@@ -1,0 +1,647 @@
+{
+  "version": 1,
+  "feature_slug": "dealsignal-v1",
+  "prd": "tasks/prd-dealsignal-v1.md",
+  "prd_zh": "tasks/prd-dealsignal-v1-zh.md",
+  "spec": "tasks/spec-dealsignal-v1.md",
+  "created_at": "2026-06-17T12:56:00+08:00",
+  "updated_at": "2026-06-17T15:30:04.522826+08:00",
+  "issues": [
+    {
+      "local_id": 1,
+      "title": "项目脚手架与数据库 Schema 落地",
+      "source": [
+        "database-model.md Section 4",
+        "sql/schema.sql"
+      ],
+      "platform_id": ".autoresearch/issues/issue-001-项目脚手架与数据库-schema-落地.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 2,
+      "title": "认证与工作区模型",
+      "source": [
+        "database-model.md Section 2.1",
+        "PRD.md Section 4"
+      ],
+      "platform_id": ".autoresearch/issues/issue-002-认证与工作区模型.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 3,
+      "title": "文档上传与版本管理后端",
+      "source": [
+        "US-001",
+        "FR-1",
+        "FR-27"
+      ],
+      "platform_id": ".autoresearch/issues/issue-003-文档上传与版本管理后端.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 4,
+      "title": "文档处理流水线（PDF/PPT 转页、缩略图、文本提取）",
+      "source": [
+        "US-001",
+        "FR-12",
+        "database-model.md Section 2.3"
+      ],
+      "platform_id": ".autoresearch/issues/issue-004-文档处理流水线pdf-ppt-转页-缩略图-文本提取.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 5,
+      "title": "文档库列表与详情页面",
+      "source": [
+        "US-001",
+        "UI/page-prototypes.md Section 6-7"
+      ],
+      "platform_id": ".autoresearch/issues/issue-005-文档库列表与详情页面.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 6,
+      "title": "智能链接创建与权限配置后端",
+      "source": [
+        "US-002",
+        "FR-2~FR-10"
+      ],
+      "platform_id": ".autoresearch/issues/issue-006-智能链接创建与权限配置后端.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 7,
+      "title": "智能链接创建表单 UI",
+      "source": [
+        "US-002",
+        "UI/page-prototypes.md Section 8"
+      ],
+      "platform_id": ".autoresearch/issues/issue-007-智能链接创建表单-ui.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 8,
+      "title": "链接详情与管理页面",
+      "source": [
+        "US-002",
+        "UI/page-prototypes.md Section 9"
+      ],
+      "platform_id": ".autoresearch/issues/issue-008-链接详情与管理页面.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 9,
+      "title": "阅读器访问控制与邮件验证",
+      "source": [
+        "US-003",
+        "FR-6",
+        "FR-29",
+        "UI/page-prototypes.md Section 10.1"
+      ],
+      "platform_id": ".autoresearch/issues/issue-009-阅读器访问控制与邮件验证.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 10,
+      "title": "文档阅读器渲染与页面导航",
+      "source": [
+        "US-003",
+        "UI/page-prototypes.md Section 10.2"
+      ],
+      "platform_id": ".autoresearch/issues/issue-010-文档阅读器渲染与页面导航.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 11,
+      "title": "页面级阅读事件采集后端",
+      "source": [
+        "US-004",
+        "FR-11",
+        "FR-12"
+      ],
+      "platform_id": ".autoresearch/issues/issue-011-页面级阅读事件采集后端.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 12,
+      "title": "下载事件与访问拒绝事件采集",
+      "source": [
+        "US-004",
+        "FR-13",
+        "FR-29"
+      ],
+      "platform_id": ".autoresearch/issues/issue-012-下载事件与访问拒绝事件采集.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 13,
+      "title": "收件人活动时间线与分析展示",
+      "source": [
+        "US-004",
+        "FR-14",
+        "FR-15",
+        "UI/page-prototypes.md Section 9"
+      ],
+      "platform_id": ".autoresearch/issues/issue-013-收件人活动时间线与分析展示.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 14,
+      "title": "意图评分计算与解释",
+      "source": [
+        "US-005",
+        "FR-16",
+        "FR-17"
+      ],
+      "platform_id": ".autoresearch/issues/issue-014-意图评分计算与解释.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 15,
+      "title": "仪表盘与热信号 UI",
+      "source": [
+        "US-005",
+        "US-008",
+        "UI/page-prototypes.md Section 5"
+      ],
+      "platform_id": ".autoresearch/issues/issue-015-仪表盘与热信号-ui.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 16,
+      "title": "基础动态水印",
+      "source": [
+        "US-007",
+        "FR-10"
+      ],
+      "platform_id": ".autoresearch/issues/issue-016-基础动态水印.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 17,
+      "title": "邮件提醒系统",
+      "source": [
+        "US-008",
+        "FR-22"
+      ],
+      "platform_id": ".autoresearch/issues/issue-017-邮件提醒系统.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 18,
+      "title": "基础数据室后端",
+      "source": [
+        "US-006",
+        "FR-18~FR-21"
+      ],
+      "platform_id": ".autoresearch/issues/issue-018-基础数据室后端.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 19,
+      "title": "数据室创建与管理 UI",
+      "source": [
+        "US-006",
+        "UI/page-prototypes.md Section 12-14"
+      ],
+      "platform_id": ".autoresearch/issues/issue-019-数据室创建与管理-ui.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 20,
+      "title": "CSV 导出功能",
+      "source": [
+        "FR-30"
+      ],
+      "platform_id": ".autoresearch/issues/issue-020-csv-导出功能.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": "Enriched with SPEC references from tasks/spec-dealsignal-v1.md"
+    },
+    {
+      "local_id": 21,
+      "title": "高级水印模板",
+      "source": [
+        "P1: Advanced watermark templates"
+      ],
+      "platform_id": ".autoresearch/issues/issue-021-高级水印模板.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 22,
+      "title": "Slack 提醒集成",
+      "source": [
+        "P1: Slack alerts",
+        "FR-23"
+      ],
+      "platform_id": ".autoresearch/issues/issue-022-slack-提醒集成.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 23,
+      "title": "HubSpot / Salesforce 连接",
+      "source": [
+        "US-009",
+        "FR-24"
+      ],
+      "platform_id": ".autoresearch/issues/issue-023-hubspot---salesforce-连接.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 24,
+      "title": "CRM 活动同步",
+      "source": [
+        "US-009",
+        "FR-25"
+      ],
+      "platform_id": ".autoresearch/issues/issue-024-crm-活动同步.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 25,
+      "title": "数据室模板",
+      "source": [
+        "P1: Deal Room templates"
+      ],
+      "platform_id": ".autoresearch/issues/issue-025-数据室模板.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 26,
+      "title": "内容库后端",
+      "source": [
+        "US-010",
+        "FR-26",
+        "FR-28"
+      ],
+      "platform_id": ".autoresearch/issues/issue-026-内容库后端.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 27,
+      "title": "内容库 UI",
+      "source": [
+        "US-010",
+        "UI/page-prototypes.md Section 17"
+      ],
+      "platform_id": ".autoresearch/issues/issue-027-内容库-ui.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 28,
+      "title": "行动助手推荐",
+      "source": [
+        "P1: Action Assistant recommendations",
+        "PRD.md Section 7.6"
+      ],
+      "platform_id": ".autoresearch/issues/issue-028-行动助手推荐.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 29,
+      "title": "品牌化阅读器",
+      "source": [
+        "P1: Branded viewer"
+      ],
+      "platform_id": ".autoresearch/issues/issue-029-品牌化阅读器.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 30,
+      "title": "AI 跟进邮件草稿",
+      "source": [
+        "P2: AI follow-up drafts"
+      ],
+      "platform_id": ".autoresearch/issues/issue-030-ai-跟进邮件草稿.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 31,
+      "title": "LP 门户",
+      "source": [
+        "P2: LP Portal"
+      ],
+      "platform_id": ".autoresearch/issues/issue-031-lp-门户.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 32,
+      "title": "自定义域名",
+      "source": [
+        "P2: Custom domain"
+      ],
+      "platform_id": ".autoresearch/issues/issue-032-自定义域名.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 33,
+      "title": "高级审计导出",
+      "source": [
+        "P2: Advanced audit export"
+      ],
+      "platform_id": ".autoresearch/issues/issue-033-高级审计导出.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 34,
+      "title": "SSO 单点登录",
+      "source": [
+        "P2: SSO"
+      ],
+      "platform_id": ".autoresearch/issues/issue-034-sso-单点登录.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 35,
+      "title": "SCIM 用户同步",
+      "source": [
+        "P2: SCIM"
+      ],
+      "platform_id": ".autoresearch/issues/issue-035-scim-用户同步.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 36,
+      "title": "数据保留策略",
+      "source": [
+        "P2: Data retention policies"
+      ],
+      "platform_id": ".autoresearch/issues/issue-036-数据保留策略.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 37,
+      "title": "高级工作流自动化",
+      "source": [
+        "P3: Advanced workflow automation"
+      ],
+      "platform_id": ".autoresearch/issues/issue-037-高级工作流自动化.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 38,
+      "title": "数据驻留",
+      "source": [
+        "P3: Data residency"
+      ],
+      "platform_id": ".autoresearch/issues/issue-038-数据驻留.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 39,
+      "title": "深度 BI 报表",
+      "source": [
+        "P3: Deep BI reporting"
+      ],
+      "platform_id": ".autoresearch/issues/issue-039-深度-bi-报表.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 40,
+      "title": "SOC 2 支持工作流",
+      "source": [
+        "P3: SOC 2 support workflows"
+      ],
+      "platform_id": ".autoresearch/issues/issue-040-soc-2-支持工作流.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 41,
+      "title": "企业 DLP 集成",
+      "source": [
+        "P3: Enterprise DLP integrations"
+      ],
+      "platform_id": ".autoresearch/issues/issue-041-企业-dlp-集成.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 42,
+      "title": "移动端轻量管理后台（Mobile Web Management Lite）",
+      "source": [
+        "UI/page-prototypes.md Section 11"
+      ],
+      "platform_id": ".autoresearch/issues/issue-042-移动端轻量管理后台mobile-web-management-lite.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 43,
+      "title": "联系人管理（Contacts + Contact Detail）",
+      "source": [
+        "UI/page-prototypes.md Section 15"
+      ],
+      "platform_id": ".autoresearch/issues/issue-043-联系人管理contacts---contact-detail.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 44,
+      "title": "洞察分析中心（Insights）",
+      "source": [
+        "UI/page-prototypes.md Section 16"
+      ],
+      "platform_id": ".autoresearch/issues/issue-044-洞察分析中心insights.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 45,
+      "title": "设置中心（Settings）",
+      "source": [
+        "UI/page-prototypes.md Section 18"
+      ],
+      "platform_id": ".autoresearch/issues/issue-045-设置中心settings.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    },
+    {
+      "local_id": 46,
+      "title": "品牌化 LP 门户 UI（LP Portal）",
+      "source": [
+        "P2: LP Portal",
+        "UI/page-prototypes.md Section 10.3 Mobile Room Viewer"
+      ],
+      "platform_id": ".autoresearch/issues/issue-046-品牌化-lp-门户-uilp-portal.md",
+      "branch": null,
+      "pr_number": null,
+      "commit": null,
+      "status": "open",
+      "notes": null
+    }
+  ],
+  "notes": "Unified bilingual PRD v1 merged from PRD.md and PRD + 产品设计的完整文档草案.md. Old files untouched."
+}
