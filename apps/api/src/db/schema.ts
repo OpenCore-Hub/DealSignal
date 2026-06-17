@@ -35,12 +35,7 @@ export const workspaceModeEnum = pgEnum('workspace_mode', [
   'mixed',
 ]);
 
-export const membershipRoleEnum = pgEnum('membership_role', [
-  'owner',
-  'admin',
-  'member',
-  'viewer',
-]);
+export const membershipRoleEnum = pgEnum('membership_role', ['owner', 'admin', 'member', 'viewer']);
 
 export const contactSegmentEnum = pgEnum('contact_segment', [
   'investor',
@@ -82,17 +77,9 @@ export const linkAccessModeEnum = pgEnum('link_access_mode', [
   'nda_required',
 ]);
 
-export const downloadPolicyEnum = pgEnum('download_policy', [
-  'allowed',
-  'disabled',
-  'watermarked',
-]);
+export const downloadPolicyEnum = pgEnum('download_policy', ['allowed', 'disabled', 'watermarked']);
 
-export const frictionLevelEnum = pgEnum('friction_level', [
-  'low',
-  'medium',
-  'high',
-]);
+export const frictionLevelEnum = pgEnum('friction_level', ['low', 'medium', 'high']);
 
 export const smartLinkStatusEnum = pgEnum('smart_link_status', [
   'active',
@@ -109,10 +96,7 @@ export const recipientStatusEnum = pgEnum('recipient_status', [
   'revoked',
 ]);
 
-export const accessScopeTypeEnum = pgEnum('access_scope_type', [
-  'smart_link',
-  'deal_room',
-]);
+export const accessScopeTypeEnum = pgEnum('access_scope_type', ['smart_link', 'deal_room']);
 
 export const accessGrantStatusEnum = pgEnum('access_grant_status', [
   'pending',
@@ -131,11 +115,7 @@ export const roomTypeEnum = pgEnum('room_type', [
   'custom',
 ]);
 
-export const roomStatusEnum = pgEnum('room_status', [
-  'draft',
-  'active',
-  'archived',
-]);
+export const roomStatusEnum = pgEnum('room_status', ['draft', 'active', 'archived']);
 
 export const roomMemberRoleEnum = pgEnum('room_member_role', [
   'viewer',
@@ -143,24 +123,11 @@ export const roomMemberRoleEnum = pgEnum('room_member_role', [
   'collaborator',
 ]);
 
-export const principalTypeEnum = pgEnum('principal_type', [
-  'contact',
-  'account',
-  'domain',
-  'role',
-]);
+export const principalTypeEnum = pgEnum('principal_type', ['contact', 'account', 'domain', 'role']);
 
-export const questionStatusEnum = pgEnum('question_status', [
-  'open',
-  'answered',
-  'closed',
-]);
+export const questionStatusEnum = pgEnum('question_status', ['open', 'answered', 'closed']);
 
-export const downloadStatusEnum = pgEnum('download_status', [
-  'allowed',
-  'blocked',
-  'failed',
-]);
+export const downloadStatusEnum = pgEnum('download_status', ['allowed', 'blocked', 'failed']);
 
 export const scoreTypeEnum = pgEnum('score_type', [
   'investor_intent',
@@ -225,6 +192,15 @@ export const users = pgTable('users', {
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 });
 
+export const userCredentials = pgTable('user_credentials', {
+  userId: uuid('user_id')
+    .primaryKey()
+    .references(() => users.id, { onDelete: 'cascade' }),
+  passwordHash: text('password_hash').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
 export const workspaces = pgTable('workspaces', {
   id: uuid('id').primaryKey().defaultRandom(),
   name: text('name').notNull(),
@@ -249,7 +225,9 @@ export const workspaceMemberships = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique('workspace_memberships_workspace_user_idx').on(table.workspaceId, table.userId)]
+  (table) => [
+    unique('workspace_memberships_workspace_user_idx').on(table.workspaceId, table.userId),
+  ]
 );
 
 export const accounts = pgTable('accounts', {
@@ -445,7 +423,9 @@ export const libraryItems = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (table) => [unique('library_items_workspace_document_idx').on(table.workspaceId, table.documentId)]
+  (table) => [
+    unique('library_items_workspace_document_idx').on(table.workspaceId, table.documentId),
+  ]
 );
 
 export const smartLinks = pgTable(

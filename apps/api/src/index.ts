@@ -1,15 +1,8 @@
-import Fastify from 'fastify';
-import { db, pool } from './db/index.js';
+import { pool } from './db/index.js';
+import { createApp } from './app.js';
 
-const app = Fastify({ logger: true });
 const port = Number(process.env.PORT ?? 3001);
-
-app.get('/health', async () => ({ status: 'ok' }));
-
-app.get('/health/db', async () => {
-  const result = await db.execute('SELECT now() as now');
-  return { status: 'ok', now: result.rows[0]?.now };
-});
+const app = await createApp();
 
 async function start() {
   try {
@@ -21,4 +14,4 @@ async function start() {
   }
 }
 
-start();
+await start();
