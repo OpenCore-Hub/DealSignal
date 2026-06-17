@@ -1,9 +1,10 @@
 import Fastify from 'fastify';
 import { db } from './db/index.js';
 import { registerAuthRoutes, type AuthRoutesOptions } from './modules/auth/routes.js';
+import { registerDocumentRoutes, type DocumentRoutesOptions } from './modules/documents/routes.js';
 import { registerStorageRoutes, type StorageRoutesOptions } from './modules/storage/routes.js';
 
-export type CreateAppOptions = AuthRoutesOptions & StorageRoutesOptions;
+export type CreateAppOptions = AuthRoutesOptions & StorageRoutesOptions & DocumentRoutesOptions;
 
 export async function createApp(options: CreateAppOptions = {}) {
   const app = Fastify({ logger: true });
@@ -17,6 +18,7 @@ export async function createApp(options: CreateAppOptions = {}) {
 
   await registerAuthRoutes(app, options);
   await registerStorageRoutes(app, options);
+  await registerDocumentRoutes(app, options);
 
   return app;
 }
