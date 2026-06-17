@@ -1,8 +1,24 @@
+import { useI18n } from './i18n/index.js';
+
 function App() {
+  const { locale, setLocale, t } = useI18n();
+
   return (
     <div style={{ padding: '2rem', fontFamily: 'system-ui, sans-serif' }}>
-      <h1>DealSignal</h1>
-      <p>Secure document sharing, deal rooms, and intent analytics.</p>
+      <header style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+        <h1>{t('app.name')}</h1>
+        <label>
+          <span style={{ marginRight: '0.5rem' }}>{t('app.language')}</span>
+          <select
+            value={locale}
+            onChange={(event) => setLocale(event.target.value as typeof locale)}
+          >
+            <option value="en">{t('common.english')}</option>
+            <option value="zh-CN">{t('common.chinese')}</option>
+          </select>
+        </label>
+      </header>
+      <p>{t('app.tagline')}</p>
     </div>
   );
 }

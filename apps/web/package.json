@@ -8,7 +8,9 @@
     "dev": "vite",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint src"
+    "lint": "eslint src",
+    "i18n:check": "node scripts/check-translations.mjs",
+    "i18n:no-hardcoded-strings": "node scripts/check-hardcoded-ui-strings.mjs"
   },
   "dependencies": {
     "@dealsignal/shared": "workspace:*",

@@ -11,3 +11,5 @@ coverage
 .drizzle
 apps/*/dist
 packages/*/dist
+__pycache__/
+*.pyc
