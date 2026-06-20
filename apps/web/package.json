@@ -1,0 +1,27 @@
+{
+  "name": "@dealsignal/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc && vite build",
+    "dev": "vite",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src",
+    "i18n:check": "node scripts/check-translations.mjs",
+    "i18n:no-hardcoded-strings": "node scripts/check-hardcoded-ui-strings.mjs"
+  },
+  "dependencies": {
+    "@dealsignal/shared": "workspace:*",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.4",
+    "@types/react-dom": "^19.1.5",
+    "@vitejs/plugin-react": "^4.4.1",
+    "typescript": "^5.8.3",
+    "vite": "^6.3.5"
+  }
+}

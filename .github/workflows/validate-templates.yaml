@@ -1,0 +1,42 @@
+name: Validate Templates
+
+on:
+  pull_request:
+    paths:
+      - 'docs/templates/**'
+      - 'docs/templates/scripts/validate_templates.py'
+      - 'docs/templates/scripts/copy-templates-to-project.py'
+      - 'docs/templates/templates-manifest.yaml'
+      - 'docs/templates/templates-schema.json'
+  push:
+    branches: [main]
+    paths:
+      - 'docs/templates/**'
+      - 'docs/templates/scripts/validate_templates.py'
+      - 'docs/templates/scripts/copy-templates-to-project.py'
+      - 'docs/templates/templates-manifest.yaml'
+      - 'docs/templates/templates-schema.json'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install validation dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml jsonschema openapi-spec-validator
+      - name: Validate templates
+        run: python3 docs/templates/scripts/validate_templates.py
+      - name: Validate OpenAPI template
+        run: openapi-spec-validator docs/templates/openapi-template-v1.yaml
+      - name: Validate copy-to-project script
+        run: |
+          python3 docs/templates/scripts/copy-templates-to-project.py \
+            --target /tmp/template-copy-test/docs/templates \
+            --product-name "Test Product" \
+            --project-prefix TP
+          python3 /tmp/template-copy-test/docs/templates/scripts/validate_templates.py

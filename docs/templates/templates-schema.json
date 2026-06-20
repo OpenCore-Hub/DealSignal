@@ -1,0 +1,244 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://general-document-templates.dev/templates-schema.json",
+  "title": "General-Purpose Document Template Library Schema",
+  "description": "JSON Schema for validating YAML front matter of project document templates.",
+  "type": "object",
+  "$defs": {
+    "linkedDocRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Reference to another document, e.g. docs/PRD-v1.0.0.md"
+    },
+    "templateIdRef": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Manifest template id, e.g. prd-v2"
+    },
+    "templateEntry": {
+      "type": "object",
+      "required": ["id", "file", "type", "stage", "maturity", "required_frontmatter_fields"],
+      "properties": {
+        "id": { "type": "string" },
+        "file": { "type": "string" },
+        "type": { "type": "string" },
+        "stage": { "type": "string" },
+        "maturity": {
+          "type": "string",
+          "enum": ["stable", "new-introduced", "experimental", "deprecated"]
+        },
+        "required_frontmatter_fields": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "related_templates": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/templateIdRef" },
+          "description": "IDs of other templates this template references."
+        }
+      }
+    },
+    "commonFrontmatter": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "owner": { "type": "string", "minLength": 1 }
+      }
+    },
+    "frontmatterSchemas": {
+      "type": "object",
+      "properties": {
+        "prd": {
+          "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }],
+          "required": ["id", "version", "status", "owner", "linked_docs", "acceptance_criteria"],
+          "properties": {
+            "linked_docs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/linkedDocRef" }
+            },
+            "acceptance_criteria": { "type": "string", "minLength": 1 },
+            "open_questions": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional list of unresolved product questions."
+            },
+            "ai_red_flags": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Optional constraints AI must respect when consuming this PRD."
+            },
+            "ai_confidence": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Agent confidence level for implementing this PRD."
+            },
+            "pending_confirmation": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional questions AI must confirm with humans before acting."
+            }
+          }
+        },
+        "tdd": {
+          "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }],
+          "required": ["id", "version", "status", "owner", "linked_prd", "linked_architecture"],
+          "properties": {
+            "linked_prd": { "$ref": "#/$defs/linkedDocRef" },
+            "linked_architecture": { "$ref": "#/$defs/linkedDocRef" },
+            "ai_red_flags": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Optional constraints AI must respect when consuming this TDD."
+            },
+            "ai_confidence": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Agent confidence level for implementing this TDD."
+            },
+            "pending_confirmation": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Optional questions AI must confirm with humans before acting."
+            }
+          }
+        },
+        "plan": {
+          "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }],
+          "required": ["id", "version", "status", "owner", "linked_docs"],
+          "properties": {
+            "linked_docs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/linkedDocRef" }
+            }
+          }
+        },
+        "agent-task": {
+          "type": "object",
+          "required": [
+            "task_id", "parent_issue", "agent_task_id", "version", "priority",
+            "status", "type", "effort", "branch", "estimated_files", "max_lines",
+            "project_stack", "ai_red_flags", "ai_confidence", "pending_confirmation"
+          ],
+          "properties": {
+            "task_id": { "type": "string", "minLength": 1 },
+            "parent_issue": { "type": "string", "minLength": 1 },
+            "agent_task_id": { "type": "string", "minLength": 1 },
+            "version": { "type": "string", "minLength": 1 },
+            "priority": { "type": "string", "minLength": 1 },
+            "status": { "type": "string", "minLength": 1 },
+            "type": { "type": "string", "minLength": 1 },
+            "effort": { "type": "string", "minLength": 1 },
+            "branch": { "type": "string", "minLength": 1 },
+            "estimated_files": { "type": "string", "minLength": 1 },
+            "max_lines": { "type": "string", "minLength": 1 },
+            "project_stack": { "type": "string", "minLength": 1 },
+            "ai_red_flags": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 }
+            },
+            "ai_confidence": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Agent confidence level for this task (e.g. high / medium / low)."
+            },
+            "pending_confirmation": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "Questions that require human confirmation before execution."
+            },
+            "available_tools": {
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Optional list of tools or skills the agent may use (e.g. test, lint, browse)."
+            }
+          }
+        },
+        "openapi": {
+          "type": "object",
+          "description": "OpenAPI YAML files are validated by openapi-spec-validator, not by this front matter schema.",
+          "additionalProperties": true
+        },
+        "adr": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Architecture Decision Record front matter." },
+        "analysis": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Competitive or market analysis front matter." },
+        "changelog": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Changelog front matter." },
+        "change-request": {
+          "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }],
+          "description": "Change request front matter.",
+          "properties": {
+            "linked_docs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/linkedDocRef" },
+              "description": "Baseline documents this change request references."
+            },
+            "downstream_docs_to_update": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/linkedDocRef" },
+              "description": "Documents that must be updated after the change is approved/implemented."
+            }
+          }
+        },
+        "checklist": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Review checklist front matter." },
+        "compliance": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Compliance document front matter." },
+        "database": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Database model front matter." },
+        "deployment": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Deployment log front matter." },
+        "design": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Design system or UI deliverable front matter." },
+        "disaster-recovery": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Disaster recovery plan front matter." },
+        "environment": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Environment configuration front matter." },
+        "feature-flag": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Feature flag specification front matter." },
+        "guide": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Frontend component guide front matter." },
+        "gtm": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Go-to-market document front matter." },
+        "incident": {
+          "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }],
+          "description": "Incident response report front matter.",
+          "properties": {
+            "linked_docs": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/linkedDocRef" },
+              "description": "Documents related to this incident."
+            },
+            "downstream_docs_to_update": {
+              "type": "array",
+              "items": { "$ref": "#/$defs/linkedDocRef" },
+              "description": "Documents that must be evaluated/updated after the incident is closed."
+            }
+          }
+        },
+        "migration": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Data migration plan front matter." },
+        "release-notes": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Release notes front matter." },
+        "research": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "User research report front matter." },
+        "review": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Code review document front matter." },
+        "rollback": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Rollback plan front matter." },
+        "runbook": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Runbook front matter." },
+        "security": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Security test plan or threat model front matter." },
+        "slo": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Service level objective front matter." },
+        "spec": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "LLM prompt spec or similar spec front matter." },
+        "strategy": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Strategy document front matter." },
+        "test-plan": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "QA test plan front matter." },
+        "test-report": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "QA test report front matter." },
+        "tracking": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Event tracking specification front matter." },
+        "api-spec": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Markdown API specification front matter." },
+        "api-deprecation-policy": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "API deprecation policy front matter." },
+        "performance-test-plan": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Performance test plan front matter." },
+        "user-feedback-plan": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "User feedback plan front matter." },
+        "architecture": { "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }], "description": "Architecture diagrams front matter." },
+        "default": {
+          "allOf": [{ "$ref": "#/$defs/commonFrontmatter" }],
+          "description": "Default schema for templates without a dedicated front matter block."
+        }
+      }
+    }
+  },
+  "properties": {
+    "version": {
+      "description": "Manifest schema version",
+      "type": "string"
+    },
+    "templates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/templateEntry" }
+    }
+  },
+  "required": ["version", "templates"]
+}

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "general-document-templates"
+version = "1.0.0"
+description = "通用企业文档模板库：覆盖产品、架构、开发、测试、安全、运维、上市全生命周期"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [
+    { name = "General Document Templates Contributors" },
+]
+keywords = ["templates", "prd", "tdd", "api-spec", "openapi", "agent-task", "documentation"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Documentation",
+]
+dependencies = [
+    "pyyaml>=6.0",
+    "jsonschema>=4.0",
+]
+
+[project.optional-dependencies]
+openapi = ["openapi-spec-validator>=0.7.0"]
+dev = [
+    "openapi-spec-validator>=0.7.0",
+]
+
+[project.scripts]
+validate-templates = "scripts.validate_templates:main"
+
+[project.urls]
+Repository = "https://github.com/{组织标识}/document-templates"
+Issues = "https://github.com/{组织标识}/document-templates/issues"
+Documentation = "https://github.com/{组织标识}/document-templates#readme"

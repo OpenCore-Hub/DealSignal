@@ -1,0 +1,19 @@
+{
+  "app": {
+    "name": "DealSignal",
+    "tagline": "安全分享关键文档、构建交易数据室，并识别真实意图信号。",
+    "language": "语言"
+  },
+  "common": {
+    "loading": "加载中...",
+    "save": "保存",
+    "cancel": "取消",
+    "english": "英文",
+    "chinese": "中文"
+  },
+  "errors": {
+    "INVALID_LOGIN_INPUT": "请输入邮箱和密码。",
+    "UNAUTHORIZED": "未授权访问。",
+    "UNKNOWN": "出错了，请稍后重试。"
+  }
+}

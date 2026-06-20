@@ -1,0 +1,937 @@
+version: 1.0.0
+templates:
+- id: accessibility-conformance-v1
+  file: ACCESSIBILITY-CONFORMANCE-template-v1.md
+  type: compliance
+  stage: design-test
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - design-system-v1
+  - frontend-component-guide-v1
+  - prd-v2
+  - qa-test-report-v1
+  - tdd-v2
+  - ui-design-deliverable-v1
+- id: adr-v1
+  file: ADR-template-v1.md
+  type: adr
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-deprecation-policy-v1
+  - prd-v2
+  - tdd-v2
+  - tech-review-checklist-v1
+- id: agent-task-v2
+  file: AGENT-TASK-template-v2.md
+  type: agent-task
+  stage: dev
+  maturity: stable
+  required_frontmatter_fields:
+  - task_id
+  - parent_issue
+  - agent_task_id
+  - version
+  - priority
+  - status
+  - type
+  - effort
+  - branch
+  - estimated_files
+  - max_lines
+  - project_stack
+  - ai_red_flags
+  - ai_confidence
+  - pending_confirmation
+  related_templates:
+  - api-spec-v1
+  - code-review-v1
+  - implementation-plan-issues-v1
+  - prd-v2
+  - tdd-v2
+- id: api-spec-v1
+  file: API-SPEC-template-v1.md
+  type: api-spec
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - agent-task-v2
+  - api-deprecation-policy-v1
+  - change-request-v1
+  - database-model-v1
+  - event-tracking-v1
+  - frontend-component-guide-v1
+  - llm-prompt-spec-v1
+  - openapi-v1
+  - performance-test-plan-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - tdd-v2
+  - tech-review-checklist-v1
+  - tracking-requirements-v1
+  - ui-design-deliverable-v1
+- id: architecture-diagrams-v1
+  file: ARCHITECTURE-DIAGRAMS-template-v1.md
+  type: architecture
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - database-model-v1
+  - prd-v2
+  - tdd-v2
+  - tech-review-checklist-v1
+- id: changelog-v1
+  file: CHANGELOG-template-v1.md
+  type: changelog
+  stage: release
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-deprecation-policy-v1
+  - prd-v2
+  - release-notes-v1
+  - tdd-v2
+- id: change-request-v1
+  file: CHANGE-REQUEST-template-v1.md
+  type: change-request
+  stage: operations
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - security-test-plan-v1
+  - tdd-v2
+  - user-feedback-plan-v1
+- id: code-review-v1
+  file: CODE-REVIEW-template-v1.md
+  type: review
+  stage: dev
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - agent-task-v2
+  - implementation-plan-issues-v1
+  - implementation-plan-v1
+  - qa-test-plan-v1
+  - tdd-v2
+  - tech-review-checklist-v1
+- id: competitive-analysis-v1
+  file: COMPETITIVE-ANALYSIS-template-v1.md
+  type: analysis
+  stage: pre-project
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-light-v1
+  - gtm-light-v1
+  - gtm-v1
+  - prd-v2
+  - strategy-light-v1
+  - strategy-v1
+  - ui-design-deliverable-v1
+  - user-feedback-plan-v1
+  - user-research-light-v1
+  - user-research-v1
+- id: compliance-v1
+  file: COMPLIANCE-template-v1.md
+  type: compliance
+  stage: operations
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - prd-v2
+  - security-test-plan-v1
+  - tdd-v2
+  - threat-model-v1
+- id: data-migration-v1
+  file: DATA-MIGRATION-template-v1.md
+  type: migration
+  stage: operations
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - database-model-v1
+  - release-notes-v1
+  - rollback-plan-v1
+  - tdd-v2
+- id: database-model-v1
+  file: DATABASE-MODEL-template-v1.md
+  type: database
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - architecture-diagrams-v1
+  - data-migration-v1
+  - event-tracking-v1
+  - prd-v2
+  - tdd-v2
+  - tech-review-checklist-v1
+- id: deployment-log-v1
+  file: DEPLOYMENT-LOG-template-v1.md
+  type: deployment
+  stage: release
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - qa-test-report-v1
+  - release-notes-v1
+  - rollback-plan-v1
+- id: design-system-v1
+  file: DESIGN-SYSTEM-template-v1.md
+  type: design
+  stage: design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - accessibility-conformance-v1
+  - frontend-component-guide-v1
+  - prd-v2
+  - tdd-v2
+  - ui-design-deliverable-v1
+  - ui-design-light-v1
+- id: disaster-recovery-plan-v1
+  file: DISASTER-RECOVERY-PLAN-template-v1.md
+  type: disaster-recovery
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - incident-response-v1
+  - prd-v2
+  - rollback-plan-v1
+  - runbook-v1
+  - tdd-v2
+- id: environment-config-v1
+  file: ENVIRONMENT-CONFIG-template-v1.md
+  type: environment
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - feature-flag-v1
+  - incident-response-v1
+  - prd-v2
+  - rollback-plan-v1
+  - tdd-v2
+- id: event-tracking-v1
+  file: EVENT-TRACKING-template-v1.md
+  type: tracking
+  stage: dev
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - database-model-v1
+  - prd-v2
+  - tdd-v2
+  - tracking-requirements-v1
+- id: feature-flag-v1
+  file: FEATURE-FLAG-template-v1.md
+  type: feature-flag
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - environment-config-v1
+  - incident-response-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - rollback-plan-v1
+  - tdd-v2
+- id: frontend-component-guide-v1
+  file: FRONTEND-COMPONENT-GUIDE-template-v1.md
+  type: guide
+  stage: dev
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - accessibility-conformance-v1
+  - api-spec-v1
+  - design-system-v1
+  - prd-v2
+  - tdd-v2
+  - ui-design-deliverable-v1
+  - ui-design-light-v1
+- id: gtm-v1
+  file: GTM-template-v1.md
+  type: gtm
+  stage: gtm
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-light-v1
+  - competitive-analysis-v1
+  - gtm-light-v1
+  - prd-v2
+  - strategy-light-v1
+  - strategy-v1
+  - user-feedback-plan-v1
+- id: implementation-plan-issues-v1
+  file: IMPLEMENTATION-PLAN-ISSUES-template-v1.md
+  type: plan
+  stage: pre-dev
+  maturity: experimental
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  - linked_docs
+  related_templates:
+  - agent-task-v2
+  - code-review-v1
+  - implementation-plan-v1
+  - prd-v2
+  - tdd-v2
+- id: implementation-plan-v1
+  file: IMPLEMENTATION-PLAN-template-v1.md
+  type: plan
+  stage: pre-dev
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  - linked_docs
+  related_templates:
+  - code-review-v1
+  - implementation-plan-issues-v1
+  - prd-review-checklist-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - tdd-v2
+  - tech-review-checklist-v1
+- id: incident-response-v1
+  file: INCIDENT-RESPONSE-template-v1.md
+  type: incident
+  stage: operations
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - disaster-recovery-plan-v1
+  - environment-config-v1
+  - feature-flag-v1
+  - release-notes-v1
+  - rollback-plan-v1
+  - slo-service-level-v1
+- id: llm-prompt-spec-v1
+  file: LLM-PROMPT-SPEC-template-v1.md
+  type: spec
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - tdd-v2
+  - threat-model-v1
+- id: prd-light-v1
+  file: PRD-LIGHT-template-v1.md
+  type: prd
+  stage: requirements
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  - linked_docs
+  - acceptance_criteria
+  related_templates:
+  - prd-v2
+  - tdd-v2
+- id: prd-review-checklist-v1
+  file: PRD-REVIEW-CHECKLIST-template-v1.md
+  type: checklist
+  stage: requirements
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - implementation-plan-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - tdd-v2
+  - ui-design-deliverable-v1
+- id: prd-v2
+  file: PRD-template-v2.md
+  type: prd
+  stage: requirements
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  - linked_docs
+  - acceptance_criteria
+  related_templates:
+  - accessibility-conformance-v1
+  - adr-v1
+  - agent-task-v2
+  - api-deprecation-policy-v1
+  - api-spec-v1
+  - architecture-diagrams-v1
+  - change-request-v1
+  - changelog-v1
+  - competitive-analysis-light-v1
+  - competitive-analysis-v1
+  - compliance-v1
+  - database-model-v1
+  - design-system-v1
+  - disaster-recovery-plan-v1
+  - environment-config-v1
+  - event-tracking-v1
+  - feature-flag-v1
+  - frontend-component-guide-v1
+  - gtm-light-v1
+  - gtm-v1
+  - implementation-plan-issues-v1
+  - implementation-plan-v1
+  - llm-prompt-spec-v1
+  - openapi-v1
+  - prd-light-v1
+  - prd-review-checklist-v1
+  - qa-test-plan-v1
+  - qa-test-report-v1
+  - release-notes-v1
+  - security-test-plan-v1
+  - slo-service-level-v1
+  - strategy-light-v1
+  - strategy-v1
+  - tdd-v2
+  - threat-model-v1
+  - tracking-requirements-v1
+  - ui-design-deliverable-v1
+  - ui-design-light-v1
+  - user-feedback-plan-v1
+  - user-research-light-v1
+  - user-research-v1
+- id: qa-test-plan-v1
+  file: QA-TEST-PLAN-template-v1.md
+  type: test-plan
+  stage: test
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - change-request-v1
+  - code-review-v1
+  - feature-flag-v1
+  - implementation-plan-v1
+  - llm-prompt-spec-v1
+  - performance-test-plan-v1
+  - prd-review-checklist-v1
+  - prd-v2
+  - qa-test-report-v1
+  - security-test-plan-v1
+  - tdd-v2
+  - ui-design-deliverable-v1
+- id: qa-test-report-v1
+  file: QA-TEST-REPORT-template-v1.md
+  type: test-report
+  stage: test
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - accessibility-conformance-v1
+  - deployment-log-v1
+  - performance-test-plan-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - release-notes-v1
+  - tdd-v2
+- id: release-notes-v1
+  file: RELEASE-NOTES-template-v1.md
+  type: release-notes
+  stage: release
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-deprecation-policy-v1
+  - changelog-v1
+  - data-migration-v1
+  - deployment-log-v1
+  - incident-response-v1
+  - prd-v2
+  - qa-test-report-v1
+  - rollback-plan-v1
+  - runbook-v1
+  - tdd-v2
+- id: rollback-plan-v1
+  file: ROLLBACK-PLAN-template-v1.md
+  type: rollback
+  stage: release
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - data-migration-v1
+  - deployment-log-v1
+  - disaster-recovery-plan-v1
+  - environment-config-v1
+  - feature-flag-v1
+  - incident-response-v1
+  - release-notes-v1
+  - slo-service-level-v1
+  - tdd-v2
+- id: runbook-v1
+  file: RUNBOOK-template-v1.md
+  type: runbook
+  stage: operations
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - disaster-recovery-plan-v1
+  - release-notes-v1
+  - tdd-v2
+- id: security-test-plan-v1
+  file: SECURITY-TEST-PLAN-template-v1.md
+  type: security
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - change-request-v1
+  - compliance-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - tdd-v2
+  - threat-model-v1
+- id: slo-service-level-v1
+  file: SLO-SERVICE-LEVEL-template-v1.md
+  type: slo
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - incident-response-v1
+  - performance-test-plan-v1
+  - prd-v2
+  - rollback-plan-v1
+  - tdd-v2
+- id: strategy-v1
+  file: STRATEGY-template-v1.md
+  type: strategy
+  stage: pre-project
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-light-v1
+  - competitive-analysis-v1
+  - gtm-light-v1
+  - gtm-v1
+  - prd-v2
+  - strategy-light-v1
+  - user-feedback-plan-v1
+  - user-research-light-v1
+  - user-research-v1
+- id: tdd-v2
+  file: TDD-template-v2.md
+  type: tdd
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  - linked_prd
+  - linked_architecture
+  related_templates:
+  - accessibility-conformance-v1
+  - adr-v1
+  - agent-task-v2
+  - api-deprecation-policy-v1
+  - api-spec-v1
+  - architecture-diagrams-v1
+  - change-request-v1
+  - changelog-v1
+  - code-review-v1
+  - compliance-v1
+  - data-migration-v1
+  - database-model-v1
+  - design-system-v1
+  - disaster-recovery-plan-v1
+  - environment-config-v1
+  - event-tracking-v1
+  - feature-flag-v1
+  - frontend-component-guide-v1
+  - implementation-plan-issues-v1
+  - implementation-plan-v1
+  - llm-prompt-spec-v1
+  - openapi-v1
+  - performance-test-plan-v1
+  - prd-light-v1
+  - prd-review-checklist-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - qa-test-report-v1
+  - release-notes-v1
+  - rollback-plan-v1
+  - runbook-v1
+  - security-test-plan-v1
+  - slo-service-level-v1
+  - tech-review-checklist-v1
+  - threat-model-v1
+  - ui-design-deliverable-v1
+- id: tech-review-checklist-v1
+  file: TECH-REVIEW-CHECKLIST-template-v1.md
+  type: checklist
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - adr-v1
+  - api-spec-v1
+  - architecture-diagrams-v1
+  - code-review-v1
+  - database-model-v1
+  - implementation-plan-v1
+  - tdd-v2
+- id: threat-model-v1
+  file: THREAT-MODEL-template-v1.md
+  type: security
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - compliance-v1
+  - llm-prompt-spec-v1
+  - prd-v2
+  - security-test-plan-v1
+  - tdd-v2
+- id: tracking-requirements-v1
+  file: TRACKING-REQUIREMENTS-template-v1.md
+  type: tracking
+  stage: requirements
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - event-tracking-v1
+  - prd-v2
+- id: ui-design-deliverable-v1
+  file: UI-DESIGN-DELIVERABLE-template-v1.md
+  type: design
+  stage: design
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - accessibility-conformance-v1
+  - api-spec-v1
+  - competitive-analysis-v1
+  - design-system-v1
+  - frontend-component-guide-v1
+  - prd-review-checklist-v1
+  - prd-v2
+  - qa-test-plan-v1
+  - tdd-v2
+  - ui-design-light-v1
+  - user-research-v1
+- id: user-research-v1
+  file: USER-RESEARCH-template-v1.md
+  type: research
+  stage: pre-project
+  maturity: stable
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-light-v1
+  - competitive-analysis-v1
+  - gtm-light-v1
+  - prd-v2
+  - strategy-light-v1
+  - strategy-v1
+  - ui-design-deliverable-v1
+  - ui-design-light-v1
+  - user-feedback-plan-v1
+  - user-research-light-v1
+- id: openapi-v1
+  file: openapi-template-v1.yaml
+  type: openapi
+  stage: tech-design
+  maturity: stable
+  required_frontmatter_fields: []
+  related_templates:
+  - api-deprecation-policy-v1
+  - api-spec-v1
+  - prd-v2
+  - tdd-v2
+- id: strategy-light-v1
+  file: STRATEGY-LIGHT-template-v1.md
+  type: strategy
+  stage: pre-project
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-v1
+  - gtm-v1
+  - prd-v2
+  - strategy-v1
+  - user-research-v1
+- id: competitive-analysis-light-v1
+  file: COMPETITIVE-ANALYSIS-LIGHT-template-v1.md
+  type: analysis
+  stage: pre-project
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-v1
+  - gtm-v1
+  - prd-v2
+  - strategy-v1
+  - user-research-v1
+- id: gtm-light-v1
+  file: GTM-LIGHT-template-v1.md
+  type: gtm
+  stage: gtm
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-v1
+  - gtm-v1
+  - prd-v2
+  - strategy-v1
+  - user-research-v1
+- id: user-research-light-v1
+  file: USER-RESEARCH-LIGHT-template-v1.md
+  type: research
+  stage: pre-project
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - competitive-analysis-v1
+  - prd-v2
+  - strategy-v1
+  - user-research-v1
+- id: ui-design-light-v1
+  file: UI-DESIGN-LIGHT-template-v1.md
+  type: design
+  stage: design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - design-system-v1
+  - frontend-component-guide-v1
+  - prd-v2
+  - ui-design-deliverable-v1
+  - user-research-v1
+- id: performance-test-plan-v1
+  file: PERFORMANCE-TEST-PLAN-template-v1.md
+  type: performance-test-plan
+  stage: test
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - api-spec-v1
+  - qa-test-plan-v1
+  - qa-test-report-v1
+  - slo-service-level-v1
+  - tdd-v2
+- id: api-deprecation-policy-v1
+  file: API-DEPRECATION-POLICY-template-v1.md
+  type: api-deprecation-policy
+  stage: tech-design
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - adr-v1
+  - api-spec-v1
+  - changelog-v1
+  - openapi-v1
+  - prd-v2
+  - release-notes-v1
+  - tdd-v2
+- id: user-feedback-plan-v1
+  file: USER-FEEDBACK-PLAN-template-v1.md
+  type: user-feedback-plan
+  stage: requirements
+  maturity: new-introduced
+  required_frontmatter_fields:
+  - id
+  - version
+  - status
+  - owner
+  related_templates:
+  - change-request-v1
+  - competitive-analysis-v1
+  - gtm-v1
+  - prd-v2
+  - strategy-v1
+  - user-research-v1
