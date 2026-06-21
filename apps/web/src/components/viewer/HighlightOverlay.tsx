@@ -11,19 +11,21 @@ export function HighlightOverlay({ evidences, className }: HighlightOverlayProps
 
   return (
     <div className={cn("pointer-events-none absolute inset-0", className)} aria-hidden="true">
-      {evidences.map((ev) => (
-        <div
-          key={ev.id}
-          className="absolute animate-pulse rounded-sm border border-primary/60 bg-primary/20"
-          style={{
-            left: `${ev.bbox.x * 100}%`,
-            top: `${ev.bbox.y * 100}%`,
-            width: `${ev.bbox.w * 100}%`,
-            height: `${ev.bbox.h * 100}%`,
-          }}
-          title={ev.text}
-        />
-      ))}
+      {evidences.map((ev) =>
+        ev.boxes.map((box, index) => (
+          <div
+            key={`${ev.chunk_id}-${index}`}
+            className="absolute animate-pulse rounded-sm border border-primary/60 bg-primary/20"
+            style={{
+              left: `${box.x * 100}%`,
+              top: `${box.y * 100}%`,
+              width: `${box.w * 100}%`,
+              height: `${box.h * 100}%`,
+            }}
+            title={ev.quote}
+          />
+        ))
+      )}
     </div>
   );
 }

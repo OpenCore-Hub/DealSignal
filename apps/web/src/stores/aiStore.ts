@@ -1,48 +1,52 @@
 import { create } from "zustand";
-import i18next from "i18next";
-import type { ChatMessage } from "@/types";
+import { api } from "@/lib/api";
+import type { ChatMessage, Evidence } from "@/types";
+
+interface ChatContext {
+  documentId?: string;
+  pageNumber?: number;
+}
 
 interface AIState {
   open: boolean;
   messages: ChatMessage[];
   pending: boolean;
+  sessionId: string | null;
+  highlightedEvidence: Evidence | null;
+  highlightedPage: number | null;
   toggle: () => void;
   setOpen: (open: boolean) => void;
-  sendMessage: (content: string, context?: { documentId?: string; pageNumber?: number }) => Promise<void>;
+  sendMessage: (content: string, context?: ChatContext) => Promise<void>;
   reset: () => void;
+  setHighlight: (evidence: Evidence | null, page?: number) => void;
+  clearHighlight: () => void;
 }
+
+const WELCOME_MESSAGE: ChatMessage = {
+  id: "welcome",
+  role: "assistant",
+  content: "ai:welcomeMessage",
+  createdAt: new Date().toISOString(),
+};
 
 function getInitialMessages(): ChatMessage[] {
-  return [
-    {
-      id: "welcome",
-      role: "assistant",
-      content: i18next.t("ai:welcomeMessage"),
-      createdAt: new Date().toISOString(),
-    },
-  ];
+  return [WELCOME_MESSAGE];
 }
 
-function buildReply(content: string, context?: { documentId?: string }): string {
-  const docContext = context?.documentId ? i18next.t("ai:replies.documentContext") : "";
-  const lower = content.toLowerCase();
-
-  if (lower.includes("heat") || lower.includes("signal")) {
-    return `${i18next.t("ai:replies.heatAnalysis")}${docContext}`;
-  }
-  if (lower.includes("security") || lower.includes("permission")) {
-    return i18next.t("ai:replies.securityAdvice");
-  }
-  if (lower.includes("next") || lower.includes("action")) {
-    return i18next.t("ai:replies.followUpAction");
-  }
-  return `${i18next.t("ai:replies.default")}${docContext}`;
+function buildHistory(messages: ChatMessage[]): { role: "user" | "assistant"; content: string }[] {
+  return messages
+    .filter((m) => m.id !== "welcome")
+    .slice(-10)
+    .map((m) => ({ role: m.role, content: m.content }));
 }
 
-export const useAIStore = create<AIState>((set) => ({
+export const useAIStore = create<AIState>((set, get) => ({
   open: false,
   messages: getInitialMessages(),
   pending: false,
+  sessionId: null,
+  highlightedEvidence: null,
+  highlightedPage: null,
 
   toggle: () => set((state) => ({ open: !state.open })),
   setOpen: (open) => set({ open }),
@@ -56,21 +60,52 @@ export const useAIStore = create<AIState>((set) => ({
     };
     set((state) => ({ messages: [...state.messages, userMessage], pending: true }));
 
-    await new Promise((resolve) => setTimeout(resolve, 800));
+    try {
+      const history = buildHistory(get().messages);
+      const payload: {
+        query: string;
+        document_id?: string;
+        session_id?: string;
+        history?: { role: "user" | "assistant"; content: string }[];
+      } = {
+        query: content,
+        session_id: get().sessionId ?? undefined,
+      };
+      if (context?.documentId) payload.document_id = context.documentId;
+      if (history.length > 0) payload.history = history;
 
-    const reply = buildReply(content, context);
+      const res = await api.assistantChat(payload);
 
-    const assistantMessage: ChatMessage = {
-      id: `a_${Date.now()}`,
-      role: "assistant",
-      content: reply,
-      createdAt: new Date().toISOString(),
-    };
-    set((state) => ({
-      messages: [...state.messages, assistantMessage],
-      pending: false,
-    }));
+      const assistantMessage: ChatMessage = {
+        id: `a_${Date.now()}`,
+        role: "assistant",
+        content: res.answer,
+        evidences: res.evidence,
+        createdAt: new Date().toISOString(),
+      };
+      set((state) => ({
+        messages: [...state.messages, assistantMessage],
+        pending: false,
+        sessionId: res.session_id,
+      }));
+    } catch (e) {
+      const errorMessage: ChatMessage = {
+        id: `a_${Date.now()}`,
+        role: "assistant",
+        content: e instanceof Error ? e.message : "Sorry, something went wrong.",
+        createdAt: new Date().toISOString(),
+      };
+      set((state) => ({
+        messages: [...state.messages, errorMessage],
+        pending: false,
+      }));
+    }
   },
 
-  reset: () => set({ messages: getInitialMessages() }),
+  reset: () => set({ open: false, pending: false, messages: getInitialMessages(), sessionId: null, highlightedEvidence: null, highlightedPage: null }),
+
+  setHighlight: (evidence, page) =>
+    set({ highlightedEvidence: evidence, highlightedPage: page ?? evidence?.page_number ?? null }),
+
+  clearHighlight: () => set({ highlightedEvidence: null, highlightedPage: null }),
 }));

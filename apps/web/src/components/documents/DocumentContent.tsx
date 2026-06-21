@@ -23,7 +23,7 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
       pageNumber,
       viewCount: analytic?.viewCount ?? 0,
       avgDurationSeconds: analytic?.avgDurationSeconds ?? 0,
-      hasEvidence: evidences?.some((e) => e.pageNumber === pageNumber) ?? false,
+      hasEvidence: evidences?.some((e) => e.page_number === pageNumber) ?? false,
     };
   });
 
@@ -106,17 +106,17 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
                 );
               })()}
             </div>
-            {evidences && evidences.filter((e) => e.pageNumber === selectedPage).length > 0 && (
+            {evidences && evidences.filter((e) => e.page_number === selectedPage).length > 0 && (
               <div className="mt-4 rounded-md border border-border bg-muted/50 p-3">
                 <p className="text-caption mb-2 text-muted-foreground">{t("documents:content.evidenceHighlight")}</p>
                 {evidences
-                  .filter((e) => e.pageNumber === selectedPage)
+                  .filter((e) => e.page_number === selectedPage)
                   .map((ev) => (
-                    <div key={ev.id} className="text-sm">
+                    <div key={ev.chunk_id} className="text-sm">
                       <span className="inline-block rounded bg-warning-500/20 px-1 py-0.5 text-xs font-medium text-warning-700">
                         {t("documents:content.sourceLocation")}
                       </span>
-                      <p className="mt-1">{ev.text}</p>
+                      <p className="mt-1">{ev.quote}</p>
                     </div>
                   ))}
               </div>
