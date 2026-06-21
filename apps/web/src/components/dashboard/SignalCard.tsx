@@ -1,0 +1,139 @@
+import { useState } from "react";
+import { useNavigate, useParams } from "react-router";
+import { motion, AnimatePresence } from "motion/react";
+import {
+  Fire,
+  Thermometer,
+  Snowflake,
+  Warning,
+  CaretDown,
+  CaretUp,
+  ArrowRight,
+  Envelope,
+  Phone,
+  ShareNetwork,
+} from "@phosphor-icons/react";
+import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import type { Signal, ActionItem } from "@/types";
+
+const typeConfig = {
+  hot: { icon: Fire, label: "高热度", color: "text-hot-500 bg-hot-500/10 border-hot-500/20" },
+  warm: { icon: Thermometer, label: "中热度", color: "text-warm-500 bg-warm-500/10 border-warm-500/20" },
+  cold: { icon: Snowflake, label: "低热度", color: "text-cold-500 bg-cold-500/10 border-cold-500/20" },
+  risk: { icon: Warning, label: "风险", color: "text-destructive bg-destructive/10 border-destructive/20" },
+};
+
+const priorityConfig = {
+  high: "bg-error-500/10 text-error-500 border-error-500/20",
+  medium: "bg-warning-500/10 text-warning-500 border-warning-500/20",
+  low: "bg-neutral-500/10 text-neutral-500 border-neutral-500/20",
+};
+
+interface SignalCardProps {
+  signal: Signal;
+  action?: ActionItem;
+  onActionStatusChange?: (id: string, status: ActionItem["status"]) => void;
+}
+
+export function SignalCard({ signal, action, onActionStatusChange }: SignalCardProps) {
+  const navigate = useNavigate();
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const [expanded, setExpanded] = useState(false);
+  const config = typeConfig[signal.type];
+  const Icon = config.icon;
+
+  const handleNavigate = () => {
+    if (signal.documentId) navigate(`/${workspaceSlug}/documents/${signal.documentId}`);
+    else if (signal.linkId) navigate(`/${workspaceSlug}/links/${signal.linkId}`);
+    else if (signal.contactId) navigate(`/${workspaceSlug}/contacts/${signal.contactId}`);
+  };
+
+  const actionIcon = {
+    email: Envelope,
+    call: Phone,
+    share: ShareNetwork,
+    review: Warning,
+  }[action?.actionType ?? "email"];
+  const ActionIcon = actionIcon;
+
+  return (
+    <motion.div
+      layout
+      className={`rounded-xl border bg-card p-4 transition-shadow hover:shadow-sm ${config.color}`}
+    >
+      <div className="flex items-start gap-3">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${config.color}`}>
+          <Icon size={18} weight="fill" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <h3 className="text-h3 truncate">{signal.title}</h3>
+            <Badge variant="outline" className={priorityConfig[signal.priority]}>
+              {signal.priority === "high" ? "高优先级" : signal.priority === "medium" ? "中优先级" : "低优先级"}
+            </Badge>
+          </div>
+          <p className="text-body mt-1 text-muted-foreground">{signal.description}</p>
+          <div className="mt-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleNavigate}>
+              查看详情 <ArrowRight size={14} className="ml-1" />
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={() => setExpanded((v) => !v)}
+              className="text-muted-foreground"
+            >
+              {expanded ? "收起" : "展开分析"}
+              {expanded ? <CaretUp size={14} className="ml-1" /> : <CaretDown size={14} className="ml-1" />}
+            </Button>
+          </div>
+        </div>
+      </div>
+
+      <AnimatePresence>
+        {expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden"
+          >
+            <div className="mt-4 space-y-3 border-t border-border pt-4">
+              <div>
+                <p className="text-caption uppercase tracking-wide text-muted-foreground">AI 解释</p>
+                <p className="text-body mt-1">{signal.explanation}</p>
+              </div>
+              <div>
+                <p className="text-caption uppercase tracking-wide text-muted-foreground">建议行动</p>
+                <p className="text-body mt-1">{signal.suggestion}</p>
+              </div>
+              {action && (
+                <div className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary/10 text-primary">
+                    <ActionIcon size={16} />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-sm font-medium">{action.title}</p>
+                    <p className="text-caption text-muted-foreground">
+                      截止 {new Date(action.dueAt).toLocaleDateString("zh-CN")}
+                    </p>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={action.status === "done" ? "secondary" : "default"}
+                    onClick={() =>
+                      onActionStatusChange?.(action.id, action.status === "done" ? "pending" : "done")
+                    }
+                  >
+                    {action.status === "done" ? "已完成" : "标记完成"}
+                  </Button>
+                </div>
+              )}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </motion.div>
+  );
+}

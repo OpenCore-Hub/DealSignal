@@ -1,0 +1,280 @@
+import { useEffect, useState } from "react";
+import { useNavigate, useParams } from "react-router";
+import { motion } from "motion/react";
+import {
+  Fire,
+  Clock,
+  Snowflake,
+  CheckCircle,
+  CalendarBlank,
+  Link as LinkIcon,
+  FileText,
+  ArrowRight,
+  UploadSimple,
+} from "@phosphor-icons/react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { api, type DashboardStats } from "@/lib/api";
+import { useSignalStore } from "@/stores/signalStore";
+import { SignalCard } from "./SignalCard";
+import { ActionList } from "./ActionList";
+import { HeatMap } from "./HeatMap";
+import { EmptyState } from "@/components/common/EmptyState";
+
+const timeRanges = [
+  { value: "7", label: "最近 7 天" },
+  { value: "30", label: "最近 30 天" },
+  { value: "90", label: "最近 90 天" },
+];
+
+function SummaryCards({
+  stats,
+  pendingActions,
+}: {
+  stats: DashboardStats;
+  pendingActions: number;
+}) {
+  const items = [
+    {
+      label: "高热度",
+      count: stats.hotCount,
+      icon: Fire,
+      color: "text-hot-500 bg-hot-500/10",
+    },
+    {
+      label: "中热度",
+      count: stats.warmCount,
+      icon: Clock,
+      color: "text-warm-500 bg-warm-500/10",
+    },
+    {
+      label: "低热度",
+      count: stats.coldCount,
+      icon: Snowflake,
+      color: "text-cold-500 bg-cold-500/10",
+    },
+    {
+      label: "待办行动",
+      count: pendingActions,
+      icon: CheckCircle,
+      color: "text-success-500 bg-success-500/10",
+    },
+  ];
+
+  return (
+    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+      {items.map((item) => {
+        const Icon = item.icon;
+        return (
+          <Card key={item.label} className="transition-shadow hover:shadow-sm">
+            <CardContent className="flex items-center gap-3 p-4">
+              <div className={`flex h-10 w-10 items-center justify-center rounded-md ${item.color}`}>
+                <Icon size={20} weight="fill" />
+              </div>
+              <div>
+                <p className="text-h1 tabular-nums">{item.count}</p>
+                <p className="text-caption text-muted-foreground">{item.label}</p>
+              </div>
+            </CardContent>
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+export function DashboardPage() {
+  const navigate = useNavigate();
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [timeRange, setTimeRange] = useState("7");
+  const reducedMotion = useReducedMotion();
+
+  const { signals, actions, fetchSignals, updateActionStatus } = useSignalStore();
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const [dashboardStats] = await Promise.all([api.getDashboardStats(), fetchSignals()]);
+        if (!cancelled) {
+          setStats(dashboardStats);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchSignals]);
+
+  if (loading || !stats) {
+    return (
+      <div className="space-y-6">
+        <Skeleton className="h-8 w-48" />
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-24" />
+          ))}
+        </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+          <Skeleton className="h-96 lg:col-span-2" />
+          <Skeleton className="h-96" />
+        </div>
+      </div>
+    );
+  }
+
+  const pendingActions = actions.filter((a) => a.status !== "done").length;
+
+  return (
+    <motion.div
+      initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+      className="space-y-8"
+    >
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-h1">交易雷达</h1>
+          <p className="text-body text-muted-foreground">
+            今日需要关注什么：热度信号、待办行动、风险提醒，一站聚合。
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Select value={timeRange} onValueChange={(value) => value && setTimeRange(value)}>
+            <SelectTrigger className="w-[140px]">
+              <CalendarBlank size={16} className="mr-2 text-muted-foreground" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {timeRanges.map((range) => (
+                <SelectItem key={range.value} value={range.value}>
+                  {range.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button onClick={() => navigate(`/${workspaceSlug}/documents/upload`)}>
+            <UploadSimple size={16} className="mr-2" />
+            上传文档
+          </Button>
+        </div>
+      </div>
+
+      <SummaryCards stats={stats} pendingActions={pendingActions} />
+
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+        <div className="space-y-6 lg:col-span-2">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-h2 flex items-center gap-2">
+                <Fire size={20} className="text-hot-500" />
+                信号流
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {signals.length === 0 ? (
+                <EmptyState
+                  icon={<Fire size={48} />}
+                  title="暂无信号"
+                  description="上传并分享文档后，AI 会自动识别高意向投资人/客户并生成信号。"
+                  action={{
+                    label: "上传第一份文档",
+                    onClick: () => navigate(`/${workspaceSlug}/documents/upload`),
+                  }}
+                />
+              ) : (
+                <div className="space-y-4">
+                  {signals.map((signal) => (
+                    <SignalCard
+                      key={signal.id}
+                      signal={signal}
+                      action={actions.find((a) => a.signalId === signal.id)}
+                      onActionStatusChange={updateActionStatus}
+                    />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-h2 flex items-center gap-2">
+                <FileText size={20} />
+                最近文档
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {stats.recentDocuments.length === 0 ? (
+                <EmptyState
+                  icon={<FileText size={48} />}
+                  title="暂无文档"
+                  description="上传第一份融资材料或销售提案，开始追踪热度。"
+                />
+              ) : (
+                <ul className="space-y-3">
+                  {stats.recentDocuments.slice(0, 5).map((doc) => (
+                    <li
+                      key={doc.id}
+                      className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                      onClick={() => navigate(`/${workspaceSlug}/documents/${doc.id}`)}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{doc.title}</p>
+                        <p className="text-caption text-muted-foreground">
+                          {doc.pageCount} 页 · {doc.status === "ready" ? "已就绪" : "处理中"}
+                        </p>
+                      </div>
+                      <ArrowRight size={16} className="text-muted-foreground" />
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
+        <div className="space-y-6">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-h2 flex items-center gap-2">
+                <CheckCircle size={20} />
+                待办行动
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ActionList actions={actions} onStatusChange={updateActionStatus} />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-h2 flex items-center gap-2">
+                <LinkIcon size={20} />
+                热度地图
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <HeatMap links={stats.recentLinks} />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </motion.div>
+  );
+}

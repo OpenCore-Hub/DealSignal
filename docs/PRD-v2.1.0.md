@@ -106,13 +106,13 @@ pending_confirmation: []
 | 已归档 PRD | 《PRD-v2.0.7-ARCHIVED》 | `docs/PRD-v2.0.7-ARCHIVED.md` | 已冻结的历史版本 |
 | 原始 PRD 草案 | 《PRD + 产品设计的完整文档草案》 | `docs/PRD + 产品设计的完整文档草案.md` | 已冻结 |
 | 上传查看 AI 设计 | 《上传-查看-AI问答设计文》 | `docs/上传-查看-AI问答设计文.md` | 已冻结 |
-| 技术设计文档 | 《TDD-v2.1.0》 | `docs/TDD-v2.1.0.md` | 已编写，评审中 |
-| 架构与流程图 | 《ARCHITECTURE-v2.1.0》 | `docs/ARCHITECTURE-v2.1.0.md` | 已编写，评审中 |
-| 数据库模型 | 《database-model-v2.1.0》 | `docs/database-model-v2.1.0.md` | 已编写，评审中 |
-| 实施计划 | 《IMPLEMENTATION-PLAN-v2.1.0》 | `docs/IMPLEMENTATION-PLAN-v2.1.0.md` | 待编写 |
+| 技术设计文档 | 《TDD-v2.1.0》 | `docs/TDD-v2.1.0.md` | 已批准 |
+| 架构与流程图 | 《ARCHITECTURE-v2.1.0》 | `docs/ARCHITECTURE-v2.1.0.md` | 已批准 |
+| 数据库模型 | 《database-model-v2.1.0》 | `docs/database-model-v2.1.0.md` | 已批准 |
+| 实施计划 | 《IMPLEMENTATION-PLAN-v2.1.0》 | `docs/IMPLEMENTATION-PLAN-v2.1.0.md` | 已批准 |
 | 测试计划 | 《QA-TEST-PLAN-v2.1.0》 | `docs/QA-TEST-PLAN-v2.1.0.md` | 待编写 |
 | 埋点需求 | 《TRACKING-REQUIREMENTS-v2.1.0》 | `docs/TRACKING-REQUIREMENTS-v2.1.0.md` | 待编写 |
-| UI 设计交付 | 《UI-DESIGN-DELIVERABLE-v2.1.0》 | `docs/UI-DESIGN-DELIVERABLE-v2.1.0.md` | 待编写 |
+| UI 设计交付 | 《UI-DESIGN-DELIVERABLE-v2.1.0》 | `docs/UI-DESIGN-DELIVERABLE-v2.1.0.md` | 已编写，评审中 |
 
 ---
 
