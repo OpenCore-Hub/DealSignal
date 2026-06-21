@@ -104,7 +104,9 @@ owner: "后端架构师 / 产品经理"
 | Content-Type | 是 | `application/json` 或 `multipart/form-data` |
 | X-Request-ID | 推荐 | 请求追踪 ID（UUID） |
 | X-Idempotency-Key | 条件 | 幂等键，用于写操作 |
-| Accept-Language | 否 | 用户语言偏好 |
+| Accept-Language | 否 | 用户语言偏好；当前前端支持 `en`（默认）与 `zh-CN`。若后端返回用户可见文案，建议与此头字段对齐；否则后端可返回 plain text 或 i18n key，需在接口契约中明确。 |
+
+> **i18n 约定**：v2.1.1 前端已实现 `en` / `zh-CN` 双语。mock 阶段部分用户可见文案以 i18n key 形式返回（如 `dashboard.mock.signals.sig_1.title`），由前端 `t(key)` 渲染。真实后端接入时需在 API 契约中明确：后端是返回已本地化的 plain text，还是返回与前端命名空间一致的 key。
 
 ### 2.5 通用响应结构
 

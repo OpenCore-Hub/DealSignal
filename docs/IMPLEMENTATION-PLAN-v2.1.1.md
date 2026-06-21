@@ -19,7 +19,7 @@
 阶段 E：数据室模板引擎        1-2 天    ✅ 已完成
 ```
 
-> 实际完成时间：2026-06-20。所有阶段已通过 `pnpm build` 与 `pnpm lint` 验证（lint 仅剩 TanStack Table 库本身导致的 3 个 incompatible-library warning）。
+> 实际完成时间：2026-06-20。所有阶段已通过 `pnpm build` 与 `pnpm lint` 验证。原 TanStack Table 的 3 个 `incompatible-library` warning 已通过 `"use no memo"` 指令与 ESLint disable 注释消除。
 
 ---
 
@@ -392,8 +392,92 @@ src/
 
 ---
 
-## 10. 版本历史
+## 10. 实际落地补充说明（2026-06-21 文档对齐）
+
+以下内容为 v2.1.1 实际实现与原始计划的差异记录，供后续迭代与真实后端接入时参考。
+
+### 10.1 i18n 与 Settings Language 页面
+
+| 项 | 计划 | 实际 |
+|---|---|---|
+| 范围 | 未计划 | 已提前落地：双语 `en` / `zh-CN`，默认 `en` |
+| 实现 | - | `i18next` + `react-i18next` + `i18next-resources-to-backend`，11 个 namespace 懒加载，自定义 detector |
+| 路由 | - | `/:workspaceSlug/settings/language` |
+| 持久化 | - | `localStorage` key `i18nextLng` |
+
+### 10.2 主题与全局状态
+
+- 主题状态由 Zustand `uiStore` 管理，支持 `light` / `dark` / `system`，持久化到 `localStorage`。
+- `ThemeProvider` 负责切换 `html.dark` 类并监听 `prefers-color-scheme`。
+- 其他 Zustand store：`workspaceStore`（当前 workspace）、`aiStore`（AI 会话）、`documentStore`、`linkStore` 等。
+
+### 10.3 Workspace 切换器
+
+- 原始计划：入口放在侧边栏 Settings 子菜单。
+- 实际实现：入口放在侧边栏底部 **Workspace Switcher**（`src/components/layout/WorkspaceSwitcher.tsx`）。
+- 工作区名称在 mock 数据中存为 i18n key（`mock.workspaces.acme.name`），组件通过 `t(workspace.name)` 渲染。
+- "Create workspace" 当前仅展示 coming-soon toast，未实现真实创建流程。
+
+### 10.4 组件清单修正
+
+原始 §3.2 / §7.1 的组件名与文件和实际代码不完全一致，实际文件如下：
+
+| 实际文件 | 对应原始计划组件 | 说明 |
+|---|---|---|
+| `src/components/dashboard/SignalCard.tsx` | `SignalStream.tsx` | 重命名/拆分；实际为可交互信号卡片 |
+| `src/components/dashboard/ActionList.tsx` | `ActionQueue.tsx` | 重命名 |
+| `src/components/dashboard/RiskAlertList.tsx` | `RiskAlerts.tsx` | 内联风险提醒列表 |
+| `src/components/links/SmartLinkCreator.tsx` + `src/components/links/smart-link/*` | `SmartLinkComposer.tsx` | 拆分为 Creator + 多个子组件 |
+| `src/components/documents/DocumentDetail.tsx` / `DocumentContent.tsx` / `DocumentAnalytics.tsx` / `DocumentAIInsights.tsx` | `DocumentHeatmap.tsx` | 未做页面热力图 overlay，改为详情页多标签 |
+| `src/components/contacts/ContactDetail.tsx` | `ContactProfile.tsx` | 重命名 |
+| `src/components/deal-rooms/DealRoomCreator.tsx` | `DealRoomTemplatePicker.tsx` | 重命名；模板选择内嵌在创建流程中 |
+| `src/components/viewer/CanvasViewer.tsx` | `DocumentCanvas.tsx` | 重命名 |
+| `src/components/ai/AIAssistant.tsx` / `src/routes/viewer.tsx` | `viewer/AIAssistant.tsx` | AI 助手组件提升到通用组件目录 |
+
+> 注：原始计划中的 `ThumbnailNav`、`HighlightOverlay`、`WatermarkOverlay` 尚未作为独立组件实现；相关能力在 `CanvasViewer` 与 Viewer 路由中内联处理。
+
+### 10.5 React Compiler 与 TanStack Table 兼容处理
+
+- 项目使用 React 19，但未启用 React Compiler 插件。
+- `DocumentsTable.tsx`、`LinksTable.tsx`、`LinkAccessLog.tsx` 使用 TanStack Table 时触发 `react-hooks/incompatible-library` ESLint 规则。
+- 处理方式：在每个组件顶部添加 `"use no memo";` 指令，并在 `useReactTable` 调用处添加 `// eslint-disable-next-line react-hooks/incompatible-library`。
+- 该处理是临时方案；若后续启用 React Compiler，需重新评估这些 opt-out。
+
+### 10.6 Mock 数据与 i18n key 约定
+
+- 为保持中英文切换一致，mock 数据中的用户可见文案统一返回 i18n key：
+  - 信号：`dashboard.mock.signals.sig_1.title` / `.description` / `.explanation` / `.suggestion`
+  - 行动项：`dashboard.mock.actions.*`
+  - 风险：`dashboard.mock.risks.*`
+  - 工作区名：`mock.workspaces.acme.name` / `mock.workspaces.ventura.name`
+- 组件通过 `t(key)` 渲染，支持 `data` 插值。
+- **后端接入风险**：真实 API 若返回 plain text，需要改为 plain text 渲染或让后端保持相同的 key 契约。建议在 API-SPEC 中明确后端文案返回格式。
+
+### 10.7 路由补充
+
+实际路由在 `src/router.tsx` 中定义，除原始计划页面外新增：
+
+- `/`：Workspaces 选择页（`src/routes/workspaces.tsx`）
+- `/:workspaceSlug/settings/language`：语言设置页
+- 其他 Settings 子页面：`general`、`brand`、`security`、`members`、`billing`、`integrations`
+
+### 10.8 验收清单更新
+
+- [x] Dashboard 交易雷达首屏包含信号流、热度卡片、行动队列
+- [x] 智能链接创建器支持可视化安全强度与摩擦提示
+- [x] AI 悬浮助手支持多轮对话、evidence 跳转
+- [x] 文档详情页展示 Overview / Visitors / Links / Settings 标签
+- [x] 联系人页面展示详情与时间线
+- [x] 数据室创建支持模板选择
+- [x] 热度评分按圈层计算并展示
+- [x] 构建通过，`pnpm lint` 无错误
+- [x] i18n 中英文切换可用
+- [x] Settings Language 页面可用
+- [ ] 真实后端接入时确认 mock-i18n key 模式或迁移为 plain text
+
+## 11. 版本历史
 
 | 版本 | 日期 | 变更 |
 |---|---|---|
 | v2.1.1 | 2026-06-20 | Signal-First 重设计实施计划 |
+| v2.1.1-sync | 2026-06-21 | 补充实际落地差异：i18n、Theme、Workspace Switcher、组件清单修正、React Compiler opt-out、mock-i18n 约定 |

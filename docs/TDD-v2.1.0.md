@@ -79,6 +79,7 @@ TDD 目标：
 
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
+| v0.1.1-sync | 2026-06-21 | 技术团队 | 对齐前端实际栈与 i18n：React 19 + React Router 8 + Vite 8 + Tailwind CSS 4 + Base UI；双语 `en`/`zh-CN` 已落地 | 第 2、6 章 |
 | v0.1.0 | 2026-06-20 | 技术团队 | 初始版本，基于 PRD-v2.1.0 编制技术方案 | 全文档 |
 
 ### 1.2 关联文档
@@ -148,7 +149,8 @@ TDD 目标：
 - 自建邮件群发系统
 - CSV 导出
 - Markdown 文档上传与解析
-- 多语言、数据驻留、SSO/SCIM
+- 多语言（已作为 v2.1.1 增强提前落地：支持 `en` / `zh-CN`，默认 `en`）
+- 数据驻留、SSO/SCIM
 
 ---
 
@@ -161,8 +163,8 @@ TDD 目标：
 │                                    用户访问层                                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────────────────────────┐  │
 │  │   Web App    │  │  Public      │  │  Custom Domain / Brand Pages            │  │
-│  │  (React +    │  │  Viewer      │  │  (investor.fund.com)                    │  │
-│  │   Vite)      │  │  Landing     │  │                                         │  │
+│  │ (React 19 +  │  │  Viewer      │  │  (investor.fund.com)                    │  │
+│  │  Vite 8)     │  │  Landing     │  │                                         │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────────────────┬──────────────────────┘  │
 │         └─────────────────┴─────────────────────────────┘                         │
 │                              │                                                    │
@@ -228,7 +230,7 @@ TDD 目标：
 ```
 
 **服务说明**：
-- **Web App**：React + Vite 前端，面向登录用户（Dashboard、文档管理、链接管理、数据室、设置）。
+- **Web App**：React 19 + React Router 8 + Vite 8 + TypeScript + Tailwind CSS 4 + Base UI 前端，面向登录用户（Dashboard、文档管理、链接管理、数据室、设置）。已集成 `i18next`/`react-i18next` 实现 `en`/`zh-CN` 双语，`Zustand` 管理主题/workspace/AI 等全局状态。
 - **Public Viewer**：公开文档查看页，面向接收方，无需登录。
 - **API Gateway**：Traefik 或 Nginx，负责 SSL 终止、Host 解析为 tenant、路由、基础限流、WAF。
 - **Web API**：Go 1.22+ + Gin + sqlc + pgx，处理所有内部 Workspace API。
