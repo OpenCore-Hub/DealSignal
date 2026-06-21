@@ -1,6 +1,7 @@
 import { cn } from "@/lib/utils";
 import { EmptyState } from "./EmptyState";
 import { Clock, DownloadSimple, Eye, ArrowClockwise, ShareNetwork } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 
 export type ActivityType = "open" | "page_view" | "revisit" | "download" | "share";
 
@@ -17,21 +18,22 @@ interface ActivityTimelineProps {
   className?: string;
 }
 
-const typeConfig: Record<ActivityType, { icon: typeof Eye; color: string; label: string }> = {
-  open: { icon: Eye, color: "bg-info-500", label: "打开" },
-  page_view: { icon: Eye, color: "bg-info-500", label: "查看页面" },
-  revisit: { icon: ArrowClockwise, color: "bg-warm-500", label: "再次访问" },
-  download: { icon: DownloadSimple, color: "bg-success-500", label: "下载" },
-  share: { icon: ShareNetwork, color: "bg-risk-500", label: "分享" },
-};
-
 export function ActivityTimeline({ activities, className }: ActivityTimelineProps) {
+  const { t } = useTranslation("common");
+  const typeConfig: Record<ActivityType, { icon: typeof Eye; color: string; label: string }> = {
+    open: { icon: Eye, color: "bg-info-500", label: t("activity.open") },
+    page_view: { icon: Eye, color: "bg-info-500", label: t("activity.pageView") },
+    revisit: { icon: ArrowClockwise, color: "bg-warm-500", label: t("activity.revisit") },
+    download: { icon: DownloadSimple, color: "bg-success-500", label: t("activity.download") },
+    share: { icon: ShareNetwork, color: "bg-risk-500", label: t("activity.share") },
+  };
+
   if (activities.length === 0) {
     return (
       <EmptyState
         icon={<Clock size={32} />}
-        title="暂无活动"
-        description="该联系人或文档尚未产生浏览行为。"
+        title={t("activity.emptyTitle")}
+        description={t("activity.emptyDescription")}
         size="large"
       />
     );

@@ -1,11 +1,13 @@
 import { useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { List, Bell, UploadSimple, SignOut, Gear } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -17,6 +19,7 @@ import { api } from "@/lib/api";
 import type { WorkspaceSettings } from "@/types";
 
 export function TopNav() {
+  const { t } = useTranslation("layout");
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { toggleSidebar, setUploadDialogOpen } = useUIStore();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
@@ -45,7 +48,7 @@ export function TopNav() {
         className={cn(
           "flex h-9 w-9 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring md:hidden"
         )}
-        aria-label="切换侧边栏"
+        aria-label={t("topNav.toggleSidebar")}
       >
         <List size={20} />
       </button>
@@ -63,7 +66,7 @@ export function TopNav() {
           onClick={() => setUploadDialogOpen(true)}
         >
           <UploadSimple size={16} weight="bold" />
-          上传文档
+          {t("topNav.uploadDocument")}
         </Button>
 
         <ThemeToggle />
@@ -71,9 +74,9 @@ export function TopNav() {
         <Button
           size="icon"
           variant="ghost"
-          aria-label="通知"
+          aria-label={t("topNav.notifications.title")}
           disabled
-          title="通知中心即将上线"
+          title={t("topNav.notifications.comingSoon")}
         >
           <Bell size={20} />
         </Button>
@@ -83,28 +86,30 @@ export function TopNav() {
             render={
               <button
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-primary text-primary-foreground text-sm font-medium focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
-                aria-label="账户菜单"
+                aria-label={t("topNav.account.menu")}
               >
                 {avatarLabel}
               </button>
             }
           />
           <DropdownMenuContent align="end" className="w-48">
-            <DropdownMenuLabel className="font-normal">
-              <div className="flex flex-col">
-                <span className="text-sm font-medium">{settings?.name ?? workspaceSlug ?? "工作区"}</span>
-                <span className="text-caption text-muted-foreground">账户菜单</span>
-              </div>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem disabled title="账户设置需后端支持">
-              <Gear size={16} className="mr-2" />
-              账户设置
-            </DropdownMenuItem>
-            <DropdownMenuItem disabled title="登出需后端支持">
-              <SignOut size={16} className="mr-2" />
-              登出
-            </DropdownMenuItem>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="font-normal">
+                <div className="flex flex-col">
+                  <span className="text-sm font-medium">{settings?.name ?? workspaceSlug ?? t("topNav.workspace.fallback")}</span>
+                  <span className="text-caption text-muted-foreground">{t("topNav.account.menu")}</span>
+                </div>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem disabled title={t("topNav.account.settingsComingSoon")}>
+                <Gear size={16} className="mr-2" />
+                {t("topNav.account.settings")}
+              </DropdownMenuItem>
+              <DropdownMenuItem disabled title={t("topNav.account.logoutComingSoon")}>
+                <SignOut size={16} className="mr-2" />
+                {t("topNav.account.logout")}
+              </DropdownMenuItem>
+            </DropdownMenuGroup>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

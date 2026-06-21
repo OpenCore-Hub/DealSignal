@@ -3,7 +3,7 @@ import { UploadSimple, File, X, Check, Warning } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-
+import { useTranslation } from "react-i18next";
 
 interface UploadFile {
   id: string;
@@ -14,6 +14,7 @@ interface UploadFile {
 }
 
 export function Uploader() {
+  const { t } = useTranslation("documents");
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
 
@@ -29,7 +30,6 @@ export function Uploader() {
 
     setFiles((prev) => [...prev, ...newFiles]);
 
-    // Simulate upload progress
     newFiles.forEach((uploadFile) => {
       const interval = setInterval(() => {
         setFiles((prev) =>
@@ -49,7 +49,6 @@ export function Uploader() {
         );
       }, 300);
 
-      // Simulate processing completion
       setTimeout(() => {
         setFiles((prev) =>
           prev.map((f) =>
@@ -79,7 +78,7 @@ export function Uploader() {
     setFiles((prev) => prev.filter((f) => f.id !== id));
   };
 
-  const supportedTypes = ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx";
+  const supportedTypes = t("upload.supportedTypes");
 
   return (
     <div className="space-y-4">
@@ -97,9 +96,9 @@ export function Uploader() {
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
           <UploadSimple size={24} weight="bold" />
         </div>
-        <h3 className="mt-4 text-h3">拖拽文件到这里</h3>
+        <h3 className="mt-4 text-h3">{t("upload.dragTitle")}</h3>
         <p className="mt-1 text-body text-muted-foreground">
-          或点击选择文件，支持 PDF / Word / PPT / Excel
+          {t("upload.dragDescription")}
         </p>
         <input
           type="file"
@@ -111,7 +110,7 @@ export function Uploader() {
         />
         <label htmlFor="file-upload">
           <Button variant="outline" className="mt-4">
-            选择文件
+            {t("upload.selectFiles")}
           </Button>
         </label>
       </div>
@@ -143,12 +142,12 @@ export function Uploader() {
                   <Warning size={18} weight="bold" className="text-error-500" />
                 )}
                 {uploadFile.status === "processing" && (
-                  <span className="text-caption text-muted-foreground">解析中...</span>
+                  <span className="text-caption text-muted-foreground">{t("upload.processing")}</span>
                 )}
                 <button
                   onClick={() => removeFile(uploadFile.id)}
                   className="text-muted-foreground hover:text-foreground"
-                  aria-label="移除文件"
+                  aria-label={t("upload.removeFile")}
                 >
                   <X size={18} />
                 </button>

@@ -13,8 +13,11 @@ import { DocumentAnalytics } from "@/components/documents/DocumentAnalytics";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
+import { useTranslation } from "react-i18next";
 
 export function InsightsPagesPage() {
+  const { t } = useTranslation("insights");
+  const { t: tc } = useTranslation("common");
   const [selectedDocId, setSelectedDocId] = useState("");
   const {
     data: documents,
@@ -50,7 +53,7 @@ export function InsightsPagesPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={refetch}>重试</Button>
+        <Button onClick={refetch}>{tc("retry")}</Button>
       </div>
     );
   }
@@ -63,8 +66,8 @@ export function InsightsPagesPage() {
     return (
       <EmptyState
         icon={<FileText size={48} />}
-        title="暂无文档"
-        description="上传文档后即可查看页面参与度分析。"
+        title={t("pages.emptyTitle")}
+        description={t("pages.emptyDescription")}
       />
     );
   }
@@ -72,10 +75,10 @@ export function InsightsPagesPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <h2 className="text-h2">页面参与度</h2>
+        <h2 className="text-h2">{t("pages.title")}</h2>
         <Select value={selectedDocId} onValueChange={handleDocChange}>
           <SelectTrigger className="w-full sm:w-64">
-            <SelectValue placeholder="选择文档" />
+            <SelectValue placeholder={t("pages.selectPlaceholder")} />
           </SelectTrigger>
           <SelectContent>
             {documents.map((doc) => (
@@ -92,8 +95,8 @@ export function InsightsPagesPage() {
       ) : analytics?.length === 0 ? (
         <EmptyState
           icon={<FileText size={48} />}
-          title="暂无页面分析数据"
-          description="该文档暂无访问记录，分享链接后即可收集数据。"
+          title={t("pages.noAnalyticsTitle")}
+          description={t("pages.noAnalyticsDescription")}
         />
       ) : (
         <DocumentAnalytics analytics={analytics ?? []} />

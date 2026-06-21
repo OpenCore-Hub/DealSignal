@@ -55,15 +55,15 @@ describe("daysOverdue", () => {
 });
 
 describe("confidenceLabel", () => {
-  it("returns high confidence for large samples", () => {
-    expect(confidenceLabel(50)).toBe("高置信度");
+  it("returns high confidence key for large samples", () => {
+    expect(confidenceLabel(50)).toBe("common:confidence.high");
   });
 
-  it("returns medium confidence for moderate samples", () => {
-    expect(confidenceLabel(10)).toBe("中置信度");
+  it("returns medium confidence key for moderate samples", () => {
+    expect(confidenceLabel(10)).toBe("common:confidence.medium");
   });
 
-  it("returns low confidence for small samples", () => {
-    expect(confidenceLabel(3)).toBe("低置信度（样本较少）");
+  it("returns low confidence key for small samples", () => {
+    expect(confidenceLabel(3)).toBe("common:confidence.low");
   });
 });

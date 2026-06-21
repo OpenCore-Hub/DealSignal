@@ -21,6 +21,7 @@ import type {
   WorkspaceMember,
   WorkspaceSettings,
 } from "@/types";
+import i18next from "i18next";
 
 export interface DashboardStats {
   hotCount: number;
@@ -183,10 +184,5 @@ export const api = {
 // api.ts 仅保留网络层与业务方法，避免职责耦合
 
 export function heatLabel(level: HeatLevel): string {
-  const labels: Record<HeatLevel, string> = {
-    hot: "高热度",
-    warm: "中热度",
-    cold: "低热度",
-  };
-  return labels[level];
+  return i18next.t(`common:heat.${level}`);
 }

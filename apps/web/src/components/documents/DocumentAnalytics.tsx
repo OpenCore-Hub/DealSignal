@@ -1,4 +1,5 @@
 import { ChartBar } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -10,17 +11,19 @@ interface DocumentAnalyticsProps {
 }
 
 export function DocumentAnalytics({ analytics, className }: DocumentAnalyticsProps) {
+  const { t } = useTranslation("documents");
+
   if (analytics.length === 0) {
     return (
       <Card className={cn("overflow-hidden", className)}>
         <CardHeader className="pb-2">
-          <CardTitle className="text-h3">页面停留时间</CardTitle>
+          <CardTitle className="text-h3">{t("documents:analytics.title")}</CardTitle>
         </CardHeader>
         <CardContent>
           <EmptyState
             icon={<ChartBar size={48} />}
-            title="暂无页面数据"
-            description="该文档尚未被访问，页面停留时间将在首次访问后显示。"
+            title={t("documents:analytics.emptyTitle")}
+            description={t("documents:analytics.emptyDescription")}
           />
         </CardContent>
       </Card>
@@ -32,7 +35,7 @@ export function DocumentAnalytics({ analytics, className }: DocumentAnalyticsPro
   return (
     <Card className={cn("overflow-hidden", className)}>
       <CardHeader className="pb-2">
-        <CardTitle className="text-h3">页面停留时间</CardTitle>
+        <CardTitle className="text-h3">{t("documents:analytics.title")}</CardTitle>
       </CardHeader>
       <CardContent>
         <div className="flex h-48 items-end gap-1">
@@ -52,15 +55,18 @@ export function DocumentAnalytics({ analytics, className }: DocumentAnalyticsPro
                   {page.pageNumber}
                 </span>
                 <div className="pointer-events-none absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background group-hover:block">
-                  第 {page.pageNumber} 页 · {page.avgDurationSeconds}s
+                  {t("documents:analytics.pageTooltip", {
+                    pageNumber: page.pageNumber,
+                    seconds: page.avgDurationSeconds,
+                  })}
                 </div>
               </div>
             );
           })}
         </div>
         <div className="mt-2 flex justify-between text-caption text-muted-foreground">
-          <span>第 1 页</span>
-          <span>第 {analytics.length} 页</span>
+          <span>{t("documents:analytics.firstPage")}</span>
+          <span>{t("documents:analytics.lastPage", { count: analytics.length })}</span>
         </div>
       </CardContent>
     </Card>

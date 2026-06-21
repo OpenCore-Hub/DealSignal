@@ -1,0 +1,59 @@
+{
+  "page": {
+    "title": "访问者",
+    "description": "追踪谁看过你的材料，识别高意向联系人。"
+  },
+  "searchPlaceholder": "搜索联系人...",
+  "unknownOrganization": "未知机构",
+  "visitCount": "{{count}} 次访问",
+  "totalDuration": "累计 {{duration}}",
+  "lastSeen": "最后 {{time}}",
+  "empty": {
+    "title": "暂无联系人",
+    "description": "当有人通过分享链接访问文档时，会自动聚合为联系人。"
+  },
+  "detail": {
+    "back": "返回访问者",
+    "writeEmail": "写邮件",
+    "totalVisits": "总访问",
+    "totalDuration": "累计时长",
+    "score": "热度分",
+    "heat": "热度",
+    "tabs": {
+      "overview": "概览",
+      "timeline": "活动时间线",
+      "documents": "浏览文档",
+      "notes": "备注"
+    },
+    "recentActivity": "最近活动摘要",
+    "noActivities": {
+      "title": "暂无活动记录",
+      "description": "当联系人访问文档时，这里会显示最近活动。"
+    },
+    "viewedDocuments": "浏览过的文档",
+    "noDocuments": {
+      "title": "暂无浏览记录",
+      "description": "联系人尚未通过链接浏览任何文档。"
+    },
+    "view": "查看",
+    "notesHint": "暂无备注。点击右上角“写邮件”即可记录沟通要点。"
+  },
+  "mock": {
+    "activities": {
+      "act_1": { "description": "在财务页停留 3 分钟" },
+      "act_2": { "description": "打开财务模型" },
+      "act_3": { "description": "再次查看 pitch deck" },
+      "act_4": { "description": "查看收入预测页" }
+    }
+  },
+  "activity": {
+    "open": "打开文档",
+    "pageView": "查看第 {{page}} 页",
+    "revisit": "再次访问",
+    "download": "下载文档",
+    "openShort": "打开",
+    "pageViewShort": "查看第 {{page}} 页",
+    "revisitShort": "再次访问",
+    "downloadShort": "下载"
+  }
+}

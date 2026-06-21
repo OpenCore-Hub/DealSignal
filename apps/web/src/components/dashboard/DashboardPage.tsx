@@ -11,6 +11,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -28,15 +29,16 @@ function SummaryCards({
   stats: DashboardStats;
   pendingActions: number;
 }) {
+  const { t } = useTranslation("dashboard");
   const items = [
     {
-      label: "高热度信号数",
+      label: t("summary.hotSignals"),
       count: stats.hotCount,
       icon: Fire,
       color: "text-hot-500 bg-hot-500/10",
     },
     {
-      label: "待办行动数",
+      label: t("summary.pendingActions"),
       count: pendingActions,
       icon: CheckCircle,
       color: "text-success-500 bg-success-500/10",
@@ -66,6 +68,7 @@ function SummaryCards({
 }
 
 function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAlerts"]; workspaceSlug?: string }) {
+  const { t } = useTranslation("dashboard");
   const navigate = useNavigate();
   if (alerts.length === 0) return null;
 
@@ -74,7 +77,7 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
       <CardHeader className="pb-3">
         <CardTitle className="text-h2 flex items-center gap-2 text-risk-600">
           <Warning size={20} weight="fill" />
-          风险提醒
+          {t("riskAlerts.title")}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -100,8 +103,8 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
               >
               <div className="mt-0.5 h-2 w-2 rounded-full bg-risk-500" />
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium">{alert.title}</p>
-                <p className="text-body text-muted-foreground">{alert.description}</p>
+                <p className="text-sm font-medium">{t(alert.title)}</p>
+                <p className="text-body text-muted-foreground">{t(alert.description)}</p>
               </div>
               <ArrowRight size={16} className="text-muted-foreground" />
             </li>
@@ -116,6 +119,8 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const reducedMotion = useReducedMotion();
+  const { t } = useTranslation("dashboard");
+  const { t: tCommon } = useTranslation("common");
 
   const { signals, actions, fetchSignals, updateActionStatus } = useSignalStore();
   const {
@@ -135,7 +140,7 @@ export function DashboardPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={refetch}>重试</Button>
+        <Button onClick={refetch}>{tCommon("retry")}</Button>
       </div>
     );
   }
@@ -168,9 +173,9 @@ export function DashboardPage() {
     >
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h1 className="text-h1">交易雷达</h1>
+          <h1 className="text-h1">{t("title")}</h1>
           <p className="text-body text-muted-foreground">
-            今日需要关注什么：热度信号、待办行动、风险提醒，一站聚合。
+            {t("subtitle")}
           </p>
         </div>
 
@@ -188,17 +193,17 @@ export function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-h2 flex items-center gap-2">
                 <Fire size={20} className="text-hot-500" />
-                信号流
+                {t("sections.signals")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {signals.length === 0 ? (
                 <EmptyState
                   icon={<Fire size={48} />}
-                  title="暂无信号"
-                  description="上传并分享文档后，AI 会自动识别高意向投资人/客户并生成信号。"
+                  title={t("empty.signals.title")}
+                  description={t("empty.signals.description")}
                   action={{
-                    label: "上传第一份文档",
+                    label: t("empty.signals.action"),
                     onClick: () => navigate(`/${workspaceSlug}/documents/upload`),
                   }}
                 />
@@ -221,15 +226,15 @@ export function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-h2 flex items-center gap-2">
                 <FileText size={20} />
-                最近文档
+                {t("sections.recentDocuments")}
               </CardTitle>
             </CardHeader>
             <CardContent>
               {stats.recentDocuments.length === 0 ? (
                 <EmptyState
                   icon={<FileText size={48} />}
-                  title="暂无文档"
-                  description="上传第一份融资材料或销售提案，开始追踪热度。"
+                  title={t("empty.documents.title")}
+                  description={t("empty.documents.description")}
                 />
               ) : (
                 <div className="space-y-3">
@@ -253,7 +258,7 @@ export function DashboardPage() {
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-medium">{doc.title}</p>
                           <p className="text-caption text-muted-foreground">
-                            {doc.pageCount} 页 · {doc.status === "ready" ? "已就绪" : "处理中"}
+                            {t("document.pageCount", { count: doc.pageCount })} · {tCommon(`status.${doc.status}`)}
                           </p>
                         </div>
                         <ArrowRight size={16} className="text-muted-foreground" />
@@ -267,7 +272,7 @@ export function DashboardPage() {
                         size="sm"
                         onClick={() => navigate(`/${workspaceSlug}/documents`)}
                       >
-                        查看全部
+                        {tCommon("viewAll")}
                         <ArrowRight size={16} className="ml-1" />
                       </Button>
                     </div>
@@ -283,7 +288,7 @@ export function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-h2 flex items-center gap-2">
                 <CheckCircle size={20} />
-                待办行动
+                {t("sections.actions")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -295,7 +300,7 @@ export function DashboardPage() {
             <CardHeader className="pb-3">
               <CardTitle className="text-h2 flex items-center gap-2">
                 <LinkIcon size={20} />
-                热度地图
+                {t("sections.heatMap")}
               </CardTitle>
             </CardHeader>
             <CardContent>

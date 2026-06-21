@@ -6,15 +6,18 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import type { IntegrationStatus } from "@/types";
 
-const integrationsConfig = [
-  { id: "slack" as const, name: "Slack", description: "热度提醒推送到 Slack 频道", icon: CloudArrowUp },
-  { id: "hubspot" as const, name: "HubSpot", description: "同步联系人、访问事件到 CRM", icon: Database },
-  { id: "zapier" as const, name: "Zapier", description: "自动化工作流触发", icon: Plug },
-];
-
 export function SettingsIntegrationsPage() {
+  const { t } = useTranslation("settings");
+  const { t: tc } = useTranslation("common");
+  const integrationsConfig = [
+    { id: "slack" as const, name: "Slack", description: t("integrations.slackDescription"), icon: CloudArrowUp },
+    { id: "hubspot" as const, name: "HubSpot", description: t("integrations.hubspotDescription"), icon: Database },
+    { id: "zapier" as const, name: "Zapier", description: t("integrations.zapierDescription"), icon: Plug },
+  ];
+
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,13 +30,13 @@ export function SettingsIntegrationsPage() {
         const res = await api.getIntegrations();
         setStatus(res.data);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "加载失败");
+        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, []);
+  }, [tc, t]);
 
   const toggle = async (id: keyof IntegrationStatus) => {
     if (!status) return;
@@ -43,10 +46,12 @@ export function SettingsIntegrationsPage() {
     try {
       const res = await api.updateIntegrations(next);
       setStatus(res.data);
-      toast.success(`${integrationsConfig.find((c) => c.id === id)?.name ?? id} 已${res.data[id] ? "连接" : "断开"}`);
+      const name = integrationsConfig.find((c) => c.id === id)?.name ?? id;
+      const state = res.data[id] ? t("integrations.connected") : t("integrations.disconnected");
+      toast.success(`${name} ${state}`);
     } catch (e) {
       setStatus(previous);
-      toast.error(e instanceof Error ? e.message : "更新集成状态失败");
+      toast.error(e instanceof Error ? e.message : t("integrations.updateFailed"));
     }
   };
 
@@ -56,7 +61,7 @@ export function SettingsIntegrationsPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-4 p-12 text-center">
             <p className="text-body text-muted-foreground">{error}</p>
-            <Button onClick={() => window.location.reload()}>重试</Button>
+            <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
           </CardContent>
         </Card>
       </div>
@@ -78,7 +83,7 @@ export function SettingsIntegrationsPage() {
         <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <Plug size={20} />
-            集成
+            {t("integrations.title")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -99,7 +104,7 @@ export function SettingsIntegrationsPage() {
                   <div className="flex items-center gap-3">
                     <Switch checked={connected} onCheckedChange={() => toggle(integration.id)} />
                     <Button variant="outline" size="sm" disabled={!connected}>
-                      {connected ? "配置" : "连接"}
+                      {connected ? t("integrations.configure") : t("integrations.connect")}
                     </Button>
                   </div>
                 </li>

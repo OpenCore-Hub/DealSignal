@@ -1,12 +1,13 @@
 import { toast } from "sonner";
+import i18next from "i18next";
 
-export async function copyToClipboard(text: string, description = "已复制到剪贴板"): Promise<boolean> {
+export async function copyToClipboard(text: string, successMessage?: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
-    toast.success(description);
+    toast.success(successMessage || i18next.t("common:copied"));
     return true;
   } catch {
-    toast.error("复制失败，请手动复制");
+    toast.error(i18next.t("common:error.copyFailed"));
     return false;
   }
 }

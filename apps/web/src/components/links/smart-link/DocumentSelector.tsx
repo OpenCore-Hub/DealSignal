@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { FileText } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import type { Document } from "@/types";
 
 interface DocumentSelectorProps {
@@ -26,12 +27,15 @@ export function DocumentSelector({
   onSelect,
   onUpload,
 }: DocumentSelectorProps) {
+  const { t } = useTranslation("links");
+  const { t: tc } = useTranslation("common");
+
   return (
     <Card>
       <CardHeader>
         <CardTitle className="text-h2 flex items-center gap-2">
           <FileText size={20} />
-          选择文档
+          {t("creator.selectDocument")}
         </CardTitle>
       </CardHeader>
       <CardContent>
@@ -39,15 +43,15 @@ export function DocumentSelector({
           <Skeleton className="h-10" />
         ) : documents.length === 0 ? (
           <div className="rounded-md border border-dashed border-border p-6 text-center">
-            <p className="text-sm text-muted-foreground">暂无可用文档，请先上传。</p>
+            <p className="text-sm text-muted-foreground">{t("creator.noDocuments")}</p>
             <Button className="mt-3" size="sm" onClick={onUpload}>
-              上传文档
+              {tc("upload")}
             </Button>
           </div>
         ) : (
           <Select value={selectedId} onValueChange={(value) => value && onSelect(value)}>
             <SelectTrigger>
-              <SelectValue placeholder="选择要分享的文档" />
+              <SelectValue placeholder={t("creator.selectPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
               {documents.map((doc) => (

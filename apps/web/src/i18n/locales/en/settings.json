@@ -1,0 +1,92 @@
+{
+  "page": {
+    "title": "Settings",
+    "description": "Manage workspace, brand, members, and account security."
+  },
+  "nav": {
+    "general": "General",
+    "language": "Language",
+    "brand": "Brand",
+    "members": "Members",
+    "integrations": "Integrations",
+    "billing": "Billing",
+    "security": "Security"
+  },
+  "general": {
+    "title": "Workspace",
+    "name": "Workspace name",
+    "slug": "Slug",
+    "save": "Save changes",
+    "saving": "Saving...",
+    "saved": "Workspace info saved"
+  },
+  "language": {
+    "title": "Language",
+    "label": "Interface language",
+    "placeholder": "Select language",
+    "hint": "Language changes take effect immediately and are saved to local storage."
+  },
+  "brand": {
+    "title": "Brand Customization",
+    "logo": "Logo",
+    "upload": "Upload Logo",
+    "uploading": "Uploading...",
+    "uploadSuccess": "Logo uploaded",
+    "uploadFailed": "Logo upload failed",
+    "noLogo": "No logo uploaded",
+    "brandColor": "Brand color",
+    "viewerDomain": "Custom viewer domain",
+    "save": "Save brand settings",
+    "saving": "Saving...",
+    "saved": "Brand settings saved",
+    "hint": "Uploaded logo is saved to file storage first, then written to brand settings."
+  },
+  "members": {
+    "title": "Members",
+    "emailPlaceholder": "Email address",
+    "invite": "Invite",
+    "inviting": "Inviting...",
+    "loadFailed": "Failed to load members",
+    "retry": "Retry",
+    "editRole": "Edit role",
+    "editRoleDisabled": "Editing roles requires backend support",
+    "remove": "Remove",
+    "removeDisabled": "Removing members requires backend support"
+  },
+  "integrations": {
+    "title": "Integrations",
+    "connect": "Connect",
+    "configure": "Configure",
+    "connected": "connected",
+    "disconnected": "disconnected",
+    "updateFailed": "Failed to update integration status",
+    "slackDescription": "Push heat alerts to a Slack channel",
+    "hubspotDescription": "Sync contacts and access events to CRM",
+    "zapierDescription": "Trigger automated workflows"
+  },
+  "billing": {
+    "title": "Subscription & Usage",
+    "plan": "Current plan",
+    "upgrade": "Upgrade",
+    "upgradeDisabled": "Upgrading requires backend payment support",
+    "loadFailed": "Failed to load billing info",
+    "storage": "Document storage",
+    "links": "Share links",
+    "rooms": "Deal rooms"
+  },
+  "security": {
+    "title": "Security",
+    "forceEmailVerification": "Force email verification",
+    "forceEmailVerificationDescription": "Require email verification before accessing links",
+    "watermarkDownloads": "Watermark downloads",
+    "watermarkDownloadsDescription": "Add visitor email watermark when downloading PDFs",
+    "twoFactor": "Two-factor authentication",
+    "twoFactorDescription": "Enable 2FA for admin accounts",
+    "configure": "Configure",
+    "auditLog": "Audit Log",
+    "auditLogDescription": "Review key workspace actions from the last 30 days.",
+    "auditLogDisabled": "Audit log requires backend support",
+    "viewAuditLog": "View audit log",
+    "loadFailed": "Failed to load security settings"
+  }
+}

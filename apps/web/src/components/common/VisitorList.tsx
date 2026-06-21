@@ -1,5 +1,6 @@
 import { Link, useParams } from "react-router";
 import { Users } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { HeatBadge } from "./HeatBadge";
 import { EmptyState } from "./EmptyState";
@@ -24,13 +25,14 @@ interface VisitorListProps {
 
 export function VisitorList({ visitors, className }: VisitorListProps) {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const { t } = useTranslation("common");
 
   if (visitors.length === 0) {
     return (
       <EmptyState
         icon={<Users size={32} />}
-        title="暂无访客"
-        description="分享文档链接后，访客将自动出现在这里。"
+        title={t("visitor.empty.title")}
+        description={t("visitor.empty.description")}
         size="large"
       />
     );
@@ -50,9 +52,7 @@ export function VisitorList({ visitors, className }: VisitorListProps) {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm font-medium">{visitor.name ?? visitor.email}</p>
               <p className="text-caption text-muted-foreground">
-                {visitor.organization ?? "未知机构"} · {visitor.visitCount} 次访问 · 平均{" "}
-                {formatDuration(visitor.avgDurationSeconds)} · 最后{" "}
-                {formatRelativeTime(visitor.lastSeenAt)}
+                {visitor.organization ?? t("visitor.unknownOrganization")} · {t("visitor.visitCount", { count: visitor.visitCount })} · {t("visitor.avgDuration", { duration: formatDuration(visitor.avgDurationSeconds) })} · {t("visitor.lastSeen", { time: formatRelativeTime(visitor.lastSeenAt) })}
               </p>
             </div>
             <HeatBadge level={visitor.heatLevel} />

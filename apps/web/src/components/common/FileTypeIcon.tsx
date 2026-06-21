@@ -7,15 +7,18 @@ import {
 } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import type { Document } from "@/types";
+import { useTranslation } from "react-i18next";
+
+type FileTypeKey = "fileType.pdf" | "fileType.docx" | "fileType.pptx" | "fileType.xlsx";
 
 const config: Record<
   Document["fileType"],
-  { icon: typeof FilePdf; label: string }
+  { icon: typeof FilePdf; key: FileTypeKey }
 > = {
-  pdf: { icon: FilePdf, label: "PDF" },
-  docx: { icon: FileDoc, label: "Word" },
-  pptx: { icon: FilePpt, label: "PPT" },
-  xlsx: { icon: FileXls, label: "Excel" },
+  pdf: { icon: FilePdf, key: "fileType.pdf" },
+  docx: { icon: FileDoc, key: "fileType.docx" },
+  pptx: { icon: FilePpt, key: "fileType.pptx" },
+  xlsx: { icon: FileXls, key: "fileType.xlsx" },
 };
 
 interface FileTypeIconProps {
@@ -31,11 +34,13 @@ export function FileTypeIcon({
   showLabel = false,
   className,
 }: FileTypeIconProps) {
+  const { t } = useTranslation("common");
   const cfg = config[type] || {
     icon: FileText,
-    label: type.toUpperCase(),
+    key: undefined,
   };
   const Icon = cfg.icon;
+  const label = cfg.key ? (t(cfg.key) as string) : type.toUpperCase();
 
   if (showLabel) {
     return (
@@ -44,12 +49,12 @@ export function FileTypeIcon({
           "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground",
           className
         )}
-        aria-label={cfg.label}
+        aria-label={label}
       >
-        <span className="text-caption font-bold">{cfg.label}</span>
+        <span className="text-caption font-bold">{label}</span>
       </div>
     );
   }
 
-  return <Icon size={size} className={cn("text-muted-foreground", className)} aria-label={cfg.label} />;
+  return <Icon size={size} className={cn("text-muted-foreground", className)} aria-label={label} />;
 }

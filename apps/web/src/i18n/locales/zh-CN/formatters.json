@@ -1,0 +1,15 @@
+{
+  "fileSize": {
+    "units": ["B", "KB", "MB", "GB"]
+  },
+  "duration": {
+    "seconds": "{{count}} 秒",
+    "minutesAndSeconds": "{{m}} 分 {{s}} 秒"
+  },
+  "relativeTime": {
+    "justNow": "刚刚",
+    "minutesAgo": "{{count}} 分钟前",
+    "hoursAgo": "{{count}} 小时前",
+    "daysAgo": "{{count}} 天前"
+  }
+}

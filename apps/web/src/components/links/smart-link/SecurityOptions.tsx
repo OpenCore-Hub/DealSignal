@@ -8,6 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useTranslation } from "react-i18next";
 import type { PermissionConfig } from "@/types";
 
 interface SecurityOptionsProps {
@@ -16,12 +17,13 @@ interface SecurityOptionsProps {
 }
 
 export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
+  const { t } = useTranslation("links");
   const update = (patch: Partial<PermissionConfig>) => onChange({ ...config, ...patch });
 
   return (
     <div className="space-y-6">
       <div className="space-y-3">
-        <Label>安全选项</Label>
+        <Label>{t("creator.securityOptions")}</Label>
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Checkbox
@@ -30,7 +32,7 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
               onCheckedChange={(checked) => update({ requireEmail: checked === true })}
             />
             <Label htmlFor="require-email" className="text-sm font-normal">
-              需要邮箱验证
+              {t("creator.requireEmail")}
             </Label>
           </div>
           <div className="flex items-center gap-2">
@@ -40,12 +42,12 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
               onCheckedChange={(checked) => update({ whitelistEnabled: checked === true })}
             />
             <Label htmlFor="whitelist" className="text-sm font-normal">
-              白名单邮箱/域名
+              {t("creator.whitelist")}
             </Label>
           </div>
           {config.whitelistEnabled && (
             <Input
-              placeholder="输入邮箱或域名，用逗号分隔"
+              placeholder={t("creator.whitelistPlaceholder")}
               value={config.whitelist.join(", ")}
               onChange={(e) =>
                 update({ whitelist: e.target.value.split(",").map((s) => s.trim()) })
@@ -60,13 +62,13 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
               onCheckedChange={(checked) => update({ passwordEnabled: checked === true })}
             />
             <Label htmlFor="password" className="text-sm font-normal">
-              访问密码
+              {t("creator.password")}
             </Label>
           </div>
           {config.passwordEnabled && (
             <Input
               type="password"
-              placeholder="设置密码"
+              placeholder={t("creator.passwordPlaceholder")}
               value={config.password ?? ""}
               onChange={(e) => update({ password: e.target.value })}
               className="ml-6"
@@ -79,7 +81,7 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
               onCheckedChange={(checked) => update({ allowDownload: checked === true })}
             />
             <Label htmlFor="download" className="text-sm font-normal">
-              允许下载
+              {t("creator.allowDownload")}
             </Label>
           </div>
           <div className="flex items-center gap-2">
@@ -89,7 +91,7 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
               onCheckedChange={(checked) => update({ watermarkEnabled: checked === true })}
             />
             <Label htmlFor="watermark" className="text-sm font-normal">
-              动态水印
+              {t("creator.watermark")}
             </Label>
           </div>
         </div>
@@ -97,7 +99,7 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="space-y-2">
-          <Label>有效期</Label>
+          <Label>{t("creator.expiry")}</Label>
           <Select
             value={String(config.expiryDays)}
             onValueChange={(value) =>
@@ -105,18 +107,18 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
             }
           >
             <SelectTrigger>
-              <SelectValue placeholder="选择有效期" />
+              <SelectValue placeholder={t("creator.expiryPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="7">7 天</SelectItem>
-              <SelectItem value="30">30 天</SelectItem>
-              <SelectItem value="90">90 天</SelectItem>
-              <SelectItem value="custom">自定义</SelectItem>
+              <SelectItem value="7">{t("creator.expiryDays.7")}</SelectItem>
+              <SelectItem value="30">{t("creator.expiryDays.30")}</SelectItem>
+              <SelectItem value="90">{t("creator.expiryDays.90")}</SelectItem>
+              <SelectItem value="custom">{t("creator.expiryDays.custom")}</SelectItem>
             </SelectContent>
           </Select>
         </div>
         <div className="space-y-2">
-          <Label>最大访问次数</Label>
+          <Label>{t("creator.maxViews")}</Label>
           <Select
             value={String(config.maxViews)}
             onValueChange={(value) =>
@@ -124,13 +126,13 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
             }
           >
             <SelectTrigger>
-              <SelectValue placeholder="选择最大访问次数" />
+              <SelectValue placeholder={t("creator.maxViewsPlaceholder")} />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="unlimited">无限制</SelectItem>
-              <SelectItem value="10">10 次</SelectItem>
-              <SelectItem value="50">50 次</SelectItem>
-              <SelectItem value="100">100 次</SelectItem>
+              <SelectItem value="unlimited">{t("creator.maxViewsOptions.unlimited")}</SelectItem>
+              <SelectItem value="10">{t("creator.maxViewsOptions.10")}</SelectItem>
+              <SelectItem value="50">{t("creator.maxViewsOptions.50")}</SelectItem>
+              <SelectItem value="100">{t("creator.maxViewsOptions.100")}</SelectItem>
             </SelectContent>
           </Select>
         </div>

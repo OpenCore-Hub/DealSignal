@@ -3,6 +3,7 @@ import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { EmptyState } from "./EmptyState";
 import { ChartLineUp } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 
 interface TrendChartProps {
   title: string;
@@ -17,8 +18,9 @@ export function TrendChart({
   data,
   labels,
   className,
-  emptyDescription = "数据不足，无法生成趋势图。",
+  emptyDescription,
 }: TrendChartProps) {
+  const { t } = useTranslation("common");
   const [hovered, setHovered] = useState<number | null>(null);
 
   if (!data || data.length === 0) {
@@ -30,8 +32,8 @@ export function TrendChart({
         <CardContent>
           <EmptyState
             icon={<ChartLineUp size={32} />}
-            title="暂无趋势数据"
-            description={emptyDescription}
+            title={t("trendEmptyTitle")}
+            description={emptyDescription ?? t("empty.description")}
             size="large"
           />
         </CardContent>
@@ -69,8 +71,8 @@ export function TrendChart({
           ))}
         </div>
         <div className="mt-3 flex justify-between text-caption text-muted-foreground">
-          <span>{labels?.[0] ?? "开始"}</span>
-          <span>{labels?.[labels.length - 1] ?? "现在"}</span>
+          <span>{labels?.[0] ?? t("start")}</span>
+          <span>{labels?.[labels.length - 1] ?? t("now")}</span>
         </div>
       </CardContent>
     </Card>

@@ -36,7 +36,7 @@ export function useAsyncData<T>(
         }
       } catch (e) {
         if (!cancelledRef.current) {
-          setError(e instanceof Error ? e.message : "加载失败");
+          setError(e instanceof Error ? e.message : "Failed to load");
         }
       } finally {
         if (!cancelledRef.current) {

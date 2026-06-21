@@ -8,6 +8,7 @@ import {
   CaretRight,
   FileText,
 } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
@@ -16,6 +17,7 @@ import type { Document, PageAnalytics } from "@/types";
 
 export function CanvasViewer() {
   const { documentId } = useParams<{ documentId: string }>();
+  const { t } = useTranslation(["documents", "common"]);
   const [doc, setDoc] = useState<Document | null>(null);
   const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
   const [loading, setLoading] = useState(true);
@@ -39,7 +41,7 @@ export function CanvasViewer() {
           setPage(1);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -48,7 +50,7 @@ export function CanvasViewer() {
     return () => {
       cancelled = true;
     };
-  }, [documentId, retryTick]);
+  }, [documentId, retryTick, t]);
 
   if (loading) {
     return (
@@ -68,8 +70,8 @@ export function CanvasViewer() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-50 dark:bg-background">
         <FileText size={48} className="text-muted-foreground/50" />
-        <p className="text-body text-destructive">加载失败：{error}</p>
-        <Button onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+        <p className="text-body text-destructive">{t("documents:viewer.loadFailed", { error })}</p>
+        <Button onClick={() => setRetryTick((t) => t + 1)}>{t("common:retry")}</Button>
       </div>
     );
   }
@@ -78,7 +80,7 @@ export function CanvasViewer() {
     return (
       <div className="flex flex-1 flex-col items-center justify-center bg-neutral-50 dark:bg-background">
         <FileText size={48} className="text-muted-foreground/50" />
-        <p className="mt-4 text-body text-muted-foreground">文档不存在或无法加载</p>
+        <p className="mt-4 text-body text-muted-foreground">{t("documents:viewer.notFound")}</p>
       </div>
     );
   }
@@ -101,7 +103,11 @@ export function CanvasViewer() {
           <div>
             <p className="text-sm font-medium">{doc.title}</p>
             <p className="text-caption text-muted-foreground">
-              {doc.fileType.toUpperCase()} · {formatFileSize(doc.fileSize)} · {totalPages} 页
+              {t("documents:viewer.meta", {
+                fileType: doc.fileType.toUpperCase(),
+                fileSize: formatFileSize(doc.fileSize),
+                pageCount: totalPages,
+              })}
             </p>
           </div>
         </div>
@@ -111,7 +117,7 @@ export function CanvasViewer() {
             size="icon-sm"
             variant="ghost"
             onClick={() => setZoom((z) => Math.max(50, z - 10))}
-            aria-label="缩小"
+            aria-label={t("documents:viewer.zoomOut")}
           >
             <MagnifyingGlassMinus size={16} />
           </Button>
@@ -120,7 +126,7 @@ export function CanvasViewer() {
             size="icon-sm"
             variant="ghost"
             onClick={() => setZoom((z) => Math.min(200, z + 10))}
-            aria-label="放大"
+            aria-label={t("documents:viewer.zoomIn")}
           >
             <MagnifyingGlassPlus size={16} />
           </Button>
@@ -132,7 +138,7 @@ export function CanvasViewer() {
             variant="ghost"
             onClick={() => setPage((p) => Math.max(1, p - 1))}
             disabled={page <= 1}
-            aria-label="上一页"
+            aria-label={t("documents:viewer.previousPage")}
           >
             <CaretLeft size={16} />
           </Button>
@@ -144,11 +150,18 @@ export function CanvasViewer() {
             variant="ghost"
             onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages}
-            aria-label="下一页"
+            aria-label={t("documents:viewer.nextPage")}
           >
             <CaretRight size={16} />
           </Button>
-          <Button size="icon-sm" variant="ghost" aria-label="下载" disabled title="下载需后端签名 URL 支持" onClick={() => {}}>
+          <Button
+            size="icon-sm"
+            variant="ghost"
+            aria-label={t("common:download")}
+            disabled
+            title={t("documents:viewer.downloadDisabled")}
+            onClick={() => {}}
+          >
             <Download size={16} />
           </Button>
         </div>
@@ -157,7 +170,7 @@ export function CanvasViewer() {
       <div className="flex flex-1 overflow-hidden">
         {/* Thumbnail sidebar */}
         <aside className="hidden w-48 flex-col gap-2 overflow-y-auto border-r border-border bg-card p-3 md:flex">
-          <p className="text-caption font-medium text-muted-foreground">页面热度</p>
+          <p className="text-caption font-medium text-muted-foreground">{t("documents:viewer.pageHeat")}</p>
           {pages.map((p) => {
             const heat = p.viewCount > 0 ? Math.min(100, (p.viewCount / Math.max(...pages.map((x) => x.viewCount), 1)) * 100) : 0;
             return (
@@ -171,12 +184,17 @@ export function CanvasViewer() {
                     : "border-border bg-background hover:bg-muted"
                 }`}
               >
-                <span className="text-xs font-medium">第 {p.pageNumber} 页</span>
+                <span className="text-xs font-medium">
+                  {t("documents:viewer.pageLabel", { pageNumber: p.pageNumber })}
+                </span>
                 <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
                   <div className="h-full rounded-full bg-hot-500" style={{ width: `${heat}%` }} />
                 </div>
                 <span className="text-caption text-muted-foreground">
-                  {p.viewCount} 次访问 · {formatDuration(p.avgDurationSeconds)}
+                  {t("documents:viewer.thumbnailViews", {
+                    count: p.viewCount,
+                    duration: formatDuration(p.avgDurationSeconds),
+                  })}
                 </span>
               </button>
             );
@@ -190,15 +208,19 @@ export function CanvasViewer() {
             style={{ width: `${zoom * 6}px`, height: `${zoom * 8}px`, minWidth: 300, minHeight: 400 }}
           >
             <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
-              <div className="text-h1 text-muted-foreground">第 {page} 页</div>
-              <p className="text-body text-muted-foreground">文档预览占位</p>
+              <div className="text-h1 text-muted-foreground">
+                {t("documents:viewer.pagePlaceholder", { pageNumber: page })}
+              </div>
+              <p className="text-body text-muted-foreground">{t("documents:viewer.previewPlaceholder")}</p>
               <p className="text-caption max-w-xs">
-                后端签名 URL 加载后将在此渲染真实页面内容。
+                {t("documents:viewer.signedUrlNotice")}
                 {pageAnalytics && (
                   <>
                     <br />
-                    当前页浏览 {pageAnalytics.viewCount} 次，平均停留{" "}
-                    {formatDuration(pageAnalytics.avgDurationSeconds)}。
+                    {t("documents:viewer.currentPageStats", {
+                      count: pageAnalytics.viewCount,
+                      duration: formatDuration(pageAnalytics.avgDurationSeconds),
+                    })}
                   </>
                 )}
               </p>

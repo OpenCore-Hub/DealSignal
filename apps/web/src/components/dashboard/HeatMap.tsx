@@ -1,6 +1,7 @@
 import { useNavigate, useParams } from "react-router";
 import { Fire, Clock, Snowflake, Link as LinkIcon } from "@phosphor-icons/react";
 import type { HeatLevel, Link as LinkType } from "@/types";
+import { useTranslation } from "react-i18next";
 
 interface HeatMapProps {
   links: LinkType[];
@@ -9,6 +10,8 @@ interface HeatMapProps {
 export function HeatMap({ links }: HeatMapProps) {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const { t } = useTranslation("dashboard");
+  const { t: tCommon } = useTranslation("common");
 
   const grouped: Record<HeatLevel, LinkType[]> = {
     hot: links.filter((l) => l.heatLevel === "hot"),
@@ -16,10 +19,10 @@ export function HeatMap({ links }: HeatMapProps) {
     cold: links.filter((l) => l.heatLevel === "cold"),
   };
 
-  const tiers: { level: HeatLevel; label: string; icon: typeof Fire; color: string }[] = [
-    { level: "hot", label: "高热度", icon: Fire, color: "bg-hot-500" },
-    { level: "warm", label: "中热度", icon: Clock, color: "bg-warm-500" },
-    { level: "cold", label: "低热度", icon: Snowflake, color: "bg-cold-500" },
+  const tiers: { level: HeatLevel; icon: typeof Fire; color: string }[] = [
+    { level: "hot", icon: Fire, color: "bg-hot-500" },
+    { level: "warm", icon: Clock, color: "bg-warm-500" },
+    { level: "cold", icon: Snowflake, color: "bg-cold-500" },
   ];
 
   return (
@@ -27,14 +30,15 @@ export function HeatMap({ links }: HeatMapProps) {
       {tiers.map((tier) => {
         const Icon = tier.icon;
         const items = grouped[tier.level];
+        const tierLabel = tCommon(`heat.${tier.level}`);
         return (
           <div key={tier.level}>
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Icon size={16} weight="fill" className={tier.color.replace("bg-", "text-")} />
-                <span className="text-sm font-medium">{tier.label}</span>
+                <span className="text-sm font-medium">{tierLabel}</span>
               </div>
-              <span className="text-caption text-muted-foreground">{items.length} 个链接</span>
+              <span className="text-caption text-muted-foreground">{t("heatMap.linkCount", { count: items.length })}</span>
             </div>
             <div className="space-y-2">
               {items.slice(0, 5).map((link) => {
@@ -56,14 +60,14 @@ export function HeatMap({ links }: HeatMapProps) {
                     <LinkIcon size={14} className="shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-sm">{link.documentTitle}</p>
-                      <p className="text-caption text-muted-foreground">{link.accessCount} 次访问</p>
+                      <p className="text-caption text-muted-foreground">{t("heatMap.accessCount", { count: link.accessCount })}</p>
                     </div>
                     <div className={`h-1.5 w-1.5 rounded-full ${tier.color}`} />
                   </div>
                 );
               })}
               {items.length === 0 && (
-                <p className="text-caption text-muted-foreground">暂无 {tier.label} 链接</p>
+                <p className="text-caption text-muted-foreground">{t("heatMap.noLinks", { tier: tierLabel })}</p>
               )}
             </div>
           </div>

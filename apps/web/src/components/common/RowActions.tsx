@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { buttonVariants } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "react-i18next";
 
 export interface RowAction {
   label: string;
@@ -24,9 +25,10 @@ interface RowActionsProps {
 }
 
 export function RowActions({ actions }: RowActionsProps) {
+  const { t } = useTranslation("common");
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={buttonVariants({ variant: "ghost", size: "icon" })} aria-label="更多操作">
+      <DropdownMenuTrigger className={buttonVariants({ variant: "ghost", size: "icon" })} aria-label={t("moreActions")}>
         <DotsThree size={18} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">

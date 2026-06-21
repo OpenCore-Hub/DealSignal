@@ -1,21 +1,23 @@
 import { NavLink, Outlet, useParams } from "react-router";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "@/components/common/PageHeader";
-
-const tabs = [
-  { path: "overview", label: "总览" },
-  { path: "pages", label: "页面分析" },
-  { path: "suggestions", label: "跟进建议" },
-];
+import { useTranslation } from "react-i18next";
 
 export function InsightsPage() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const { t } = useTranslation("insights");
+
+  const tabs = [
+    { path: "overview", label: t("nav.overview") },
+    { path: "pages", label: t("nav.pages") },
+    { path: "suggestions", label: t("nav.suggestions") },
+  ];
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title="洞察"
-        description="追踪文档热度、页面参与度与智能跟进建议。"
+        title={t("page.title")}
+        description={t("page.description")}
       />
 
       <nav className="flex items-center gap-1 border-b border-border">

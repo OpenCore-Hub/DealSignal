@@ -1,0 +1,73 @@
+{
+  "page": {
+    "title": "数据室",
+    "description": "集中管理尽调资料、LP 报告与销售提案的数据室。",
+    "create": "新建数据室"
+  },
+  "empty": {
+    "title": "暂无数据室",
+    "description": "创建第一个数据室，安全地向投资人、LP 或客户展示尽调材料。",
+    "action": "新建数据室"
+  },
+  "documentCount": "{{count}} 文档",
+  "memberCount": "{{count}} 成员",
+  "pendingApprovals": "{{count}} 待审批",
+  "lastAccessed": "最近访问 {{time}}",
+  "createdAt": "创建于 {{time}}",
+  "ndaEnabled": "NDA 已启用",
+  "noNda": "无需 NDA",
+  "detail": {
+    "back": "返回数据室",
+    "invite": "邀请成员",
+    "inviteDisabled": "邀请成员需后端支持",
+    "manageDocs": "管理文档",
+    "manageDocsDisabled": "管理文档需后端支持",
+    "documents": "文档",
+    "members": "成员",
+    "security": "安全",
+    "folders": "文件夹结构",
+    "recommendedFiles": "推荐文件清单",
+    "completion": "完成度",
+    "uploaded": "已上传",
+    "upload": "上传",
+    "uploadDisabled": "上传文件需后端支持",
+    "noTemplate": "未匹配到模板结构。"
+  },
+  "new": {
+    "title": "新建数据室",
+    "subtitle": "选择场景模板，系统会自动生成文件夹结构与推荐文件清单。",
+    "basicInfo": "基本信息",
+    "name": "名称",
+    "namePlaceholder": "例如：Seed Round Due Diligence",
+    "description": "描述",
+    "descriptionPlaceholder": "说明数据室用途与目标受众",
+    "enableNda": "启用 NDA",
+    "enableNdaDescription": "访问前要求签署保密协议",
+    "folders": "文件夹结构",
+    "recommendedFiles": "推荐文件",
+    "defaultPermission": "默认权限",
+    "cancel": "取消",
+    "create": "创建数据室",
+    "creating": "创建中...",
+    "created": "数据室已创建",
+    "createFailed": "创建数据室失败",
+    "folderCount": "{{count}} 个文件夹"
+  },
+  "permission": {
+    "low": {
+      "label": "低摩擦",
+      "description": "公开或邮箱验证即可访问",
+      "friction": "接收方无需额外步骤，打开率最高。"
+    },
+    "medium": {
+      "label": "中强度",
+      "description": "白名单或密码保护",
+      "friction": "需要邮箱/密码/白名单验证，适合敏感材料。"
+    },
+    "high": {
+      "label": "高强度",
+      "description": "NDA + 白名单 + 密码组合",
+      "friction": "NDA 签署 + 多重验证，适合机密尽调资料。"
+    }
+  }
+}

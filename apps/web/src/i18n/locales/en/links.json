@@ -1,0 +1,143 @@
+{
+  "page": {
+    "title": "Share Links",
+    "description": "Manage trackable links, view engagement, and configure security.",
+    "createLink": "Create Link"
+  },
+  "title": {
+    "allLinks": "All Links"
+  },
+  "table": {
+    "link": "Link",
+    "document": "Document",
+    "accessCount": "Visits",
+    "accessCountValue": "{{count}} visits",
+    "avgDuration": "Avg. time",
+    "lastViewed": "Last Viewed",
+    "heat": "Heat",
+    "status": "Status",
+    "totalLinks": "{{count}} links",
+    "copyLink": "Copy Link"
+  },
+  "actions": {
+    "viewLog": "View Log",
+    "exportData": "Export Access Data",
+    "downloadOnly": "Download Only",
+    "exportProTooltip": "Export requires backend support",
+    "downloadProTooltip": "Download-only requires backend support"
+  },
+  "empty": {
+    "title": "No links yet",
+    "description": "Configure permissions and create links to track investor and buyer engagement.",
+    "createLink": "Create Link"
+  },
+  "delete": {
+    "title": "Delete Link",
+    "description": "Are you sure you want to delete \"{{url}}\"? Related access records will no longer be viewable via this link.",
+    "confirmLoading": "Deleting...",
+    "success": "Link deleted"
+  },
+  "backToLinks": "Back to links",
+  "detail": {
+    "headerDescription": "Document: {{doc}} · Created on {{date}}",
+    "editProTooltip": "Editing requires backend support",
+    "copySuccess": "Link copied",
+    "totalVisits": "Total Visits",
+    "uniqueVisitors": "Unique Visitors",
+    "avgDuration": "Avg. time",
+    "lastVisit": "Last Visit",
+    "permissionConfig": "Permission Settings",
+    "expiresAt": "Expires {{time}}",
+    "trendTitle": "Visit trend",
+    "trendEmpty": "No visits yet. Trends appear after the first visit.",
+    "timelineTitle": "Visitor Timeline",
+    "accessLogTitle": "Access Log"
+  },
+  "timeline": {
+    "viewedPage": "{{visitor}} viewed page {{page}}",
+    "viewedLink": "{{visitor}} visited link",
+    "description": "Stayed {{duration}} · {{device}} · {{location}}"
+  },
+  "accessLog": {
+    "timestamp": "Time",
+    "visitor": "Visitor",
+    "page": "Page",
+    "duration": "Duration",
+    "device": "Device",
+    "location": "Location",
+    "anonymous": "Anonymous",
+    "empty": {
+      "title": "No access records",
+      "description": "This link has not been visited yet; visitor behavior will appear here after sharing."
+    }
+  },
+  "creator": {
+    "backToLinks": "Back to Links",
+    "title": "Smart Link Creator",
+    "subtitle": "Select a document and configure permission strength; the system scores recipient friction and security in real time.",
+    "securityTitle": "Permissions & Security",
+    "loadDocsFailed": "Failed to load documents",
+    "createSuccess": "Link generated",
+    "createFailed": "Failed to create link",
+    "copySuccess": "Link copied",
+    "selectDocument": "Select Document",
+    "noDocuments": "No available documents; please upload first.",
+    "selectPlaceholder": "Select a document to share",
+    "permissionStrength": "Permission level",
+    "securityOptions": "Security Options",
+    "requireEmail": "Require email verification",
+    "whitelist": "Whitelist emails/domains",
+    "whitelistPlaceholder": "Enter emails or domains separated by commas",
+    "password": "Access password",
+    "passwordPlaceholder": "Set password",
+    "allowDownload": "Allow download",
+    "watermark": "Dynamic watermark",
+    "expiry": "Expiration",
+    "expiryPlaceholder": "Select validity",
+    "expiryDays": {
+      "7": "7 days",
+      "30": "30 days",
+      "90": "90 days",
+      "custom": "Custom"
+    },
+    "maxViews": "Max views",
+    "maxViewsPlaceholder": "Select max views",
+    "maxViewsOptions": {
+      "unlimited": "Unlimited",
+      "10": "10 views",
+      "50": "50 views",
+      "100": "100 views"
+    },
+    "scoreTitle": "Security vs Friction",
+    "securityScore": "Security Strength",
+    "frictionScore": "Recipient Friction",
+    "previewTitle": "Preview",
+    "previewDocumentLabel": "Document",
+    "noDocumentSelected": "Not selected",
+    "featureEmail": "Email verification",
+    "featurePassword": "Access password",
+    "featureWatermark": "Dynamic watermark",
+    "featureNoDownload": "Download disabled",
+    "generatedLabel": "Generated link",
+    "creating": "Creating...",
+    "recreate": "Create Again",
+    "createLink": "Create Link"
+  },
+  "level": {
+    "low": {
+      "label": "Low Friction",
+      "description": "Public or email verification required",
+      "friction": "No extra steps for recipients; highest open rate."
+    },
+    "medium": {
+      "label": "Medium Strength",
+      "description": "Whitelist or password protection",
+      "friction": "Requires email/password/whitelist verification; suitable for sensitive materials."
+    },
+    "high": {
+      "label": "High Strength",
+      "description": "NDA + whitelist + password combined",
+      "friction": "NDA signing + multi-step verification; suitable for confidential due-diligence materials."
+    }
+  }
+}

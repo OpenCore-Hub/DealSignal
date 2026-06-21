@@ -1,0 +1,92 @@
+{
+  "page": {
+    "title": "设置",
+    "description": "管理工作区、品牌、成员与账户安全。"
+  },
+  "nav": {
+    "general": "通用",
+    "language": "语言",
+    "brand": "品牌",
+    "members": "成员",
+    "integrations": "集成",
+    "billing": "账单",
+    "security": "安全"
+  },
+  "general": {
+    "title": "工作区信息",
+    "name": "工作区名称",
+    "slug": "Slug",
+    "save": "保存更改",
+    "saving": "保存中...",
+    "saved": "工作区信息已保存"
+  },
+  "language": {
+    "title": "语言",
+    "label": "界面语言",
+    "placeholder": "选择语言",
+    "hint": "切换语言后将立即生效，并保存到本地存储。"
+  },
+  "brand": {
+    "title": "品牌定制",
+    "logo": "Logo",
+    "upload": "上传 Logo",
+    "uploading": "上传中...",
+    "uploadSuccess": "Logo 上传成功",
+    "uploadFailed": "Logo 上传失败",
+    "noLogo": "未上传",
+    "brandColor": "主色",
+    "viewerDomain": "自定义访问域名",
+    "save": "保存品牌设置",
+    "saving": "保存中...",
+    "saved": "品牌设置已保存",
+    "hint": "上传的 Logo 会先保存到文件存储，随后写入品牌设置。"
+  },
+  "members": {
+    "title": "成员管理",
+    "emailPlaceholder": "邮箱地址",
+    "invite": "邀请",
+    "inviting": "邀请中...",
+    "loadFailed": "加载成员失败",
+    "retry": "重试",
+    "editRole": "编辑角色",
+    "editRoleDisabled": "编辑角色需后端支持",
+    "remove": "移除",
+    "removeDisabled": "移除成员需后端支持"
+  },
+  "integrations": {
+    "title": "集成",
+    "connect": "连接",
+    "configure": "配置",
+    "connected": "已连接",
+    "disconnected": "已断开",
+    "updateFailed": "更新集成状态失败",
+    "slackDescription": "热度提醒推送到 Slack 频道",
+    "hubspotDescription": "同步联系人、访问事件到 CRM",
+    "zapierDescription": "自动化工作流触发"
+  },
+  "billing": {
+    "title": "订阅与用量",
+    "plan": "当前方案",
+    "upgrade": "升级",
+    "upgradeDisabled": "升级订阅需后端支付支持",
+    "loadFailed": "加载订阅信息失败",
+    "storage": "文档存储",
+    "links": "分享链接",
+    "rooms": "数据室"
+  },
+  "security": {
+    "title": "安全",
+    "forceEmailVerification": "强制邮箱验证",
+    "forceEmailVerificationDescription": "访问链接前必须验证邮箱",
+    "watermarkDownloads": "水印下载",
+    "watermarkDownloadsDescription": "下载 PDF 时附加访客邮箱水印",
+    "twoFactor": "双因素认证",
+    "twoFactorDescription": "为管理员账号启用 2FA",
+    "configure": "配置",
+    "auditLog": "审计日志",
+    "auditLogDescription": "查看最近 30 天的工作区关键操作记录。",
+    "auditLogDisabled": "审计日志需后端支持",
+    "viewAuditLog": "查看审计日志",
+    "loadFailed": "加载安全设置失败"
+  }
+}

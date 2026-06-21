@@ -8,9 +8,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { RowActions } from "@/components/common/RowActions";
 import { api } from "@/lib/api";
 import { getInitials } from "@/lib/formatters";
+import { useTranslation } from "react-i18next";
 import type { WorkspaceMember } from "@/types";
 
 export function SettingsMembersPage() {
+  const { t } = useTranslation("settings");
+  const { t: tc } = useTranslation("common");
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +30,7 @@ export function SettingsMembersPage() {
         const res = await api.getWorkspaceMembers();
         if (!cancelled) setMembers(res.data);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -36,7 +39,7 @@ export function SettingsMembersPage() {
     return () => {
       cancelled = true;
     };
-  }, [retryKey]);
+  }, [retryKey, tc]);
 
   const handleInvite = async () => {
     if (!email.trim()) return;
@@ -56,13 +59,13 @@ export function SettingsMembersPage() {
         <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <Users size={20} />
-            成员管理
+            {t("members.title")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
             <Input
-              placeholder="邮箱地址"
+              placeholder={t("members.emailPlaceholder")}
               className="max-w-sm"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -70,16 +73,16 @@ export function SettingsMembersPage() {
             />
             <Button onClick={handleInvite} disabled={!email.trim() || inviting}>
               <EnvelopeSimple size={16} className="mr-1.5" />
-              {inviting ? "邀请中..." : "邀请"}
+              {inviting ? t("members.inviting") : t("members.invite")}
             </Button>
           </div>
 
           {error ? (
             <div className="rounded-lg border border-error-500/20 bg-error-100 p-4">
-              <p className="text-sm font-medium text-error-500">加载成员失败</p>
+              <p className="text-sm font-medium text-error-500">{t("members.loadFailed")}</p>
               <p className="text-caption mt-1 text-error-500/80">{error}</p>
               <Button variant="outline" size="sm" className="mt-3" onClick={() => setRetryKey((k) => k + 1)}>
-                重试
+                {t("members.retry")}
               </Button>
             </div>
           ) : loading ? (
@@ -101,8 +104,8 @@ export function SettingsMembersPage() {
                     <Badge variant={member.status === "active" ? "default" : "secondary"}>{member.role}</Badge>
                     <RowActions
                       actions={[
-                        { label: "编辑角色", onClick: () => {}, disabled: true, title: "编辑角色需后端支持" },
-                        { label: "移除", onClick: () => {}, destructive: true, disabled: true, title: "移除成员需后端支持" },
+                        { label: t("members.editRole"), onClick: () => {}, disabled: true, title: t("members.editRoleDisabled") },
+                        { label: t("members.remove"), onClick: () => {}, destructive: true, disabled: true, title: t("members.removeDisabled") },
                       ]}
                     />
                   </div>

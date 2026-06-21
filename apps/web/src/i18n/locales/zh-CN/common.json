@@ -1,0 +1,146 @@
+{
+  "appName": "DealSignal",
+  "loading": "加载中...",
+  "retry": "重试",
+  "cancel": "取消",
+  "save": "保存",
+  "delete": "删除",
+  "create": "创建",
+  "upload": "上传",
+  "copy": "复制",
+  "copied": "已复制",
+  "close": "关闭",
+  "search": "搜索...",
+  "viewAll": "查看全部",
+  "view": "查看",
+  "viewDetails": "查看详情",
+  "download": "下载",
+  "preview": "预览",
+  "edit": "编辑",
+  "configure": "配置",
+  "connect": "连接",
+  "back": "返回",
+  "open": "打开",
+  "submit": "提交",
+  "send": "发送",
+  "createLink": "创建链接",
+  "copyLink": "复制链接",
+  "linkCopied": "链接已复制",
+  "logs": "日志",
+  "deleting": "删除中...",
+  "complete": "完成",
+  "reload": "刷新页面",
+  "backToHome": "返回首页",
+  "dueDate": "截止",
+  "overdue": {
+    "days": "已逾期 {{count}} 天"
+  },
+  "error": {
+    "title": "出错了",
+    "pageLoadFailed": "页面加载失败，请稍后重试。",
+    "loadFailed": "加载失败",
+    "saveFailed": "保存失败",
+    "deleteFailed": "删除失败",
+    "copyFailed": "复制失败，请手动复制"
+  },
+  "empty": {
+    "title": "暂无数据",
+    "description": "当前没有可用数据。"
+  },
+  "status": {
+    "enabled": "启用",
+    "disabled": "停用",
+    "active": "启用",
+    "inactive": "已停用",
+    "pending": "待处理",
+    "ready": "已就绪",
+    "processing": "处理中",
+    "uploading": "上传中",
+    "failed": "处理失败",
+    "done": "已完成"
+  },
+  "heat": {
+    "hot": "高热度",
+    "warm": "中热度",
+    "cold": "低热度",
+    "risk": "风险"
+  },
+  "priority": {
+    "high": "高优先级",
+    "medium": "中优先级",
+    "low": "低优先级"
+  },
+  "confidence": {
+    "high": "高置信度",
+    "medium": "中置信度",
+    "low": "低置信度（样本较少）"
+  },
+  "impact": {
+    "high": "高影响",
+    "medium": "中影响",
+    "low": "低影响"
+  },
+  "actionType": {
+    "email": "发邮件",
+    "call": "电话",
+    "share": "分享资料",
+    "review": "审查"
+  },
+  "fileType": {
+    "pdf": "PDF",
+    "docx": "Word",
+    "pptx": "PPT",
+    "xlsx": "Excel"
+  },
+  "languages": {
+    "en": "English",
+    "zh-CN": "简体中文"
+  },
+  "selectWorkspace": "选择工作区",
+  "selectWorkspaceDescription": "请选择要进入的工作区",
+  "moreActions": "更多操作",
+  "usageAtLimit": "已达上限",
+  "trendEmptyTitle": "暂无趋势数据",
+  "theme": {
+    "toggle": "切换主题",
+    "light": "浅色",
+    "dark": "深色",
+    "system": "跟随系统"
+  },
+  "start": "开始",
+  "now": "现在",
+  "activity": {
+    "open": "打开",
+    "pageView": "查看页面",
+    "revisit": "再次访问",
+    "download": "下载",
+    "share": "分享",
+    "emptyTitle": "暂无活动",
+    "emptyDescription": "该联系人或文档尚未产生浏览行为。"
+  },
+  "usageNearLimit": "接近上限",
+  "createWorkspace": "创建工作区",
+  "createWorkspaceDisabled": "创建工作区需后端支持",
+  "visitor": {
+    "unknownOrganization": "未知机构",
+    "visitCount": "{{count}} 次访问",
+    "avgDuration": "平均停留 {{duration}}",
+    "lastSeen": "最后 {{time}}",
+    "unknown": "未知",
+    "empty": {
+      "title": "暂无访客",
+      "description": "当有人通过分享链接访问文档时，这里会显示访客。"
+    }
+  },
+  "notFound": {
+    "title": "页面未找到",
+    "description": "你访问的页面不存在，请返回 Dashboard。",
+    "backToDashboard": "返回 Dashboard"
+  },
+  "mock": {
+    "workspaces": {
+      "acme": { "name": "Acme 资本" },
+      "ventura": { "name": "Ventura 基金" }
+    }
+  }
+}

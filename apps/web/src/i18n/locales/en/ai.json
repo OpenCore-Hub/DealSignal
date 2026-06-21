@@ -1,0 +1,47 @@
+{
+  "welcomeMessage": "I'm the DealSignal AI assistant. Once a model is connected, I can help you interpret document heat, recommend next actions, and explain visitor behavior. Current replies use demo logic and do not reference real names or numbers.",
+  "context": {
+    "document": "Based on current document",
+    "global": "Global assistant"
+  },
+  "suggestions": {
+    "highHeatSignals": "What high-heat signals are there today?",
+    "contactBehavior": "What does {{name}}'s behavior indicate?",
+    "documentRisks": "What are the key risk points in this document?",
+    "linkSecurity": "How can I improve link security?"
+  },
+  "inputPlaceholder": "Ask about signals, action suggestions, or security settings...",
+  "evidence": {
+    "title": "Evidence & source location",
+    "page": "Page {{pageNumber}}",
+    "jumpAlert": "Jump to page {{pageNumber}} and highlight the source"
+  },
+  "viewer": {
+    "title": "AI Assistant",
+    "open": "Open AI assistant",
+    "close": "Close AI assistant",
+    "placeholder": "Ask a question...",
+    "emptyTitle": "Ask AI about this document",
+    "emptyExample": "e.g. What is this company's gross margin?",
+    "thinking": "Thinking..."
+  },
+  "resetDialog": {
+    "title": "Reset conversation",
+    "description": "Are you sure you want to clear the current conversation? This cannot be undone.",
+    "cancel": "Cancel",
+    "confirm": "Reset"
+  },
+  "aria": {
+    "open": "Open AI assistant",
+    "close": "Close AI assistant",
+    "reset": "Reset conversation",
+    "send": "Send message"
+  },
+  "replies": {
+    "documentContext": " (based on the current document context)",
+    "heatAnalysis": "I'll analyze this document's access data to surface visitors with long dwell times and repeat visits as engagement signals.",
+    "securityAdvice": "I can review this link's permissions and suggest stronger settings for sensitive materials.",
+    "followUpAction": "Based on highly engaged visitors and their interaction history, I can suggest follow-ups like sending more materials or booking a meeting.",
+    "default": "Got it. Once the model is connected, I'll generate explainable answers based on real documents and access data."
+  }
+}

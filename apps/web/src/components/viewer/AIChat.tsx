@@ -6,19 +6,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAIStore } from "@/stores/aiStore";
+import { useTranslation } from "react-i18next";
 import type { Evidence } from "@/types";
 
 function EvidenceCard({ evidence }: { evidence: Evidence }) {
+  const { t } = useTranslation("ai");
   return (
     <button
       type="button"
       className="mt-2 w-full rounded-md border border-border bg-muted/50 p-2 text-left text-sm transition-colors hover:bg-muted"
       onClick={() => {
-        // Placeholder: would jump to page and highlight bbox
-        alert(`跳转到第 ${evidence.pageNumber} 页并高亮引用`);
+        alert(t("evidence.jumpAlert", { pageNumber: evidence.pageNumber }));
       }}
     >
-      <span className="text-caption text-muted-foreground">第 {evidence.pageNumber} 页</span>
+      <span className="text-caption text-muted-foreground">{t("evidence.page", { pageNumber: evidence.pageNumber })}</span>
       <p className="mt-0.5 line-clamp-2">{evidence.text}</p>
     </button>
   );
@@ -26,6 +27,7 @@ function EvidenceCard({ evidence }: { evidence: Evidence }) {
 
 export function AIChat() {
   const { documentId } = useParams<{ documentId: string }>();
+  const { t } = useTranslation("ai");
   const reducedMotion = useReducedMotion();
   const { open, messages, pending, toggle, setOpen, sendMessage } = useAIStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -57,7 +59,7 @@ export function AIChat() {
             transition={{ duration: 0.2 }}
             onClick={toggle}
             className="fixed right-6 bottom-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:ring-3 focus-visible:ring-ring/50"
-            aria-label="打开 AI 助手"
+            aria-label={t("viewer.open")}
           >
             <Robot size={24} weight="fill" />
           </motion.button>
@@ -76,13 +78,13 @@ export function AIChat() {
             <div className="flex h-12 items-center justify-between border-b border-border px-4">
               <div className="flex items-center gap-2">
                 <Robot size={18} weight="fill" className="text-primary" />
-                <span className="text-sm font-medium">AI 助手</span>
+                <span className="text-sm font-medium">{t("viewer.title")}</span>
               </div>
               <Button
                 size="icon"
                 variant="ghost"
                 onClick={() => setOpen(false)}
-                aria-label="关闭 AI 助手"
+                aria-label={t("viewer.close")}
               >
                 <X size={18} />
               </Button>
@@ -97,8 +99,8 @@ export function AIChat() {
               {messages.length === 0 && (
                 <div className="py-8 text-center text-muted-foreground">
                   <Robot size={32} className="mx-auto mb-2 opacity-40" />
-                  <p className="text-sm">向 AI 提问关于文档的内容</p>
-                  <p className="text-caption">例如："这家公司的毛利率是多少？"</p>
+                  <p className="text-sm">{t("viewer.emptyTitle")}</p>
+                  <p className="text-caption">{t("viewer.emptyExample")}</p>
                 </div>
               )}
               {messages.map((msg) => (
@@ -121,7 +123,7 @@ export function AIChat() {
                 <div className="flex justify-start">
                   <div className="flex max-w-[85%] items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
                     <Spinner size={16} className="animate-spin" />
-                    思考中...
+                    {t("viewer.thinking")}
                   </div>
                 </div>
               )}
@@ -131,7 +133,7 @@ export function AIChat() {
               <form onSubmit={handleSubmit} className="flex gap-2">
                 <Input
                   name="message"
-                  placeholder="输入问题..."
+                  placeholder={t("viewer.placeholder")}
                   className="flex-1"
                   autoComplete="off"
                 />

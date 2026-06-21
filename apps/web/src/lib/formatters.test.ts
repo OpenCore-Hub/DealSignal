@@ -1,10 +1,23 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
+import i18next from "i18next";
+import { initReactI18next } from "react-i18next";
+import zhCNFormatters from "../i18n/locales/zh-CN/formatters.json";
 import {
   formatFileSize,
   formatDuration,
   formatRelativeTime,
   getInitials,
 } from "./formatters";
+
+beforeAll(async () => {
+  await i18next.use(initReactI18next).init({
+    lng: "zh-CN",
+    fallbackLng: "zh-CN",
+    resources: {
+      "zh-CN": { formatters: zhCNFormatters },
+    },
+  });
+});
 
 describe("formatFileSize", () => {
   it("returns 0 B for zero bytes", () => {
@@ -31,11 +44,11 @@ describe("formatDuration", () => {
   });
 
   it("formats seconds only", () => {
-    expect(formatDuration(45)).toBe("45s");
+    expect(formatDuration(45)).toBe("45 秒");
   });
 
   it("formats minutes and seconds", () => {
-    expect(formatDuration(125)).toBe("2m 5s");
+    expect(formatDuration(125)).toBe("2 分 5 秒");
   });
 });
 

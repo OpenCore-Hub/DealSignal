@@ -1,5 +1,6 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Warning, ShieldWarning } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { calculateFrictionScore, calculateSecurityScore, levelConfig } from "./levelConfig";
 import type { PermissionConfig } from "@/types";
 import type { PermissionLevel } from "./types";
@@ -10,6 +11,7 @@ interface ScoreDisplayProps {
 }
 
 export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
+  const { t } = useTranslation("links");
   const frictionScore = calculateFrictionScore(config);
   const securityScore = calculateSecurityScore(config);
   const info = levelConfig[level];
@@ -17,13 +19,13 @@ export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-h2">安全 vs 摩擦</CardTitle>
+        <CardTitle className="text-h2">{t("creator.scoreTitle")}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div>
           <div className="mb-1 flex items-center justify-between text-sm">
             <span className="flex items-center gap-1">
-              <ShieldWarning size={14} /> 安全强度
+              <ShieldWarning size={14} /> {t("creator.securityScore")}
             </span>
             <span className="font-medium">{securityScore}/10</span>
           </div>
@@ -37,7 +39,7 @@ export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
         <div>
           <div className="mb-1 flex items-center justify-between text-sm">
             <span className="flex items-center gap-1">
-              <Warning size={14} /> 接收方摩擦
+              <Warning size={14} /> {t("creator.frictionScore")}
             </span>
             <span className="font-medium">{frictionScore}/10</span>
           </div>
@@ -50,7 +52,7 @@ export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
             />
           </div>
         </div>
-        <p className="text-caption text-muted-foreground">{info.friction}</p>
+        <p className="text-caption text-muted-foreground">{t(info.friction)}</p>
       </CardContent>
     </Card>
   );

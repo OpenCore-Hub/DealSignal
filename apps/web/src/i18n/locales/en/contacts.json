@@ -1,0 +1,60 @@
+{
+  "page": {
+    "title": "Contacts",
+    "description": "Track who viewed your materials and identify high-intent contacts."
+  },
+  "searchPlaceholder": "Search contacts...",
+  "unknownOrganization": "Unknown organization",
+  "visitCount": "{{count}} visits",
+  "visitCount_one": "{{count}} visit",
+  "totalDuration": "Total {{duration}}",
+  "lastSeen": "Last seen {{time}}",
+  "empty": {
+    "title": "No contacts yet",
+    "description": "Contacts are automatically aggregated when someone accesses a document through a share link."
+  },
+  "detail": {
+    "back": "Back to contacts",
+    "writeEmail": "Write email",
+    "totalVisits": "Total visits",
+    "totalDuration": "Total duration",
+    "score": "Heat score",
+    "heat": "Heat",
+    "tabs": {
+      "overview": "Overview",
+      "timeline": "Timeline",
+      "documents": "Documents",
+      "notes": "Notes"
+    },
+    "recentActivity": "Recent activity",
+    "noActivities": {
+      "title": "No activity yet",
+      "description": "Recent activity will appear here when a contact views a document."
+    },
+    "viewedDocuments": "Viewed documents",
+    "noDocuments": {
+      "title": "No viewed documents",
+      "description": "This contact has not viewed any documents via a link yet."
+    },
+    "view": "View",
+    "notesHint": "No notes yet. Click Write email to capture conversation highlights."
+  },
+  "mock": {
+    "activities": {
+      "act_1": { "description": "Spent 3 minutes on the financial slide" },
+      "act_2": { "description": "Opened the financial model" },
+      "act_3": { "description": "Returned to the pitch deck" },
+      "act_4": { "description": "Viewed the revenue forecast page" }
+    }
+  },
+  "activity": {
+    "open": "opened the document",
+    "pageView": "viewed page {{page}}",
+    "revisit": "returned",
+    "download": "downloaded the document",
+    "openShort": "Opened",
+    "pageViewShort": "Viewed page {{page}}",
+    "revisitShort": "Returned",
+    "downloadShort": "Downloaded"
+  }
+}

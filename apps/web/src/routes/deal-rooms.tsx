@@ -9,11 +9,14 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useTranslation } from "react-i18next";
 import type { DealRoom } from "@/types";
-// DealRoom 类型用于组件内的类型推断
+
 export type { DealRoom };
 
 export function DealRoomsPage() {
+  const { t, i18n } = useTranslation("dealRooms");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { data: rooms, loading, error, refetch } = useAsyncData(
@@ -26,17 +29,17 @@ export function DealRoomsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="数据室" description="集中管理尽调资料、LP 报告与销售提案的数据室。">
+      <PageHeader title={t("page.title")} description={t("page.description")}>
         <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}>
           <Plus size={16} weight="bold" />
-          新建数据室
+          {t("page.create")}
         </Button>
       </PageHeader>
 
       {error ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
           <p className="text-body text-muted-foreground">{error}</p>
-          <Button onClick={refetch}>重试</Button>
+          <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
       ) : loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
@@ -47,9 +50,9 @@ export function DealRoomsPage() {
       ) : rooms?.length === 0 ? (
         <EmptyState
           icon={<Folder size={48} />}
-          title="暂无数据室"
-          description="创建第一个数据室，安全地向投资人、LP 或客户展示尽调材料。"
-          action={{ label: "新建数据室", onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`) }}
+          title={t("empty.title")}
+          description={t("empty.description")}
+          action={{ label: t("empty.action"), onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`) }}
           size="large"
         />
       ) : (
@@ -77,14 +80,14 @@ export function DealRoomsPage() {
               <CardContent className="space-y-3">
                 <p className="text-body text-muted-foreground">{room.description}</p>
                 <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary">{room.documentCount} 文档</Badge>
-                  <Badge variant="secondary">{room.memberCount} 成员</Badge>
+                  <Badge variant="secondary">{t("documentCount", { count: room.documentCount })}</Badge>
+                  <Badge variant="secondary">{t("memberCount", { count: room.memberCount })}</Badge>
                   {room.pendingApprovals > 0 && (
-                    <Badge variant="destructive">{room.pendingApprovals} 待审批</Badge>
+                    <Badge variant="destructive">{t("pendingApprovals", { count: room.pendingApprovals })}</Badge>
                   )}
                 </div>
                 <p className="text-caption text-muted-foreground">
-                  最近访问 {room.lastAccessedAt ? formatRelativeTime(room.lastAccessedAt) : "-"}
+                  {t("lastAccessed", { time: room.lastAccessedAt ? formatRelativeTime(room.lastAccessedAt, i18n.language) : "-" })}
                 </p>
               </CardContent>
             </Card>

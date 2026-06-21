@@ -240,7 +240,7 @@ export const handlers = [
     return HttpResponse.json({
       data: {
         plan: "Pro",
-        period: "年付",
+        period: "Annual",
         storageUsed: Math.round((totalStorage / 1024 / 1024) * 10) / 10,
         storageLimit: 50,
         linksUsed: mockLinks.length,

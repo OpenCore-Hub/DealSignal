@@ -1,0 +1,97 @@
+{
+  "title": "Deal Radar",
+  "subtitle": "Everything that needs your attention today: heat signals, pending actions, and risk alerts, all in one place.",
+  "summary": {
+    "hotSignals": "Hot signals",
+    "pendingActions": "Pending actions"
+  },
+  "riskAlerts": {
+    "title": "Risk alerts"
+  },
+  "sections": {
+    "signals": "Signals",
+    "recentDocuments": "Recent documents",
+    "actions": "Actions",
+    "heatMap": "Heat map"
+  },
+  "empty": {
+    "signals": {
+      "title": "No signals yet",
+      "description": "Upload and share documents, and AI will automatically identify high-intent investors/customers and generate signals.",
+      "action": "Upload your first document"
+    },
+    "documents": {
+      "title": "No documents yet",
+      "description": "Upload your first pitch deck or sales proposal to start tracking heat."
+    },
+    "actions": {
+      "title": "No pending actions",
+      "description": "All signals have been handled."
+    }
+  },
+  "signal": {
+    "expand": "Expand analysis",
+    "collapse": "Collapse",
+    "aiExplanation": "AI insight",
+    "suggestedAction": "Suggested action",
+    "markDone": "Mark done"
+  },
+  "actions": {
+    "completedWithCount": "Completed ({{count}})"
+  },
+  "heatMap": {
+    "linkCount": "{{count}} link",
+    "linkCount_plural": "{{count}} links",
+    "accessCount": "{{count}} view",
+    "accessCount_plural": "{{count}} views",
+    "noLinks": "No {{tier}} links yet"
+  },
+  "document": {
+    "pageCount": "{{count}} page",
+    "pageCount_plural": "{{count}} pages"
+  },
+  "mock": {
+    "signals": {
+      "sig_1": {
+        "title": "Sarah Chen is heating up",
+        "description": "Horizon VC partner visited the Pitch Deck 3 times in the past 24 hours and spent 5 minutes on the financial slides.",
+        "explanation": "Repeat visits to key slides signal strong investment intent.",
+        "suggestion": "Send a term sheet summary within 24 hours and propose a 30-minute call."
+      },
+      "sig_2": {
+        "title": "Marcus keeps returning to the team slide",
+        "description": "Boldstart Principal opened the Pitch Deck for the third time and spent 3 minutes on the team slide.",
+        "explanation": "Team is a key decision slide for early-stage investors; repeated views indicate a deep dive.",
+        "suggestion": "Send founder bios and recommendation letters."
+      },
+      "sig_3": {
+        "title": "Wei Li is focused on the revenue forecast",
+        "description": "Future Fund LP viewed the revenue forecast page in the financial model for over 2 minutes.",
+        "explanation": "LPs typically focus on cash flow and returns, which signals they're entering evaluation.",
+        "suggestion": "Schedule a financial model walkthrough."
+      },
+      "sig_4": {
+        "title": "Unidentified visitor downloaded Pitch Deck",
+        "description": "An unidentified email downloaded the Pitch Deck through a public link.",
+        "explanation": "Public links can leak. Tighten access controls.",
+        "suggestion": "Require email verification and enable download watermarks."
+      }
+    },
+    "actions": {
+      "act_1": { "title": "Follow up with Sarah Chen" },
+      "act_2": { "title": "Send team background to Marcus" },
+      "act_3": { "title": "Schedule financial model walkthrough with Wei Li" },
+      "act_4": { "title": "Review public link security settings" }
+    },
+    "risks": {
+      "risk_1": {
+        "title": "Unidentified email downloaded Pitch Deck",
+        "description": "Public link was downloaded by alex@unknown.com; potential leak risk."
+      },
+      "risk_2": {
+        "title": "Link expired",
+        "description": "Financial Model link expired on 2026-06-17. Renew or notify recipients."
+      }
+    }
+  }
+}

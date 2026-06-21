@@ -11,9 +11,12 @@ import { StatCard } from "@/components/common/StatCard";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/formatters";
+import { useTranslation } from "react-i18next";
 import type { DealRoom, DealRoomTemplate } from "@/types";
 
 export function DealRoomDetailPage() {
+  const { t, i18n } = useTranslation("dealRooms");
+  const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const [room, setRoom] = useState<DealRoom | null>(null);
   const [templates, setTemplates] = useState<DealRoomTemplate[]>([]);
@@ -36,7 +39,7 @@ export function DealRoomDetailPage() {
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "加载失败");
+          setError(e instanceof Error ? e.message : tc("error.loadFailed"));
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -46,7 +49,7 @@ export function DealRoomDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [roomId, retryKey]);
+  }, [roomId, retryKey, tc]);
 
   const template = useMemo(
     () => templates.find((t) => t.scenario === room?.template),
@@ -71,10 +74,10 @@ export function DealRoomDetailPage() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回数据室" />
+        <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border p-12 text-center">
           <p className="text-muted-foreground">{error}</p>
-          <Button onClick={() => setRetryKey((k) => k + 1)}>重试</Button>
+          <Button onClick={() => setRetryKey((k) => k + 1)}>{tc("retry")}</Button>
         </div>
       </div>
     );
@@ -86,41 +89,41 @@ export function DealRoomDetailPage() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回数据室" />
+      <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
 
       <PageHeader title={room.name} description={room.description}>
-        <Button variant="outline" className="gap-1.5" disabled title="邀请成员需后端支持">
+        <Button variant="outline" className="gap-1.5" disabled title={t("detail.inviteDisabled")}>
           <Envelope size={16} />
-          邀请成员
+          {t("detail.invite")}
         </Button>
-        <Button className="gap-1.5" disabled title="管理文档需后端支持">
+        <Button className="gap-1.5" disabled title={t("detail.manageDocsDisabled")}>
           <FileText size={16} />
-          管理文档
+          {t("detail.manageDocs")}
         </Button>
       </PageHeader>
 
       <DetailLayout
         sidebar={
           <div className="space-y-4">
-            <StatCard label="文档" value={room.documentCount} icon={<FileText size={18} />} />
-            <StatCard label="成员" value={room.memberCount} icon={<Users size={18} />} />
+            <StatCard label={t("detail.documents")} value={room.documentCount} icon={<FileText size={18} />} />
+            <StatCard label={t("detail.members")} value={room.memberCount} icon={<Users size={18} />} />
             <Card>
               <CardHeader>
-                <CardTitle className="text-h3">安全</CardTitle>
+                <CardTitle className="text-h3">{t("detail.security")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
                   {room.ndaEnabled ? (
                     <Badge variant="destructive" className="gap-1">
                       <Lock size={12} />
-                      NDA 已启用
+                      {t("ndaEnabled")}
                     </Badge>
                   ) : (
-                    <Badge variant="secondary">无需 NDA</Badge>
+                    <Badge variant="secondary">{t("noNda")}</Badge>
                   )}
                 </div>
                 <p className="mt-3 text-caption text-muted-foreground">
-                  创建于 {formatRelativeTime(room.createdAt)}
+                  {t("createdAt", { time: formatRelativeTime(room.createdAt, i18n.language) })}
                 </p>
               </CardContent>
             </Card>
@@ -132,7 +135,7 @@ export function DealRoomDetailPage() {
             <CardHeader>
               <CardTitle className="text-h2 flex items-center gap-2">
                 <Folder size={20} />
-                文件夹结构
+                {t("detail.folders")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -151,7 +154,7 @@ export function DealRoomDetailPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="text-body text-muted-foreground">未匹配到模板结构。</p>
+                <p className="text-body text-muted-foreground">{t("detail.noTemplate")}</p>
               )}
             </CardContent>
           </Card>
@@ -160,12 +163,12 @@ export function DealRoomDetailPage() {
             <CardHeader>
               <CardTitle className="text-h2 flex items-center gap-2">
                 <Check size={20} />
-                推荐文件清单
+                {t("detail.recommendedFiles")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">完成度</span>
+                <span className="text-muted-foreground">{t("detail.completion")}</span>
                 <span className="font-medium">{completion}%</span>
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
@@ -190,12 +193,12 @@ export function DealRoomDetailPage() {
                     </div>
                     {item.done ? (
                       <Badge variant="outline" className="border-success-500/20 text-success-500">
-                        已上传
+                        {t("detail.uploaded")}
                       </Badge>
                     ) : (
-                      <Button size="sm" variant="ghost" className="gap-1" disabled title="上传文件需后端支持">
+                      <Button size="sm" variant="ghost" className="gap-1" disabled title={t("detail.uploadDisabled")}>
                         <UploadSimple size={14} />
-                        上传
+                        {t("detail.upload")}
                       </Button>
                     )}
                   </li>

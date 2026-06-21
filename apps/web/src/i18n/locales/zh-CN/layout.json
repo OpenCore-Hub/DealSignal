@@ -1,0 +1,43 @@
+{
+  "appTitle": "DealSignal",
+  "sidebar": {
+    "toggle": {
+      "collapse": "收起侧边栏",
+      "expand": "展开侧边栏"
+    },
+    "mainNavigation": "主导航",
+    "nav": {
+      "dashboard": "交易雷达",
+      "documents": "文档库",
+      "links": "链接",
+      "dealRooms": "数据室",
+      "contacts": "联系人",
+      "insights": "洞察",
+      "settings": "设置"
+    }
+  },
+  "topNav": {
+    "toggleSidebar": "切换侧边栏",
+    "uploadDocument": "上传文档",
+    "notifications": {
+      "title": "通知",
+      "comingSoon": "通知中心即将上线"
+    },
+    "account": {
+      "menu": "账户菜单",
+      "settings": "账户设置",
+      "settingsComingSoon": "账户设置需后端支持",
+      "logout": "登出",
+      "logoutComingSoon": "登出需后端支持"
+    },
+    "workspace": {
+      "fallback": "工作区"
+    }
+  },
+  "workspaceSwitcher": {
+    "switchWorkspace": "切换工作区",
+    "label": "工作区",
+    "createWorkspace": "创建工作区",
+    "createWorkspaceComingSoon": "创建工作区需后端支持"
+  }
+}

@@ -24,7 +24,7 @@ export function daysOverdue(dueAt: string): number {
 }
 
 export function confidenceLabel(sampleCount: number): string {
-  if (sampleCount >= 50) return "高置信度";
-  if (sampleCount >= 10) return "中置信度";
-  return "低置信度（样本较少）";
+  if (sampleCount >= 50) return "common:confidence.high";
+  if (sampleCount >= 10) return "common:confidence.medium";
+  return "common:confidence.low";
 }

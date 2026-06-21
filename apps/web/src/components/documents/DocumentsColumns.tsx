@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import type { NavigateFunction } from "react-router";
 import { Copy, DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
 import { HeatBadge } from "@/components/common/HeatBadge";
@@ -47,11 +48,13 @@ interface UseDocumentColumnsOptions {
 }
 
 export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColumnsOptions) {
+  const { t } = useTranslation(["documents", "common"]);
+
   return useMemo<ColumnDef<DocumentRow>[]>(
     () => [
       {
         accessorKey: "title",
-        header: "文件",
+        header: t("documents:columns.file"),
         cell: ({ row }) => {
           const doc = row.original;
           return (
@@ -60,8 +63,8 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium">{doc.title}</p>
                 <p className="text-caption text-muted-foreground">
-                  {doc.pageCount} 页 · {formatFileSize(doc.fileSize)} · {formatDate(doc.createdAt)} ·{" "}
-                  {doc.links.length} 个链接
+                  {t("documents:columns.pages", { count: doc.pageCount })} · {formatFileSize(doc.fileSize)} · {formatDate(doc.createdAt)} ·{" "}
+                  {t("documents:columns.links", { count: doc.links.length })}
                 </p>
               </div>
             </div>
@@ -70,14 +73,16 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
       },
       {
         accessorKey: "heatLevel",
-        header: "热度",
+        header: t("documents:columns.heat"),
         cell: ({ row }) => <HeatBadge level={row.original.heatLevel} />,
       },
       {
         accessorKey: "totalViews",
-        header: "访问次数",
+        header: t("documents:columns.views"),
         cell: ({ row }) => (
-          <span className="text-caption tabular-nums">{row.original.totalViews} 次访问</span>
+          <span className="text-caption tabular-nums">
+            {t("documents:columns.viewCount", { count: row.original.totalViews })}
+          </span>
         ),
       },
       {
@@ -91,7 +96,7 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label="预览"
+                aria-label={t("common:preview")}
                 onClick={(e) => {
                   e.stopPropagation();
                   navigate(`/${workspaceSlug}/documents/${doc.id}`);
@@ -102,33 +107,33 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
               <RowActions
                 actions={[
                   {
-                    label: "创建链接",
+                    label: t("common:createLink"),
                     icon: <LinkIcon size={16} />,
                     onClick: () => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
                   },
                   ...(firstLink?.shortUrl
                     ? [
                         {
-                          label: "复制链接",
+                          label: t("common:copyLink"),
                           icon: <Copy size={16} />,
-                          onClick: () => copyToClipboard(firstLink.shortUrl, "链接已复制"),
+                          onClick: () => copyToClipboard(firstLink.shortUrl, t("common:linkCopied")),
                         },
                       ]
                     : []),
                   {
-                    label: "下载",
+                    label: t("common:download"),
                     icon: <DownloadSimple size={16} />,
                     onClick: () => {},
                     disabled: true,
-                    title: "下载需后端签名 URL 支持",
+                    title: t("documents:columns.downloadDisabled"),
                     pro: true,
                   },
                   {
-                    label: "删除",
+                    label: t("common:delete"),
                     icon: <Trash size={16} />,
                     onClick: () => {},
                     disabled: true,
-                    title: "删除文档需后端支持",
+                    title: t("documents:columns.deleteDisabled"),
                     destructive: true,
                     pro: true,
                   },
@@ -139,6 +144,6 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
         },
       },
     ],
-    [navigate, workspaceSlug]
+    [navigate, workspaceSlug, t]
   );
 }

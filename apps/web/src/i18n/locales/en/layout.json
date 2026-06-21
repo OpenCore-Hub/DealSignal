@@ -1,0 +1,43 @@
+{
+  "appTitle": "DealSignal",
+  "sidebar": {
+    "toggle": {
+      "collapse": "Collapse sidebar",
+      "expand": "Expand sidebar"
+    },
+    "mainNavigation": "Main navigation",
+    "nav": {
+      "dashboard": "Deal Radar",
+      "documents": "Documents",
+      "links": "Links",
+      "dealRooms": "Deal Rooms",
+      "contacts": "Contacts",
+      "insights": "Insights",
+      "settings": "Settings"
+    }
+  },
+  "topNav": {
+    "toggleSidebar": "Toggle sidebar",
+    "uploadDocument": "Upload document",
+    "notifications": {
+      "title": "Notifications",
+      "comingSoon": "Notification center coming soon"
+    },
+    "account": {
+      "menu": "Account menu",
+      "settings": "Account settings",
+      "settingsComingSoon": "Account settings require backend support",
+      "logout": "Log out",
+      "logoutComingSoon": "Log out requires backend support"
+    },
+    "workspace": {
+      "fallback": "Workspace"
+    }
+  },
+  "workspaceSwitcher": {
+    "switchWorkspace": "Switch workspace",
+    "label": "Workspace",
+    "createWorkspace": "Create workspace",
+    "createWorkspaceComingSoon": "Create workspace requires backend support"
+  }
+}

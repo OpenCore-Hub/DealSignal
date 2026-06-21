@@ -22,30 +22,32 @@ import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
+import { useTranslation } from "react-i18next";
 import type { Activity, Contact, Document } from "@/types";
 
 function ContactScoreChart({
   scoreHistory,
+  title,
+  emptyDescription,
+  locale,
 }: {
   scoreHistory: { date: string; score: number }[];
+  title: string;
+  emptyDescription: string;
+  locale: string;
 }) {
   const labels = useMemo(
-    () => scoreHistory.map((h) => new Date(h.date).toLocaleDateString("zh-CN", { month: "short", day: "numeric" })),
-    [scoreHistory]
+    () => scoreHistory.map((h) => new Date(h.date).toLocaleDateString(locale, { month: "short", day: "numeric" })),
+    [scoreHistory, locale]
   );
   const data = useMemo(() => scoreHistory.map((h) => h.score), [scoreHistory]);
 
-  return (
-    <TrendChart
-      title="意向评分趋势"
-      labels={labels}
-      data={data}
-      emptyDescription="评分历史不足，趋势将在更多互动后生成。"
-    />
-  );
+  return <TrendChart title={title} labels={labels} data={data} emptyDescription={emptyDescription} />;
 }
 
 export function ContactDetailPage() {
+  const { t, i18n } = useTranslation("contacts");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug, contactId } = useParams<{ workspaceSlug: string; contactId: string }>();
   const [contact, setContact] = useState<Contact | null>(null);
@@ -53,6 +55,7 @@ export function ContactDetailPage() {
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const locale = i18n.language;
 
   useEffect(() => {
     let cancelled = false;
@@ -73,7 +76,7 @@ export function ContactDetailPage() {
           setDocuments(docsRes.data);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -82,25 +85,25 @@ export function ContactDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [contactId]);
+  }, [contactId, tc]);
 
   const timelineActivities = useMemo(
     () =>
       activities.map((a) => ({
         id: a.id,
-        time: formatRelativeTime(a.timestamp),
+        time: formatRelativeTime(a.timestamp, locale),
         title: `${a.contactEmail} ${
           a.eventType === "open"
-            ? "打开文档"
+            ? t("activity.open")
             : a.eventType === "page_view"
-            ? `查看第 ${a.pageNumber} 页`
+            ? t("activity.pageView", { page: a.pageNumber })
             : a.eventType === "revisit"
-            ? "再次访问"
-            : "下载文档"
+            ? t("activity.revisit")
+            : t("activity.download")
         }`,
-        description: `${a.documentTitle} · ${a.description}`,
+        description: `${a.documentTitle} · ${t(a.description)}`,
       })),
-    [activities]
+    [activities, locale, t]
   );
 
   const viewedDocuments = useMemo(
@@ -112,7 +115,7 @@ export function ContactDetailPage() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>重试</Button>
+        <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
       </div>
     );
   }
@@ -123,27 +126,27 @@ export function ContactDetailPage() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/contacts`} label="返回访问者" />
+      <BackButton to={`/${workspaceSlug}/contacts`} label={t("detail.back")} />
 
       <PageHeader
         title={contact.name}
-        description={`${contact.email} · ${contact.organization || "未知机构"} · ${contact.role || ""}`}
+        description={`${contact.email} · ${contact.organization || t("unknownOrganization")} · ${contact.role || ""}`}
       >
         <Button variant="outline" className="gap-1.5" onClick={() => window.open(`mailto:${contact.email}`)}>
           <Envelope size={16} />
-          写邮件
+          {t("detail.writeEmail")}
         </Button>
       </PageHeader>
 
       <DetailLayout
         sidebar={
           <div className="space-y-4">
-            <StatCard label="总访问" value={contact.totalVisits} />
-            <StatCard label="累计时长" value={formatDuration(contact.totalDurationSeconds)} />
-            <StatCard label="热度分" value={contact.score} />
+            <StatCard label={t("detail.totalVisits")} value={contact.totalVisits} />
+            <StatCard label={t("detail.totalDuration")} value={formatDuration(contact.totalDurationSeconds, locale)} />
+            <StatCard label={t("detail.score")} value={contact.score} />
             <Card>
               <CardHeader>
-                <CardTitle className="text-h3">热度</CardTitle>
+                <CardTitle className="text-h3">{t("detail.heat")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <HeatBadge level={contact.heatLevel} />
@@ -154,27 +157,32 @@ export function ContactDetailPage() {
       >
         <Tabs defaultValue="overview" className="w-full">
           <TabsList className="mb-4">
-            <TabsTrigger value="overview">概览</TabsTrigger>
-            <TabsTrigger value="timeline">活动时间线</TabsTrigger>
-            <TabsTrigger value="documents">浏览文档</TabsTrigger>
-            <TabsTrigger value="notes">备注</TabsTrigger>
+            <TabsTrigger value="overview">{t("detail.tabs.overview")}</TabsTrigger>
+            <TabsTrigger value="timeline">{t("detail.tabs.timeline")}</TabsTrigger>
+            <TabsTrigger value="documents">{t("detail.tabs.documents")}</TabsTrigger>
+            <TabsTrigger value="notes">{t("detail.tabs.notes")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <ContactScoreChart scoreHistory={contact.scoreHistory} />
+            <ContactScoreChart
+              scoreHistory={contact.scoreHistory}
+              title={t("detail.recentActivity")}
+              emptyDescription={t("detail.noActivities.description")}
+              locale={locale}
+            />
             <Card>
               <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <Users size={20} />
-                  最近活动摘要
+                  {t("detail.recentActivity")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {activities.length === 0 ? (
                   <EmptyState
                     icon={<Clock size={48} />}
-                    title="暂无活动记录"
-                    description="当联系人访问文档时，这里会显示最近活动。"
+                    title={t("detail.noActivities.title")}
+                    description={t("detail.noActivities.description")}
                     size="large"
                   />
                 ) : (
@@ -185,14 +193,14 @@ export function ContactDetailPage() {
                           <p className="text-sm font-medium">{a.documentTitle}</p>
                           <p className="text-caption text-muted-foreground">
                             {a.eventType === "open"
-                              ? "打开"
+                              ? t("activity.openShort")
                               : a.eventType === "page_view"
-                              ? `查看第 ${a.pageNumber} 页`
+                              ? t("activity.pageViewShort", { page: a.pageNumber })
                               : a.eventType === "revisit"
-                              ? "再次访问"
-                              : "下载"}
+                              ? t("activity.revisitShort")
+                              : t("activity.downloadShort")}
                             {" · "}
-                            {formatRelativeTime(a.timestamp)}
+                            {formatRelativeTime(a.timestamp, locale)}
                           </p>
                         </div>
                         <Button
@@ -200,7 +208,7 @@ export function ContactDetailPage() {
                           variant="outline"
                           onClick={() => navigate(`/${workspaceSlug}/links/${a.linkId}`)}
                         >
-                          查看
+                          {t("detail.view")}
                         </Button>
                       </li>
                     ))}
@@ -215,7 +223,7 @@ export function ContactDetailPage() {
               <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <Clock size={20} />
-                  活动时间线
+                  {t("detail.tabs.timeline")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -229,15 +237,15 @@ export function ContactDetailPage() {
               <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <Folder size={20} />
-                  浏览过的文档
+                  {t("detail.viewedDocuments")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {viewedDocuments.length === 0 ? (
                   <EmptyState
                     icon={<Folder size={48} />}
-                    title="暂无浏览记录"
-                    description="联系人尚未通过链接浏览任何文档。"
+                    title={t("detail.noDocuments.title")}
+                    description={t("detail.noDocuments.description")}
                     size="large"
                   />
                 ) : (
@@ -263,7 +271,7 @@ export function ContactDetailPage() {
                             <p className="text-sm font-medium">{doc.title}</p>
                           </div>
                           <Button size="sm" variant="outline">
-                            查看
+                            {t("detail.view")}
                           </Button>
                         </li>
                       );
@@ -279,13 +287,11 @@ export function ContactDetailPage() {
               <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <Note size={20} />
-                  联系人备注
+                  {t("detail.tabs.notes")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground">
-                  暂无备注。点击右上角“写邮件”即可记录沟通要点。
-                </p>
+                <p className="text-sm text-muted-foreground">{t("detail.notesHint")}</p>
               </CardContent>
             </Card>
           </TabsContent>

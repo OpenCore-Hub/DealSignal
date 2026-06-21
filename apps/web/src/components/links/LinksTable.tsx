@@ -9,6 +9,7 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -39,8 +40,11 @@ import { toast } from "sonner";
 import type { Link } from "@/types";
 
 export function LinksTable() {
+  "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const { t } = useTranslation("links");
+  const { t: tc } = useTranslation("common");
   const { data: fetchedData, loading, error, refetch } = useAsyncData(async () => {
     const res = await api.getLinks();
     return res.data;
@@ -58,7 +62,7 @@ export function LinksTable() {
     () => [
       {
         accessorKey: "shortUrl",
-        header: "链接",
+        header: t("table.link"),
         cell: ({ row }) => {
           const link = row.original;
           return (
@@ -67,10 +71,10 @@ export function LinksTable() {
               <Button
                 size="icon-sm"
                 variant="ghost"
-                aria-label="复制链接"
+                aria-label={t("table.copyLink")}
                 onClick={(e) => {
                   e.stopPropagation();
-                  copyToClipboard(link.shortUrl, "链接已复制");
+                  void copyToClipboard(link.shortUrl, t("detail.copySuccess"));
                 }}
               >
                 <Copy size={14} />
@@ -81,19 +85,19 @@ export function LinksTable() {
       },
       {
         accessorKey: "documentTitle",
-        header: "文档",
+        header: t("table.document"),
         cell: ({ row }) => <span className="truncate text-sm">{row.original.documentTitle}</span>,
       },
       {
         accessorKey: "accessCount",
-        header: "访问次数",
+        header: t("table.accessCount"),
         cell: ({ row }) => (
-          <span className="text-caption tabular-nums">{row.original.accessCount} 次访问</span>
+          <span className="text-caption tabular-nums">{t("table.accessCountValue", { count: row.original.accessCount })}</span>
         ),
       },
       {
         accessorKey: "avgDurationSeconds",
-        header: "平均时长",
+        header: t("table.avgDuration"),
         cell: ({ row }) => (
           <span className="text-caption tabular-nums">
             {formatDuration(row.original.avgDurationSeconds || 0)}
@@ -102,7 +106,7 @@ export function LinksTable() {
       },
       {
         accessorKey: "lastViewedAt",
-        header: "最近访问",
+        header: t("table.lastViewed"),
         cell: ({ row }) => (
           <span className="text-caption text-muted-foreground">
             {formatRelativeTime(row.original.lastViewedAt)}
@@ -111,17 +115,17 @@ export function LinksTable() {
       },
       {
         accessorKey: "heatLevel",
-        header: "热度",
+        header: t("table.heat"),
         cell: ({ row }) => <HeatBadge level={row.original.heatLevel} />,
       },
       {
         accessorKey: "isActive",
-        header: "状态",
+        header: t("table.status"),
         cell: ({ row }) => {
           const active = row.original.isActive ?? true;
           return (
             <Badge variant="outline" className={active ? "text-success-500" : "text-muted-foreground"}>
-              {active ? "启用" : "已停用"}
+              {active ? tc("status.enabled") : tc("status.inactive")}
             </Badge>
           );
         },
@@ -135,28 +139,28 @@ export function LinksTable() {
             <RowActions
               actions={[
                 {
-                  label: "查看日志",
+                  label: t("actions.viewLog"),
                   icon: <ArrowRight size={16} />,
                   onClick: () => navigate(`/${workspaceSlug}/links/${link.id}`),
                 },
                 {
-                  label: "导出访问数据",
+                  label: t("actions.exportData"),
                   icon: <Export size={16} />,
                   onClick: () => {},
                   disabled: true,
-                  title: "导出需后端支持",
+                  title: t("actions.exportProTooltip"),
                   pro: true,
                 },
                 {
-                  label: "仅允许下载",
+                  label: t("actions.downloadOnly"),
                   icon: <DownloadSimple size={16} />,
                   onClick: () => {},
                   disabled: true,
-                  title: "仅允许下载需后端支持",
+                  title: t("actions.downloadProTooltip"),
                   pro: true,
                 },
                 {
-                  label: "删除",
+                  label: tc("delete"),
                   icon: <Trash size={16} />,
                   onClick: () => setLinkToDelete(link),
                   destructive: true,
@@ -167,9 +171,10 @@ export function LinksTable() {
         },
       },
     ],
-    [navigate, workspaceSlug]
+    [navigate, workspaceSlug, t, tc]
   );
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data,
     columns,
@@ -183,7 +188,7 @@ export function LinksTable() {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={refetch}>重试</Button>
+        <Button onClick={refetch}>{tc("retry")}</Button>
       </div>
     );
   }
@@ -196,10 +201,10 @@ export function LinksTable() {
     return (
       <EmptyState
         icon={<LinkIcon size={64} />}
-        title="暂无链接"
-        description="为文档配置权限并创建链接，即可追踪投资人/客户的访问行为。"
+        title={t("empty.title")}
+        description={t("empty.description")}
         action={{
-          label: "创建链接",
+          label: t("empty.createLink"),
           onClick: () => navigate(`/${workspaceSlug}/links/new`),
         }}
       />
@@ -209,8 +214,8 @@ export function LinksTable() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-h2">全部链接</h2>
-        <span className="text-caption text-muted-foreground">{data.length} 个链接</span>
+        <h2 className="text-h2">{t("title.allLinks")}</h2>
+        <span className="text-caption text-muted-foreground">{t("table.totalLinks", { count: data.length })}</span>
       </div>
 
       <div className="rounded-lg border border-border bg-card">
@@ -257,14 +262,14 @@ export function LinksTable() {
       <Dialog open={!!linkToDelete} onOpenChange={(open) => !open && setLinkToDelete(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除链接</DialogTitle>
+            <DialogTitle>{t("delete.title")}</DialogTitle>
             <DialogDescription>
-              确定要删除「{linkToDelete?.shortUrl}」吗？关联的访问记录将不再可通过该链接查看。
+              {t("delete.description", { url: linkToDelete?.shortUrl })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setLinkToDelete(null)} disabled={isDeleting}>
-              取消
+              {tc("cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -275,16 +280,16 @@ export function LinksTable() {
                 try {
                   await api.updateLink(linkToDelete.id, { isActive: false });
                   setData((prev) => prev.map((l) => (l.id === linkToDelete.id ? { ...l, isActive: false } : l)));
-                  toast.success("链接已删除");
+                  toast.success(t("delete.success"));
                   setLinkToDelete(null);
                 } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "删除失败");
+                  toast.error(e instanceof Error ? e.message : tc("error.deleteFailed"));
                 } finally {
                   setIsDeleting(false);
                 }
               }}
             >
-              {isDeleting ? "删除中..." : "删除"}
+              {isDeleting ? t("delete.confirmLoading") : tc("delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

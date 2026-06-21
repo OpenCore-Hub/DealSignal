@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ClockCounterClockwise } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { formatDate } from "@/lib/formatters";
 import { EmptyState } from "@/components/common/EmptyState";
 import type { AccessLog } from "@/types";
@@ -22,39 +23,42 @@ interface LinkAccessLogProps {
 }
 
 export function LinkAccessLog({ logs }: LinkAccessLogProps) {
+  "use no memo";
+  const { t } = useTranslation("links");
   const columns: ColumnDef<AccessLog>[] = [
     {
       accessorKey: "timestamp",
-      header: "时间",
+      header: t("accessLog.timestamp"),
       cell: ({ row }) => formatDate(row.original.timestamp),
     },
     {
       accessorKey: "visitorEmail",
-      header: "访客",
-      cell: ({ row }) => row.original.visitorEmail || "匿名",
+      header: t("accessLog.visitor"),
+      cell: ({ row }) => row.original.visitorEmail || t("accessLog.anonymous"),
     },
     {
       accessorKey: "pageNumber",
-      header: "页面",
+      header: t("accessLog.page"),
       cell: ({ row }) => row.original.pageNumber || "-",
     },
     {
       accessorKey: "durationSeconds",
-      header: "停留",
+      header: t("accessLog.duration"),
       cell: ({ row }) => `${row.original.durationSeconds}s`,
     },
     {
       accessorKey: "device",
-      header: "设备",
+      header: t("accessLog.device"),
       cell: ({ row }) => row.original.device || "-",
     },
     {
       accessorKey: "location",
-      header: "地点",
+      header: t("accessLog.location"),
       cell: ({ row }) => row.original.location || "-",
     },
   ];
 
+  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: logs,
     columns,
@@ -65,8 +69,8 @@ export function LinkAccessLog({ logs }: LinkAccessLogProps) {
     return (
       <EmptyState
         icon={<ClockCounterClockwise size={48} />}
-        title="暂无访问记录"
-        description="该链接尚未被访问，分享后将在此显示访客行为。"
+        title={t("accessLog.empty.title")}
+        description={t("accessLog.empty.description")}
         size="large"
       />
     );

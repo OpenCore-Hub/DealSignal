@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { Copy, PencilSimple, ToggleRight } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -41,6 +42,8 @@ function buildDailyTrend(logs: AccessLog[]): { labels: string[]; data: number[] 
 
 export function LinkDetail() {
   const { workspaceSlug, linkId } = useParams<{ workspaceSlug: string; linkId: string }>();
+  const { t } = useTranslation("links");
+  const { t: tc } = useTranslation("common");
   const [link, setLink] = useState<Link | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
@@ -61,7 +64,7 @@ export function LinkDetail() {
           setLogs(logData.data);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -70,7 +73,7 @@ export function LinkDetail() {
     return () => {
       cancelled = true;
     };
-  }, [linkId, retryTick]);
+  }, [linkId, retryTick, tc]);
 
   const trend = useMemo(() => buildDailyTrend(logs), [logs]);
 
@@ -81,23 +84,23 @@ export function LinkDetail() {
       .map((log) => ({
         id: log.id,
         time: formatRelativeTime(log.timestamp),
-        title: `${log.visitorName || log.visitorEmail || "未知访客"}${
-          log.pageNumber ? ` 查看第 ${log.pageNumber} 页` : " 访问链接"
-        }`,
+        title: log.pageNumber
+          ? t("timeline.viewedPage", { visitor: log.visitorName || log.visitorEmail || tc("visitor.unknown"), page: log.pageNumber })
+          : t("timeline.viewedLink", { visitor: log.visitorName || log.visitorEmail || tc("visitor.unknown") }),
         description: log.durationSeconds
-          ? `停留 ${formatDuration(log.durationSeconds)} · ${log.device || ""} · ${log.location || ""}`
+          ? t("timeline.description", { duration: formatDuration(log.durationSeconds), device: log.device || "", location: log.location || "" })
           : undefined,
       }));
-  }, [logs]);
+  }, [logs, t, tc]);
 
   if (error) {
     return (
       <div className="space-y-6">
-        <BackButton to={`/${workspaceSlug}/links`} label="返回链接管理" />
+        <BackButton to={`/${workspaceSlug}/links`} label={t("backToLinks")} />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-body text-destructive mb-4">加载失败：{error}</p>
-            <Button onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+            <p className="text-body text-destructive mb-4">{tc("error.loadFailed")}{error ? `: ${error}` : ""}</p>
+            <Button onClick={() => setRetryTick((t) => t + 1)}>{tc("retry")}</Button>
           </CardContent>
         </Card>
       </div>
@@ -108,25 +111,25 @@ export function LinkDetail() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/links`} label="返回链接管理" />
+      <BackButton to={`/${workspaceSlug}/links`} label={t("backToLinks")} />
 
       <PageHeader
         title={link.shortUrl.split("/").pop() || link.id}
-        description={`文档：${link.documentTitle} · 创建于 ${formatDate(link.createdAt)}`}
+        description={t("detail.headerDescription", { doc: link.documentTitle, date: formatDate(link.createdAt) })}
       >
-        <Button variant="outline" className="gap-1.5" disabled title="链接编辑需后端支持" onClick={() => {}}>
+        <Button variant="outline" className="gap-1.5" disabled title={t("detail.editProTooltip")} onClick={() => {}}>
           <PencilSimple size={16} />
-          编辑
+          {tc("edit")}
         </Button>
         <Button
           variant="outline"
           className="gap-1.5"
           onClick={() => {
-            void copyToClipboard(link.shortUrl, "链接已复制");
+            void copyToClipboard(link.shortUrl, t("detail.copySuccess"));
           }}
         >
           <Copy size={16} />
-          复制
+          {tc("copy")}
         </Button>
         <Button
           className="gap-1.5"
@@ -137,30 +140,30 @@ export function LinkDetail() {
           }}
         >
           <ToggleRight size={16} />
-          {link.isActive ? "停用" : "启用"}
+          {link.isActive ? tc("status.disabled") : tc("status.enabled")}
         </Button>
       </PageHeader>
 
       <DetailLayout
         sidebar={
           <div className="space-y-4">
-            <StatCard label="总访问" value={link.accessCount} />
-            <StatCard label="独立访客" value={calculateUniqueVisitors(logs)} />
-            <StatCard label="平均时长" value={formatDuration(link.avgDurationSeconds || 0)} />
+            <StatCard label={t("detail.totalVisits")} value={link.accessCount} />
+            <StatCard label={t("detail.uniqueVisitors")} value={calculateUniqueVisitors(logs)} />
+            <StatCard label={t("detail.avgDuration")} value={formatDuration(link.avgDurationSeconds || 0)} />
             <StatCard
-              label="最后访问"
+              label={t("detail.lastVisit")}
               value={link.lastViewedAt ? formatRelativeTime(link.lastViewedAt) : "-"}
             />
             <Card>
               <CardHeader>
-                <CardTitle className="text-h3">权限配置</CardTitle>
+                <CardTitle className="text-h3">{t("detail.permissionConfig")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
                   <PermissionBadge type={link.permissionType || "public"} />
                   {link.expiresAt && (
                     <span className="text-caption text-muted-foreground">
-                      过期于 {formatRelativeTime(link.expiresAt)}
+                      {t("detail.expiresAt", { time: formatRelativeTime(link.expiresAt) })}
                     </span>
                   )}
                 </div>
@@ -171,14 +174,14 @@ export function LinkDetail() {
       >
         <div className="space-y-6">
           <TrendChart
-            title="访问量趋势"
+            title={t("detail.trendTitle")}
             labels={trend.labels}
             data={trend.data}
-            emptyDescription="暂无访问数据，趋势将在首次访问后自动生成。"
+            emptyDescription={t("detail.trendEmpty")}
           />
           <Card>
             <CardHeader>
-              <CardTitle className="text-h3">访问者时间线</CardTitle>
+              <CardTitle className="text-h3">{t("detail.timelineTitle")}</CardTitle>
             </CardHeader>
             <CardContent>
               <ActivityTimeline activities={timelineActivities} />
@@ -189,7 +192,7 @@ export function LinkDetail() {
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-h2">访问日志</CardTitle>
+          <CardTitle className="text-h2">{t("detail.accessLogTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <LinkAccessLog logs={logs} />

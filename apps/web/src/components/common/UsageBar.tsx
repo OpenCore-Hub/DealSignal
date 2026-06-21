@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useTranslation } from "react-i18next";
 
 interface UsageBarProps {
   label: string;
@@ -9,9 +10,10 @@ interface UsageBarProps {
 }
 
 export function UsageBar({ label, current, max, unit, className }: UsageBarProps) {
+  const { t } = useTranslation("common");
   const percentage = Math.min(100, Math.round((current / max) * 100));
   const barColor = percentage >= 100 ? "bg-error-500" : percentage >= 80 ? "bg-warning-500" : "bg-primary";
-  const statusText = percentage >= 100 ? "已达上限" : percentage >= 80 ? "接近上限" : "";
+  const statusText = percentage >= 100 ? t("usageAtLimit") : percentage >= 80 ? t("usageNearLimit") : "";
 
   return (
     <div className={cn("space-y-1.5", className)}>

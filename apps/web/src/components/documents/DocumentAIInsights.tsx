@@ -1,4 +1,5 @@
 import { Sparkle, FileText, TrendUp, Warning } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -11,6 +12,7 @@ interface DocumentAIInsightsProps {
 }
 
 export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsightsProps) {
+  const { t } = useTranslation("documents");
   const { setOpen, sendMessage } = useAIStore();
 
   const askAI = (question: string) => {
@@ -22,8 +24,8 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
     return (
       <EmptyState
         icon={<Sparkle size={48} />}
-        title="暂无分析数据"
-        description="文档被访问后，AI 将基于真实阅读行为生成关键洞察。"
+        title={t("documents:aiInsights.emptyTitle")}
+        description={t("documents:aiInsights.emptyDescription")}
       />
     );
   }
@@ -39,16 +41,20 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
         <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <Sparkle size={20} className="text-warning-500" />
-            AI 关键洞察
+            {t("documents:aiInsights.title")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
             <TrendUp size={18} className="mt-0.5 text-success-500" />
             <div>
-              <p className="text-sm font-medium">投资人最关注第 {topPage?.pageNumber ?? 1} 页</p>
+              <p className="text-sm font-medium">
+                {t("documents:aiInsights.topPage", { pageNumber: topPage?.pageNumber ?? 1 })}
+              </p>
               <p className="text-caption text-muted-foreground">
-                平均停留 {topPage?.avgDurationSeconds ?? 0} 秒，说明这一页是决策关键页。
+                {t("documents:aiInsights.topPageDescription", {
+                  seconds: topPage?.avgDurationSeconds ?? 0,
+                })}
               </p>
             </div>
           </div>
@@ -56,9 +62,13 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
             <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
               <Warning size={18} className="mt-0.5 text-hot-500" />
               <div>
-                <p className="text-sm font-medium">第 {exitRisk.pageNumber} 页退出率较高</p>
+                <p className="text-sm font-medium">
+                  {t("documents:aiInsights.exitRisk", { pageNumber: exitRisk.pageNumber })}
+                </p>
                 <p className="text-caption text-muted-foreground">
-                  退出率 {Math.round(exitRisk.exitRate * 100)}%，建议优化内容或补充说明。
+                  {t("documents:aiInsights.exitRiskDescription", {
+                    percent: Math.round(exitRisk.exitRate * 100),
+                  })}
                 </p>
               </div>
             </div>
@@ -66,9 +76,9 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
           <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
             <FileText size={18} className="mt-0.5 text-primary" />
             <div>
-              <p className="text-sm font-medium">证据驱动的回答</p>
+              <p className="text-sm font-medium">{t("documents:aiInsights.evidenceDriven")}</p>
               <p className="text-caption text-muted-foreground">
-                所有 AI 结论均附带页码与原文定位，可在左侧“内容”页查看高亮。
+                {t("documents:aiInsights.evidenceDrivenDescription")}
               </p>
             </div>
           </div>
@@ -77,18 +87,30 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-h2">追问 AI</CardTitle>
+          <CardTitle className="text-h2">{t("documents:aiInsights.followUpTitle")}</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => askAI("这份文档最关键的风险点是什么？")}>
-              关键风险点
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => askAI(t("documents:aiInsights.questions.risks"))}
+            >
+              {t("documents:aiInsights.questionLabels.risks")}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => askAI("投资人最关注哪些页面？")}>
-              投资人关注点
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => askAI(t("documents:aiInsights.questions.focus"))}
+            >
+              {t("documents:aiInsights.questionLabels.focus")}
             </Button>
-            <Button variant="outline" size="sm" onClick={() => askAI("我应该如何优化这份文档？")}>
-              优化建议
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => askAI(t("documents:aiInsights.questions.optimize"))}
+            >
+              {t("documents:aiInsights.questionLabels.optimize")}
             </Button>
           </div>
         </CardContent>

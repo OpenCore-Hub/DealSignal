@@ -1,6 +1,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, lazy } from "react";
 import { createBrowserRouter, Navigate, Outlet, useRouteError } from "react-router";
+import { useTranslation } from "react-i18next";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +29,7 @@ const SettingsMembersPage = lazy(() => import("@/routes/settings/members").then(
 const SettingsIntegrationsPage = lazy(() => import("@/routes/settings/integrations").then((m) => ({ default: m.SettingsIntegrationsPage })));
 const SettingsBillingPage = lazy(() => import("@/routes/settings/billing").then((m) => ({ default: m.SettingsBillingPage })));
 const SettingsSecurityPage = lazy(() => import("@/routes/settings/security").then((m) => ({ default: m.SettingsSecurityPage })));
+const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").then((m) => ({ default: m.SettingsLanguagePage })));
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
 const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ default: m.NotFoundPage })));
 const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
@@ -55,18 +57,19 @@ function WorkspaceLayout() {
 }
 
 function RouteError() {
+  const { t } = useTranslation("common");
   const error = useRouteError() as Error;
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 p-6 text-center">
-      <h1 className="text-h1 text-foreground">出错了</h1>
+      <h1 className="text-h1 text-foreground">{t("error.title")}</h1>
       <p className="max-w-md text-body text-muted-foreground">
-        {error?.message || "页面加载失败，请稍后重试。"}
+        {error?.message || t("error.pageLoadFailed")}
       </p>
       <div className="flex gap-3">
         <Button variant="outline" onClick={() => window.location.reload()}>
-          刷新页面
+          {t("reload")}
         </Button>
-        <Button onClick={() => window.location.href = "/"}>返回首页</Button>
+        <Button onClick={() => window.location.href = "/"}>{t("backToHome")}</Button>
       </div>
     </div>
   );
@@ -116,6 +119,7 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <Navigate to="general" replace /> },
           { path: "general", element: <SettingsGeneralPage /> },
+          { path: "language", element: <SettingsLanguagePage /> },
           { path: "brand", element: <SettingsBrandPage /> },
           { path: "members", element: <SettingsMembersPage /> },
           { path: "integrations", element: <SettingsIntegrationsPage /> },

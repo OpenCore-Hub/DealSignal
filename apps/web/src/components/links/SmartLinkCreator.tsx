@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
 import { CaretLeft } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,7 @@ export function SmartLinkCreator() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [searchParams] = useSearchParams();
   const reducedMotion = useReducedMotion();
+  const { t } = useTranslation("links");
   const [documents, setDocuments] = useState<import("@/types").Document[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>("");
@@ -55,7 +57,7 @@ export function SmartLinkCreator() {
         if (initialId) setSelectedDocumentId(initialId);
       })
       .catch((e) => {
-        if (!cancelled) toast.error(e instanceof Error ? e.message : "加载文档失败");
+        if (!cancelled) toast.error(e instanceof Error ? e.message : t("creator.loadDocsFailed"));
       })
       .finally(() => {
         if (!cancelled) setLoadingDocs(false);
@@ -63,7 +65,7 @@ export function SmartLinkCreator() {
     return () => {
       cancelled = true;
     };
-  }, [searchParams]);
+  }, [searchParams, t]);
 
   const selectedDocument = useMemo(
     () => documents.find((d) => d.id === selectedDocumentId),
@@ -88,9 +90,9 @@ export function SmartLinkCreator() {
     try {
       const link = await api.createLink(selectedDocumentId, config);
       setGeneratedLink(link.shortUrl);
-      toast.success("链接已生成");
+      toast.success(t("creator.createSuccess"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "创建链接失败");
+      toast.error(e instanceof Error ? e.message : t("creator.createFailed"));
     } finally {
       setCreating(false);
     }
@@ -98,7 +100,7 @@ export function SmartLinkCreator() {
 
   const handleCopy = async () => {
     if (!generatedLink) return;
-    await copyToClipboard(generatedLink, "链接已复制");
+    await copyToClipboard(generatedLink, t("creator.copySuccess"));
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
@@ -113,14 +115,14 @@ export function SmartLinkCreator() {
       <div className="flex items-center gap-2">
         <Button variant="ghost" size="sm" onClick={() => navigate(`/${workspaceSlug}/links`)}>
           <CaretLeft size={16} className="mr-1" />
-          返回链接列表
+          {t("creator.backToLinks")}
         </Button>
       </div>
 
       <div className="space-y-1">
-        <h1 className="text-h1">智能链接创建器</h1>
+        <h1 className="text-h1">{t("creator.title")}</h1>
         <p className="text-body text-muted-foreground">
-          选择文档并配置权限强度，系统会实时评估接收方摩擦与安全等级。
+          {t("creator.subtitle")}
         </p>
       </div>
 
@@ -138,7 +140,7 @@ export function SmartLinkCreator() {
             <CardHeader>
               <CardTitle className="text-h2 flex items-center gap-2">
                 <ShieldCheck size={20} />
-                权限与安全
+                {t("creator.securityTitle")}
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">

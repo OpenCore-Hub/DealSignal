@@ -1,5 +1,6 @@
 import { Link } from "react-router";
 import { ArrowLeft } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
 interface BackButtonProps {
@@ -8,7 +9,10 @@ interface BackButtonProps {
   className?: string;
 }
 
-export function BackButton({ to, label = "返回", className }: BackButtonProps) {
+export function BackButton({ to, label, className }: BackButtonProps) {
+  const { t } = useTranslation("common");
+  const backLabel = label ?? t("back");
+
   return (
     <Link
       to={to}
@@ -18,7 +22,7 @@ export function BackButton({ to, label = "返回", className }: BackButtonProps)
       )}
     >
       <ArrowLeft size={14} />
-      {label}
+      {backLabel}
     </Link>
   );
 }

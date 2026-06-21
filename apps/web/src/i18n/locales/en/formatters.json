@@ -1,0 +1,18 @@
+{
+  "fileSize": {
+    "units": ["B", "KB", "MB", "GB"]
+  },
+  "duration": {
+    "seconds": "{{count}}s",
+    "minutesAndSeconds": "{{m}}m {{s}}s"
+  },
+  "relativeTime": {
+    "justNow": "Just now",
+    "minutesAgo": "{{count}} minute ago",
+    "minutesAgo_plural": "{{count}} minutes ago",
+    "hoursAgo": "{{count}} hour ago",
+    "hoursAgo_plural": "{{count}} hours ago",
+    "daysAgo": "{{count}} day ago",
+    "daysAgo_plural": "{{count}} days ago"
+  }
+}

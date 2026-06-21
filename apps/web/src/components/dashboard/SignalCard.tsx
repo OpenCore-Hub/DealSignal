@@ -17,12 +17,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Signal, ActionItem } from "@/types";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { useTranslation } from "react-i18next";
 
 const typeConfig = {
-  hot: { icon: Fire, label: "高热度", dot: "bg-hot-500", subtle: "bg-hot-500/8" },
-  warm: { icon: Thermometer, label: "中热度", dot: "bg-warm-500", subtle: "bg-warm-500/8" },
-  cold: { icon: Snowflake, label: "低热度", dot: "bg-cold-500", subtle: "bg-cold-500/8" },
-  risk: { icon: Warning, label: "风险", dot: "bg-risk-500", subtle: "bg-risk-500/8" },
+  hot: { icon: Fire, dot: "bg-hot-500", subtle: "bg-hot-500/8" },
+  warm: { icon: Thermometer, dot: "bg-warm-500", subtle: "bg-warm-500/8" },
+  cold: { icon: Snowflake, dot: "bg-cold-500", subtle: "bg-cold-500/8" },
+  risk: { icon: Warning, dot: "bg-risk-500", subtle: "bg-risk-500/8" },
 };
 
 const priorityConfig = {
@@ -42,6 +43,8 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = useReducedMotion();
+  const { t } = useTranslation("dashboard");
+  const { t: tCommon, i18n } = useTranslation("common");
   const config = typeConfig[signal.type];
   const Icon = config.icon;
 
@@ -59,6 +62,13 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   }[action?.actionType ?? "email"];
   const ActionIcon = actionIcon;
 
+  const priorityLabel =
+    signal.priority === "high"
+      ? tCommon("priority.high")
+      : signal.priority === "medium"
+        ? tCommon("priority.medium")
+        : tCommon("priority.low");
+
   return (
     <motion.div
       layout={!reducedMotion}
@@ -72,15 +82,15 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-h3 truncate">{signal.title}</h3>
+            <h3 className="text-h3 truncate">{t(signal.title)}</h3>
             <Badge variant="outline" className={priorityConfig[signal.priority]}>
-              {signal.priority === "high" ? "高优先级" : signal.priority === "medium" ? "中优先级" : "低优先级"}
+              {priorityLabel}
             </Badge>
           </div>
-          <p className="text-body mt-1 text-muted-foreground">{signal.description}</p>
+          <p className="text-body mt-1 text-muted-foreground">{t(signal.description)}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={handleNavigate}>
-              查看详情 <ArrowRight size={14} className="ml-1" />
+              {tCommon("viewDetails")} <ArrowRight size={14} className="ml-1" />
             </Button>
             <Button
               size="sm"
@@ -88,7 +98,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
               onClick={() => setExpanded((v) => !v)}
               className="text-muted-foreground"
             >
-              {expanded ? "收起" : "展开分析"}
+              {expanded ? t("signal.collapse") : t("signal.expand")}
               {expanded ? <CaretUp size={14} className="ml-1" /> : <CaretDown size={14} className="ml-1" />}
             </Button>
           </div>
@@ -105,12 +115,12 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
           >
             <div className="mt-4 space-y-3 border-t border-border pt-4">
               <div>
-                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">AI 解释</p>
-                <p className="text-body mt-1">{signal.explanation}</p>
+                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t("signal.aiExplanation")}</p>
+                <p className="text-body mt-1">{t(signal.explanation)}</p>
               </div>
               <div>
-                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">建议行动</p>
-                <p className="text-body mt-1">{signal.suggestion}</p>
+                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t("signal.suggestedAction")}</p>
+                <p className="text-body mt-1">{t(signal.suggestion)}</p>
               </div>
               {action && (
                 <div className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
@@ -118,9 +128,9 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
                     <ActionIcon size={16} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm font-medium">{action.title}</p>
+                    <p className="text-sm font-medium">{t(action.title)}</p>
                     <p className="text-caption text-muted-foreground">
-                      截止 {new Date(action.dueAt).toLocaleDateString("zh-CN")}
+                      {tCommon("dueDate")} {new Date(action.dueAt).toLocaleDateString(i18n.language)}
                     </p>
                   </div>
                   <Button
@@ -130,7 +140,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
                       onActionStatusChange?.(action.id, action.status === "done" ? "pending" : "done")
                     }
                   >
-                    {action.status === "done" ? "已完成" : "标记完成"}
+                    {action.status === "done" ? tCommon("status.done") : t("signal.markDone")}
                   </Button>
                 </div>
               )}

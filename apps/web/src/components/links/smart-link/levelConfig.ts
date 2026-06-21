@@ -6,25 +6,25 @@ export const LEVEL_ORDER: PermissionLevel[] = ["low", "medium", "high"];
 
 export const levelConfig: Record<PermissionLevel, LevelInfo> = {
   low: {
-    label: "低摩擦",
-    description: "公开或邮箱验证即可访问",
+    label: "level.low.label",
+    description: "level.low.description",
     icon: LockKeyOpen,
     color: "text-success-500 bg-success-500/10 border-success-500/20",
-    friction: "接收方无需额外步骤，打开率最高。",
+    friction: "level.low.friction",
   },
   medium: {
-    label: "中强度",
-    description: "白名单或密码保护",
+    label: "level.medium.label",
+    description: "level.medium.description",
     icon: Lock,
     color: "text-warm-500 bg-warm-500/10 border-warm-500/20",
-    friction: "需要邮箱/密码/白名单验证，适合敏感材料。",
+    friction: "level.medium.friction",
   },
   high: {
-    label: "高强度",
-    description: "NDA + 白名单 + 密码组合",
+    label: "level.high.label",
+    description: "level.high.description",
     icon: Shield,
     color: "text-hot-500 bg-hot-500/10 border-hot-500/20",
-    friction: "NDA 签署 + 多重验证，适合机密尽调资料。",
+    friction: "level.high.friction",
   },
 };
 

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Copy, DownloadSimple, Eye, Link as LinkIcon, Plus, Trash } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -83,6 +84,7 @@ function aggregateVisitors(logs: AccessLog[]): VisitorSummary[] {
 export function DocumentDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
+  const { t } = useTranslation(["documents", "common"]);
   const [doc, setDoc] = useState<Document | null>(null);
   const [links, setLinks] = useState<Link[]>([]);
   const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
@@ -114,7 +116,7 @@ export function DocumentDetail() {
           setLogs(allLogs.flat());
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -123,7 +125,7 @@ export function DocumentDetail() {
     return () => {
       cancelled = true;
     };
-  }, [documentId, retryTick]);
+  }, [documentId, retryTick, t]);
 
   const visitors = useMemo(() => aggregateVisitors(logs), [logs]);
 
@@ -138,11 +140,13 @@ export function DocumentDetail() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackButton to={`/${workspaceSlug}/documents`} label="返回文档库" />
+        <BackButton to={`/${workspaceSlug}/documents`} label={t("documents:detail.back")} />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-body text-destructive mb-4">加载失败：{error}</p>
-            <Button onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+            <p className="text-body text-destructive mb-4">
+              {t("documents:detail.loadFailed", { error })}
+            </p>
+            <Button onClick={() => setRetryTick((t) => t + 1)}>{t("common:retry")}</Button>
           </CardContent>
         </Card>
       </div>
@@ -160,34 +164,37 @@ export function DocumentDetail() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/documents`} label="返回文档库" />
+      <BackButton to={`/${workspaceSlug}/documents`} label={t("documents:detail.back")} />
 
       <PageHeader
         title={doc.title}
-        description={`${doc.fileType.toUpperCase()} · ${doc.pageCount} 页 · ${formatFileSize(
-          doc.fileSize
-        )} · 上传于 ${formatRelativeTime(doc.createdAt)}`}
+        description={t("documents:detail.meta", {
+          fileType: doc.fileType.toUpperCase(),
+          pageCount: doc.pageCount,
+          fileSize: formatFileSize(doc.fileSize),
+          createdAt: formatRelativeTime(doc.createdAt),
+        })}
       >
         <Button variant="outline" className="gap-1.5" onClick={() => navigate(`/viewer/${doc.id}`)}>
           <Eye size={16} />
-          预览
+          {t("common:preview")}
         </Button>
         <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}>
           <LinkIcon size={16} />
-          创建链接
+          {t("common:createLink")}
         </Button>
         <RowActions
           actions={[
             {
-              label: "下载",
+              label: t("common:download"),
               icon: <DownloadSimple size={16} />,
               onClick: () => {},
               disabled: true,
-              title: "下载需后端签名 URL 支持",
+              title: t("documents:detail.downloadDisabled"),
               pro: true,
             },
             {
-              label: "删除",
+              label: t("common:delete"),
               icon: <Trash size={16} />,
               onClick: () => setDeleteDialogOpen(true),
               destructive: true,
@@ -200,35 +207,35 @@ export function DocumentDetail() {
       <DetailLayout
         sidebar={
           <div className="space-y-4">
-            <StatCard label="总访问" value={totalViews} />
-            <StatCard label="独立访客" value={uniqueVisitors} />
-            <StatCard label="平均停留" value={formatDuration(avgDuration)} />
+            <StatCard label={t("documents:detail.totalViews")} value={totalViews} />
+            <StatCard label={t("documents:detail.uniqueVisitors")} value={uniqueVisitors} />
+            <StatCard label={t("documents:detail.avgDuration")} value={formatDuration(avgDuration)} />
             <Card>
               <CardHeader>
-                <CardTitle className="text-h3">链接热度分布</CardTitle>
+                <CardTitle className="text-h3">{t("documents:detail.heatDistribution")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
                   {heatDistribution.hot > 0 && (
                     <div className="flex items-center gap-1.5 rounded-full bg-hot-500/10 px-2 py-1 text-xs font-medium text-hot-500">
                       <span className="h-1.5 w-1.5 rounded-full bg-hot-500" />
-                      高 {heatDistribution.hot}
+                      {t("documents:detail.heatHot", { count: heatDistribution.hot })}
                     </div>
                   )}
                   {heatDistribution.warm > 0 && (
                     <div className="flex items-center gap-1.5 rounded-full bg-warm-500/10 px-2 py-1 text-xs font-medium text-warm-500">
                       <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
-                      中 {heatDistribution.warm}
+                      {t("documents:detail.heatWarm", { count: heatDistribution.warm })}
                     </div>
                   )}
                   {heatDistribution.cold > 0 && (
                     <div className="flex items-center gap-1.5 rounded-full bg-cold-500/10 px-2 py-1 text-xs font-medium text-cold-500">
                       <span className="h-1.5 w-1.5 rounded-full bg-cold-500" />
-                      低 {heatDistribution.cold}
+                      {t("documents:detail.heatCold", { count: heatDistribution.cold })}
                     </div>
                   )}
                   {links.length === 0 && (
-                    <p className="text-sm text-muted-foreground">暂无链接</p>
+                    <p className="text-sm text-muted-foreground">{t("documents:detail.noLinks")}</p>
                   )}
                 </div>
               </CardContent>
@@ -238,10 +245,10 @@ export function DocumentDetail() {
       >
         <Tabs defaultValue="overview" className="w-full">
           <TabsList className="mb-4">
-            <TabsTrigger value="overview">总览</TabsTrigger>
-            <TabsTrigger value="content">内容</TabsTrigger>
-            <TabsTrigger value="analytics">数据</TabsTrigger>
-            <TabsTrigger value="ai">AI 洞察</TabsTrigger>
+            <TabsTrigger value="overview">{t("documents:detail.tabs.overview")}</TabsTrigger>
+            <TabsTrigger value="content">{t("documents:detail.tabs.content")}</TabsTrigger>
+            <TabsTrigger value="analytics">{t("documents:detail.tabs.analytics")}</TabsTrigger>
+            <TabsTrigger value="ai">{t("documents:detail.tabs.ai")}</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="space-y-6">
             <DocumentAnalytics analytics={analytics} />
@@ -249,7 +256,7 @@ export function DocumentDetail() {
               <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <Plus size={20} />
-                  最近访客
+                  {t("documents:detail.recentVisitors")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -260,15 +267,15 @@ export function DocumentDetail() {
               <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <LinkIcon size={20} />
-                  此文档的链接
+                  {t("documents:detail.documentLinks")}
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 {links.length === 0 ? (
                   <EmptyState
                     icon={<LinkIcon size={48} />}
-                    title="暂无链接"
-                    description="点击右上角创建链接开始分享。"
+                    title={t("documents:detail.linksEmptyTitle")}
+                    description={t("documents:detail.linksEmptyDescription")}
 
                   />
                 ) : (
@@ -283,7 +290,10 @@ export function DocumentDetail() {
                           <div className="min-w-0">
                             <p className="truncate text-sm font-medium">{link.shortUrl}</p>
                             <p className="text-caption text-muted-foreground">
-                              {link.accessCount} 次访问 · {formatRelativeTime(link.createdAt)}
+                              {t("documents:detail.linkViews", {
+                                count: link.accessCount,
+                                createdAt: formatRelativeTime(link.createdAt),
+                              })}
                             </p>
                           </div>
                         </div>
@@ -293,12 +303,12 @@ export function DocumentDetail() {
                             size="icon-sm"
                             variant="ghost"
                             onClick={() => {
-                              void copyToClipboard(link.shortUrl, "链接已复制");
+                              void copyToClipboard(link.shortUrl, t("common:linkCopied"));
                             }}>
                             <Copy size={14} />
                           </Button>
                           <Button size="sm" variant="outline" onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}>
-                            日志
+                            {t("common:logs")}
                           </Button>
                         </div>
                       </li>
@@ -323,14 +333,14 @@ export function DocumentDetail() {
       <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>删除文档</DialogTitle>
+            <DialogTitle>{t("documents:detail.deleteDialog.title")}</DialogTitle>
             <DialogDescription>
-              确定要删除「{doc.title}」吗？关联链接将一并失效，此操作不可撤销。
+              {t("documents:detail.deleteDialog.description", { title: doc.title })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={isDeleting}>
-              取消
+              {t("common:cancel")}
             </Button>
             <Button
               variant="destructive"
@@ -339,15 +349,15 @@ export function DocumentDetail() {
                 setIsDeleting(true);
                 try {
                   await api.deleteDocument(doc.id);
-                  toast.success("文档已删除");
+                  toast.success(t("documents:detail.deleted"));
                   navigate(`/${workspaceSlug}/documents`);
                 } catch (e) {
-                  toast.error(e instanceof Error ? e.message : "删除失败");
+                  toast.error(e instanceof Error ? e.message : t("common:error.deleteFailed"));
                   setIsDeleting(false);
                 }
               }}
             >
-              {isDeleting ? "删除中..." : "删除"}
+              {isDeleting ? t("common:deleting") : t("common:delete")}
             </Button>
           </DialogFooter>
         </DialogContent>

@@ -5,9 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { useTranslation } from "react-i18next";
 import type { Workspace } from "@/types";
 
 export function WorkspacesPage() {
+  const { t } = useTranslation("common");
   const navigate = useNavigate();
   const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
   const [loading, setLoading] = useState(true);
@@ -22,7 +24,7 @@ export function WorkspacesPage() {
         const res = await api.getWorkspaces();
         if (!cancelled) setWorkspaces(res.data);
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : t("error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -31,7 +33,7 @@ export function WorkspacesPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [t]);
 
   if (loading) {
     return (
@@ -49,13 +51,12 @@ export function WorkspacesPage() {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>重试</Button>
+        <Button onClick={() => window.location.reload()}>{t("retry")}</Button>
       </div>
     );
   }
 
   if (workspaces.length === 1) {
-    // 只有一个 workspace 时直接跳转，避免多余点击
     navigate(`/${workspaces[0].slug}/dashboard`, { replace: true });
     return null;
   }
@@ -64,32 +65,35 @@ export function WorkspacesPage() {
     <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-background p-6">
       <div className="w-full max-w-md space-y-6">
         <div className="text-center">
-          <h1 className="text-display text-foreground">选择工作区</h1>
+          <h1 className="text-display text-foreground">{t("selectWorkspace")}</h1>
           <p className="mt-2 text-body text-muted-foreground">
-            请选择要进入的工作区
+            {t("selectWorkspaceDescription")}
           </p>
         </div>
 
         <div className="space-y-3">
-          {workspaces.map((workspace) => (
-            <Card
-              key={workspace.id}
-              className="cursor-pointer transition-colors hover:bg-muted/50"
-              onClick={() => navigate(`/${workspace.slug}/dashboard`)}
-            >
-              <CardContent className="flex items-center gap-4 py-4">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-lg font-bold">
-                  {workspace.name.slice(0, 1)}
-                </div>
-                <div className="min-w-0">
-                  <p className="font-medium text-foreground">{workspace.name}</p>
-                  <p className="text-caption text-muted-foreground truncate">
-                    {workspace.slug}
-                  </p>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+          {workspaces.map((workspace) => {
+            const displayName = t(workspace.name);
+            return (
+              <Card
+                key={workspace.id}
+                className="cursor-pointer transition-colors hover:bg-muted/50"
+                onClick={() => navigate(`/${workspace.slug}/dashboard`)}
+              >
+                <CardContent className="flex items-center gap-4 py-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground text-lg font-bold">
+                    {displayName.slice(0, 1)}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="font-medium text-foreground">{displayName}</p>
+                    <p className="text-caption text-muted-foreground truncate">
+                      {workspace.slug}
+                    </p>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
         </div>
 
         <Button
@@ -97,10 +101,10 @@ export function WorkspacesPage() {
           className="w-full gap-2"
           onClick={() => {}}
           disabled
-          title="创建工作区需后端支持"
+          title={t("createWorkspaceDisabled")}
         >
           <Buildings size={18} />
-          创建工作区
+          {t("createWorkspace")}
         </Button>
       </div>
     </div>

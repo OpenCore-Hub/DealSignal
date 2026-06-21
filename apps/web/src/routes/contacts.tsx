@@ -11,11 +11,14 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useTranslation } from "react-i18next";
 import type { Contact } from "@/types";
-// Contact 类型用于组件内的类型推断
+
 export type { Contact };
 
 export function ContactsPage() {
+  const { t, i18n } = useTranslation("contacts");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [query, setQuery] = useState("");
@@ -40,7 +43,7 @@ export function ContactsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title="访问者" description="追踪谁看过你的材料，识别高意向联系人。" />
+      <PageHeader title={t("page.title")} description={t("page.description")} />
 
       <div className="relative max-w-sm">
         <MagnifyingGlass
@@ -48,7 +51,7 @@ export function ContactsPage() {
           className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
         />
         <Input
-          placeholder="搜索联系人..."
+          placeholder={t("searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="pl-9"
@@ -58,7 +61,7 @@ export function ContactsPage() {
       {error ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
           <p className="text-body text-muted-foreground">{error}</p>
-          <Button onClick={refetch}>重试</Button>
+          <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
       ) : loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -68,8 +71,8 @@ export function ContactsPage() {
       ) : filtered.length === 0 ? (
         <EmptyState
           icon={<Users size={48} />}
-          title="暂无联系人"
-          description="当有人通过分享链接访问文档时，会自动聚合为联系人。"
+          title={t("empty.title")}
+          description={t("empty.description")}
           size="large"
         />
       ) : (
@@ -93,14 +96,13 @@ export function ContactsPage() {
                   <p className="text-h3">{contact.name}</p>
                   <p className="text-caption text-muted-foreground">{contact.email}</p>
                   <p className="mt-2 text-caption text-muted-foreground">
-                    {contact.organization || "未知机构"} · {contact.totalVisits} 次访问 · 累计{" "}
-                    {formatDuration(contact.totalDurationSeconds)}
+                    {contact.organization || t("unknownOrganization")} · {t("visitCount", { count: contact.totalVisits })} · {t("totalDuration", { duration: formatDuration(contact.totalDurationSeconds, i18n.language) })}
                   </p>
                 </div>
                 <div className="text-right">
                   <HeatBadge level={contact.heatLevel} />
                   <p className="mt-1 text-caption text-muted-foreground">
-                    最后 {contact.lastSeenAt ? formatRelativeTime(contact.lastSeenAt) : "-"}
+                    {contact.lastSeenAt ? t("lastSeen", { time: formatRelativeTime(contact.lastSeenAt, i18n.language) }) : "-"}
                   </p>
                 </div>
               </CardContent>

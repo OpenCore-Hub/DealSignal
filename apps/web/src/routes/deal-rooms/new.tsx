@@ -22,6 +22,7 @@ import { api } from "@/lib/api";
 import { BackButton } from "@/components/common/BackButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import type { DealRoomTemplate } from "@/types";
 
 const permissionIcons = {
@@ -30,13 +31,9 @@ const permissionIcons = {
   high: Shield,
 };
 
-const permissionLabels = {
-  low: "低摩擦",
-  medium: "中强度",
-  high: "高强度",
-};
-
 export function NewDealRoomPage() {
+  const { t } = useTranslation("dealRooms");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const reducedMotion = useReducedMotion();
@@ -65,14 +62,14 @@ export function NewDealRoomPage() {
         setTemplates(res.data);
         if (res.data[0]) selectTemplate(res.data[0], true);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "加载失败");
+        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         setLoading(false);
       }
     }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [tc]);
 
   const selectedTemplate = useMemo(
     () => templates.find((t) => t.id === selectedTemplateId),
@@ -89,10 +86,10 @@ export function NewDealRoomPage() {
         templateId: selectedTemplate.id,
         ndaEnabled: nda,
       });
-      toast.success("数据室已创建");
+      toast.success(t("new.created"));
       navigate(`/${workspaceSlug}/deal-rooms/${room.id}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "创建数据室失败");
+      toast.error(e instanceof Error ? e.message : t("new.createFailed"));
     } finally {
       setCreating(false);
     }
@@ -105,19 +102,19 @@ export function NewDealRoomPage() {
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="mx-auto max-w-5xl space-y-6"
     >
-      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回数据室" />
+      <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
 
       <div className="space-y-1">
-        <h1 className="text-h1">新建数据室</h1>
+        <h1 className="text-h1">{t("new.title")}</h1>
         <p className="text-body text-muted-foreground">
-          选择场景模板，系统会自动生成文件夹结构与推荐文件清单。
+          {t("new.subtitle")}
         </p>
       </div>
 
       {error ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
           <p className="text-body text-muted-foreground">{error}</p>
-          <Button onClick={() => window.location.reload()}>重试</Button>
+          <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
         </div>
       ) : loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -159,7 +156,7 @@ export function NewDealRoomPage() {
                   </p>
                   <div className="mt-3 flex flex-wrap gap-1">
                     <Badge variant="outline" className="text-caption">
-                      {template.folderStructure.length} 个文件夹
+                      {t("new.folderCount", { count: template.folderStructure.length })}
                     </Badge>
                     {template.ndaEnabled && (
                       <Badge variant="secondary" className="text-caption">
@@ -177,41 +174,41 @@ export function NewDealRoomPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-h2">基本信息</CardTitle>
+            <CardTitle className="text-h2">{t("new.basicInfo")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="room-name">名称</Label>
+              <Label htmlFor="room-name">{t("new.name")}</Label>
               <Input
                 id="room-name"
-                placeholder="例如：Seed Round Due Diligence"
+                placeholder={t("new.namePlaceholder")}
                 value={name}
                 onChange={(e) => setName(e.target.value)}
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="room-description">描述</Label>
+              <Label htmlFor="room-description">{t("new.description")}</Label>
               <Input
                 id="room-description"
-                placeholder="说明数据室用途与目标受众"
+                placeholder={t("new.descriptionPlaceholder")}
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
             </div>
             <div className="flex items-center justify-between rounded-md border border-border p-3">
               <div>
-                <p className="text-sm font-medium">启用 NDA</p>
-                <p className="text-caption text-muted-foreground">访问前要求签署保密协议</p>
+                <p className="text-sm font-medium">{t("new.enableNda")}</p>
+                <p className="text-caption text-muted-foreground">{t("new.enableNdaDescription")}</p>
               </div>
               <Switch checked={nda} onCheckedChange={setNda} />
             </div>
             <div className="flex justify-end gap-2 pt-2">
               <Button variant="outline" onClick={() => navigate(`/${workspaceSlug}/deal-rooms`)}>
-                取消
+                {t("new.cancel")}
               </Button>
               <Button className="gap-1.5" disabled={!name || creating} onClick={handleCreate}>
                 <Plus size={16} weight="bold" />
-                {creating ? "创建中..." : "创建数据室"}
+                {creating ? t("new.creating") : t("new.create")}
               </Button>
             </div>
           </CardContent>
@@ -222,7 +219,7 @@ export function NewDealRoomPage() {
             <CardHeader>
               <CardTitle className="text-h2 flex items-center gap-2">
                 <Folder size={20} />
-                文件夹结构
+                {t("new.folders")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -241,7 +238,7 @@ export function NewDealRoomPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-muted-foreground">选择模板后查看文件夹结构。</p>
+                <p className="text-sm text-muted-foreground">{t("detail.noTemplate")}</p>
               )}
             </CardContent>
           </Card>
@@ -250,7 +247,7 @@ export function NewDealRoomPage() {
             <CardHeader>
               <CardTitle className="text-h2 flex items-center gap-2">
                 <FileText size={20} />
-                推荐文件
+                {t("new.recommendedFiles")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -264,7 +261,7 @@ export function NewDealRoomPage() {
                   ))}
                 </ul>
               ) : (
-                <p className="text-sm text-muted-foreground">选择模板后查看推荐文件。</p>
+                <p className="text-sm text-muted-foreground">{t("detail.noTemplate")}</p>
               )}
             </CardContent>
           </Card>
@@ -273,7 +270,7 @@ export function NewDealRoomPage() {
             <CardHeader>
               <CardTitle className="text-h2 flex items-center gap-2">
                 <ShieldCheck size={20} />
-                默认权限
+                {t("new.defaultPermission")}
               </CardTitle>
             </CardHeader>
             <CardContent>
@@ -283,10 +280,10 @@ export function NewDealRoomPage() {
                     const Icon = permissionIcons[selectedTemplate.defaultPermissionLevel];
                     return <Icon size={18} className="text-muted-foreground" />;
                   })()}
-                  {permissionLabels[selectedTemplate.defaultPermissionLevel]}
+                  {t(`permission.${selectedTemplate.defaultPermissionLevel}.label`)}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">选择模板后查看默认权限。</p>
+                <p className="text-sm text-muted-foreground">{t("detail.noTemplate")}</p>
               )}
             </CardContent>
           </Card>

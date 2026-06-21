@@ -10,6 +10,7 @@ import {
   CaretLeft,
   CaretRight,
 } from "@phosphor-icons/react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/uiStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -19,22 +20,23 @@ import { api } from "@/lib/api";
 import type { WorkspaceSettings } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 
-const navItems = [
-  { to: "dashboard", label: "交易雷达", icon: ChartPie },
-  { to: "documents", label: "文档库", icon: FileText },
-  { to: "links", label: "链接", icon: LinkIcon },
-  { to: "deal-rooms", label: "数据室", icon: FolderOpen },
-  { to: "contacts", label: "联系人", icon: Users },
-  { to: "insights", label: "洞察", icon: ChartLineUp },
-  { to: "settings", label: "设置", icon: Gear },
-];
-
 export function Sidebar() {
+  const { t } = useTranslation("layout");
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore();
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const navItems = [
+    { to: "dashboard", labelKey: "sidebar.nav.dashboard", icon: ChartPie },
+    { to: "documents", labelKey: "sidebar.nav.documents", icon: FileText },
+    { to: "links", labelKey: "sidebar.nav.links", icon: LinkIcon },
+    { to: "deal-rooms", labelKey: "sidebar.nav.dealRooms", icon: FolderOpen },
+    { to: "contacts", labelKey: "sidebar.nav.contacts", icon: Users },
+    { to: "insights", labelKey: "sidebar.nav.insights", icon: ChartLineUp },
+    { to: "settings", labelKey: "sidebar.nav.settings", icon: Gear },
+  ] as const;
 
   useEffect(() => {
     if (isMobile) {
@@ -102,14 +104,14 @@ export function Sidebar() {
           <button
             onClick={toggleSidebar}
             className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={sidebarOpen ? "收起侧边栏" : "展开侧边栏"}
+            aria-label={sidebarOpen ? t("sidebar.toggle.collapse") : t("sidebar.toggle.expand")}
           >
             {sidebarOpen ? <CaretLeft size={16} /> : <CaretRight size={16} />}
           </button>
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-3" aria-label="主导航">
+        <nav className="flex-1 overflow-y-auto p-3" aria-label={t("sidebar.mainNavigation")}>
           <ul className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;
@@ -117,7 +119,7 @@ export function Sidebar() {
                 <li key={item.to}>
                   <NavLink
                     to={`/${workspaceSlug}/${item.to}`}
-                    title={item.label}
+                    title={t(item.labelKey)}
                     className={({ isActive }) =>
                       cn(
                         "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
@@ -134,7 +136,7 @@ export function Sidebar() {
                         sidebarOpen ? "opacity-100" : "opacity-0 md:hidden"
                       )}
                     >
-                      {item.label}
+                      {t(item.labelKey)}
                     </span>
                   </NavLink>
                 </li>

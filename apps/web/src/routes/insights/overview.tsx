@@ -8,15 +8,16 @@ import { StatCard } from "@/components/common/StatCard";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { TrendChart } from "@/components/common/TrendChart";
 import { api, type InsightsOverview } from "@/lib/api";
+import { useTranslation } from "react-i18next";
 import type { AccessLog } from "@/types";
 
-function buildLast7DaysTrend(logs: AccessLog[]): { labels: string[]; data: number[] } {
+function buildLast7DaysTrend(logs: AccessLog[], locale: string): { labels: string[]; data: number[] } {
   const days: { label: string; date: Date; count: number }[] = [];
   for (let i = 6; i >= 0; i--) {
     const d = new Date();
     d.setDate(d.getDate() - i);
     days.push({
-      label: d.toLocaleDateString("zh-CN", { month: "short", day: "numeric" }),
+      label: d.toLocaleDateString(locale, { month: "short", day: "numeric" }),
       date: new Date(d.getFullYear(), d.getMonth(), d.getDate()),
       count: 0,
     });
@@ -30,12 +31,16 @@ function buildLast7DaysTrend(logs: AccessLog[]): { labels: string[]; data: numbe
 }
 
 export function InsightsOverviewPage() {
+  const { t } = useTranslation("insights");
+  const { t: tc } = useTranslation("common");
+  const { i18n } = useTranslation();
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [data, setData] = useState<InsightsOverview | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const locale = i18n.language;
 
   useEffect(() => {
     let cancelled = false;
@@ -53,7 +58,7 @@ export function InsightsOverviewPage() {
           setLogs(allLogs.flat());
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -62,15 +67,15 @@ export function InsightsOverviewPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [tc]);
 
-  const trend = useMemo(() => buildLast7DaysTrend(logs), [logs]);
+  const trend = useMemo(() => buildLast7DaysTrend(logs, locale), [logs, locale]);
 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>重试</Button>
+        <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
       </div>
     );
   }
@@ -91,17 +96,17 @@ export function InsightsOverviewPage() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="高热度" value={data.tierCounts.hot} icon={<HeatBadge level="hot" />} />
-        <StatCard label="中热度" value={data.tierCounts.warm} icon={<HeatBadge level="warm" />} />
-        <StatCard label="低热度" value={data.tierCounts.cold} icon={<HeatBadge level="cold" />} />
-        <StatCard label="热度信号" value={data.tierCounts.hot + data.tierCounts.warm} />
+        <StatCard label={t("overview.hot")} value={data.tierCounts.hot} icon={<HeatBadge level="hot" />} />
+        <StatCard label={t("overview.warm")} value={data.tierCounts.warm} icon={<HeatBadge level="warm" />} />
+        <StatCard label={t("overview.cold")} value={data.tierCounts.cold} icon={<HeatBadge level="cold" />} />
+        <StatCard label={t("overview.signals")} value={data.tierCounts.hot + data.tierCounts.warm} />
       </div>
 
       <TrendChart
-        title="近 7 天访问量趋势"
+        title={t("overview.trendTitle")}
         labels={trend.labels}
         data={trend.data}
-        emptyDescription="暂无访问数据，趋势将在链接被访问后自动生成。"
+        emptyDescription={t("overview.trendEmpty")}
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -109,7 +114,7 @@ export function InsightsOverviewPage() {
           <CardHeader>
             <CardTitle className="text-h2 flex items-center gap-2">
               <FileText size={20} />
-              热门文档
+              {t("overview.topDocuments")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -132,7 +137,7 @@ export function InsightsOverviewPage() {
                   >
                   <span className="truncate text-sm font-medium">{doc.title}</span>
                   <div className="flex items-center gap-3">
-                    <span className="text-caption tabular-nums text-muted-foreground">{doc.views} 次访问</span>
+                    <span className="text-caption tabular-nums text-muted-foreground">{t("overview.views", { count: doc.views })}</span>
                     <HeatBadge level={doc.heatLevel} />
                   </div>
                 </li>
@@ -145,7 +150,7 @@ export function InsightsOverviewPage() {
           <CardHeader>
             <CardTitle className="text-h2 flex items-center gap-2">
               <LinkIcon size={20} />
-              热门链接
+              {t("overview.topLinks")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -168,7 +173,7 @@ export function InsightsOverviewPage() {
                   >
                   <span className="truncate text-sm font-medium">{link.shortUrl}</span>
                   <div className="flex items-center gap-3">
-                    <span className="text-caption tabular-nums text-muted-foreground">{link.views} 次访问</span>
+                    <span className="text-caption tabular-nums text-muted-foreground">{t("overview.views", { count: link.views })}</span>
                     <HeatBadge level={link.heatLevel} />
                   </div>
                 </li>
@@ -182,7 +187,7 @@ export function InsightsOverviewPage() {
         <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <Users size={20} />
-            高意向访问者
+            {t("overview.topContacts")}
           </CardTitle>
         </CardHeader>
         <CardContent>
@@ -205,7 +210,7 @@ export function InsightsOverviewPage() {
                 >
                 <span className="truncate text-sm font-medium">{contact.email}</span>
                 <div className="flex items-center gap-3">
-                  <span className="text-caption tabular-nums text-muted-foreground">{contact.score} 分</span>
+                  <span className="text-caption tabular-nums text-muted-foreground">{t("suggestions.score", { score: contact.score })}</span>
                   <HeatBadge level={contact.heatLevel} />
                 </div>
               </li>

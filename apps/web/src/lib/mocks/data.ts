@@ -18,8 +18,8 @@ import type {
 } from "@/types";
 
 export const mockWorkspaces: Workspace[] = [
-  { id: "ws_1", slug: "acme-capital", name: "Acme Capital" },
-  { id: "ws_2", slug: "ventura-fund", name: "Ventura Fund" },
+  { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name" },
+  { id: "ws_2", slug: "ventura-fund", name: "mock.workspaces.ventura.name" },
 ];
 
 export const mockDocuments: Document[] = [
@@ -111,7 +111,7 @@ export const mockHeatAlerts: HeatAlert[] = [
     heatLevel: "hot",
     score: 92,
     lastSeenAt: "2026-06-20T18:42:00Z",
-    suggestion: "Sarah 反复查看财务页，建议 24 小时内跟进融资条款。",
+    suggestion: "Sarah reviewed the financial slide multiple times; follow up on terms within 24 hours.",
   },
   {
     id: "alert_2",
@@ -121,7 +121,7 @@ export const mockHeatAlerts: HeatAlert[] = [
     heatLevel: "hot",
     score: 87,
     lastSeenAt: "2026-06-20T16:15:00Z",
-    suggestion: "Marcus 在团队页停留 3 分钟，可发送补充团队背景资料。",
+    suggestion: "Marcus spent 3 minutes on the team slide; send supplementary team background.",
   },
   {
     id: "alert_3",
@@ -131,7 +131,7 @@ export const mockHeatAlerts: HeatAlert[] = [
     heatLevel: "warm",
     score: 64,
     lastSeenAt: "2026-06-19T20:30:00Z",
-    suggestion: "Wei 查看了收入预测，可安排一次财务模型 walkthrough。",
+    suggestion: "Wei viewed the revenue forecast; schedule a financial model walkthrough.",
   },
 ];
 
@@ -225,7 +225,7 @@ export const mockActivities: Activity[] = [
     pageNumber: 12,
     durationSeconds: 180,
     timestamp: "2026-06-20T18:42:00Z",
-    description: "在财务页停留 3 分钟",
+    description: "mock.activities.act_1.description",
   },
   {
     id: "act_2",
@@ -236,7 +236,7 @@ export const mockActivities: Activity[] = [
     eventType: "open",
     durationSeconds: 240,
     timestamp: "2026-06-20T18:30:00Z",
-    description: "打开财务模型",
+    description: "mock.activities.act_2.description",
   },
   {
     id: "act_3",
@@ -247,7 +247,7 @@ export const mockActivities: Activity[] = [
     eventType: "revisit",
     durationSeconds: 360,
     timestamp: "2026-06-20T16:15:00Z",
-    description: "再次查看 pitch deck",
+    description: "mock.activities.act_3.description",
   },
   {
     id: "act_4",
@@ -259,7 +259,7 @@ export const mockActivities: Activity[] = [
     pageNumber: 5,
     durationSeconds: 120,
     timestamp: "2026-06-19T20:30:00Z",
-    description: "查看收入预测页",
+    description: "mock.activities.act_4.description",
   },
 ];
 
@@ -342,8 +342,8 @@ export const mockSuggestions: Suggestion[] = [
     linkId: "link_1",
     heatLevel: "hot",
     score: 92,
-    reason: "Sarah 在过去 24 小时内 2 次查看财务页，累计停留 5 分钟",
-    action: "建议 24 小时内跟进融资条款与估值讨论",
+    reason: "suggestions.mock.sg_1.reason",
+    action: "suggestions.mock.sg_1.action",
     lastActivityAt: "2026-06-20T18:42:00Z",
   },
   {
@@ -354,8 +354,8 @@ export const mockSuggestions: Suggestion[] = [
     linkId: "link_1",
     heatLevel: "hot",
     score: 87,
-    reason: "Marcus 第三次访问，团队页停留时间最长",
-    action: "发送补充团队背景与创始人经历资料",
+    reason: "suggestions.mock.sg_2.reason",
+    action: "suggestions.mock.sg_2.action",
     lastActivityAt: "2026-06-20T16:15:00Z",
   },
   {
@@ -366,8 +366,8 @@ export const mockSuggestions: Suggestion[] = [
     linkId: "link_2",
     heatLevel: "warm",
     score: 64,
-    reason: "Wei 重点关注收入预测与现金流",
-    action: "安排一次 30 分钟财务模型 walkthrough",
+    reason: "suggestions.mock.sg_3.reason",
+    action: "suggestions.mock.sg_3.action",
     lastActivityAt: "2026-06-19T20:30:00Z",
   },
 ];
@@ -376,7 +376,7 @@ export const mockDealRooms: DealRoom[] = [
   {
     id: "room_1",
     name: "Seed Round Due Diligence",
-    description: "面向 Seed 轮投资人的尽调资料室",
+    description: "Due diligence room for Seed-round investors",
     template: "seed",
     documentCount: 12,
     memberCount: 5,
@@ -389,7 +389,7 @@ export const mockDealRooms: DealRoom[] = [
   {
     id: "room_2",
     name: "Q2 LP Report",
-    description: "2026 年第二季度 LP 更新报告",
+    description: "Q2 2026 LP update report",
     template: "lp-update",
     documentCount: 8,
     memberCount: 25,
@@ -402,7 +402,7 @@ export const mockDealRooms: DealRoom[] = [
   {
     id: "room_3",
     name: "Enterprise Proposal - Acme Corp",
-    description: "Acme Corp 企业级方案提案资料室",
+    description: "Acme Corp enterprise proposal data room",
     template: "sales-proposal",
     documentCount: 6,
     memberCount: 4,
@@ -457,10 +457,10 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_1",
     type: "hot",
-    title: "Sarah Chen 热度飙升",
-    description: "Horizon VC 合伙人在过去 24 小时内 3 次访问 Pitch Deck，并在财务页累计停留 5 分钟。",
-    explanation: "多次回访 + 关键页停留时长 = 高购买/投资意图。",
-    suggestion: "24 小时内发送融资条款摘要并提议 30 分钟电话沟通。",
+    title: "mock.signals.sig_1.title",
+    description: "mock.signals.sig_1.description",
+    explanation: "mock.signals.sig_1.explanation",
+    suggestion: "mock.signals.sig_1.suggestion",
     documentId: "doc_1",
     contactId: "contact_1",
     linkId: "link_1",
@@ -470,10 +470,10 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_2",
     type: "hot",
-    title: "Marcus 再次访问团队页",
-    description: "Boldstart Principal 第三次打开 Pitch Deck，团队页停留 3 分钟。",
-    explanation: "团队是早期投资关键决策页，反复查看说明正在做 deep dive。",
-    suggestion: "发送创始人深度背景与推荐信。",
+    title: "mock.signals.sig_2.title",
+    description: "mock.signals.sig_2.description",
+    explanation: "mock.signals.sig_2.explanation",
+    suggestion: "mock.signals.sig_2.suggestion",
     documentId: "doc_1",
     contactId: "contact_2",
     linkId: "link_1",
@@ -483,10 +483,10 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_3",
     type: "warm",
-    title: "Wei Li 关注收入预测",
-    description: "Future Fund LP 查看财务模型收入预测页超过 2 分钟。",
-    explanation: "LP 通常关注现金流与回报，说明进入评估阶段。",
-    suggestion: "安排一次财务模型 walkthrough。",
+    title: "mock.signals.sig_3.title",
+    description: "mock.signals.sig_3.description",
+    explanation: "mock.signals.sig_3.explanation",
+    suggestion: "mock.signals.sig_3.suggestion",
     documentId: "doc_2",
     contactId: "contact_3",
     linkId: "link_2",
@@ -496,10 +496,10 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_4",
     type: "risk",
-    title: "公开链接被异常访问",
-    description: "一个未识别邮箱通过公开链接下载了 Pitch Deck。",
-    explanation: "公开链接存在外泄风险，建议收紧权限。",
-    suggestion: "将该链接设为邮件验证，并启用下载水印。",
+    title: "mock.signals.sig_4.title",
+    description: "mock.signals.sig_4.description",
+    explanation: "mock.signals.sig_4.explanation",
+    suggestion: "mock.signals.sig_4.suggestion",
     linkId: "link_3",
     createdAt: "2026-06-18T09:00:00Z",
     priority: "medium",
@@ -510,7 +510,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_1",
     signalId: "sig_1",
-    title: "跟进 Sarah Chen",
+    title: "mock.actions.act_1.title",
     impact: "high",
     dueAt: "2026-06-21T18:00:00Z",
     status: "pending",
@@ -519,7 +519,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_2",
     signalId: "sig_2",
-    title: "发送团队补充资料给 Marcus",
+    title: "mock.actions.act_2.title",
     impact: "high",
     dueAt: "2026-06-21T12:00:00Z",
     status: "pending",
@@ -528,7 +528,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_3",
     signalId: "sig_3",
-    title: "安排 Wei Li 财务模型 walkthrough",
+    title: "mock.actions.act_3.title",
     impact: "medium",
     dueAt: "2026-06-23T10:00:00Z",
     status: "pending",
@@ -537,7 +537,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_4",
     signalId: "sig_4",
-    title: "审查公开链接安全设置",
+    title: "mock.actions.act_4.title",
     impact: "medium",
     dueAt: "2026-06-21T09:00:00Z",
     status: "pending",
@@ -549,8 +549,8 @@ export const mockRiskAlerts: RiskAlert[] = [
   {
     id: "risk_1",
     type: "download",
-    title: "未识别邮箱下载了 Pitch Deck",
-    description: "公开链接被 alex@unknown.com 下载，存在外泄风险。",
+    title: "mock.risks.risk_1.title",
+    description: "mock.risks.risk_1.description",
     linkId: "link_3",
     documentId: "doc_1",
     createdAt: "2026-06-18T09:00:00Z",
@@ -558,8 +558,8 @@ export const mockRiskAlerts: RiskAlert[] = [
   {
     id: "risk_2",
     type: "expired",
-    title: "一个链接已过期",
-    description: "Financial Model 链接已于 2026-06-17 过期，建议续期或通知接收方。",
+    title: "mock.risks.risk_2.title",
+    description: "mock.risks.risk_2.description",
     linkId: "link_2",
     documentId: "doc_2",
     createdAt: "2026-06-19T10:00:00Z",
@@ -569,15 +569,15 @@ export const mockRiskAlerts: RiskAlert[] = [
 export const mockDealRoomTemplates: DealRoomTemplate[] = [
   {
     id: "tmpl_seed",
-    name: "Seed 轮尽调",
-    description: "面向种子轮投资人的标准尽调资料室，包含 Deck、财务模型、团队与法律文件。",
+    name: "Seed Round Due Diligence",
+    description: "Standard due diligence room for seed investors, including deck, financial model, team and legal documents.",
     scenario: "seed",
     folderStructure: [
-      { name: "01 Pitch Deck", description: "最新版融资路演材料" },
-      { name: "02 Financials", description: "历史财务、预测模型与关键假设" },
-      { name: "03 Team", description: "创始人简历、组织架构与招聘计划" },
-      { name: "04 Product", description: "产品 demo、路线图与技术架构" },
-      { name: "05 Legal", description: "公司注册、股东协议、期权计划" },
+      { name: "01 Pitch Deck", description: "Latest fundraising deck" },
+      { name: "02 Financials", description: "Historical financials, projections and key assumptions" },
+      { name: "03 Team", description: "Founder resumes, org chart and hiring plan" },
+      { name: "04 Product", description: "Product demo, roadmap and technical architecture" },
+      { name: "05 Legal", description: "Incorporation, shareholder agreement and option plan" },
     ],
     recommendedFiles: ["Pitch Deck.pdf", "Financial Model.xlsx", "Cap Table"],
     defaultPermissionLevel: "medium",
@@ -585,8 +585,8 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
   },
   {
     id: "tmpl_series_a",
-    name: "Series A 数据室",
-    description: "面向 A 轮机构的深度尽调，强调产品数据、增长指标与财务透明度。",
+    name: "Series A Data Room",
+    description: "In-depth due diligence for Series A firms, emphasizing product data, growth metrics and financial transparency.",
     scenario: "series-a",
     folderStructure: [
       { name: "01 Executive Summary" },
@@ -602,8 +602,8 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
   },
   {
     id: "tmlp_lp_update",
-    name: "LP 季度更新",
-    description: "面向 LP 的季度业绩、分配与运营报告，支持批量分发与访问追踪。",
+    name: "LP Quarterly Update",
+    description: "Quarterly performance, distribution and operations report for LPs, with bulk distribution and access tracking.",
     scenario: "lp-update",
     folderStructure: [
       { name: "01 GP Letter" },
@@ -618,8 +618,8 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
   },
   {
     id: "tmpl_sales_proposal",
-    name: "企业销售提案",
-    description: "面向企业采购委员会的方案资料室，包含提案、案例、安全与实施计划。",
+    name: "Enterprise Sales Proposal",
+    description: "Proposal data room for enterprise procurement committees, including proposal, case studies, security and implementation plan.",
     scenario: "sales-proposal",
     folderStructure: [
       { name: "01 Proposal" },

@@ -1,0 +1,143 @@
+{
+  "page": {
+    "title": "分享链接",
+    "description": "管理所有可追踪链接，查看访问热度与安全设置。",
+    "createLink": "创建链接"
+  },
+  "title": {
+    "allLinks": "全部链接"
+  },
+  "table": {
+    "link": "链接",
+    "document": "文档",
+    "accessCount": "访问次数",
+    "accessCountValue": "{{count}} 次访问",
+    "avgDuration": "平均时长",
+    "lastViewed": "最近访问",
+    "heat": "热度",
+    "status": "状态",
+    "totalLinks": "{{count}} 个链接",
+    "copyLink": "复制链接"
+  },
+  "actions": {
+    "viewLog": "查看日志",
+    "exportData": "导出访问数据",
+    "downloadOnly": "仅允许下载",
+    "exportProTooltip": "导出需后端支持",
+    "downloadProTooltip": "仅允许下载需后端支持"
+  },
+  "empty": {
+    "title": "暂无链接",
+    "description": "为文档配置权限并创建链接，即可追踪投资人/客户的访问行为。",
+    "createLink": "创建链接"
+  },
+  "delete": {
+    "title": "删除链接",
+    "description": "确定要删除「{{url}}」吗？关联的访问记录将不再可通过该链接查看。",
+    "confirmLoading": "删除中...",
+    "success": "链接已删除"
+  },
+  "backToLinks": "返回链接管理",
+  "detail": {
+    "headerDescription": "文档：{{doc}} · 创建于 {{date}}",
+    "editProTooltip": "链接编辑需后端支持",
+    "copySuccess": "链接已复制",
+    "totalVisits": "总访问",
+    "uniqueVisitors": "独立访客",
+    "avgDuration": "平均时长",
+    "lastVisit": "最后访问",
+    "permissionConfig": "权限配置",
+    "expiresAt": "过期于 {{time}}",
+    "trendTitle": "访问量趋势",
+    "trendEmpty": "暂无访问数据，趋势将在首次访问后自动生成。",
+    "timelineTitle": "访问者时间线",
+    "accessLogTitle": "访问日志"
+  },
+  "timeline": {
+    "viewedPage": "{{visitor}} 查看第 {{page}} 页",
+    "viewedLink": "{{visitor}} 访问链接",
+    "description": "停留 {{duration}} · {{device}} · {{location}}"
+  },
+  "accessLog": {
+    "timestamp": "时间",
+    "visitor": "访客",
+    "page": "页面",
+    "duration": "停留",
+    "device": "设备",
+    "location": "地点",
+    "anonymous": "匿名",
+    "empty": {
+      "title": "暂无访问记录",
+      "description": "该链接尚未被访问，分享后将在此显示访客行为。"
+    }
+  },
+  "creator": {
+    "backToLinks": "返回链接列表",
+    "title": "智能链接创建器",
+    "subtitle": "选择文档并配置权限强度，系统会实时评估接收方摩擦与安全等级。",
+    "securityTitle": "权限与安全",
+    "loadDocsFailed": "加载文档失败",
+    "createSuccess": "链接已生成",
+    "createFailed": "创建链接失败",
+    "copySuccess": "链接已复制",
+    "selectDocument": "选择文档",
+    "noDocuments": "暂无可用文档，请先上传。",
+    "selectPlaceholder": "选择要分享的文档",
+    "permissionStrength": "权限强度",
+    "securityOptions": "安全选项",
+    "requireEmail": "需要邮箱验证",
+    "whitelist": "白名单邮箱/域名",
+    "whitelistPlaceholder": "输入邮箱或域名，用逗号分隔",
+    "password": "访问密码",
+    "passwordPlaceholder": "设置密码",
+    "allowDownload": "允许下载",
+    "watermark": "动态水印",
+    "expiry": "有效期",
+    "expiryPlaceholder": "选择有效期",
+    "expiryDays": {
+      "7": "7 天",
+      "30": "30 天",
+      "90": "90 天",
+      "custom": "自定义"
+    },
+    "maxViews": "最大访问次数",
+    "maxViewsPlaceholder": "选择最大访问次数",
+    "maxViewsOptions": {
+      "unlimited": "无限制",
+      "10": "10 次",
+      "50": "50 次",
+      "100": "100 次"
+    },
+    "scoreTitle": "安全 vs 摩擦",
+    "securityScore": "安全强度",
+    "frictionScore": "接收方摩擦",
+    "previewTitle": "预览",
+    "previewDocumentLabel": "文档",
+    "noDocumentSelected": "未选择",
+    "featureEmail": "邮箱验证",
+    "featurePassword": "访问密码",
+    "featureWatermark": "动态水印",
+    "featureNoDownload": "禁止下载",
+    "generatedLabel": "已生成链接",
+    "creating": "创建中...",
+    "recreate": "再次创建",
+    "createLink": "创建链接"
+  },
+  "level": {
+    "low": {
+      "label": "低摩擦",
+      "description": "公开或邮箱验证即可访问",
+      "friction": "接收方无需额外步骤，打开率最高。"
+    },
+    "medium": {
+      "label": "中强度",
+      "description": "白名单或密码保护",
+      "friction": "需要邮箱/密码/白名单验证，适合敏感材料。"
+    },
+    "high": {
+      "label": "高强度",
+      "description": "NDA + 白名单 + 密码组合",
+      "friction": "NDA 签署 + 多重验证，适合机密尽调资料。"
+    }
+  }
+}

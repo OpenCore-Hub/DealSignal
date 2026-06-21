@@ -7,9 +7,12 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
+import { useTranslation } from "react-i18next";
 import type { WorkspaceSettings } from "@/types";
 
 export function SettingsBrandPage() {
+  const { t } = useTranslation("settings");
+  const { t: tc } = useTranslation("common");
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -26,13 +29,13 @@ export function SettingsBrandPage() {
         const res = await api.getWorkspaceSettings();
         setSettings(res.data);
       } catch (e) {
-        setError(e instanceof Error ? e.message : "加载失败");
+        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
       } finally {
         setLoading(false);
       }
     }
     load();
-  }, []);
+  }, [tc]);
 
   const handleSave = async () => {
     if (!settings) return;
@@ -40,9 +43,9 @@ export function SettingsBrandPage() {
     try {
       const res = await api.updateWorkspaceSettings(settings);
       setSettings(res.data);
-      toast.success("品牌设置已保存");
+      toast.success(t("brand.saved"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : "保存失败");
+      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
     } finally {
       setSaving(false);
     }
@@ -54,7 +57,7 @@ export function SettingsBrandPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-4 p-12 text-center">
             <p className="text-body text-muted-foreground">{error}</p>
-            <Button onClick={() => window.location.reload()}>重试</Button>
+            <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
           </CardContent>
         </Card>
       </div>
@@ -76,22 +79,22 @@ export function SettingsBrandPage() {
         <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <Palette size={20} />
-            品牌定制
+            {t("brand.title")}
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="space-y-2">
-            <Label>Logo</Label>
+            <Label>{t("brand.logo")}</Label>
             <div className="flex items-center gap-4">
               {settings.logoUrl ? (
                 <img
                   src={settings.logoUrl}
-                  alt="Workspace logo"
+                  alt={t("brand.logo")}
                   className="h-24 w-24 rounded-md border border-border object-contain bg-background"
                 />
               ) : (
                 <div className="flex h-24 w-24 items-center justify-center rounded-md border border-dashed border-border bg-muted/50 text-center text-xs text-muted-foreground">
-                  未上传
+                  {t("brand.noLogo")}
                 </div>
               )}
               <input
@@ -115,9 +118,9 @@ export function SettingsBrandPage() {
                       URL.revokeObjectURL(previewRef.current);
                       previewRef.current = null;
                     }
-                    toast.success("Logo 上传成功");
+                    toast.success(t("brand.uploadSuccess"));
                   } catch (err) {
-                    toast.error(err instanceof Error ? err.message : "Logo 上传失败");
+                    toast.error(err instanceof Error ? err.message : t("brand.uploadFailed"));
                   } finally {
                     setUploading(false);
                   }
@@ -131,13 +134,13 @@ export function SettingsBrandPage() {
                 onClick={() => fileInputRef.current?.click()}
               >
                 <Upload size={16} />
-                {uploading ? "上传中..." : "上传 Logo"}
+                {uploading ? t("brand.uploading") : t("brand.upload")}
               </Button>
             </div>
-            <p className="text-caption text-muted-foreground">上传的 Logo 会先保存到文件存储，随后写入品牌设置。</p>
+            <p className="text-caption text-muted-foreground">{t("brand.hint")}</p>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="brand-color">主色</Label>
+            <Label htmlFor="brand-color">{t("brand.brandColor")}</Label>
             <div className="flex items-center gap-2">
               <Input
                 id="brand-color"
@@ -152,7 +155,7 @@ export function SettingsBrandPage() {
             </div>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="viewer-domain">自定义访问域名</Label>
+            <Label htmlFor="viewer-domain">{t("brand.viewerDomain")}</Label>
             <Input
               id="viewer-domain"
               placeholder="invest.yourdomain.com"
@@ -161,7 +164,7 @@ export function SettingsBrandPage() {
             />
           </div>
           <Button onClick={handleSave} disabled={saving}>
-            {saving ? "保存中..." : "保存品牌设置"}
+            {saving ? t("brand.saving") : t("brand.save")}
           </Button>
         </CardContent>
       </Card>

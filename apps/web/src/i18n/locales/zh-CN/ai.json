@@ -1,0 +1,47 @@
+{
+  "welcomeMessage": "我是 DealSignal AI 助手。接入模型后，我可以帮你解读文档热度、推荐下一步行动、解释访客行为。当前回复为演示逻辑，不引用真实姓名或数字。",
+  "context": {
+    "document": "基于当前文档",
+    "global": "全局助手"
+  },
+  "suggestions": {
+    "highHeatSignals": "今天有哪些高热度信号？",
+    "contactBehavior": "{{name}} 的行为说明什么？",
+    "documentRisks": "这份文档的关键风险点是什么？",
+    "linkSecurity": "如何提升链接安全性？"
+  },
+  "inputPlaceholder": "询问信号、行动建议或安全设置...",
+  "evidence": {
+    "title": "证据与原文定位",
+    "page": "第 {{pageNumber}} 页",
+    "jumpAlert": "跳转到第 {{pageNumber}} 页并高亮引用"
+  },
+  "viewer": {
+    "title": "AI 助手",
+    "open": "打开 AI 助手",
+    "close": "关闭 AI 助手",
+    "placeholder": "输入问题...",
+    "emptyTitle": "向 AI 提问关于文档的内容",
+    "emptyExample": "例如：这家公司的毛利率是多少？",
+    "thinking": "思考中..."
+  },
+  "resetDialog": {
+    "title": "重置对话",
+    "description": "确定要清空当前对话记录吗？此操作无法撤销。",
+    "cancel": "取消",
+    "confirm": "重置"
+  },
+  "aria": {
+    "open": "打开 AI 助手",
+    "close": "关闭 AI 助手",
+    "reset": "重置对话",
+    "send": "发送消息"
+  },
+  "replies": {
+    "documentContext": "（基于当前文档上下文）",
+    "heatAnalysis": "我会分析当前文档的访问数据，找出停留时间长、回访频繁的访客，并标注为热度信号。",
+    "securityAdvice": "我可以检查当前链接的权限配置，并在需要敏感材料时建议提升安全强度。",
+    "followUpAction": "基于高热度访客与文档互动记录，我可以推荐后续跟进动作，例如发送补充材料或安排会议。",
+    "default": "收到你的问题。接入模型后，我将基于真实文档与访问数据生成可解释的回答。"
+  }
+}
