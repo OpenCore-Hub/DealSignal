@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
@@ -80,28 +80,36 @@ describe("WorkspaceSwitcher", () => {
 
   it("renders active workspace name and switches workspace", async () => {
     await renderWithProviders();
-    await waitFor(() => {
-      expect(screen.getByText("Acme Capital")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    fireEvent.click(screen.getByRole("button", { name: /Switch workspace/i }));
+    const button = await screen.findByRole("button", { name: /Switch workspace/i });
+    expect(await screen.findByText("Acme Capital")).toBeInTheDocument();
+
+    fireEvent.click(button);
+    const venturaItem = await screen.findByRole("menuitem", { name: /Ventura Fund/i });
+    fireEvent.click(venturaItem);
+
     await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: /Ventura Fund/i })).toBeInTheDocument();
+      expect(setCurrentWorkspaceMock).toHaveBeenCalledWith(mockWorkspaces[1]);
     });
-    fireEvent.click(screen.getByRole("menuitem", { name: /Ventura Fund/i }));
-    expect(setCurrentWorkspaceMock).toHaveBeenCalledWith(mockWorkspaces[1]);
     expect(navigateMock).toHaveBeenCalledWith("/ventura-fund/dashboard");
   });
 
   it("shows coming-soon toast when creating workspace", async () => {
     await renderWithProviders();
-    await waitFor(() => {
-      expect(screen.getByText("Acme Capital")).toBeInTheDocument();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
     });
-    fireEvent.click(screen.getByRole("button", { name: /Switch workspace/i }));
+    const button = await screen.findByRole("button", { name: /Switch workspace/i });
+    expect(await screen.findByText("Acme Capital")).toBeInTheDocument();
+
+    fireEvent.click(button);
+    const createItem = await screen.findByRole("menuitem", { name: /Create workspace/i });
+    fireEvent.click(createItem);
+
     await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: /Create workspace/i })).toBeInTheDocument();
+      expect(toastInfoMock).toHaveBeenCalledWith("Workspace creation requires backend support.");
     });
-    fireEvent.click(screen.getByRole("menuitem", { name: /Create workspace/i }));
-    expect(toastInfoMock).toHaveBeenCalledWith("Workspace creation requires backend support.");
   });
 });
