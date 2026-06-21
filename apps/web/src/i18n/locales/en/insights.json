@@ -1,0 +1,54 @@
+{
+  "nav": {
+    "overview": "Overview",
+    "pages": "Pages",
+    "suggestions": "Suggestions"
+  },
+  "page": {
+    "title": "Insights",
+    "description": "Track document heat, page engagement, and smart follow-up suggestions."
+  },
+  "overview": {
+    "hot": "Hot",
+    "warm": "Warm",
+    "cold": "Cold",
+    "signals": "Heat signals",
+    "trendTitle": "Visits in the last 7 days",
+    "trendEmpty": "No access data yet; the trend will be generated automatically after links are visited.",
+    "topDocuments": "Top documents",
+    "topLinks": "Top links",
+    "topContacts": "High-intent visitors",
+    "views": "{{count}} views",
+    "views_one": "{{count}} view"
+  },
+  "pages": {
+    "title": "Page engagement",
+    "selectPlaceholder": "Select document",
+    "emptyTitle": "No documents yet",
+    "emptyDescription": "Upload a document to view page engagement analysis.",
+    "noAnalyticsTitle": "No page analytics yet",
+    "noAnalyticsDescription": "This document has no access records yet; data will be collected after sharing links."
+  },
+  "suggestions": {
+    "emptyTitle": "No suggestions yet",
+    "mock": {
+      "sg_1": {
+        "reason": "Sarah viewed the financial slide twice in the past 24 hours, totaling 5 minutes.",
+        "action": "Follow up on terms and valuation within 24 hours"
+      },
+      "sg_2": {
+        "reason": "Marcus visited for the third time and spent the longest on the team slide.",
+        "action": "Send team background and founder bios"
+      },
+      "sg_3": {
+        "reason": "Wei focused on revenue forecast and cash flow.",
+        "action": "Schedule a 30-minute financial model walkthrough"
+      }
+    },
+    "emptyDescription": "No pending suggestions. New ones appear automatically when heat signals are detected.",
+    "viewContact": "View contact",
+    "writeEmail": "Write follow-up email",
+    "emailDisabled": "Email sending requires backend support",
+    "score": "{{score}} pts"
+  }
+}

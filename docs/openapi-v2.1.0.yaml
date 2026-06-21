@@ -1,0 +1,1562 @@
+openapi: 3.1.0
+
+# =============================================================================
+# DealSignal OpenAPI 规范 v2.1.0
+# =============================================================================
+# 文档编号：API-2024-001
+# 版本：v2.1.0
+# 模板版本：v1
+# 状态：已批准
+# 编写人：后端架构师 / API 设计师
+# 关联文档：
+#   - docs/PRD-v2.1.0.md
+#   - docs/TDD-v2.1.0.md
+#   - docs/API-SPEC-v2.1.0.md
+# 同步要求：
+#   本文件必须与 docs/API-SPEC-v2.1.0.md 保持同步。
+# =============================================================================
+
+info:
+  title: "DealSignal API"
+  description: |
+    DealSignal v2.1.0 的 RESTful API 规范。
+
+    ## 认证
+    - 用户接口使用 Bearer Token：`Authorization: Bearer <jwt_token>`
+    - 服务/机器调用使用 API Key：`X-API-Key: <api_key>`
+    - 公开访问通过签名 URL token
+
+    ## 路由策略
+    - 内部 Workspace API：`https://{tenantSlug}.dealsignal.com/{workspaceSlug}/api/v1`
+    - 公开访问 API：`https://{publicDomain}/api/v1/public`
+
+    ## 通用响应
+    成功响应统一返回 `code: ok`，错误响应返回对应的 `code` 和 `message`。
+
+    ## 分页
+    列表接口默认返回 20 条，最大 100 条。支持 `page` 和 `page_size` 参数。
+
+    ## 限流
+    普通接口 100 次/分钟/用户，上传接口 10 次/分钟/用户，AI 问答 30 次/分钟/用户。
+  version: "1.0.0"
+  contact:
+    name: "DealSignal API 支持"
+    email: "api-support@dealsignal.com"
+    url: "https://developers.dealsignal.com"
+
+servers:
+  - url: "https://{tenantSlug}.dealsignal.com/{workspaceSlug}/api/v1"
+    description: "内部 Workspace API（生产环境）"
+    variables:
+      tenantSlug:
+        default: "acme"
+        description: "租户子域名 slug"
+      workspaceSlug:
+        default: "main"
+        description: "Workspace slug"
+  - url: "https://{publicDomain}/api/v1/public"
+    description: "公开访问 API（生产环境）"
+    variables:
+      publicDomain:
+        default: "docs.acme.com"
+        description: "公开链接自定义域名"
+  - url: "http://localhost:8080/{workspaceSlug}/api/v1"
+    description: "本地开发环境（内部 API）"
+    variables:
+      workspaceSlug:
+        default: "main"
+  - url: "http://localhost:8080/api/v1/public"
+    description: "本地开发环境（公开 API）"
+
+# =============================================================================
+# 安全认证
+# =============================================================================
+security:
+  - bearerAuth: []
+
+# =============================================================================
+# 标签分类
+# =============================================================================
+tags:
+  - name: "Upload"
+    description: "文档上传与解析"
+  - name: "Viewer"
+    description: "文档查看与页面渲染"
+  - name: "Analytics"
+    description: "阅读事件与热度分析"
+  - name: "Search"
+    description: "文档内搜索"
+  - name: "Assistant"
+    description: "AI 问答"
+  - name: "Link"
+    description: "智能链接与权限"
+  - name: "DealRoom"
+    description: "数据室"
+  - name: "Integration"
+    description: "第三方集成"
+
+# =============================================================================
+# 路径定义
+# =============================================================================
+paths:
+  # ---------------------------------------------------------------------------
+  # Upload
+  # ---------------------------------------------------------------------------
+  /documents:
+    post:
+      summary: "上传文档"
+      description: "上传 PDF / DOCX / PPTX / XLSX 文件，创建 document 记录与 ingestion job。"
+      operationId: "uploadDocument"
+      tags:
+        - "Upload"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadDocumentRequest"
+      responses:
+        "201":
+          description: "上传成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Document"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "413":
+          $ref: "#/components/responses/FileTooLargeError"
+        "415":
+          $ref: "#/components/responses/InvalidFileTypeError"
+        "429":
+          $ref: "#/components/responses/StorageQuotaExceededError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /documents/{documentId}:
+    parameters:
+      - $ref: "#/components/parameters/DocumentIdPath"
+
+    get:
+      summary: "获取文档状态"
+      description: "获取文档元数据、解析状态与 ingestion job 信息。"
+      operationId: "getDocument"
+      tags:
+        - "Upload"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Document"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/DocumentNotFoundError"
+
+  # ---------------------------------------------------------------------------
+  # Viewer
+  # ---------------------------------------------------------------------------
+  /documents/{documentId}/pages:
+    parameters:
+      - $ref: "#/components/parameters/DocumentIdPath"
+
+    get:
+      summary: "获取页面列表"
+      description: "获取文档所有页面的元数据（页码、尺寸、缩略图 object key）。"
+      operationId: "listDocumentPages"
+      tags:
+        - "Viewer"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PageList"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/DocumentNotFoundError"
+        "409":
+          $ref: "#/components/responses/DocumentNotReadyError"
+
+  /documents/{documentId}/pages/signed-url:
+    parameters:
+      - $ref: "#/components/parameters/DocumentIdPath"
+
+    post:
+      summary: "获取签名 URL（内部）"
+      description: "为指定页面生成后端签名 URL 或 Cloudflare 签名 URL。"
+      operationId: "getSignedPageURL"
+      tags:
+        - "Viewer"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GetSignedURLRequest"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SignedURLResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/PageNotFoundError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Analytics / Public Events
+  # ---------------------------------------------------------------------------
+  /events:
+    post:
+      summary: "上报阅读事件"
+      description: "公开接口，接收访问者在 Viewer 页面产生的阅读行为事件。"
+      operationId: "trackEvents"
+      tags:
+        - "Analytics"
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrackEventsRequest"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/TrackEventsResponse"
+        "400":
+          $ref: "#/components/responses/InvalidTokenError"
+        "429":
+          $ref: "#/components/responses/RateLimitError"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ---------------------------------------------------------------------------
+  # Search
+  # ---------------------------------------------------------------------------
+  /search:
+    post:
+      summary: "文档内搜索"
+      description: "在指定文档内执行 hybrid search（exact + fulltext + vector）。"
+      operationId: "searchDocument"
+      tags:
+        - "Search"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SearchRequest"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SearchResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "409":
+          $ref: "#/components/responses/DocumentNotReadyError"
+
+  # ---------------------------------------------------------------------------
+  # Assistant
+  # ---------------------------------------------------------------------------
+  /assistant/chat:
+    post:
+      summary: "AI 问答"
+      description: "基于文档内容回答问题，返回 answer、evidence 与 follow-up questions。"
+      operationId: "assistantChat"
+      tags:
+        - "Assistant"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssistantChatRequest"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/AssistantChatResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "409":
+          $ref: "#/components/responses/DocumentNotReadyError"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailableError"
+
+  # ---------------------------------------------------------------------------
+  # Link
+  # ---------------------------------------------------------------------------
+  /links:
+    post:
+      summary: "创建智能链接"
+      description: "为文档创建公开分享链接，支持多种权限策略。"
+      operationId: "createLink"
+      tags:
+        - "Link"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLinkRequest"
+      responses:
+        "201":
+          description: "创建成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/Link"
+        "400":
+          $ref: "#/components/responses/InvalidPermissionConfigError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "409":
+          $ref: "#/components/responses/DocumentNotReadyError"
+
+  /public/links/{publicToken}:
+    parameters:
+      - name: publicToken
+        in: path
+        required: true
+        description: "链接 public_token"
+        schema:
+          type: string
+
+    get:
+      summary: "访问公开链接"
+      description: "公开接口，返回链接、文档元数据及访问权限校验结果。"
+      operationId: "accessPublicLink"
+      tags:
+        - "Link"
+      security: []
+      parameters:
+        - name: tenant
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: workspace
+          in: query
+          required: true
+          schema:
+            type: string
+        - name: token
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/PublicLinkAccessResponse"
+        "403":
+          $ref: "#/components/responses/PublicLinkForbiddenError"
+        "404":
+          $ref: "#/components/responses/LinkNotFoundError"
+        "410":
+          $ref: "#/components/responses/LinkGoneError"
+        "429":
+          $ref: "#/components/responses/LinkMaxAccessReachedError"
+
+  # ---------------------------------------------------------------------------
+  # Analytics
+  # ---------------------------------------------------------------------------
+  /analytics/links/{linkId}/score:
+    parameters:
+      - name: linkId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: "热度评分"
+      description: "获取指定链接的热度评分与评分因子。"
+      operationId: "getLinkHeatScore"
+      tags:
+        - "Analytics"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/HeatScoreResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/LinkNotFoundError"
+
+  /analytics/links/{linkId}/suggestions:
+    parameters:
+      - name: linkId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: "跟进建议"
+      description: "基于热度与行为数据生成跟进建议。"
+      operationId: "getFollowUpSuggestions"
+      tags:
+        - "Analytics"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SuggestionsResponse"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/LinkNotFoundError"
+
+  # ---------------------------------------------------------------------------
+  # Deal Room
+  # ---------------------------------------------------------------------------
+  /deal-rooms:
+    post:
+      summary: "创建数据室"
+      description: "创建多文件数据室，支持模板与初始文档。"
+      operationId: "createDealRoom"
+      tags:
+        - "DealRoom"
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateDealRoomRequest"
+      responses:
+        "201":
+          description: "创建成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DealRoom"
+        "400":
+          $ref: "#/components/responses/BadRequestError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "409":
+          $ref: "#/components/responses/SlugDuplicatedError"
+
+  /deal-rooms/{roomId}:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    get:
+      summary: "获取数据室"
+      description: "获取数据室详情，包括文件夹、文档、成员与访问申请。"
+      operationId: "getDealRoom"
+      tags:
+        - "DealRoom"
+      responses:
+        "200":
+          description: "成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DealRoomDetail"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+        "403":
+          $ref: "#/components/responses/ForbiddenError"
+        "404":
+          $ref: "#/components/responses/RoomNotFoundError"
+
+  /public/deal-rooms/{roomId}/access-requests:
+    parameters:
+      - name: roomId
+        in: path
+        required: true
+        schema:
+          type: string
+
+    post:
+      summary: "数据室访问申请"
+      description: "公开接口，访客申请访问数据室。"
+      operationId: "requestDealRoomAccess"
+      tags:
+        - "DealRoom"
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DealRoomAccessRequestRequest"
+      responses:
+        "201":
+          description: "申请成功"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/DealRoomAccessRequest"
+        "400":
+          $ref: "#/components/responses/InvalidEmailError"
+        "404":
+          $ref: "#/components/responses/RoomNotFoundError"
+        "409":
+          $ref: "#/components/responses/RequestAlreadyExistsError"
+
+  # ---------------------------------------------------------------------------
+  # Integration
+  # ---------------------------------------------------------------------------
+  /integrations/crm/sync:
+    post:
+      summary: "CRM 同步"
+      description: "将事件同步到 HubSpot 或 Salesforce。"
+      operationId: "syncToCRM"
+      tags:
+        - "Integration"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CRMSyncRequest"
+      responses:
+        "202":
+          description: "已入队"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SyncQueuedResponse"
+        "400":
+          $ref: "#/components/responses/IntegrationNotConfiguredError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+  /integrations/slack/notify:
+    post:
+      summary: "Slack 通知"
+      description: "发送 Slack 通知到指定频道。"
+      operationId: "sendSlackNotification"
+      tags:
+        - "Integration"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SlackNotifyRequest"
+      responses:
+        "202":
+          description: "已入队"
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/BaseResponse"
+                  - type: object
+                    required: [data]
+                    properties:
+                      data:
+                        $ref: "#/components/schemas/SyncQueuedResponse"
+        "400":
+          $ref: "#/components/responses/SlackNotConnectedError"
+        "401":
+          $ref: "#/components/responses/UnauthorizedError"
+
+
+# =============================================================================
+# 组件定义
+# =============================================================================
+components:
+  # ---------------------------------------------------------------------------
+  # 安全方案
+  # ---------------------------------------------------------------------------
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "用户会话 JWT Token"
+    apiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: "服务/机器调用 API Key"
+
+  # ---------------------------------------------------------------------------
+  # 参数
+  # ---------------------------------------------------------------------------
+  parameters:
+    DocumentIdPath:
+      name: documentId
+      in: path
+      required: true
+      description: "文档 ID"
+      schema:
+        type: string
+
+    IdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: false
+      description: "幂等键"
+      schema:
+        type: string
+
+    PageQuery:
+      name: page
+      in: query
+      description: "页码"
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+
+    PageSizeQuery:
+      name: page_size
+      in: query
+      description: "每页数量"
+      schema:
+        type: integer
+        default: 20
+        maximum: 100
+
+  # ---------------------------------------------------------------------------
+  # Schema
+  # ---------------------------------------------------------------------------
+  schemas:
+    # ---------------------------- Base ----------------------------
+    BaseResponse:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+          example: "ok"
+        message:
+          type: string
+          example: "success"
+        request_id:
+          type: string
+          example: "req_xxx"
+
+    Pagination:
+      type: object
+      required: [page, page_size, total, has_more]
+      properties:
+        page:
+          type: integer
+        page_size:
+          type: integer
+        total:
+          type: integer
+        has_more:
+          type: boolean
+
+    ErrorResponse:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              issue:
+                type: string
+        request_id:
+          type: string
+
+    # ---------------------------- Document ----------------------------
+    UploadDocumentRequest:
+      type: object
+      required: [file]
+      properties:
+        file:
+          type: string
+          format: binary
+          description: "PDF / DOCX / PPTX / XLSX，最大 100MB"
+        source_type:
+          type: string
+          enum: [pdf, docx, pptx, xlsx]
+          description: "未提供时从文件名推断"
+
+    Document:
+      type: object
+      required: [id, title, source_type, status, created_at]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        source_type:
+          type: string
+          enum: [pdf, docx, pptx, xlsx]
+        status:
+          type: string
+          enum: [uploaded, processing, ready, failed]
+        page_count:
+          type: integer
+          nullable: true
+        ingestion_job:
+          $ref: "#/components/schemas/IngestionJob"
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    IngestionJob:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+          enum: [pending, running, completed, failed, cancelled]
+        error_message:
+          type: string
+          nullable: true
+
+    # ---------------------------- Pages ----------------------------
+    PageList:
+      type: object
+      required: [document_id, pages, total]
+      properties:
+        document_id:
+          type: string
+        pages:
+          type: array
+          items:
+            $ref: "#/components/schemas/Page"
+        total:
+          type: integer
+
+    Page:
+      type: object
+      required: [page_number, width, height]
+      properties:
+        page_number:
+          type: integer
+        width:
+          type: integer
+        height:
+          type: integer
+        thumbnail_object_key:
+          type: string
+
+    GetSignedURLRequest:
+      type: object
+      required: [page_number]
+      properties:
+        page_number:
+          type: integer
+          minimum: 1
+        purpose:
+          type: string
+          enum: [view, thumbnail]
+          default: view
+
+    SignedURLResponse:
+      type: object
+      required: [page_number, image_url, expires_at, width, height]
+      properties:
+        page_number:
+          type: integer
+        image_url:
+          type: string
+          format: uri
+        expires_at:
+          type: string
+          format: date-time
+        width:
+          type: integer
+        height:
+          type: integer
+
+    # ---------------------------- Events ----------------------------
+    TrackEventsRequest:
+      type: object
+      required: [token, visitor_id, events]
+      properties:
+        token:
+          type: string
+        visitor_id:
+          type: string
+        events:
+          type: array
+          items:
+            $ref: "#/components/schemas/ReadingEvent"
+
+    ReadingEvent:
+      type: object
+      required: [event_type, timestamp]
+      properties:
+        event_type:
+          type: string
+          enum: [link_opened, page_viewed, download_attempted]
+        page_number:
+          type: integer
+        duration_ms:
+          type: integer
+        scroll_depth:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+
+    TrackEventsResponse:
+      type: object
+      required: [received, visitor_id]
+      properties:
+        received:
+          type: integer
+        visitor_id:
+          type: string
+
+    # ---------------------------- Search ----------------------------
+    SearchRequest:
+      type: object
+      required: [document_id, query]
+      properties:
+        document_id:
+          type: string
+        query:
+          type: string
+        mode:
+          type: string
+          enum: [exact, fulltext, vector, hybrid]
+          default: hybrid
+        top_k:
+          type: integer
+          default: 5
+          maximum: 20
+
+    SearchResponse:
+      type: object
+      required: [document_id, query, results]
+      properties:
+        document_id:
+          type: string
+        query:
+          type: string
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/SearchResult"
+
+    SearchResult:
+      type: object
+      required: [chunk_id, score, normalized_text, page_number]
+      properties:
+        chunk_id:
+          type: string
+        score:
+          type: number
+        normalized_text:
+          type: string
+        page_number:
+          type: integer
+        boxes:
+          type: array
+          items:
+            $ref: "#/components/schemas/BoundingBox"
+
+    BoundingBox:
+      type: object
+      required: [x, y, w, h]
+      properties:
+        x:
+          type: number
+        y:
+          type: number
+        w:
+          type: number
+        h:
+          type: number
+
+    # ---------------------------- Assistant ----------------------------
+    AssistantChatRequest:
+      type: object
+      required: [document_id, query]
+      properties:
+        document_id:
+          type: string
+        query:
+          type: string
+        session_id:
+          type: string
+
+    AssistantChatResponse:
+      type: object
+      required: [session_id, answer, evidence]
+      properties:
+        session_id:
+          type: string
+        answer:
+          type: string
+        evidence:
+          type: array
+          items:
+            $ref: "#/components/schemas/Evidence"
+        follow_up_questions:
+          type: array
+          items:
+            type: string
+
+    Evidence:
+      type: object
+      required: [chunk_id, quote, page_number, boxes, score]
+      properties:
+        chunk_id:
+          type: string
+        quote:
+          type: string
+        page_number:
+          type: integer
+        boxes:
+          type: array
+          items:
+            $ref: "#/components/schemas/BoundingBox"
+        score:
+          type: number
+
+    # ---------------------------- Link ----------------------------
+    CreateLinkRequest:
+      type: object
+      required: [document_id]
+      properties:
+        document_id:
+          type: string
+        name:
+          type: string
+        permission_type:
+          type: string
+          enum: [public, email_required, whitelist, password]
+          default: public
+        allowed_emails:
+          type: array
+          items:
+            type: string
+            format: email
+        allowed_domains:
+          type: array
+          items:
+            type: string
+        password:
+          type: string
+        expires_at:
+          type: string
+          format: date-time
+        max_access_count:
+          type: integer
+        download_enabled:
+          type: boolean
+          default: false
+        watermark_enabled:
+          type: boolean
+          default: false
+
+    Link:
+      type: object
+      required: [id, public_token, name, short_url, permission_type, status, created_at]
+      properties:
+        id:
+          type: string
+        public_token:
+          type: string
+        name:
+          type: string
+        short_url:
+          type: string
+          format: uri
+        permission_type:
+          type: string
+        status:
+          type: string
+          enum: [active, expired, revoked]
+        created_at:
+          type: string
+          format: date-time
+
+    PublicLinkAccessResponse:
+      type: object
+      required: [link, document, visitor_id, requires_email, requires_password]
+      properties:
+        link:
+          $ref: "#/components/schemas/Link"
+        document:
+          type: object
+          required: [id, title, page_count, status]
+          properties:
+            id:
+              type: string
+            title:
+              type: string
+            page_count:
+              type: integer
+            status:
+              type: string
+        visitor_id:
+          type: string
+        requires_email:
+          type: boolean
+        requires_password:
+          type: boolean
+
+    # ---------------------------- Analytics ----------------------------
+    HeatScoreResponse:
+      type: object
+      required: [link_id, score, tier, factors, updated_at]
+      properties:
+        link_id:
+          type: string
+        score:
+          type: integer
+        tier:
+          type: string
+          enum: [hot, warm, cold]
+        factors:
+          type: array
+          items:
+            $ref: "#/components/schemas/HeatFactor"
+        updated_at:
+          type: string
+          format: date-time
+
+    HeatFactor:
+      type: object
+      required: [name, value, weight]
+      properties:
+        name:
+          type: string
+        value:
+          type: number
+        weight:
+          type: number
+
+    SuggestionsResponse:
+      type: object
+      required: [link_id, suggestions]
+      properties:
+        link_id:
+          type: string
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/FollowUpSuggestion"
+
+    FollowUpSuggestion:
+      type: object
+      required: [type, priority, title, description, recommended_action]
+      properties:
+        type:
+          type: string
+        priority:
+          type: string
+          enum: [high, medium, low]
+        title:
+          type: string
+        description:
+          type: string
+        recommended_action:
+          type: string
+        email_draft:
+          type: string
+
+    # ---------------------------- Deal Room ----------------------------
+    CreateDealRoomRequest:
+      type: object
+      required: [name, slug]
+      properties:
+        name:
+          type: string
+        slug:
+          type: string
+        template_type:
+          type: string
+          enum: [seed, series_a, lp_update, sales_proposal]
+        requires_nda:
+          type: boolean
+          default: false
+        requires_approval:
+          type: boolean
+          default: false
+        documents:
+          type: array
+          items:
+            type: object
+            required: [document_id, folder_path]
+            properties:
+              document_id:
+                type: string
+              folder_path:
+                type: string
+
+    DealRoom:
+      type: object
+      required: [id, slug, name, template_type, requires_nda, requires_approval, created_at]
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        template_type:
+          type: string
+        requires_nda:
+          type: boolean
+        requires_approval:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+
+    DealRoomDetail:
+      type: object
+      required: [id, slug, name, folders, members, access_requests]
+      properties:
+        id:
+          type: string
+        slug:
+          type: string
+        name:
+          type: string
+        folders:
+          type: array
+          items:
+            $ref: "#/components/schemas/DealRoomFolder"
+        members:
+          type: array
+          items:
+            $ref: "#/components/schemas/DealRoomMember"
+        access_requests:
+          type: array
+          items:
+            $ref: "#/components/schemas/DealRoomAccessRequest"
+
+    DealRoomFolder:
+      type: object
+      required: [path, documents]
+      properties:
+        path:
+          type: string
+        documents:
+          type: array
+          items:
+            type: object
+            required: [document_id, title]
+            properties:
+              document_id:
+                type: string
+              title:
+                type: string
+
+    DealRoomMember:
+      type: object
+      required: [email, role]
+      properties:
+        email:
+          type: string
+        role:
+          type: string
+        nda_confirmed_at:
+          type: string
+          format: date-time
+
+    DealRoomAccessRequestRequest:
+      type: object
+      required: [email]
+      properties:
+        email:
+          type: string
+          format: email
+        reason:
+          type: string
+
+    DealRoomAccessRequest:
+      type: object
+      required: [id, room_id, email, status, created_at]
+      properties:
+        id:
+          type: string
+        room_id:
+          type: string
+        email:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+          enum: [pending, approved, rejected]
+        created_at:
+          type: string
+          format: date-time
+
+    # ---------------------------- Integration ----------------------------
+    CRMSyncRequest:
+      type: object
+      required: [provider, event_type, payload]
+      properties:
+        provider:
+          type: string
+          enum: [hubspot, salesforce]
+        event_type:
+          type: string
+          enum: [hot_event, follow_up, page_view]
+        payload:
+          type: object
+
+    SlackNotifyRequest:
+      type: object
+      required: [channel, event_type, message]
+      properties:
+        channel:
+          type: string
+        event_type:
+          type: string
+          enum: [hot_event, forward, anomaly]
+        message:
+          type: object
+
+    SyncQueuedResponse:
+      type: object
+      required: [sync_id, status]
+      properties:
+        sync_id:
+          type: string
+        status:
+          type: string
+          enum: [queued]
+
+  # ---------------------------------------------------------------------------
+  # Responses
+  # ---------------------------------------------------------------------------
+  responses:
+    BadRequestError:
+      description: "请求参数错误"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    UnauthorizedError:
+      description: "未认证或 token 过期"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ForbiddenError:
+      description: "无权限访问"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    NotFoundError:
+      description: "资源不存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ConflictError:
+      description: "资源冲突"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    RateLimitError:
+      description: "请求过于频繁"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InternalError:
+      description: "服务器内部错误"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    ServiceUnavailableError:
+      description: "依赖服务暂不可用"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    FileTooLargeError:
+      description: "文件超过 100MB"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InvalidFileTypeError:
+      description: "文件类型不支持"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    StorageQuotaExceededError:
+      description: "租户存储配额超限"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    DocumentNotFoundError:
+      description: "文档不存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    DocumentNotReadyError:
+      description: "文档尚未解析完成"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    PageNotFoundError:
+      description: "页面不存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InvalidTokenError:
+      description: "link token 无效"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InvalidPermissionConfigError:
+      description: "权限配置非法"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    LinkNotFoundError:
+      description: "链接不存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    LinkGoneError:
+      description: "链接已过期或已撤回"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    LinkMaxAccessReachedError:
+      description: "达到最大访问次数"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    PublicLinkForbiddenError:
+      description: "需要邮箱验证、密码或白名单"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    SlugDuplicatedError:
+      description: "slug 已存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    RoomNotFoundError:
+      description: "数据室不存在"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    InvalidEmailError:
+      description: "邮箱格式错误"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    RequestAlreadyExistsError:
+      description: "已存在 pending 申请"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    IntegrationNotConfiguredError:
+      description: "未配置 CRM 集成"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+    SlackNotConnectedError:
+      description: "未绑定 Slack"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"

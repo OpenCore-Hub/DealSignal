@@ -1,0 +1,53 @@
+{
+  "nav": {
+    "overview": "总览",
+    "pages": "页面分析",
+    "suggestions": "跟进建议"
+  },
+  "page": {
+    "title": "洞察",
+    "description": "追踪文档热度、页面参与度与智能跟进建议。"
+  },
+  "overview": {
+    "hot": "高热度",
+    "warm": "中热度",
+    "cold": "低热度",
+    "signals": "热度信号",
+    "trendTitle": "近 7 天访问量趋势",
+    "trendEmpty": "暂无访问数据，趋势将在链接被访问后自动生成。",
+    "topDocuments": "热门文档",
+    "topLinks": "热门链接",
+    "topContacts": "高意向访问者",
+    "views": "{{count}} 次访问"
+  },
+  "pages": {
+    "title": "页面参与度",
+    "selectPlaceholder": "选择文档",
+    "emptyTitle": "暂无文档",
+    "emptyDescription": "上传文档后即可查看页面参与度分析。",
+    "noAnalyticsTitle": "暂无页面分析数据",
+    "noAnalyticsDescription": "该文档暂无访问记录，分享链接后即可收集数据。"
+  },
+  "suggestions": {
+    "emptyTitle": "暂无跟进建议",
+    "mock": {
+      "sg_1": {
+        "reason": "Sarah 在过去 24 小时内 2 次查看财务页，累计停留 5 分钟",
+        "action": "建议 24 小时内跟进融资条款与估值讨论"
+      },
+      "sg_2": {
+        "reason": "Marcus 第三次访问，团队页停留时间最长",
+        "action": "发送补充团队背景与创始人经历资料"
+      },
+      "sg_3": {
+        "reason": "Wei 重点关注收入预测与现金流",
+        "action": "安排一次 30 分钟财务模型 walkthrough"
+      }
+    },
+    "emptyDescription": "当前没有待办建议，系统会在检测到新的热度信号时自动生成。",
+    "viewContact": "查看联系人",
+    "writeEmail": "写跟进邮件",
+    "emailDisabled": "邮件发送需后端支持",
+    "score": "{{score}} 分"
+  }
+}

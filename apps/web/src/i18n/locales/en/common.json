@@ -1,0 +1,148 @@
+{
+  "appName": "DealSignal",
+  "loading": "Loading...",
+  "retry": "Retry",
+  "cancel": "Cancel",
+  "save": "Save",
+  "delete": "Delete",
+  "create": "Create",
+  "upload": "Upload",
+  "copy": "Copy",
+  "copied": "Copied",
+  "close": "Close",
+  "search": "Search...",
+  "viewAll": "View all",
+  "view": "View",
+  "viewDetails": "View details",
+  "download": "Download",
+  "preview": "Preview",
+  "edit": "Edit",
+  "configure": "Configure",
+  "connect": "Connect",
+  "back": "Back",
+  "open": "Open",
+  "submit": "Submit",
+  "send": "Send",
+  "createLink": "Create link",
+  "copyLink": "Copy link",
+  "linkCopied": "Link copied",
+  "logs": "Logs",
+  "deleting": "Deleting...",
+  "complete": "Complete",
+  "reload": "Refresh page",
+  "backToHome": "Back to home",
+  "dueDate": "Due",
+  "overdue": {
+    "days": "{{count}} day overdue",
+    "days_plural": "{{count}} days overdue"
+  },
+  "error": {
+    "title": "Something went wrong",
+    "pageLoadFailed": "Failed to load the page. Please try again later.",
+    "loadFailed": "Failed to load",
+    "saveFailed": "Failed to save",
+    "deleteFailed": "Failed to delete",
+    "copyFailed": "Copy failed, please copy manually"
+  },
+  "empty": {
+    "title": "No data",
+    "description": "No data available at the moment."
+  },
+  "status": {
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "active": "Active",
+    "inactive": "Inactive",
+    "pending": "Pending",
+    "ready": "Ready",
+    "processing": "Processing",
+    "uploading": "Uploading",
+    "failed": "Failed",
+    "done": "Done"
+  },
+  "heat": {
+    "hot": "Hot",
+    "warm": "Warm",
+    "cold": "Cold",
+    "risk": "Risk"
+  },
+  "priority": {
+    "high": "High priority",
+    "medium": "Medium priority",
+    "low": "Low priority"
+  },
+  "confidence": {
+    "high": "High confidence",
+    "medium": "Medium confidence",
+    "low": "Low confidence (small sample)"
+  },
+  "impact": {
+    "high": "High impact",
+    "medium": "Medium impact",
+    "low": "Low impact"
+  },
+  "actionType": {
+    "email": "Email",
+    "call": "Call",
+    "share": "Share materials",
+    "review": "Review"
+  },
+  "fileType": {
+    "pdf": "PDF",
+    "docx": "Word",
+    "pptx": "PPT",
+    "xlsx": "Excel"
+  },
+  "languages": {
+    "en": "English",
+    "zh-CN": "简体中文"
+  },
+  "selectWorkspace": "Select workspace",
+  "selectWorkspaceDescription": "Choose a workspace to enter",
+  "moreActions": "More actions",
+  "usageAtLimit": "At limit",
+  "trendEmptyTitle": "No trend data yet",
+  "theme": {
+    "toggle": "Toggle theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
+  },
+  "start": "Start",
+  "now": "Now",
+  "activity": {
+    "open": "Opened",
+    "pageView": "Viewed page",
+    "revisit": "Revisited",
+    "download": "Downloaded",
+    "share": "Shared",
+    "emptyTitle": "No activity yet",
+    "emptyDescription": "This contact or document has not generated any viewing behavior."
+  },
+  "usageNearLimit": "Near limit",
+  "createWorkspace": "Create workspace",
+  "createWorkspaceDisabled": "Creating workspaces requires backend support",
+  "visitor": {
+    "unknownOrganization": "Unknown organization",
+    "visitCount": "{{count}} visits",
+    "visitCount_one": "{{count}} visit",
+    "avgDuration": "Avg. time {{duration}}",
+    "lastSeen": "Last seen {{time}}",
+    "unknown": "Unknown",
+    "empty": {
+      "title": "No visitors yet",
+      "description": "Visitors will appear here when someone accesses a document through a share link."
+    }
+  },
+  "notFound": {
+    "title": "Page not found",
+    "description": "The page you visited does not exist. Return to Dashboard.",
+    "backToDashboard": "Back to Dashboard"
+  },
+  "mock": {
+    "workspaces": {
+      "acme": { "name": "Acme Capital" },
+      "ventura": { "name": "Ventura Fund" }
+    }
+  }
+}

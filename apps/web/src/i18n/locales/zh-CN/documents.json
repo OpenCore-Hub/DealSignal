@@ -1,0 +1,124 @@
+{
+  "page": {
+    "title": "文档库",
+    "description": "管理所有已上传材料，追踪传播与热度。"
+  },
+  "upload": {
+    "title": "上传文档",
+    "description": "拖拽文件到下方，或点击选择文件。支持 PDF、Word、PPT、Excel。",
+    "dragTitle": "拖拽文件到这里",
+    "dragDescription": "或点击选择文件，支持 PDF / Word / PPT / Excel",
+    "selectFiles": "选择文件",
+    "processing": "解析中...",
+    "removeFile": "移除文件",
+    "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+  },
+  "table": {
+    "emptyTitle": "文档库为空",
+    "emptyDescription": "上传第一份文档，即可创建安全分享链接并追踪投资人/客户的阅读热度。",
+    "upload": "上传文档",
+    "searchPlaceholder": "搜索文档...",
+    "documentCount": "{{count}} 个文档",
+    "documentCountFiltered": "{{count}} 个文档 · 筛选后 {{filtered}} 个",
+    "noMatches": "没有找到匹配的文档"
+  },
+  "columns": {
+    "file": "文件",
+    "heat": "热度",
+    "views": "访问次数",
+    "pages": "{{count}} 页",
+    "links": "{{count}} 个链接",
+    "viewCount": "{{count}} 次访问",
+    "downloadDisabled": "下载需后端签名 URL 支持",
+    "deleteDisabled": "删除文档需后端支持"
+  },
+  "detail": {
+    "back": "返回文档库",
+    "loadFailed": "加载失败：{{error}}",
+    "meta": "{{fileType}} · {{pageCount}} 页 · {{fileSize}} · 上传于 {{createdAt}}",
+    "downloadDisabled": "下载需后端签名 URL 支持",
+    "totalViews": "总访问",
+    "uniqueVisitors": "独立访客",
+    "avgDuration": "平均停留",
+    "heatDistribution": "链接热度分布",
+    "heatHot": "高 {{count}}",
+    "heatWarm": "中 {{count}}",
+    "heatCold": "低 {{count}}",
+    "noLinks": "暂无链接",
+    "tabs": {
+      "overview": "总览",
+      "content": "内容",
+      "analytics": "数据",
+      "ai": "AI 洞察"
+    },
+    "recentVisitors": "最近访客",
+    "documentLinks": "此文档的链接",
+    "linksEmptyTitle": "暂无链接",
+    "linksEmptyDescription": "点击右上角创建链接开始分享。",
+    "linkViews": "{{count}} 次访问 · {{createdAt}}",
+    "deleteDialog": {
+      "title": "删除文档",
+      "description": "确定要删除「{{title}}」吗？关联链接将一并失效，此操作不可撤销。"
+    },
+    "deleting": "删除中...",
+    "deleted": "文档已删除"
+  },
+  "analytics": {
+    "title": "页面停留时间",
+    "emptyTitle": "暂无页面数据",
+    "emptyDescription": "该文档尚未被访问，页面停留时间将在首次访问后显示。",
+    "pageTooltip": "第 {{pageNumber}} 页 · {{seconds}}s",
+    "firstPage": "第 1 页",
+    "lastPage": "第 {{count}} 页"
+  },
+  "content": {
+    "pageLabel": "第 {{pageNumber}} 页",
+    "evidenceBadge": "证据",
+    "evidenceSrOnly": "此页包含 AI 证据高亮",
+    "pageDetailTitle": "第 {{pageNumber}} 页详情",
+    "viewCount": "浏览次数",
+    "avgDuration": "平均停留",
+    "exitRate": "退出率",
+    "evidenceHighlight": "AI 证据高亮",
+    "sourceLocation": "原文定位"
+  },
+  "aiInsights": {
+    "emptyTitle": "暂无分析数据",
+    "emptyDescription": "文档被访问后，AI 将基于真实阅读行为生成关键洞察。",
+    "title": "AI 关键洞察",
+    "topPage": "投资人最关注第 {{pageNumber}} 页",
+    "topPageDescription": "平均停留 {{seconds}} 秒，说明这一页是决策关键页。",
+    "exitRisk": "第 {{pageNumber}} 页退出率较高",
+    "exitRiskDescription": "退出率 {{percent}}%，建议优化内容或补充说明。",
+    "evidenceDriven": "证据驱动的回答",
+    "evidenceDrivenDescription": "所有 AI 结论均附带页码与原文定位，可在左侧“内容”页查看高亮。",
+    "followUpTitle": "追问 AI",
+    "questions": {
+      "risks": "这份文档最关键的风险点是什么？",
+      "focus": "投资人最关注哪些页面？",
+      "optimize": "我应该如何优化这份文档？"
+    },
+    "questionLabels": {
+      "risks": "关键风险点",
+      "focus": "投资人关注点",
+      "optimize": "优化建议"
+    }
+  },
+  "viewer": {
+    "loadFailed": "加载失败：{{error}}",
+    "notFound": "文档不存在或无法加载",
+    "meta": "{{fileType}} · {{fileSize}} · {{pageCount}} 页",
+    "zoomOut": "缩小",
+    "zoomIn": "放大",
+    "previousPage": "上一页",
+    "nextPage": "下一页",
+    "downloadDisabled": "下载需后端签名 URL 支持",
+    "pageHeat": "页面热度",
+    "pageLabel": "第 {{pageNumber}} 页",
+    "thumbnailViews": "{{count}} 次访问 · {{duration}}",
+    "pagePlaceholder": "第 {{pageNumber}} 页",
+    "previewPlaceholder": "文档预览占位",
+    "signedUrlNotice": "后端签名 URL 加载后将在此渲染真实页面内容。",
+    "currentPageStats": "当前页浏览 {{count}} 次，平均停留 {{duration}}。"
+  }
+}

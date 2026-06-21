@@ -13,7 +13,7 @@ owner: 技术团队
 > **状态**：`已批准`  
 > **编写人/适用对象**：`技术团队 / 架构师 / 后端负责人 / 前端负责人`  
 > **编写日期**：`2026-06-20`  
-> **最后更新**：`2026-06-20`  
+> **最后更新**：`2026-06-21`  
 > **关联资源**：  
 > - `docs/PRD-v2.1.0.md`  
 > - `docs/TDD-v2.1.0.md`  
@@ -53,6 +53,7 @@ owner: 技术团队
 
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
+| v2.1.1-sync | 2026-06-21 | 技术团队 | 对齐 Web App 实际栈：React 19 + React Router 8 + Vite 8 + Tailwind CSS 4 + Base UI；补充 i18n、Theme、Zustand 状态、React Router 路由说明 | 第 1、4 章 |
 | v2.1.0 | 2026-06-20 | 技术团队 | 按 ARCHITECTURE-DIAGRAMS-template-v1 创建 DealSignal v2.1.0 架构图资源，包含业务架构、C4 Container 系统架构、部署拓扑、数据流、业务流程、时序、状态、ERD 及图表管理规范 | 全资源 |
 
 ### 1.2 图表资产清单
@@ -75,6 +76,17 @@ owner: 技术团队
 | 链接生命周期状态图 | State | Mermaid | `docs/ARCHITECTURE-v2.1.0.md` | [查看](#92-链接生命周期状态) |
 | 数据室访问申请状态图 | State | Mermaid | `docs/ARCHITECTURE-v2.1.0.md` | [查看](#93-数据室访问申请生命周期状态) |
 | 核心 ERD | ER Diagram | Mermaid | `docs/ARCHITECTURE-v2.1.0.md` | [查看](#10-实体关系图erd) |
+
+### 1.3 评审记录
+
+| 轮次 | 日期 | 参与人 | 结论 | 待办 |
+|------|------|--------|------|------|
+| 架构评审 | 2026-06-20 | CTO、架构师 | 通过 | C4 Container 系统架构与部署拓扑已确认 |
+| 后端评审 | 2026-06-20 | 后端负责人 | 通过 | 数据流图与时序图已确认 |
+| 前端评审 | 2026-06-20 | 前端负责人 | 通过 | 页面状态与组件交互已确认 |
+| QA 评审 | 2026-06-20 | QA 负责人 | 通过 | 核心流程图与时序图覆盖 P0 用例 |
+| 产品评审 | 2026-06-20 | 产品经理 | 通过 | 业务流程图与 PRD 关键路径一致 |
+| 最终评审 | 2026-06-20 | 全体 | 已批准 | ARCHITECTURE-v2.1.0 进入实施阶段 |
 
 ---
 
@@ -223,7 +235,7 @@ flowchart TB
 
 | 组件 | 技术栈 | 职责 | 对应 TDD 章节 |
 |------|--------|------|---------------|
-| Web App | React 18 + Vite + TypeScript | Dashboard、Viewer、AI 助手、数据室等前端界面，基于 Canvas 渲染页面与水印 overlay | PRD-v2.1.0 前端设计（TDD 第 6.3 节 Viewer Frontend 作为实现参考） |
+| Web App | React 19 + React Router 8 + Vite 8 + TypeScript + Tailwind CSS 4 + Base UI | Dashboard、Viewer、AI 助手、数据室等前端界面；基于 Canvas 渲染页面与水印 overlay | PRD-v2.1.0 前端设计、TDD 第 6.3 节 Viewer Frontend |
 | API Gateway | Kong / Nginx + OpenTelemetry | 路由、鉴权、限流、租户/Workspace 上下文解析、日志与 trace 入口 | TDD-v2.1.0 第 5.6 节“路由策略” |
 | Upload Service | Go 1.22+ + Gin | 文件上传、校验、hash、去重、创建 ingestion_job、生成直传 URL | TDD-v2.1.0 第 6.1 节“Upload Service” |
 | Ingestion Worker | Go 1.22+ + PDF 处理库（如 go-fitz / pdfcpu）+ OnlyOffice | 异步解析 PDF / Office，生成 webp、chunks、boxes、embedding，更新文档状态 | TDD-v2.1.0 第 6.2 节“Ingestion Worker” |
@@ -241,6 +253,17 @@ flowchart TB
 | Object Storage | S3 / 阿里云 OSS（私有 bucket） | 原始文件、PDF canonical、page webp、缩略图 | TDD-v2.1.0 第 7.3 节“对象存储安全” |
 | CDN | Cloudflare | 静态资源分发、签名 URL 校验、DDoS 防护 | TDD-v2.1.0 第 7.4 节“签名 URL 安全” |
 | OpenAI | OpenAI API / 兼容 Embedding & LLM | text-embedding 与 chat completion，用于搜索向量与 AI 问答 | TDD-v2.1.0 第 6.6 节“Assistant Service” |
+
+### 4.2.1 前端容器与全局状态
+
+| 模块 | 实现 | 职责 | 关键文件 |
+|------|------|------|----------|
+| i18n | `i18next` + `react-i18next` + `i18next-resources-to-backend` | 双语支持（`en` / `zh-CN`），默认 `en`；11 个 namespace 懒加载；自定义 detector 按 `?lng` → `localStorage` → `navigator` → `htmlTag` 顺序检测 | `src/i18n/config.ts`, `src/i18n/detectors.ts` |
+| Theme | Zustand `uiStore` + `ThemeProvider` | 支持 `light` / `dark` / `system`，持久化到 `localStorage`，监听 `prefers-color-scheme` | `src/stores/uiStore.ts`, `src/components/providers/ThemeProvider.tsx` |
+| 全局状态 | Zustand | `uiStore`（主题、语言、侧边栏状态）、`workspaceStore`（当前 workspace）、`aiStore`（AI 会话）等 | `src/stores/*.ts` |
+| 路由 | React Router 8（data API / `createBrowserRouter`） | 按 `/:workspaceSlug/*` 组织 workspace 内路由；根路径 `/` 为 Workspace 选择页 | `src/router.tsx` |
+
+> **说明**：前端 mock 数据中的用户可见文案统一返回 i18n key（如 `dashboard.mock.signals.sig_1.title`），由组件调用 `t(key)` 渲染。该模式在接入真实后端时需要重新评估：后端返回 plain text 则组件无需翻译，后端返回 key 则需保持 key 契约一致。
 
 ### 4.3 说明
 

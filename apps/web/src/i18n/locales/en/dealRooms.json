@@ -1,0 +1,77 @@
+{
+  "page": {
+    "title": "Deal Rooms",
+    "description": "Centralize due diligence materials, LP reports, and sales proposals in secure deal rooms.",
+    "create": "New deal room"
+  },
+  "empty": {
+    "title": "No deal rooms yet",
+    "description": "Create your first deal room to securely present due diligence materials to investors, LPs, or clients.",
+    "action": "New deal room"
+  },
+  "documentCount": "{{count}} docs",
+  "documentCount_one": "{{count}} doc",
+  "memberCount": "{{count}} members",
+  "memberCount_one": "{{count}} member",
+  "pendingApprovals": "{{count}} pending",
+  "pendingApprovals_one": "{{count}} pending",
+  "lastAccessed": "Last accessed {{time}}",
+  "createdAt": "Created {{time}}",
+  "ndaEnabled": "NDA enabled",
+  "noNda": "No NDA required",
+  "detail": {
+    "back": "Back to deal rooms",
+    "invite": "Invite members",
+    "inviteDisabled": "Inviting members requires backend support",
+    "manageDocs": "Manage documents",
+    "manageDocsDisabled": "Managing documents requires backend support",
+    "documents": "Documents",
+    "members": "Members",
+    "security": "Security",
+    "folders": "Folder structure",
+    "recommendedFiles": "Recommended files",
+    "completion": "Progress",
+    "uploaded": "Uploaded",
+    "upload": "Upload",
+    "uploadDisabled": "Uploading files requires backend support",
+    "noTemplate": "No matching template structure."
+  },
+  "new": {
+    "title": "New Deal Room",
+    "subtitle": "Choose a scenario template and the system will generate folder structure and a recommended file list.",
+    "basicInfo": "Basic info",
+    "name": "Name",
+    "namePlaceholder": "e.g. Seed Round Due Diligence",
+    "description": "Description",
+    "descriptionPlaceholder": "Describe the purpose and target audience",
+    "enableNda": "Enable NDA",
+    "enableNdaDescription": "Require NDA signature before access",
+    "folders": "Folder structure",
+    "recommendedFiles": "Recommended files",
+    "defaultPermission": "Default permission",
+    "cancel": "Cancel",
+    "create": "Create deal room",
+    "creating": "Creating...",
+    "created": "Deal room created",
+    "createFailed": "Failed to create deal room",
+    "folderCount": "{{count}} folders",
+    "folderCount_one": "{{count}} folder"
+  },
+  "permission": {
+    "low": {
+      "label": "Low Friction",
+      "description": "Public or email verification required",
+      "friction": "No extra steps for recipients; highest open rate."
+    },
+    "medium": {
+      "label": "Medium Strength",
+      "description": "Whitelist or password protection",
+      "friction": "Requires email/password/whitelist verification; suitable for sensitive materials."
+    },
+    "high": {
+      "label": "High Strength",
+      "description": "NDA + whitelist + password combined",
+      "friction": "NDA signing + multi-step verification; suitable for confidential due-diligence materials."
+    }
+  }
+}

@@ -76,6 +76,7 @@ pending_confirmation: []
 
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
+| v2.1.1-sync | 2026-06-21 | 产品团队 | 对齐已实现的前端能力： bilingual i18n（en/zh-CN）、Settings Language 页面、Workspace 切换器位置、Workspaces 落地页、Theme 模式 | 第 4、6、11、18 章 |
 | v2.1.0 | 2026-06-20 | 产品团队 | 按 PRD-template-v2 重构：补齐 YAML front matter；统一版本号为 v2.1.0；修正 AC 与关键路径映射；统一 API 路径；清理设计稿占位符；归档 v2.0.7 | 全文档 |
 | v1.0.0 | 2026-06-18 | 产品团队 | 基于原始草案重构为工程化 PRD v1 模板 | 全文档 |
 | v2.0.0 | 2026-06-18 | 产品团队 | 按 PRD-template-v2 升级；整合上传/查看/AI 问答设计文档；补充数据架构、接口契约、测试策略、上线运维 | 全文档 |
@@ -106,13 +107,13 @@ pending_confirmation: []
 | 已归档 PRD | 《PRD-v2.0.7-ARCHIVED》 | `docs/PRD-v2.0.7-ARCHIVED.md` | 已冻结的历史版本 |
 | 原始 PRD 草案 | 《PRD + 产品设计的完整文档草案》 | `docs/PRD + 产品设计的完整文档草案.md` | 已冻结 |
 | 上传查看 AI 设计 | 《上传-查看-AI问答设计文》 | `docs/上传-查看-AI问答设计文.md` | 已冻结 |
-| 技术设计文档 | 《TDD-v2.1.0》 | `docs/TDD-v2.1.0.md` | 已编写，评审中 |
-| 架构与流程图 | 《ARCHITECTURE-v2.1.0》 | `docs/ARCHITECTURE-v2.1.0.md` | 已编写，评审中 |
-| 数据库模型 | 《database-model-v2.1.0》 | `docs/database-model-v2.1.0.md` | 已编写，评审中 |
-| 实施计划 | 《IMPLEMENTATION-PLAN-v2.1.0》 | `docs/IMPLEMENTATION-PLAN-v2.1.0.md` | 待编写 |
+| 技术设计文档 | 《TDD-v2.1.0》 | `docs/TDD-v2.1.0.md` | 已批准 |
+| 架构与流程图 | 《ARCHITECTURE-v2.1.0》 | `docs/ARCHITECTURE-v2.1.0.md` | 已批准 |
+| 数据库模型 | 《database-model-v2.1.0》 | `docs/database-model-v2.1.0.md` | 已批准 |
+| 实施计划 | 《IMPLEMENTATION-PLAN-v2.1.0》 | `docs/IMPLEMENTATION-PLAN-v2.1.0.md` | 已批准 |
 | 测试计划 | 《QA-TEST-PLAN-v2.1.0》 | `docs/QA-TEST-PLAN-v2.1.0.md` | 待编写 |
 | 埋点需求 | 《TRACKING-REQUIREMENTS-v2.1.0》 | `docs/TRACKING-REQUIREMENTS-v2.1.0.md` | 待编写 |
-| UI 设计交付 | 《UI-DESIGN-DELIVERABLE-v2.1.0》 | `docs/UI-DESIGN-DELIVERABLE-v2.1.0.md` | 待编写 |
+| UI 设计交付 | 《UI-DESIGN-DELIVERABLE-v2.1.0》 | `docs/UI-DESIGN-DELIVERABLE-v2.1.0.md` | 已编写，评审中 |
 
 ---
 
@@ -204,7 +205,8 @@ pending_confirmation: []
 | 自建邮件群发系统 | 使用现有邮件服务 | 不建设 |
 | CSV 导出 | 非核心功能，完全不做 | 以后均不支持 |
 | Markdown 文档上传与解析 | 产品定位不支持 Markdown 源文件 | 以后均不支持，用户可转 PDF 上传 |
-| 多语言、数据驻留、SSO/SCIM | 企业版需求 | 二期 |
+| 多语言 | 已作为 v2.1.1 增强提前落地：支持 `en` / `zh-CN`，默认 `en`；剩余企业级数据驻留、SSO/SCIM 仍为二期 | v2.1.1 已交付双语，数据驻留/SSO/SCIM 二期 |
+| 数据驻留、SSO/SCIM | 企业版需求 | 二期 |
 
 ### 4.4 假设与依赖
 
@@ -405,7 +407,7 @@ admin 在 Workspace 中输入被邀请人邮箱
   - 对内：同一用户可属于多个 Workspace，权限各自独立；切换 Workspace 后 URL 路径变为 `/{workspaceSlug}/...`，页面数据刷新为当前 Workspace。
 - 所有业务表必须包含 `tenant_id` 与 `workspace_id`；所有查询必须同时带 `tenant_id` 与 `workspace_id` 过滤。
 - Workspace 创建权限：tenant admin（tenant owner 默认拥有 admin 权限）。
-- Workspace 切换入口：侧边栏 Settings 子菜单；切换后 URL 跳转到 `/{workspaceSlug}/...`。
+- Workspace 切换入口：侧边栏底部 **Workspace Switcher**；切换后 URL 跳转到 `/{workspaceSlug}/...`。Settings 中不再放置 Workspace 切换入口，仅保留语言、品牌、成员等配置项。
 - 用户注册：通过 workspace 邀请链接注册，邀请 token 有效期可配置（默认 7 天，最大 30 天）；注册后自动加入对应 workspace，角色为 member（可升级为 admin）。
 
 ### 6.4 合规约束
@@ -1062,18 +1064,20 @@ Insights
 └── 团队表现
 
 Settings
-├── 切换 Workspace
+├── 通用（General）
 ├── 品牌
 ├── 权限
 ├── 集成
 ├── 团队成员
-└── 安全策略
+├── 安全策略
+└── 语言（Language）
 ```
 
 ### 11.3 关键页面清单
 
 | 页面 | 设计稿链接 | 状态 | 备注 |
 |------|------------|------|------|
+| Workspaces 选择页 | 待补充 | 已实现 | 多 Workspace 用户在根路径 `/` 选择当前工作区 |
 | Dashboard | 待补充（预计 2026-07-09） | 待设计 | 交易雷达首屏 |
 | 文档上传页 | 待补充（预计 2026-07-09） | 待设计 | 拖拽上传、进度、格式提示 |
 | 文档列表页 | 待补充（预计 2026-07-09） | 待设计 | 状态、搜索、筛选 |
@@ -1099,7 +1103,8 @@ Settings
 | 点击引用 | 点击 | Canvas 跳转目标页 + 高亮框 pulse | 目标页未加载时请求签名 URL |
 | 热度评分卡片 | hover | 展示评分因子 | - |
 | 数据室访问申请 | 提交 | 待审批状态 + owner 通知 | 拒绝时说明原因 |
-| Workspace 切换 | 点击侧边栏 Settings → 切换 Workspace | 展开 workspace 列表，切换后 URL 跳转 `/{workspaceSlug}/...` 并刷新页面数据 | 仅展示用户有权限的 workspace |
+| Workspace 切换 | 点击侧边栏底部 Workspace Switcher | 展开 workspace 列表，切换后 URL 跳转 `/{workspaceSlug}/...` 并刷新页面数据 | 仅展示用户有权限的 workspace；当前 "Create workspace" 仅展示 coming-soon 提示 |
+| 语言切换 | Settings → Language | 选择 `en` / `zh-CN`，立即生效并写入 `localStorage` | 首次 fallback 为 `en` |
 
 ### 11.5 页面状态规范
 
@@ -1658,7 +1663,7 @@ PRD 评审通过
 | D-15 | 用户通过 workspace 邀请注册 | 开放注册后分配默认 workspace | 邀请制保证用户直接进入正确工作空间 | 自然注册流程变长 | 产品 |
 | D-16 | 支持企业自定义域名 | 仅子域名 | 提升企业品牌感知 | 增加域名解析、SSL、CDN 配置复杂度 | 产品/技术 |
 | D-17 | 自定义域名 SSL 采用 Let's Encrypt 自动签发 | 手动上传证书 / 付费 CA | 降低运维成本，自动续期 | 当前场景下速率限制不构成瓶颈，无需额外预案 | 技术 |
-| D-18 | Workspace 切换入口放在侧边栏 Settings 子菜单 | 顶部导航 / 头像下拉 | 不占用主导航空间，符合设置心智模型 | 切换路径多一步 | 设计 |
+| D-18 | Workspace 切换入口放在侧边栏底部 Workspace Switcher | 顶部导航 / 头像下拉 / Settings 子菜单 | 一键可达，且与 Settings 配置项解耦 | 占用侧边栏底部空间 | 设计 |
 | D-19 | 邀请 token 有效期可配置 | 固定 7 天 | 满足不同安全策略需求 | 配置项增加 | 产品 |
 | D-20 | OnlyOffice 自托管部署在独立集群 | 与主服务同集群 | 隔离资源，避免转换任务影响核心服务 | 增加跨集群通信复杂度 | 技术 |
 | D-21 | 自定义域名采用 **CNAME 验证** | DNS TXT 验证 | 配置更简单，用户易操作 | 需要用户能修改 DNS 记录 | 技术 |

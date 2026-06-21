@@ -1,0 +1,128 @@
+{
+  "page": {
+    "title": "Documents",
+    "description": "Manage all uploaded materials and track sharing and heat."
+  },
+  "upload": {
+    "title": "Upload Document",
+    "description": "Drag a file below, or click to select. Supports PDF, Word, PPT, and Excel.",
+    "dragTitle": "Drag files here",
+    "dragDescription": "Or click to select files. Supports PDF / Word / PPT / Excel",
+    "selectFiles": "Select files",
+    "processing": "Processing...",
+    "removeFile": "Remove file",
+    "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+  },
+  "table": {
+    "emptyTitle": "Document library is empty",
+    "emptyDescription": "Upload your first document to create secure share links and track investor and buyer engagement.",
+    "upload": "Upload Document",
+    "searchPlaceholder": "Search documents...",
+    "documentCount": "{{count}} documents",
+    "documentCount_one": "{{count}} document",
+    "documentCountFiltered": "{{count}} documents · {{filtered}} filtered",
+    "noMatches": "No matching documents found"
+  },
+  "columns": {
+    "file": "File",
+    "heat": "Heat",
+    "views": "Views",
+    "pages": "{{count}} pages",
+    "pages_one": "{{count}} page",
+    "links": "{{count}} links",
+    "links_one": "{{count}} link",
+    "viewCount": "{{count}} views",
+    "viewCount_one": "{{count}} view",
+    "downloadDisabled": "Download requires backend signed URL support",
+    "deleteDisabled": "Delete document requires backend support"
+  },
+  "detail": {
+    "back": "Back to documents",
+    "loadFailed": "Failed to load: {{error}}",
+    "meta": "{{fileType}} · {{pageCount}} pages · {{fileSize}} · uploaded {{createdAt}}",
+    "downloadDisabled": "Download requires backend signed URL support",
+    "totalViews": "Total views",
+    "uniqueVisitors": "Unique visitors",
+    "avgDuration": "Avg. time on document",
+    "heatDistribution": "Link engagement breakdown",
+    "heatHot": "Hot {{count}}",
+    "heatWarm": "Warm {{count}}",
+    "heatCold": "Cold {{count}}",
+    "noLinks": "No links yet",
+    "tabs": {
+      "overview": "Overview",
+      "content": "Content",
+      "analytics": "Analytics",
+      "ai": "AI Insights"
+    },
+    "recentVisitors": "Recent visitors",
+    "documentLinks": "Links for this document",
+    "linksEmptyTitle": "No links yet",
+    "linksEmptyDescription": "Click Create link in the top right to start sharing.",
+    "linkViews": "{{count}} views · {{createdAt}}",
+    "deleteDialog": {
+      "title": "Delete document",
+      "description": "Are you sure you want to delete \"{{title}}\"? Associated links will become invalid and this action cannot be undone."
+    },
+    "deleting": "Deleting...",
+    "deleted": "Document deleted"
+  },
+  "analytics": {
+    "title": "Time on page",
+    "emptyTitle": "No page data yet",
+    "emptyDescription": "This document hasn't been viewed yet. Time on page will appear after the first visit.",
+    "pageTooltip": "Page {{pageNumber}} · {{seconds}}s",
+    "firstPage": "Page 1",
+    "lastPage": "Page {{count}}"
+  },
+  "content": {
+    "pageLabel": "Page {{pageNumber}}",
+    "evidenceBadge": "Evidence",
+    "evidenceSrOnly": "This page contains AI evidence highlights",
+    "pageDetailTitle": "Page {{pageNumber}} details",
+    "viewCount": "Views",
+    "avgDuration": "Avg. duration",
+    "exitRate": "Exit rate",
+    "evidenceHighlight": "AI evidence highlights",
+    "sourceLocation": "Source location"
+  },
+  "aiInsights": {
+    "emptyTitle": "No analysis data yet",
+    "emptyDescription": "After the document is viewed, AI will generate key insights based on real reading behavior.",
+    "title": "AI insights",
+    "topPage": "Investors focused most on page {{pageNumber}}",
+    "topPageDescription": "Average time on page {{seconds}}s, indicating this is a decision-critical page.",
+    "exitRisk": "Page {{pageNumber}} has a high exit rate",
+    "exitRiskDescription": "Exit rate {{percent}}%, consider optimizing content or adding explanations.",
+    "evidenceDriven": "Evidence-driven answers",
+    "evidenceDrivenDescription": "All AI conclusions include page numbers and source locations; view highlights in the Content tab.",
+    "followUpTitle": "Ask a follow-up",
+    "questions": {
+      "risks": "What are the most critical risks in this document?",
+      "focus": "Which pages do investors care about most?",
+      "optimize": "How should I optimize this document?"
+    },
+    "questionLabels": {
+      "risks": "Key risks",
+      "focus": "Investor focus",
+      "optimize": "Optimization tips"
+    }
+  },
+  "viewer": {
+    "loadFailed": "Failed to load: {{error}}",
+    "notFound": "Document does not exist or cannot be loaded",
+    "meta": "{{fileType}} · {{fileSize}} · {{pageCount}} pages",
+    "zoomOut": "Zoom out",
+    "zoomIn": "Zoom in",
+    "previousPage": "Previous page",
+    "nextPage": "Next page",
+    "downloadDisabled": "Download requires backend signed URL support",
+    "pageHeat": "Page heat",
+    "pageLabel": "Page {{pageNumber}}",
+    "thumbnailViews": "{{count}} views · {{duration}}",
+    "pagePlaceholder": "Page {{pageNumber}}",
+    "previewPlaceholder": "Document preview placeholder",
+    "signedUrlNotice": "Real page content will render here once the backend signed URL is loaded.",
+    "currentPageStats": "Viewed {{count}} times · avg. time {{duration}}."
+  }
+}

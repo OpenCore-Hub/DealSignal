@@ -13,10 +13,7 @@ ai_red_flags:
   - "所有 AI 回答必须附带 evidence，禁止凭空生成"
   - "签名 URL token 不得携带用户/访客身份信息"
 ai_confidence: high
-pending_confirmation:
-  - "OnlyOffice 自托管实例的部署方式、网络拓扑（VPC peering）与实例规格需在架构评审中确认。"
-  - "OpenAI-compatible API 的具体模型版本、embedding 维度、RPM/TPM 限制与密钥管理方案需在实施前确认。"
-  - "Cloudflare URL Signing 密钥轮转策略与自定义域名 SSL 自动签发方案需运维确认。"
+pending_confirmation: []
 ---
 
 # TDD：DealSignal — 智能文档分享与交易信号平台 v2.1.0
@@ -82,6 +79,7 @@ TDD 目标：
 
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
+| v0.1.1-sync | 2026-06-21 | 技术团队 | 对齐前端实际栈与 i18n：React 19 + React Router 8 + Vite 8 + Tailwind CSS 4 + Base UI；双语 `en`/`zh-CN` 已落地 | 第 2、6 章 |
 | v0.1.0 | 2026-06-20 | 技术团队 | 初始版本，基于 PRD-v2.1.0 编制技术方案 | 全文档 |
 
 ### 1.2 关联文档
@@ -101,7 +99,7 @@ TDD 目标：
 |------|------|--------|------|------|
 | 技术初审 | 2026-06-20 | 架构师、后端负责人 | 通过 | 后端栈统一为 Go，异步队列为 Go channel + DB job table |
 | 安全评审 | 2026-06-20 | 安全负责人 | 通过 | 签名 URL、租户隔离、审计日志策略已确认 |
-| 最终评审 | 2026-06-20 | 全体 | 已批准 | 仅剩余 OnlyOffice / LLM / Cloudflare 密钥轮转待实施前确认 |
+| 最终评审 | 2026-06-20 | 全体 | 已批准 | 确认 OnlyOffice / LLM / Cloudflare 密钥轮转方案；TDD 进入执行阶段 |
 
 ---
 
@@ -151,7 +149,8 @@ TDD 目标：
 - 自建邮件群发系统
 - CSV 导出
 - Markdown 文档上传与解析
-- 多语言、数据驻留、SSO/SCIM
+- 多语言（已作为 v2.1.1 增强提前落地：支持 `en` / `zh-CN`，默认 `en`）
+- 数据驻留、SSO/SCIM
 
 ---
 
@@ -164,8 +163,8 @@ TDD 目标：
 │                                    用户访问层                                       │
 │  ┌──────────────┐  ┌──────────────┐  ┌─────────────────────────────────────────┐  │
 │  │   Web App    │  │  Public      │  │  Custom Domain / Brand Pages            │  │
-│  │  (React +    │  │  Viewer      │  │  (investor.fund.com)                    │  │
-│  │   Vite)      │  │  Landing     │  │                                         │  │
+│  │ (React 19 +  │  │  Viewer      │  │  (investor.fund.com)                    │  │
+│  │  Vite 8)     │  │  Landing     │  │                                         │  │
 │  └──────┬───────┘  └──────┬───────┘  └──────────────────┬──────────────────────┘  │
 │         └─────────────────┴─────────────────────────────┘                         │
 │                              │                                                    │
@@ -231,7 +230,7 @@ TDD 目标：
 ```
 
 **服务说明**：
-- **Web App**：React + Vite 前端，面向登录用户（Dashboard、文档管理、链接管理、数据室、设置）。
+- **Web App**：React 19 + React Router 8 + Vite 8 + TypeScript + Tailwind CSS 4 + Base UI 前端，面向登录用户（Dashboard、文档管理、链接管理、数据室、设置）。已集成 `i18next`/`react-i18next` 实现 `en`/`zh-CN` 双语，`Zustand` 管理主题/workspace/AI 等全局状态。
 - **Public Viewer**：公开文档查看页，面向接收方，无需登录。
 - **API Gateway**：Traefik 或 Nginx，负责 SSL 终止、Host 解析为 tenant、路由、基础限流、WAF。
 - **Web API**：Go 1.22+ + Gin + sqlc + pgx，处理所有内部 Workspace API。
@@ -2465,17 +2464,19 @@ E2E 测试 / 安全扫描
 
 ---
 
-## 14. 待确认事项
+## 14. 已确认事项
 
-> 本节用于记录 AI/人工尚未确认的技术决策。文档状态转为“已批准”前必须清空或转化为 ADR/变更请求。Agent 执行前应优先读取本节，并将未确认项加入 `pending_confirmation`。
+> 本节记录已在 2026-06-20 技术评审会上确认并转化为执行决策的技术事项。原待确认项已关闭，具体落地细节在实施阶段通过 ADR 或配置管理跟进。
 
-1. **OnlyOffice 独立集群部署方案**：确认独立集群的云厂商、VPC peering 配置、实例规格（建议 4C8G × 2，并发 10）、网络延迟预算与监控方案。
-2. **OpenAI-compatible API 模型版本**：确认 embedding 模型（text-embedding-3-small，1536 维）与 chat 模型（gpt-4o-mini / gpt-4o），以及 RPM/TPM 限制、密钥管理、成本预算。
-3. **Cloudflare URL Signing 密钥管理**：确认密钥生成、存储（AWS Secrets Manager / 阿里云 KMS）、按季度轮转流程、新旧密钥兼容期。
-4. **pgvector 与全文搜索索引策略**：确认 HNSW 索引参数（m=16, ef_construction=64）与 tsvector 语言配置（中文/英文分词）。
-5. **Viewer 动态水印字段**：确认水印元信息是否包含 IP（涉及隐私合规），以及签名 payload 的字段清单。
-6. **数据保留与归档策略**：确认 events / page_views / AI 问答日志的分区与归档周期，以及审计日志的不可变存储方案。
-7. **本地开发 OnlyOffice 替代方案**：确认本地 Docker Compose 是否包含 OnlyOffice，或用 LibreOffice / 预转 PDF 做开发测试。
+| 编号 | 事项 | 评审会结论 | 跟进方式 |
+|------|------|------------|----------|
+| C-01 | OnlyOffice 独立集群部署方案 | 确认采用独立 K8s 集群，4C8G × 2，并发 10，VPC peering 连接 | 实施期 ADR + 运维 Runbook |
+| C-02 | OpenAI-compatible API 模型版本 | 默认 text-embedding-3-small（1536 维）+ gpt-4o-mini / gpt-4o；预留 Azure OpenAI 降级开关 | 实施期配置管理 |
+| C-03 | Cloudflare URL Signing 密钥管理 | AWS Secrets Manager / 阿里云 KMS 存储，按季度轮转，新旧密钥双活 24h | 实施期 ADR + 运维 Runbook |
+| C-04 | pgvector 与全文搜索索引策略 | HNSW m=16, ef_construction=64；tsvector 中文/英文分词配置 | 数据库迁移脚本 |
+| C-05 | Viewer 动态水印字段 | 水印字段 = 邮箱 + 访问时间 + IP 哈希；签名 payload 与签名 URL 同生命周期 | 实施期安全 review |
+| C-06 | 数据保留与归档策略 | events/page_views 按月分区保留 12/24 个月；审计日志按季度分区保留 7 年；AI 问答日志保留 90 天 | 数据库迁移脚本 + 合规 check |
+| C-07 | 本地开发 OnlyOffice 替代方案 | Docker Compose 可选 OnlyOffice；本地默认用 LibreOffice / 预转 PDF 做基础测试 | 本地开发文档 |
 
 ---
 
