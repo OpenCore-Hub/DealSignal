@@ -7,6 +7,7 @@ import type {
   DealRoom,
   DealRoomTemplate,
   Document,
+  Evidence,
   HeatAlert,
   HeatLevel,
   IntegrationStatus,
@@ -134,6 +135,37 @@ export const api = {
   getPageAnalytics: (documentId: string) =>
     request<{ data: PageAnalytics[] }>(`/insights/pages/${documentId}`),
   getSuggestions: () => request<{ data: Suggestion[] }>("/insights/suggestions"),
+
+  assistantChat: (payload: {
+    query: string;
+    document_id?: string;
+    session_id?: string;
+    history?: { role: "user" | "assistant"; content: string }[];
+  }) =>
+    request<{
+      session_id: string;
+      answer: string;
+      evidence?: Evidence[];
+      follow_up_questions?: string[];
+    }>("/assistant/chat", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
+  searchDocument: (payload: {
+    query: string;
+    document_id?: string;
+    mode?: "exact" | "fulltext" | "vector" | "hybrid";
+    top_k?: number;
+  }) =>
+    request<{
+      document_id?: string;
+      query: string;
+      results: Evidence[];
+    }>("/search", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   getWorkspaceMembers: () => request<{ data: WorkspaceMember[] }>("/workspace/members"),
   inviteWorkspaceMember: (email: string, role: WorkspaceMember["role"]) =>

@@ -75,10 +75,11 @@ export interface ChatMessage {
 }
 
 export interface Evidence {
-  id: string;
-  pageNumber: number;
-  text: string;
-  bbox: { x: number; y: number; w: number; h: number };
+  chunk_id: string;
+  quote: string;
+  page_number: number;
+  boxes: Array<{ x: number; y: number; w: number; h: number }>;
+  score: number;
 }
 
 export interface Contact {

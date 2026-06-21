@@ -213,6 +213,45 @@ export const handlers = [
     return HttpResponse.json({ data: mockRiskAlerts });
   }),
 
+  http.post("/api/assistant/chat", async ({ request }) => {
+    const body = (await request.json()) as { query: string; document_id?: string; session_id?: string };
+    return HttpResponse.json({
+      session_id: body.session_id || `sess_${Date.now()}`,
+      answer: `Based on the document, here's an answer to "${body.query}".`,
+      evidence: body.document_id
+        ? [
+            {
+              chunk_id: "chk_demo_001",
+              quote: "Revenue grew 3x year over year.",
+              page_number: 1,
+              boxes: [{ x: 0.12, y: 0.34, w: 0.45, h: 0.06 }],
+              score: 0.92,
+            },
+          ]
+        : [],
+      follow_up_questions: ["Can you explain the growth drivers?", "What are the risks?"],
+    });
+  }),
+
+  http.post("/api/search", async ({ request }) => {
+    const body = (await request.json()) as { query: string; document_id?: string };
+    return HttpResponse.json({
+      document_id: body.document_id,
+      query: body.query,
+      results: body.document_id
+        ? [
+            {
+              chunk_id: "chk_demo_001",
+              quote: "Revenue grew 3x year over year.",
+              page_number: 1,
+              boxes: [{ x: 0.12, y: 0.34, w: 0.45, h: 0.06 }],
+              score: 0.92,
+            },
+          ]
+        : [],
+    });
+  }),
+
   http.get("/api/workspace/settings", () => {
     return HttpResponse.json({ data: workspaceSettings });
   }),

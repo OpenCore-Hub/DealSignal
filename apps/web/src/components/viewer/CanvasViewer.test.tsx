@@ -29,10 +29,11 @@ const mockAnalytics: PageAnalytics[] = [
 
 const demoEvidence: Evidence[] = [
   {
-    id: "ev-001",
-    pageNumber: 1,
-    text: "Revenue grew 3x.",
-    bbox: { x: 0.1, y: 0.2, w: 0.4, h: 0.05 },
+    chunk_id: "ev-001",
+    page_number: 1,
+    quote: "Revenue grew 3x.",
+    boxes: [{ x: 0.1, y: 0.2, w: 0.4, h: 0.05 }],
+    score: 0.95,
   },
 ];
 

@@ -11,16 +11,15 @@ import type { Evidence } from "@/types";
 
 function EvidenceCard({ evidence }: { evidence: Evidence }) {
   const { t } = useTranslation("ai");
+  const { setHighlight } = useAIStore();
   return (
     <button
       type="button"
       className="mt-2 w-full rounded-md border border-border bg-muted/50 p-2 text-left text-sm transition-colors hover:bg-muted"
-      onClick={() => {
-        alert(t("evidence.jumpAlert", { pageNumber: evidence.pageNumber }));
-      }}
+      onClick={() => setHighlight(evidence, evidence.page_number)}
     >
-      <span className="text-caption text-muted-foreground">{t("evidence.page", { pageNumber: evidence.pageNumber })}</span>
-      <p className="mt-0.5 line-clamp-2">{evidence.text}</p>
+      <span className="text-caption text-muted-foreground">{t("evidence.page", { pageNumber: evidence.page_number })}</span>
+      <p className="mt-0.5 line-clamp-2">{evidence.quote}</p>
     </button>
   );
 }
@@ -103,22 +102,25 @@ export function AIChat() {
                   <p className="text-caption">{t("viewer.emptyExample")}</p>
                 </div>
               )}
-              {messages.map((msg) => (
-                <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                  <div
-                    className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                      msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
-                    }`}
-                  >
-                    <p>{msg.content}</p>
-                    {msg.evidences?.map((ev) => (
-                      <EvidenceCard key={ev.id} evidence={ev} />
-                    ))}
+              {messages.map((msg) => {
+                const content = msg.id === "welcome" ? t(msg.content) : msg.content;
+                return (
+                  <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
+                    <div
+                      className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
+                        msg.role === "user"
+                          ? "bg-primary text-primary-foreground"
+                          : "bg-muted text-foreground"
+                      }`}
+                    >
+                      <p>{content}</p>
+                      {msg.evidences?.map((ev) => (
+                        <EvidenceCard key={ev.chunk_id} evidence={ev} />
+                      ))}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
               {pending && (
                 <div className="flex justify-start">
                   <div className="flex max-w-[85%] items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">

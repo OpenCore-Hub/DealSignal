@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatFileSize, formatDuration } from "@/lib/formatters";
 import type { Document, Evidence, PageAnalytics } from "@/types";
+import { useAIStore } from "@/stores/aiStore";
 import { ThumbnailNav } from "./ThumbnailNav";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
@@ -24,10 +25,11 @@ const DEFAULT_WATERMARK: WatermarkInfo = {
 
 const DEFAULT_EVIDENCE: Evidence[] = [
   {
-    id: "ev-demo-001",
-    pageNumber: 1,
-    text: "Revenue grew 3x.",
-    bbox: { x: 0.15, y: 0.25, w: 0.45, h: 0.06 },
+    chunk_id: "ev-demo-001",
+    page_number: 1,
+    quote: "Revenue grew 3x.",
+    boxes: [{ x: 0.15, y: 0.25, w: 0.45, h: 0.06 }],
+    score: 0.92,
   },
 ];
 
@@ -46,6 +48,7 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
   const [retryTick, setRetryTick] = useState(0);
   const [page, setPage] = useState(1);
   const [zoom, setZoom] = useState(100);
+  const { highlightedEvidence, highlightedPage } = useAIStore();
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +75,14 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
       cancelled = true;
     };
   }, [documentId, retryTick, t]);
+
+  useEffect(() => {
+    if (highlightedPage && highlightedPage !== page) {
+      // External evidence click requests a page jump; sync viewer state once.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPage(highlightedPage);
+    }
+  }, [highlightedPage, page]);
 
   if (loading) {
     return (
@@ -116,7 +127,11 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
 
   const pageWidth = Math.max(300, zoom * 6);
   const pageHeight = Math.max(400, zoom * 8);
-  const activeEvidence = (evidence ?? DEFAULT_EVIDENCE).filter((e) => e.pageNumber === page);
+  const activeEvidence = (evidence ?? DEFAULT_EVIDENCE)
+    .filter((e) => e.page_number === page)
+    .concat(
+      highlightedEvidence && highlightedEvidence.page_number === page ? [highlightedEvidence] : []
+    );
   const activeWatermark = watermark === null ? undefined : watermark ?? DEFAULT_WATERMARK;
 
   return (
