@@ -224,7 +224,7 @@ export function PermissionSlider() {
             <p className="text-caption text-muted-foreground">已生成链接</p>
             <div className="mt-1 flex items-center gap-2">
               <code className="flex-1 truncate text-sm">{generatedLink}</code>
-              <Button size="icon-xs" variant="ghost" onClick={() => navigator.clipboard.writeText(generatedLink)}>
+              <Button size="icon-sm" variant="ghost" onClick={() => navigator.clipboard.writeText(generatedLink)}>
                 <Copy size={14} />
               </Button>
             </div>

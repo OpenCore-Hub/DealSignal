@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
 import { Sparkle, FileText, TrendUp, Warning } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
+import { EmptyState } from "@/components/common/EmptyState";
 import { useAIStore } from "@/stores/aiStore";
 import type { PageAnalytics } from "@/types";
 
@@ -12,38 +11,32 @@ interface DocumentAIInsightsProps {
 }
 
 export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsightsProps) {
-  const [loading, setLoading] = useState(true);
   const { setOpen, sendMessage } = useAIStore();
-
-  useEffect(() => {
-    const timer = setTimeout(() => setLoading(false), 800);
-    return () => clearTimeout(timer);
-  }, []);
-
-  const topPage = analytics.reduce(
-    (top, current) => (current.avgDurationSeconds > top.avgDurationSeconds ? current : top),
-    analytics[0]
-  );
-  const exitRisk = analytics.filter((a) => a.exitRate > 0.08).sort((a, b) => b.exitRate - a.exitRate)[0];
 
   const askAI = (question: string) => {
     setOpen(true);
     sendMessage(question, { documentId });
   };
 
-  if (loading) {
+  if (analytics.length === 0) {
     return (
-      <div className="space-y-4">
-        <Skeleton className="h-24" />
-        <Skeleton className="h-24" />
-      </div>
+      <EmptyState
+        icon={<Sparkle size={48} />}
+        title="暂无分析数据"
+        description="文档被访问后，AI 将基于真实阅读行为生成关键洞察。"
+      />
     );
   }
+
+  const topPage = analytics.reduce((top, current) =>
+    current.avgDurationSeconds > top.avgDurationSeconds ? current : top
+  );
+  const exitRisk = analytics.filter((a) => a.exitRate > 0.08).sort((a, b) => b.exitRate - a.exitRate)[0];
 
   return (
     <div className="space-y-4">
       <Card>
-        <CardHeader className="pb-2">
+        <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <Sparkle size={20} className="text-warning-500" />
             AI 关键洞察
@@ -71,7 +64,7 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
             </div>
           )}
           <div className="flex items-start gap-3 rounded-lg bg-muted/50 p-3">
-            <FileText size={18} className="mt-0.5 text-info-500" />
+            <FileText size={18} className="mt-0.5 text-primary" />
             <div>
               <p className="text-sm font-medium">证据驱动的回答</p>
               <p className="text-caption text-muted-foreground">
@@ -83,7 +76,7 @@ export function DocumentAIInsights({ documentId, analytics }: DocumentAIInsights
       </Card>
 
       <Card>
-        <CardHeader className="pb-2">
+        <CardHeader>
           <CardTitle className="text-h2">追问 AI</CardTitle>
         </CardHeader>
         <CardContent>

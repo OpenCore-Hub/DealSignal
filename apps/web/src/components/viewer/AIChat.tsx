@@ -1,30 +1,17 @@
-import { useState, useRef, useEffect } from "react";
+import { useRef, useEffect } from "react";
+import { useParams } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import { Robot, X, PaperPlaneRight, Spinner } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import type { ChatMessage, Evidence } from "@/types";
-
-const mockResponse: ChatMessage = {
-  id: "msg_2",
-  role: "assistant",
-  content:
-    "根据文档内容，Acme 在 2026 年预计收入为 $4.2M，毛利率 72%。这一数据出现在财务预测第 7 页。",
-  evidences: [
-    {
-      id: "ev_1",
-      pageNumber: 7,
-      text: "2026 年预计收入 $4.2M，毛利率 72%",
-      bbox: { x: 120, y: 340, w: 420, h: 40 },
-    },
-  ],
-  createdAt: new Date().toISOString(),
-};
+import { useAIStore } from "@/stores/aiStore";
+import type { Evidence } from "@/types";
 
 function EvidenceCard({ evidence }: { evidence: Evidence }) {
   return (
     <button
+      type="button"
       className="mt-2 w-full rounded-md border border-border bg-muted/50 p-2 text-left text-sm transition-colors hover:bg-muted"
       onClick={() => {
         // Placeholder: would jump to page and highlight bbox
@@ -38,12 +25,10 @@ function EvidenceCard({ evidence }: { evidence: Evidence }) {
 }
 
 export function AIChat() {
-  const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const { documentId } = useParams<{ documentId: string }>();
   const reducedMotion = useReducedMotion();
+  const { open, messages, pending, toggle, setOpen, sendMessage } = useAIStore();
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -51,29 +36,18 @@ export function AIChat() {
     }
   }, [messages, open]);
 
-  const sendMessage = () => {
-    if (!input.trim()) return;
-
-    const userMessage: ChatMessage = {
-      id: Math.random().toString(36).slice(2),
-      role: "user",
-      content: input,
-      createdAt: new Date().toISOString(),
-    };
-
-    setMessages((prev) => [...prev, userMessage]);
-    setInput("");
-    setLoading(true);
-
-    setTimeout(() => {
-      setMessages((prev) => [...prev, mockResponse]);
-      setLoading(false);
-    }, 1200);
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const content = String(formData.get("message") || "").trim();
+    if (!content) return;
+    sendMessage(content, { documentId });
+    form.reset();
   };
 
   return (
     <>
-      {/* Floating toggle button */}
       <AnimatePresence>
         {!open && (
           <motion.button
@@ -81,8 +55,8 @@ export function AIChat() {
             animate={{ scale: 1, opacity: 1 }}
             exit={reducedMotion ? undefined : { scale: 0.8, opacity: 0 }}
             transition={{ duration: 0.2 }}
-            onClick={() => setOpen(true)}
-            className="fixed right-6 bottom-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:ring-2 focus-visible:ring-ring"
+            onClick={toggle}
+            className="fixed right-6 bottom-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg transition-transform hover:scale-105 focus-visible:ring-3 focus-visible:ring-ring/50"
             aria-label="打开 AI 助手"
           >
             <Robot size={24} weight="fill" />
@@ -90,7 +64,6 @@ export function AIChat() {
         )}
       </AnimatePresence>
 
-      {/* Chat panel */}
       <AnimatePresence>
         {open && (
           <motion.div
@@ -100,13 +73,13 @@ export function AIChat() {
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
             className="fixed right-4 bottom-4 z-40 flex h-[520px] w-[360px] flex-col rounded-xl border border-border bg-card shadow-xl"
           >
-            {/* Header */}
             <div className="flex h-12 items-center justify-between border-b border-border px-4">
               <div className="flex items-center gap-2">
                 <Robot size={18} weight="fill" className="text-primary" />
                 <span className="text-sm font-medium">AI 助手</span>
               </div>
               <button
+                type="button"
                 onClick={() => setOpen(false)}
                 className="text-muted-foreground hover:text-foreground"
                 aria-label="关闭 AI 助手"
@@ -115,11 +88,7 @@ export function AIChat() {
               </button>
             </div>
 
-            {/* Messages */}
-            <div
-              ref={scrollRef}
-              className="flex-1 space-y-4 overflow-y-auto p-4"
-            >
+            <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
               {messages.length === 0 && (
                 <div className="py-8 text-center text-muted-foreground">
                   <Robot size={32} className="mx-auto mb-2 opacity-40" />
@@ -128,10 +97,7 @@ export function AIChat() {
                 </div>
               )}
               {messages.map((msg) => (
-                <div
-                  key={msg.id}
-                  className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                >
+                <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                   <div
                     className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                       msg.role === "user"
@@ -146,7 +112,7 @@ export function AIChat() {
                   </div>
                 </div>
               ))}
-              {loading && (
+              {pending && (
                 <div className="flex justify-start">
                   <div className="flex max-w-[85%] items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
                     <Spinner size={16} className="animate-spin" />
@@ -156,22 +122,15 @@ export function AIChat() {
               )}
             </div>
 
-            {/* Input */}
             <div className="border-t border-border p-3">
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  sendMessage();
-                }}
-                className="flex gap-2"
-              >
+              <form onSubmit={handleSubmit} className="flex gap-2">
                 <Input
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
+                  name="message"
                   placeholder="输入问题..."
                   className="flex-1"
+                  autoComplete="off"
                 />
-                <Button type="submit" size="icon" disabled={!input.trim() || loading}>
+                <Button type="submit" size="icon" disabled={pending}>
                   <PaperPlaneRight size={16} weight="bold" />
                 </Button>
               </form>

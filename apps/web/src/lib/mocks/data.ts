@@ -10,6 +10,7 @@ import type {
   HeatAlert,
   Link,
   PageAnalytics,
+  RiskAlert,
   Signal,
   Suggestion,
   Workspace,
@@ -143,6 +144,12 @@ export const mockContacts: Contact[] = [
     role: "Partner",
     heatLevel: "hot",
     score: 92,
+    scoreHistory: [
+      { date: "2026-03-20", score: 32 },
+      { date: "2026-04-20", score: 45 },
+      { date: "2026-05-20", score: 68 },
+      { date: "2026-06-20", score: 92 },
+    ],
     totalVisits: 5,
     totalDurationSeconds: 1112,
     lastSeenAt: "2026-06-20T18:42:00Z",
@@ -156,6 +163,12 @@ export const mockContacts: Contact[] = [
     role: "Principal",
     heatLevel: "hot",
     score: 87,
+    scoreHistory: [
+      { date: "2026-03-20", score: 28 },
+      { date: "2026-04-20", score: 50 },
+      { date: "2026-05-20", score: 72 },
+      { date: "2026-06-20", score: 87 },
+    ],
     totalVisits: 3,
     totalDurationSeconds: 680,
     lastSeenAt: "2026-06-20T16:15:00Z",
@@ -169,6 +182,12 @@ export const mockContacts: Contact[] = [
     role: "LP",
     heatLevel: "warm",
     score: 64,
+    scoreHistory: [
+      { date: "2026-03-20", score: 20 },
+      { date: "2026-04-20", score: 35 },
+      { date: "2026-05-20", score: 48 },
+      { date: "2026-06-20", score: 64 },
+    ],
     totalVisits: 2,
     totalDurationSeconds: 320,
     lastSeenAt: "2026-06-19T20:30:00Z",
@@ -182,6 +201,12 @@ export const mockContacts: Contact[] = [
     role: "VP Sales",
     heatLevel: "cold",
     score: 34,
+    scoreHistory: [
+      { date: "2026-03-20", score: 15 },
+      { date: "2026-04-20", score: 22 },
+      { date: "2026-05-20", score: 28 },
+      { date: "2026-06-20", score: 34 },
+    ],
     totalVisits: 1,
     totalDurationSeconds: 45,
     lastSeenAt: "2026-06-18T09:00:00Z",
@@ -520,6 +545,27 @@ export const mockActionItems: ActionItem[] = [
   },
 ];
 
+export const mockRiskAlerts: RiskAlert[] = [
+  {
+    id: "risk_1",
+    type: "download",
+    title: "未识别邮箱下载了 Pitch Deck",
+    description: "公开链接被 alex@unknown.com 下载，存在外泄风险。",
+    linkId: "link_3",
+    documentId: "doc_1",
+    createdAt: "2026-06-18T09:00:00Z",
+  },
+  {
+    id: "risk_2",
+    type: "expired",
+    title: "一个链接已过期",
+    description: "Financial Model 链接已于 2026-06-17 过期，建议续期或通知接收方。",
+    linkId: "link_2",
+    documentId: "doc_2",
+    createdAt: "2026-06-19T10:00:00Z",
+  },
+];
+
 export const mockDealRoomTemplates: DealRoomTemplate[] = [
   {
     id: "tmpl_seed",
@@ -621,6 +667,7 @@ export function getMockDashboardStats() {
     recentDocuments: mockDocuments.slice(0, 5),
     recentLinks: mockLinks.slice(0, 5),
     heatAlerts: mockHeatAlerts,
+    riskAlerts: mockRiskAlerts,
     signals: mockSignals,
     actionItems: mockActionItems,
   };

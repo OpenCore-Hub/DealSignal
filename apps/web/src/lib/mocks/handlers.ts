@@ -1,4 +1,5 @@
 import { http, HttpResponse } from "msw";
+import type { DealRoom } from "@/types";
 import {
   mockAccessLogs,
   mockActivities,
@@ -9,6 +10,7 @@ import {
   mockHeatAlerts,
   mockLinks,
   mockPageAnalytics,
+  mockRiskAlerts,
   mockSignals,
   mockSuggestions,
   mockWorkspaceMembers,
@@ -82,8 +84,31 @@ export const handlers = [
     return HttpResponse.json(room);
   }),
 
-  http.post("/api/deal-rooms", async () => {
-    return HttpResponse.json(mockDealRooms[0], { status: 201 });
+  http.post("/api/deal-rooms", async ({ request }) => {
+    const body = (await request.json()) as {
+      name: string;
+      description: string;
+      templateId: string;
+      ndaEnabled: boolean;
+    };
+    const template = mockDealRoomTemplates.find((t) => t.id === body.templateId);
+    const newRoom: DealRoom = {
+      id: `dr_${Date.now()}`,
+      name: body.name,
+      description: body.description,
+      template: template?.scenario ?? "custom",
+      ndaEnabled: body.ndaEnabled,
+      documentCount: 0,
+      memberCount: 0,
+      pendingApprovals: 0,
+      createdAt: new Date().toISOString(),
+      lastAccessedAt: undefined,
+      status: "active",
+      uploadedFiles: [],
+      recentVisitors: [],
+    };
+    mockDealRooms.unshift(newRoom);
+    return HttpResponse.json(newRoom, { status: 201 });
   }),
 
   http.get("/api/insights/overview", () => {
@@ -147,5 +172,9 @@ export const handlers = [
 
   http.get("/api/deal-room-templates", () => {
     return HttpResponse.json({ data: mockDealRoomTemplates });
+  }),
+
+  http.get("/api/risk-alerts", () => {
+    return HttpResponse.json({ data: mockRiskAlerts });
   }),
 ];

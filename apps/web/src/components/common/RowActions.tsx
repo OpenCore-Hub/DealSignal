@@ -6,6 +6,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { buttonVariants } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 
 export interface RowAction {
   label: string;
@@ -22,10 +24,7 @@ interface RowActionsProps {
 export function RowActions({ actions }: RowActionsProps) {
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger
-        className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
-        aria-label="更多操作"
-      >
+      <DropdownMenuTrigger className={buttonVariants({ variant: "ghost", size: "icon" })} aria-label="更多操作">
         <DotsThree size={18} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
@@ -39,9 +38,9 @@ export function RowActions({ actions }: RowActionsProps) {
               {action.icon && <span className="mr-2">{action.icon}</span>}
               <span className="flex-1">{action.label}</span>
               {action.pro && (
-                <span className="ml-2 rounded border border-border px-1.5 py-0 text-[10px] font-medium text-muted-foreground">
+                <Badge variant="outline" className="ml-2 text-[10px]">
                   PRO
-                </span>
+                </Badge>
               )}
             </DropdownMenuItem>
           </div>

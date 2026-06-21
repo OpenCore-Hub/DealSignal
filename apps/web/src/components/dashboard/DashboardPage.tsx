@@ -3,8 +3,8 @@ import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import {
   Fire,
-  Clock,
-  Snowflake,
+  Warning,
+  Thermometer,
   CheckCircle,
   CalendarBlank,
   Link as LinkIcon,
@@ -53,14 +53,14 @@ function SummaryCards({
     {
       label: "中热度",
       count: stats.warmCount,
-      icon: Clock,
+      icon: Thermometer,
       color: "text-warm-500 bg-warm-500/10",
     },
     {
-      label: "低热度",
-      count: stats.coldCount,
-      icon: Snowflake,
-      color: "text-cold-500 bg-cold-500/10",
+      label: "风险提醒",
+      count: stats.riskAlerts.length,
+      icon: Warning,
+      color: "text-risk-500 bg-risk-500/10",
     },
     {
       label: "待办行动",
@@ -81,7 +81,7 @@ function SummaryCards({
                 <Icon size={20} weight="fill" />
               </div>
               <div>
-                <p className="text-h1 tabular-nums">{item.count}</p>
+                <p className="text-stat tabular-nums">{item.count}</p>
                 <p className="text-caption text-muted-foreground">{item.label}</p>
               </div>
             </CardContent>
@@ -89,6 +89,43 @@ function SummaryCards({
         );
       })}
     </div>
+  );
+}
+
+function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAlerts"]; workspaceSlug?: string }) {
+  const navigate = useNavigate();
+  if (alerts.length === 0) return null;
+
+  return (
+    <Card className="border-risk-500/20 bg-risk-500/5">
+      <CardHeader className="pb-3">
+        <CardTitle className="text-h2 flex items-center gap-2 text-risk-600">
+          <Warning size={20} weight="fill" />
+          风险提醒
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <ul className="space-y-3">
+          {alerts.map((alert) => (
+            <li
+              key={alert.id}
+              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted"
+              onClick={() => {
+                if (alert.documentId) navigate(`/${workspaceSlug}/documents/${alert.documentId}`);
+                else if (alert.linkId) navigate(`/${workspaceSlug}/links/${alert.linkId}`);
+              }}
+            >
+              <div className="mt-0.5 h-2 w-2 rounded-full bg-risk-500" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium">{alert.title}</p>
+                <p className="text-body text-muted-foreground">{alert.description}</p>
+              </div>
+              <ArrowRight size={16} className="text-muted-foreground" />
+            </li>
+          ))}
+        </ul>
+      </CardContent>
+    </Card>
   );
 }
 
@@ -176,6 +213,10 @@ export function DashboardPage() {
       </div>
 
       <SummaryCards stats={stats} pendingActions={pendingActions} />
+
+      {stats.riskAlerts.length > 0 && (
+        <RiskAlerts alerts={stats.riskAlerts} workspaceSlug={workspaceSlug} />
+      )}
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="space-y-6 lg:col-span-2">

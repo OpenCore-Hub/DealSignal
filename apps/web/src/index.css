@@ -6,39 +6,72 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme {
-  /* Font families - taste-skill: no Inter default */
+  /* Font families */
   --font-sans: "Geist Variable", "Geist", "Geist Sans", system-ui,
     -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
 
-  /* DealSignal design tokens from UI-DESIGN-DELIVERABLE-v2.1.0 */
+  /* Brand / neutral scale */
   --color-primary-500: #0f172a;
   --color-primary-600: #1e293b;
   --color-primary-700: #334155;
 
-  --color-neutral-900: #0f172a;
-  --color-neutral-500: #64748b;
-  --color-neutral-200: #e2e8f0;
   --color-neutral-50: #f8fafc;
+  --color-neutral-100: #f1f5f9;
+  --color-neutral-200: #e2e8f0;
+  --color-neutral-300: #cbd5e1;
+  --color-neutral-400: #94a3b8;
+  --color-neutral-500: #64748b;
+  --color-neutral-600: #475569;
+  --color-neutral-700: #334155;
+  --color-neutral-800: #1e293b;
+  --color-neutral-900: #0f172a;
 
+  /* Status scale - separate from heat */
   --color-success-500: #10b981;
+  --color-success-100: #d1fae5;
   --color-warning-500: #f59e0b;
+  --color-warning-100: #fef3c7;
   --color-error-500: #ef4444;
+  --color-error-100: #fee2e2;
   --color-info-500: #3b82f6;
+  --color-info-100: #dbeafe;
 
-  --color-hot-500: #ef4444;
-  --color-warm-500: #f59e0b;
-  --color-cold-500: #3b82f6;
+  /* Heat scale - independent semantics */
+  --color-hot-500: #e11d48;
+  --color-hot-100: #ffe4e6;
+  --color-warm-500: #d97706;
+  --color-warm-100: #fef3c7;
+  --color-cold-500: #64748b;
+  --color-cold-100: #f1f5f9;
 
-  /* Radius tokens */
-  --radius-sm: 4px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  /* Risk scale */
+  --color-risk-500: #7c3aed;
+  --color-risk-100: #ede9fe;
+
+  /* Spacing */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+
+  /* Radius */
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+
+  /* Shadows */
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
+  --shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.12);
 }
 
 :root {
-  /* shadcn/ui semantic tokens mapped to DealSignal colors */
   --background: #ffffff;
   --foreground: #0f172a;
   --card: #ffffff;
@@ -60,7 +93,6 @@
   --ring: #0f172a;
   --radius: 0.5rem;
 
-  /* Chart & sidebar tokens (kept for shadcn/ui compatibility) */
   --chart-1: #0f172a;
   --chart-2: #334155;
   --chart-3: #64748b;
@@ -97,7 +129,7 @@
   --input: rgba(148, 163, 184, 0.2);
   --ring: #f8fafc;
 
-  --sidebar: #0f172a;
+  --sidebar: #020617;
   --sidebar-foreground: #f8fafc;
   --sidebar-primary: #f8fafc;
   --sidebar-primary-foreground: #0f172a;
@@ -160,54 +192,70 @@
 
   body {
     @apply bg-background text-foreground font-sans antialiased;
-    font-size: 14px;
-    line-height: 22px;
+    font-size: 0.875rem;
+    line-height: 1.375rem;
+  }
+
+  :focus-visible {
+    @apply ring-2 ring-ring ring-offset-2 ring-offset-background;
   }
 }
 
-/* Typography scale from UI-DESIGN-DELIVERABLE-v2.1.0 */
+/* Typography scale */
 .text-display {
-  font-size: 32px;
+  font-size: 2rem;
   font-weight: 700;
-  line-height: 40px;
+  line-height: 2.5rem;
 }
 
 .text-h1 {
-  font-size: 24px;
+  font-size: 1.5rem;
   font-weight: 600;
-  line-height: 32px;
+  line-height: 2rem;
 }
 
 .text-h2 {
-  font-size: 20px;
+  font-size: 1.25rem;
   font-weight: 600;
-  line-height: 28px;
+  line-height: 1.75rem;
 }
 
 .text-h3 {
-  font-size: 16px;
+  font-size: 1rem;
   font-weight: 600;
-  line-height: 24px;
+  line-height: 1.5rem;
 }
 
 .text-body {
-  font-size: 14px;
+  font-size: 0.875rem;
   font-weight: 400;
-  line-height: 22px;
+  line-height: 1.375rem;
 }
 
 .text-caption {
-  font-size: 12px;
+  font-size: 0.75rem;
   font-weight: 400;
-  line-height: 18px;
+  line-height: 1.125rem;
 }
 
-/* Tabular numbers for data-heavy UI */
+.text-stat {
+  font-size: 2.25rem;
+  font-weight: 700;
+  line-height: 2.5rem;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Data numbers */
 .tabular-nums {
   font-variant-numeric: tabular-nums;
 }
 
-/* Reduced motion - taste-skill mandatory */
+/* Focus utilities */
+.focus-ring {
+  @apply focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background focus-visible:outline-none;
+}
+
+/* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

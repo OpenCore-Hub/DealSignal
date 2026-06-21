@@ -16,18 +16,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { Signal, ActionItem } from "@/types";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 const typeConfig = {
-  hot: { icon: Fire, label: "高热度", color: "text-hot-500 bg-hot-500/10 border-hot-500/20" },
-  warm: { icon: Thermometer, label: "中热度", color: "text-warm-500 bg-warm-500/10 border-warm-500/20" },
-  cold: { icon: Snowflake, label: "低热度", color: "text-cold-500 bg-cold-500/10 border-cold-500/20" },
-  risk: { icon: Warning, label: "风险", color: "text-destructive bg-destructive/10 border-destructive/20" },
+  hot: { icon: Fire, label: "高热度", dot: "bg-hot-500", subtle: "bg-hot-500/8" },
+  warm: { icon: Thermometer, label: "中热度", dot: "bg-warm-500", subtle: "bg-warm-500/8" },
+  cold: { icon: Snowflake, label: "低热度", dot: "bg-cold-500", subtle: "bg-cold-500/8" },
+  risk: { icon: Warning, label: "风险", dot: "bg-risk-500", subtle: "bg-risk-500/8" },
 };
 
 const priorityConfig = {
   high: "bg-error-500/10 text-error-500 border-error-500/20",
   medium: "bg-warning-500/10 text-warning-500 border-warning-500/20",
-  low: "bg-neutral-500/10 text-neutral-500 border-neutral-500/20",
+  low: "bg-muted text-muted-foreground",
 };
 
 interface SignalCardProps {
@@ -40,6 +41,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [expanded, setExpanded] = useState(false);
+  const reducedMotion = useReducedMotion();
   const config = typeConfig[signal.type];
   const Icon = config.icon;
 
@@ -59,15 +61,17 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
 
   return (
     <motion.div
-      layout
-      className={`rounded-xl border bg-card p-4 transition-shadow hover:shadow-sm ${config.color}`}
+      layout={!reducedMotion}
+      className="group/signal rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-shadow hover:shadow-md"
     >
       <div className="flex items-start gap-3">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${config.color}`}>
-          <Icon size={18} weight="fill" />
+        <div
+          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${config.subtle} text-foreground`}
+        >
+          <Icon size={18} weight="fill" className={config.dot.replace("bg-", "text-")} />
         </div>
         <div className="min-w-0 flex-1">
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <h3 className="text-h3 truncate">{signal.title}</h3>
             <Badge variant="outline" className={priorityConfig[signal.priority]}>
               {signal.priority === "high" ? "高优先级" : signal.priority === "medium" ? "中优先级" : "低优先级"}
@@ -91,21 +95,21 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
         </div>
       </div>
 
-      <AnimatePresence>
+      <AnimatePresence initial={false}>
         {expanded && (
           <motion.div
-            initial={{ height: 0, opacity: 0 }}
+            initial={reducedMotion ? undefined : { height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
+            exit={reducedMotion ? undefined : { height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
             <div className="mt-4 space-y-3 border-t border-border pt-4">
               <div>
-                <p className="text-caption uppercase tracking-wide text-muted-foreground">AI 解释</p>
+                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">AI 解释</p>
                 <p className="text-body mt-1">{signal.explanation}</p>
               </div>
               <div>
-                <p className="text-caption uppercase tracking-wide text-muted-foreground">建议行动</p>
+                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">建议行动</p>
                 <p className="text-body mt-1">{signal.suggestion}</p>
               </div>
               {action && (

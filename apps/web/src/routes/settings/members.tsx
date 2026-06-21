@@ -56,7 +56,7 @@ export function SettingsMembersPage() {
                     <Badge variant={member.status === "active" ? "default" : "secondary"}>
                       {member.role}
                     </Badge>
-                    <Button size="icon-xs" variant="ghost">
+                    <Button size="icon-sm" variant="ghost">
                       <DotsThree size={16} />
                     </Button>
                   </div>

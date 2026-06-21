@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { ChatMessage, Evidence } from "@/types";
+import type { ChatMessage } from "@/types";
 
 interface AIState {
   open: boolean;
@@ -16,22 +16,10 @@ const initialMessages: ChatMessage[] = [
     id: "welcome",
     role: "assistant",
     content:
-      "我是 DealSignal AI 助手。我可以帮你解读文档热度、推荐下一步行动、解释访客行为。请随时提问。",
+      "我是 DealSignal AI 助手。接入模型后，我可以帮你解读文档热度、推荐下一步行动、解释访客行为。当前回复为演示逻辑，不引用真实姓名或数字。",
     createdAt: new Date().toISOString(),
   },
 ];
-
-function generateEvidences(documentId?: string): Evidence[] | undefined {
-  if (!documentId) return undefined;
-  return [
-    {
-      id: "ev_1",
-      pageNumber: 12,
-      text: "财务预测显示 2026 年收入 1,200 万美元，毛利率 72%。",
-      bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.1 },
-    },
-  ];
-}
 
 export const useAIStore = create<AIState>((set) => ({
   open: false,
@@ -50,26 +38,25 @@ export const useAIStore = create<AIState>((set) => ({
     };
     set((state) => ({ messages: [...state.messages, userMessage], pending: true }));
 
-    // Simulate AI response
-    await new Promise((resolve) => setTimeout(resolve, 1200));
+    // Simulate network latency until a real AI endpoint is available
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
+    const docContext = context?.documentId ? "（基于当前文档上下文）" : "";
     let reply: string;
-    const docContext = context?.documentId ? `（基于当前文档 ID: ${context.documentId}）` : "";
     if (content.includes("热度") || content.includes("信号")) {
-      reply = `Sarah Chen 的热度评分最高（92/100），她在财务页停留 5 分钟，并在 24 小时内多次回访。建议 24 小时内跟进。${docContext}`;
+      reply = `我会分析当前文档的访问数据，找出停留时间长、回访频繁的访客，并标注为热度信号。${docContext}`;
     } else if (content.includes("安全") || content.includes("权限")) {
-      reply = "当前链接启用了邮箱验证，但未启用白名单。如果材料更敏感，可以提升至中强度权限。";
+      reply = "我可以检查当前链接的权限配置，并在需要敏感材料时建议提升安全强度。";
     } else if (content.includes("下一步") || content.includes("行动")) {
-      reply = "建议优先跟进高热度访客：1）Sarah Chen — 发送融资条款摘要；2）Marcus Johnson — 发送团队背景资料。";
+      reply = "基于高热度访客与文档互动记录，我可以推荐后续跟进动作，例如发送补充材料或安排会议。";
     } else {
-      reply = `收到你的问题。我正在分析相关数据，稍后可以为你生成可解释的报告。${docContext}`;
+      reply = `收到你的问题。接入模型后，我将基于真实文档与访问数据生成可解释的回答。${docContext}`;
     }
 
     const assistantMessage: ChatMessage = {
       id: `a_${Date.now()}`,
       role: "assistant",
       content: reply,
-      evidences: generateEvidences(context?.documentId),
       createdAt: new Date().toISOString(),
     };
     set((state) => ({

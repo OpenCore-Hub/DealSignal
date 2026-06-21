@@ -89,6 +89,7 @@ export interface Contact {
   role?: string;
   heatLevel: HeatLevel;
   score: number;
+  scoreHistory: { date: string; score: number }[];
   totalVisits: number;
   totalDurationSeconds: number;
   lastSeenAt?: string;
@@ -144,7 +145,7 @@ export interface DealRoom {
   id: string;
   name: string;
   description: string;
-  template: "seed" | "series-a" | "series-b" | "lp-update" | "sales-proposal" | "custom";
+  template: "seed" | "series-a" | "series-b" | "lp-update" | "sales-proposal" | "ma" | "custom";
   documentCount: number;
   memberCount: number;
   pendingApprovals: number;
@@ -152,6 +153,8 @@ export interface DealRoom {
   createdAt: string;
   lastAccessedAt?: string;
   status: "active" | "archived" | "pending";
+  uploadedFiles?: string[];
+  recentVisitors?: { email: string; name?: string; heatLevel: HeatLevel; lastSeenAt: string }[];
 }
 
 export interface WorkspaceMember {

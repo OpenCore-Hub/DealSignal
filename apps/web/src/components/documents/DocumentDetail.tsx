@@ -1,105 +1,124 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import {
-  ArrowLeft,
-  Copy,
-  DownloadSimple,
-  Eye,
-  Link as LinkIcon,
-  Plus,
-  Trash,
-} from "@phosphor-icons/react";
+import { Copy, DownloadSimple, Eye, Link as LinkIcon, Plus, Trash } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/common/PageHeader";
+import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
 import { VisitorList } from "@/components/common/VisitorList";
 import { RowActions } from "@/components/common/RowActions";
+import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { DocumentAnalytics } from "./DocumentAnalytics";
 import { DocumentContent } from "./DocumentContent";
 import { DocumentAIInsights } from "./DocumentAIInsights";
-import { api, formatDuration, formatFileSize, formatRelativeTime } from "@/lib/api";
-import { mockContacts } from "@/lib/mocks/data";
-import type { Document, Link, PageAnalytics, Evidence } from "@/types";
+import { api, formatDuration, formatFileSize, formatRelativeTime, calculateUniqueVisitors } from "@/lib/api";
+import type { Document, Link, PageAnalytics, AccessLog, HeatLevel } from "@/types";
 
-function DocumentSkeleton() {
-  return (
-    <div className="space-y-6">
-      <Skeleton className="h-8 w-64" />
-      <Skeleton className="h-48" />
-      <Skeleton className="h-48" />
-    </div>
-  );
+interface VisitorSummary {
+  id: string;
+  email: string;
+  organization?: string;
+  heatLevel: HeatLevel;
+  visitCount: number;
+  avgDurationSeconds: number;
+  lastSeenAt: string;
 }
 
-const mockEvidences: Evidence[] = [
-  {
-    id: "ev_doc_1",
-    pageNumber: 12,
-    text: "财务预测显示 2026 年收入 1,200 万美元，毛利率 72%。",
-    bbox: { x: 0.1, y: 0.2, w: 0.8, h: 0.1 },
-  },
-  {
-    id: "ev_doc_2",
-    pageNumber: 7,
-    text: "核心团队拥有 20+ 年企业服务经验，此前成功退出两次。",
-    bbox: { x: 0.1, y: 0.4, w: 0.8, h: 0.1 },
-  },
-];
+function aggregateVisitors(logs: AccessLog[]): VisitorSummary[] {
+  const byEmail = new Map<string, { duration: number; count: number; lastSeen: string; name?: string }>();
+  for (const log of logs) {
+    const email = log.visitorEmail;
+    const existing = byEmail.get(email);
+    const timestamp = new Date(log.timestamp).toISOString();
+    if (existing) {
+      existing.count += 1;
+      existing.duration += log.durationSeconds || 0;
+      if (timestamp > existing.lastSeen) {
+        existing.lastSeen = timestamp;
+        if (log.visitorName) existing.name = log.visitorName;
+      }
+    } else {
+      byEmail.set(email, {
+        count: 1,
+        duration: log.durationSeconds || 0,
+        lastSeen: timestamp,
+        name: log.visitorName,
+      });
+    }
+  }
+
+  const hotThreshold = 3;
+  return Array.from(byEmail.entries())
+    .map(([email, v], index) => ({
+      id: `${email}-${index}`,
+      email: v.name && v.name !== email ? `${v.name} <${email}>` : email,
+      organization: undefined,
+      heatLevel: (v.count >= hotThreshold ? "hot" : v.count >= 1 ? "warm" : "cold") as HeatLevel,
+      visitCount: v.count,
+      avgDurationSeconds: Math.round(v.duration / v.count),
+      lastSeenAt: v.lastSeen,
+    }))
+    .sort((a, b) => new Date(b.lastSeenAt).getTime() - new Date(a.lastSeenAt).getTime())
+    .slice(0, 10);
+}
 
 export function DocumentDetail() {
   const navigate = useNavigate();
-  const { workspaceSlug, documentId } = useParams<{
-    workspaceSlug: string;
-    documentId: string;
-  }>();
+  const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
   const [doc, setDoc] = useState<Document | null>(null);
   const [links, setLinks] = useState<Link[]>([]);
   const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
+  const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const visitors = useMemo(
-    () =>
-      mockContacts
-        .filter((c) => c.viewedDocuments.includes(documentId || ""))
-        .map((c) => ({
-          id: c.id,
-          email: c.email,
-          organization: c.organization,
-          heatLevel: c.heatLevel,
-          visitCount: c.totalVisits,
-          avgDurationSeconds: c.totalDurationSeconds,
-          lastSeenAt: c.lastSeenAt || "-",
-        }))
-        .slice(0, 5),
-    [documentId]
-  );
-
   useEffect(() => {
-    if (!documentId) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoading(true);
-    Promise.all([
-      api.getDocumentById(documentId),
-      api.getLinksByDocumentId(documentId),
-      api.getPageAnalytics(documentId),
-    ]).then(([d, l, a]) => {
-      setDoc(d);
-      setLinks(l.data);
-      setAnalytics(a.data);
-      setLoading(false);
-    });
+    let cancelled = false;
+    const id = documentId;
+    if (!id) return;
+    async function load() {
+      try {
+        setLoading(true);
+        const [d, l, a] = await Promise.all([
+          api.getDocumentById(id!),
+          api.getLinksByDocumentId(id!),
+          api.getPageAnalytics(id!),
+        ]);
+        const allLogs = await Promise.all(l.data.map((link) => api.getAccessLogs(link.id).then((r) => r.data)));
+        if (!cancelled) {
+          setDoc(d);
+          setLinks(l.data);
+          setAnalytics(a.data);
+          setLogs(allLogs.flat());
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [documentId]);
 
-  if (loading || !doc) return <DocumentSkeleton />;
+  const visitors = useMemo(() => aggregateVisitors(logs), [logs]);
+
+  const heatDistribution = useMemo(() => {
+    const counts = { hot: 0, warm: 0, cold: 0 } as Record<HeatLevel, number>;
+    for (const link of links) {
+      counts[link.heatLevel] = (counts[link.heatLevel] ?? 0) + 1;
+    }
+    return counts;
+  }, [links]);
+
+  if (loading || !doc) return <SkeletonDetail />;
 
   const totalViews = links.reduce((sum, l) => sum + l.accessCount, 0);
-  const uniqueVisitors = visitors.length;
+  const uniqueVisitors = calculateUniqueVisitors(logs);
   const avgDuration =
     links.length > 0
       ? Math.round(links.reduce((sum, l) => sum + (l.avgDurationSeconds || 0), 0) / links.length)
@@ -107,13 +126,7 @@ export function DocumentDetail() {
 
   return (
     <div className="space-y-6">
-      <button
-        onClick={() => navigate(`/${workspaceSlug}/documents`)}
-        className="flex items-center gap-1 text-caption text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft size={14} />
-        返回文档库
-      </button>
+      <BackButton to={`/${workspaceSlug}/documents`} label="返回文档库" />
 
       <PageHeader
         title={doc.title}
@@ -121,14 +134,11 @@ export function DocumentDetail() {
           doc.fileSize
         )} · 上传于 ${formatRelativeTime(doc.createdAt)}`}
       >
-        <Button variant="outline" className="gap-1.5">
+        <Button variant="outline" className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/viewer/${doc.id}`)}>
           <Eye size={16} />
           预览
         </Button>
-        <Button
-          className="gap-1.5"
-          onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}
-        >
+        <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}>
           <LinkIcon size={16} />
           创建链接
         </Button>
@@ -145,6 +155,7 @@ export function DocumentDetail() {
               icon: <Trash size={16} />,
               onClick: () => navigate(`/${workspaceSlug}/documents`),
               destructive: true,
+              pro: true,
             },
           ]}
         />
@@ -157,14 +168,32 @@ export function DocumentDetail() {
             <StatCard label="独立访客" value={uniqueVisitors} />
             <StatCard label="平均停留" value={formatDuration(avgDuration)} />
             <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-h3">热度分布</CardTitle>
+              <CardHeader>
+                <CardTitle className="text-h3">链接热度分布</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
-                  <HeatBadge level="hot" />
-                  <HeatBadge level="warm" />
-                  <HeatBadge level="cold" />
+                  {heatDistribution.hot > 0 && (
+                    <div className="flex items-center gap-1.5 rounded-full bg-hot-500/10 px-2 py-1 text-xs font-medium text-hot-500">
+                      <span className="h-1.5 w-1.5 rounded-full bg-hot-500" />
+                      高 {heatDistribution.hot}
+                    </div>
+                  )}
+                  {heatDistribution.warm > 0 && (
+                    <div className="flex items-center gap-1.5 rounded-full bg-warm-500/10 px-2 py-1 text-xs font-medium text-warm-500">
+                      <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
+                      中 {heatDistribution.warm}
+                    </div>
+                  )}
+                  {heatDistribution.cold > 0 && (
+                    <div className="flex items-center gap-1.5 rounded-full bg-cold-500/10 px-2 py-1 text-xs font-medium text-cold-500">
+                      <span className="h-1.5 w-1.5 rounded-full bg-cold-500" />
+                      低 {heatDistribution.cold}
+                    </div>
+                  )}
+                  {links.length === 0 && (
+                    <p className="text-sm text-muted-foreground">暂无链接</p>
+                  )}
                 </div>
               </CardContent>
             </Card>
@@ -181,7 +210,7 @@ export function DocumentDetail() {
           <TabsContent value="overview" className="space-y-6">
             <DocumentAnalytics analytics={analytics} />
             <Card>
-              <CardHeader className="pb-3">
+              <CardHeader>
                 <CardTitle className="text-h2 flex items-center gap-2">
                   <Plus size={20} />
                   最近访客
@@ -193,12 +222,7 @@ export function DocumentDetail() {
             </Card>
           </TabsContent>
           <TabsContent value="content">
-            <DocumentContent
-              title={doc.title}
-              pageCount={doc.pageCount}
-              analytics={analytics}
-              evidences={mockEvidences}
-            />
+            <DocumentContent title={doc.title} pageCount={doc.pageCount} analytics={analytics} evidences={[]} />
           </TabsContent>
           <TabsContent value="analytics">
             <DocumentAnalytics analytics={analytics} />
@@ -210,7 +234,7 @@ export function DocumentDetail() {
       </DetailLayout>
 
       <Card>
-        <CardHeader className="pb-3">
+        <CardHeader>
           <CardTitle className="text-h2 flex items-center gap-2">
             <LinkIcon size={20} />
             此文档的链接
@@ -229,7 +253,7 @@ export function DocumentDetail() {
                   className="flex items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
                 >
                   <div className="flex min-w-0 items-center gap-3">
-                    <FileTypeIcon type="pdf" />
+                    <FileTypeIcon type={doc.fileType} />
                     <div className="min-w-0">
                       <p className="truncate text-sm font-medium">{link.shortUrl}</p>
                       <p className="text-caption text-muted-foreground">
@@ -240,17 +264,13 @@ export function DocumentDetail() {
                   <div className="flex items-center gap-2">
                     <HeatBadge level={link.heatLevel} />
                     <Button
-                      size="icon"
+                      size="icon-sm"
                       variant="ghost"
                       onClick={() => navigator.clipboard.writeText(link.shortUrl)}
                     >
                       <Copy size={14} />
                     </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}
-                    >
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}>
                       日志
                     </Button>
                   </div>

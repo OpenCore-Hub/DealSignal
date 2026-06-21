@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import {
-  ArrowLeft,
   Plus,
   Check,
   Folder,
@@ -20,6 +19,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { BackButton } from "@/components/common/BackButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import type { DealRoomTemplate } from "@/types";
 
@@ -71,10 +71,19 @@ export function NewDealRoomPage() {
   );
 
   const handleCreate = async () => {
+    if (!selectedTemplate || !name) return;
     setCreating(true);
-    await new Promise((resolve) => setTimeout(resolve, 600));
-    setCreating(false);
-    navigate(`/${workspaceSlug}/deal-rooms`);
+    try {
+      const room = await api.createDealRoom({
+        name,
+        description,
+        templateId: selectedTemplate.id,
+        ndaEnabled: nda,
+      });
+      navigate(`/${workspaceSlug}/deal-rooms/${room.id}`);
+    } finally {
+      setCreating(false);
+    }
   };
 
   return (
@@ -84,13 +93,7 @@ export function NewDealRoomPage() {
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="mx-auto max-w-5xl space-y-6"
     >
-      <button
-        onClick={() => navigate(`/${workspaceSlug}/deal-rooms`)}
-        className="flex items-center gap-1 text-caption text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft size={14} />
-        返回 Deal Rooms
-      </button>
+      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回 Deal Rooms" />
 
       <div className="space-y-1">
         <h1 className="text-h1">数据室模板引擎</h1>
@@ -117,7 +120,7 @@ export function NewDealRoomPage() {
                 }`}
                 onClick={() => selectTemplate(template)}
               >
-                <CardContent className="p-4">
+                <CardContent>
                   <div className="flex items-start justify-between">
                     <p className="text-h3">{template.name}</p>
                     {selected && (

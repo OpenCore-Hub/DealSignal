@@ -5,16 +5,17 @@ import {
   FileXls,
   FileText,
 } from "@phosphor-icons/react";
+import { cn } from "@/lib/utils";
 import type { Document } from "@/types";
 
 const config: Record<
   Document["fileType"],
-  { icon: typeof FilePdf; color: string; label: string }
+  { icon: typeof FilePdf; label: string }
 > = {
-  pdf: { icon: FilePdf, color: "text-red-500", label: "PDF" },
-  docx: { icon: FileDoc, color: "text-blue-500", label: "Word" },
-  pptx: { icon: FilePpt, color: "text-orange-500", label: "PPT" },
-  xlsx: { icon: FileXls, color: "text-green-500", label: "Excel" },
+  pdf: { icon: FilePdf, label: "PDF" },
+  docx: { icon: FileDoc, label: "Word" },
+  pptx: { icon: FilePpt, label: "PPT" },
+  xlsx: { icon: FileXls, label: "Excel" },
 };
 
 interface FileTypeIconProps {
@@ -32,7 +33,6 @@ export function FileTypeIcon({
 }: FileTypeIconProps) {
   const cfg = config[type] || {
     icon: FileText,
-    color: "text-muted-foreground",
     label: type.toUpperCase(),
   };
   const Icon = cfg.icon;
@@ -40,7 +40,10 @@ export function FileTypeIcon({
   if (showLabel) {
     return (
       <div
-        className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted ${cfg.color} ${className || ""}`}
+        className={cn(
+          "flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border bg-muted text-muted-foreground",
+          className
+        )}
         aria-label={cfg.label}
       >
         <span className="text-caption font-bold">{cfg.label}</span>
@@ -48,5 +51,5 @@ export function FileTypeIcon({
     );
   }
 
-  return <Icon size={size} className={cfg.color} aria-label={cfg.label} />;
+  return <Icon size={size} className={cn("text-muted-foreground", className)} aria-label={cfg.label} />;
 }

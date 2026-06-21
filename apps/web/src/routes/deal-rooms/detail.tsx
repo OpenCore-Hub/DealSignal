@@ -1,31 +1,43 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
-import { ArrowLeft, FileText, Users, Lock, Envelope, Folder, Check, UploadSimple } from "@phosphor-icons/react";
+import { useParams } from "react-router";
+import { FileText, Users, Lock, Envelope, Folder, Check, UploadSimple } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/common/PageHeader";
+import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
+import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api, formatRelativeTime } from "@/lib/api";
 import type { DealRoom, DealRoomTemplate } from "@/types";
 
 export function DealRoomDetailPage() {
-  const navigate = useNavigate();
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const [room, setRoom] = useState<DealRoom | null>(null);
   const [templates, setTemplates] = useState<DealRoomTemplate[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!roomId) return;
-    Promise.all([api.getDealRoomById(roomId), api.getDealRoomTemplates()]).then(([r, t]) => {
-      setRoom(r);
-      setTemplates(t.data);
-      setLoading(false);
-    });
+    let cancelled = false;
+    const id = roomId;
+    if (!id) return;
+    async function load() {
+      try {
+        setLoading(true);
+        const [r, t] = await Promise.all([api.getDealRoomById(id!), api.getDealRoomTemplates()]);
+        if (!cancelled) {
+          setRoom(r);
+          setTemplates(t.data);
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
   }, [roomId]);
 
   const template = useMemo(
@@ -33,13 +45,14 @@ export function DealRoomDetailPage() {
     [templates, room]
   );
 
+  const uploaded = useMemo(() => new Set(room?.uploadedFiles ?? []), [room]);
   const checklist = useMemo(
     () =>
       template?.recommendedFiles.map((name) => ({
         name,
-        done: name.split("").reduce((sum, ch) => sum + ch.charCodeAt(0), 0) % 2 === 0,
+        done: uploaded.has(name),
       })) ?? [],
-    [template]
+    [template, uploaded]
   );
 
   const completion = useMemo(
@@ -48,30 +61,19 @@ export function DealRoomDetailPage() {
   );
 
   if (loading || !room) {
-    return (
-      <div className="space-y-6">
-        <Skeleton className="h-8 w-64" />
-        <Skeleton className="h-48" />
-      </div>
-    );
+    return <SkeletonDetail />;
   }
 
   return (
     <div className="space-y-6">
-      <button
-        onClick={() => navigate(`/${workspaceSlug}/deal-rooms`)}
-        className="flex items-center gap-1 text-caption text-muted-foreground transition-colors hover:text-foreground"
-      >
-        <ArrowLeft size={14} />
-        返回 Deal Rooms
-      </button>
+      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回 Deal Rooms" />
 
       <PageHeader title={room.name} description={room.description}>
-        <Button variant="outline" className="gap-1.5">
+        <Button variant="outline" className="gap-1.5" onClick={() => {}}>
           <Envelope size={16} />
           邀请成员
         </Button>
-        <Button className="gap-1.5">
+        <Button className="gap-1.5" onClick={() => {}}>
           <FileText size={16} />
           管理文档
         </Button>
@@ -83,7 +85,7 @@ export function DealRoomDetailPage() {
             <StatCard label="文档" value={room.documentCount} icon={<FileText size={18} />} />
             <StatCard label="成员" value={room.memberCount} icon={<Users size={18} />} />
             <Card>
-              <CardHeader className="pb-2">
+              <CardHeader>
                 <CardTitle className="text-h3">安全</CardTitle>
               </CardHeader>
               <CardContent>
@@ -146,7 +148,12 @@ export function DealRoomDetailPage() {
                 <span className="text-muted-foreground">完成度</span>
                 <span className="font-medium">{completion}%</span>
               </div>
-              <Progress value={completion} />
+              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
+                <div
+                  className="h-full rounded-full bg-success-500 transition-all"
+                  style={{ width: `${completion}%` }}
+                />
+              </div>
               <ul className="space-y-2">
                 {checklist.map((item, idx) => (
                   <li
@@ -162,11 +169,11 @@ export function DealRoomDetailPage() {
                       </span>
                     </div>
                     {item.done ? (
-                      <Badge variant="outline" className="text-success-500 border-success-500/20">
+                      <Badge variant="outline" className="border-success-500/20 text-success-500">
                         已上传
                       </Badge>
                     ) : (
-                      <Button size="sm" variant="ghost" className="gap-1">
+                      <Button size="sm" variant="ghost" className="gap-1" onClick={() => {}}>
                         <UploadSimple size={14} />
                         上传
                       </Button>

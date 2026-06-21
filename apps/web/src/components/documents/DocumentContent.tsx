@@ -40,7 +40,7 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
               }`}
               onClick={() => setSelectedPage(page.pageNumber)}
             >
-              <CardContent className="relative flex aspect-[3/4] flex-col items-center justify-center p-4">
+              <CardContent className="relative flex aspect-[3/4] flex-col items-center justify-center">
                 <FileText size={32} className="text-muted-foreground/50" />
                 <p className="mt-2 text-sm font-medium">第 {page.pageNumber} 页</p>
                 <div className="absolute bottom-0 left-0 right-0 h-1 bg-muted">
@@ -50,9 +50,12 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
                   />
                 </div>
                 {page.hasEvidence && (
-                  <Badge className="absolute right-2 top-2 bg-primary text-primary-foreground text-[10px]">
-                    证据
-                  </Badge>
+                  <>
+                    <Badge className="absolute right-2 top-2 bg-primary text-primary-foreground text-[10px]">
+                      证据
+                    </Badge>
+                    <span className="sr-only">此页包含 AI 证据高亮</span>
+                  </>
                 )}
               </CardContent>
             </Card>
@@ -62,7 +65,7 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
 
       {selectedPage && (
         <Card>
-          <CardContent className="p-4">
+          <CardContent>
             <div className="flex items-start justify-between">
               <div>
                 <p className="text-h3 flex items-center gap-2">
@@ -100,10 +103,7 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
                   .filter((e) => e.pageNumber === selectedPage)
                   .map((ev) => (
                     <div key={ev.id} className="text-sm">
-                      <span
-                        className="inline-block rounded bg-warning-500/20 px-1 py-0.5 text-warning-700"
-                        style={{ fontSize: 12 }}
-                      >
+                      <span className="inline-block rounded bg-warning-500/20 px-1 py-0.5 text-xs font-medium text-warning-700">
                         原文定位
                       </span>
                       <p className="mt-1">{ev.text}</p>

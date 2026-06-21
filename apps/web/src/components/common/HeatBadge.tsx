@@ -1,10 +1,11 @@
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import type { HeatLevel } from "@/types";
 
-const styles: Record<HeatLevel, string> = {
-  hot: "bg-hot-500/10 text-hot-500 border-hot-500/20",
-  warm: "bg-warm-500/10 text-warm-500 border-warm-500/20",
-  cold: "bg-cold-500/10 text-cold-500 border-cold-500/20",
+const dotStyles: Record<HeatLevel, string> = {
+  hot: "bg-hot-500",
+  warm: "bg-warm-500",
+  cold: "bg-cold-500",
 };
 
 const labels: Record<HeatLevel, string> = {
@@ -20,14 +21,9 @@ interface HeatBadgeProps {
 
 export function HeatBadge({ level, className }: HeatBadgeProps) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium",
-        styles[level],
-        className
-      )}
-    >
+    <Badge variant={level} className={cn("gap-1 capitalize", className)}>
+      <span className={cn("h-1.5 w-1.5 rounded-full", dotStyles[level])} />
       {labels[level]}
-    </span>
+    </Badge>
   );
 }

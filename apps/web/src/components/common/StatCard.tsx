@@ -7,19 +7,24 @@ interface StatCardProps {
   subtext?: string;
   icon?: React.ReactNode;
   className?: string;
+  size?: "default" | "sm";
 }
 
-export function StatCard({ label, value, subtext, icon, className }: StatCardProps) {
+export function StatCard({ label, value, subtext, icon, className, size = "default" }: StatCardProps) {
   return (
-    <Card className={cn("transition-shadow hover:shadow-sm", className)}>
-      <CardContent className="p-4">
-        <div className="flex items-start justify-between">
+    <Card className={cn(className)}>
+      <CardContent>
+        <div className="flex items-start justify-between gap-2">
           <div>
             <p className="text-caption text-muted-foreground">{label}</p>
-            <p className="text-h2 mt-1 tabular-nums">{value}</p>
-            {subtext && <p className="text-caption text-muted-foreground mt-1">{subtext}</p>}
+            <p className={cn("mt-1 tabular-nums", size === "sm" ? "text-h3" : "text-stat")}>{value}</p>
+            {subtext && <p className="text-caption mt-1 text-muted-foreground">{subtext}</p>}
           </div>
-          {icon && <div className="text-muted-foreground">{icon}</div>}
+          {icon && (
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+              {icon}
+            </div>
+          )}
         </div>
       </CardContent>
     </Card>

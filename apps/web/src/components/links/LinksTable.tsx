@@ -1,4 +1,5 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useNavigate, useParams } from "react-router";
 import {
   useReactTable,
   getCoreRowModel,
@@ -9,7 +10,7 @@ import {
 } from "@tanstack/react-table";
 import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -21,16 +22,33 @@ import {
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
-import { formatDuration, formatRelativeTime } from "@/lib/api";
-import { mockLinks } from "@/lib/mocks/data";
+import { SkeletonList } from "@/components/common/SkeletonLayout";
+import { api, formatDuration, formatRelativeTime } from "@/lib/api";
 import type { Link } from "@/types";
-import { useNavigate, useParams } from "react-router";
 
 export function LinksTable() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const [data, setData] = useState<Link[]>(mockLinks);
+  const [data, setData] = useState<Link[]>([]);
+  const [loading, setLoading] = useState(true);
   const [sorting, setSorting] = useState<SortingState>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        setLoading(true);
+        const res = await api.getLinks();
+        if (!cancelled) setData(res.data);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const columns = useMemo<ColumnDef<Link>[]>(
     () => [
@@ -41,11 +59,9 @@ export function LinksTable() {
           const link = row.original;
           return (
             <div className="flex min-w-0 items-center gap-2">
-              <code className="truncate rounded bg-muted px-1.5 py-0.5 text-caption">
-                {link.shortUrl}
-              </code>
+              <code className="truncate rounded bg-muted px-1.5 py-0.5 text-caption">{link.shortUrl}</code>
               <Button
-                size="icon-xs"
+                size="icon-sm"
                 variant="ghost"
                 aria-label="复制链接"
                 onClick={(e) => {
@@ -62,17 +78,13 @@ export function LinksTable() {
       {
         accessorKey: "documentTitle",
         header: "文档",
-        cell: ({ row }) => (
-          <span className="truncate text-sm">{row.original.documentTitle}</span>
-        ),
+        cell: ({ row }) => <span className="truncate text-sm">{row.original.documentTitle}</span>,
       },
       {
         accessorKey: "accessCount",
         header: "访问次数",
         cell: ({ row }) => (
-          <span className="text-caption tabular-nums">
-            {row.original.accessCount} views
-          </span>
+          <span className="text-caption tabular-nums">{row.original.accessCount} views</span>
         ),
       },
       {
@@ -100,27 +112,13 @@ export function LinksTable() {
       },
       {
         accessorKey: "isActive",
-        header: "启用",
+        header: "状态",
         cell: ({ row }) => {
-          const link = row.original;
+          const active = row.original.isActive ?? true;
           return (
-            <div className="flex items-center gap-2">
-              <Switch
-                checked={link.isActive ?? true}
-                onCheckedChange={(checked) => {
-                  setData((prev) =>
-                    prev.map((l) =>
-                      l.id === link.id ? { ...l, isActive: checked } : l
-                    )
-                  );
-                }}
-                onClick={(e) => e.stopPropagation()}
-                aria-label={link.isActive ? "停用链接" : "启用链接"}
-              />
-              <span className="text-caption text-muted-foreground">
-                {link.isActive ? "Yes" : "No"}
-              </span>
-            </div>
+            <Badge variant="outline" className={active ? "text-success-500" : "text-muted-foreground"}>
+              {active ? "启用" : "已停用"}
+            </Badge>
           );
         },
       },
@@ -152,8 +150,7 @@ export function LinksTable() {
                 {
                   label: "删除",
                   icon: <Trash size={16} />,
-                  onClick: () =>
-                    setData((prev) => prev.filter((l) => l.id !== link.id)),
+                  onClick: () => setData((prev) => prev.filter((l) => l.id !== link.id)),
                   destructive: true,
                 },
               ]}
@@ -174,12 +171,20 @@ export function LinksTable() {
     getSortedRowModel: getSortedRowModel(),
   });
 
+  if (loading) {
+    return <SkeletonList rows={6} />;
+  }
+
   if (data.length === 0) {
     return (
       <EmptyState
-        icon={<LinkIcon size={48} />}
+        icon={<LinkIcon size={64} />}
         title="暂无链接"
         description="为文档配置权限并创建链接，即可追踪投资人/客户的访问行为。"
+        action={{
+          label: "创建链接",
+          onClick: () => navigate(`/${workspaceSlug}/links/new`),
+        }}
       />
     );
   }
@@ -197,10 +202,7 @@ export function LinksTable() {
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead
-                    key={header.id}
-                    className={header.id === "actions" ? "w-[60px]" : ""}
-                  >
+                  <TableHead key={header.id} className={header.id === "actions" ? "w-[60px]" : ""}>
                     {header.isPlaceholder
                       ? null
                       : flexRender(header.column.columnDef.header, header.getContext())}

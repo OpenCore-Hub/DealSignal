@@ -25,15 +25,15 @@ export function EmptyState({
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/30 px-6 py-12 text-center",
-        size === "large" && "py-16",
+        "flex flex-col items-center justify-center rounded-xl bg-muted/30 px-6 py-10 text-center",
+        size === "large" && "py-14",
         className
       )}
     >
       <div
         className={cn(
-          "mb-4 text-muted-foreground",
-          size === "large" ? "[&_svg]:size-16" : "[&_svg]:size-12"
+          "mb-3 text-muted-foreground",
+          size === "large" ? "[&_svg]:size-12" : "[&_svg]:size-10"
         )}
       >
         {icon}
@@ -41,7 +41,7 @@ export function EmptyState({
       <h3 className={cn("text-h3", size === "large" && "text-h2")}>{title}</h3>
       <p className="mt-1 max-w-sm text-body text-muted-foreground">{description}</p>
       {action && (
-        <Button className="mt-5" onClick={action.onClick}>
+        <Button className="mt-4" onClick={action.onClick}>
           {action.label}
         </Button>
       )}
