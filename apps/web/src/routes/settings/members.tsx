@@ -1,23 +1,54 @@
 import { useEffect, useState } from "react";
-import { Users, EnvelopeSimple, DotsThree } from "@phosphor-icons/react";
+import { Users, EnvelopeSimple } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api, getInitials } from "@/lib/api";
+import { RowActions } from "@/components/common/RowActions";
+import { api } from "@/lib/api";
+import { getInitials } from "@/lib/formatters";
 import type { WorkspaceMember } from "@/types";
 
 export function SettingsMembersPage() {
   const [members, setMembers] = useState<WorkspaceMember[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
+  const [email, setEmail] = useState("");
+  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
-    api.getWorkspaceMembers().then((res) => {
-      setMembers(res.data);
-      setLoading(false);
-    });
-  }, []);
+    let cancelled = false;
+    async function load() {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await api.getWorkspaceMembers();
+        if (!cancelled) setMembers(res.data);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    }
+    load();
+    return () => {
+      cancelled = true;
+    };
+  }, [retryKey]);
+
+  const handleInvite = async () => {
+    if (!email.trim()) return;
+    setInviting(true);
+    try {
+      const res = await api.inviteWorkspaceMember(email.trim(), "member");
+      setMembers((prev) => [...prev, res.data]);
+      setEmail("");
+    } finally {
+      setInviting(false);
+    }
+  };
 
   return (
     <div className="space-y-6">
@@ -30,14 +61,28 @@ export function SettingsMembersPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex gap-2">
-            <Input placeholder="邮箱地址" className="max-w-sm" />
-            <Button>
+            <Input
+              placeholder="邮箱地址"
+              className="max-w-sm"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleInvite()}
+            />
+            <Button onClick={handleInvite} disabled={!email.trim() || inviting}>
               <EnvelopeSimple size={16} className="mr-1.5" />
-              邀请
+              {inviting ? "邀请中..." : "邀请"}
             </Button>
           </div>
 
-          {loading ? (
+          {error ? (
+            <div className="rounded-lg border border-error-500/20 bg-error-100 p-4">
+              <p className="text-sm font-medium text-error-500">加载成员失败</p>
+              <p className="text-caption mt-1 text-error-500/80">{error}</p>
+              <Button variant="outline" size="sm" className="mt-3" onClick={() => setRetryKey((k) => k + 1)}>
+                重试
+              </Button>
+            </div>
+          ) : loading ? (
             <Skeleton className="h-40" />
           ) : (
             <ul className="divide-y divide-border">
@@ -53,12 +98,13 @@ export function SettingsMembersPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Badge variant={member.status === "active" ? "default" : "secondary"}>
-                      {member.role}
-                    </Badge>
-                    <Button size="icon-sm" variant="ghost">
-                      <DotsThree size={16} />
-                    </Button>
+                    <Badge variant={member.status === "active" ? "default" : "secondary"}>{member.role}</Badge>
+                    <RowActions
+                      actions={[
+                        { label: "编辑角色", onClick: () => {}, disabled: true, title: "编辑角色需后端支持" },
+                        { label: "移除", onClick: () => {}, destructive: true, disabled: true, title: "移除成员需后端支持" },
+                      ]}
+                    />
                   </div>
                 </li>
               ))}

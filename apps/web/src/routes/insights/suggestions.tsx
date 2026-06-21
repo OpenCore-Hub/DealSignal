@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { Lightning, Envelope } from "@phosphor-icons/react";
+import { Lightning, Envelope, Lightbulb } from "@phosphor-icons/react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { HeatBadge } from "@/components/common/HeatBadge";
+import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import type { Suggestion } from "@/types";
 
@@ -13,13 +14,32 @@ export function InsightsSuggestionsPage() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    api.getSuggestions().then((res) => {
-      setSuggestions(res.data);
-      setLoading(false);
-    });
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await api.getSuggestions();
+        setSuggestions(res.data);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "加载失败");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
   }, []);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={() => window.location.reload()}>重试</Button>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -31,11 +51,22 @@ export function InsightsSuggestionsPage() {
     );
   }
 
+  if (suggestions.length === 0) {
+    return (
+      <EmptyState
+        icon={<Lightbulb size={48} />}
+        title="暂无跟进建议"
+        description="当前没有待办建议，系统会在检测到新的热度信号时自动生成。"
+        size="large"
+      />
+    );
+  }
+
   return (
     <div className="space-y-6">
       <div className="grid gap-4">
         {suggestions.map((s) => (
-          <Card key={s.id} className="transition-shadow hover:shadow-sm">
+          <Card key={s.id} className="transition-colors hover:bg-muted/50">
             <CardContent className="p-5">
               <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                 <div className="space-y-2">
@@ -60,7 +91,7 @@ export function InsightsSuggestionsPage() {
                   >
                     查看联系人
                   </Button>
-                  <Button className="gap-1.5">
+                  <Button className="gap-1.5" disabled title="邮件发送需后端支持">
                     <Envelope size={16} />
                     写跟进邮件
                   </Button>

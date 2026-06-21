@@ -9,7 +9,8 @@ import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
-import { api, formatRelativeTime } from "@/lib/api";
+import { api } from "@/lib/api";
+import { formatRelativeTime } from "@/lib/formatters";
 import type { DealRoom, DealRoomTemplate } from "@/types";
 
 export function DealRoomDetailPage() {
@@ -17,6 +18,8 @@ export function DealRoomDetailPage() {
   const [room, setRoom] = useState<DealRoom | null>(null);
   const [templates, setTemplates] = useState<DealRoomTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -25,10 +28,15 @@ export function DealRoomDetailPage() {
     async function load() {
       try {
         setLoading(true);
+        setError(null);
         const [r, t] = await Promise.all([api.getDealRoomById(id!), api.getDealRoomTemplates()]);
         if (!cancelled) {
           setRoom(r);
           setTemplates(t.data);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "加载失败");
         }
       } finally {
         if (!cancelled) setLoading(false);
@@ -38,7 +46,7 @@ export function DealRoomDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [roomId]);
+  }, [roomId, retryKey]);
 
   const template = useMemo(
     () => templates.find((t) => t.scenario === room?.template),
@@ -60,20 +68,32 @@ export function DealRoomDetailPage() {
     [checklist]
   );
 
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回数据室" />
+        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border p-12 text-center">
+          <p className="text-muted-foreground">{error}</p>
+          <Button onClick={() => setRetryKey((k) => k + 1)}>重试</Button>
+        </div>
+      </div>
+    );
+  }
+
   if (loading || !room) {
     return <SkeletonDetail />;
   }
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回 Deal Rooms" />
+      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回数据室" />
 
       <PageHeader title={room.name} description={room.description}>
-        <Button variant="outline" className="gap-1.5" onClick={() => {}}>
+        <Button variant="outline" className="gap-1.5" disabled title="邀请成员需后端支持">
           <Envelope size={16} />
           邀请成员
         </Button>
-        <Button className="gap-1.5" onClick={() => {}}>
+        <Button className="gap-1.5" disabled title="管理文档需后端支持">
           <FileText size={16} />
           管理文档
         </Button>
@@ -150,7 +170,7 @@ export function DealRoomDetailPage() {
               </div>
               <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
                 <div
-                  className="h-full rounded-full bg-success-500 transition-all"
+                  className="h-full rounded-full bg-success-500 transition-[width]"
                   style={{ width: `${completion}%` }}
                 />
               </div>
@@ -173,7 +193,7 @@ export function DealRoomDetailPage() {
                         已上传
                       </Badge>
                     ) : (
-                      <Button size="sm" variant="ghost" className="gap-1" onClick={() => {}}>
+                      <Button size="sm" variant="ghost" className="gap-1" disabled title="上传文件需后端支持">
                         <UploadSimple size={14} />
                         上传
                       </Button>

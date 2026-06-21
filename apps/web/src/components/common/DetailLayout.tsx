@@ -17,7 +17,9 @@ export function DetailLayout({ children, sidebar, className }: DetailLayoutProps
       )}
     >
       <div className="min-w-0">{children}</div>
-      {sidebar && <aside className="space-y-6">{sidebar}</aside>}
+      {sidebar && (
+        <aside className="space-y-6 lg:sticky lg:top-6 lg:self-start">{sidebar}</aside>
+      )}
     </div>
   );
 }

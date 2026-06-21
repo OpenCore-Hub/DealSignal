@@ -1,5 +1,7 @@
+import { ChartBar } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { EmptyState } from "@/components/common/EmptyState";
 import type { PageAnalytics } from "@/types";
 
 interface DocumentAnalyticsProps {
@@ -8,6 +10,23 @@ interface DocumentAnalyticsProps {
 }
 
 export function DocumentAnalytics({ analytics, className }: DocumentAnalyticsProps) {
+  if (analytics.length === 0) {
+    return (
+      <Card className={cn("overflow-hidden", className)}>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-h3">页面停留时间</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <EmptyState
+            icon={<ChartBar size={48} />}
+            title="暂无页面数据"
+            description="该文档尚未被访问，页面停留时间将在首次访问后显示。"
+          />
+        </CardContent>
+      </Card>
+    );
+  }
+
   const maxDuration = Math.max(...analytics.map((a) => a.avgDurationSeconds), 1);
 
   return (
@@ -25,11 +44,11 @@ export function DocumentAnalytics({ analytics, className }: DocumentAnalyticsPro
                 className="group relative flex flex-1 flex-col items-center"
               >
                 <div
-                  className="w-full rounded-sm bg-primary/10 transition-all hover:bg-primary/20"
+                  className="w-full rounded-sm bg-primary/10 transition-colors hover:bg-primary/20"
                   style={{ height: `${height}%` }}
                   aria-hidden="true"
                 />
-                <span className="mt-1 text-[10px] text-muted-foreground">
+                <span className="mt-1 text-caption text-muted-foreground">
                   {page.pageNumber}
                 </span>
                 <div className="pointer-events-none absolute -top-8 left-1/2 z-10 hidden -translate-x-1/2 whitespace-nowrap rounded-md bg-foreground px-2 py-1 text-xs text-background group-hover:block">

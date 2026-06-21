@@ -12,6 +12,14 @@ import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon } fro
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -23,32 +31,28 @@ import { HeatBadge } from "@/components/common/HeatBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
-import { api, formatDuration, formatRelativeTime } from "@/lib/api";
+import { api } from "@/lib/api";
+import { formatDuration, formatRelativeTime } from "@/lib/formatters";
+import { copyToClipboard } from "@/lib/clipboard";
+import { useAsyncData } from "@/hooks/useAsyncData";
+import { toast } from "sonner";
 import type { Link } from "@/types";
 
 export function LinksTable() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const { data: fetchedData, loading, error, refetch } = useAsyncData(async () => {
+    const res = await api.getLinks();
+    return res.data;
+  }, []);
   const [data, setData] = useState<Link[]>([]);
-  const [loading, setLoading] = useState(true);
   const [sorting, setSorting] = useState<SortingState>([]);
+  const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        const res = await api.getLinks();
-        if (!cancelled) setData(res.data);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (fetchedData) setData(fetchedData);
+  }, [fetchedData]);
 
   const columns = useMemo<ColumnDef<Link>[]>(
     () => [
@@ -66,7 +70,7 @@ export function LinksTable() {
                 aria-label="复制链接"
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigator.clipboard.writeText(link.shortUrl);
+                  copyToClipboard(link.shortUrl, "链接已复制");
                 }}
               >
                 <Copy size={14} />
@@ -84,7 +88,7 @@ export function LinksTable() {
         accessorKey: "accessCount",
         header: "访问次数",
         cell: ({ row }) => (
-          <span className="text-caption tabular-nums">{row.original.accessCount} views</span>
+          <span className="text-caption tabular-nums">{row.original.accessCount} 次访问</span>
         ),
       },
       {
@@ -139,18 +143,22 @@ export function LinksTable() {
                   label: "导出访问数据",
                   icon: <Export size={16} />,
                   onClick: () => {},
+                  disabled: true,
+                  title: "导出需后端支持",
                   pro: true,
                 },
                 {
                   label: "仅允许下载",
                   icon: <DownloadSimple size={16} />,
                   onClick: () => {},
+                  disabled: true,
+                  title: "仅允许下载需后端支持",
                   pro: true,
                 },
                 {
                   label: "删除",
                   icon: <Trash size={16} />,
-                  onClick: () => setData((prev) => prev.filter((l) => l.id !== link.id)),
+                  onClick: () => setLinkToDelete(link),
                   destructive: true,
                 },
               ]}
@@ -170,6 +178,15 @@ export function LinksTable() {
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={refetch}>重试</Button>
+      </div>
+    );
+  }
 
   if (loading) {
     return <SkeletonList rows={6} />;
@@ -216,7 +233,15 @@ export function LinksTable() {
               <TableRow
                 key={row.id}
                 className="cursor-pointer"
+                role="link"
+                tabIndex={0}
                 onClick={() => navigate(`/${workspaceSlug}/links/${row.original.id}`)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    navigate(`/${workspaceSlug}/links/${row.original.id}`);
+                  }
+                }}
               >
                 {row.getVisibleCells().map((cell) => (
                   <TableCell key={cell.id}>
@@ -228,6 +253,42 @@ export function LinksTable() {
           </TableBody>
         </Table>
       </div>
+
+      <Dialog open={!!linkToDelete} onOpenChange={(open) => !open && setLinkToDelete(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除链接</DialogTitle>
+            <DialogDescription>
+              确定要删除「{linkToDelete?.shortUrl}」吗？关联的访问记录将不再可通过该链接查看。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLinkToDelete(null)} disabled={isDeleting}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={async () => {
+                if (!linkToDelete) return;
+                setIsDeleting(true);
+                try {
+                  await api.updateLink(linkToDelete.id, { isActive: false });
+                  setData((prev) => prev.map((l) => (l.id === linkToDelete.id ? { ...l, isActive: false } : l)));
+                  toast.success("链接已删除");
+                  setLinkToDelete(null);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "删除失败");
+                } finally {
+                  setIsDeleting(false);
+                }
+              }}
+            >
+              {isDeleting ? "删除中..." : "删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

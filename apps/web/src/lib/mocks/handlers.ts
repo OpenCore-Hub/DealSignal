@@ -1,5 +1,4 @@
 import { http, HttpResponse } from "msw";
-import type { DealRoom } from "@/types";
 import {
   mockAccessLogs,
   mockActivities,
@@ -14,11 +13,37 @@ import {
   mockSignals,
   mockSuggestions,
   mockWorkspaceMembers,
+  mockWorkspaces,
   getMockDashboardStats,
   getMockSignalFeed,
 } from "./data";
+import type { DealRoom, WorkspaceMember } from "@/types";
+
+let workspaceSettings = {
+  name: "Acme Capital",
+  slug: "acme-capital",
+  brandColor: "#0f172a",
+  viewerDomain: "",
+  logoUrl: "",
+};
+
+let integrationsStatus = {
+  slack: false,
+  hubspot: false,
+  zapier: false,
+};
+
+let securitySettings = {
+  forceEmailVerification: true,
+  watermarkDownloads: false,
+  twoFactorEnabled: false,
+};
 
 export const handlers = [
+  http.get("/api/workspaces", () => {
+    return HttpResponse.json({ data: mockWorkspaces });
+  }),
+
   http.get("/api/dashboard/stats", () => {
     return HttpResponse.json(getMockDashboardStats());
   }),
@@ -31,6 +56,13 @@ export const handlers = [
     const doc = mockDocuments.find((d) => d.id === params.id);
     if (!doc) return new HttpResponse(null, { status: 404 });
     return HttpResponse.json(doc);
+  }),
+
+  http.delete("/api/documents/:id", ({ params }) => {
+    const index = mockDocuments.findIndex((d) => d.id === params.id);
+    if (index === -1) return new HttpResponse(null, { status: 404 });
+    mockDocuments.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.post("/api/documents", async () => {
@@ -49,6 +81,14 @@ export const handlers = [
   http.get("/api/links/:id", ({ params }) => {
     const link = mockLinks.find((l) => l.id === params.id);
     if (!link) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(link);
+  }),
+
+  http.patch("/api/links/:id", async ({ request, params }) => {
+    const link = mockLinks.find((l) => l.id === params.id);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    const patch = (await request.json()) as Partial<typeof link>;
+    Object.assign(link, patch);
     return HttpResponse.json(link);
   }),
 
@@ -176,5 +216,73 @@ export const handlers = [
 
   http.get("/api/risk-alerts", () => {
     return HttpResponse.json({ data: mockRiskAlerts });
+  }),
+
+  http.get("/api/workspace/settings", () => {
+    return HttpResponse.json({ data: workspaceSettings });
+  }),
+
+  http.put("/api/workspace/settings", async ({ request }) => {
+    const body = (await request.json()) as typeof workspaceSettings;
+    workspaceSettings = { ...workspaceSettings, ...body };
+    return HttpResponse.json({ data: workspaceSettings });
+  }),
+
+  http.post("/api/workspace/logo", async () => {
+    // 模拟上传：返回固定 CDN 图片 URL（生产环境会替换为实际上传地址）
+    const mockLogoUrl = "https://placehold.co/128x128/0f172a/ffffff?text=Logo";
+    workspaceSettings = { ...workspaceSettings, logoUrl: mockLogoUrl };
+    return HttpResponse.json({ data: { logoUrl: mockLogoUrl } }, { status: 201 });
+  }),
+
+  http.get("/api/workspace/billing", () => {
+    const totalStorage = mockDocuments.reduce((sum, d) => sum + d.fileSize, 0);
+    return HttpResponse.json({
+      data: {
+        plan: "Pro",
+        period: "年付",
+        storageUsed: Math.round((totalStorage / 1024 / 1024) * 10) / 10,
+        storageLimit: 50,
+        linksUsed: mockLinks.length,
+        linksLimit: 100,
+        roomsUsed: mockDealRooms.length,
+        roomsLimit: 10,
+      },
+    });
+  }),
+
+  http.get("/api/workspace/integrations", () => {
+    return HttpResponse.json({ data: integrationsStatus });
+  }),
+
+  http.put("/api/workspace/integrations", async ({ request }) => {
+    const body = (await request.json()) as typeof integrationsStatus;
+    integrationsStatus = { ...integrationsStatus, ...body };
+    return HttpResponse.json({ data: integrationsStatus });
+  }),
+
+  http.get("/api/workspace/security", () => {
+    return HttpResponse.json({ data: securitySettings });
+  }),
+
+  http.put("/api/workspace/security", async ({ request }) => {
+    const body = (await request.json()) as typeof securitySettings;
+    securitySettings = { ...securitySettings, ...body };
+    return HttpResponse.json({ data: securitySettings });
+  }),
+
+  http.post("/api/workspace/members", async ({ request }) => {
+    const body = (await request.json()) as { email: string; role: WorkspaceMember["role"] };
+    const newMember: WorkspaceMember = {
+      id: `wm_${Date.now()}`,
+      userId: `u_${Date.now()}`,
+      email: body.email,
+      name: body.email.split("@")[0],
+      role: body.role,
+      joinedAt: new Date().toISOString(),
+      status: "pending",
+    };
+    mockWorkspaceMembers.push(newMember);
+    return HttpResponse.json({ data: newMember }, { status: 201 });
   }),
 ];

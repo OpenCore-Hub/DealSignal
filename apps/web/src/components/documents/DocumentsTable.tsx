@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   useReactTable,
@@ -6,18 +6,9 @@ import {
   getSortedRowModel,
   getFilteredRowModel,
   flexRender,
-  type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import {
-  Copy,
-  DownloadSimple,
-  Eye,
-  Link as LinkIcon,
-  MagnifyingGlass,
-  Plus,
-  Trash,
-} from "@phosphor-icons/react";
+import { Link as LinkIcon, MagnifyingGlass, Plus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -28,169 +19,32 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { FileTypeIcon } from "@/components/common/FileTypeIcon";
-import { HeatBadge } from "@/components/common/HeatBadge";
-import { RowActions } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
-import { api, formatFileSize, formatDate } from "@/lib/api";
-import type { Document, HeatLevel, Link } from "@/types";
-
-interface DocumentRow extends Document {
-  links: Link[];
-  totalViews: number;
-  heatLevel: HeatLevel;
-}
-
-function calculateHeatLevel(totalViews: number): HeatLevel {
-  if (totalViews >= 30) return "hot";
-  if (totalViews >= 5) return "warm";
-  return "cold";
-}
-
-function buildDocumentRows(documents: Document[], links: Link[]): DocumentRow[] {
-  const linksByDoc = links.reduce<Record<string, Link[]>>((acc, link) => {
-    if (!acc[link.documentId]) acc[link.documentId] = [];
-    acc[link.documentId].push(link);
-    return acc;
-  }, {});
-
-  return documents.map((doc) => {
-    const docLinks = linksByDoc[doc.id] ?? [];
-    const totalViews = docLinks.reduce((sum, l) => sum + l.accessCount, 0);
-    return {
-      ...doc,
-      links: docLinks,
-      totalViews,
-      heatLevel: calculateHeatLevel(totalViews),
-    };
-  });
-}
+import { useAsyncData } from "@/hooks/useAsyncData";
+import { api } from "@/lib/api";
+import { buildDocumentRows, useDocumentColumns } from "./DocumentsColumns";
 
 export function DocumentsTable() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [sorting, setSorting] = useState<SortingState>([]);
   const [globalFilter, setGlobalFilter] = useState("");
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [links, setLinks] = useState<Link[]>([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        const [docsRes, linksRes] = await Promise.all([api.getDocuments(), api.getLinks()]);
-        if (!cancelled) {
-          setDocuments(docsRes.data);
-          setLinks(linksRes.data);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
+  const {
+    data,
+    loading,
+    error,
+    refetch,
+  } = useAsyncData(async () => {
+    const [docsRes, linksRes] = await Promise.all([api.getDocuments(), api.getLinks()]);
+    return buildDocumentRows(docsRes.data, linksRes.data);
   }, []);
 
-  const data = useMemo(() => buildDocumentRows(documents, links), [documents, links]);
-
-  const columns = useMemo<ColumnDef<DocumentRow>[]>(
-    () => [
-      {
-        accessorKey: "title",
-        header: "文件",
-        cell: ({ row }) => {
-          const doc = row.original;
-          return (
-            <div className="flex items-center gap-3">
-              <FileTypeIcon type={doc.fileType} showLabel />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{doc.title}</p>
-                <p className="text-caption text-muted-foreground">
-                  {doc.pageCount} 页 · {formatFileSize(doc.fileSize)} · {formatDate(doc.createdAt)} ·{" "}
-                  {doc.links.length} 个链接
-                </p>
-              </div>
-            </div>
-          );
-        },
-      },
-      {
-        accessorKey: "heatLevel",
-        header: "热度",
-        cell: ({ row }) => <HeatBadge level={row.original.heatLevel} />,
-      },
-      {
-        accessorKey: "totalViews",
-        header: "访问次数",
-        cell: ({ row }) => (
-          <span className="text-caption tabular-nums">{row.original.totalViews} views</span>
-        ),
-      },
-      {
-        id: "actions",
-        header: "",
-        cell: ({ row }) => {
-          const doc = row.original;
-          const firstLink = doc.links[0];
-          return (
-            <div className="flex items-center justify-end gap-1">
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                aria-label="预览"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  navigate(`/${workspaceSlug}/documents/${doc.id}`);
-                }}
-              >
-                <Eye size={16} />
-              </Button>
-              <RowActions
-                actions={[
-                  {
-                    label: "创建链接",
-                    icon: <LinkIcon size={16} />,
-                    onClick: () => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
-                  },
-                  ...(firstLink?.shortUrl
-                    ? [
-                        {
-                          label: "复制链接",
-                          icon: <Copy size={16} />,
-                          onClick: () => navigator.clipboard.writeText(firstLink.shortUrl),
-                        },
-                      ]
-                    : []),
-                  {
-                    label: "下载",
-                    icon: <DownloadSimple size={16} />,
-                    onClick: () => {},
-                    pro: true,
-                  },
-                  {
-                    label: "删除",
-                    icon: <Trash size={16} />,
-                    onClick: () => {},
-                    destructive: true,
-                    pro: true,
-                  },
-                ]}
-              />
-            </div>
-          );
-        },
-      },
-    ],
-    [navigate, workspaceSlug]
-  );
+  const columns = useDocumentColumns({ workspaceSlug, navigate });
 
   const table = useReactTable({
-    data,
+    data: data ?? [],
     columns,
     state: { sorting, globalFilter },
     onSortingChange: setSorting,
@@ -200,11 +54,20 @@ export function DocumentsTable() {
     getFilteredRowModel: getFilteredRowModel(),
   });
 
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={refetch}>重试</Button>
+      </div>
+    );
+  }
+
   if (loading) {
     return <SkeletonList rows={6} />;
   }
 
-  if (data.length === 0) {
+  if (!data || data.length === 0) {
     return (
       <EmptyState
         icon={<LinkIcon size={64} />}
@@ -274,7 +137,15 @@ export function DocumentsTable() {
                 <TableRow
                   key={row.id}
                   className="cursor-pointer"
+                  role="link"
+                  tabIndex={0}
                   onClick={() => navigate(`/${workspaceSlug}/documents/${row.original.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      navigate(`/${workspaceSlug}/documents/${row.original.id}`);
+                    }
+                  }}
                 >
                   {row.getVisibleCells().map((cell) => (
                     <TableCell key={cell.id}>

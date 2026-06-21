@@ -1,40 +1,25 @@
-import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import {
   Fire,
   Warning,
-  Thermometer,
   CheckCircle,
-  CalendarBlank,
   Link as LinkIcon,
   FileText,
   ArrowRight,
-  UploadSimple,
 } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import { api, type DashboardStats } from "@/lib/api";
 import { useSignalStore } from "@/stores/signalStore";
 import { SignalCard } from "./SignalCard";
 import { ActionList } from "./ActionList";
 import { HeatMap } from "./HeatMap";
 import { EmptyState } from "@/components/common/EmptyState";
-
-const timeRanges = [
-  { value: "7", label: "最近 7 天" },
-  { value: "30", label: "最近 30 天" },
-  { value: "90", label: "最近 90 天" },
-];
 
 function SummaryCards({
   stats,
@@ -45,25 +30,13 @@ function SummaryCards({
 }) {
   const items = [
     {
-      label: "高热度",
+      label: "高热度信号数",
       count: stats.hotCount,
       icon: Fire,
       color: "text-hot-500 bg-hot-500/10",
     },
     {
-      label: "中热度",
-      count: stats.warmCount,
-      icon: Thermometer,
-      color: "text-warm-500 bg-warm-500/10",
-    },
-    {
-      label: "风险提醒",
-      count: stats.riskAlerts.length,
-      icon: Warning,
-      color: "text-risk-500 bg-risk-500/10",
-    },
-    {
-      label: "待办行动",
+      label: "待办行动数",
       count: pendingActions,
       icon: CheckCircle,
       color: "text-success-500 bg-success-500/10",
@@ -71,11 +44,11 @@ function SummaryCards({
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+    <div className="grid grid-cols-2 gap-4">
       {items.map((item) => {
         const Icon = item.icon;
         return (
-          <Card key={item.label} className="transition-shadow hover:shadow-sm">
+          <Card key={item.label}>
             <CardContent className="flex items-center gap-3 p-4">
               <div className={`flex h-10 w-10 items-center justify-center rounded-md ${item.color}`}>
                 <Icon size={20} weight="fill" />
@@ -106,15 +79,25 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
       </CardHeader>
       <CardContent>
         <ul className="space-y-3">
-          {alerts.map((alert) => (
-            <li
-              key={alert.id}
-              className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted"
-              onClick={() => {
-                if (alert.documentId) navigate(`/${workspaceSlug}/documents/${alert.documentId}`);
-                else if (alert.linkId) navigate(`/${workspaceSlug}/links/${alert.linkId}`);
-              }}
-            >
+          {alerts.map((alert) => {
+            const handleClick = () => {
+              if (alert.documentId) navigate(`/${workspaceSlug}/documents/${alert.documentId}`);
+              else if (alert.linkId) navigate(`/${workspaceSlug}/links/${alert.linkId}`);
+            };
+            return (
+              <li
+                key={alert.id}
+                role="link"
+                tabIndex={0}
+                className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted"
+                onClick={handleClick}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    handleClick();
+                  }
+                }}
+              >
               <div className="mt-0.5 h-2 w-2 rounded-full bg-risk-500" />
               <div className="min-w-0 flex-1">
                 <p className="text-sm font-medium">{alert.title}</p>
@@ -122,7 +105,7 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
               </div>
               <ArrowRight size={16} className="text-muted-foreground" />
             </li>
-          ))}
+          ); })}
         </ul>
       </CardContent>
     </Card>
@@ -132,38 +115,37 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
 export function DashboardPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState("7");
   const reducedMotion = useReducedMotion();
 
   const { signals, actions, fetchSignals, updateActionStatus } = useSignalStore();
+  const {
+    data: stats,
+    loading,
+    error,
+    refetch,
+  } = useAsyncData<DashboardStats>(
+    async () => {
+      const [dashboardStats] = await Promise.all([api.getDashboardStats(), fetchSignals()]);
+      return dashboardStats;
+    },
+    [fetchSignals]
+  );
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        const [dashboardStats] = await Promise.all([api.getDashboardStats(), fetchSignals()]);
-        if (!cancelled) {
-          setStats(dashboardStats);
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [fetchSignals]);
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={refetch}>重试</Button>
+      </div>
+    );
+  }
 
   if (loading || !stats) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-48" />
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
+        <div className="grid grid-cols-2 gap-4">
+          {Array.from({ length: 2 }).map((_, i) => (
             <Skeleton key={i} className="h-24" />
           ))}
         </div>
@@ -191,25 +173,7 @@ export function DashboardPage() {
             今日需要关注什么：热度信号、待办行动、风险提醒，一站聚合。
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Select value={timeRange} onValueChange={(value) => value && setTimeRange(value)}>
-            <SelectTrigger className="w-[140px]">
-              <CalendarBlank size={16} className="mr-2 text-muted-foreground" />
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {timeRanges.map((range) => (
-                <SelectItem key={range.value} value={range.value}>
-                  {range.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Button onClick={() => navigate(`/${workspaceSlug}/documents/upload`)}>
-            <UploadSimple size={16} className="mr-2" />
-            上传文档
-          </Button>
-        </div>
+
       </div>
 
       <SummaryCards stats={stats} pendingActions={pendingActions} />
@@ -268,23 +232,47 @@ export function DashboardPage() {
                   description="上传第一份融资材料或销售提案，开始追踪热度。"
                 />
               ) : (
-                <ul className="space-y-3">
-                  {stats.recentDocuments.slice(0, 5).map((doc) => (
-                    <li
-                      key={doc.id}
-                      className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
-                      onClick={() => navigate(`/${workspaceSlug}/documents/${doc.id}`)}
-                    >
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{doc.title}</p>
-                        <p className="text-caption text-muted-foreground">
-                          {doc.pageCount} 页 · {doc.status === "ready" ? "已就绪" : "处理中"}
-                        </p>
-                      </div>
-                      <ArrowRight size={16} className="text-muted-foreground" />
-                    </li>
-                  ))}
-                </ul>
+                <div className="space-y-3">
+                  <ul className="space-y-3">
+                    {stats.recentDocuments.slice(0, 3).map((doc) => {
+                      const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                      return (
+                        <li
+                          key={doc.id}
+                          role="link"
+                          tabIndex={0}
+                          className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                          onClick={handleClick}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleClick();
+                            }
+                          }}
+                        >
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">{doc.title}</p>
+                          <p className="text-caption text-muted-foreground">
+                            {doc.pageCount} 页 · {doc.status === "ready" ? "已就绪" : "处理中"}
+                          </p>
+                        </div>
+                        <ArrowRight size={16} className="text-muted-foreground" />
+                      </li>
+                    ); })}
+                  </ul>
+                  {stats.recentDocuments.length > 3 && (
+                    <div className="flex justify-end">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(`/${workspaceSlug}/documents`)}
+                      >
+                        查看全部
+                        <ArrowRight size={16} className="ml-1" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
               )}
             </CardContent>
           </Card>

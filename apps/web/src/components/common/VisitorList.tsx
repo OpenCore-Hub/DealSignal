@@ -3,7 +3,7 @@ import { Users } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { HeatBadge } from "./HeatBadge";
 import { EmptyState } from "./EmptyState";
-import { formatDuration, formatRelativeTime, getInitials } from "@/lib/api";
+import { formatDuration, formatRelativeTime, getInitials } from "@/lib/formatters";
 import type { HeatLevel } from "@/types";
 
 interface Visitor {

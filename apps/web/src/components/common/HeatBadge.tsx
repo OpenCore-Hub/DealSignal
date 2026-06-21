@@ -21,7 +21,7 @@ interface HeatBadgeProps {
 
 export function HeatBadge({ level, className }: HeatBadgeProps) {
   return (
-    <Badge variant={level} className={cn("gap-1 capitalize", className)}>
+    <Badge variant={level} className={cn("gap-1", className)}>
       <span className={cn("h-1.5 w-1.5 rounded-full", dotStyles[level])} />
       {labels[level]}
     </Badge>

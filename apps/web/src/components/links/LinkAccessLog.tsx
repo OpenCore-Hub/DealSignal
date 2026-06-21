@@ -12,7 +12,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { formatDate } from "@/lib/api";
+import { ClockCounterClockwise } from "@phosphor-icons/react";
+import { formatDate } from "@/lib/formatters";
+import { EmptyState } from "@/components/common/EmptyState";
 import type { AccessLog } from "@/types";
 
 interface LinkAccessLogProps {
@@ -58,6 +60,17 @@ export function LinkAccessLog({ logs }: LinkAccessLogProps) {
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
+
+  if (logs.length === 0) {
+    return (
+      <EmptyState
+        icon={<ClockCounterClockwise size={48} />}
+        title="暂无访问记录"
+        description="该链接尚未被访问，分享后将在此显示访客行为。"
+        size="large"
+      />
+    );
+  }
 
   return (
     <div className="rounded-lg border border-border bg-card">

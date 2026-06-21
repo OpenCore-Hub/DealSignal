@@ -12,13 +12,10 @@ import { TrendChart } from "@/components/common/TrendChart";
 import { PermissionBadge } from "@/components/common/PermissionBadge";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { LinkAccessLog } from "./LinkAccessLog";
-import {
-  api,
-  formatDate,
-  formatDuration,
-  formatRelativeTime,
-  calculateUniqueVisitors,
-} from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
+import { api } from "@/lib/api";
+import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
+import { calculateUniqueVisitors } from "@/lib/calculations";
 import type { AccessLog, Link } from "@/types";
 
 function buildDailyTrend(logs: AccessLog[]): { labels: string[]; data: number[] } {
@@ -47,6 +44,8 @@ export function LinkDetail() {
   const [link, setLink] = useState<Link | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -55,11 +54,14 @@ export function LinkDetail() {
     async function load() {
       try {
         setLoading(true);
+        setError(null);
         const [l, logData] = await Promise.all([api.getLinkById(id!), api.getAccessLogs(id!)]);
         if (!cancelled) {
           setLink(l);
           setLogs(logData.data);
         }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -68,7 +70,7 @@ export function LinkDetail() {
     return () => {
       cancelled = true;
     };
-  }, [linkId]);
+  }, [linkId, retryTick]);
 
   const trend = useMemo(() => buildDailyTrend(logs), [logs]);
 
@@ -88,6 +90,20 @@ export function LinkDetail() {
       }));
   }, [logs]);
 
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <BackButton to={`/${workspaceSlug}/links`} label="返回链接管理" />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-body text-destructive mb-4">加载失败：{error}</p>
+            <Button onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   if (loading || !link) return <SkeletonDetail />;
 
   return (
@@ -98,19 +114,28 @@ export function LinkDetail() {
         title={link.shortUrl.split("/").pop() || link.id}
         description={`文档：${link.documentTitle} · 创建于 ${formatDate(link.createdAt)}`}
       >
-        <Button variant="outline" className="gap-1.5" onClick={() => {}}>
+        <Button variant="outline" className="gap-1.5" disabled title="链接编辑需后端支持" onClick={() => {}}>
           <PencilSimple size={16} />
           编辑
         </Button>
         <Button
           variant="outline"
           className="gap-1.5"
-          onClick={() => navigator.clipboard.writeText(link.shortUrl)}
+          onClick={() => {
+            void copyToClipboard(link.shortUrl, "链接已复制");
+          }}
         >
           <Copy size={16} />
           复制
         </Button>
-        <Button className="gap-1.5" onClick={() => {}}>
+        <Button
+          className="gap-1.5"
+          onClick={async () => {
+            const next = !link.isActive;
+            const updated = await api.updateLink(link.id, { isActive: next });
+            setLink(updated);
+          }}
+        >
           <ToggleRight size={16} />
           {link.isActive ? "停用" : "启用"}
         </Button>

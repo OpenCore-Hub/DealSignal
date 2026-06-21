@@ -3,6 +3,14 @@ import { useNavigate, useParams } from "react-router";
 import { Copy, DownloadSimple, Eye, Link as LinkIcon, Plus, Trash } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/common/PageHeader";
 import { BackButton } from "@/components/common/BackButton";
@@ -13,10 +21,15 @@ import { FileTypeIcon } from "@/components/common/FileTypeIcon";
 import { VisitorList } from "@/components/common/VisitorList";
 import { RowActions } from "@/components/common/RowActions";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
+import { EmptyState } from "@/components/common/EmptyState";
 import { DocumentAnalytics } from "./DocumentAnalytics";
 import { DocumentContent } from "./DocumentContent";
 import { DocumentAIInsights } from "./DocumentAIInsights";
-import { api, formatDuration, formatFileSize, formatRelativeTime, calculateUniqueVisitors } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
+import { api } from "@/lib/api";
+import { formatDuration, formatFileSize, formatRelativeTime } from "@/lib/formatters";
+import { calculateUniqueVisitors } from "@/lib/calculations";
+import { toast } from "sonner";
 import type { Document, Link, PageAnalytics, AccessLog, HeatLevel } from "@/types";
 
 interface VisitorSummary {
@@ -75,6 +88,10 @@ export function DocumentDetail() {
   const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [retryTick, setRetryTick] = useState(0);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -83,6 +100,7 @@ export function DocumentDetail() {
     async function load() {
       try {
         setLoading(true);
+        setError(null);
         const [d, l, a] = await Promise.all([
           api.getDocumentById(id!),
           api.getLinksByDocumentId(id!),
@@ -95,6 +113,8 @@ export function DocumentDetail() {
           setAnalytics(a.data);
           setLogs(allLogs.flat());
         }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -103,7 +123,7 @@ export function DocumentDetail() {
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+  }, [documentId, retryTick]);
 
   const visitors = useMemo(() => aggregateVisitors(logs), [logs]);
 
@@ -114,6 +134,20 @@ export function DocumentDetail() {
     }
     return counts;
   }, [links]);
+
+  if (error) {
+    return (
+      <div className="space-y-6">
+        <BackButton to={`/${workspaceSlug}/documents`} label="返回文档库" />
+        <Card>
+          <CardContent className="py-12 text-center">
+            <p className="text-body text-destructive mb-4">加载失败：{error}</p>
+            <Button onClick={() => setRetryTick((t) => t + 1)}>重试</Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   if (loading || !doc) return <SkeletonDetail />;
 
@@ -134,7 +168,7 @@ export function DocumentDetail() {
           doc.fileSize
         )} · 上传于 ${formatRelativeTime(doc.createdAt)}`}
       >
-        <Button variant="outline" className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/viewer/${doc.id}`)}>
+        <Button variant="outline" className="gap-1.5" onClick={() => navigate(`/viewer/${doc.id}`)}>
           <Eye size={16} />
           预览
         </Button>
@@ -148,12 +182,14 @@ export function DocumentDetail() {
               label: "下载",
               icon: <DownloadSimple size={16} />,
               onClick: () => {},
+              disabled: true,
+              title: "下载需后端签名 URL 支持",
               pro: true,
             },
             {
               label: "删除",
               icon: <Trash size={16} />,
-              onClick: () => navigate(`/${workspaceSlug}/documents`),
+              onClick: () => setDeleteDialogOpen(true),
               destructive: true,
               pro: true,
             },
@@ -220,6 +256,57 @@ export function DocumentDetail() {
                 <VisitorList visitors={visitors} />
               </CardContent>
             </Card>
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-h2 flex items-center gap-2">
+                  <LinkIcon size={20} />
+                  此文档的链接
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {links.length === 0 ? (
+                  <EmptyState
+                    icon={<LinkIcon size={48} />}
+                    title="暂无链接"
+                    description="点击右上角创建链接开始分享。"
+
+                  />
+                ) : (
+                  <ul className="space-y-2">
+                    {links.map((link) => (
+                      <li
+                        key={link.id}
+                        className="flex items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <FileTypeIcon type={doc.fileType} />
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium">{link.shortUrl}</p>
+                            <p className="text-caption text-muted-foreground">
+                              {link.accessCount} 次访问 · {formatRelativeTime(link.createdAt)}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <HeatBadge level={link.heatLevel} />
+                          <Button
+                            size="icon-sm"
+                            variant="ghost"
+                            onClick={() => {
+                              void copyToClipboard(link.shortUrl, "链接已复制");
+                            }}>
+                            <Copy size={14} />
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}>
+                            日志
+                          </Button>
+                        </div>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </CardContent>
+            </Card>
           </TabsContent>
           <TabsContent value="content">
             <DocumentContent title={doc.title} pageCount={doc.pageCount} analytics={analytics} evidences={[]} />
@@ -233,53 +320,38 @@ export function DocumentDetail() {
         </Tabs>
       </DetailLayout>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-h2 flex items-center gap-2">
-            <LinkIcon size={20} />
-            此文档的链接
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {links.length === 0 ? (
-            <div className="py-8 text-center text-muted-foreground">
-              暂无链接，点击右上角创建链接开始分享。
-            </div>
-          ) : (
-            <ul className="space-y-2">
-              {links.map((link) => (
-                <li
-                  key={link.id}
-                  className="flex items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
-                >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <FileTypeIcon type={doc.fileType} />
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium">{link.shortUrl}</p>
-                      <p className="text-caption text-muted-foreground">
-                        {link.accessCount} views · {formatRelativeTime(link.createdAt)}
-                      </p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <HeatBadge level={link.heatLevel} />
-                    <Button
-                      size="icon-sm"
-                      variant="ghost"
-                      onClick={() => navigator.clipboard.writeText(link.shortUrl)}
-                    >
-                      <Copy size={14} />
-                    </Button>
-                    <Button size="sm" variant="outline" onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}>
-                      日志
-                    </Button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+      <Dialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>删除文档</DialogTitle>
+            <DialogDescription>
+              确定要删除「{doc.title}」吗？关联链接将一并失效，此操作不可撤销。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeleteDialogOpen(false)} disabled={isDeleting}>
+              取消
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={isDeleting}
+              onClick={async () => {
+                setIsDeleting(true);
+                try {
+                  await api.deleteDocument(doc.id);
+                  toast.success("文档已删除");
+                  navigate(`/${workspaceSlug}/documents`);
+                } catch (e) {
+                  toast.error(e instanceof Error ? e.message : "删除失败");
+                  setIsDeleting(false);
+                }
+              }}
+            >
+              {isDeleting ? "删除中..." : "删除"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -1,6 +1,7 @@
-import { useEffect, useState } from "react";
-import { Card, CardContent } from "@/components/ui/card";
+import { useState } from "react";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { FileText } from "@phosphor-icons/react";
 import {
   Select,
   SelectContent,
@@ -9,29 +10,64 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { DocumentAnalytics } from "@/components/documents/DocumentAnalytics";
+import { EmptyState } from "@/components/common/EmptyState";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
-import { mockDocuments } from "@/lib/mocks/data";
-import type { PageAnalytics } from "@/types";
 
 export function InsightsPagesPage() {
-  const [selectedDocId, setSelectedDocId] = useState(mockDocuments[0]?.id || "");
-  const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [selectedDocId, setSelectedDocId] = useState("");
+  const {
+    data: documents,
+    loading: loadingDocs,
+    error,
+    refetch,
+  } = useAsyncData(async () => {
+    const res = await api.getDocuments();
+    const docs = res.data;
+    setSelectedDocId(docs[0]?.id || "");
+    return docs;
+  }, []);
 
-  useEffect(() => {
-    if (!selectedDocId) return;
-    api.getPageAnalytics(selectedDocId).then((res) => {
-      setAnalytics(res.data);
-      setLoading(false);
-    });
-  }, [selectedDocId]);
+  const {
+    data: analytics,
+    loading: loadingAnalytics,
+  } = useAsyncData(
+    async () => {
+      if (!selectedDocId) return [];
+      const res = await api.getPageAnalytics(selectedDocId);
+      return res.data;
+    },
+    [selectedDocId]
+  );
 
   const handleDocChange = (value: string | null) => {
     if (value) {
-      setLoading(true);
       setSelectedDocId(value);
     }
   };
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={refetch}>重试</Button>
+      </div>
+    );
+  }
+
+  if (loadingDocs) {
+    return <Skeleton className="h-80" />;
+  }
+
+  if (!documents || documents.length === 0) {
+    return (
+      <EmptyState
+        icon={<FileText size={48} />}
+        title="暂无文档"
+        description="上传文档后即可查看页面参与度分析。"
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -42,7 +78,7 @@ export function InsightsPagesPage() {
             <SelectValue placeholder="选择文档" />
           </SelectTrigger>
           <SelectContent>
-            {mockDocuments.map((doc) => (
+            {documents.map((doc) => (
               <SelectItem key={doc.id} value={doc.id}>
                 {doc.title}
               </SelectItem>
@@ -51,16 +87,16 @@ export function InsightsPagesPage() {
         </Select>
       </div>
 
-      {loading ? (
+      {loadingAnalytics ? (
         <Skeleton className="h-80" />
-      ) : analytics.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center text-muted-foreground">
-            暂无页面分析数据
-          </CardContent>
-        </Card>
+      ) : analytics?.length === 0 ? (
+        <EmptyState
+          icon={<FileText size={48} />}
+          title="暂无页面分析数据"
+          description="该文档暂无访问记录，分享链接后即可收集数据。"
+        />
       ) : (
-        <DocumentAnalytics analytics={analytics} />
+        <DocumentAnalytics analytics={analytics ?? []} />
       )}
     </div>
   );

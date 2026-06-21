@@ -126,6 +126,8 @@ export interface PageAnalytics {
   viewCount: number;
   avgDurationSeconds: number;
   exitRate: number;
+  /** 页面标题或提取的关键文本，用于匹配关键页 */
+  title?: string;
 }
 
 export interface Suggestion {
@@ -166,6 +168,37 @@ export interface WorkspaceMember {
   joinedAt: string;
   status: "active" | "pending" | "suspended";
   avatarUrl?: string;
+}
+
+export interface WorkspaceSettings {
+  name: string;
+  slug: string;
+  brandColor: string;
+  viewerDomain: string;
+  logoUrl?: string;
+}
+
+export interface BillingInfo {
+  plan: string;
+  period: string;
+  storageUsed: number;
+  storageLimit: number;
+  linksUsed: number;
+  linksLimit: number;
+  roomsUsed: number;
+  roomsLimit: number;
+}
+
+export interface IntegrationStatus {
+  slack: boolean;
+  hubspot: boolean;
+  zapier: boolean;
+}
+
+export interface SecuritySettings {
+  forceEmailVerification: boolean;
+  watermarkDownloads: boolean;
+  twoFactorEnabled: boolean;
 }
 
 export interface AuditLog {

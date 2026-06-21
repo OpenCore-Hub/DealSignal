@@ -12,56 +12,59 @@ export const CIRCLE_CONFIGS: Record<Circle, HeatScoreConfig> = {
   founder: {
     name: "founder",
     weights: {
-      opens: 5,
-      revisits: 15,
-      avgDurationMinutes: 10,
-      keyPageViews: 20,
+      opens: 3,
+      revisits: 18,
+      avgDurationMinutes: 12,
+      keyPageViews: 25,
       forwardSignals: 15,
-      downloads: 10,
+      downloads: 8,
       bouncePenalty: 10,
     },
     keyPages: {
-      "fundamentals": ["financials", "traction", "market", "team", "use-of-funds"],
-      "narrative": ["deck", "one-pager", "executive-summary"],
-      "trust": ["data-room", "cap-table", "due-diligence"],
+      financials: ["financial", "revenue", "projection", "unit economics", "burn", "runway"],
+      team: ["team", "founder", "advisor", "hiring"],
+      traction: ["traction", "growth", "metric", "mrr", "arr", "customer"],
+      market: ["market", "tam", "sam", "som", "opportunity"],
     },
-    thresholds: { hot: 80, warm: 50, cold: 0 },
+    thresholds: { hot: 75, warm: 40, cold: 0 },
   },
   investor_ir: {
     name: "investor_ir",
     weights: {
-      opens: 5,
-      revisits: 15,
+      opens: 2,
+      revisits: 12,
       avgDurationMinutes: 10,
       keyPageViews: 20,
-      forwardSignals: 15,
-      downloads: 10,
+      forwardSignals: 8,
+      downloads: 5,
       bouncePenalty: 10,
     },
     keyPages: {
-      "fundamentals": ["nav", "performance", "attribution", "portfolio"],
-      "governance": ["gp-report", "lpa", "side-letters", "aml/kyc"],
-      "operations": ["capital-calls", "distributions", "audits"],
+      performance: ["performance", "return", "irr", "multiple", "nav"],
+      distribution: ["distribution", "dpi", "rvpi", "tvpi", "capital"],
+      strategy: ["strategy", "thesis", "allocation", "outlook"],
+      portfolio: ["portfolio", "company", "investment"],
     },
-    thresholds: { hot: 75, warm: 45, cold: 0 },
+    thresholds: { hot: 70, warm: 35, cold: 0 },
   },
   sales: {
     name: "sales",
     weights: {
-      opens: 5,
+      opens: 2,
       revisits: 15,
       avgDurationMinutes: 10,
-      keyPageViews: 20,
-      forwardSignals: 15,
-      downloads: 10,
-      bouncePenalty: 10,
+      keyPageViews: 28,
+      forwardSignals: 20,
+      downloads: 5,
+      bouncePenalty: 12,
     },
     keyPages: {
-      "problem": ["problem", "challenges", "roi"],
-      "solution": ["product", "solution", "features", "pricing"],
-      "proof": ["case-study", "testimonials", "security", "implementation"],
+      pricing: ["pricing", "price", "cost", "fee", "quote", "proposal"],
+      security: ["security", "compliance", "soc2", "gdpr", "encryption"],
+      case_studies: ["case study", "customer story", "testimonial", "roi"],
+      implementation: ["implementation", "onboarding", "deployment", "timeline"],
     },
-    thresholds: { hot: 75, warm: 45, cold: 0 },
+    thresholds: { hot: 72, warm: 38, cold: 0 },
   },
 };
 
@@ -133,10 +136,13 @@ export function computeHeatScore(
   const keyPages = Object.values(config.keyPages).flat();
   const topKeyPages = pageAnalytics
     ? pageAnalytics
-        .filter((p) => keyPages.some((kw) => String(p.pageNumber).includes(kw)))
+        .filter((p) => {
+          const text = [p.title, String(p.pageNumber)].filter(Boolean).join(" ").toLowerCase();
+          return keyPages.some((kw) => text.includes(kw.toLowerCase()));
+        })
         .sort((a, b) => b.viewCount - a.viewCount)
         .slice(0, 3)
-        .map((p) => `Page ${p.pageNumber}`)
+        .map((p) => p.title ?? `Page ${p.pageNumber}`)
     : [];
 
   return { score, level, trend, breakdown, topKeyPages };

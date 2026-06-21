@@ -71,24 +71,29 @@ export function AIChat() {
             animate={{ opacity: 1, y: 0 }}
             exit={reducedMotion ? undefined : { opacity: 0, y: 20 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed right-4 bottom-4 z-40 flex h-[520px] w-[360px] flex-col rounded-xl border border-border bg-card shadow-xl"
+            className="fixed right-4 bottom-4 z-40 flex h-[520px] w-full max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-card shadow-xl sm:max-w-[360px]"
           >
             <div className="flex h-12 items-center justify-between border-b border-border px-4">
               <div className="flex items-center gap-2">
                 <Robot size={18} weight="fill" className="text-primary" />
                 <span className="text-sm font-medium">AI 助手</span>
               </div>
-              <button
-                type="button"
+              <Button
+                size="icon"
+                variant="ghost"
                 onClick={() => setOpen(false)}
-                className="text-muted-foreground hover:text-foreground"
                 aria-label="关闭 AI 助手"
               >
                 <X size={18} />
-              </button>
+              </Button>
             </div>
 
-            <div ref={scrollRef} className="flex-1 space-y-4 overflow-y-auto p-4">
+            <div
+              ref={scrollRef}
+              className="flex-1 space-y-4 overflow-y-auto p-4"
+              aria-live="polite"
+              aria-busy={pending}
+            >
               {messages.length === 0 && (
                 <div className="py-8 text-center text-muted-foreground">
                   <Robot size={32} className="mx-auto mb-2 opacity-40" />

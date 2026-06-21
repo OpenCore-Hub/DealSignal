@@ -11,6 +11,14 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 import { useAIStore } from "@/stores/aiStore";
 import type { Evidence } from "@/types";
@@ -35,6 +43,7 @@ export function AIAssistant() {
   const location = useLocation();
   const { open, messages, pending, toggle, setOpen, sendMessage, reset } = useAIStore();
   const [input, setInput] = useState("");
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   const documentIdMatch = location.pathname.match(/\/documents\/([^/]+)/);
@@ -67,7 +76,7 @@ export function AIAssistant() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="flex h-[520px] w-[360px] flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl sm:w-[420px]"
+            className="flex max-h-[calc(100dvh-6rem)] min-h-[320px] w-full max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-xl border border-border bg-card shadow-lg sm:max-w-[420px]"
           >
             <div className="flex items-center justify-between border-b border-border bg-muted/50 px-4 py-3">
               <div className="flex items-center gap-2">
@@ -82,7 +91,12 @@ export function AIAssistant() {
                 </div>
               </div>
               <div className="flex items-center gap-1">
-                <Button size="icon" variant="ghost" onClick={reset} aria-label="重置对话">
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  onClick={() => setResetDialogOpen(true)}
+                  aria-label="重置对话"
+                >
                   <ArrowCounterClockwise size={16} />
                 </Button>
                 <Button size="icon" variant="ghost" onClick={() => setOpen(false)} aria-label="关闭">
@@ -91,7 +105,11 @@ export function AIAssistant() {
               </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto px-4 py-4">
+            <div
+              className="flex-1 overflow-y-auto px-4 py-4"
+              aria-live="polite"
+              aria-busy={pending}
+            >
               <div className="space-y-4">
                 {messages.map((msg) => (
                   <div
@@ -124,6 +142,31 @@ export function AIAssistant() {
                 <div ref={bottomRef} />
               </div>
             </div>
+
+            <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+              <DialogContent showCloseButton={false}>
+                <DialogHeader>
+                  <DialogTitle>重置对话</DialogTitle>
+                  <DialogDescription>
+                    确定要清空当前对话记录吗？此操作无法撤销。
+                  </DialogDescription>
+                </DialogHeader>
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => setResetDialogOpen(false)}>
+                    取消
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    onClick={() => {
+                      reset();
+                      setResetDialogOpen(false);
+                    }}
+                  >
+                    重置
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
 
             <div className="border-t border-border p-3">
               {!pending && messages.length <= 2 && (

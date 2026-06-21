@@ -19,7 +19,9 @@ import { HeatBadge } from "@/components/common/HeatBadge";
 import { ActivityTimeline } from "@/components/common/ActivityTimeline";
 import { TrendChart } from "@/components/common/TrendChart";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
-import { api, formatDuration, formatRelativeTime } from "@/lib/api";
+import { EmptyState } from "@/components/common/EmptyState";
+import { api } from "@/lib/api";
+import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import type { Activity, Contact, Document } from "@/types";
 
 function ContactScoreChart({
@@ -50,6 +52,7 @@ export function ContactDetailPage() {
   const [activities, setActivities] = useState<Activity[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -58,6 +61,7 @@ export function ContactDetailPage() {
     async function load() {
       try {
         setLoading(true);
+        setError(null);
         const [c, a, docsRes] = await Promise.all([
           api.getContactById(id!),
           api.getActivitiesByContactId(id!),
@@ -68,6 +72,8 @@ export function ContactDetailPage() {
           setActivities(a.data);
           setDocuments(docsRes.data);
         }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,6 +107,15 @@ export function ContactDetailPage() {
     () => documents.filter((d) => contact?.viewedDocuments.includes(d.id)),
     [documents, contact]
   );
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={() => window.location.reload()}>重试</Button>
+      </div>
+    );
+  }
 
   if (loading || !contact) {
     return <SkeletonDetail />;
@@ -139,7 +154,7 @@ export function ContactDetailPage() {
       >
         <Tabs defaultValue="overview" className="w-full">
           <TabsList className="mb-4">
-            <TabsTrigger value="overview">360° 视图</TabsTrigger>
+            <TabsTrigger value="overview">概览</TabsTrigger>
             <TabsTrigger value="timeline">活动时间线</TabsTrigger>
             <TabsTrigger value="documents">浏览文档</TabsTrigger>
             <TabsTrigger value="notes">备注</TabsTrigger>
@@ -156,7 +171,12 @@ export function ContactDetailPage() {
               </CardHeader>
               <CardContent>
                 {activities.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无活动记录。</p>
+                  <EmptyState
+                    icon={<Clock size={48} />}
+                    title="暂无活动记录"
+                    description="当联系人访问文档时，这里会显示最近活动。"
+                    size="large"
+                  />
                 ) : (
                   <ul className="space-y-2">
                     {activities.slice(0, 5).map((a) => (
@@ -214,24 +234,40 @@ export function ContactDetailPage() {
               </CardHeader>
               <CardContent>
                 {viewedDocuments.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">暂无浏览记录。</p>
+                  <EmptyState
+                    icon={<Folder size={48} />}
+                    title="暂无浏览记录"
+                    description="联系人尚未通过链接浏览任何文档。"
+                    size="large"
+                  />
                 ) : (
                   <ul className="space-y-2">
-                    {viewedDocuments.map((doc) => (
-                      <li
-                        key={doc.id}
-                        className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
-                        onClick={() => navigate(`/${workspaceSlug}/documents/${doc.id}`)}
-                      >
-                        <div className="flex items-center gap-3">
-                          <FileText size={18} className="text-muted-foreground" />
-                          <p className="text-sm font-medium">{doc.title}</p>
-                        </div>
-                        <Button size="sm" variant="outline">
-                          查看
-                        </Button>
-                      </li>
-                    ))}
+                    {viewedDocuments.map((doc) => {
+                      const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                      return (
+                        <li
+                          key={doc.id}
+                          role="link"
+                          tabIndex={0}
+                          className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                          onClick={handleClick}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              handleClick();
+                            }
+                          }}
+                        >
+                          <div className="flex items-center gap-3">
+                            <FileText size={18} className="text-muted-foreground" />
+                            <p className="text-sm font-medium">{doc.title}</p>
+                          </div>
+                          <Button size="sm" variant="outline">
+                            查看
+                          </Button>
+                        </li>
+                      );
+                    })}
                   </ul>
                 )}
               </CardContent>

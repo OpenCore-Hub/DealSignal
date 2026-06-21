@@ -62,7 +62,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   return (
     <motion.div
       layout={!reducedMotion}
-      className="group/signal rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-shadow hover:shadow-md"
+      className="group/signal rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-colors hover:bg-muted/50 hover:border-muted-foreground/20"
     >
       <div className="flex items-start gap-3">
         <div

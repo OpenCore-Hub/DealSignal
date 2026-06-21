@@ -2,19 +2,24 @@ import type {
   AccessLog,
   ActionItem,
   Activity,
+  BillingInfo,
   Contact,
   DealRoom,
   DealRoomTemplate,
   Document,
   HeatAlert,
   HeatLevel,
+  IntegrationStatus,
   Link,
   PageAnalytics,
   PermissionConfig,
   RiskAlert,
+  SecuritySettings,
   Signal,
   Suggestion,
+  Workspace,
   WorkspaceMember,
+  WorkspaceSettings,
 } from "@/types";
 
 export interface DashboardStats {
@@ -41,10 +46,33 @@ export interface SignalFeed {
   actions: ActionItem[];
 }
 
-async function request<T>(path: string, options?: RequestInit): Promise<T> {
+export interface RequestOptions extends RequestInit {
+  token?: string;
+  idempotencyKey?: string;
+}
+
+async function request<T>(path: string, options?: RequestOptions): Promise<T> {
+  const headers = new Headers(options?.headers);
+  const body = options?.body;
+
+  // 仅在非 FormData 请求体时自动设置 JSON Content-Type，避免破坏 multipart 上传
+  if (!(body instanceof FormData)) {
+    if (!headers.has("Content-Type")) {
+      headers.set("Content-Type", "application/json");
+    }
+  }
+
+  // 预留认证与幂等扩展点
+  if (options?.token) {
+    headers.set("Authorization", `Bearer ${options.token}`);
+  }
+  if (options?.idempotencyKey) {
+    headers.set("Idempotency-Key", options.idempotencyKey);
+  }
+
   const response = await fetch(`/api${path}`, {
-    headers: { "Content-Type": "application/json" },
     ...options,
+    headers,
   });
   if (!response.ok) {
     throw new Error(`API error: ${response.status} ${response.statusText}`);
@@ -53,10 +81,13 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  getWorkspaces: () => request<{ data: Workspace[] }>("/workspaces"),
+
   getDashboardStats: () => request<DashboardStats>("/dashboard/stats"),
 
   getDocuments: () => request<{ data: Document[] }>("/documents"),
   getDocumentById: (id: string) => request<Document>(`/documents/${id}`),
+  deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: "DELETE" }),
 
   uploadDocument: (file: File) => {
     const formData = new FormData();
@@ -74,6 +105,8 @@ export const api = {
   getLinkById: (id: string) => request<Link>(`/links/${id}`),
   getLinksByDocumentId: (documentId: string) =>
     request<{ data: Link[] }>(`/links?documentId=${documentId}`),
+  updateLink: (id: string, patch: Partial<Link>) =>
+    request<Link>(`/links/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
 
   getAccessLogs: (linkId: string) =>
     request<{ data: AccessLog[] }>(`/links/${linkId}/access-logs`),
@@ -102,6 +135,43 @@ export const api = {
   getSuggestions: () => request<{ data: Suggestion[] }>("/insights/suggestions"),
 
   getWorkspaceMembers: () => request<{ data: WorkspaceMember[] }>("/workspace/members"),
+  inviteWorkspaceMember: (email: string, role: WorkspaceMember["role"]) =>
+    request<{ data: WorkspaceMember }>("/workspace/members", {
+      method: "POST",
+      body: JSON.stringify({ email, role }),
+    }),
+
+  getWorkspaceSettings: () => request<{ data: WorkspaceSettings }>("/workspace/settings"),
+  updateWorkspaceSettings: (settings: WorkspaceSettings) =>
+    request<{ data: WorkspaceSettings }>("/workspace/settings", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
+
+  uploadWorkspaceLogo: (file: File) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    return request<{ data: { logoUrl: string } }>("/workspace/logo", {
+      method: "POST",
+      body: formData,
+    });
+  },
+
+  getBillingInfo: () => request<{ data: BillingInfo }>("/workspace/billing"),
+
+  getIntegrations: () => request<{ data: IntegrationStatus }>("/workspace/integrations"),
+  updateIntegrations: (status: IntegrationStatus) =>
+    request<{ data: IntegrationStatus }>("/workspace/integrations", {
+      method: "PUT",
+      body: JSON.stringify(status),
+    }),
+
+  getSecuritySettings: () => request<{ data: SecuritySettings }>("/workspace/security"),
+  updateSecuritySettings: (settings: SecuritySettings) =>
+    request<{ data: SecuritySettings }>("/workspace/security", {
+      method: "PUT",
+      body: JSON.stringify(settings),
+    }),
 
   getSignals: () => request<SignalFeed>("/signals"),
   getSignalById: (id: string) => request<Signal>(`/signals/${id}`),
@@ -109,43 +179,8 @@ export const api = {
   getDealRoomTemplates: () => request<{ data: DealRoomTemplate[] }>("/deal-room-templates"),
 };
 
-export function formatFileSize(bytes: number): string {
-  if (bytes === 0) return "0 B";
-  const k = 1024;
-  const sizes = ["B", "KB", "MB", "GB"];
-  const i = Math.floor(Math.log(bytes) / Math.log(k));
-  return `${parseFloat((bytes / k ** i).toFixed(1))} ${sizes[i]}`;
-}
-
-export function formatDate(date: string): string {
-  return new Intl.DateTimeFormat("zh-CN", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(new Date(date));
-}
-
-export function formatDuration(seconds: number): string {
-  if (!seconds || seconds <= 0) return "-";
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  if (m === 0) return `${s}s`;
-  return `${m}m ${s}s`;
-}
-
-export function formatRelativeTime(date?: string): string {
-  if (!date) return "-";
-  const now = new Date();
-  const then = new Date(date);
-  const diff = Math.floor((now.getTime() - then.getTime()) / 1000);
-  if (diff < 60) return "刚刚";
-  if (diff < 3600) return `${Math.floor(diff / 60)} 分钟前`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)} 小时前`;
-  if (diff < 604800) return `${Math.floor(diff / 86400)} 天前`;
-  return formatDate(date);
-}
+// 工具函数请直接从 @/lib/formatters 或 @/lib/calculations 导入
+// api.ts 仅保留网络层与业务方法，避免职责耦合
 
 export function heatLabel(level: HeatLevel): string {
   const labels: Record<HeatLevel, string> = {
@@ -154,42 +189,4 @@ export function heatLabel(level: HeatLevel): string {
     cold: "低热度",
   };
   return labels[level];
-}
-
-export function getInitials(name: string): string {
-  return name
-    .split(" ")
-    .map((n) => n[0])
-    .join("")
-    .toUpperCase()
-    .slice(0, 2);
-}
-
-export function calculateUniqueVisitors(logs: { visitorEmail: string }[]): number {
-  return new Set(logs.map((l) => l.visitorEmail)).size;
-}
-
-export function calculateHeatDistribution(contacts: { heatLevel: HeatLevel }[]): Record<HeatLevel, number> {
-  return contacts.reduce(
-    (acc, c) => {
-      acc[c.heatLevel] = (acc[c.heatLevel] ?? 0) + 1;
-      return acc;
-    },
-    { hot: 0, warm: 0, cold: 0 } as Record<HeatLevel, number>
-  );
-}
-
-export function isOverdue(dueAt: string): boolean {
-  return new Date(dueAt) < new Date();
-}
-
-export function daysOverdue(dueAt: string): number {
-  const diff = new Date().getTime() - new Date(dueAt).getTime();
-  return Math.max(0, Math.floor(diff / 86400000));
-}
-
-export function confidenceLabel(sampleCount: number): string {
-  if (sampleCount >= 50) return "高置信度";
-  if (sampleCount >= 10) return "中置信度";
-  return "低置信度（样本较少）";
 }

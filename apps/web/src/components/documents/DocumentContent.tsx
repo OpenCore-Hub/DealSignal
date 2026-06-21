@@ -35,10 +35,18 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
           return (
             <Card
               key={page.pageNumber}
-              className={`cursor-pointer overflow-hidden transition-all hover:shadow-md ${
+              role="button"
+              tabIndex={0}
+              className={`cursor-pointer overflow-hidden transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
                 selectedPage === page.pageNumber ? "ring-2 ring-primary" : ""
               }`}
               onClick={() => setSelectedPage(page.pageNumber)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  setSelectedPage(page.pageNumber);
+                }
+              }}
             >
               <CardContent className="relative flex aspect-[3/4] flex-col items-center justify-center">
                 <FileText size={32} className="text-muted-foreground/50" />
@@ -51,7 +59,7 @@ export function DocumentContent({ title, pageCount, analytics, evidences }: Docu
                 </div>
                 {page.hasEvidence && (
                   <>
-                    <Badge className="absolute right-2 top-2 bg-primary text-primary-foreground text-[10px]">
+                    <Badge className="absolute right-2 top-2 bg-primary text-primary-foreground text-caption">
                       证据
                     </Badge>
                     <span className="sr-only">此页包含 AI 证据高亮</span>

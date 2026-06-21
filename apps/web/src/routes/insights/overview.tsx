@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router";
 import { FileText, Link as LinkIcon, Users } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import { StatCard } from "@/components/common/StatCard";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { TrendChart } from "@/components/common/TrendChart";
@@ -34,12 +35,14 @@ export function InsightsOverviewPage() {
   const [data, setData] = useState<InsightsOverview | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
     async function load() {
       try {
         setLoading(true);
+        setError(null);
         const overview = await api.getInsightsOverview();
         const linksRes = await api.getLinks();
         const allLogs = await Promise.all(
@@ -49,6 +52,8 @@ export function InsightsOverviewPage() {
           setData(overview);
           setLogs(allLogs.flat());
         }
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "加载失败");
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -60,6 +65,15 @@ export function InsightsOverviewPage() {
   }, []);
 
   const trend = useMemo(() => buildLast7DaysTrend(logs), [logs]);
+
+  if (error) {
+    return (
+      <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+        <p className="text-body text-muted-foreground">{error}</p>
+        <Button onClick={() => window.location.reload()}>重试</Button>
+      </div>
+    );
+  }
 
   if (loading || !data) {
     return (
@@ -100,19 +114,29 @@ export function InsightsOverviewPage() {
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
-              {data.topDocuments.map((doc) => (
-                <li
-                  key={doc.id}
-                  className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
-                  onClick={() => navigate(`/${workspaceSlug}/documents/${doc.id}`)}
-                >
+              {data.topDocuments.map((doc) => {
+                const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                return (
+                  <li
+                    key={doc.id}
+                    role="link"
+                    tabIndex={0}
+                    className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                    onClick={handleClick}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleClick();
+                      }
+                    }}
+                  >
                   <span className="truncate text-sm font-medium">{doc.title}</span>
                   <div className="flex items-center gap-3">
-                    <span className="text-caption tabular-nums text-muted-foreground">{doc.views} views</span>
+                    <span className="text-caption tabular-nums text-muted-foreground">{doc.views} 次访问</span>
                     <HeatBadge level={doc.heatLevel} />
                   </div>
                 </li>
-              ))}
+              ); })}
             </ul>
           </CardContent>
         </Card>
@@ -126,19 +150,29 @@ export function InsightsOverviewPage() {
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
-              {data.topLinks.map((link) => (
-                <li
-                  key={link.id}
-                  className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
-                  onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}
-                >
+              {data.topLinks.map((link) => {
+                const handleClick = () => navigate(`/${workspaceSlug}/links/${link.id}`);
+                return (
+                  <li
+                    key={link.id}
+                    role="link"
+                    tabIndex={0}
+                    className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                    onClick={handleClick}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleClick();
+                      }
+                    }}
+                  >
                   <span className="truncate text-sm font-medium">{link.shortUrl}</span>
                   <div className="flex items-center gap-3">
-                    <span className="text-caption tabular-nums text-muted-foreground">{link.views} views</span>
+                    <span className="text-caption tabular-nums text-muted-foreground">{link.views} 次访问</span>
                     <HeatBadge level={link.heatLevel} />
                   </div>
                 </li>
-              ))}
+              ); })}
             </ul>
           </CardContent>
         </Card>
@@ -153,19 +187,29 @@ export function InsightsOverviewPage() {
         </CardHeader>
         <CardContent>
           <ul className="space-y-2">
-            {data.topContacts.map((contact) => (
-              <li
-                key={contact.id}
-                className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
-                onClick={() => navigate(`/${workspaceSlug}/contacts/${contact.id}`)}
-              >
+            {data.topContacts.map((contact) => {
+              const handleClick = () => navigate(`/${workspaceSlug}/contacts/${contact.id}`);
+              return (
+                <li
+                  key={contact.id}
+                  role="link"
+                  tabIndex={0}
+                  className="flex cursor-pointer items-center justify-between rounded-md border border-border p-3 transition-colors hover:bg-muted"
+                  onClick={handleClick}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      handleClick();
+                    }
+                  }}
+                >
                 <span className="truncate text-sm font-medium">{contact.email}</span>
                 <div className="flex items-center gap-3">
                   <span className="text-caption tabular-nums text-muted-foreground">{contact.score} 分</span>
                   <HeatBadge level={contact.heatLevel} />
                 </div>
               </li>
-            ))}
+            ); })}
           </ul>
         </CardContent>
       </Card>

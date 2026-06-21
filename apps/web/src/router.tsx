@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, lazy } from "react";
-import { createBrowserRouter, Navigate, Outlet } from "react-router";
+import { createBrowserRouter, Navigate, Outlet, useRouteError } from "react-router";
 import { AppShell } from "@/components/layout/AppShell";
+import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 
 const DashboardPage = lazy(() => import("@/routes/dashboard").then((m) => ({ default: m.DashboardPage })));
@@ -29,6 +30,7 @@ const SettingsBillingPage = lazy(() => import("@/routes/settings/billing").then(
 const SettingsSecurityPage = lazy(() => import("@/routes/settings/security").then((m) => ({ default: m.SettingsSecurityPage })));
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
 const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ default: m.NotFoundPage })));
+const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
 
 function PageLoader() {
   return (
@@ -52,11 +54,38 @@ function WorkspaceLayout() {
   );
 }
 
+function RouteError() {
+  const error = useRouteError() as Error;
+  return (
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 p-6 text-center">
+      <h1 className="text-h1 text-foreground">出错了</h1>
+      <p className="max-w-md text-body text-muted-foreground">
+        {error?.message || "页面加载失败，请稍后重试。"}
+      </p>
+      <div className="flex gap-3">
+        <Button variant="outline" onClick={() => window.location.reload()}>
+          刷新页面
+        </Button>
+        <Button onClick={() => window.location.href = "/"}>返回首页</Button>
+      </div>
+    </div>
+  );
+}
+
 export const router = createBrowserRouter([
-  { path: "/", element: <Navigate to="/acme-capital/dashboard" replace /> },
+  {
+    path: "/",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <WorkspacesPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
   {
     path: "/:workspaceSlug",
     element: <WorkspaceLayout />,
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <Navigate to="dashboard" replace /> },
       { path: "dashboard", element: <DashboardPage /> },
@@ -97,5 +126,5 @@ export const router = createBrowserRouter([
       { path: "*", element: <NotFoundPage /> },
     ],
   },
-  { path: "/viewer", element: <Suspense fallback={<PageLoader />}><ViewerPage /></Suspense> },
+  { path: "/viewer/:documentId", element: <Suspense fallback={<PageLoader />}><ViewerPage /></Suspense> },
 ]);

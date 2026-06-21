@@ -69,7 +69,7 @@ function DialogContent({
             }
           >
             <X size={16} />
-            <span className="sr-only">Close</span>
+            <span className="sr-only">关闭</span>
           </DialogPrimitive.Close>
         )}
       </DialogPrimitive.Popup>

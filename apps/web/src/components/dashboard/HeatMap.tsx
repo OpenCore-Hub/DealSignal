@@ -1,3 +1,4 @@
+import { useNavigate, useParams } from "react-router";
 import { Fire, Clock, Snowflake, Link as LinkIcon } from "@phosphor-icons/react";
 import type { HeatLevel, Link as LinkType } from "@/types";
 
@@ -6,6 +7,9 @@ interface HeatMapProps {
 }
 
 export function HeatMap({ links }: HeatMapProps) {
+  const navigate = useNavigate();
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+
   const grouped: Record<HeatLevel, LinkType[]> = {
     hot: links.filter((l) => l.heatLevel === "hot"),
     warm: links.filter((l) => l.heatLevel === "warm"),
@@ -33,19 +37,31 @@ export function HeatMap({ links }: HeatMapProps) {
               <span className="text-caption text-muted-foreground">{items.length} 个链接</span>
             </div>
             <div className="space-y-2">
-              {items.slice(0, 5).map((link) => (
-                <div
-                  key={link.id}
-                  className="flex items-center gap-2 rounded-md border border-border bg-card p-2"
-                >
-                  <LinkIcon size={14} className="shrink-0 text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm">{link.documentTitle}</p>
-                    <p className="text-caption text-muted-foreground">{link.accessCount} 次访问</p>
+              {items.slice(0, 5).map((link) => {
+                const handleClick = () => navigate(`/${workspaceSlug}/links/${link.id}`);
+                return (
+                  <div
+                    key={link.id}
+                    role="link"
+                    tabIndex={0}
+                    className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card p-2 transition-colors hover:bg-muted"
+                    onClick={handleClick}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        handleClick();
+                      }
+                    }}
+                  >
+                    <LinkIcon size={14} className="shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-sm">{link.documentTitle}</p>
+                      <p className="text-caption text-muted-foreground">{link.accessCount} 次访问</p>
+                    </div>
+                    <div className={`h-1.5 w-1.5 rounded-full ${tier.color}`} />
                   </div>
-                  <div className={`h-1.5 w-1.5 rounded-full ${tier.color}`} />
-                </div>
-              ))}
+                );
+              })}
               {items.length === 0 && (
                 <p className="text-caption text-muted-foreground">暂无 {tier.label} 链接</p>
               )}

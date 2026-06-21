@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { ActionItem } from "@/types";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
-import { isOverdue, daysOverdue } from "@/lib/api";
+import { isOverdue, daysOverdue } from "@/lib/calculations";
 
 const actionConfig = {
   email: { icon: Envelope, label: "发邮件" },
@@ -48,7 +48,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                 key={action.id}
                 layout={!reducedMotion}
                 exit={reducedMotion ? undefined : { opacity: 0, height: 0 }}
-                className="flex items-start gap-3 rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-shadow hover:shadow-md"
+                className="flex items-start gap-3 rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-colors hover:bg-muted/50 hover:border-muted-foreground/20"
               >
                 <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                   <Icon size={18} />

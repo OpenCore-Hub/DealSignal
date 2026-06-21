@@ -1,32 +1,36 @@
-import { useEffect, useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Users, MagnifyingGlass } from "@phosphor-icons/react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PageHeader } from "@/components/common/PageHeader";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { EmptyState } from "@/components/common/EmptyState";
-import { api, formatDuration, formatRelativeTime } from "@/lib/api";
+import { api } from "@/lib/api";
+import { formatDuration, formatRelativeTime } from "@/lib/formatters";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import type { Contact } from "@/types";
+// Contact 类型用于组件内的类型推断
+export type { Contact };
 
 export function ContactsPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
-
-  useEffect(() => {
-    api.getContacts().then((res) => {
-      setContacts(res.data);
-      setLoading(false);
-    });
-  }, []);
+  const { data: contacts, loading, error, refetch } = useAsyncData(
+    async () => {
+      const res = await api.getContacts();
+      return res.data;
+    },
+    []
+  );
 
   const filtered = useMemo(() => {
+    const list = contacts ?? [];
     const q = query.toLowerCase();
-    return contacts.filter(
+    return list.filter(
       (c) =>
         c.name.toLowerCase().includes(q) ||
         c.email.toLowerCase().includes(q) ||
@@ -51,7 +55,12 @@ export function ContactsPage() {
         />
       </div>
 
-      {loading ? (
+      {error ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+          <p className="text-body text-muted-foreground">{error}</p>
+          <Button onClick={refetch}>重试</Button>
+        </div>
+      ) : loading ? (
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <Skeleton className="h-28" />
           <Skeleton className="h-28" />
@@ -68,8 +77,16 @@ export function ContactsPage() {
           {filtered.map((contact) => (
             <Card
               key={contact.id}
-              className="cursor-pointer transition-shadow hover:shadow-sm"
+              role="link"
+              tabIndex={0}
+              className="cursor-pointer transition-colors hover:bg-muted/50"
               onClick={() => navigate(`/${workspaceSlug}/contacts/${contact.id}`)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  navigate(`/${workspaceSlug}/contacts/${contact.id}`);
+                }
+              }}
             >
               <CardContent className="flex items-start justify-between p-5">
                 <div>

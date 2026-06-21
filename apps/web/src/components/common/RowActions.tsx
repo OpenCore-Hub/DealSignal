@@ -15,6 +15,8 @@ export interface RowAction {
   onClick: () => void;
   destructive?: boolean;
   pro?: boolean;
+  disabled?: boolean;
+  title?: string;
 }
 
 interface RowActionsProps {
@@ -33,12 +35,14 @@ export function RowActions({ actions }: RowActionsProps) {
             {index > 0 && action.destructive && <DropdownMenuSeparator />}
             <DropdownMenuItem
               onClick={action.onClick}
+              disabled={action.disabled}
+              title={action.title}
               className={action.destructive ? "text-error-500 focus:text-error-500" : ""}
             >
               {action.icon && <span className="mr-2">{action.icon}</span>}
               <span className="flex-1">{action.label}</span>
               {action.pro && (
-                <Badge variant="outline" className="ml-2 text-[10px]">
+                <Badge variant="outline" className="ml-2 text-caption">
                   PRO
                 </Badge>
               )}

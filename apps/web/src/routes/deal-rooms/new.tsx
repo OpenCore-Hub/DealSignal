@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { BackButton } from "@/components/common/BackButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { toast } from "sonner";
 import type { DealRoomTemplate } from "@/types";
 
 const permissionIcons = {
@@ -41,6 +42,7 @@ export function NewDealRoomPage() {
   const reducedMotion = useReducedMotion();
   const [templates, setTemplates] = useState<DealRoomTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
@@ -55,13 +57,20 @@ export function NewDealRoomPage() {
   };
 
   useEffect(() => {
-    api
-      .getDealRoomTemplates()
-      .then((res) => {
+    async function load() {
+      try {
+        setLoading(true);
+        setError(null);
+        const res = await api.getDealRoomTemplates();
         setTemplates(res.data);
         if (res.data[0]) selectTemplate(res.data[0], true);
-      })
-      .finally(() => setLoading(false));
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "加载失败");
+      } finally {
+        setLoading(false);
+      }
+    }
+    load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -80,7 +89,10 @@ export function NewDealRoomPage() {
         templateId: selectedTemplate.id,
         ndaEnabled: nda,
       });
+      toast.success("数据室已创建");
       navigate(`/${workspaceSlug}/deal-rooms/${room.id}`);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "创建数据室失败");
     } finally {
       setCreating(false);
     }
@@ -93,16 +105,21 @@ export function NewDealRoomPage() {
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="mx-auto max-w-5xl space-y-6"
     >
-      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回 Deal Rooms" />
+      <BackButton to={`/${workspaceSlug}/deal-rooms`} label="返回数据室" />
 
       <div className="space-y-1">
-        <h1 className="text-h1">数据室模板引擎</h1>
+        <h1 className="text-h1">新建数据室</h1>
         <p className="text-body text-muted-foreground">
           选择场景模板，系统会自动生成文件夹结构与推荐文件清单。
         </p>
       </div>
 
-      {loading ? (
+      {error ? (
+        <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+          <p className="text-body text-muted-foreground">{error}</p>
+          <Button onClick={() => window.location.reload()}>重试</Button>
+        </div>
+      ) : loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <Skeleton key={i} className="h-40" />
@@ -115,10 +132,18 @@ export function NewDealRoomPage() {
             return (
               <Card
                 key={template.id}
-                className={`cursor-pointer transition-all hover:shadow-sm ${
+                role="button"
+                tabIndex={0}
+                className={`cursor-pointer transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
                   selected ? "ring-2 ring-primary" : ""
                 }`}
                 onClick={() => selectTemplate(template)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectTemplate(template);
+                  }
+                }}
               >
                 <CardContent>
                   <div className="flex items-start justify-between">
@@ -133,11 +158,11 @@ export function NewDealRoomPage() {
                     {template.description}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-1">
-                    <Badge variant="outline" className="text-[10px]">
+                    <Badge variant="outline" className="text-caption">
                       {template.folderStructure.length} 个文件夹
                     </Badge>
                     {template.ndaEnabled && (
-                      <Badge variant="secondary" className="text-[10px]">
+                      <Badge variant="secondary" className="text-caption">
                         NDA
                       </Badge>
                     )}

@@ -14,22 +14,27 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/uiStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import type { WorkspaceSettings } from "@/types";
+import { Skeleton } from "@/components/ui/skeleton";
 
 const navItems = [
-  { to: "dashboard", label: "Dashboard", icon: ChartPie },
-  { to: "documents", label: "Documents", icon: FileText },
-  { to: "links", label: "Links", icon: LinkIcon },
-  { to: "deal-rooms", label: "Deal Rooms", icon: FolderOpen },
-  { to: "contacts", label: "Contacts", icon: Users },
-  { to: "insights", label: "Insights", icon: ChartLineUp },
-  { to: "settings", label: "Settings", icon: Gear },
+  { to: "dashboard", label: "交易雷达", icon: ChartPie },
+  { to: "documents", label: "文档库", icon: FileText },
+  { to: "links", label: "链接", icon: LinkIcon },
+  { to: "deal-rooms", label: "数据室", icon: FolderOpen },
+  { to: "contacts", label: "联系人", icon: Users },
+  { to: "insights", label: "洞察", icon: ChartLineUp },
+  { to: "settings", label: "设置", icon: Gear },
 ];
 
 export function Sidebar() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { sidebarOpen, toggleSidebar, setSidebarOpen } = useUIStore();
   const isMobile = useMediaQuery("(max-width: 767px)");
+  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     if (isMobile) {
@@ -38,6 +43,21 @@ export function Sidebar() {
       setSidebarOpen(true);
     }
   }, [isMobile, setSidebarOpen]);
+
+  useEffect(() => {
+    async function loadSettings() {
+      try {
+        setLoading(true);
+        const res = await api.getWorkspaceSettings();
+        setSettings(res.data);
+      } catch {
+        // Keep default logo on error
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadSettings();
+  }, []);
 
   return (
     <>
@@ -64,9 +84,19 @@ export function Sidebar() {
               sidebarOpen ? "opacity-100" : "opacity-0 md:opacity-0"
             )}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-sm">
-              D
-            </div>
+            {loading ? (
+              <Skeleton className="h-8 w-8 rounded-md" />
+            ) : settings?.logoUrl ? (
+              <img
+                src={settings.logoUrl}
+                alt={settings.name}
+                className="h-8 w-8 rounded-md object-contain"
+              />
+            ) : (
+              <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-sm">
+                {settings?.name?.charAt(0).toUpperCase() || "D"}
+              </div>
+            )}
             <span className="text-h3 whitespace-nowrap">DealSignal</span>
           </div>
           <button
@@ -87,6 +117,7 @@ export function Sidebar() {
                 <li key={item.to}>
                   <NavLink
                     to={`/${workspaceSlug}/${item.to}`}
+                    title={item.label}
                     className={({ isActive }) =>
                       cn(
                         "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
