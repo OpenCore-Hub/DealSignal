@@ -13,9 +13,30 @@ import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatFileSize, formatDuration } from "@/lib/formatters";
-import type { Document, PageAnalytics } from "@/types";
+import type { Document, Evidence, PageAnalytics } from "@/types";
+import { ThumbnailNav } from "./ThumbnailNav";
+import { HighlightOverlay } from "./HighlightOverlay";
+import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
 
-export function CanvasViewer() {
+const DEFAULT_WATERMARK: WatermarkInfo = {
+  email: "viewer@example.test",
+};
+
+const DEFAULT_EVIDENCE: Evidence[] = [
+  {
+    id: "ev-demo-001",
+    pageNumber: 1,
+    text: "Revenue grew 3x.",
+    bbox: { x: 0.15, y: 0.25, w: 0.45, h: 0.06 },
+  },
+];
+
+interface CanvasViewerProps {
+  evidence?: Evidence[];
+  watermark?: WatermarkInfo | null;
+}
+
+export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
   const { documentId } = useParams<{ documentId: string }>();
   const { t } = useTranslation(["documents", "common"]);
   const [doc, setDoc] = useState<Document | null>(null);
@@ -71,7 +92,7 @@ export function CanvasViewer() {
       <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-50 dark:bg-background">
         <FileText size={48} className="text-muted-foreground/50" />
         <p className="text-body text-destructive">{t("documents:viewer.loadFailed", { error })}</p>
-        <Button onClick={() => setRetryTick((t) => t + 1)}>{t("common:retry")}</Button>
+        <Button onClick={() => setRetryTick((x) => x + 1)}>{t("common:retry")}</Button>
       </div>
     );
   }
@@ -92,6 +113,11 @@ export function CanvasViewer() {
     const a = analytics.find((x) => x.pageNumber === num);
     return { pageNumber: num, viewCount: a?.viewCount ?? 0, avgDurationSeconds: a?.avgDurationSeconds ?? 0 };
   });
+
+  const pageWidth = Math.max(300, zoom * 6);
+  const pageHeight = Math.max(400, zoom * 8);
+  const activeEvidence = (evidence ?? DEFAULT_EVIDENCE).filter((e) => e.pageNumber === page);
+  const activeWatermark = watermark === null ? undefined : watermark ?? DEFAULT_WATERMARK;
 
   return (
     <div className="flex flex-1 flex-col bg-neutral-50 dark:bg-background">
@@ -168,44 +194,18 @@ export function CanvasViewer() {
       </header>
 
       <div className="flex flex-1 overflow-hidden">
-        {/* Thumbnail sidebar */}
-        <aside className="hidden w-48 flex-col gap-2 overflow-y-auto border-r border-border bg-card p-3 md:flex">
-          <p className="text-caption font-medium text-muted-foreground">{t("documents:viewer.pageHeat")}</p>
-          {pages.map((p) => {
-            const heat = p.viewCount > 0 ? Math.min(100, (p.viewCount / Math.max(...pages.map((x) => x.viewCount), 1)) * 100) : 0;
-            return (
-              <button
-                key={p.pageNumber}
-                type="button"
-                onClick={() => setPage(p.pageNumber)}
-                className={`flex flex-col gap-1 rounded-md border p-2 text-left transition-colors ${
-                  page === p.pageNumber
-                    ? "border-primary bg-primary/5"
-                    : "border-border bg-background hover:bg-muted"
-                }`}
-              >
-                <span className="text-xs font-medium">
-                  {t("documents:viewer.pageLabel", { pageNumber: p.pageNumber })}
-                </span>
-                <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-hot-500" style={{ width: `${heat}%` }} />
-                </div>
-                <span className="text-caption text-muted-foreground">
-                  {t("documents:viewer.thumbnailViews", {
-                    count: p.viewCount,
-                    duration: formatDuration(p.avgDurationSeconds),
-                  })}
-                </span>
-              </button>
-            );
-          })}
-        </aside>
+        <ThumbnailNav
+          pages={pages}
+          currentPage={page}
+          onSelect={setPage}
+          className="hidden w-48 md:flex"
+        />
 
         {/* Canvas area */}
         <div className="relative flex flex-1 items-center justify-center overflow-auto p-8">
           <div
             className="relative overflow-hidden rounded-md bg-white shadow-card"
-            style={{ width: `${zoom * 6}px`, height: `${zoom * 8}px`, minWidth: 300, minHeight: 400 }}
+            style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
           >
             <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
               <div className="text-h1 text-muted-foreground">
@@ -226,13 +226,8 @@ export function CanvasViewer() {
               </p>
             </div>
 
-            <div className="pointer-events-none absolute inset-0 flex rotate-[-30deg] flex-wrap items-center justify-center gap-16 opacity-[0.08]">
-              {Array.from({ length: 12 }).map((_, i) => (
-                <span key={i} className="whitespace-nowrap text-2xl font-bold text-foreground">
-                  viewer@dealsignal.com
-                </span>
-              ))}
-            </div>
+            <HighlightOverlay evidences={activeEvidence} />
+            <WatermarkOverlay watermark={activeWatermark} />
           </div>
         </div>
       </div>
