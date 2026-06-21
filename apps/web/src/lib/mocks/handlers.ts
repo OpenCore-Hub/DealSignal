@@ -14,18 +14,13 @@ import {
   mockSuggestions,
   mockWorkspaceMembers,
   mockWorkspaces,
+  defaultWorkspaceSettings,
   getMockDashboardStats,
   getMockSignalFeed,
 } from "./data";
 import type { DealRoom, WorkspaceMember } from "@/types";
 
-let workspaceSettings = {
-  name: "Acme Capital",
-  slug: "acme-capital",
-  brandColor: "#0f172a",
-  viewerDomain: "",
-  logoUrl: "",
-};
+let workspaceSettings = { ...defaultWorkspaceSettings };
 
 let integrationsStatus = {
   slack: false,

@@ -16,11 +16,19 @@ const mockWorkspaces: Workspace[] = [
   { id: "ws_2", name: "mock.workspaces.ventura.name", slug: "ventura-fund" },
 ];
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getWorkspaces: vi.fn(() => Promise.resolve({ data: mockWorkspaces })),
-  },
-}));
+const { apiMock, resolveGetWorkspaces } = vi.hoisted(() => {
+  let resolve: (value: { data: Workspace[] }) => void = () => {};
+  return {
+    apiMock: {
+      getWorkspaces: vi.fn(
+        () => new Promise<{ data: Workspace[] }>((r) => { resolve = r; })
+      ),
+    },
+    resolveGetWorkspaces: (value: { data: Workspace[] }) => resolve(value),
+  };
+});
+
+vi.mock("@/lib/api", () => ({ api: apiMock }));
 
 vi.mock("@/stores/uiStore", () => ({
   useUIStore: (selector?: (state: { currentWorkspace: Workspace | null; setCurrentWorkspace: (w: Workspace) => void }) => unknown) => {
@@ -51,6 +59,7 @@ describe("WorkspaceSwitcher", () => {
     setCurrentWorkspaceMock.mockClear();
     navigateMock.mockClear();
     toastInfoMock.mockClear();
+    apiMock.getWorkspaces.mockClear();
   });
 
   const renderWithProviders = async (initialRoute = "/acme-capital/dashboard") => {
@@ -78,11 +87,17 @@ describe("WorkspaceSwitcher", () => {
     );
   };
 
-  it("renders active workspace name and switches workspace", async () => {
-    await renderWithProviders();
+  const loadWorkspaces = async () => {
     await act(async () => {
+      resolveGetWorkspaces({ data: mockWorkspaces });
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
+  };
+
+  it("renders active workspace name and switches workspace", async () => {
+    await renderWithProviders();
+    await loadWorkspaces();
+
     const button = await screen.findByRole("button", { name: /Switch workspace/i });
     expect(await screen.findByText("Acme Capital")).toBeInTheDocument();
 
@@ -98,9 +113,8 @@ describe("WorkspaceSwitcher", () => {
 
   it("shows coming-soon toast when creating workspace", async () => {
     await renderWithProviders();
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 0));
-    });
+    await loadWorkspaces();
+
     const button = await screen.findByRole("button", { name: /Switch workspace/i });
     expect(await screen.findByText("Acme Capital")).toBeInTheDocument();
 
