@@ -3,6 +3,9 @@ package server
 import (
 	"net/http"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
 )
 
@@ -22,6 +25,17 @@ func (s *Server) registerRoutes() {
 	s.engine.GET("/healthz", func(c *gin.Context) {
 		c.JSON(http.StatusOK, HealthResponse{Status: "ok", Version: s.cfg.Version})
 	})
+
+	api := s.engine.Group("/api")
+
+	if s.dbPool != nil {
+		queries := db.New(s.dbPool)
+		authHandler := auth.NewHandler(auth.NewService(queries))
+		authHandler.RegisterRoutes(api)
+
+		workspaceHandler := workspace.NewHandler(workspace.NewService(queries))
+		workspaceHandler.RegisterRoutes(api)
+	}
 
 	s.engine.NoRoute(func(c *gin.Context) {
 		c.JSON(http.StatusNotFound, ErrorResponse{
