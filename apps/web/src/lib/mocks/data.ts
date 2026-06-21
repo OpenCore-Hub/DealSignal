@@ -15,12 +15,21 @@ import type {
   Suggestion,
   Workspace,
   WorkspaceMember,
+  WorkspaceSettings,
 } from "@/types";
 
 export const mockWorkspaces: Workspace[] = [
   { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name" },
   { id: "ws_2", slug: "ventura-fund", name: "mock.workspaces.ventura.name" },
 ];
+
+export const defaultWorkspaceSettings: WorkspaceSettings = {
+  name: "Demo Workspace",
+  slug: "acme-capital",
+  brandColor: "#0f172a",
+  viewerDomain: "",
+  logoUrl: "",
+};
 
 export const mockDocuments: Document[] = [
   {

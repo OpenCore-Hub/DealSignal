@@ -27,13 +27,13 @@ function buildReply(content: string, context?: { documentId?: string }): string 
   const docContext = context?.documentId ? i18next.t("ai:replies.documentContext") : "";
   const lower = content.toLowerCase();
 
-  if (lower.includes("heat") || lower.includes("signal") || lower.includes("热度") || lower.includes("信号")) {
+  if (lower.includes("heat") || lower.includes("signal")) {
     return `${i18next.t("ai:replies.heatAnalysis")}${docContext}`;
   }
-  if (lower.includes("security") || lower.includes("permission") || lower.includes("安全") || lower.includes("权限")) {
+  if (lower.includes("security") || lower.includes("permission")) {
     return i18next.t("ai:replies.securityAdvice");
   }
-  if (lower.includes("next") || lower.includes("action") || lower.includes("下一步") || lower.includes("行动")) {
+  if (lower.includes("next") || lower.includes("action")) {
     return i18next.t("ai:replies.followUpAction");
   }
   return `${i18next.t("ai:replies.default")}${docContext}`;
