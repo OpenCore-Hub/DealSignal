@@ -117,6 +117,19 @@ type IngestionJob struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type IntegrationSyncLog struct {
+	ID           pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	Provider     string
+	Direction    string
+	RecordType   string
+	ExternalID   pgtype.Text
+	Status       string
+	Payload      []byte
+	ErrorMessage pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+}
+
 type Link struct {
 	ID               pgtype.UUID
 	TenantID         pgtype.UUID
@@ -137,6 +150,37 @@ type Link struct {
 	CreatedBy        pgtype.UUID
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+}
+
+type Notification struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Channel     string
+	Subject     string
+	Body        string
+	Status      string
+	Attempts    int32
+	LastError   pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type NotificationSetting struct {
+	WorkspaceID         pgtype.UUID
+	EmailEnabled        bool
+	SlackWebhookUrl     pgtype.Text
+	SlackConnected      bool
+	HubspotConnected    bool
+	SalesforceConnected bool
+	UpdatedAt           pgtype.Timestamptz
+}
+
+type OauthState struct {
+	State       string
+	WorkspaceID pgtype.UUID
+	Provider    string
+	ExpiresAt   pgtype.Timestamptz
 }
 
 type Page struct {

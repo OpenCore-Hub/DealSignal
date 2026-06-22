@@ -34,6 +34,16 @@ type Config struct {
 	BaseDomain   string
 	CNAMETarget  string
 	CertProvider string
+	AppBaseURL            string
+	SMTPHost              string
+	SMTPPort              string
+	SMTPUser              string
+	SMTPPass              string
+	SMTPFrom              string
+	SlackClientID         string
+	SlackClientSecret     string
+	HubSpotClientID       string
+	HubSpotClientSecret   string
 }
 
 // Load parses environment variables into Config and validates required fields.
@@ -65,6 +75,16 @@ func Load() (*Config, error) {
 		BaseDomain:   getEnv("BASE_DOMAIN", "dealsignal.com"),
 		CNAMETarget:  getEnv("CNAME_TARGET", "cname.dealsignal.com"),
 		CertProvider: getEnv("CERT_PROVIDER", "noop"),
+		AppBaseURL:          getEnv("APP_BASE_URL", "http://localhost:8080"),
+		SMTPHost:            os.Getenv("SMTP_HOST"),
+		SMTPPort:            getEnv("SMTP_PORT", "587"),
+		SMTPUser:            os.Getenv("SMTP_USER"),
+		SMTPPass:            os.Getenv("SMTP_PASS"),
+		SMTPFrom:            os.Getenv("SMTP_FROM"),
+		SlackClientID:       os.Getenv("SLACK_CLIENT_ID"),
+		SlackClientSecret:   os.Getenv("SLACK_CLIENT_SECRET"),
+		HubSpotClientID:     os.Getenv("HUBSPOT_CLIENT_ID"),
+		HubSpotClientSecret: os.Getenv("HUBSPOT_CLIENT_SECRET"),
 	}
 
 	if cfg.DatabaseURL == "" {
