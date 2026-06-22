@@ -11,6 +11,11 @@
     "linkSecurity": "如何提升链接安全性？"
   },
   "inputPlaceholder": "询问信号、行动建议或安全设置...",
+  "search": {
+    "results": "以下是与 \"{{query}}\" 最相关的段落：",
+    "noResults": "在该文档中未找到与 \"{{query}}\" 相关的内容。",
+    "error": "搜索失败，请稍后重试。"
+  },
   "evidence": {
     "title": "证据与原文定位",
     "page": "第 {{pageNumber}} 页",

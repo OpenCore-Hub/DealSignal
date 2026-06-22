@@ -40,6 +40,24 @@ function buildHistory(messages: ChatMessage[]): { role: "user" | "assistant"; co
     .map((m) => ({ role: m.role, content: m.content }));
 }
 
+function mapSearchResult(result: unknown): Evidence {
+  const r = result as {
+    chunk_id: string;
+    quote?: string;
+    normalized_text?: string;
+    page_number: number;
+    boxes: Evidence["boxes"];
+    score: number;
+  };
+  return {
+    chunk_id: r.chunk_id,
+    quote: r.quote ?? r.normalized_text ?? "",
+    page_number: r.page_number,
+    boxes: r.boxes,
+    score: r.score,
+  };
+}
+
 export const useAIStore = create<AIState>((set, get) => ({
   open: false,
   messages: getInitialMessages(),
@@ -61,38 +79,52 @@ export const useAIStore = create<AIState>((set, get) => ({
     set((state) => ({ messages: [...state.messages, userMessage], pending: true }));
 
     try {
-      const history = buildHistory(get().messages);
-      const payload: {
-        query: string;
-        document_id?: string;
-        session_id?: string;
-        history?: { role: "user" | "assistant"; content: string }[];
-      } = {
-        query: content,
-        session_id: get().sessionId ?? undefined,
-      };
-      if (context?.documentId) payload.document_id = context.documentId;
-      if (history.length > 0) payload.history = history;
+      let assistantMessage: ChatMessage;
 
-      const res = await api.assistantChat(payload);
+      if (context?.documentId) {
+        const res = await api.searchDocument({
+          query: content,
+          document_id: context.documentId,
+          mode: "hybrid",
+          top_k: 5,
+        });
+        const evidences = res.results.map(mapSearchResult);
+        assistantMessage = {
+          id: `a_${Date.now()}`,
+          role: "assistant",
+          content:
+            evidences.length > 0
+              ? `Here are the most relevant passages for "${res.query}":`
+              : `No relevant passages found for "${res.query}" in this document.`,
+          evidences,
+          createdAt: new Date().toISOString(),
+        };
+      } else {
+        const history = buildHistory(get().messages);
+        const res = await api.assistantChat({
+          query: content,
+          session_id: get().sessionId ?? undefined,
+          history: history.length > 0 ? history : undefined,
+        });
+        assistantMessage = {
+          id: `a_${Date.now()}`,
+          role: "assistant",
+          content: res.answer,
+          evidences: res.evidence,
+          createdAt: new Date().toISOString(),
+        };
+        set({ sessionId: res.session_id });
+      }
 
-      const assistantMessage: ChatMessage = {
-        id: `a_${Date.now()}`,
-        role: "assistant",
-        content: res.answer,
-        evidences: res.evidence,
-        createdAt: new Date().toISOString(),
-      };
       set((state) => ({
         messages: [...state.messages, assistantMessage],
         pending: false,
-        sessionId: res.session_id,
       }));
     } catch (e) {
       const errorMessage: ChatMessage = {
         id: `a_${Date.now()}`,
         role: "assistant",
-        content: e instanceof Error ? e.message : "Sorry, something went wrong.",
+        content: e instanceof Error ? e.message : "Sorry, the search failed. Please try again later.",
         createdAt: new Date().toISOString(),
       };
       set((state) => ({
@@ -102,7 +134,15 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   },
 
-  reset: () => set({ open: false, pending: false, messages: getInitialMessages(), sessionId: null, highlightedEvidence: null, highlightedPage: null }),
+  reset: () =>
+    set({
+      open: false,
+      pending: false,
+      messages: getInitialMessages(),
+      sessionId: null,
+      highlightedEvidence: null,
+      highlightedPage: null,
+    }),
 
   setHighlight: (evidence, page) =>
     set({ highlightedEvidence: evidence, highlightedPage: page ?? evidence?.page_number ?? null }),
