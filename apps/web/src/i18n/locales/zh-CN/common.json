@@ -57,7 +57,9 @@
     "processing": "处理中",
     "uploading": "上传中",
     "failed": "处理失败",
-    "done": "已完成"
+    "done": "已完成",
+    "snoozed": "已延后",
+    "ignored": "已忽略"
   },
   "heat": {
     "hot": "高热度",

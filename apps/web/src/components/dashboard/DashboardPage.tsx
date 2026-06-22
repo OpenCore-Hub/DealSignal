@@ -1,3 +1,4 @@
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import {
@@ -17,6 +18,7 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api, type DashboardStats } from "@/lib/api";
 import { useSignalStore } from "@/stores/signalStore";
+import { sortSignals } from "@/lib/sortSignals";
 import { SignalCard } from "./SignalCard";
 import { ActionList } from "./ActionList";
 import { HeatMap } from "./HeatMap";
@@ -136,6 +138,9 @@ export function DashboardPage() {
     [fetchSignals]
   );
 
+  const pendingActions = actions.filter((a) => a.status === "pending").length;
+  const sortedSignals = useMemo(() => sortSignals(signals), [signals]);
+
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
@@ -161,8 +166,6 @@ export function DashboardPage() {
       </div>
     );
   }
-
-  const pendingActions = actions.filter((a) => a.status !== "done").length;
 
   return (
     <motion.div
@@ -209,7 +212,7 @@ export function DashboardPage() {
                 />
               ) : (
                 <div className="space-y-4">
-                  {signals.map((signal) => (
+                  {sortedSignals.map((signal) => (
                     <SignalCard
                       key={signal.id}
                       signal={signal}
