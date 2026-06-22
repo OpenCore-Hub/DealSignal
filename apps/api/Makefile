@@ -1,4 +1,4 @@
-.PHONY: build test lint run clean compose-up compose-down
+.PHONY: build test lint security run clean compose-up compose-down
 
 build:
 	go build -o bin/server ./cmd/server
@@ -8,6 +8,10 @@ test:
 
 lint:
 	golangci-lint run ./...
+
+security:
+	@which govulncheck > /dev/null 2>&1 || go install golang.org/x/vuln/cmd/govulncheck@latest
+	govulncheck ./...
 
 run:
 	go run ./cmd/server
