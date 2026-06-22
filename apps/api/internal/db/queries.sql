@@ -406,3 +406,30 @@ FROM workspaces w
 JOIN workspace_members m ON m.workspace_id = w.id
 WHERE m.user_id = $1 AND w.tenant_id = $2
 ORDER BY w.created_at DESC;
+
+-- name: CreateSuggestion :one
+INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at;
+
+-- name: ListSuggestionsByLink :many
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+FROM suggestions
+WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
+ORDER BY created_at DESC;
+
+-- name: CountRecentSuggestionsByLinkAndType :one
+SELECT COUNT(*) AS count
+FROM suggestions
+WHERE link_id = $1 AND type = $2 AND dismissed = false AND created_at > now() - interval '24 hours';
+
+-- name: DismissSuggestion :exec
+UPDATE suggestions
+SET dismissed = true, updated_at = now()
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: GetSuggestionByID :one
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+FROM suggestions
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;

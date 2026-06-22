@@ -17,6 +17,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
@@ -106,6 +107,10 @@ func (s *Server) registerRoutes() {
 			linkHandler.RegisterWorkspaceRoutes(ws)
 			analyticsHandler.RegisterWorkspaceRoutes(ws)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
+
+			suggestionSvc := suggestions.NewService(queries)
+			suggestionHandler := suggestions.NewHandler(suggestionSvc)
+			suggestionHandler.RegisterRoutes(ws)
 
 			public := s.engine.Group("/api/v1/public")
 			linkHandler.RegisterPublicRoutes(public)
