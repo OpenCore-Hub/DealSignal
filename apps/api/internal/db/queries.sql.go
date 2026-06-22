@@ -121,6 +121,24 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 	return i, err
 }
 
+const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
+SELECT COUNT(*) AS count
+FROM suggestions
+WHERE link_id = $1 AND type = $2 AND dismissed = false AND created_at > now() - interval '24 hours'
+`
+
+type CountRecentSuggestionsByLinkAndTypeParams struct {
+	LinkID pgtype.UUID
+	Type   string
+}
+
+func (q *Queries) CountRecentSuggestionsByLinkAndType(ctx context.Context, arg CountRecentSuggestionsByLinkAndTypeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentSuggestionsByLinkAndType, arg.LinkID, arg.Type)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createAccessLog = `-- name: CreateAccessLog :exec
 INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -604,6 +622,52 @@ func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) 
 	return err
 }
 
+const createSuggestion = `-- name: CreateSuggestion :one
+INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+`
+
+type CreateSuggestionParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	ContactID   pgtype.UUID
+	LinkID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	Type        string
+	Reason      string
+	Action      string
+}
+
+func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionParams) (Suggestion, error) {
+	row := q.db.QueryRow(ctx, createSuggestion,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.ContactID,
+		arg.LinkID,
+		arg.DocumentID,
+		arg.Type,
+		arg.Reason,
+		arg.Action,
+	)
+	var i Suggestion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.ContactID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Type,
+		&i.Reason,
+		&i.Action,
+		&i.Dismissed,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createTenant = `-- name: CreateTenant :one
 INSERT INTO tenants (name, slug)
 VALUES ($1, $2)
@@ -736,6 +800,22 @@ type DeleteTenantDomainParams struct {
 
 func (q *Queries) DeleteTenantDomain(ctx context.Context, arg DeleteTenantDomainParams) error {
 	_, err := q.db.Exec(ctx, deleteTenantDomain, arg.ID, arg.TenantID)
+	return err
+}
+
+const dismissSuggestion = `-- name: DismissSuggestion :exec
+UPDATE suggestions
+SET dismissed = true, updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DismissSuggestionParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionParams) error {
+	_, err := q.db.Exec(ctx, dismissSuggestion, arg.ID, arg.WorkspaceID)
 	return err
 }
 
@@ -1145,6 +1225,38 @@ func (q *Queries) GetRoomMemberByEmail(ctx context.Context, arg GetRoomMemberByE
 		&i.NdaStatus,
 		&i.NdaSignedAt,
 		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getSuggestionByID = `-- name: GetSuggestionByID :one
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+FROM suggestions
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetSuggestionByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetSuggestionByID(ctx context.Context, arg GetSuggestionByIDParams) (Suggestion, error) {
+	row := q.db.QueryRow(ctx, getSuggestionByID, arg.ID, arg.WorkspaceID)
+	var i Suggestion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.ContactID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Type,
+		&i.Reason,
+		&i.Action,
+		&i.Dismissed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1660,6 +1772,51 @@ func (q *Queries) ListRoomMembers(ctx context.Context, roomID pgtype.UUID) ([]Ro
 			&i.NdaStatus,
 			&i.NdaSignedAt,
 			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSuggestionsByLink = `-- name: ListSuggestionsByLink :many
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+FROM suggestions
+WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
+ORDER BY created_at DESC
+`
+
+type ListSuggestionsByLinkParams struct {
+	LinkID      pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestionsByLinkParams) ([]Suggestion, error) {
+	rows, err := q.db.Query(ctx, listSuggestionsByLink, arg.LinkID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Suggestion
+	for rows.Next() {
+		var i Suggestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.ContactID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.Type,
+			&i.Reason,
+			&i.Action,
+			&i.Dismissed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

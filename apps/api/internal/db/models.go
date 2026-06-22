@@ -53,6 +53,14 @@ type Chunk struct {
 	SearchVector interface{}
 }
 
+type Contact struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Email       pgtype.Text
+	Name        pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+}
+
 type DealRoom struct {
 	ID               pgtype.UUID
 	TenantID         pgtype.UUID
@@ -203,6 +211,21 @@ type RoomNdaAgreement struct {
 	Ip        *netip.Addr
 	UserAgent pgtype.Text
 	AgreedAt  pgtype.Timestamptz
+}
+
+type Suggestion struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	ContactID   pgtype.UUID
+	LinkID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	Type        string
+	Reason      string
+	Action      string
+	Dismissed   bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type Tenant struct {
