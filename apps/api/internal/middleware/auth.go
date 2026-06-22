@@ -8,7 +8,11 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-const userIDKey = "userID"
+const (
+	userIDKey    = "userID"
+	workspaceIDKey = "workspaceID"
+	tenantIDKey    = "tenantID"
+)
 
 // Auth validates the JWT bearer token and injects the user ID into the context.
 func Auth() gin.HandlerFunc {
@@ -39,6 +43,24 @@ func Auth() gin.HandlerFunc {
 // UserIDFrom returns the authenticated user ID from the gin context.
 func UserIDFrom(c *gin.Context) string {
 	v, _ := c.Get(userIDKey)
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// WorkspaceIDFrom returns the workspace ID injected by workspace auth middleware.
+func WorkspaceIDFrom(c *gin.Context) string {
+	v, _ := c.Get(workspaceIDKey)
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return ""
+}
+
+// TenantIDFrom returns the tenant ID injected by workspace auth middleware.
+func TenantIDFrom(c *gin.Context) string {
+	v, _ := c.Get(tenantIDKey)
 	if s, ok := v.(string); ok {
 		return s
 	}

@@ -14,6 +14,17 @@ type Config struct {
 	JWTSecret   string
 	LogLevel    string
 	Version     string
+
+	S3Endpoint       string
+	S3PublicEndpoint string
+	S3Bucket         string
+	S3AccessKey    string
+	S3SecretKey    string
+	S3Region       string
+	S3UsePathStyle string
+
+	OnlyOfficeURL         string
+	OnlyOfficeJWTSecret   string
 }
 
 // Load parses environment variables into Config and validates required fields.
@@ -25,6 +36,17 @@ func Load() (*Config, error) {
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
 		JWTSecret:   os.Getenv("JWT_SECRET"),
+
+		S3Endpoint:       os.Getenv("S3_ENDPOINT"),
+		S3PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
+		S3Bucket:         os.Getenv("S3_BUCKET"),
+		S3AccessKey:      os.Getenv("S3_ACCESS_KEY"),
+		S3SecretKey:      os.Getenv("S3_SECRET_KEY"),
+		S3Region:         os.Getenv("S3_REGION"),
+		S3UsePathStyle:   os.Getenv("S3_USE_PATH_STYLE"),
+
+		OnlyOfficeURL:       os.Getenv("ONLYOFFICE_URL"),
+		OnlyOfficeJWTSecret: os.Getenv("ONLYOFFICE_JWT_SECRET"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -35,6 +57,12 @@ func Load() (*Config, error) {
 	}
 	if cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("JWT_SECRET is required")
+	}
+	if cfg.S3Bucket == "" {
+		return nil, fmt.Errorf("S3_BUCKET is required")
+	}
+	if cfg.S3AccessKey == "" || cfg.S3SecretKey == "" {
+		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY are required")
 	}
 
 	if _, err := strconv.Atoi(cfg.Port); err != nil {

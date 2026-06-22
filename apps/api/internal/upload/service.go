@@ -1,0 +1,137 @@
+package upload
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"mime/multipart"
+	"path/filepath"
+	"strings"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+const maxFileSize = 100 * 1024 * 1024 // 100MB
+
+var (
+	ErrFileTooLarge      = errors.New("file exceeds 100MB limit")
+	ErrInvalidFileType   = errors.New("unsupported file type")
+	allowedExtensions    = map[string]string{
+		".pdf":  "pdf",
+		".docx": "docx",
+		".pptx": "pptx",
+		".xlsx": "xlsx",
+	}
+)
+
+// Document is the public view of a db.Document.
+type Document struct {
+	ID         string `json:"id"`
+	Title      string `json:"title"`
+	SourceType string `json:"source_type"`
+	Status     string `json:"status"`
+	PageCount  *int32 `json:"page_count,omitempty"`
+	CreatedAt  string `json:"created_at"`
+}
+
+// Service handles document uploads.
+type Service struct {
+	queries *db.Queries
+	storage *storage.Client
+}
+
+// NewService creates an upload service.
+func NewService(q *db.Queries, s *storage.Client) *Service {
+	return &Service{queries: q, storage: s}
+}
+
+// ValidateFileHeader checks file size and extension.
+func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
+	if fileHeader.Size > maxFileSize {
+		return "", ErrFileTooLarge
+	}
+	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	sourceType, ok := allowedExtensions[ext]
+	if !ok {
+		return "", ErrInvalidFileType
+	}
+	return sourceType, nil
+}
+
+// CreateDocument validates, stores the file and creates the document record.
+func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID string, fileHeader *multipart.FileHeader) (Document, error) {
+	sourceType, err := ValidateFileHeader(fileHeader)
+	if err != nil {
+		return Document{}, err
+	}
+
+	file, err := fileHeader.Open()
+	if err != nil {
+		return Document{}, fmt.Errorf("open uploaded file: %w", err)
+	}
+	defer file.Close()
+
+	docID := uuid.New()
+	storageKey := storage.ObjectKey(tenantID, workspaceID, docID.String(), fileHeader.Filename)
+
+	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
+		return Document{}, fmt.Errorf("store file: %w", err)
+	}
+
+	tenantUUID := pgUUID(tenantID)
+	workspaceUUID := pgUUID(workspaceID)
+	userUUID := pgUUID(userID)
+
+	d, err := s.queries.CreateDocument(ctx, db.CreateDocumentParams{
+		ID:          pgUUID(docID.String()),
+		TenantID:    tenantUUID,
+		WorkspaceID: workspaceUUID,
+		CreatedBy:   userUUID,
+		Title:       fileHeader.Filename,
+		SourceType:  sourceType,
+		Status:      "uploaded",
+		StorageKey:  storageKey,
+	})
+	if err != nil {
+		return Document{}, fmt.Errorf("create document record: %w", err)
+	}
+
+	_, err = s.queries.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+		TenantID:    tenantUUID,
+		WorkspaceID: workspaceUUID,
+		DocumentID:  d.ID,
+		Status:      "queued",
+	})
+	if err != nil {
+		return Document{}, fmt.Errorf("create ingestion job: %w", err)
+	}
+
+	return documentFromDB(d), nil
+}
+
+func documentFromDB(d db.Document) Document {
+	doc := Document{
+		ID:         uuid.UUID(d.ID.Bytes).String(),
+		Title:      d.Title,
+		SourceType: d.SourceType,
+		Status:     d.Status,
+		CreatedAt:  d.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+	}
+	if d.PageCount.Valid {
+		v := d.PageCount.Int32
+		doc.PageCount = &v
+	}
+	return doc
+}
+
+func pgUUID(id string) pgtype.UUID {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+

@@ -34,8 +34,8 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.Use(middleware.Auth())
 	g.POST("", h.Create)
 	g.GET("", h.List)
-	g.GET("/:id", h.Get)
-	g.POST("/:id/members", h.AddMember)
+	g.GET("/:workspaceSlug", h.Get)
+	g.POST("/:workspaceSlug/members", h.AddMember)
 }
 
 // Create handles workspace creation.
@@ -74,8 +74,8 @@ func (h *Handler) List(c *gin.Context) {
 // Get returns a single workspace.
 func (h *Handler) Get(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
-	id := c.Param("id")
-	ws, err := h.service.Get(c.Request.Context(), userID, id)
+	slug := c.Param("workspaceSlug")
+	ws, err := h.service.GetBySlug(c.Request.Context(), userID, slug)
 	if err != nil {
 		if err == ErrNotMember {
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
@@ -96,8 +96,18 @@ func (h *Handler) AddMember(c *gin.Context) {
 	}
 
 	actorID := middleware.UserIDFrom(c)
-	wsID := c.Param("id")
-	member, err := h.service.AddMember(c.Request.Context(), actorID, wsID, req.UserID, req.Role)
+	slug := c.Param("workspaceSlug")
+	ws, err := h.service.GetBySlug(c.Request.Context(), actorID, slug)
+	if err != nil {
+		if err == ErrNotMember {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+		return
+	}
+
+	member, err := h.service.AddMember(c.Request.Context(), actorID, ws.ID, req.UserID, req.Role)
 	if err != nil {
 		if err == ErrNotMember {
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})

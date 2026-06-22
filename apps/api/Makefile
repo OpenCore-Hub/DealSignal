@@ -16,7 +16,7 @@ clean:
 	rm -rf bin/
 
 compose-up:
-	docker compose -f docker-compose.yml up --build -d
+	docker-compose -f docker-compose.yml up --build -d
 
 compose-down:
-	docker compose -f docker-compose.yml down -v
+	docker-compose -f docker-compose.yml down -v

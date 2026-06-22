@@ -35,6 +35,153 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 	return i, err
 }
 
+const createChunk = `-- name: CreateChunk :exec
+INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox)
+VALUES ($1, $2, $3, $4, $5)
+`
+
+type CreateChunkParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageID      pgtype.UUID
+	Text        string
+	Bbox        []byte
+}
+
+func (q *Queries) CreateChunk(ctx context.Context, arg CreateChunkParams) error {
+	_, err := q.db.Exec(ctx, createChunk,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.PageID,
+		arg.Text,
+		arg.Bbox,
+	)
+	return err
+}
+
+const createDocument = `-- name: CreateDocument :one
+INSERT INTO documents (
+    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+`
+
+type CreateDocumentParams struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+}
+
+func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) (Document, error) {
+	row := q.db.QueryRow(ctx, createDocument,
+		arg.ID,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.CreatedBy,
+		arg.Title,
+		arg.SourceType,
+		arg.Status,
+		arg.StorageKey,
+	)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const createIngestionJob = `-- name: CreateIngestionJob :one
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+`
+
+type CreateIngestionJobParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+	Status      string
+}
+
+func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJobParams) (IngestionJob, error) {
+	row := q.db.QueryRow(ctx, createIngestionJob,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.DocumentID,
+		arg.Status,
+	)
+	var i IngestionJob
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.Status,
+		&i.Attempts,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createPage = `-- name: CreatePage :one
+INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
+`
+
+type CreatePageParams struct {
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	DocumentID     pgtype.UUID
+	PageNumber     int32
+	ImageObjectKey pgtype.Text
+	Width          pgtype.Int4
+	Height         pgtype.Int4
+}
+
+func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (Page, error) {
+	row := q.db.QueryRow(ctx, createPage,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.DocumentID,
+		arg.PageNumber,
+		arg.ImageObjectKey,
+		arg.Width,
+		arg.Height,
+	)
+	var i Page
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PageNumber,
+		&i.ImageObjectKey,
+		&i.Width,
+		&i.Height,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createTenant = `-- name: CreateTenant :one
 INSERT INTO tenants (name)
 VALUES ($1)
@@ -73,8 +220,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspaces (tenant_id, name, slug, brand_color)
-VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, name, slug, brand_color, created_at
+VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, name, slug, brand_color, created_at
 `
 
 type CreateWorkspaceParams struct {
@@ -98,6 +244,91 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.Name,
 		&i.Slug,
 		&i.BrandColor,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getDocumentByID = `-- name: GetDocumentByID :one
+SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+LIMIT 1
+`
+
+type GetDocumentByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetDocumentByID(ctx context.Context, arg GetDocumentByIDParams) (Document, error) {
+	row := q.db.QueryRow(ctx, getDocumentByID, arg.ID, arg.WorkspaceID)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getIngestionJobByDocument = `-- name: GetIngestionJobByDocument :one
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+FROM ingestion_jobs
+WHERE document_id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetIngestionJobByDocument(ctx context.Context, documentID pgtype.UUID) (IngestionJob, error) {
+	row := q.db.QueryRow(ctx, getIngestionJobByDocument, documentID)
+	var i IngestionJob
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.Status,
+		&i.Attempts,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPageByDocumentAndNumber = `-- name: GetPageByDocumentAndNumber :one
+SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
+FROM pages
+WHERE document_id = $1 AND page_number = $2
+LIMIT 1
+`
+
+type GetPageByDocumentAndNumberParams struct {
+	DocumentID pgtype.UUID
+	PageNumber int32
+}
+
+func (q *Queries) GetPageByDocumentAndNumber(ctx context.Context, arg GetPageByDocumentAndNumberParams) (Page, error) {
+	row := q.db.QueryRow(ctx, getPageByDocumentAndNumber, arg.DocumentID, arg.PageNumber)
+	var i Page
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PageNumber,
+		&i.ImageObjectKey,
+		&i.Width,
+		&i.Height,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -202,6 +433,83 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 	return i, err
 }
 
+const listDocumentsByWorkspace = `-- name: ListDocumentsByWorkspace :many
+SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND deleted_at IS NULL
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Document, error) {
+	rows, err := q.db.Query(ctx, listDocumentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Document
+	for rows.Next() {
+		var i Document
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPagesByDocument = `-- name: ListPagesByDocument :many
+SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
+FROM pages
+WHERE document_id = $1
+ORDER BY page_number
+`
+
+func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUID) ([]Page, error) {
+	rows, err := q.db.Query(ctx, listPagesByDocument, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Page
+	for rows.Next() {
+		var i Page
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.DocumentID,
+			&i.PageNumber,
+			&i.ImageObjectKey,
+			&i.Width,
+			&i.Height,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceMembers = `-- name: ListWorkspaceMembers :many
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
@@ -278,4 +586,44 @@ func (q *Queries) ListWorkspacesByUser(ctx context.Context, userID pgtype.UUID) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const updateDocumentStatus = `-- name: UpdateDocumentStatus :exec
+UPDATE documents
+SET status = $1, page_count = $2, updated_at = now()
+WHERE id = $3
+`
+
+type UpdateDocumentStatusParams struct {
+	Status    string
+	PageCount pgtype.Int4
+	ID        pgtype.UUID
+}
+
+func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentStatusParams) error {
+	_, err := q.db.Exec(ctx, updateDocumentStatus, arg.Status, arg.PageCount, arg.ID)
+	return err
+}
+
+const updateIngestionJob = `-- name: UpdateIngestionJob :exec
+UPDATE ingestion_jobs
+SET status = $1, attempts = $2, error_message = $3, updated_at = now()
+WHERE id = $4
+`
+
+type UpdateIngestionJobParams struct {
+	Status       string
+	Attempts     pgtype.Int4
+	ErrorMessage pgtype.Text
+	ID           pgtype.UUID
+}
+
+func (q *Queries) UpdateIngestionJob(ctx context.Context, arg UpdateIngestionJobParams) error {
+	_, err := q.db.Exec(ctx, updateIngestionJob,
+		arg.Status,
+		arg.Attempts,
+		arg.ErrorMessage,
+		arg.ID,
+	)
+	return err
 }

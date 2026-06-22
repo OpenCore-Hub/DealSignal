@@ -24,7 +24,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("acquire connection failed: %v", err)
 	}
-	if err := db.MigrateUp(ctx, conn.Conn(), db.MigrationDir()); err != nil {
+	if err := db.MigrateUpFS(ctx, conn.Conn(), db.MigrationsFS); err != nil {
 		conn.Release()
 		log.Fatalf("migrations failed: %v", err)
 	}

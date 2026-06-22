@@ -1,0 +1,4 @@
+DROP TABLE IF EXISTS chunks;
+DROP TABLE IF EXISTS pages;
+DROP TABLE IF EXISTS ingestion_jobs;
+DROP TABLE IF EXISTS documents;
