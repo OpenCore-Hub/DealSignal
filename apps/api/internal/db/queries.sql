@@ -433,3 +433,69 @@ SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reas
 FROM suggestions
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
+
+-- name: GetNotificationSettings :one
+SELECT workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected, updated_at
+FROM notification_settings
+WHERE workspace_id = $1;
+
+-- name: UpsertNotificationSettings :one
+INSERT INTO notification_settings (
+    workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id)
+DO UPDATE SET
+    email_enabled = EXCLUDED.email_enabled,
+    slack_webhook_url = EXCLUDED.slack_webhook_url,
+    slack_connected = EXCLUDED.slack_connected,
+    hubspot_connected = EXCLUDED.hubspot_connected,
+    salesforce_connected = EXCLUDED.salesforce_connected,
+    updated_at = now()
+RETURNING workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected, updated_at;
+
+-- name: CreateNotification :one
+INSERT INTO notifications (workspace_id, user_id, channel, subject, body)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at;
+
+-- name: ListPendingNotifications :many
+SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at
+FROM notifications
+WHERE status = 'pending' AND attempts < 3
+ORDER BY created_at ASC
+LIMIT 100;
+
+-- name: MarkNotificationSent :exec
+UPDATE notifications
+SET status = 'sent', attempts = attempts + 1, updated_at = now()
+WHERE id = $1;
+
+-- name: MarkNotificationFailed :exec
+UPDATE notifications
+SET status = 'failed', attempts = attempts + 1, last_error = $2, updated_at = now()
+WHERE id = $1;
+
+-- name: CreateOAuthState :exec
+INSERT INTO oauth_states (state, workspace_id, provider, expires_at)
+VALUES ($1, $2, $3, $4);
+
+-- name: GetOAuthState :one
+SELECT state, workspace_id, provider, expires_at
+FROM oauth_states
+WHERE state = $1 AND provider = $2
+LIMIT 1;
+
+-- name: DeleteOAuthState :exec
+DELETE FROM oauth_states WHERE state = $1;
+
+-- name: CreateSyncLog :one
+INSERT INTO integration_sync_logs (workspace_id, provider, direction, record_type, external_id, status, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, workspace_id, provider, direction, record_type, external_id, status, payload, error_message, created_at;
+
+-- name: ListSyncLogsByWorkspace :many
+SELECT id, workspace_id, provider, direction, record_type, external_id, status, payload, error_message, created_at
+FROM integration_sync_logs
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+LIMIT 50;

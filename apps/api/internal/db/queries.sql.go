@@ -553,6 +553,67 @@ func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreement
 	return err
 }
 
+const createNotification = `-- name: CreateNotification :one
+INSERT INTO notifications (workspace_id, user_id, channel, subject, body)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at
+`
+
+type CreateNotificationParams struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Channel     string
+	Subject     string
+	Body        string
+}
+
+func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error) {
+	row := q.db.QueryRow(ctx, createNotification,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.Channel,
+		arg.Subject,
+		arg.Body,
+	)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Channel,
+		&i.Subject,
+		&i.Body,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createOAuthState = `-- name: CreateOAuthState :exec
+INSERT INTO oauth_states (state, workspace_id, provider, expires_at)
+VALUES ($1, $2, $3, $4)
+`
+
+type CreateOAuthStateParams struct {
+	State       string
+	WorkspaceID pgtype.UUID
+	Provider    string
+	ExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStateParams) error {
+	_, err := q.db.Exec(ctx, createOAuthState,
+		arg.State,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
 const createPage = `-- name: CreatePage :one
 INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -664,6 +725,48 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		&i.Dismissed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createSyncLog = `-- name: CreateSyncLog :one
+INSERT INTO integration_sync_logs (workspace_id, provider, direction, record_type, external_id, status, payload)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, workspace_id, provider, direction, record_type, external_id, status, payload, error_message, created_at
+`
+
+type CreateSyncLogParams struct {
+	WorkspaceID pgtype.UUID
+	Provider    string
+	Direction   string
+	RecordType  string
+	ExternalID  pgtype.Text
+	Status      string
+	Payload     []byte
+}
+
+func (q *Queries) CreateSyncLog(ctx context.Context, arg CreateSyncLogParams) (IntegrationSyncLog, error) {
+	row := q.db.QueryRow(ctx, createSyncLog,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.Direction,
+		arg.RecordType,
+		arg.ExternalID,
+		arg.Status,
+		arg.Payload,
+	)
+	var i IntegrationSyncLog
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.Direction,
+		&i.RecordType,
+		&i.ExternalID,
+		&i.Status,
+		&i.Payload,
+		&i.ErrorMessage,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -786,6 +889,15 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteOAuthState = `-- name: DeleteOAuthState :exec
+DELETE FROM oauth_states WHERE state = $1
+`
+
+func (q *Queries) DeleteOAuthState(ctx context.Context, state string) error {
+	_, err := q.db.Exec(ctx, deleteOAuthState, state)
+	return err
 }
 
 const deleteTenantDomain = `-- name: DeleteTenantDomain :exec
@@ -1167,6 +1279,51 @@ func (q *Queries) GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID
 	row := q.db.QueryRow(ctx, getLinkPageViewMetrics, linkID)
 	var i GetLinkPageViewMetricsRow
 	err := row.Scan(&i.AvgDurationSeconds, &i.KeyPageViews, &i.TotalPageViews)
+	return i, err
+}
+
+const getNotificationSettings = `-- name: GetNotificationSettings :one
+SELECT workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected, updated_at
+FROM notification_settings
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetNotificationSettings(ctx context.Context, workspaceID pgtype.UUID) (NotificationSetting, error) {
+	row := q.db.QueryRow(ctx, getNotificationSettings, workspaceID)
+	var i NotificationSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.EmailEnabled,
+		&i.SlackWebhookUrl,
+		&i.SlackConnected,
+		&i.HubspotConnected,
+		&i.SalesforceConnected,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOAuthState = `-- name: GetOAuthState :one
+SELECT state, workspace_id, provider, expires_at
+FROM oauth_states
+WHERE state = $1 AND provider = $2
+LIMIT 1
+`
+
+type GetOAuthStateParams struct {
+	State    string
+	Provider string
+}
+
+func (q *Queries) GetOAuthState(ctx context.Context, arg GetOAuthStateParams) (OauthState, error) {
+	row := q.db.QueryRow(ctx, getOAuthState, arg.State, arg.Provider)
+	var i OauthState
+	err := row.Scan(
+		&i.State,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.ExpiresAt,
+	)
 	return i, err
 }
 
@@ -1745,6 +1902,46 @@ func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUI
 	return items, nil
 }
 
+const listPendingNotifications = `-- name: ListPendingNotifications :many
+SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at
+FROM notifications
+WHERE status = 'pending' AND attempts < 3
+ORDER BY created_at ASC
+LIMIT 100
+`
+
+func (q *Queries) ListPendingNotifications(ctx context.Context) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, listPendingNotifications)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notification
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.Channel,
+			&i.Subject,
+			&i.Body,
+			&i.Status,
+			&i.Attempts,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoomMembers = `-- name: ListRoomMembers :many
 SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
 FROM room_members
@@ -1819,6 +2016,45 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 			&i.Dismissed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSyncLogsByWorkspace = `-- name: ListSyncLogsByWorkspace :many
+SELECT id, workspace_id, provider, direction, record_type, external_id, status, payload, error_message, created_at
+FROM integration_sync_logs
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+LIMIT 50
+`
+
+func (q *Queries) ListSyncLogsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]IntegrationSyncLog, error) {
+	rows, err := q.db.Query(ctx, listSyncLogsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []IntegrationSyncLog
+	for rows.Next() {
+		var i IntegrationSyncLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Provider,
+			&i.Direction,
+			&i.RecordType,
+			&i.ExternalID,
+			&i.Status,
+			&i.Payload,
+			&i.ErrorMessage,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1995,6 +2231,33 @@ func (q *Queries) ListWorkspacesByUserAndTenant(ctx context.Context, arg ListWor
 		return nil, err
 	}
 	return items, nil
+}
+
+const markNotificationFailed = `-- name: MarkNotificationFailed :exec
+UPDATE notifications
+SET status = 'failed', attempts = attempts + 1, last_error = $2, updated_at = now()
+WHERE id = $1
+`
+
+type MarkNotificationFailedParams struct {
+	ID        pgtype.UUID
+	LastError pgtype.Text
+}
+
+func (q *Queries) MarkNotificationFailed(ctx context.Context, arg MarkNotificationFailedParams) error {
+	_, err := q.db.Exec(ctx, markNotificationFailed, arg.ID, arg.LastError)
+	return err
+}
+
+const markNotificationSent = `-- name: MarkNotificationSent :exec
+UPDATE notifications
+SET status = 'sent', attempts = attempts + 1, updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) MarkNotificationSent(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markNotificationSent, id)
+	return err
 }
 
 const searchChunksByText = `-- name: SearchChunksByText :many
@@ -2293,4 +2556,50 @@ func (q *Queries) UpdateTenantDomainSSL(ctx context.Context, arg UpdateTenantDom
 		arg.TenantID,
 	)
 	return err
+}
+
+const upsertNotificationSettings = `-- name: UpsertNotificationSettings :one
+INSERT INTO notification_settings (
+    workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id)
+DO UPDATE SET
+    email_enabled = EXCLUDED.email_enabled,
+    slack_webhook_url = EXCLUDED.slack_webhook_url,
+    slack_connected = EXCLUDED.slack_connected,
+    hubspot_connected = EXCLUDED.hubspot_connected,
+    salesforce_connected = EXCLUDED.salesforce_connected,
+    updated_at = now()
+RETURNING workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected, updated_at
+`
+
+type UpsertNotificationSettingsParams struct {
+	WorkspaceID         pgtype.UUID
+	EmailEnabled        bool
+	SlackWebhookUrl     pgtype.Text
+	SlackConnected      bool
+	HubspotConnected    bool
+	SalesforceConnected bool
+}
+
+func (q *Queries) UpsertNotificationSettings(ctx context.Context, arg UpsertNotificationSettingsParams) (NotificationSetting, error) {
+	row := q.db.QueryRow(ctx, upsertNotificationSettings,
+		arg.WorkspaceID,
+		arg.EmailEnabled,
+		arg.SlackWebhookUrl,
+		arg.SlackConnected,
+		arg.HubspotConnected,
+		arg.SalesforceConnected,
+	)
+	var i NotificationSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.EmailEnabled,
+		&i.SlackWebhookUrl,
+		&i.SlackConnected,
+		&i.HubspotConnected,
+		&i.SalesforceConnected,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

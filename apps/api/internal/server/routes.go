@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
@@ -13,10 +14,12 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/integration"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
@@ -112,7 +115,15 @@ func (s *Server) registerRoutes() {
 			suggestionHandler := suggestions.NewHandler(suggestionSvc)
 			suggestionHandler.RegisterRoutes(ws)
 
+			notificationSvc := notification.NewService(queries, s.cfg)
+			notification.NewWorker(notificationSvc, 30*time.Second).Start(context.Background())
+
+			integrationSvc := integration.NewService(queries, s.cfg)
+			integrationHandler := integration.NewHandler(integrationSvc)
+			integrationHandler.RegisterRoutes(ws)
+
 			public := s.engine.Group("/api/v1/public")
+			integrationHandler.RegisterOAuthRoutes(public)
 			linkHandler.RegisterPublicRoutes(public)
 			dealroomHandler.RegisterPublicRoutes(public)
 		}
