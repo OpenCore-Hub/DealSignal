@@ -22,6 +22,12 @@ import type {
   WorkspaceMember,
   WorkspaceSettings,
 } from "@/types";
+import { request } from "@/lib/apiClient";
+import {
+  toCreateDealRoomPayload,
+  toCreateLinkPayload,
+} from "@/lib/apiAdapters";
+import { useUIStore } from "@/stores/uiStore";
 import i18next from "i18next";
 
 export interface DashboardStats {
@@ -48,93 +54,99 @@ export interface SignalFeed {
   actions: ActionItem[];
 }
 
-export interface RequestOptions extends RequestInit {
-  token?: string;
-  idempotencyKey?: string;
-}
-
-async function request<T>(path: string, options?: RequestOptions): Promise<T> {
-  const headers = new Headers(options?.headers);
-  const body = options?.body;
-
-  // 仅在非 FormData 请求体时自动设置 JSON Content-Type，避免破坏 multipart 上传
-  if (!(body instanceof FormData)) {
-    if (!headers.has("Content-Type")) {
-      headers.set("Content-Type", "application/json");
-    }
+function getWorkspaceSlug(): string {
+  const slug = useUIStore.getState().currentWorkspace?.slug;
+  if (!slug) {
+    throw new Error("No workspace selected");
   }
-
-  // 预留认证与幂等扩展点
-  if (options?.token) {
-    headers.set("Authorization", `Bearer ${options.token}`);
-  }
-  if (options?.idempotencyKey) {
-    headers.set("Idempotency-Key", options.idempotencyKey);
-  }
-
-  const response = await fetch(`/api${path}`, {
-    ...options,
-    headers,
-  });
-  if (!response.ok) {
-    throw new Error(`API error: ${response.status} ${response.statusText}`);
-  }
-  return response.json() as Promise<T>;
+  return slug;
 }
 
 export const api = {
-  getWorkspaces: () => request<{ data: Workspace[] }>("/workspaces"),
+  getWorkspaces: () => request<{ data: Workspace[] }>(undefined, "/workspaces"),
 
-  getDashboardStats: () => request<DashboardStats>("/dashboard/stats"),
+  getDashboardStats: () =>
+    request<DashboardStats>(getWorkspaceSlug(), "/dashboard/stats"),
 
-  getDocuments: () => request<{ data: Document[] }>("/documents"),
-  getDocumentById: (id: string) => request<Document>(`/documents/${id}`),
-  deleteDocument: (id: string) => request<void>(`/documents/${id}`, { method: "DELETE" }),
+  getDocuments: () =>
+    request<{ data: Document[] }>(getWorkspaceSlug(), "/documents"),
+  getDocumentById: (id: string) =>
+    request<Document>(getWorkspaceSlug(), `/documents/${id}`),
+  deleteDocument: (id: string) =>
+    request<void>(getWorkspaceSlug(), `/documents/${id}`, { method: "DELETE" }),
 
   uploadDocument: (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
-    return request<Document>("/documents", { method: "POST", body: formData });
+    return request<Document>(getWorkspaceSlug(), "/documents", {
+      method: "POST",
+      body: formData,
+    });
   },
 
   createLink: (documentId: string, config: PermissionConfig) =>
-    request<Link>("/links", {
+    request<Link>(getWorkspaceSlug(), "/links", {
       method: "POST",
-      body: JSON.stringify({ documentId, config }),
+      body: JSON.stringify(toCreateLinkPayload(documentId, config)),
     }),
 
-  getLinks: () => request<{ data: Link[] }>("/links"),
-  getLinkById: (id: string) => request<Link>(`/links/${id}`),
+  getLinks: () =>
+    request<{ data: Link[] }>(getWorkspaceSlug(), "/links"),
+  getLinkById: (id: string) =>
+    request<Link>(getWorkspaceSlug(), `/links/${id}`),
   getLinksByDocumentId: (documentId: string) =>
-    request<{ data: Link[] }>(`/links?documentId=${documentId}`),
+    request<{ data: Link[] }>(
+      getWorkspaceSlug(),
+      `/links?documentId=${documentId}`
+    ),
   updateLink: (id: string, patch: Partial<Link>) =>
-    request<Link>(`/links/${id}`, { method: "PATCH", body: JSON.stringify(patch) }),
+    request<Link>(getWorkspaceSlug(), `/links/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(patch),
+    }),
 
   getAccessLogs: (linkId: string) =>
-    request<{ data: AccessLog[] }>(`/links/${linkId}/access-logs`),
+    request<{ data: AccessLog[] }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/access-logs`
+    ),
 
-  getContacts: () => request<{ data: Contact[] }>("/contacts"),
-  getContactById: (id: string) => request<Contact>(`/contacts/${id}`),
+  getContacts: () =>
+    request<{ data: Contact[] }>(getWorkspaceSlug(), "/contacts"),
+  getContactById: (id: string) =>
+    request<Contact>(getWorkspaceSlug(), `/contacts/${id}`),
   getActivitiesByContactId: (contactId: string) =>
-    request<{ data: Activity[] }>(`/contacts/${contactId}/activities`),
+    request<{ data: Activity[] }>(
+      getWorkspaceSlug(),
+      `/contacts/${contactId}/activities`
+    ),
 
-  getDealRooms: () => request<{ data: DealRoom[] }>("/deal-rooms"),
-  getDealRoomById: (id: string) => request<DealRoom>(`/deal-rooms/${id}`),
+  getDealRooms: () =>
+    request<{ data: DealRoom[] }>(getWorkspaceSlug(), "/deal-rooms"),
+  getDealRoomById: (id: string) =>
+    request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${id}`),
   createDealRoom: (payload: {
     name: string;
-    description: string;
-    templateId: string;
-    ndaEnabled: boolean;
+    slug: string;
+    description?: string;
+    template?: string;
+    ndaEnabled?: boolean;
+    requiresApproval?: boolean;
   }) =>
-    request<DealRoom>("/deal-rooms", {
+    request<DealRoom>(getWorkspaceSlug(), "/deal-rooms", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify(toCreateDealRoomPayload(payload)),
     }),
 
-  getInsightsOverview: () => request<InsightsOverview>("/insights/overview"),
+  getInsightsOverview: () =>
+    request<InsightsOverview>(getWorkspaceSlug(), "/insights/overview"),
   getPageAnalytics: (documentId: string) =>
-    request<{ data: PageAnalytics[] }>(`/insights/pages/${documentId}`),
-  getSuggestions: () => request<{ data: Suggestion[] }>("/insights/suggestions"),
+    request<{ data: PageAnalytics[] }>(
+      getWorkspaceSlug(),
+      `/insights/pages/${documentId}`
+    ),
+  getSuggestions: () =>
+    request<{ data: Suggestion[] }>(getWorkspaceSlug(), "/insights/suggestions"),
 
   assistantChat: (payload: {
     query: string;
@@ -147,7 +159,7 @@ export const api = {
       answer: string;
       evidence?: Evidence[];
       follow_up_questions?: string[];
-    }>("/assistant/chat", {
+    }>(getWorkspaceSlug(), "/assistant/chat", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
@@ -162,21 +174,23 @@ export const api = {
       document_id?: string;
       query: string;
       results: Evidence[];
-    }>("/search", {
+    }>(getWorkspaceSlug(), "/search", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
 
-  getWorkspaceMembers: () => request<{ data: WorkspaceMember[] }>("/workspace/members"),
+  getWorkspaceMembers: () =>
+    request<{ data: WorkspaceMember[] }>(getWorkspaceSlug(), "/workspace/members"),
   inviteWorkspaceMember: (email: string, role: WorkspaceMember["role"]) =>
-    request<{ data: WorkspaceMember }>("/workspace/members", {
+    request<{ data: WorkspaceMember }>(getWorkspaceSlug(), "/workspace/members", {
       method: "POST",
       body: JSON.stringify({ email, role }),
     }),
 
-  getWorkspaceSettings: () => request<{ data: WorkspaceSettings }>("/workspace/settings"),
+  getWorkspaceSettings: () =>
+    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/workspace/settings"),
   updateWorkspaceSettings: (settings: WorkspaceSettings) =>
-    request<{ data: WorkspaceSettings }>("/workspace/settings", {
+    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/workspace/settings", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
@@ -184,36 +198,42 @@ export const api = {
   uploadWorkspaceLogo: (file: File) => {
     const formData = new FormData();
     formData.append("file", file);
-    return request<{ data: { logoUrl: string } }>("/workspace/logo", {
-      method: "POST",
-      body: formData,
-    });
+    return request<{ data: { logoUrl: string } }>(
+      getWorkspaceSlug(),
+      "/workspace/logo",
+      {
+        method: "POST",
+        body: formData,
+      }
+    );
   },
 
-  getBillingInfo: () => request<{ data: BillingInfo }>("/workspace/billing"),
+  getBillingInfo: () =>
+    request<{ data: BillingInfo }>(getWorkspaceSlug(), "/workspace/billing"),
 
-  getIntegrations: () => request<{ data: IntegrationStatus }>("/workspace/integrations"),
+  getIntegrations: () =>
+    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/workspace/integrations"),
   updateIntegrations: (status: IntegrationStatus) =>
-    request<{ data: IntegrationStatus }>("/workspace/integrations", {
+    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/workspace/integrations", {
       method: "PUT",
       body: JSON.stringify(status),
     }),
 
-  getSecuritySettings: () => request<{ data: SecuritySettings }>("/workspace/security"),
+  getSecuritySettings: () =>
+    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/workspace/security"),
   updateSecuritySettings: (settings: SecuritySettings) =>
-    request<{ data: SecuritySettings }>("/workspace/security", {
+    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/workspace/security", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
 
-  getSignals: () => request<SignalFeed>("/signals"),
-  getSignalById: (id: string) => request<Signal>(`/signals/${id}`),
+  getSignals: () => request<SignalFeed>(getWorkspaceSlug(), "/signals"),
+  getSignalById: (id: string) =>
+    request<Signal>(getWorkspaceSlug(), `/signals/${id}`),
 
-  getDealRoomTemplates: () => request<{ data: DealRoomTemplate[] }>("/deal-room-templates"),
+  getDealRoomTemplates: () =>
+    request<{ data: DealRoomTemplate[] }>(getWorkspaceSlug(), "/deal-room-templates"),
 };
-
-// 工具函数请直接从 @/lib/formatters 或 @/lib/calculations 导入
-// api.ts 仅保留网络层与业务方法，避免职责耦合
 
 export function heatLabel(level: HeatLevel): string {
   return i18next.t(`common:heat.${level}`);
