@@ -605,15 +605,68 @@ func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) 
 }
 
 const createTenant = `-- name: CreateTenant :one
-INSERT INTO tenants (name)
-VALUES ($1)
-RETURNING id, name, created_at
+INSERT INTO tenants (name, slug)
+VALUES ($1, $2)
+RETURNING id, name, slug, created_at
 `
 
-func (q *Queries) CreateTenant(ctx context.Context, name string) (Tenant, error) {
-	row := q.db.QueryRow(ctx, createTenant, name)
-	var i Tenant
-	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+type CreateTenantParams struct {
+	Name string
+	Slug pgtype.Text
+}
+
+type CreateTenantRow struct {
+	ID        pgtype.UUID
+	Name      string
+	Slug      pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) CreateTenant(ctx context.Context, arg CreateTenantParams) (CreateTenantRow, error) {
+	row := q.db.QueryRow(ctx, createTenant, arg.Name, arg.Slug)
+	var i CreateTenantRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.Slug,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createTenantDomain = `-- name: CreateTenantDomain :one
+INSERT INTO tenant_domains (tenant_id, domain, domain_type, is_primary)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+`
+
+type CreateTenantDomainParams struct {
+	TenantID   pgtype.UUID
+	Domain     string
+	DomainType string
+	IsPrimary  bool
+}
+
+func (q *Queries) CreateTenantDomain(ctx context.Context, arg CreateTenantDomainParams) (TenantDomain, error) {
+	row := q.db.QueryRow(ctx, createTenantDomain,
+		arg.TenantID,
+		arg.Domain,
+		arg.DomainType,
+		arg.IsPrimary,
+	)
+	var i TenantDomain
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Domain,
+		&i.DomainType,
+		&i.IsPrimary,
+		&i.SslStatus,
+		&i.SslExpiresAt,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
 }
 
@@ -669,6 +722,21 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const deleteTenantDomain = `-- name: DeleteTenantDomain :exec
+DELETE FROM tenant_domains
+WHERE id = $1 AND tenant_id = $2
+`
+
+type DeleteTenantDomainParams struct {
+	ID       pgtype.UUID
+	TenantID pgtype.UUID
+}
+
+func (q *Queries) DeleteTenantDomain(ctx context.Context, arg DeleteTenantDomainParams) error {
+	_, err := q.db.Exec(ctx, deleteTenantDomain, arg.ID, arg.TenantID)
+	return err
 }
 
 const getAccessRequestByID = `-- name: GetAccessRequestByID :one
@@ -1083,6 +1151,49 @@ func (q *Queries) GetRoomMemberByEmail(ctx context.Context, arg GetRoomMemberByE
 	return i, err
 }
 
+const getTenantBySlug = `-- name: GetTenantBySlug :one
+SELECT id, name, created_at
+FROM tenants
+WHERE slug = $1 LIMIT 1
+`
+
+type GetTenantBySlugRow struct {
+	ID        pgtype.UUID
+	Name      string
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) GetTenantBySlug(ctx context.Context, slug pgtype.Text) (GetTenantBySlugRow, error) {
+	row := q.db.QueryRow(ctx, getTenantBySlug, slug)
+	var i GetTenantBySlugRow
+	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	return i, err
+}
+
+const getTenantDomainByDomain = `-- name: GetTenantDomainByDomain :one
+SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+FROM tenant_domains
+WHERE domain = $1 LIMIT 1
+`
+
+func (q *Queries) GetTenantDomainByDomain(ctx context.Context, domain string) (TenantDomain, error) {
+	row := q.db.QueryRow(ctx, getTenantDomainByDomain, domain)
+	var i TenantDomain
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Domain,
+		&i.DomainType,
+		&i.IsPrimary,
+		&i.SslStatus,
+		&i.SslExpiresAt,
+		&i.VerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, created_at
 FROM users
@@ -1147,6 +1258,31 @@ WHERE w.slug = $1 LIMIT 1
 
 func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspace, error) {
 	row := q.db.QueryRow(ctx, getWorkspaceBySlug, slug)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Slug,
+		&i.BrandColor,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWorkspaceByTenantAndSlug = `-- name: GetWorkspaceByTenantAndSlug :one
+SELECT id, tenant_id, name, slug, brand_color, created_at
+FROM workspaces
+WHERE tenant_id = $1 AND slug = $2 LIMIT 1
+`
+
+type GetWorkspaceByTenantAndSlugParams struct {
+	TenantID pgtype.UUID
+	Slug     string
+}
+
+func (q *Queries) GetWorkspaceByTenantAndSlug(ctx context.Context, arg GetWorkspaceByTenantAndSlugParams) (Workspace, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceByTenantAndSlug, arg.TenantID, arg.Slug)
 	var i Workspace
 	err := row.Scan(
 		&i.ID,
@@ -1537,6 +1673,44 @@ func (q *Queries) ListRoomMembers(ctx context.Context, roomID pgtype.UUID) ([]Ro
 	return items, nil
 }
 
+const listTenantDomainsByTenant = `-- name: ListTenantDomainsByTenant :many
+SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+FROM tenant_domains
+WHERE tenant_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListTenantDomainsByTenant(ctx context.Context, tenantID pgtype.UUID) ([]TenantDomain, error) {
+	rows, err := q.db.Query(ctx, listTenantDomainsByTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TenantDomain
+	for rows.Next() {
+		var i TenantDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Domain,
+			&i.DomainType,
+			&i.IsPrimary,
+			&i.SslStatus,
+			&i.SslExpiresAt,
+			&i.VerifiedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceMembers = `-- name: ListWorkspaceMembers :many
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
@@ -1596,6 +1770,57 @@ func (q *Queries) ListWorkspacesByUser(ctx context.Context, userID pgtype.UUID) 
 	var items []ListWorkspacesByUserRow
 	for rows.Next() {
 		var i ListWorkspacesByUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.Slug,
+			&i.BrandColor,
+			&i.CreatedAt,
+			&i.Role,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspacesByUserAndTenant = `-- name: ListWorkspacesByUserAndTenant :many
+SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at, m.role
+FROM workspaces w
+JOIN workspace_members m ON m.workspace_id = w.id
+WHERE m.user_id = $1 AND w.tenant_id = $2
+ORDER BY w.created_at DESC
+`
+
+type ListWorkspacesByUserAndTenantParams struct {
+	UserID   pgtype.UUID
+	TenantID pgtype.UUID
+}
+
+type ListWorkspacesByUserAndTenantRow struct {
+	ID         pgtype.UUID
+	TenantID   pgtype.UUID
+	Name       string
+	Slug       string
+	BrandColor pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+	Role       string
+}
+
+func (q *Queries) ListWorkspacesByUserAndTenant(ctx context.Context, arg ListWorkspacesByUserAndTenantParams) ([]ListWorkspacesByUserAndTenantRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesByUserAndTenant, arg.UserID, arg.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkspacesByUserAndTenantRow
+	for rows.Next() {
+		var i ListWorkspacesByUserAndTenantRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -1885,5 +2110,30 @@ type UpdateRoomMemberStatusParams struct {
 
 func (q *Queries) UpdateRoomMemberStatus(ctx context.Context, arg UpdateRoomMemberStatusParams) error {
 	_, err := q.db.Exec(ctx, updateRoomMemberStatus, arg.Status, arg.RoomID, arg.Email)
+	return err
+}
+
+const updateTenantDomainSSL = `-- name: UpdateTenantDomainSSL :exec
+UPDATE tenant_domains
+SET ssl_status = $1, ssl_expires_at = $2, verified_at = $3, updated_at = now()
+WHERE id = $4 AND tenant_id = $5
+`
+
+type UpdateTenantDomainSSLParams struct {
+	SslStatus    string
+	SslExpiresAt pgtype.Timestamptz
+	VerifiedAt   pgtype.Timestamptz
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+}
+
+func (q *Queries) UpdateTenantDomainSSL(ctx context.Context, arg UpdateTenantDomainSSLParams) error {
+	_, err := q.db.Exec(ctx, updateTenantDomainSSL,
+		arg.SslStatus,
+		arg.SslExpiresAt,
+		arg.VerifiedAt,
+		arg.ID,
+		arg.TenantID,
+	)
 	return err
 }

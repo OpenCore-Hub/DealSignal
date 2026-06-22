@@ -209,6 +209,20 @@ type Tenant struct {
 	ID        pgtype.UUID
 	Name      string
 	CreatedAt pgtype.Timestamptz
+	Slug      pgtype.Text
+}
+
+type TenantDomain struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	Domain       string
+	DomainType   string
+	IsPrimary    bool
+	SslStatus    string
+	SslExpiresAt pgtype.Timestamptz
+	VerifiedAt   pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type User struct {

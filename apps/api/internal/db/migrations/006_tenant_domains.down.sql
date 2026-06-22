@@ -1,0 +1,2 @@
+DROP TABLE IF EXISTS tenant_domains;
+ALTER TABLE tenants DROP COLUMN IF EXISTS slug;

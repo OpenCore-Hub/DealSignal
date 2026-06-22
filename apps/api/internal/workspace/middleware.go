@@ -18,7 +18,8 @@ func AuthMiddleware(svc *Service) gin.HandlerFunc {
 		}
 
 		userID := middleware.UserIDFrom(c)
-		ws, err := svc.GetBySlug(c.Request.Context(), userID, slug)
+		tenantID := middleware.TenantIDFrom(c)
+		ws, err := svc.GetByTenantAndSlug(c.Request.Context(), userID, tenantID, slug)
 		if err != nil {
 			if err == ErrNotMember {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "not a member of this workspace"})

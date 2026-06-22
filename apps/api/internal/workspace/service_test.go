@@ -151,9 +151,10 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		f.tenant = db.Tenant{
 			ID:        newPGUUID(),
 			Name:      argString(args, 0),
+			Slug:      pgtype.Text{String: argString(args, 1), Valid: true},
 			CreatedAt: now,
 		}
-		return fakeRow{values: []interface{}{f.tenant.ID, f.tenant.Name, f.tenant.CreatedAt}}
+		return fakeRow{values: []interface{}{f.tenant.ID, f.tenant.Name, f.tenant.Slug, f.tenant.CreatedAt}}
 
 	case strings.Contains(sqlLower, "insert into workspaces"):
 		f.workspace = db.Workspace{
