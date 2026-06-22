@@ -19,12 +19,21 @@ const demoEvidence: Evidence[] = [
   },
 ];
 
-const { apiMock, resolveAssistantChat } = vi.hoisted(() => {
-  let resolve: (value: {
+const {
+  apiMock,
+  resolveAssistantChat,
+  resolveSearch,
+} = vi.hoisted(() => {
+  let chatResolve: (value: {
     session_id: string;
     answer: string;
     evidence?: Evidence[];
     follow_up_questions?: string[];
+  }) => void = () => {};
+  let searchResolve: (value: {
+    document_id?: string;
+    query: string;
+    results: Evidence[];
   }) => void = () => {};
   return {
     apiMock: {
@@ -35,7 +44,15 @@ const { apiMock, resolveAssistantChat } = vi.hoisted(() => {
             answer: string;
             evidence?: Evidence[];
             follow_up_questions?: string[];
-          }>((r) => { resolve = r; })
+          }>((r) => { chatResolve = r; })
+      ),
+      searchDocument: vi.fn(
+        () =>
+          new Promise<{
+            document_id?: string;
+            query: string;
+            results: Evidence[];
+          }>((r) => { searchResolve = r; })
       ),
     },
     resolveAssistantChat: (
@@ -45,7 +62,14 @@ const { apiMock, resolveAssistantChat } = vi.hoisted(() => {
         evidence?: Evidence[];
         follow_up_questions?: string[];
       }
-    ) => resolve(value),
+    ) => chatResolve(value),
+    resolveSearch: (
+      value: {
+        document_id?: string;
+        query: string;
+        results: Evidence[];
+      }
+    ) => searchResolve(value),
   };
 });
 
@@ -86,6 +110,17 @@ async function renderWithProviders(initialRoute = "/documents/doc-001") {
   );
 }
 
+async function sendSearchResponse() {
+  await act(async () => {
+    resolveSearch({
+      document_id: "doc-001",
+      query: "What is the revenue trend?",
+      results: demoEvidence,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+}
+
 async function sendAssistantResponse() {
   await act(async () => {
     resolveAssistantChat({
@@ -103,10 +138,11 @@ Element.prototype.scrollIntoView = vi.fn();
 describe("AIAssistant", () => {
   beforeEach(() => {
     apiMock.assistantChat.mockClear();
+    apiMock.searchDocument.mockClear();
     useAIStore.getState().reset();
   });
 
-  it("opens the assistant and sends a message", async () => {
+  it("opens the assistant and searches current document", async () => {
     await renderWithProviders();
 
     fireEvent.click(screen.getByRole("button", { name: /Open AI assistant/i }));
@@ -114,14 +150,33 @@ describe("AIAssistant", () => {
     fireEvent.change(input, { target: { value: "What is the revenue trend?" } });
     fireEvent.submit(input.closest("form")!);
 
-    expect(apiMock.assistantChat).toHaveBeenCalledWith(
+    expect(apiMock.searchDocument).toHaveBeenCalledWith(
       expect.objectContaining({ query: "What is the revenue trend?", document_id: "doc-001" })
     );
+    expect(apiMock.assistantChat).not.toHaveBeenCalled();
+
+    await sendSearchResponse();
+
+    expect(await screen.findByText((content) => content.includes("Here are the most relevant passages"))).toBeInTheDocument();
+    expect(screen.getByText(/Revenue grew 3x year over year/i)).toBeInTheDocument();
+  });
+
+  it("falls back to assistant chat when no document context", async () => {
+    await renderWithProviders("/dashboard");
+
+    fireEvent.click(screen.getByRole("button", { name: /Open AI assistant/i }));
+    const input = await screen.findByPlaceholderText(/Ask about signals/i);
+    fireEvent.change(input, { target: { value: "What are today’s signals?" } });
+    fireEvent.submit(input.closest("form")!);
+
+    expect(apiMock.assistantChat).toHaveBeenCalledWith(
+      expect.objectContaining({ query: "What are today’s signals?" })
+    );
+    expect(apiMock.searchDocument).not.toHaveBeenCalled();
 
     await sendAssistantResponse();
 
     expect(await screen.findByText("Revenue grew 3x based on the latest report.")).toBeInTheDocument();
-    expect(screen.getByText(/Revenue grew 3x year over year/i)).toBeInTheDocument();
   });
 
   it("navigates to viewer page when evidence is clicked", async () => {
@@ -132,7 +187,7 @@ describe("AIAssistant", () => {
     fireEvent.change(input, { target: { value: "Show evidence" } });
     fireEvent.submit(input.closest("form")!);
 
-    await sendAssistantResponse();
+    await sendSearchResponse();
 
     const evidenceCard = await screen.findByText(/Revenue grew 3x year over year/i);
     fireEvent.click(evidenceCard.closest("button")!);
@@ -150,14 +205,14 @@ describe("AIAssistant", () => {
     fireEvent.change(input, { target: { value: "Hello" } });
     fireEvent.submit(input.closest("form")!);
 
-    await sendAssistantResponse();
-    await screen.findByText("Revenue grew 3x based on the latest report.");
+    await sendSearchResponse();
+    await screen.findByText((content) => content.includes("Here are the most relevant passages"));
 
     fireEvent.click(screen.getByRole("button", { name: /Reset conversation/i }));
     fireEvent.click(screen.getByRole("button", { name: /Reset/i }));
 
     await waitFor(() => {
-      expect(screen.queryByText("Revenue grew 3x based on the latest report.")).not.toBeInTheDocument();
+      expect(screen.queryByText(/Here are the most relevant passages/i)).not.toBeInTheDocument();
     });
   });
 });
