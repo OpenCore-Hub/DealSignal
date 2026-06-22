@@ -11,7 +11,8 @@
     "test:watch": "vitest",
     "preview": "vite preview",
     "qa:routes": "node scripts/qa/qa-routes.mjs",
-    "qa:interactive": "node scripts/qa/qa-interactive.mjs"
+    "qa:interactive": "node scripts/qa/qa-interactive.mjs",
+    "security": "pnpm audit --audit-level high --registry=https://registry.npmjs.org/"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",
