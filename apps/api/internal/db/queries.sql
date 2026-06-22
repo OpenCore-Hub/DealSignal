@@ -181,3 +181,76 @@ FROM assistant_messages
 WHERE session_id = $1
 ORDER BY created_at ASC
 LIMIT $2;
+-- name: CreateLink :one
+INSERT INTO links (
+    tenant_id, workspace_id, document_id, public_token, name, permission_type,
+    allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+    download_enabled, watermark_enabled, status, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at;
+
+-- name: GetLinkByIDAndWorkspace :one
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
+
+-- name: GetLinkByPublicToken :one
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE public_token = $1 AND status = 'active'
+LIMIT 1;
+
+-- name: IncrementLinkAccessCount :exec
+UPDATE links
+SET access_count = access_count + 1, updated_at = now()
+WHERE id = $1;
+
+-- name: ListLinksByWorkspace :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE workspace_id = $1 AND deleted_at IS NULL
+ORDER BY created_at DESC;
+
+-- name: CreateAccessLog :exec
+INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: CreatePageView :exec
+INSERT INTO page_views (tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: GetLinkAccessMetrics :one
+SELECT
+    COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
+FROM access_logs
+WHERE link_id = $1;
+
+-- name: GetLinkPageViewMetrics :one
+SELECT
+    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS key_page_views,
+    COUNT(*) AS total_page_views
+FROM page_views
+WHERE link_id = $1;
+
+-- name: GetLinkBounceCount :one
+SELECT COUNT(*) AS bounce_count
+FROM access_logs a
+WHERE a.link_id = $1
+  AND a.event_type = 'link_opened'
+  AND a.visitor_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM page_views p
+      WHERE p.link_id = $1 AND p.visitor_id = a.visitor_id
+  );
