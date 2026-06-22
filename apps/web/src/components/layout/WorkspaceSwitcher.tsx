@@ -40,6 +40,12 @@ export function WorkspaceSwitcher() {
     workspaces.find((w) => w.slug === workspaceSlug) ||
     workspaces[0];
 
+  useEffect(() => {
+    if (activeWorkspace && activeWorkspace.id !== currentWorkspace?.id) {
+      setCurrentWorkspace(activeWorkspace);
+    }
+  }, [activeWorkspace, currentWorkspace, setCurrentWorkspace]);
+
   if (!activeWorkspace) {
     return (
       <div className="flex items-center gap-3 rounded-md px-2 py-2 text-muted-foreground">

@@ -37,7 +37,7 @@ export function LinkPreview({
       <CardContent className="space-y-4">
         <div className="rounded-md border border-border bg-muted p-3">
           <p className="text-caption text-muted-foreground">{t("creator.previewDocumentLabel")}</p>
-          <p className="mt-1 text-sm font-medium">{selectedDocument?.title ?? t("creator.noDocumentSelected")}</p>
+          <p data-testid="selected-document" className="mt-1 text-sm font-medium">{selectedDocument?.title ?? t("creator.noDocumentSelected")}</p>
         </div>
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2">
@@ -64,7 +64,7 @@ export function LinkPreview({
               <Check size={12} /> {t("creator.generatedLabel")}
             </p>
             <div className="mt-1 flex items-center gap-2">
-              <code className="flex-1 truncate text-sm">{generatedLink}</code>
+              <code data-testid="generated-link" className="flex-1 truncate text-sm">{generatedLink}</code>
               <Button
                 size="icon"
                 variant="ghost"
@@ -77,7 +77,7 @@ export function LinkPreview({
           </div>
         ) : null}
 
-        <Button className="w-full" disabled={!selectedDocument || creating} onClick={onCreate}>
+        <Button data-testid="create-link-button" className="w-full" disabled={!selectedDocument || creating} onClick={onCreate}>
           {creating ? t("creator.creating") : generatedLink ? t("creator.recreate") : t("creator.createLink")}
         </Button>
       </CardContent>

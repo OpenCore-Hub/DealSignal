@@ -77,6 +77,7 @@ export function WorkspacesPage() {
             return (
               <Card
                 key={workspace.id}
+                data-testid={`workspace-card-${workspace.slug}`}
                 className="cursor-pointer transition-colors hover:bg-muted/50"
                 onClick={() => navigate(`/${workspace.slug}/dashboard`)}
               >

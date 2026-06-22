@@ -48,7 +48,7 @@ available_tools:
 > **版本**：`v2.1.2`  
 > **模板版本**：`v2`  
 > **优先级**：`P0`  
-> **状态**：`待执行`  
+> **状态**：`已完成`  
 > **类型**：`test`  
 > **预计工作量**：`L`  
 > **分支名**：`feat/agent-task-016-test-automation`  
@@ -95,6 +95,7 @@ available_tools:
 | `apps/web/src/lib/apiAdapters.test.ts` | 新增 | mapper 测试 |
 | `apps/web/src/components/**/*.test.tsx` | 新增 | 组件测试 |
 | `apps/web/e2e/*.spec.ts` | 新增 | Playwright E2E |
+| `apps/web/playwright.config.ts` | 新增 | Playwright 配置 |
 | `apps/web/vitest.config.ts` | 修改 | 覆盖率配置 |
 | `apps/api/tests/integration/*_test.go` | 新增 | 后端集成测试 |
 | `.github/workflows/ci.yml` | 修改 | 测试门禁 |
@@ -107,7 +108,7 @@ available_tools:
 - [x] 前端覆盖率门禁：`@vitest/coverage-v8` 已接入，`coverage.enabled: true`，仅对核心逻辑与已测组件统计；当前结果 statements 89.63% / branches 76.44% / functions 82.52% / lines 92.03%，阈值设置为 statements 80% / branches 70% / functions 55% / lines 80%。
 - [x] 后端单元测试：`go test -race -cover ./...` 全绿，新增 `link/service_test.go`、`upload/service_test.go`、`auth/service_test.go` 覆盖核心校验逻辑。
 - [x] CI 测试门禁：`.github/workflows/ci.yml` 已包含 `backend-test`（含 coverprofile）、`backend-lint`、`backend-security`（govulncheck）与前端 typecheck/lint/test/coverage。
-- [ ] Playwright P0 E2E：脚本与配置待补充（当前未覆盖）。
+- [x] Playwright P0 E2E：新增 `apps/web/playwright.config.ts`、`apps/web/e2e/p0.spec.ts` 与 `e2e/fixtures/sample.pdf`，覆盖“选择 workspace → 上传文档 → 创建智能链接 → 查看分析”流程；同时修复 `WorkspaceSwitcher` 在直接访问 workspace 路由时未写入 `currentWorkspace` 的问题。
 
 ---
 

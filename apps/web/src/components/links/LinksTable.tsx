@@ -237,6 +237,8 @@ export function LinksTable() {
             {table.getRowModel().rows.map((row) => (
               <TableRow
                 key={row.id}
+                data-testid="links-table-row"
+                data-link-id={row.original.id}
                 className="cursor-pointer"
                 role="link"
                 tabIndex={0}

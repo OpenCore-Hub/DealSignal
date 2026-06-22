@@ -136,7 +136,9 @@ export function Uploader() {
               </div>
               <div className="flex items-center gap-2">
                 {uploadFile.status === "done" && (
-                  <Check size={18} weight="bold" className="text-success-500" />
+                  <span data-testid="upload-success">
+                    <Check size={18} weight="bold" className="text-success-500" />
+                  </span>
                 )}
                 {uploadFile.status === "error" && (
                   <Warning size={18} weight="bold" className="text-error-500" />
