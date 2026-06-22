@@ -3,11 +3,13 @@ package server
 import (
 	"net/http"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
@@ -76,12 +78,22 @@ func (s *Server) registerRoutes() {
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, llmClient)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
+			linkSvc := link.NewService(queries)
+			analyticsSvc := analytics.NewService(queries)
+			linkHandler := link.NewHandler(linkSvc, analyticsSvc)
+			analyticsHandler := analytics.NewHandler(analyticsSvc)
+
 			ws := api.Group("/workspaces/:workspaceSlug")
 			ws.Use(middleware.Auth())
 			ws.Use(workspace.AuthMiddleware(workspaceSvc))
 			uploadHandler.RegisterRoutes(ws)
 			searchHandler.RegisterRoutes(ws)
 			assistantHandler.RegisterRoutes(ws)
+			linkHandler.RegisterWorkspaceRoutes(ws)
+			analyticsHandler.RegisterWorkspaceRoutes(ws)
+
+			public := s.engine.Group("/api/v1/public")
+			linkHandler.RegisterPublicRoutes(public)
 		}
 	}
 

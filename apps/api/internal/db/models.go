@@ -5,37 +5,33 @@
 package db
 
 import (
+	"net/netip"
+
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pgvector/pgvector-go"
 )
 
-type AssistantMessage struct {
-	ID        pgtype.UUID
-	SessionID pgtype.UUID
-	Role      string
-	Content   string
-	Evidence  []byte
-	CreatedAt pgtype.Timestamptz
-}
-
-type AssistantSession struct {
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-	UserID      pgtype.UUID
-	Title       pgtype.Text
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-}
-
-type Chunk struct {
+type AccessLog struct {
 	ID           pgtype.UUID
 	TenantID     pgtype.UUID
 	WorkspaceID  pgtype.UUID
-	PageID       pgtype.UUID
-	Text         string
-	Bbox         []byte
-	Embedding    pgvector.Vector
-	SearchVector interface{}
+	LinkID       pgtype.UUID
+	VisitorID    pgtype.Text
+	VisitorEmail pgtype.Text
+	EventType    string
+	Ip           *netip.Addr
+	UserAgent    pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+}
+
+type Chunk struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageID      pgtype.UUID
+	Text        string
+	Bbox        []byte
+	Embedding   pgvector.Vector
 }
 
 type Document struct {
@@ -65,6 +61,28 @@ type IngestionJob struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type Link struct {
+	ID               pgtype.UUID
+	TenantID         pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	DocumentID       pgtype.UUID
+	PublicToken      string
+	Name             pgtype.Text
+	PermissionType   string
+	AllowedEmails    []byte
+	AllowedDomains   []byte
+	PasswordHash     pgtype.Text
+	ExpiresAt        pgtype.Timestamptz
+	MaxAccessCount   pgtype.Int4
+	AccessCount      int32
+	DownloadEnabled  bool
+	WatermarkEnabled bool
+	Status           string
+	CreatedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
+
 type Page struct {
 	ID             pgtype.UUID
 	TenantID       pgtype.UUID
@@ -75,6 +93,18 @@ type Page struct {
 	Width          pgtype.Int4
 	Height         pgtype.Int4
 	CreatedAt      pgtype.Timestamptz
+}
+
+type PageView struct {
+	ID              pgtype.UUID
+	TenantID        pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       pgtype.Text
+	PageNumber      int32
+	DurationSeconds int32
+	ScrollDepth     pgtype.Numeric
+	CreatedAt       pgtype.Timestamptz
 }
 
 type Tenant struct {
