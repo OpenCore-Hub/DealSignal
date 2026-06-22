@@ -155,7 +155,7 @@ interface RequestOptions extends RequestInit {
 
 ```json
 {
-  "mockToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test",
+  "mockToken": "dummy-token-for-local-development-only",
   "mockHeaders": {
     "Accept-Language": "en",
     "X-Request-ID": "550e8400-e29b-41d4-a716-446655440000",
