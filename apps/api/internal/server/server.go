@@ -1,22 +1,38 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
+
+// DBPool is the minimal interface required by sqlc generated queries.
+type DBPool interface {
+	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
+	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
+	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+}
 
 // Server wraps the gin engine and application config.
 type Server struct {
 	engine *gin.Engine
 	cfg    *config.Config
+	dbPool DBPool
 }
 
-// New creates a configured HTTP server.
+// New creates a configured HTTP server without a database connection (for tests).
 func New(cfg *config.Config) *Server {
+	return NewWithDB(cfg, nil)
+}
+
+// NewWithDB creates a configured HTTP server with a database connection.
+func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 	if cfg.LogLevel == "info" {
 		gin.SetMode(gin.ReleaseMode)
 	} else if cfg.LogLevel == "debug" {
@@ -30,7 +46,7 @@ func New(cfg *config.Config) *Server {
 	r.Use(requestLogger())
 	r.Use(corsMiddleware())
 
-	s := &Server{engine: r, cfg: cfg}
+	s := &Server{engine: r, cfg: cfg, dbPool: dbPool}
 	s.registerRoutes()
 	return s
 }
