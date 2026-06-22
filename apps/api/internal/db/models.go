@@ -37,6 +37,8 @@ type AssistantSession struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
 	UserID      pgtype.UUID
+	LinkID      pgtype.UUID
+	DocumentID  pgtype.UUID
 	Title       pgtype.Text
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -306,6 +308,16 @@ type Workspace struct {
 	Slug       string
 	BrandColor pgtype.Text
 	CreatedAt  pgtype.Timestamptz
+}
+
+type WorkspaceInvitation struct {
+	Token       pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Email       string
+	Role        string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
 }
 
 type WorkspaceMember struct {

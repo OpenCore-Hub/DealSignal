@@ -1,34 +1,44 @@
 package auth
 
 import (
+	"context"
+	"errors"
 	"testing"
-
-	"golang.org/x/crypto/bcrypt"
 )
 
-func TestPasswordHashing(t *testing.T) {
-	password := "correct-horse-battery-staple"
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
-	if err != nil {
-		t.Fatalf("hash password: %v", err)
+func init() {
+	InitJWT("test-secret-for-unit-tests")
+}
+
+func TestRegisterValidation(t *testing.T) {
+	svc := NewService(nil)
+	ctx := context.Background()
+
+	cases := []struct {
+		name     string
+		email    string
+		password string
+		err      error
+	}{
+		{"invalid email", "not-an-email", "password123", ErrInvalidEmail},
+		{"short password", "user@example.com", "short", errors.New("password must be at least 8 characters")},
 	}
-	if err := bcrypt.CompareHashAndPassword(hash, []byte(password)); err != nil {
-		t.Fatalf("compare password: %v", err)
-	}
-	if err := bcrypt.CompareHashAndPassword(hash, []byte("wrong")); err == nil {
-		t.Fatal("expected mismatch for wrong password")
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			_, _, err := svc.Register(ctx, c.email, c.password)
+			if err == nil || err.Error() != c.err.Error() {
+				t.Fatalf("expected error %q, got %v", c.err, err)
+			}
+		})
 	}
 }
 
 func TestIsUniqueViolation(t *testing.T) {
 	if isUniqueViolation(nil) {
-		t.Fatal("nil should not be unique violation")
+		t.Error("nil should not be unique violation")
 	}
-	if !isUniqueViolation(errorWithCode("23505")) {
-		t.Fatal("expected unique violation for 23505")
+	if !isUniqueViolation(errors.New("pq: duplicate key value violates unique constraint \"users_email_key\" (SQLSTATE 23505)")) {
+		t.Error("expected unique violation")
 	}
 }
-
-type errorWithCode string
-
-func (e errorWithCode) Error() string { return string(e) }

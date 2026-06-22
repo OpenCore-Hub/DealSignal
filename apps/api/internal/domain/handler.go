@@ -31,13 +31,23 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 }
 
 type registerRequest struct {
+	TenantID   string `json:"tenant_id" binding:"required"`
 	Domain     string `json:"domain" binding:"required"`
 	DomainType string `json:"domain_type" binding:"required,oneof=SUBDOMAIN CUSTOM PUBLIC_LINK"`
 	IsPrimary  bool   `json:"is_primary"`
 }
 
-func (h *Handler) requireTenantAdmin(c *gin.Context) (string, bool) {
-	tenantID := middleware.TenantIDFrom(c)
+func tenantIDFromRequest(c *gin.Context) string {
+	if id := c.Query("tenant_id"); id != "" {
+		return id
+	}
+	if id := c.GetHeader("X-Tenant-ID"); id != "" {
+		return id
+	}
+	return middleware.TenantIDFrom(c)
+}
+
+func (h *Handler) requireTenantAdmin(c *gin.Context, tenantID string) (string, bool) {
 	if tenantID == "" {
 		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"code": "missing_tenant", "message": "tenant context is required"})
 		return "", false
@@ -57,7 +67,7 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	tenantID, ok := h.requireTenantAdmin(c)
+	tenantID, ok := h.requireTenantAdmin(c, req.TenantID)
 	if !ok {
 		return
 	}
@@ -78,7 +88,7 @@ func (h *Handler) Register(c *gin.Context) {
 }
 
 func (h *Handler) List(c *gin.Context) {
-	tenantID, ok := h.requireTenantAdmin(c)
+	tenantID, ok := h.requireTenantAdmin(c, tenantIDFromRequest(c))
 	if !ok {
 		return
 	}
@@ -92,7 +102,7 @@ func (h *Handler) List(c *gin.Context) {
 }
 
 func (h *Handler) Verify(c *gin.Context) {
-	tenantID, ok := h.requireTenantAdmin(c)
+	tenantID, ok := h.requireTenantAdmin(c, tenantIDFromRequest(c))
 	if !ok {
 		return
 	}
@@ -113,7 +123,7 @@ func (h *Handler) Verify(c *gin.Context) {
 }
 
 func (h *Handler) Delete(c *gin.Context) {
-	tenantID, ok := h.requireTenantAdmin(c)
+	tenantID, ok := h.requireTenantAdmin(c, tenantIDFromRequest(c))
 	if !ok {
 		return
 	}

@@ -3,6 +3,7 @@ package assistant
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -116,5 +117,66 @@ func TestChatEmptyMessage(t *testing.T) {
 	_, err := svc.Chat(context.Background(), "user-1", "ws-1", ChatRequest{Message: "   "})
 	if err == nil {
 		t.Fatal("expected error for empty message")
+	}
+}
+
+func TestChatNoEvidenceReturnsNoBasis(t *testing.T) {
+	ctx := context.Background()
+	q := &mockQuerier{
+		sessionID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
+	}
+	s := &mockSearcher{evidence: nil}
+	llmAnswer := "I could not find a basis for the answer in the workspace documents."
+	l := &mockLLM{answer: llmAnswer}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	resp, err := svc.Chat(ctx, "user-1", "ws-1", ChatRequest{Message: "What was Q3 revenue?"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Answer != llmAnswer {
+		t.Fatalf("expected answer %q, got %q", llmAnswer, resp.Answer)
+	}
+	if len(resp.Evidence) != 0 {
+		t.Fatalf("expected empty evidence, got %d", len(resp.Evidence))
+	}
+}
+
+func TestChatKeepsMultiTurnContext(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	q := &mockQuerier{
+		sessionID: sessionID,
+		messages: []db.AssistantMessage{
+			{SessionID: sessionID, Role: "user", Content: "What was Q3 revenue?"},
+			{SessionID: sessionID, Role: "assistant", Content: "Revenue grew 3x YoY."},
+		},
+	}
+	s := &mockSearcher{evidence: []search.Evidence{
+		{ChunkID: "chunk-1", PageNumber: 3, Text: "Revenue grew 3x YoY."},
+	}}
+	l := &mockLLM{answer: "It grew 3x YoY."}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	resp, err := svc.Chat(ctx, "user-1", "ws-1", ChatRequest{
+		SessionID: sessionID.String(),
+		Message:   "And what about Q4?",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Answer != l.answer {
+		t.Fatalf("expected answer %q, got %q", l.answer, resp.Answer)
+	}
+	if len(q.messages) != 4 {
+		t.Fatalf("expected 4 messages in session, got %d", len(q.messages))
+	}
+}
+
+func TestChatInvalidSessionID(t *testing.T) {
+	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	_, err := svc.Chat(context.Background(), "user-1", "ws-1", ChatRequest{SessionID: "not-a-uuid", Message: "hi"})
+	if !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("expected ErrInvalidSession, got %v", err)
 	}
 }

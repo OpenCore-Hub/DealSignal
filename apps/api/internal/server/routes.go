@@ -28,6 +28,15 @@ import (
 	"github.com/google/uuid"
 )
 
+type notificationAdapter struct {
+	svc *notification.Service
+}
+
+func (a *notificationAdapter) Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) error {
+	_, err := a.svc.Enqueue(ctx, workspaceID, userID, channel, subject, body)
+	return err
+}
+
 // ErrorResponse is the standard JSON error shape.
 type ErrorResponse struct {
 	Code    string `json:"code"`
@@ -81,7 +90,7 @@ func (s *Server) registerRoutes() {
 				}
 			}
 
-			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, storageClient)
+			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, s.cfg.OnlyOfficeJWTSecret, storageClient)
 			ingestionSvc := ingestion.NewService(queries, storageClient, converter, llmClient)
 			uploadSvc := upload.NewService(queries, storageClient)
 			uploadHandler := upload.NewHandler(uploadSvc, ingestionSvc, storageClient)
@@ -95,11 +104,15 @@ func (s *Server) registerRoutes() {
 
 			linkSvc := link.NewService(queries)
 			analyticsSvc := analytics.NewService(queries)
-			linkHandler := link.NewHandler(linkSvc, analyticsSvc)
+			notificationSvc := notification.NewService(queries, s.cfg)
+			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
+			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc)
 			analyticsHandler := analytics.NewHandler(analyticsSvc)
 
-			dealroomSvc := dealroom.NewService(queries)
+			dealroomSvc := dealroom.NewService(queries, s.dbPool)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
+
+			suggestionHandler := suggestions.NewHandler(suggestionSvc)
 
 			ws := api.Group("/workspaces/:workspaceSlug")
 			ws.Use(middleware.Auth())
@@ -110,13 +123,10 @@ func (s *Server) registerRoutes() {
 			linkHandler.RegisterWorkspaceRoutes(ws)
 			analyticsHandler.RegisterWorkspaceRoutes(ws)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
-
-			suggestionSvc := suggestions.NewService(queries)
-			suggestionHandler := suggestions.NewHandler(suggestionSvc)
 			suggestionHandler.RegisterRoutes(ws)
 
-			notificationSvc := notification.NewService(queries, s.cfg)
 			notification.NewWorker(notificationSvc, 30*time.Second).Start(context.Background())
+			domain.NewRenewalWorker(domainSvc, 1*time.Hour, 7*24*time.Hour).Start(context.Background())
 
 			integrationSvc := integration.NewService(queries, s.cfg)
 			integrationHandler := integration.NewHandler(integrationSvc)

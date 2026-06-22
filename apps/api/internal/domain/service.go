@@ -51,11 +51,15 @@ type Domain struct {
 	UpdatedAt    string    `json:"updated_at"`
 }
 
+// CNAMELookup resolves the canonical name for a domain.
+type CNAMELookup func(ctx context.Context, domain string) (string, error)
+
 // Service manages tenant domains and SSL lifecycle.
 type Service struct {
-	queries    *db.Queries
-	provider   CertificateProvider
-	cnameTarget string
+	queries       *db.Queries
+	provider      CertificateProvider
+	cnameTarget   string
+	cnameLookup   CNAMELookup
 }
 
 // NewService creates a domain service with the given certificate provider.
@@ -63,7 +67,12 @@ func NewService(q *db.Queries, provider CertificateProvider, cnameTarget string)
 	if provider == nil {
 		provider = NoopProvider{}
 	}
-	return &Service{queries: q, provider: provider, cnameTarget: cnameTarget}
+	return &Service{
+		queries:     q,
+		provider:    provider,
+		cnameTarget: cnameTarget,
+		cnameLookup: net.DefaultResolver.LookupCNAME,
+	}
 }
 
 // Register allocates a new domain for a tenant.
@@ -171,6 +180,43 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]Domain, error) {
 	return out, nil
 }
 
+// RenewExpiringCertificates re-issues certificates for domains that expire before
+// the given threshold. It returns the number of successfully renewed domains.
+func (s *Service) RenewExpiringCertificates(ctx context.Context, before time.Time) (int, error) {
+	rows, err := s.queries.ListTenantDomainsExpiringBefore(ctx, pgtype.Timestamptz{Time: before, Valid: true})
+	if err != nil {
+		return 0, err
+	}
+
+	renewed := 0
+	for _, r := range rows {
+		expiresAt, err := s.provider.Issue(ctx, r.Domain)
+		if err != nil {
+			_ = s.queries.UpdateTenantDomainSSL(ctx, db.UpdateTenantDomainSSLParams{
+				SslStatus:    SSLError,
+				SslExpiresAt: pgtype.Timestamptz{},
+				VerifiedAt:   pgtype.Timestamptz{},
+				ID:           r.ID,
+				TenantID:     r.TenantID,
+			})
+			continue
+		}
+
+		now := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		exp := pgtype.Timestamptz{Time: expiresAt, Valid: true}
+		if err := s.queries.UpdateTenantDomainSSL(ctx, db.UpdateTenantDomainSSLParams{
+			SslStatus:    SSLIssued,
+			SslExpiresAt: exp,
+			VerifiedAt:   now,
+			ID:           r.ID,
+			TenantID:     r.TenantID,
+		}); err == nil {
+			renewed++
+		}
+	}
+	return renewed, nil
+}
+
 // Delete removes a domain.
 func (s *Service) Delete(ctx context.Context, tenantID, domainID string) error {
 	tenantUUID, err := pgUUID(tenantID)
@@ -215,7 +261,7 @@ func (s *Service) verifyCNAME(ctx context.Context, domain string) error {
 	if s.cnameTarget == "" {
 		return nil
 	}
-	cname, err := net.DefaultResolver.LookupCNAME(ctx, domain)
+	cname, err := s.cnameLookup(ctx, domain)
 	if err != nil {
 		return err
 	}

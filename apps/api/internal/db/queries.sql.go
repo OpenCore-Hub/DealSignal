@@ -124,16 +124,17 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
 SELECT COUNT(*) AS count
 FROM suggestions
-WHERE link_id = $1 AND type = $2 AND dismissed = false AND created_at > now() - interval '24 hours'
+WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND dismissed = false AND created_at > now() - interval '24 hours'
 `
 
 type CountRecentSuggestionsByLinkAndTypeParams struct {
-	LinkID pgtype.UUID
-	Type   string
+	LinkID      pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Type        string
 }
 
 func (q *Queries) CountRecentSuggestionsByLinkAndType(ctx context.Context, arg CountRecentSuggestionsByLinkAndTypeParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRecentSuggestionsByLinkAndType, arg.LinkID, arg.Type)
+	row := q.db.QueryRow(ctx, countRecentSuggestionsByLinkAndType, arg.LinkID, arg.WorkspaceID, arg.Type)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -245,7 +246,7 @@ func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistan
 const createAssistantSession = `-- name: CreateAssistantSession :one
 INSERT INTO assistant_sessions (workspace_id, user_id, title)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, title, created_at, updated_at
+RETURNING id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at
 `
 
 type CreateAssistantSessionParams struct {
@@ -261,6 +262,8 @@ func (q *Queries) CreateAssistantSession(ctx context.Context, arg CreateAssistan
 		&i.ID,
 		&i.WorkspaceID,
 		&i.UserID,
+		&i.LinkID,
+		&i.DocumentID,
 		&i.Title,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -458,6 +461,39 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 	return i, err
 }
 
+const createInvitation = `-- name: CreateInvitation :one
+INSERT INTO workspace_invitations (workspace_id, email, role, expires_at)
+VALUES ($1, $2, $3, $4)
+RETURNING token, workspace_id, email, role, expires_at, used_at, created_at
+`
+
+type CreateInvitationParams struct {
+	WorkspaceID pgtype.UUID
+	Email       string
+	Role        string
+	ExpiresAt   pgtype.Timestamptz
+}
+
+func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationParams) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, createInvitation,
+		arg.WorkspaceID,
+		arg.Email,
+		arg.Role,
+		arg.ExpiresAt,
+	)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.Token,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createLink = `-- name: CreateLink :one
 INSERT INTO links (
     tenant_id, workspace_id, document_id, public_token, name, permission_type,
@@ -533,7 +569,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 const createNDAAgreement = `-- name: CreateNDAAgreement :exec
 INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (room_id, email) DO UPDATE SET agreed_at = now(), ip = EXCLUDED.ip, user_agent = EXCLUDED.user_agent
+ON CONFLICT (room_id, email) DO NOTHING
 `
 
 type CreateNDAAgreementParams struct {
@@ -891,12 +927,30 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 	return i, err
 }
 
+const deleteChunksByDocument = `-- name: DeleteChunksByDocument :exec
+DELETE FROM chunks WHERE page_id IN (SELECT id FROM pages WHERE document_id = $1)
+`
+
+func (q *Queries) DeleteChunksByDocument(ctx context.Context, documentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteChunksByDocument, documentID)
+	return err
+}
+
 const deleteOAuthState = `-- name: DeleteOAuthState :exec
 DELETE FROM oauth_states WHERE state = $1
 `
 
 func (q *Queries) DeleteOAuthState(ctx context.Context, state string) error {
 	_, err := q.db.Exec(ctx, deleteOAuthState, state)
+	return err
+}
+
+const deletePagesByDocument = `-- name: DeletePagesByDocument :exec
+DELETE FROM pages WHERE document_id = $1
+`
+
+func (q *Queries) DeletePagesByDocument(ctx context.Context, documentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePagesByDocument, documentID)
 	return err
 }
 
@@ -963,7 +1017,7 @@ func (q *Queries) GetAccessRequestByID(ctx context.Context, arg GetAccessRequest
 }
 
 const getAssistantSession = `-- name: GetAssistantSession :one
-SELECT id, workspace_id, user_id, title, created_at, updated_at
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at
 FROM assistant_sessions
 WHERE id = $1 AND workspace_id = $2 AND user_id = $3
 LIMIT 1
@@ -982,6 +1036,8 @@ func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessi
 		&i.ID,
 		&i.WorkspaceID,
 		&i.UserID,
+		&i.LinkID,
+		&i.DocumentID,
 		&i.Title,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1088,6 +1144,39 @@ func (q *Queries) GetDocumentByID(ctx context.Context, arg GetDocumentByIDParams
 	return i, err
 }
 
+const getDocumentByIDAndTenant = `-- name: GetDocumentByIDAndTenant :one
+SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL
+LIMIT 1
+`
+
+type GetDocumentByIDAndTenantParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	TenantID    pgtype.UUID
+}
+
+func (q *Queries) GetDocumentByIDAndTenant(ctx context.Context, arg GetDocumentByIDAndTenantParams) (Document, error) {
+	row := q.db.QueryRow(ctx, getDocumentByIDAndTenant, arg.ID, arg.WorkspaceID, arg.TenantID)
+	var i Document
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getFolderPermission = `-- name: GetFolderPermission :one
 SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
 FROM room_member_folder_permissions
@@ -1138,6 +1227,27 @@ func (q *Queries) GetIngestionJobByDocument(ctx context.Context, documentID pgty
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getInvitationByToken = `-- name: GetInvitationByToken :one
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE token = $1 LIMIT 1
+`
+
+func (q *Queries) GetInvitationByToken(ctx context.Context, token pgtype.UUID) (WorkspaceInvitation, error) {
+	row := q.db.QueryRow(ctx, getInvitationByToken, token)
+	var i WorkspaceInvitation
+	err := row.Scan(
+		&i.Token,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Role,
+		&i.ExpiresAt,
+		&i.UsedAt,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1519,6 +1629,31 @@ func (q *Queries) GetWorkspaceByID(ctx context.Context, id pgtype.UUID) (Workspa
 	return i, err
 }
 
+const getWorkspaceByIDAndTenant = `-- name: GetWorkspaceByIDAndTenant :one
+SELECT id, tenant_id, name, slug, brand_color, created_at
+FROM workspaces
+WHERE id = $1 AND tenant_id = $2 LIMIT 1
+`
+
+type GetWorkspaceByIDAndTenantParams struct {
+	ID       pgtype.UUID
+	TenantID pgtype.UUID
+}
+
+func (q *Queries) GetWorkspaceByIDAndTenant(ctx context.Context, arg GetWorkspaceByIDAndTenantParams) (Workspace, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceByIDAndTenant, arg.ID, arg.TenantID)
+	var i Workspace
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Slug,
+		&i.BrandColor,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
 SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at
 FROM workspaces w
@@ -1821,7 +1956,7 @@ SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
 FROM links
-WHERE workspace_id = $1 AND deleted_at IS NULL
+WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC
 `
 
@@ -2104,6 +2239,44 @@ func (q *Queries) ListTenantDomainsByTenant(ctx context.Context, tenantID pgtype
 	return items, nil
 }
 
+const listTenantDomainsExpiringBefore = `-- name: ListTenantDomainsExpiringBefore :many
+SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+FROM tenant_domains
+WHERE ssl_status = 'issued' AND ssl_expires_at < $1
+ORDER BY ssl_expires_at ASC
+`
+
+func (q *Queries) ListTenantDomainsExpiringBefore(ctx context.Context, sslExpiresAt pgtype.Timestamptz) ([]TenantDomain, error) {
+	rows, err := q.db.Query(ctx, listTenantDomainsExpiringBefore, sslExpiresAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TenantDomain
+	for rows.Next() {
+		var i TenantDomain
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Domain,
+			&i.DomainType,
+			&i.IsPrimary,
+			&i.SslStatus,
+			&i.SslExpiresAt,
+			&i.VerifiedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceMembers = `-- name: ListWorkspaceMembers :many
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
@@ -2233,9 +2406,23 @@ func (q *Queries) ListWorkspacesByUserAndTenant(ctx context.Context, arg ListWor
 	return items, nil
 }
 
+const markInvitationUsed = `-- name: MarkInvitationUsed :exec
+UPDATE workspace_invitations
+SET used_at = now()
+WHERE token = $1
+`
+
+func (q *Queries) MarkInvitationUsed(ctx context.Context, token pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markInvitationUsed, token)
+	return err
+}
+
 const markNotificationFailed = `-- name: MarkNotificationFailed :exec
 UPDATE notifications
-SET status = 'failed', attempts = attempts + 1, last_error = $2, updated_at = now()
+SET attempts = attempts + 1,
+    last_error = $2,
+    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
+    updated_at = now()
 WHERE id = $1
 `
 
@@ -2258,6 +2445,48 @@ WHERE id = $1
 func (q *Queries) MarkNotificationSent(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markNotificationSent, id)
 	return err
+}
+
+const recordLinkOpened = `-- name: RecordLinkOpened :execrows
+WITH inc AS (
+    UPDATE links
+    SET access_count = access_count + 1, updated_at = now()
+    WHERE links.id = $1
+      AND links.status = 'active'
+      AND (links.max_access_count IS NULL OR links.access_count < links.max_access_count)
+    RETURNING links.id
+)
+INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
+SELECT $2, $3, $4, $5, $6, 'link_opened', $7, $8
+WHERE EXISTS (SELECT 1 FROM inc)
+`
+
+type RecordLinkOpenedParams struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    pgtype.Text
+	VisitorEmail pgtype.Text
+	Ip           *netip.Addr
+	UserAgent    pgtype.Text
+}
+
+func (q *Queries) RecordLinkOpened(ctx context.Context, arg RecordLinkOpenedParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordLinkOpened,
+		arg.ID,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.VisitorEmail,
+		arg.Ip,
+		arg.UserAgent,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const searchChunksByText = `-- name: SearchChunksByText :many

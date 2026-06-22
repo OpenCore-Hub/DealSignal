@@ -3,6 +3,7 @@ package analytics
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -10,32 +11,49 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+// ErrLinkMaxAccessReached is returned when the link's access limit has been exhausted.
+var ErrLinkMaxAccessReached = errors.New("link max access reached")
+
+// Querier isolates the database operations required by analytics.
+type Querier interface {
+	RecordLinkOpened(ctx context.Context, arg db.RecordLinkOpenedParams) (int64, error)
+	CreateAccessLog(ctx context.Context, arg db.CreateAccessLogParams) error
+	CreatePageView(ctx context.Context, arg db.CreatePageViewParams) error
+	GetLinkByIDAndWorkspace(ctx context.Context, arg db.GetLinkByIDAndWorkspaceParams) (db.Link, error)
+	GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkAccessMetricsRow, error)
+	GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkPageViewMetricsRow, error)
+	GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (int64, error)
+}
+
 // Service records events and computes heat scores.
 type Service struct {
-	queries *db.Queries
+	queries Querier
 }
 
 // NewService creates an analytics service.
-func NewService(q *db.Queries) *Service {
+func NewService(q Querier) *Service {
 	return &Service{queries: q}
 }
 
-// RecordLinkOpened records a link-open event and increments the access counter.
+// RecordLinkOpened atomically increments the link access counter and records the event.
 func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID, email, ip, ua string) error {
-	err := s.queries.IncrementLinkAccessCount(ctx, link.ID)
-	if err != nil {
-		return fmt.Errorf("increment access count: %w", err)
-	}
-	return s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
+	rows, err := s.queries.RecordLinkOpened(ctx, db.RecordLinkOpenedParams{
+		ID:           link.ID,
 		TenantID:     link.TenantID,
 		WorkspaceID:  link.WorkspaceID,
 		LinkID:       link.ID,
 		VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		VisitorEmail: pgtype.Text{String: email, Valid: email != ""},
-		EventType:    "link_opened",
 		Ip:           parseIP(ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
+	if err != nil {
+		return fmt.Errorf("record link opened: %w", err)
+	}
+	if rows == 0 {
+		return ErrLinkMaxAccessReached
+	}
+	return nil
 }
 
 // RecordPageView records a page-view event.

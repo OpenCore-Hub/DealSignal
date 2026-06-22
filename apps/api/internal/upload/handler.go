@@ -3,6 +3,7 @@ package upload
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -56,7 +57,7 @@ func (h *Handler) Create(c *gin.Context) {
 		switch err {
 		case ErrFileTooLarge:
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": err.Error()})
-		case ErrInvalidFileType:
+		case ErrInvalidFileType, ErrInvalidFileContent:
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
@@ -67,13 +68,19 @@ func (h *Handler) Create(c *gin.Context) {
 	// Trigger ingestion asynchronously; status is queryable via /status.
 	go func() {
 		ctx := context.Background()
-		_ = h.ingestionService.ProcessDocument(ctx, db.Document{
-			ID:         pgUUID(doc.ID),
-			TenantID:   pgUUID(tenantID),
+		if err := h.ingestionService.ProcessDocument(ctx, db.Document{
+			ID:          pgUUID(doc.ID),
+			TenantID:    pgUUID(tenantID),
 			WorkspaceID: pgUUID(workspaceID),
-			SourceType: doc.SourceType,
-			StorageKey: h.objectKey(doc.ID, tenantID, workspaceID, fileHeader.Filename),
-		})
+			SourceType:  doc.SourceType,
+			StorageKey:  h.objectKey(doc.ID, tenantID, workspaceID, fileHeader.Filename),
+		}); err != nil {
+			fmt.Printf(`{"time":"%s","level":"error","document_id":"%s","error":"%s"}`+"\n",
+				time.Now().UTC().Format(time.RFC3339),
+				doc.ID,
+				err.Error(),
+			)
+		}
 	}()
 
 	c.JSON(http.StatusCreated, doc)
@@ -169,14 +176,16 @@ func (h *Handler) SignedURL(c *gin.Context) {
 
 func (h *Handler) getDocumentAndJob(c *gin.Context) (db.Document, db.IngestionJob, error) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	tenantID := middleware.TenantIDFrom(c)
 	docID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		return db.Document{}, db.IngestionJob{}, errInvalidDocumentID
 	}
 
-	doc, err := h.uploadService.queries.GetDocumentByID(c.Request.Context(), db.GetDocumentByIDParams{
+	doc, err := h.uploadService.queries.GetDocumentByIDAndTenant(c.Request.Context(), db.GetDocumentByIDAndTenantParams{
 		ID:          pgtype.UUID{Bytes: docID, Valid: true},
 		WorkspaceID: pgUUID(workspaceID),
+		TenantID:    pgUUID(tenantID),
 	})
 	if err != nil {
 		return db.Document{}, db.IngestionJob{}, err

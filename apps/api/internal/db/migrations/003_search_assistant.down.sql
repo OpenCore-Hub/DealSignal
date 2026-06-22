@@ -1,6 +1,8 @@
 DROP INDEX IF EXISTS idx_assistant_messages_session_id;
 DROP TABLE IF EXISTS assistant_messages;
 
+DROP INDEX IF EXISTS idx_assistant_sessions_document;
+DROP INDEX IF EXISTS idx_assistant_sessions_link;
 DROP INDEX IF EXISTS idx_assistant_sessions_workspace_user;
 DROP TABLE IF EXISTS assistant_sessions;
 

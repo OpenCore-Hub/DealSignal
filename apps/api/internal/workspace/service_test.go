@@ -81,7 +81,7 @@ func TestGetWorkspaceNotMember(t *testing.T) {
 	fake := &fakeDB{t: t}
 	svc := NewService(db.New(fake))
 
-	_, err := svc.Get(context.Background(), uuid.NewString(), uuid.NewString())
+	_, err := svc.Get(context.Background(), uuid.NewString(), uuid.NewString(), "")
 	if !errors.Is(err, ErrNotMember) {
 		t.Fatalf("expected ErrNotMember, got %v", err)
 	}
@@ -92,7 +92,7 @@ func TestAddMemberInvalidRole(t *testing.T) {
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
 	svc := NewService(db.New(fake))
 
-	_, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), uuid.NewString(), "superuser")
+	_, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), "superuser")
 	if err == nil {
 		t.Fatal("expected error for invalid role")
 	}
@@ -106,7 +106,7 @@ func TestAddMemberSuccess(t *testing.T) {
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
 	svc := NewService(db.New(fake))
 
-	member, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), uuid.NewString(), RoleAdmin)
+	member, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), RoleAdmin)
 	if err != nil {
 		t.Fatalf("add member: %v", err)
 	}
@@ -122,9 +122,10 @@ type fakeDB struct {
 	actorUserID string
 	listRows    []db.ListWorkspacesByUserRow
 
-	tenant     db.Tenant
-	workspace  db.Workspace
-	member     db.WorkspaceMember
+	tenant      db.Tenant
+	workspace   db.Workspace
+	member      db.WorkspaceMember
+	invitation  db.WorkspaceInvitation
 }
 
 func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
@@ -176,7 +177,24 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		}
 		return fakeRow{values: []interface{}{f.member.WorkspaceID, f.member.UserID, f.member.Role, f.member.JoinedAt}}
 
-	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where w.id"):
+	case strings.Contains(sqlLower, "insert into workspace_invitations"):
+		f.invitation = db.WorkspaceInvitation{
+			Token:       newPGUUID(),
+			WorkspaceID: argUUID(args, 0),
+			Email:       argString(args, 1),
+			Role:        argString(args, 2),
+			ExpiresAt:   argTimestamptz(args, 3),
+			CreatedAt:   now,
+		}
+		return fakeRow{values: []interface{}{f.invitation.Token, f.invitation.WorkspaceID, f.invitation.Email, f.invitation.Role, f.invitation.ExpiresAt, f.invitation.UsedAt, f.invitation.CreatedAt}}
+
+	case strings.Contains(sqlLower, "from workspace_invitations"):
+		return fakeRow{values: []interface{}{f.invitation.Token, f.invitation.WorkspaceID, f.invitation.Email, f.invitation.Role, f.invitation.ExpiresAt, f.invitation.UsedAt, f.invitation.CreatedAt}}
+
+	case strings.Contains(sqlLower, "from workspaces") && (strings.Contains(sqlLower, "where w.id") || strings.Contains(sqlLower, "where id = $1 and tenant_id")):
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt}}
+
+	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where slug"):
 		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt}}
 
 	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "where workspace_id"):
@@ -304,4 +322,115 @@ func pgUUIDFromString(s string) pgtype.UUID {
 
 func bytesEqual(a, b [16]byte) bool {
 	return a == b
+}
+
+func TestAddMemberRequiresManager(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleMember, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	_, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), RoleAdmin)
+	if !errors.Is(err, ErrNotManager) {
+		t.Fatalf("expected ErrNotManager, got %v", err)
+	}
+}
+
+func TestGuestRoleValid(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	member, err := svc.AddMember(context.Background(), actorID, uuid.NewString(), "", uuid.NewString(), RoleGuest)
+	if err != nil {
+		t.Fatalf("add guest member: %v", err)
+	}
+	if member.Role != RoleGuest {
+		t.Fatalf("expected role guest, got %s", member.Role)
+	}
+}
+
+func TestCreateInvitationRequiresManager(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleMember, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	_, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
+	if !errors.Is(err, ErrNotManager) {
+		t.Fatalf("expected ErrNotManager, got %v", err)
+	}
+}
+
+func TestCreateInvitationInvalidRole(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	_, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", "superuser", 7)
+	if !errors.Is(err, ErrInvalidRole) {
+		t.Fatalf("expected ErrInvalidRole, got %v", err)
+	}
+}
+
+func argTimestamptz(args []interface{}, i int) pgtype.Timestamptz {
+	if i >= len(args) {
+		return pgtype.Timestamptz{}
+	}
+	if t, ok := args[i].(pgtype.Timestamptz); ok {
+		return t
+	}
+	return pgtype.Timestamptz{}
+}
+
+func TestAcceptInvitationSuccess(t *testing.T) {
+	actorID := uuid.NewString()
+	userID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+
+	member, err := svc.AcceptInvitation(context.Background(), inv.Token, userID)
+	if err != nil {
+		t.Fatalf("accept invitation: %v", err)
+	}
+	if member.Role != RoleGuest {
+		t.Fatalf("expected role guest, got %s", member.Role)
+	}
+}
+
+func TestAcceptInvitationExpired(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	fake.invitation.ExpiresAt = pgtype.Timestamptz{Time: time.Now().UTC().Add(-24 * time.Hour), Valid: true}
+
+	_, err = svc.AcceptInvitation(context.Background(), inv.Token, uuid.NewString())
+	if !errors.Is(err, ErrInvitationExpired) {
+		t.Fatalf("expected ErrInvitationExpired, got %v", err)
+	}
+}
+
+func TestAcceptInvitationAlreadyUsed(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
+	svc := NewService(db.New(fake))
+
+	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
+	if err != nil {
+		t.Fatalf("create invitation: %v", err)
+	}
+	fake.invitation.UsedAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+
+	_, err = svc.AcceptInvitation(context.Background(), inv.Token, uuid.NewString())
+	if !errors.Is(err, ErrInvitationUsed) {
+		t.Fatalf("expected ErrInvitationUsed, got %v", err)
+	}
 }

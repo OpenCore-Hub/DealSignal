@@ -32,7 +32,7 @@ func (h *Handler) List(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": items})
+	c.JSON(http.StatusOK, gin.H{"link_id": c.Param("linkId"), "suggestions": items})
 }
 
 func (h *Handler) Generate(c *gin.Context) {
@@ -46,7 +46,7 @@ func (h *Handler) Generate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"data": items})
+	c.JSON(http.StatusCreated, gin.H{"link_id": c.Param("linkId"), "suggestions": items})
 }
 
 func (h *Handler) Dismiss(c *gin.Context) {

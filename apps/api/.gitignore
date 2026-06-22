@@ -2,3 +2,6 @@
 /tmp/
 *.env
 !.env.example
+coverage.out
+coverage.html
+*.coverage

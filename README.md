@@ -50,6 +50,23 @@ pnpm lint
 - [设计令牌 v2.1.1](./docs/DESIGN-TOKENS-v2.1.1.md)
 - [API 规范 v2.1.0](./docs/API-SPEC-v2.1.0.md)
 
+## 安全扫描
+
+安全策略与风险接受项见 [`docs/SECURITY.md`](./docs/SECURITY.md)。
+
+常用命令：
+
+```bash
+# Go 漏洞扫描
+cd apps/api && make security
+
+# Trivy 文件系统扫描
+cd apps/api && make trivy-fs
+
+# 前端依赖审计
+cd apps/web && pnpm security
+```
+
 ## 贡献指南
 
 1. 遵循 `apps/web/src/index.css` 中的语义化 Token。

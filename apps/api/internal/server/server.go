@@ -8,15 +8,17 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-// DBPool is the minimal interface required by sqlc generated queries.
+// DBPool is the minimal interface required by sqlc generated queries and transactions.
 type DBPool interface {
 	Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error)
 	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
+	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
 // Server wraps the gin engine and application config.
@@ -43,6 +45,7 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(requestIDMiddleware())
 	r.Use(requestLogger())
 	r.Use(corsMiddleware())
 
@@ -62,6 +65,18 @@ func (s *Server) Run() error {
 	return s.engine.Run(addr)
 }
 
+func requestIDMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		requestID := c.GetHeader("X-Request-ID")
+		if requestID == "" {
+			requestID = uuid.NewString()
+		}
+		c.Set("requestID", requestID)
+		c.Header("X-Request-ID", requestID)
+		c.Next()
+	}
+}
+
 func requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
@@ -73,12 +88,14 @@ func requestLogger() gin.HandlerFunc {
 		clientIP := c.ClientIP()
 		method := c.Request.Method
 		statusCode := c.Writer.Status()
+		requestID := c.GetString("requestID")
 		if raw != "" {
 			path = path + "?" + raw
 		}
 
-		fmt.Printf(`{"time":"%s","level":"info","client_ip":"%s","method":"%s","path":"%s","status":%d,"latency_ms":%d}%s`,
+		fmt.Printf(`{"time":"%s","level":"info","request_id":"%s","client_ip":"%s","method":"%s","path":"%s","status":%d,"latency_ms":%d}%s`,
 			start.Format(time.RFC3339Nano),
+			requestID,
 			clientIP,
 			method,
 			path,

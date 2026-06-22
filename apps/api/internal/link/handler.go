@@ -2,6 +2,7 @@
 package link
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -16,13 +18,14 @@ import (
 
 // Handler exposes link endpoints.
 type Handler struct {
-	service   *Service
-	analytics *analytics.Service
+	service     *Service
+	analytics   *analytics.Service
+	suggestions *suggestions.Service
 }
 
 // NewHandler creates a link handler.
-func NewHandler(s *Service, a *analytics.Service) *Handler {
-	return &Handler{service: s, analytics: a}
+func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service) *Handler {
+	return &Handler{service: s, analytics: a, suggestions: sg}
 }
 
 // RegisterWorkspaceRoutes mounts authenticated workspace routes.
@@ -92,7 +95,17 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
+	h.triggerSuggestions(c.Request.Context(), res.Link)
 	c.Status(http.StatusNoContent)
+}
+
+func (h *Handler) triggerSuggestions(ctx context.Context, link db.Link) {
+	if h.suggestions == nil {
+		return
+	}
+	workspaceID := uuid.UUID(link.WorkspaceID.Bytes).String()
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	_, _ = h.suggestions.Generate(ctx, workspaceID, linkID)
 }
 
 // CreateRequest is the JSON body for creating a link.
@@ -175,10 +188,11 @@ func (h *Handler) Access(c *gin.Context) {
 	password := c.Query("password")
 
 	result, err := h.service.Access(c.Request.Context(), token, AccessRequest{
-		Email:    email,
-		Password: password,
-		IP:       c.ClientIP(),
-		UA:       c.Request.UserAgent(),
+		Email:     email,
+		Password:  password,
+		NDAAgreed: c.Query("nda_agreed") == "true",
+		IP:        c.ClientIP(),
+		UA:        c.Request.UserAgent(),
 	})
 	if err != nil {
 		mapAccessError(c, err)
@@ -189,6 +203,7 @@ func (h *Handler) Access(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
+	h.triggerSuggestions(c.Request.Context(), result.Link)
 
 	link := result.Link
 	doc, err := h.service.queries.GetDocumentByID(c.Request.Context(), db.GetDocumentByIDParams{
@@ -216,8 +231,9 @@ func (h *Handler) Access(c *gin.Context) {
 			"status":     doc.Status,
 		},
 		"visitor_id":        result.VisitorID,
-		"requires_email":    false,
-		"requires_password": false,
+		"requires_email":    result.Link.PermissionType == "email_required" || result.Link.PermissionType == "whitelist" || result.Link.PermissionType == "nda",
+		"requires_password": result.Link.PermissionType == "password",
+		"requires_nda":      result.Link.PermissionType == "nda",
 	})
 }
 
@@ -239,6 +255,8 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": err.Error()})
 	case errors.Is(err, ErrInvalidPassword):
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_password", "message": err.Error()})
+	case errors.Is(err, ErrRequiresNDA):
+		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 	}

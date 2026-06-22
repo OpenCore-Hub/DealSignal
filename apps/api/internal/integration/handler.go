@@ -64,12 +64,9 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), Settings{
-		EmailEnabled:        req.EmailEnabled,
-		SlackWebhookURL:     req.SlackWebhookURL,
-		SlackConnected:      req.SlackConnected,
-		HubSpotConnected:    req.HubSpotConnected,
-		SalesforceConnected: req.SalesforceConnected,
+	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), SaveSettingsRequest{
+		EmailEnabled:    req.EmailEnabled,
+		SlackWebhookURL: req.SlackWebhookURL,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
@@ -120,6 +117,10 @@ func (h *Handler) HubSpotSync(c *gin.Context) {
 }
 
 func (h *Handler) ListSyncLogs(c *gin.Context) {
-	// Stub: would list sync logs for the workspace.
-	c.JSON(http.StatusOK, gin.H{"data": []interface{}{}})
+	logs, err := h.service.ListSyncLogs(c.Request.Context(), workspaceID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": logs})
 }
