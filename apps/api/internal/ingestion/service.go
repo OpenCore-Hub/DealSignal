@@ -11,18 +11,25 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
+
+// Embedder generates vector embeddings for text.
+type Embedder interface {
+	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+}
 
 // Service orchestrates document ingestion.
 type Service struct {
-	queries    *db.Queries
-	storage    *storage.Client
-	converter  *Converter
+	queries   *db.Queries
+	storage   *storage.Client
+	converter *Converter
+	embedder  Embedder
 }
 
 // NewService creates an ingestion service.
-func NewService(q *db.Queries, s *storage.Client, c *Converter) *Service {
-	return &Service{queries: q, storage: s, converter: c}
+func NewService(q *db.Queries, s *storage.Client, c *Converter, e Embedder) *Service {
+	return &Service{queries: q, storage: s, converter: c, embedder: e}
 }
 
 // ProcessDocument parses a document and populates pages and chunks.
@@ -91,14 +98,29 @@ func (s *Service) run(ctx context.Context, doc db.Document) error {
 			return fmt.Errorf("create page record: %w", err)
 		}
 
-		chunks := splitText(p.Text, p.Number)
-		for _, ch := range chunks {
-			err := s.queries.CreateChunk(ctx, db.CreateChunkParams{
+		chunks := splitText(p.Text, p.Number, p.Width, p.Height)
+		texts := make([]string, len(chunks))
+		for i, ch := range chunks {
+			texts[i] = ch.Text
+		}
+
+		var embeddings [][]float32
+		if len(texts) > 0 {
+			var err error
+			embeddings, err = s.embedder.EmbedBatch(ctx, texts)
+			if err != nil {
+				return fmt.Errorf("embed chunks: %w", err)
+			}
+		}
+
+		for i, ch := range chunks {
+			err := s.queries.CreateChunkWithEmbedding(ctx, db.CreateChunkWithEmbeddingParams{
 				TenantID:    doc.TenantID,
 				WorkspaceID: doc.WorkspaceID,
 				PageID:      page.ID,
 				Text:        ch.Text,
 				Bbox:        ch.Bbox,
+				Embedding:   pgvector.NewVector(embeddings[i]),
 			})
 			if err != nil {
 				return fmt.Errorf("create chunk: %w", err)

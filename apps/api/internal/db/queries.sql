@@ -114,3 +114,70 @@ LIMIT 1;
 -- name: CreateChunk :exec
 INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox)
 VALUES ($1, $2, $3, $4, $5);
+
+-- name: CreateChunkWithEmbedding :exec
+INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox, embedding, search_vector)
+VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('english', $4));
+
+-- name: UpdateChunkSearchVector :exec
+UPDATE chunks
+SET search_vector = to_tsvector('english', text)
+WHERE id = $1;
+
+-- name: SearchChunksByVector :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    (c.embedding <=> sqlc.arg(embedding)::vector)::float8 AS distance
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.embedding IS NOT NULL
+ORDER BY c.embedding <=> sqlc.arg(embedding)::vector
+LIMIT $2;
+
+-- name: SearchChunksByText :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    ts_rank(c.search_vector, plainto_tsquery('english', sqlc.arg(query))) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.search_vector @@ plainto_tsquery('english', sqlc.arg(query))
+ORDER BY rank DESC
+LIMIT $2;
+
+-- name: CreateAssistantSession :one
+INSERT INTO assistant_sessions (workspace_id, user_id, title)
+VALUES ($1, $2, $3)
+RETURNING id, workspace_id, user_id, title, created_at, updated_at;
+
+-- name: GetAssistantSession :one
+SELECT id, workspace_id, user_id, title, created_at, updated_at
+FROM assistant_sessions
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3
+LIMIT 1;
+
+-- name: UpdateAssistantSessionTitle :exec
+UPDATE assistant_sessions
+SET title = $1, updated_at = now()
+WHERE id = $2;
+
+-- name: CreateAssistantMessage :one
+INSERT INTO assistant_messages (session_id, role, content, evidence)
+VALUES ($1, $2, $3, $4)
+RETURNING id, session_id, role, content, evidence, created_at;
+
+-- name: ListAssistantMessagesBySession :many
+SELECT id, session_id, role, content, evidence, created_at
+FROM assistant_messages
+WHERE session_id = $1
+ORDER BY created_at ASC
+LIMIT $2;

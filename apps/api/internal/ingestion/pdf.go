@@ -28,6 +28,11 @@ type Chunk struct {
 	Bbox []byte
 }
 
+// pageBbox returns a JSON bounding box for the whole page.
+func pageBbox(width, height int) []byte {
+	return []byte(fmt.Sprintf(`{"x":0,"y":0,"w":%d,"h":%d}`, width, height))
+}
+
 // ExtractPages extracts page count, dimensions and text from a PDF file.
 func ExtractPages(ctx context.Context, filePath string) ([]PageInfo, error) {
 	f, r, err := pdf.Open(filePath)
@@ -175,9 +180,10 @@ var letterFont = [26][7]byte{
 }
 
 // splitText breaks page text into rough chunks.
-func splitText(text string, pageNumber int) []Chunk {
+func splitText(text string, pageNumber, pageWidth, pageHeight int) []Chunk {
 	paragraphs := strings.Split(strings.TrimSpace(text), "\n")
 	var chunks []Chunk
+	bbox := pageBbox(pageWidth, pageHeight)
 	for i, para := range paragraphs {
 		para = strings.TrimSpace(para)
 		if para == "" {
@@ -185,7 +191,7 @@ func splitText(text string, pageNumber int) []Chunk {
 		}
 		chunks = append(chunks, Chunk{
 			Text: para,
-			Bbox: nil,
+			Bbox: bbox,
 		})
 		if i > 100 {
 			break
