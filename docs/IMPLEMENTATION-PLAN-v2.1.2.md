@@ -1,7 +1,7 @@
 ---
 id: "IP-2024-002"
 version: "v2.1.2"
-status: "已批准"
+status: "已完成"
 owner: "技术负责人 / 项目经理"
 linked_docs:
   - "docs/PRD-v2.1.0.md"
@@ -40,7 +40,7 @@ linked_docs:
 ## 1. 当前状态
 
 - **前端 v2.1.1** 已完成并合并到 `main`：i18n（en/zh-CN）、Settings Language、Workspace Switcher、Theme Toggle、基础 Viewer/AI/Links/Contacts/DealRooms UI。
-- **后端** 尚未开始，当前所有 API 由 MSW mock 提供。
+- **后端 MVP** 已完成：Go 服务骨架、auth/workspace、upload/ingestion、search/evidence/assistant、links/analytics/rooms、notifications/integrations、security scan 均已实现并通过基本测试。
 - **文档一致性评审** 已识别关键缺口：API 路径/响应格式、字段命名、缺失端点、任务拆分/依赖/估算问题。
 
 本计划在前序评审基础上，对 v2.1.2 工作进行重新拆分与对齐。
