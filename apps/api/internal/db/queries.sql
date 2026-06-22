@@ -254,3 +254,114 @@ WHERE a.link_id = $1
       SELECT 1 FROM page_views p
       WHERE p.link_id = $1 AND p.visitor_id = a.visitor_id
   );
+-- name: CreateDealRoom :one
+INSERT INTO deal_rooms (
+    tenant_id, workspace_id, slug, name, description, template_type, settings,
+    requires_nda, requires_approval, status, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+          requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at;
+
+-- name: GetDealRoomByID :one
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+FROM deal_rooms
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+LIMIT 1;
+
+-- name: GetDealRoomBySlug :one
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+FROM deal_rooms
+WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
+LIMIT 1;
+
+-- name: ListDealRoomsByWorkspace :many
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+FROM deal_rooms
+WHERE workspace_id = $1 AND deleted_at IS NULL
+ORDER BY created_at DESC;
+
+-- name: AddRoomMember :one
+INSERT INTO room_members (tenant_id, workspace_id, room_id, email, user_id, role, nda_status, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at;
+
+-- name: GetRoomMemberByEmail :one
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE room_id = $1 AND email = $2
+LIMIT 1;
+
+-- name: UpdateRoomMemberStatus :exec
+UPDATE room_members
+SET status = $1, updated_at = now()
+WHERE room_id = $2 AND email = $3;
+
+-- name: UpdateRoomMemberNDA :exec
+UPDATE room_members
+SET nda_status = 'signed', nda_signed_at = now(), updated_at = now()
+WHERE room_id = $1 AND email = $2;
+
+-- name: ListRoomMembers :many
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE room_id = $1
+ORDER BY created_at DESC;
+
+-- name: CreateAccessRequest :one
+INSERT INTO room_access_requests (tenant_id, workspace_id, room_id, email, reason, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at;
+
+-- name: GetAccessRequestByID :one
+SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM room_access_requests
+WHERE id = $1 AND room_id = $2
+LIMIT 1;
+
+-- name: UpdateAccessRequestStatus :exec
+UPDATE room_access_requests
+SET status = $1, reviewed_by = $2, reviewed_at = now(), updated_at = now()
+WHERE id = $3;
+
+-- name: ListAccessRequestsByRoom :many
+SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM room_access_requests
+WHERE room_id = $1
+ORDER BY created_at DESC;
+
+-- name: AddDealRoomDocument :one
+INSERT INTO deal_room_documents (tenant_id, workspace_id, room_id, document_id, folder_path, sort_order)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at;
+
+-- name: ListDealRoomDocuments :many
+SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at
+FROM deal_room_documents
+WHERE room_id = $1
+ORDER BY folder_path, sort_order;
+
+-- name: SetFolderPermission :one
+INSERT INTO room_member_folder_permissions (tenant_id, workspace_id, room_id, email, folder_path, permission)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (room_id, email, folder_path) DO UPDATE SET permission = EXCLUDED.permission, updated_at = now()
+RETURNING id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at;
+
+-- name: GetFolderPermission :one
+SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
+FROM room_member_folder_permissions
+WHERE room_id = $1 AND email = $2 AND folder_path = $3
+LIMIT 1;
+
+-- name: CreateNDAAgreement :exec
+INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (room_id, email) DO UPDATE SET agreed_at = now(), ip = EXCLUDED.ip, user_agent = EXCLUDED.user_agent;
+
+-- name: HasNDAAgreement :one
+SELECT EXISTS (
+    SELECT 1 FROM room_nda_agreements
+    WHERE room_id = $1 AND email = $2
+) AS has_agreement;

@@ -7,6 +7,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
@@ -83,6 +84,9 @@ func (s *Server) registerRoutes() {
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc)
 			analyticsHandler := analytics.NewHandler(analyticsSvc)
 
+			dealroomSvc := dealroom.NewService(queries)
+			dealroomHandler := dealroom.NewHandler(dealroomSvc)
+
 			ws := api.Group("/workspaces/:workspaceSlug")
 			ws.Use(middleware.Auth())
 			ws.Use(workspace.AuthMiddleware(workspaceSvc))
@@ -91,9 +95,11 @@ func (s *Server) registerRoutes() {
 			assistantHandler.RegisterRoutes(ws)
 			linkHandler.RegisterWorkspaceRoutes(ws)
 			analyticsHandler.RegisterWorkspaceRoutes(ws)
+			dealroomHandler.RegisterWorkspaceRoutes(ws)
 
 			public := s.engine.Group("/api/v1/public")
 			linkHandler.RegisterPublicRoutes(public)
+			dealroomHandler.RegisterPublicRoutes(public)
 		}
 	}
 

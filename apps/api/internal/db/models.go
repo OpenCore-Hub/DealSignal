@@ -24,14 +24,62 @@ type AccessLog struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type AssistantMessage struct {
+	ID        pgtype.UUID
+	SessionID pgtype.UUID
+	Role      string
+	Content   string
+	Evidence  []byte
+	CreatedAt pgtype.Timestamptz
+}
+
+type AssistantSession struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Title       pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type Chunk struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	PageID       pgtype.UUID
+	Text         string
+	Bbox         []byte
+	Embedding    pgvector.Vector
+	SearchVector interface{}
+}
+
+type DealRoom struct {
+	ID               pgtype.UUID
+	TenantID         pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	Slug             string
+	Name             string
+	Description      pgtype.Text
+	TemplateType     pgtype.Text
+	Settings         []byte
+	RequiresNda      bool
+	RequiresApproval bool
+	Status           string
+	CreatedBy        pgtype.UUID
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+	DeletedAt        pgtype.Timestamptz
+}
+
+type DealRoomDocument struct {
 	ID          pgtype.UUID
 	TenantID    pgtype.UUID
 	WorkspaceID pgtype.UUID
-	PageID      pgtype.UUID
-	Text        string
-	Bbox        []byte
-	Embedding   pgvector.Vector
+	RoomID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	FolderPath  string
+	SortOrder   int32
+	CreatedAt   pgtype.Timestamptz
 }
 
 type Document struct {
@@ -105,6 +153,56 @@ type PageView struct {
 	DurationSeconds int32
 	ScrollDepth     pgtype.Numeric
 	CreatedAt       pgtype.Timestamptz
+}
+
+type RoomAccessRequest struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	Reason      pgtype.Text
+	Status      string
+	ReviewedBy  pgtype.UUID
+	ReviewedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RoomMember struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	UserID      pgtype.UUID
+	Role        string
+	NdaStatus   string
+	NdaSignedAt pgtype.Timestamptz
+	Status      string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RoomMemberFolderPermission struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	FolderPath  string
+	Permission  string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type RoomNdaAgreement struct {
+	ID        pgtype.UUID
+	RoomID    pgtype.UUID
+	Email     string
+	Ip        *netip.Addr
+	UserAgent pgtype.Text
+	AgreedAt  pgtype.Timestamptz
 }
 
 type Tenant struct {

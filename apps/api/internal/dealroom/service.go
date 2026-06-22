@@ -1,0 +1,442 @@
+// Package dealroom implements data-room CRUD, membership, approvals and permissions.
+package dealroom
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"net/mail"
+	"regexp"
+	"strings"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+var (
+	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+
+	ErrRoomNotFound       = errors.New("room not found")
+	ErrInvalidSlug        = errors.New("slug must be lowercase alphanumeric with hyphens")
+	ErrDuplicateSlug      = errors.New("slug already exists")
+	ErrNotRoomAdmin       = errors.New("not a room admin")
+	ErrMemberNotFound     = errors.New("member not found")
+	ErrRequestNotFound    = errors.New("access request not found")
+	ErrNDARequired        = errors.New("nda required")
+	ErrApprovalRequired   = errors.New("access not approved")
+	ErrFolderAccessDenied = errors.New("folder access denied")
+	ErrInvalidEmail       = errors.New("invalid email")
+)
+
+// Service handles data rooms.
+type Service struct {
+	queries *db.Queries
+}
+
+// NewService creates a deal room service.
+func NewService(q *db.Queries) *Service {
+	return &Service{queries: q}
+}
+
+// CreateRoomRequest is the input for creating a room.
+type CreateRoomRequest struct {
+	Slug             string
+	Name             string
+	Description      string
+	TemplateType     string
+	Settings         map[string]interface{}
+	RequiresNDA      bool
+	RequiresApproval bool
+}
+
+// CreateRoom creates a data room in a workspace.
+func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, req CreateRoomRequest) (db.DealRoom, error) {
+	if strings.TrimSpace(req.Name) == "" {
+		return db.DealRoom{}, errors.New("name is required")
+	}
+	if !slugRegex.MatchString(req.Slug) {
+		return db.DealRoom{}, ErrInvalidSlug
+	}
+
+	workspaceUUID := pgUUID(workspaceID)
+	userUUID := pgUUID(userID)
+
+	tenant, err := s.getTenantForWorkspace(ctx, workspaceUUID)
+	if err != nil {
+		return db.DealRoom{}, err
+	}
+
+	settings := []byte("{}")
+	if len(req.Settings) > 0 {
+		settings, _ = json.Marshal(req.Settings)
+	}
+
+	room, err := s.queries.CreateDealRoom(ctx, db.CreateDealRoomParams{
+		TenantID:         tenant,
+		WorkspaceID:      workspaceUUID,
+		Slug:             req.Slug,
+		Name:             req.Name,
+		Description:      pgtype.Text{String: req.Description, Valid: req.Description != ""},
+		TemplateType:     pgtype.Text{String: req.TemplateType, Valid: req.TemplateType != ""},
+		Settings:         settings,
+		RequiresNda:      req.RequiresNDA,
+		RequiresApproval: req.RequiresApproval,
+		Status:           "active",
+		CreatedBy:        userUUID,
+	})
+	if err != nil {
+		if strings.Contains(err.Error(), "unique") {
+			return db.DealRoom{}, ErrDuplicateSlug
+		}
+		return db.DealRoom{}, fmt.Errorf("create room: %w", err)
+	}
+
+	// creator becomes owner
+	_, _ = s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
+		TenantID:    tenant,
+		WorkspaceID: workspaceUUID,
+		RoomID:      room.ID,
+		Email:       "",
+		UserID:      userUUID,
+		Role:        "owner",
+		NdaStatus:   ndaStatusFor(room.RequiresNda),
+		Status:      "active",
+	})
+	return room, nil
+}
+
+// GetRoom returns a room scoped to a workspace.
+func (s *Service) GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error) {
+	id := pgUUID(roomID)
+	room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+		ID:          id,
+		WorkspaceID: pgUUID(workspaceID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.DealRoom{}, ErrRoomNotFound
+		}
+		return db.DealRoom{}, err
+	}
+	return room, nil
+}
+
+// AddMember adds a member to a room. Only room admins/owners can invite.
+func (s *Service) AddMember(ctx context.Context, roomID, inviterUserID, email, role string) (db.RoomMember, error) {
+	if _, err := mail.ParseAddress(email); err != nil {
+		return db.RoomMember{}, ErrInvalidEmail
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+
+	room, err := s.GetRoom(ctx, roomID, "")
+	if err != nil {
+		return db.RoomMember{}, err
+	}
+	if err := s.requireRoomAdmin(ctx, room.ID, inviterUserID); err != nil {
+		return db.RoomMember{}, err
+	}
+
+	existing, _ := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: room.ID,
+		Email:  email,
+	})
+	if existing.ID.Valid {
+		return db.RoomMember{}, errors.New("member already exists")
+	}
+
+	return s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
+		TenantID:    room.TenantID,
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		Email:       email,
+		Role:        role,
+		NdaStatus:   ndaStatusFor(room.RequiresNda),
+		Status:      "active",
+	})
+}
+
+// CreateAccessRequest creates a public access request for a room.
+func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reason string) (db.RoomAccessRequest, error) {
+	if _, err := mail.ParseAddress(email); err != nil {
+		return db.RoomAccessRequest{}, ErrInvalidEmail
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+
+	room, err := s.queries.GetDealRoomBySlug(ctx, roomSlug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.RoomAccessRequest{}, ErrRoomNotFound
+		}
+		return db.RoomAccessRequest{}, err
+	}
+
+	existing, _ := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: room.ID,
+		Email:  email,
+	})
+	if existing.Status == "active" {
+		return db.RoomAccessRequest{}, errors.New("already a member")
+	}
+
+	status := "pending"
+	if !room.RequiresApproval {
+		status = "approved"
+		_, _ = s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
+			TenantID:    room.TenantID,
+			WorkspaceID: room.WorkspaceID,
+			RoomID:      room.ID,
+			Email:       email,
+			Role:        "viewer",
+			NdaStatus:   ndaStatusFor(room.RequiresNda),
+			Status:      memberStatusFor(room.RequiresNda),
+		})
+	}
+
+	return s.queries.CreateAccessRequest(ctx, db.CreateAccessRequestParams{
+		TenantID:    room.TenantID,
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		Email:       email,
+		Reason:      pgtype.Text{String: reason, Valid: reason != ""},
+		Status:      status,
+	})
+}
+
+// ApproveAccessRequest approves a pending request and activates the member.
+func (s *Service) ApproveAccessRequest(ctx context.Context, requestID, roomID, approverUserID string) (db.RoomAccessRequest, error) {
+	room, err := s.GetRoom(ctx, roomID, "")
+	if err != nil {
+		return db.RoomAccessRequest{}, err
+	}
+	if err := s.requireRoomAdmin(ctx, room.ID, approverUserID); err != nil {
+		return db.RoomAccessRequest{}, err
+	}
+
+	reqUUID := pgUUID(requestID)
+	req, err := s.queries.GetAccessRequestByID(ctx, db.GetAccessRequestByIDParams{
+		ID:     reqUUID,
+		RoomID: room.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.RoomAccessRequest{}, ErrRequestNotFound
+		}
+		return db.RoomAccessRequest{}, err
+	}
+	if req.Status != "pending" {
+		return db.RoomAccessRequest{}, errors.New("request is not pending")
+	}
+
+	approverUUID := pgUUID(approverUserID)
+	if err := s.queries.UpdateAccessRequestStatus(ctx, db.UpdateAccessRequestStatusParams{
+		Status:     "approved",
+		ReviewedBy: approverUUID,
+		ID:         req.ID,
+	}); err != nil {
+		return db.RoomAccessRequest{}, err
+	}
+
+	member, _ := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: room.ID,
+		Email:  req.Email,
+	})
+	if member.ID.Valid {
+		_ = s.queries.UpdateRoomMemberStatus(ctx, db.UpdateRoomMemberStatusParams{
+			Status: "active",
+			RoomID: room.ID,
+			Email:  req.Email,
+		})
+	} else {
+		_, _ = s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
+			TenantID:    room.TenantID,
+			WorkspaceID: room.WorkspaceID,
+			RoomID:      room.ID,
+			Email:       req.Email,
+			Role:        "viewer",
+			NdaStatus:   ndaStatusFor(room.RequiresNda),
+			Status:      memberStatusFor(room.RequiresNda),
+		})
+	}
+
+	req.Status = "approved"
+	return req, nil
+}
+
+// PublicAccess checks if a visitor can access a public room.
+func (s *Service) PublicAccess(ctx context.Context, slug, email string) (db.DealRoom, db.RoomMember, error) {
+	room, err := s.queries.GetDealRoomBySlug(ctx, slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.DealRoom{}, db.RoomMember{}, ErrRoomNotFound
+		}
+		return db.DealRoom{}, db.RoomMember{}, err
+	}
+
+	email = strings.ToLower(strings.TrimSpace(email))
+	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: room.ID,
+		Email:  email,
+	})
+	if err != nil || !member.ID.Valid {
+		return db.DealRoom{}, db.RoomMember{}, ErrApprovalRequired
+	}
+	if member.Status != "active" {
+		return db.DealRoom{}, db.RoomMember{}, ErrApprovalRequired
+	}
+	if room.RequiresNda && member.NdaStatus != "signed" {
+		return db.DealRoom{}, db.RoomMember{}, ErrNDARequired
+	}
+	return room, member, nil
+}
+
+// RecordNDA records an NDA agreement and updates member status.
+func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string) error {
+	email = strings.ToLower(strings.TrimSpace(email))
+	room, err := s.queries.GetDealRoomBySlug(ctx, roomSlug)
+	if err != nil {
+		return ErrRoomNotFound
+	}
+	if err := s.queries.CreateNDAAgreement(ctx, db.CreateNDAAgreementParams{
+		RoomID:    room.ID,
+		Email:     email,
+		Ip:        parseIP(ip),
+		UserAgent: pgtype.Text{String: ua, Valid: ua != ""},
+	}); err != nil {
+		return fmt.Errorf("record nda: %w", err)
+	}
+	_ = s.queries.UpdateRoomMemberNDA(ctx, db.UpdateRoomMemberNDAParams{
+		RoomID: room.ID,
+		Email:  email,
+	})
+	return nil
+}
+
+// SetFolderPermission sets a folder permission for a member email.
+func (s *Service) SetFolderPermission(ctx context.Context, roomID, adminUserID, email, folderPath, permission string) (db.RoomMemberFolderPermission, error) {
+	room, err := s.GetRoom(ctx, roomID, "")
+	if err != nil {
+		return db.RoomMemberFolderPermission{}, err
+	}
+	if err := s.requireRoomAdmin(ctx, room.ID, adminUserID); err != nil {
+		return db.RoomMemberFolderPermission{}, err
+	}
+	return s.queries.SetFolderPermission(ctx, db.SetFolderPermissionParams{
+		TenantID:    room.TenantID,
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		Email:       email,
+		FolderPath:  folderPath,
+		Permission:  permission,
+	})
+}
+
+// GetFolderPermission returns effective folder permission for a member.
+func (s *Service) GetFolderPermission(ctx context.Context, roomID, email, folderPath string) (string, error) {
+	perm, err := s.queries.GetFolderPermission(ctx, db.GetFolderPermissionParams{
+		RoomID:     pgUUID(roomID),
+		Email:      email,
+		FolderPath: folderPath,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "view", nil // default
+		}
+		return "", err
+	}
+	return perm.Permission, nil
+}
+
+// AddDocument adds a document to a room folder.
+func (s *Service) AddDocument(ctx context.Context, roomID, adminUserID, documentID, folderPath string, sortOrder int32) (db.DealRoomDocument, error) {
+	room, err := s.GetRoom(ctx, roomID, "")
+	if err != nil {
+		return db.DealRoomDocument{}, err
+	}
+	if err := s.requireRoomAdmin(ctx, room.ID, adminUserID); err != nil {
+		return db.DealRoomDocument{}, err
+	}
+	docID, err := uuid.Parse(documentID)
+	if err != nil {
+		return db.DealRoomDocument{}, errors.New("invalid document id")
+	}
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: room.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.DealRoomDocument{}, errors.New("document not found")
+		}
+		return db.DealRoomDocument{}, err
+	}
+	return s.queries.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
+		TenantID:    room.TenantID,
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		DocumentID:  doc.ID,
+		FolderPath:  folderPath,
+		SortOrder:   sortOrder,
+	})
+}
+
+// ListDocuments returns documents in a room that the member can access.
+func (s *Service) ListDocuments(ctx context.Context, roomID, email string) ([]db.DealRoomDocument, error) {
+	_, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: pgUUID(roomID),
+		Email:  email,
+	})
+	if err != nil {
+		return nil, ErrApprovalRequired
+	}
+	return s.queries.ListDealRoomDocuments(ctx, pgUUID(roomID))
+}
+
+func (s *Service) requireRoomAdmin(ctx context.Context, roomID pgtype.UUID, userID string) error {
+	members, err := s.queries.ListRoomMembers(ctx, roomID)
+	if err != nil {
+		return err
+	}
+	uid := pgUUID(userID)
+	for _, m := range members {
+		if m.UserID == uid && (m.Role == "owner" || m.Role == "admin") && m.Status == "active" {
+			return nil
+		}
+	}
+	return ErrNotRoomAdmin
+}
+
+func (s *Service) getTenantForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (pgtype.UUID, error) {
+	ws, err := s.queries.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, errors.New("workspace not found")
+		}
+		return pgtype.UUID{}, err
+	}
+	return ws.TenantID, nil
+}
+
+func ndaStatusFor(required bool) string {
+	if required {
+		return "pending"
+	}
+	return "not_required"
+}
+
+func memberStatusFor(requiresApprovalOrNDA bool) string {
+	if requiresApprovalOrNDA {
+		return "pending"
+	}
+	return "active"
+}
+
+func pgUUID(id string) pgtype.UUID {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
