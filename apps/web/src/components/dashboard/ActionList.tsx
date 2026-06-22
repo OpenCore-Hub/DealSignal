@@ -1,8 +1,15 @@
+import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Check, Envelope, Phone, ShareNetwork, Warning, Clock } from "@phosphor-icons/react";
+import { Check, Envelope, Phone, ShareNetwork, Warning, Clock, X, ClockCounterClockwise, DotsThree, CaretDown, CaretUp } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { ActionItem } from "@/types";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import type { ActionItem, ActionStatus } from "@/types";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { isOverdue, daysOverdue } from "@/lib/calculations";
 import { useTranslation } from "react-i18next";
@@ -22,15 +29,18 @@ const impactConfig = {
 
 interface ActionListProps {
   actions: ActionItem[];
-  onStatusChange: (id: string, status: ActionItem["status"]) => void;
+  onStatusChange: (id: string, status: ActionStatus) => void;
 }
 
 export function ActionList({ actions, onStatusChange }: ActionListProps) {
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon, i18n } = useTranslation("common");
-  const pending = actions.filter((a) => a.status !== "done");
+  const [showHidden, setShowHidden] = useState(false);
+
+  const pending = actions.filter((a) => a.status === "pending");
   const done = actions.filter((a) => a.status === "done");
+  const hidden = actions.filter((a) => a.status === "snoozed" || a.status === "ignored");
 
   return (
     <div className="space-y-3">
@@ -80,9 +90,30 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                       : `${tCommon("dueDate")} ${new Date(action.dueAt).toLocaleDateString(i18n.language)}`}
                   </p>
                 </div>
-                <Button size="sm" variant="outline" onClick={() => onStatusChange(action.id, "done")}>
-                  {tCommon("complete")}
-                </Button>
+                <div className="flex items-center gap-1">
+                  <Button size="sm" variant="outline" onClick={() => onStatusChange(action.id, "done")}>
+                    {tCommon("complete")}
+                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={(props) => (
+                        <Button size="sm" variant="ghost" aria-label={t("actions.moreOptions")} {...props}>
+                          <DotsThree size={18} />
+                        </Button>
+                      )}
+                    />
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => onStatusChange(action.id, "snoozed")}>
+                        <ClockCounterClockwise size={16} className="mr-1.5" />
+                        {t("actions.postpone")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem variant="destructive" onClick={() => onStatusChange(action.id, "ignored")}>
+                        <X size={16} className="mr-1.5" />
+                        {t("actions.ignore")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </div>
               </motion.div>
             );
           })}
@@ -104,6 +135,52 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
               );
             })}
           </div>
+        </div>
+      )}
+
+      {hidden.length > 0 && (
+        <div className="pt-2">
+          <button
+            type="button"
+            onClick={() => setShowHidden((v) => !v)}
+            className="text-caption mb-2 flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            aria-expanded={showHidden}
+          >
+            {t("actions.hiddenWithCount", { count: hidden.length })}
+            {showHidden ? <CaretUp size={12} /> : <CaretDown size={12} />}
+          </button>
+          <AnimatePresence initial={false}>
+            {showHidden && (
+              <motion.div
+                initial={reducedMotion ? undefined : { height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={reducedMotion ? undefined : { height: 0, opacity: 0 }}
+                className="space-y-2 overflow-hidden opacity-60"
+              >
+                {hidden.map((action) => {
+                  const config = actionConfig[action.actionType];
+                  const Icon = config.icon;
+                  const statusLabel = action.status === "snoozed" ? tCommon("status.snoozed") : tCommon("status.ignored");
+                  return (
+                    <div key={action.id} className="flex items-center justify-between rounded-lg border bg-muted/50 p-3">
+                      <div className="flex items-center gap-3">
+                        <Icon size={16} className="text-muted-foreground" />
+                        <p className="text-sm text-muted-foreground">{t(action.title)}</p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline" className="text-xs">
+                          {statusLabel}
+                        </Badge>
+                        <Button size="sm" variant="ghost" onClick={() => onStatusChange(action.id, "pending")}>
+                          {t("actions.reactivate")}
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
     </div>

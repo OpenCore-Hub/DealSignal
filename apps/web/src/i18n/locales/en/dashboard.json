@@ -37,7 +37,12 @@
     "markDone": "Mark done"
   },
   "actions": {
-    "completedWithCount": "Completed ({{count}})"
+    "completedWithCount": "Completed ({{count}})",
+    "moreOptions": "More options",
+    "postpone": "Postpone",
+    "ignore": "Ignore",
+    "hiddenWithCount": "Hidden ({{count}})",
+    "reactivate": "Reactivate"
   },
   "heatMap": {
     "linkCount": "{{count}} link",

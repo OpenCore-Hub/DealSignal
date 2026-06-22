@@ -97,6 +97,8 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
               variant="ghost"
               onClick={() => setExpanded((v) => !v)}
               className="text-muted-foreground"
+              aria-expanded={expanded}
+              aria-label={expanded ? t("signal.collapse") : t("signal.expand")}
             >
               {expanded ? t("signal.collapse") : t("signal.expand")}
               {expanded ? <CaretUp size={14} className="ml-1" /> : <CaretDown size={14} className="ml-1" />}

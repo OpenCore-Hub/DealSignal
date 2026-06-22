@@ -58,7 +58,9 @@
     "processing": "Processing",
     "uploading": "Uploading",
     "failed": "Failed",
-    "done": "Done"
+    "done": "Done",
+    "snoozed": "Snoozed",
+    "ignored": "Ignored"
   },
   "heat": {
     "hot": "Hot",
