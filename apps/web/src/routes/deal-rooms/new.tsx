@@ -76,14 +76,22 @@ export function NewDealRoomPage() {
     [templates, selectedTemplateId]
   );
 
+  const slugify = (value: string) =>
+    value
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "");
+
   const handleCreate = async () => {
     if (!selectedTemplate || !name) return;
     setCreating(true);
     try {
       const room = await api.createDealRoom({
         name,
+        slug: slugify(name),
         description,
-        templateId: selectedTemplate.id,
+        template: selectedTemplate.scenario,
         ndaEnabled: nda,
       });
       toast.success(t("new.created"));

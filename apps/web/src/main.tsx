@@ -4,8 +4,8 @@ import App from "@/App";
 import "@/index.css";
 
 async function prepare() {
-  // MSW 仅用于开发环境无后端演示
-  if (import.meta.env.DEV) {
+  // 当未配置真实后端地址时，在开发环境启用 MSW
+  if (import.meta.env.DEV && !import.meta.env.VITE_API_BASE_URL) {
     const { worker } = await import("@/lib/mocks/browser");
     return worker.start({
       onUnhandledRequest: "bypass",
