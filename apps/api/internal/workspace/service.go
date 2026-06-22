@@ -112,9 +112,15 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 		return Workspace{}, err
 	}
 
-	tenant, err := s.queries.CreateTenant(ctx, name)
+	tenant, err := s.queries.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: slug, Valid: true}})
 	if err != nil {
-		return Workspace{}, err
+		if isUniqueViolation(err) {
+			// fallback to a unique slug if the workspace slug is already a tenant slug
+			tenant, err = s.queries.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: uuid.NewString(), Valid: true}})
+		}
+		if err != nil {
+			return Workspace{}, err
+		}
 	}
 
 	tenantUUID, _ := pgUUID(uuidToString(tenant.ID))
@@ -141,6 +147,14 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 	return workspaceFromRow(ws), nil
 }
 
+func isUniqueViolation(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "23505") || strings.Contains(msg, "unique constraint")
+}
+
 // List returns workspaces the user belongs to.
 func (s *Service) List(ctx context.Context, userID string) ([]Workspace, error) {
 	uid, err := pgUUID(userID)
@@ -159,8 +173,58 @@ func (s *Service) List(ctx context.Context, userID string) ([]Workspace, error) 
 }
 
 // GetBySlug returns a workspace by slug if the user is a member.
+func (s *Service) IsTenantAdmin(ctx context.Context, userID, tenantID string) bool {
+	uid, err := pgUUID(userID)
+	if err != nil {
+		return false
+	}
+	tid, err := pgUUID(tenantID)
+	if err != nil {
+		return false
+	}
+	rows, err := s.queries.ListWorkspacesByUserAndTenant(ctx, db.ListWorkspacesByUserAndTenantParams{
+		UserID:   uid,
+		TenantID: tid,
+	})
+	if err != nil {
+		return false
+	}
+	for _, r := range rows {
+		if r.Role == RoleOwner || r.Role == RoleAdmin {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Service) GetBySlug(ctx context.Context, userID, slug string) (Workspace, error) {
-	ws, err := s.queries.GetWorkspaceBySlug(ctx, slug)
+	return s.getByTenantAndSlug(ctx, userID, pgtype.UUID{}, slug)
+}
+
+// GetByTenantAndSlug returns a workspace scoped to a tenant when available.
+func (s *Service) GetByTenantAndSlug(ctx context.Context, userID, tenantID, slug string) (Workspace, error) {
+	var tenantUUID pgtype.UUID
+	if tenantID != "" {
+		var err error
+		tenantUUID, err = pgUUID(tenantID)
+		if err != nil {
+			return Workspace{}, err
+		}
+	}
+	return s.getByTenantAndSlug(ctx, userID, tenantUUID, slug)
+}
+
+func (s *Service) getByTenantAndSlug(ctx context.Context, userID string, tenantUUID pgtype.UUID, slug string) (Workspace, error) {
+	var ws db.Workspace
+	var err error
+	if tenantUUID.Valid {
+		ws, err = s.queries.GetWorkspaceByTenantAndSlug(ctx, db.GetWorkspaceByTenantAndSlugParams{
+			TenantID: tenantUUID,
+			Slug:     slug,
+		})
+	} else {
+		ws, err = s.queries.GetWorkspaceBySlug(ctx, slug)
+	}
 	if err != nil {
 		return Workspace{}, err
 	}

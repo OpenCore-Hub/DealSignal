@@ -1,13 +1,16 @@
 package server
 
 import (
+	"context"
 	"net/http"
+	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
@@ -18,6 +21,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
 // ErrorResponse is the standard JSON error shape.
@@ -47,6 +51,12 @@ func (s *Server) registerRoutes() {
 		workspaceSvc := workspace.NewService(queries)
 		workspaceHandler := workspace.NewHandler(workspaceSvc)
 		workspaceHandler.RegisterRoutes(api)
+
+		domainSvc := domain.NewService(queries, certProvider(s.cfg.CertProvider), s.cfg.CNAMETarget)
+		domainHandler := domain.NewHandler(domainSvc, workspaceSvc)
+		domainHandler.RegisterRoutes(api)
+
+		s.engine.Use(middleware.HostMiddleware(s.cfg.BaseDomain, hostLookup(domainSvc, s.cfg.BaseDomain)))
 
 		if s.cfg.S3Bucket != "" {
 			storageClient, err := storage.NewS3Client(s.cfg)
@@ -109,4 +119,25 @@ func (s *Server) registerRoutes() {
 			Message: "the requested resource does not exist",
 		})
 	})
+}
+
+func hostLookup(svc *domain.Service, baseDomain string) middleware.HostLookup {
+	return func(ctx context.Context, host string) (string, error) {
+		if suffix := "." + baseDomain; strings.HasSuffix(host, suffix) {
+			slug := strings.TrimSuffix(host, suffix)
+			t, err := svc.GetTenantBySlug(ctx, slug)
+			if err != nil {
+				return "", err
+			}
+			return uuid.UUID(t.ID.Bytes).String(), nil
+		}
+		return svc.ResolveHost(ctx, host)
+	}
+}
+
+func certProvider(name string) domain.CertificateProvider {
+	if name == "selfsigned" {
+		return domain.SelfSignedProvider{}
+	}
+	return domain.NoopProvider{}
 }

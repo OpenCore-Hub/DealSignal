@@ -14,9 +14,9 @@ FROM users
 WHERE id = $1 LIMIT 1;
 
 -- name: CreateTenant :one
-INSERT INTO tenants (name)
-VALUES ($1)
-RETURNING id, name, created_at;
+INSERT INTO tenants (name, slug)
+VALUES ($1, $2)
+RETURNING id, name, slug, created_at;
 
 -- name: CreateWorkspace :one
 INSERT INTO workspaces (tenant_id, name, slug, brand_color)
@@ -365,3 +365,44 @@ SELECT EXISTS (
     SELECT 1 FROM room_nda_agreements
     WHERE room_id = $1 AND email = $2
 ) AS has_agreement;
+-- name: CreateTenantDomain :one
+INSERT INTO tenant_domains (tenant_id, domain, domain_type, is_primary)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at;
+
+-- name: GetTenantDomainByDomain :one
+SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+FROM tenant_domains
+WHERE domain = $1 LIMIT 1;
+
+-- name: ListTenantDomainsByTenant :many
+SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+FROM tenant_domains
+WHERE tenant_id = $1
+ORDER BY created_at DESC;
+
+-- name: UpdateTenantDomainSSL :exec
+UPDATE tenant_domains
+SET ssl_status = $1, ssl_expires_at = $2, verified_at = $3, updated_at = now()
+WHERE id = $4 AND tenant_id = $5;
+
+-- name: DeleteTenantDomain :exec
+DELETE FROM tenant_domains
+WHERE id = $1 AND tenant_id = $2;
+
+-- name: GetTenantBySlug :one
+SELECT id, name, created_at
+FROM tenants
+WHERE slug = $1 LIMIT 1;
+
+-- name: GetWorkspaceByTenantAndSlug :one
+SELECT id, tenant_id, name, slug, brand_color, created_at
+FROM workspaces
+WHERE tenant_id = $1 AND slug = $2 LIMIT 1;
+
+-- name: ListWorkspacesByUserAndTenant :many
+SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at, m.role
+FROM workspaces w
+JOIN workspace_members m ON m.workspace_id = w.id
+WHERE m.user_id = $1 AND w.tenant_id = $2
+ORDER BY w.created_at DESC;
