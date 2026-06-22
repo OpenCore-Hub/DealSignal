@@ -13,15 +13,19 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./cmd/server
 
-# Pinned minimal runtime image.
-FROM gcr.io/distroless/static-debian12:nonroot@sha256:d093aa3e30dbadd3efe1310db061a14da60299baff8450a17fe0ccc514a16639
+# Empty runtime image — only the static binary and CA bundle are included.
+# This removes the distroless Debian base layer and eliminates Trivy OS-package
+# findings while keeping the container non-root.
+FROM scratch
 
 WORKDIR /app
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /build/server /app/server
 
-USER nonroot:nonroot
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+
+USER 65532:65532
 
 EXPOSE 8080
 
