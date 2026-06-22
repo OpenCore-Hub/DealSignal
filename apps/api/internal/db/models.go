@@ -9,14 +9,33 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
-type Chunk struct {
+type AssistantMessage struct {
+	ID        pgtype.UUID
+	SessionID pgtype.UUID
+	Role      string
+	Content   string
+	Evidence  []byte
+	CreatedAt pgtype.Timestamptz
+}
+
+type AssistantSession struct {
 	ID          pgtype.UUID
-	TenantID    pgtype.UUID
 	WorkspaceID pgtype.UUID
-	PageID      pgtype.UUID
-	Text        string
-	Bbox        []byte
-	Embedding   pgvector.Vector
+	UserID      pgtype.UUID
+	Title       pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type Chunk struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	PageID       pgtype.UUID
+	Text         string
+	Bbox         []byte
+	Embedding    pgvector.Vector
+	SearchVector interface{}
 }
 
 type Document struct {

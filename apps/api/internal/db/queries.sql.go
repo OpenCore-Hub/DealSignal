@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 const addWorkspaceMember = `-- name: AddWorkspaceMember :one
@@ -35,6 +36,64 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 	return i, err
 }
 
+const createAssistantMessage = `-- name: CreateAssistantMessage :one
+INSERT INTO assistant_messages (session_id, role, content, evidence)
+VALUES ($1, $2, $3, $4)
+RETURNING id, session_id, role, content, evidence, created_at
+`
+
+type CreateAssistantMessageParams struct {
+	SessionID pgtype.UUID
+	Role      string
+	Content   string
+	Evidence  []byte
+}
+
+func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistantMessageParams) (AssistantMessage, error) {
+	row := q.db.QueryRow(ctx, createAssistantMessage,
+		arg.SessionID,
+		arg.Role,
+		arg.Content,
+		arg.Evidence,
+	)
+	var i AssistantMessage
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Role,
+		&i.Content,
+		&i.Evidence,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createAssistantSession = `-- name: CreateAssistantSession :one
+INSERT INTO assistant_sessions (workspace_id, user_id, title)
+VALUES ($1, $2, $3)
+RETURNING id, workspace_id, user_id, title, created_at, updated_at
+`
+
+type CreateAssistantSessionParams struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Title       pgtype.Text
+}
+
+func (q *Queries) CreateAssistantSession(ctx context.Context, arg CreateAssistantSessionParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, createAssistantSession, arg.WorkspaceID, arg.UserID, arg.Title)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createChunk = `-- name: CreateChunk :exec
 INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox)
 VALUES ($1, $2, $3, $4, $5)
@@ -55,6 +114,32 @@ func (q *Queries) CreateChunk(ctx context.Context, arg CreateChunkParams) error 
 		arg.PageID,
 		arg.Text,
 		arg.Bbox,
+	)
+	return err
+}
+
+const createChunkWithEmbedding = `-- name: CreateChunkWithEmbedding :exec
+INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox, embedding, search_vector)
+VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('english', $4))
+`
+
+type CreateChunkWithEmbeddingParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageID      pgtype.UUID
+	Text        string
+	Bbox        []byte
+	Embedding   pgvector.Vector
+}
+
+func (q *Queries) CreateChunkWithEmbedding(ctx context.Context, arg CreateChunkWithEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, createChunkWithEmbedding,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.PageID,
+		arg.Text,
+		arg.Bbox,
+		arg.Embedding,
 	)
 	return err
 }
@@ -249,6 +334,33 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 	return i, err
 }
 
+const getAssistantSession = `-- name: GetAssistantSession :one
+SELECT id, workspace_id, user_id, title, created_at, updated_at
+FROM assistant_sessions
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3
+LIMIT 1
+`
+
+type GetAssistantSessionParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+}
+
+func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessionParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, getAssistantSession, arg.ID, arg.WorkspaceID, arg.UserID)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDocumentByID = `-- name: GetDocumentByID :one
 SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -433,6 +545,46 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 	return i, err
 }
 
+const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
+SELECT id, session_id, role, content, evidence, created_at
+FROM assistant_messages
+WHERE session_id = $1
+ORDER BY created_at ASC
+LIMIT $2
+`
+
+type ListAssistantMessagesBySessionParams struct {
+	SessionID pgtype.UUID
+	Limit     int32
+}
+
+func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAssistantMessagesBySessionParams) ([]AssistantMessage, error) {
+	rows, err := q.db.Query(ctx, listAssistantMessagesBySession, arg.SessionID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AssistantMessage
+	for rows.Next() {
+		var i AssistantMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Content,
+			&i.Evidence,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocumentsByWorkspace = `-- name: ListDocumentsByWorkspace :many
 SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -586,6 +738,149 @@ func (q *Queries) ListWorkspacesByUser(ctx context.Context, userID pgtype.UUID) 
 		return nil, err
 	}
 	return items, nil
+}
+
+const searchChunksByText = `-- name: SearchChunksByText :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    ts_rank(c.search_vector, plainto_tsquery('english', $3)) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.search_vector @@ plainto_tsquery('english', $3)
+ORDER BY rank DESC
+LIMIT $2
+`
+
+type SearchChunksByTextParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Query       string
+}
+
+type SearchChunksByTextRow struct {
+	ID         pgtype.UUID
+	Text       string
+	Bbox       []byte
+	PageNumber int32
+	DocumentID pgtype.UUID
+	Rank       float32
+}
+
+func (q *Queries) SearchChunksByText(ctx context.Context, arg SearchChunksByTextParams) ([]SearchChunksByTextRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByText, arg.WorkspaceID, arg.Limit, arg.Query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByTextRow
+	for rows.Next() {
+		var i SearchChunksByTextRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Rank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchChunksByVector = `-- name: SearchChunksByVector :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    (c.embedding <=> $3::vector)::float8 AS distance
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.embedding IS NOT NULL
+ORDER BY c.embedding <=> $3::vector
+LIMIT $2
+`
+
+type SearchChunksByVectorParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Embedding   pgvector.Vector
+}
+
+type SearchChunksByVectorRow struct {
+	ID         pgtype.UUID
+	Text       string
+	Bbox       []byte
+	PageNumber int32
+	DocumentID pgtype.UUID
+	Distance   float64
+}
+
+func (q *Queries) SearchChunksByVector(ctx context.Context, arg SearchChunksByVectorParams) ([]SearchChunksByVectorRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByVector, arg.WorkspaceID, arg.Limit, arg.Embedding)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByVectorRow
+	for rows.Next() {
+		var i SearchChunksByVectorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Distance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateAssistantSessionTitle = `-- name: UpdateAssistantSessionTitle :exec
+UPDATE assistant_sessions
+SET title = $1, updated_at = now()
+WHERE id = $2
+`
+
+type UpdateAssistantSessionTitleParams struct {
+	Title pgtype.Text
+	ID    pgtype.UUID
+}
+
+func (q *Queries) UpdateAssistantSessionTitle(ctx context.Context, arg UpdateAssistantSessionTitleParams) error {
+	_, err := q.db.Exec(ctx, updateAssistantSessionTitle, arg.Title, arg.ID)
+	return err
+}
+
+const updateChunkSearchVector = `-- name: UpdateChunkSearchVector :exec
+UPDATE chunks
+SET search_vector = to_tsvector('english', text)
+WHERE id = $1
+`
+
+func (q *Queries) UpdateChunkSearchVector(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, updateChunkSearchVector, id)
+	return err
 }
 
 const updateDocumentStatus = `-- name: UpdateDocumentStatus :exec

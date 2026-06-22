@@ -25,6 +25,11 @@ type Config struct {
 
 	OnlyOfficeURL         string
 	OnlyOfficeJWTSecret   string
+
+	OpenAIAPIKey        string
+	OpenAIBaseURL       string
+	OpenAIEmbeddingModel string
+	OpenAIChatModel     string
 }
 
 // Load parses environment variables into Config and validates required fields.
@@ -45,8 +50,13 @@ func Load() (*Config, error) {
 		S3Region:         os.Getenv("S3_REGION"),
 		S3UsePathStyle:   os.Getenv("S3_USE_PATH_STYLE"),
 
-		OnlyOfficeURL:       os.Getenv("ONLYOFFICE_URL"),
-		OnlyOfficeJWTSecret: os.Getenv("ONLYOFFICE_JWT_SECRET"),
+		OnlyOfficeURL:        os.Getenv("ONLYOFFICE_URL"),
+		OnlyOfficeJWTSecret:  os.Getenv("ONLYOFFICE_JWT_SECRET"),
+
+		OpenAIAPIKey:         os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:        os.Getenv("OPENAI_BASE_URL"),
+		OpenAIEmbeddingModel: os.Getenv("OPENAI_EMBEDDING_MODEL"),
+		OpenAIChatModel:      os.Getenv("OPENAI_CHAT_MODEL"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -63,6 +73,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.S3AccessKey == "" || cfg.S3SecretKey == "" {
 		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY are required")
+	}
+	if cfg.OpenAIAPIKey == "" {
+		return nil, fmt.Errorf("OPENAI_API_KEY is required")
 	}
 
 	if _, err := strconv.Atoi(cfg.Port); err != nil {

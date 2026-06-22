@@ -10,6 +10,7 @@ require (
 	github.com/gin-gonic/gin v1.11.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
 	github.com/pgvector/pgvector-go v0.4.0
+	github.com/sashabaranov/go-openai v1.32.0
 )
 
 require (

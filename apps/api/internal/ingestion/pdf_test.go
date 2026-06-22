@@ -6,15 +6,15 @@ import (
 
 func TestSplitText(t *testing.T) {
 	text := "First paragraph.\n\nSecond paragraph.\n   "
-	chunks := splitText(text, 1)
+	chunks := splitText(text, 1, 200, 100)
 	if len(chunks) != 2 {
 		t.Fatalf("expected 2 chunks, got %d", len(chunks))
 	}
 	if chunks[0].Text != "First paragraph." {
 		t.Fatalf("expected first chunk 'First paragraph.', got %q", chunks[0].Text)
 	}
-	if chunks[0].Bbox != nil {
-		t.Fatal("expected nil bbox")
+	if chunks[0].Bbox == nil {
+		t.Fatal("expected non-nil bbox")
 	}
 }
 
