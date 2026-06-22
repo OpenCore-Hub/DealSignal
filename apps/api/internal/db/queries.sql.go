@@ -10,7 +10,92 @@ import (
 	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
+
+const addDealRoomDocument = `-- name: AddDealRoomDocument :one
+INSERT INTO deal_room_documents (tenant_id, workspace_id, room_id, document_id, folder_path, sort_order)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at
+`
+
+type AddDealRoomDocumentParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	FolderPath  string
+	SortOrder   int32
+}
+
+func (q *Queries) AddDealRoomDocument(ctx context.Context, arg AddDealRoomDocumentParams) (DealRoomDocument, error) {
+	row := q.db.QueryRow(ctx, addDealRoomDocument,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.DocumentID,
+		arg.FolderPath,
+		arg.SortOrder,
+	)
+	var i DealRoomDocument
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.DocumentID,
+		&i.FolderPath,
+		&i.SortOrder,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const addRoomMember = `-- name: AddRoomMember :one
+INSERT INTO room_members (tenant_id, workspace_id, room_id, email, user_id, role, nda_status, status)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+`
+
+type AddRoomMemberParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	UserID      pgtype.UUID
+	Role        string
+	NdaStatus   string
+	Status      string
+}
+
+func (q *Queries) AddRoomMember(ctx context.Context, arg AddRoomMemberParams) (RoomMember, error) {
+	row := q.db.QueryRow(ctx, addRoomMember,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.Email,
+		arg.UserID,
+		arg.Role,
+		arg.NdaStatus,
+		arg.Status,
+	)
+	var i RoomMember
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.UserID,
+		&i.Role,
+		&i.NdaStatus,
+		&i.NdaSignedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
 
 const addWorkspaceMember = `-- name: AddWorkspaceMember :one
 INSERT INTO workspace_members (workspace_id, user_id, role)
@@ -66,6 +151,105 @@ func (q *Queries) CreateAccessLog(ctx context.Context, arg CreateAccessLogParams
 	return err
 }
 
+const createAccessRequest = `-- name: CreateAccessRequest :one
+INSERT INTO room_access_requests (tenant_id, workspace_id, room_id, email, reason, status)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+`
+
+type CreateAccessRequestParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	Reason      pgtype.Text
+	Status      string
+}
+
+func (q *Queries) CreateAccessRequest(ctx context.Context, arg CreateAccessRequestParams) (RoomAccessRequest, error) {
+	row := q.db.QueryRow(ctx, createAccessRequest,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.Email,
+		arg.Reason,
+		arg.Status,
+	)
+	var i RoomAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createAssistantMessage = `-- name: CreateAssistantMessage :one
+INSERT INTO assistant_messages (session_id, role, content, evidence)
+VALUES ($1, $2, $3, $4)
+RETURNING id, session_id, role, content, evidence, created_at
+`
+
+type CreateAssistantMessageParams struct {
+	SessionID pgtype.UUID
+	Role      string
+	Content   string
+	Evidence  []byte
+}
+
+func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistantMessageParams) (AssistantMessage, error) {
+	row := q.db.QueryRow(ctx, createAssistantMessage,
+		arg.SessionID,
+		arg.Role,
+		arg.Content,
+		arg.Evidence,
+	)
+	var i AssistantMessage
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.Role,
+		&i.Content,
+		&i.Evidence,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createAssistantSession = `-- name: CreateAssistantSession :one
+INSERT INTO assistant_sessions (workspace_id, user_id, title)
+VALUES ($1, $2, $3)
+RETURNING id, workspace_id, user_id, title, created_at, updated_at
+`
+
+type CreateAssistantSessionParams struct {
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+	Title       pgtype.Text
+}
+
+func (q *Queries) CreateAssistantSession(ctx context.Context, arg CreateAssistantSessionParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, createAssistantSession, arg.WorkspaceID, arg.UserID, arg.Title)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createChunk = `-- name: CreateChunk :exec
 INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox)
 VALUES ($1, $2, $3, $4, $5)
@@ -88,6 +272,90 @@ func (q *Queries) CreateChunk(ctx context.Context, arg CreateChunkParams) error 
 		arg.Bbox,
 	)
 	return err
+}
+
+const createChunkWithEmbedding = `-- name: CreateChunkWithEmbedding :exec
+INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox, embedding, search_vector)
+VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('english', $4))
+`
+
+type CreateChunkWithEmbeddingParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageID      pgtype.UUID
+	Text        string
+	Bbox        []byte
+	Embedding   pgvector.Vector
+}
+
+func (q *Queries) CreateChunkWithEmbedding(ctx context.Context, arg CreateChunkWithEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, createChunkWithEmbedding,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.PageID,
+		arg.Text,
+		arg.Bbox,
+		arg.Embedding,
+	)
+	return err
+}
+
+const createDealRoom = `-- name: CreateDealRoom :one
+INSERT INTO deal_rooms (
+    tenant_id, workspace_id, slug, name, description, template_type, settings,
+    requires_nda, requires_approval, status, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+          requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+`
+
+type CreateDealRoomParams struct {
+	TenantID         pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	Slug             string
+	Name             string
+	Description      pgtype.Text
+	TemplateType     pgtype.Text
+	Settings         []byte
+	RequiresNda      bool
+	RequiresApproval bool
+	Status           string
+	CreatedBy        pgtype.UUID
+}
+
+func (q *Queries) CreateDealRoom(ctx context.Context, arg CreateDealRoomParams) (DealRoom, error) {
+	row := q.db.QueryRow(ctx, createDealRoom,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.Slug,
+		arg.Name,
+		arg.Description,
+		arg.TemplateType,
+		arg.Settings,
+		arg.RequiresNda,
+		arg.RequiresApproval,
+		arg.Status,
+		arg.CreatedBy,
+	)
+	var i DealRoom
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.TemplateType,
+		&i.Settings,
+		&i.RequiresNda,
+		&i.RequiresApproval,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
 }
 
 const createDocument = `-- name: CreateDocument :one
@@ -244,6 +512,29 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 	return i, err
 }
 
+const createNDAAgreement = `-- name: CreateNDAAgreement :exec
+INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (room_id, email) DO UPDATE SET agreed_at = now(), ip = EXCLUDED.ip, user_agent = EXCLUDED.user_agent
+`
+
+type CreateNDAAgreementParams struct {
+	RoomID    pgtype.UUID
+	Email     string
+	Ip        *netip.Addr
+	UserAgent pgtype.Text
+}
+
+func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreementParams) error {
+	_, err := q.db.Exec(ctx, createNDAAgreement,
+		arg.RoomID,
+		arg.Email,
+		arg.Ip,
+		arg.UserAgent,
+	)
+	return err
+}
+
 const createPage = `-- name: CreatePage :one
 INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -380,6 +671,131 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 	return i, err
 }
 
+const getAccessRequestByID = `-- name: GetAccessRequestByID :one
+SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM room_access_requests
+WHERE id = $1 AND room_id = $2
+LIMIT 1
+`
+
+type GetAccessRequestByIDParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) GetAccessRequestByID(ctx context.Context, arg GetAccessRequestByIDParams) (RoomAccessRequest, error) {
+	row := q.db.QueryRow(ctx, getAccessRequestByID, arg.ID, arg.RoomID)
+	var i RoomAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAssistantSession = `-- name: GetAssistantSession :one
+SELECT id, workspace_id, user_id, title, created_at, updated_at
+FROM assistant_sessions
+WHERE id = $1 AND workspace_id = $2 AND user_id = $3
+LIMIT 1
+`
+
+type GetAssistantSessionParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	UserID      pgtype.UUID
+}
+
+func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessionParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, getAssistantSession, arg.ID, arg.WorkspaceID, arg.UserID)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDealRoomByID = `-- name: GetDealRoomByID :one
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+FROM deal_rooms
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+LIMIT 1
+`
+
+type GetDealRoomByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetDealRoomByID(ctx context.Context, arg GetDealRoomByIDParams) (DealRoom, error) {
+	row := q.db.QueryRow(ctx, getDealRoomByID, arg.ID, arg.WorkspaceID)
+	var i DealRoom
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.TemplateType,
+		&i.Settings,
+		&i.RequiresNda,
+		&i.RequiresApproval,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getDealRoomBySlug = `-- name: GetDealRoomBySlug :one
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+FROM deal_rooms
+WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
+LIMIT 1
+`
+
+func (q *Queries) GetDealRoomBySlug(ctx context.Context, slug string) (DealRoom, error) {
+	row := q.db.QueryRow(ctx, getDealRoomBySlug, slug)
+	var i DealRoom
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.Slug,
+		&i.Name,
+		&i.Description,
+		&i.TemplateType,
+		&i.Settings,
+		&i.RequiresNda,
+		&i.RequiresApproval,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getDocumentByID = `-- name: GetDocumentByID :one
 SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -408,6 +824,36 @@ func (q *Queries) GetDocumentByID(ctx context.Context, arg GetDocumentByIDParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getFolderPermission = `-- name: GetFolderPermission :one
+SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
+FROM room_member_folder_permissions
+WHERE room_id = $1 AND email = $2 AND folder_path = $3
+LIMIT 1
+`
+
+type GetFolderPermissionParams struct {
+	RoomID     pgtype.UUID
+	Email      string
+	FolderPath string
+}
+
+func (q *Queries) GetFolderPermission(ctx context.Context, arg GetFolderPermissionParams) (RoomMemberFolderPermission, error) {
+	row := q.db.QueryRow(ctx, getFolderPermission, arg.RoomID, arg.Email, arg.FolderPath)
+	var i RoomMemberFolderPermission
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.FolderPath,
+		&i.Permission,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -605,6 +1051,38 @@ func (q *Queries) GetPageByDocumentAndNumber(ctx context.Context, arg GetPageByD
 	return i, err
 }
 
+const getRoomMemberByEmail = `-- name: GetRoomMemberByEmail :one
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE room_id = $1 AND email = $2
+LIMIT 1
+`
+
+type GetRoomMemberByEmailParams struct {
+	RoomID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) GetRoomMemberByEmail(ctx context.Context, arg GetRoomMemberByEmailParams) (RoomMember, error) {
+	row := q.db.QueryRow(ctx, getRoomMemberByEmail, arg.RoomID, arg.Email)
+	var i RoomMember
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.UserID,
+		&i.Role,
+		&i.NdaStatus,
+		&i.NdaSignedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, created_at
 FROM users
@@ -704,6 +1182,25 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 	return i, err
 }
 
+const hasNDAAgreement = `-- name: HasNDAAgreement :one
+SELECT EXISTS (
+    SELECT 1 FROM room_nda_agreements
+    WHERE room_id = $1 AND email = $2
+) AS has_agreement
+`
+
+type HasNDAAgreementParams struct {
+	RoomID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) HasNDAAgreement(ctx context.Context, arg HasNDAAgreementParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasNDAAgreement, arg.RoomID, arg.Email)
+	var has_agreement bool
+	err := row.Scan(&has_agreement)
+	return has_agreement, err
+}
+
 const incrementLinkAccessCount = `-- name: IncrementLinkAccessCount :exec
 UPDATE links
 SET access_count = access_count + 1, updated_at = now()
@@ -713,6 +1210,165 @@ WHERE id = $1
 func (q *Queries) IncrementLinkAccessCount(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, incrementLinkAccessCount, id)
 	return err
+}
+
+const listAccessRequestsByRoom = `-- name: ListAccessRequestsByRoom :many
+SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM room_access_requests
+WHERE room_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAccessRequestsByRoom(ctx context.Context, roomID pgtype.UUID) ([]RoomAccessRequest, error) {
+	rows, err := q.db.Query(ctx, listAccessRequestsByRoom, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RoomAccessRequest
+	for rows.Next() {
+		var i RoomAccessRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.Email,
+			&i.Reason,
+			&i.Status,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
+SELECT id, session_id, role, content, evidence, created_at
+FROM assistant_messages
+WHERE session_id = $1
+ORDER BY created_at ASC
+LIMIT $2
+`
+
+type ListAssistantMessagesBySessionParams struct {
+	SessionID pgtype.UUID
+	Limit     int32
+}
+
+func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAssistantMessagesBySessionParams) ([]AssistantMessage, error) {
+	rows, err := q.db.Query(ctx, listAssistantMessagesBySession, arg.SessionID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AssistantMessage
+	for rows.Next() {
+		var i AssistantMessage
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.Role,
+			&i.Content,
+			&i.Evidence,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDealRoomDocuments = `-- name: ListDealRoomDocuments :many
+SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at
+FROM deal_room_documents
+WHERE room_id = $1
+ORDER BY folder_path, sort_order
+`
+
+func (q *Queries) ListDealRoomDocuments(ctx context.Context, roomID pgtype.UUID) ([]DealRoomDocument, error) {
+	rows, err := q.db.Query(ctx, listDealRoomDocuments, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DealRoomDocument
+	for rows.Next() {
+		var i DealRoomDocument
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.DocumentID,
+			&i.FolderPath,
+			&i.SortOrder,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDealRoomsByWorkspace = `-- name: ListDealRoomsByWorkspace :many
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
+       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+FROM deal_rooms
+WHERE workspace_id = $1 AND deleted_at IS NULL
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]DealRoom, error) {
+	rows, err := q.db.Query(ctx, listDealRoomsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DealRoom
+	for rows.Next() {
+		var i DealRoom
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.TemplateType,
+			&i.Settings,
+			&i.RequiresNda,
+			&i.RequiresApproval,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDocumentsByWorkspace = `-- name: ListDocumentsByWorkspace :many
@@ -841,6 +1497,46 @@ func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUI
 	return items, nil
 }
 
+const listRoomMembers = `-- name: ListRoomMembers :many
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE room_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListRoomMembers(ctx context.Context, roomID pgtype.UUID) ([]RoomMember, error) {
+	rows, err := q.db.Query(ctx, listRoomMembers, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RoomMember
+	for rows.Next() {
+		var i RoomMember
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.Email,
+			&i.UserID,
+			&i.Role,
+			&i.NdaStatus,
+			&i.NdaSignedAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceMembers = `-- name: ListWorkspaceMembers :many
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
@@ -919,6 +1615,206 @@ func (q *Queries) ListWorkspacesByUser(ctx context.Context, userID pgtype.UUID) 
 	return items, nil
 }
 
+const searchChunksByText = `-- name: SearchChunksByText :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    ts_rank(c.search_vector, plainto_tsquery('english', $3)) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.search_vector @@ plainto_tsquery('english', $3)
+ORDER BY rank DESC
+LIMIT $2
+`
+
+type SearchChunksByTextParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Query       string
+}
+
+type SearchChunksByTextRow struct {
+	ID         pgtype.UUID
+	Text       string
+	Bbox       []byte
+	PageNumber int32
+	DocumentID pgtype.UUID
+	Rank       float32
+}
+
+func (q *Queries) SearchChunksByText(ctx context.Context, arg SearchChunksByTextParams) ([]SearchChunksByTextRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByText, arg.WorkspaceID, arg.Limit, arg.Query)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByTextRow
+	for rows.Next() {
+		var i SearchChunksByTextRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Rank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchChunksByVector = `-- name: SearchChunksByVector :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    (c.embedding <=> $3::vector)::float8 AS distance
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.embedding IS NOT NULL
+ORDER BY c.embedding <=> $3::vector
+LIMIT $2
+`
+
+type SearchChunksByVectorParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Embedding   pgvector.Vector
+}
+
+type SearchChunksByVectorRow struct {
+	ID         pgtype.UUID
+	Text       string
+	Bbox       []byte
+	PageNumber int32
+	DocumentID pgtype.UUID
+	Distance   float64
+}
+
+func (q *Queries) SearchChunksByVector(ctx context.Context, arg SearchChunksByVectorParams) ([]SearchChunksByVectorRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByVector, arg.WorkspaceID, arg.Limit, arg.Embedding)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByVectorRow
+	for rows.Next() {
+		var i SearchChunksByVectorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Distance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const setFolderPermission = `-- name: SetFolderPermission :one
+INSERT INTO room_member_folder_permissions (tenant_id, workspace_id, room_id, email, folder_path, permission)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (room_id, email, folder_path) DO UPDATE SET permission = EXCLUDED.permission, updated_at = now()
+RETURNING id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
+`
+
+type SetFolderPermissionParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	FolderPath  string
+	Permission  string
+}
+
+func (q *Queries) SetFolderPermission(ctx context.Context, arg SetFolderPermissionParams) (RoomMemberFolderPermission, error) {
+	row := q.db.QueryRow(ctx, setFolderPermission,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.Email,
+		arg.FolderPath,
+		arg.Permission,
+	)
+	var i RoomMemberFolderPermission
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.FolderPath,
+		&i.Permission,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const updateAccessRequestStatus = `-- name: UpdateAccessRequestStatus :exec
+UPDATE room_access_requests
+SET status = $1, reviewed_by = $2, reviewed_at = now(), updated_at = now()
+WHERE id = $3
+`
+
+type UpdateAccessRequestStatusParams struct {
+	Status     string
+	ReviewedBy pgtype.UUID
+	ID         pgtype.UUID
+}
+
+func (q *Queries) UpdateAccessRequestStatus(ctx context.Context, arg UpdateAccessRequestStatusParams) error {
+	_, err := q.db.Exec(ctx, updateAccessRequestStatus, arg.Status, arg.ReviewedBy, arg.ID)
+	return err
+}
+
+const updateAssistantSessionTitle = `-- name: UpdateAssistantSessionTitle :exec
+UPDATE assistant_sessions
+SET title = $1, updated_at = now()
+WHERE id = $2
+`
+
+type UpdateAssistantSessionTitleParams struct {
+	Title pgtype.Text
+	ID    pgtype.UUID
+}
+
+func (q *Queries) UpdateAssistantSessionTitle(ctx context.Context, arg UpdateAssistantSessionTitleParams) error {
+	_, err := q.db.Exec(ctx, updateAssistantSessionTitle, arg.Title, arg.ID)
+	return err
+}
+
+const updateChunkSearchVector = `-- name: UpdateChunkSearchVector :exec
+UPDATE chunks
+SET search_vector = to_tsvector('english', text)
+WHERE id = $1
+`
+
+func (q *Queries) UpdateChunkSearchVector(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, updateChunkSearchVector, id)
+	return err
+}
+
 const updateDocumentStatus = `-- name: UpdateDocumentStatus :exec
 UPDATE documents
 SET status = $1, page_count = $2, updated_at = now()
@@ -956,5 +1852,38 @@ func (q *Queries) UpdateIngestionJob(ctx context.Context, arg UpdateIngestionJob
 		arg.ErrorMessage,
 		arg.ID,
 	)
+	return err
+}
+
+const updateRoomMemberNDA = `-- name: UpdateRoomMemberNDA :exec
+UPDATE room_members
+SET nda_status = 'signed', nda_signed_at = now(), updated_at = now()
+WHERE room_id = $1 AND email = $2
+`
+
+type UpdateRoomMemberNDAParams struct {
+	RoomID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) UpdateRoomMemberNDA(ctx context.Context, arg UpdateRoomMemberNDAParams) error {
+	_, err := q.db.Exec(ctx, updateRoomMemberNDA, arg.RoomID, arg.Email)
+	return err
+}
+
+const updateRoomMemberStatus = `-- name: UpdateRoomMemberStatus :exec
+UPDATE room_members
+SET status = $1, updated_at = now()
+WHERE room_id = $2 AND email = $3
+`
+
+type UpdateRoomMemberStatusParams struct {
+	Status string
+	RoomID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) UpdateRoomMemberStatus(ctx context.Context, arg UpdateRoomMemberStatusParams) error {
+	_, err := q.db.Exec(ctx, updateRoomMemberStatus, arg.Status, arg.RoomID, arg.Email)
 	return err
 }
