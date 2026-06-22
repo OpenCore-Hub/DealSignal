@@ -2,6 +2,7 @@
 package assistant
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
@@ -43,7 +44,7 @@ func (h *Handler) Chat(c *gin.Context) {
 
 	resp, err := h.service.Chat(c.Request.Context(), userID, workspaceID, ChatRequest(req))
 	if err != nil {
-		if err.Error() == "message is required" || err.Error() == "invalid session id" || err.Error() == "session not found" {
+		if errors.Is(err, ErrMessageRequired) || errors.Is(err, ErrInvalidSession) || errors.Is(err, ErrSessionNotFound) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 			return
 		}

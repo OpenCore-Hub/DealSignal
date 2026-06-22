@@ -17,6 +17,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+var (
+	ErrMessageRequired = errors.New("message is required")
+	ErrInvalidSession  = errors.New("invalid session id")
+	ErrSessionNotFound = errors.New("session not found")
+)
+
 const (
 	maxContextMessages   = 20
 	maxEvidenceChars     = 12000 // approximate 3000 tokens
@@ -76,7 +82,7 @@ func NewService(q Querier, s Searcher, f *evidence.Formatter, l ChatCompleter) *
 // Chat processes a user message and returns an evidence-backed answer.
 func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req ChatRequest) (*ChatResponse, error) {
 	if strings.TrimSpace(req.Message) == "" {
-		return nil, errors.New("message is required")
+		return nil, ErrMessageRequired
 	}
 
 	workspaceUUID := pgUUID(workspaceID)
@@ -152,7 +158,7 @@ func (s *Service) resolveSession(ctx context.Context, workspaceID, userID pgtype
 
 	sessionUUID := pgUUID(sessionID)
 	if !sessionUUID.Valid {
-		return db.AssistantSession{}, errors.New("invalid session id")
+		return db.AssistantSession{}, ErrInvalidSession
 	}
 
 	session, err := s.queries.GetAssistantSession(ctx, db.GetAssistantSessionParams{
@@ -162,7 +168,7 @@ func (s *Service) resolveSession(ctx context.Context, workspaceID, userID pgtype
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return db.AssistantSession{}, errors.New("session not found")
+			return db.AssistantSession{}, ErrSessionNotFound
 		}
 		return db.AssistantSession{}, err
 	}

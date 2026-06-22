@@ -25,3 +25,8 @@ dist-ssr
 
 # QA temporary artifacts
 qa-output/
+coverage/
+*.coverage
+test-results/
+playwright-report/
+playwright/.cache/

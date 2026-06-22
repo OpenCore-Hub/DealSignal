@@ -60,3 +60,35 @@ func TestNotFound(t *testing.T) {
 		t.Fatalf("expected code not_found, got %s", resp.Code)
 	}
 }
+
+func TestRequestIDGenerated(t *testing.T) {
+	srv := setupTestServer(t)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	requestID := w.Header().Get("X-Request-ID")
+	if requestID == "" {
+		t.Fatal("expected X-Request-ID header to be set")
+	}
+}
+
+func TestRequestIDEchoed(t *testing.T) {
+	srv := setupTestServer(t)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/healthz", nil)
+	req.Header.Set("X-Request-ID", "client-req-123")
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	if got := w.Header().Get("X-Request-ID"); got != "client-req-123" {
+		t.Fatalf("expected X-Request-ID to be echoed, got %s", got)
+	}
+}

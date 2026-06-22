@@ -19,6 +19,7 @@ const maxFileSize = 100 * 1024 * 1024 // 100MB
 var (
 	ErrFileTooLarge      = errors.New("file exceeds 100MB limit")
 	ErrInvalidFileType   = errors.New("unsupported file type")
+	ErrInvalidFileContent = errors.New("file content does not match extension")
 	allowedExtensions    = map[string]string{
 		".pdf":  "pdf",
 		".docx": "docx",
@@ -74,6 +75,10 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	}
 	defer file.Close()
 
+	if err := validateFileContent(file, sourceType); err != nil {
+		return Document{}, err
+	}
+
 	docID := uuid.New()
 	storageKey := storage.ObjectKey(tenantID, workspaceID, docID.String(), fileHeader.Filename)
 
@@ -125,6 +130,31 @@ func documentFromDB(d db.Document) Document {
 		doc.PageCount = &v
 	}
 	return doc
+}
+
+func validateFileContent(file multipart.File, sourceType string) error {
+	buf := make([]byte, 8)
+	if _, err := file.Read(buf); err != nil {
+		return fmt.Errorf("read file header: %w", err)
+	}
+	if _, err := file.Seek(0, 0); err != nil {
+		return fmt.Errorf("reset file reader: %w", err)
+	}
+
+	switch sourceType {
+	case "pdf":
+		if string(buf[:4]) != "%PDF" {
+			return ErrInvalidFileContent
+		}
+	case "docx", "pptx", "xlsx":
+		// Office Open XML files are ZIP archives.
+		if buf[0] != 0x50 || buf[1] != 0x4B {
+			return ErrInvalidFileContent
+		}
+	default:
+		return ErrInvalidFileContent
+	}
+	return nil
 }
 
 func pgUUID(id string) pgtype.UUID {

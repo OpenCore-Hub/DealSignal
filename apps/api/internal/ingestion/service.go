@@ -3,6 +3,7 @@ package ingestion
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -13,6 +14,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pgvector/pgvector-go"
 )
+
+const maxIngestionAttempts = 3
+
+var ErrMaxAttemptsExceeded = errors.New("maximum ingestion attempts exceeded")
 
 // Embedder generates vector embeddings for text.
 type Embedder interface {
@@ -39,20 +44,31 @@ func (s *Service) ProcessDocument(ctx context.Context, doc db.Document) error {
 		return fmt.Errorf("find ingestion job: %w", err)
 	}
 
-	if err := s.updateJob(ctx, job.ID, "processing", int(job.Attempts.Int32)+1, ""); err != nil {
+	currentAttempts := int(job.Attempts.Int32)
+	if currentAttempts >= maxIngestionAttempts {
+		_ = s.updateJob(ctx, job.ID, "failed", currentAttempts, "maximum ingestion attempts exceeded")
+		_ = s.updateDocumentStatus(ctx, doc.ID, "failed", nil)
+		return ErrMaxAttemptsExceeded
+	}
+
+	if err := s.updateJob(ctx, job.ID, "processing", currentAttempts+1, ""); err != nil {
 		return err
 	}
 
 	if err := s.run(ctx, doc); err != nil {
-		_ = s.updateJob(ctx, job.ID, "failed", int(job.Attempts.Int32)+1, err.Error())
+		_ = s.updateJob(ctx, job.ID, "failed", currentAttempts+1, err.Error())
 		_ = s.updateDocumentStatus(ctx, doc.ID, "failed", nil)
 		return err
 	}
 
-	return s.updateJob(ctx, job.ID, "completed", int(job.Attempts.Int32)+1, "")
+	return s.updateJob(ctx, job.ID, "completed", currentAttempts+1, "")
 }
 
 func (s *Service) run(ctx context.Context, doc db.Document) error {
+	if err := s.cleanupDocumentData(ctx, doc.ID); err != nil {
+		return fmt.Errorf("cleanup existing document data: %w", err)
+	}
+
 	tmpFile, err := s.downloadOriginal(ctx, doc.StorageKey)
 	if err != nil {
 		return err
@@ -152,6 +168,16 @@ func (s *Service) downloadOriginal(ctx context.Context, key string) (string, err
 		return "", fmt.Errorf("close temp file: %w", err)
 	}
 	return f.Name(), nil
+}
+
+func (s *Service) cleanupDocumentData(ctx context.Context, documentID pgtype.UUID) error {
+	if err := s.queries.DeleteChunksByDocument(ctx, documentID); err != nil {
+		return err
+	}
+	if err := s.queries.DeletePagesByDocument(ctx, documentID); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (s *Service) renderAndUploadPage(ctx context.Context, key string, p PageInfo) error {

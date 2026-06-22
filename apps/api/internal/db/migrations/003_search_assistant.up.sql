@@ -12,6 +12,8 @@ CREATE TABLE IF NOT EXISTS assistant_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    link_id UUID,
+    document_id UUID REFERENCES documents(id) ON DELETE CASCADE,
     title TEXT,
     created_at TIMESTAMPTZ DEFAULT now(),
     updated_at TIMESTAMPTZ DEFAULT now()
@@ -19,6 +21,12 @@ CREATE TABLE IF NOT EXISTS assistant_sessions (
 
 CREATE INDEX IF NOT EXISTS idx_assistant_sessions_workspace_user
 ON assistant_sessions(workspace_id, user_id);
+
+CREATE INDEX IF NOT EXISTS idx_assistant_sessions_link
+ON assistant_sessions(link_id);
+
+CREATE INDEX IF NOT EXISTS idx_assistant_sessions_document
+ON assistant_sessions(document_id);
 
 CREATE TABLE IF NOT EXISTS assistant_messages (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

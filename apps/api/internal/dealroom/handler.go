@@ -101,7 +101,7 @@ func (h *Handler) AddMember(c *gin.Context) {
 	if req.Role == "" {
 		req.Role = "viewer"
 	}
-	member, err := h.service.AddMember(c.Request.Context(), c.Param("id"), middleware.UserIDFrom(c), req.Email, req.Role)
+	member, err := h.service.AddMember(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.Role)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -118,7 +118,7 @@ func (h *Handler) AddMember(c *gin.Context) {
 
 // ApproveRequest handles access request approval.
 func (h *Handler) ApproveRequest(c *gin.Context) {
-	req, err := h.service.ApproveAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("id"), middleware.UserIDFrom(c))
+	req, err := h.service.ApproveAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -219,7 +219,7 @@ func (h *Handler) AddDocument(c *gin.Context) {
 	if req.FolderPath == "" {
 		req.FolderPath = "/"
 	}
-	doc, err := h.service.AddDocument(c.Request.Context(), c.Param("id"), middleware.UserIDFrom(c), req.DocumentID, req.FolderPath, req.SortOrder)
+	doc, err := h.service.AddDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.DocumentID, req.FolderPath, req.SortOrder)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -246,7 +246,7 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	perm, err := h.service.SetFolderPermission(c.Request.Context(), c.Param("id"), middleware.UserIDFrom(c), req.Email, req.FolderPath, req.Permission)
+	perm, err := h.service.SetFolderPermission(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.FolderPath, req.Permission)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):

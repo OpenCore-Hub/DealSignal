@@ -35,14 +35,20 @@ type Suggestion struct {
 	UpdatedAt  string `json:"updated_at"`
 }
 
+// Notifier enqueues notifications for high-intent signals.
+type Notifier interface {
+	Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) error
+}
+
 // Service generates follow-up suggestions from link analytics.
 type Service struct {
-	queries *db.Queries
+	queries   *db.Queries
+	notifier  Notifier
 }
 
 // NewService creates a suggestion service.
-func NewService(q *db.Queries) *Service {
-	return &Service{queries: q}
+func NewService(q *db.Queries, n Notifier) *Service {
+	return &Service{queries: q, notifier: n}
 }
 
 // Generate creates suggestions for a link based on recent access events.
@@ -74,8 +80,11 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID string) ([]S
 
 	out := make([]Suggestion, 0, len(candidates))
 	for _, c := range candidates {
-		exists, err := s.recentExists(ctx, linkUUID, c.Type)
-		if err != nil || exists {
+		exists, err := s.recentExists(ctx, link.WorkspaceID, linkUUID, c.Type)
+		if err != nil {
+			return nil, fmt.Errorf("check recent suggestion: %w", err)
+		}
+		if exists {
 			continue
 		}
 		row, err := s.queries.CreateSuggestion(ctx, db.CreateSuggestionParams{
@@ -89,9 +98,17 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID string) ([]S
 			Action:      c.Action,
 		})
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("create suggestion: %w", err)
 		}
 		out = append(out, suggestionFromRow(row))
+
+		if c.Type == "hot_signal" && s.notifier != nil {
+			userID := ""
+			if link.CreatedBy.Valid {
+				userID = uuid.UUID(link.CreatedBy.Bytes).String()
+			}
+			_ = s.notifier.Enqueue(ctx, workspaceID, userID, "email", titleForType(c.Type), c.Reason+"\n"+c.Action)
+		}
 	}
 	return out, nil
 }
@@ -137,10 +154,11 @@ func (s *Service) Dismiss(ctx context.Context, workspaceID, suggestionID string)
 	return s.queries.DismissSuggestion(ctx, db.DismissSuggestionParams{ID: id, WorkspaceID: wsUUID})
 }
 
-func (s *Service) recentExists(ctx context.Context, linkID pgtype.UUID, typ string) (bool, error) {
+func (s *Service) recentExists(ctx context.Context, workspaceID, linkID pgtype.UUID, typ string) (bool, error) {
 	count, err := s.queries.CountRecentSuggestionsByLinkAndType(ctx, db.CountRecentSuggestionsByLinkAndTypeParams{
-		LinkID: linkID,
-		Type:   typ,
+		LinkID:      linkID,
+		WorkspaceID: workspaceID,
+		Type:        typ,
 	})
 	if err != nil {
 		return false, err
@@ -195,7 +213,7 @@ func (m suggestionMetrics) heatInput() heat.Input {
 		Revisits:           m.revisits,
 		AvgDurationMinutes: m.avgDurationMinutes,
 		KeyPageViews:       m.keyPageViews,
-		ForwardSignals:     0,
+		ForwardSignals:     m.uniqueVisitors,
 		Downloads:          m.downloads,
 		BouncePenalty:      m.bounces,
 	}

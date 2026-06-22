@@ -53,19 +53,31 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 	return settingsFromRow(row), nil
 }
 
-// SaveSettings upserts workspace settings.
-func (s *Service) SaveSettings(ctx context.Context, workspaceID string, req Settings) (Settings, error) {
+// SaveSettingsRequest contains user-editable notification settings.
+type SaveSettingsRequest struct {
+	EmailEnabled    bool
+	SlackWebhookURL string
+}
+
+// SaveSettings upserts workspace settings. Integration connected flags are managed by OAuth callbacks only.
+func (s *Service) SaveSettings(ctx context.Context, workspaceID string, req SaveSettingsRequest) (Settings, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return Settings{}, err
 	}
+
+	existing, err := s.queries.GetNotificationSettings(ctx, wsUUID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Settings{}, err
+	}
+
 	row, err := s.queries.UpsertNotificationSettings(ctx, db.UpsertNotificationSettingsParams{
 		WorkspaceID:         wsUUID,
 		EmailEnabled:        req.EmailEnabled,
 		SlackWebhookUrl:     pgtype.Text{String: req.SlackWebhookURL, Valid: req.SlackWebhookURL != ""},
-		SlackConnected:      req.SlackConnected,
-		HubspotConnected:    req.HubSpotConnected,
-		SalesforceConnected: req.SalesforceConnected,
+		SlackConnected:      existing.SlackConnected,
+		HubspotConnected:    existing.HubspotConnected,
+		SalesforceConnected: existing.SalesforceConnected,
 	})
 	if err != nil {
 		return Settings{}, err
@@ -140,6 +152,15 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, state, code strin
 	_, err = s.queries.UpsertNotificationSettings(ctx, params)
 	_ = code // In production, exchange code for access token here.
 	return err
+}
+
+// ListSyncLogs returns recent sync logs for a workspace.
+func (s *Service) ListSyncLogs(ctx context.Context, workspaceID string) ([]db.IntegrationSyncLog, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	return s.queries.ListSyncLogsByWorkspace(ctx, wsUUID)
 }
 
 // SyncHubSpot pushes contacts to HubSpot using a stored access token.

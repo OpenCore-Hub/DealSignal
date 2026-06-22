@@ -13,20 +13,34 @@ import (
 )
 
 var (
-	ErrInvalidSlug  = errors.New("slug must be lowercase alphanumeric with hyphens")
-	ErrNotMember    = errors.New("user is not a member of this workspace")
-	ErrAlreadyMember = errors.New("user is already a member")
-	slugRegex       = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	ErrInvalidSlug       = errors.New("slug must be lowercase alphanumeric with hyphens")
+	ErrNotMember         = errors.New("user is not a member of this workspace")
+	ErrAlreadyMember     = errors.New("user is already a member")
+	ErrInvalidRole       = errors.New("invalid role")
+	ErrNotManager        = errors.New("only owner or admin can manage members")
+	ErrInvitationNotFound = errors.New("invitation not found")
+	ErrInvitationExpired  = errors.New("invitation expired")
+	ErrInvitationUsed     = errors.New("invitation already used")
+	slugRegex            = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 )
 
 const (
 	RoleOwner  = "owner"
 	RoleAdmin  = "admin"
 	RoleMember = "member"
+	RoleGuest  = "guest"
 )
 
 func validMemberRole(role string) bool {
-	return role == RoleAdmin || role == RoleMember
+	return role == RoleAdmin || role == RoleMember || role == RoleGuest
+}
+
+func validManagerRole(role string) bool {
+	return role == RoleOwner || role == RoleAdmin
+}
+
+func validInvitationRole(role string) bool {
+	return role == RoleAdmin || role == RoleMember || role == RoleGuest
 }
 
 // Workspace is the public view of a db.Workspace.
@@ -45,6 +59,28 @@ type Member struct {
 	UserID    string `json:"user_id"`
 	Role      string `json:"role"`
 	JoinedAt  string `json:"joined_at"`
+}
+
+// Invitation is the public view of a db.WorkspaceInvitation.
+type Invitation struct {
+	Token     string `json:"token"`
+	WorkspaceID string `json:"workspace_id"`
+	Email     string `json:"email"`
+	Role      string `json:"role"`
+	ExpiresAt string `json:"expires_at"`
+	UsedAt    string `json:"used_at,omitempty"`
+	CreatedAt string `json:"created_at"`
+}
+
+func invitationFromDB(i db.WorkspaceInvitation) Invitation {
+	return Invitation{
+		Token:       uuidToString(i.Token),
+		WorkspaceID: uuidToString(i.WorkspaceID),
+		Email:       i.Email,
+		Role:        i.Role,
+		ExpiresAt:   i.ExpiresAt.Time.Format(time.RFC3339),
+		CreatedAt:   i.CreatedAt.Time.Format(time.RFC3339),
+	}
 }
 
 // Service handles workspace operations.
@@ -197,8 +233,16 @@ func (s *Service) IsTenantAdmin(ctx context.Context, userID, tenantID string) bo
 	return false
 }
 
-func (s *Service) GetBySlug(ctx context.Context, userID, slug string) (Workspace, error) {
-	return s.getByTenantAndSlug(ctx, userID, pgtype.UUID{}, slug)
+func (s *Service) GetBySlug(ctx context.Context, userID, slug, tenantID string) (Workspace, error) {
+	var tenantUUID pgtype.UUID
+	if tenantID != "" {
+		var err error
+		tenantUUID, err = pgUUID(tenantID)
+		if err != nil {
+			return Workspace{}, err
+		}
+	}
+	return s.getByTenantAndSlug(ctx, userID, tenantUUID, slug)
 }
 
 // GetByTenantAndSlug returns a workspace scoped to a tenant when available.
@@ -236,12 +280,8 @@ func (s *Service) getByTenantAndSlug(ctx context.Context, userID string, tenantU
 }
 
 // Get returns a workspace if the user is a member.
-func (s *Service) Get(ctx context.Context, userID, workspaceID string) (Workspace, error) {
-	wsUUID, err := pgUUID(workspaceID)
-	if err != nil {
-		return Workspace{}, err
-	}
-	ws, err := s.queries.GetWorkspaceByID(ctx, wsUUID)
+func (s *Service) Get(ctx context.Context, userID, workspaceID, tenantID string) (Workspace, error) {
+	ws, err := s.getWorkspaceByID(ctx, workspaceID, tenantID)
 	if err != nil {
 		return Workspace{}, err
 	}
@@ -251,19 +291,137 @@ func (s *Service) Get(ctx context.Context, userID, workspaceID string) (Workspac
 	return workspaceFromRow(ws), nil
 }
 
-// AddMember adds a user to a workspace.
-func (s *Service) AddMember(ctx context.Context, actorID, workspaceID, userID, role string) (Member, error) {
-	if _, err := s.requireMember(ctx, actorID, workspaceID); err != nil {
+func (s *Service) getWorkspaceByID(ctx context.Context, workspaceID, tenantID string) (db.Workspace, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return db.Workspace{}, err
+	}
+	if tenantID != "" {
+		tenantUUID, err := pgUUID(tenantID)
+		if err != nil {
+			return db.Workspace{}, err
+		}
+		return s.queries.GetWorkspaceByIDAndTenant(ctx, db.GetWorkspaceByIDAndTenantParams{
+			ID:       wsUUID,
+			TenantID: tenantUUID,
+		})
+	}
+	return s.queries.GetWorkspaceByID(ctx, wsUUID)
+}
+
+func (s *Service) requireWorkspaceInTenant(ctx context.Context, workspaceID, tenantID string) error {
+	_, err := s.getWorkspaceByID(ctx, workspaceID, tenantID)
+	return err
+}
+
+// CreateInvitation creates an invitation token for a new member. Only owner/admin can call.
+func (s *Service) CreateInvitation(ctx context.Context, actorID, workspaceID, tenantID, email, role string, expiresDays int) (Invitation, error) {
+	actor, err := s.requireMember(ctx, actorID, workspaceID)
+	if err != nil {
+		return Invitation{}, err
+	}
+	if !validManagerRole(actor.Role) {
+		return Invitation{}, ErrNotManager
+	}
+	if !validInvitationRole(role) {
+		return Invitation{}, ErrInvalidRole
+	}
+	if tenantID != "" {
+		if err := s.requireWorkspaceInTenant(ctx, workspaceID, tenantID); err != nil {
+			return Invitation{}, err
+		}
+	}
+
+	wsUUID, _ := pgUUID(workspaceID)
+	if expiresDays <= 0 {
+		expiresDays = 7
+	}
+	if expiresDays > 30 {
+		expiresDays = 30
+	}
+	expiresAt := time.Now().UTC().AddDate(0, 0, expiresDays)
+
+	i, err := s.queries.CreateInvitation(ctx, db.CreateInvitationParams{
+		WorkspaceID: wsUUID,
+		Email:       email,
+		Role:        role,
+		ExpiresAt:   pgtype.Timestamptz{Time: expiresAt, Valid: true},
+	})
+	if err != nil {
+		return Invitation{}, err
+	}
+	return invitationFromDB(i), nil
+}
+
+// AcceptInvitation uses a token to add a user to a workspace.
+func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (Member, error) {
+	tokenUUID, err := pgUUID(token)
+	if err != nil {
+		return Member{}, ErrInvitationNotFound
+	}
+	inv, err := s.queries.GetInvitationByToken(ctx, tokenUUID)
+	if err != nil {
+		return Member{}, ErrInvitationNotFound
+	}
+	if inv.UsedAt.Valid {
+		return Member{}, ErrInvitationUsed
+	}
+	if inv.ExpiresAt.Time.Before(time.Now().UTC()) {
+		return Member{}, ErrInvitationExpired
+	}
+
+	workspaceID := uuidToString(inv.WorkspaceID)
+	wsUUID, _ := pgUUID(workspaceID)
+	uUUID, _ := pgUUID(userID)
+
+	// Idempotent: if already a member, mark invitation used and return existing membership.
+	existing, err := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+		WorkspaceID: wsUUID,
+		UserID:      uUUID,
+	})
+	if err == nil {
+		_ = s.queries.MarkInvitationUsed(ctx, tokenUUID)
+		return memberFromDB(existing), nil
+	}
+
+	m, err := s.queries.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+		WorkspaceID: wsUUID,
+		UserID:      uUUID,
+		Role:        inv.Role,
+	})
+	if err != nil {
 		return Member{}, err
 	}
+
+	if err := s.queries.MarkInvitationUsed(ctx, tokenUUID); err != nil {
+		return Member{}, err
+	}
+	return memberFromDB(m), nil
+}
+
+// AddMember adds an existing user to a workspace. Only owner/admin can call.
+func (s *Service) AddMember(ctx context.Context, actorID, workspaceID, tenantID, userID, role string) (Member, error) {
+	actor, err := s.requireMember(ctx, actorID, workspaceID)
+	if err != nil {
+		return Member{}, err
+	}
+	if !validManagerRole(actor.Role) {
+		return Member{}, ErrNotManager
+	}
 	if !validMemberRole(role) {
-		return Member{}, errors.New("invalid role")
+		return Member{}, ErrInvalidRole
+	}
+
+	if tenantID != "" {
+		if err := s.requireWorkspaceInTenant(ctx, workspaceID, tenantID); err != nil {
+			return Member{}, err
+		}
 	}
 
 	wsUUID, _ := pgUUID(workspaceID)
 	uUUID, _ := pgUUID(userID)
 
-	_, err := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+	_, err = s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
 		WorkspaceID: wsUUID,
 		UserID:      uUUID,
 	})

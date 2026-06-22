@@ -3,6 +3,9 @@ package ingestion
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -15,20 +18,22 @@ import (
 
 // Converter calls OnlyOffice Document Server to convert Office files to PDF.
 type Converter struct {
-	baseURL string
-	storage *storage.Client
-	client  *http.Client
+	baseURL  string
+	jwtSecret []byte
+	storage  *storage.Client
+	client   *http.Client
 }
 
 // NewConverter creates an OnlyOffice converter.
-func NewConverter(baseURL string, s *storage.Client) *Converter {
+func NewConverter(baseURL, jwtSecret string, s *storage.Client) *Converter {
 	if baseURL == "" {
 		baseURL = "http://onlyoffice:80"
 	}
 	return &Converter{
-		baseURL: baseURL,
-		storage: s,
-		client:  &http.Client{Timeout: 2 * time.Minute},
+		baseURL:   baseURL,
+		jwtSecret: []byte(jwtSecret),
+		storage:   s,
+		client:    &http.Client{Timeout: 2 * time.Minute},
 	}
 }
 
@@ -54,6 +59,9 @@ func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey str
 		return "", fmt.Errorf("build request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if len(c.jwtSecret) > 0 {
+		req.Header.Set("Authorization", "Bearer "+signConverterRequest(body, c.jwtSecret))
+	}
 
 	resp, err := c.client.Do(req)
 	if err != nil {
@@ -81,6 +89,21 @@ func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey str
 	}
 
 	return c.downloadToTemp(result.FileURL)
+}
+
+func signConverterRequest(body []byte, secret []byte) string {
+	header := map[string]string{"alg": "HS256", "typ": "JWT"}
+	headerJSON, _ := json.Marshal(header)
+
+	headerB64 := base64.RawURLEncoding.EncodeToString(headerJSON)
+	bodyB64 := base64.RawURLEncoding.EncodeToString(body)
+	signingInput := headerB64 + "." + bodyB64
+
+	mac := hmac.New(sha256.New, secret)
+	mac.Write([]byte(signingInput))
+	signature := base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
+
+	return signingInput + "." + signature
 }
 
 func (c *Converter) downloadToTemp(url string) (string, error) {

@@ -24,6 +24,7 @@ func NewHandler(s *Service) *Handler {
 // RegisterRoutes mounts the search route under a workspace-scoped group.
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/search", h.Search)
+	r.POST("/search", h.Search)
 }
 
 // Search returns matching chunks for a query.
@@ -39,6 +40,9 @@ func (h *Handler) Search(c *gin.Context) {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			limit = n
 		}
+	}
+	if limit > maxTopK {
+		limit = maxTopK
 	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)

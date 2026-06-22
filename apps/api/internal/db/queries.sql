@@ -157,10 +157,10 @@ LIMIT $2;
 -- name: CreateAssistantSession :one
 INSERT INTO assistant_sessions (workspace_id, user_id, title)
 VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, title, created_at, updated_at;
+RETURNING id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at;
 
 -- name: GetAssistantSession :one
-SELECT id, workspace_id, user_id, title, created_at, updated_at
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at
 FROM assistant_sessions
 WHERE id = $1 AND workspace_id = $2 AND user_id = $3
 LIMIT 1;
@@ -217,12 +217,25 @@ SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
 FROM links
-WHERE workspace_id = $1 AND deleted_at IS NULL
+WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC;
 
 -- name: CreateAccessLog :exec
 INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: RecordLinkOpened :execrows
+WITH inc AS (
+    UPDATE links
+    SET access_count = access_count + 1, updated_at = now()
+    WHERE links.id = $1
+      AND links.status = 'active'
+      AND (links.max_access_count IS NULL OR links.access_count < links.max_access_count)
+    RETURNING links.id
+)
+INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
+SELECT $2, $3, $4, $5, $6, 'link_opened', $7, $8
+WHERE EXISTS (SELECT 1 FROM inc);
 
 -- name: CreatePageView :exec
 INSERT INTO page_views (tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth)
@@ -358,7 +371,7 @@ LIMIT 1;
 -- name: CreateNDAAgreement :exec
 INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
 VALUES ($1, $2, $3, $4)
-ON CONFLICT (room_id, email) DO UPDATE SET agreed_at = now(), ip = EXCLUDED.ip, user_agent = EXCLUDED.user_agent;
+ON CONFLICT (room_id, email) DO NOTHING;
 
 -- name: HasNDAAgreement :one
 SELECT EXISTS (
@@ -389,6 +402,12 @@ WHERE id = $4 AND tenant_id = $5;
 -- name: DeleteTenantDomain :exec
 DELETE FROM tenant_domains
 WHERE id = $1 AND tenant_id = $2;
+
+-- name: ListTenantDomainsExpiringBefore :many
+SELECT id, tenant_id, domain, domain_type, is_primary, ssl_status, ssl_expires_at, verified_at, created_at, updated_at
+FROM tenant_domains
+WHERE ssl_status = 'issued' AND ssl_expires_at < $1
+ORDER BY ssl_expires_at ASC;
 
 -- name: GetTenantBySlug :one
 SELECT id, name, created_at
@@ -421,7 +440,7 @@ ORDER BY created_at DESC;
 -- name: CountRecentSuggestionsByLinkAndType :one
 SELECT COUNT(*) AS count
 FROM suggestions
-WHERE link_id = $1 AND type = $2 AND dismissed = false AND created_at > now() - interval '24 hours';
+WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND dismissed = false AND created_at > now() - interval '24 hours';
 
 -- name: DismissSuggestion :exec
 UPDATE suggestions
@@ -472,7 +491,10 @@ WHERE id = $1;
 
 -- name: MarkNotificationFailed :exec
 UPDATE notifications
-SET status = 'failed', attempts = attempts + 1, last_error = $2, updated_at = now()
+SET attempts = attempts + 1,
+    last_error = $2,
+    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
+    updated_at = now()
 WHERE id = $1;
 
 -- name: CreateOAuthState :exec
@@ -499,3 +521,34 @@ FROM integration_sync_logs
 WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT 50;
+
+-- name: GetWorkspaceByIDAndTenant :one
+SELECT id, tenant_id, name, slug, brand_color, created_at
+FROM workspaces
+WHERE id = $1 AND tenant_id = $2 LIMIT 1;
+
+-- name: CreateInvitation :one
+INSERT INTO workspace_invitations (workspace_id, email, role, expires_at)
+VALUES ($1, $2, $3, $4)
+RETURNING token, workspace_id, email, role, expires_at, used_at, created_at;
+
+-- name: GetInvitationByToken :one
+SELECT token, workspace_id, email, role, expires_at, used_at, created_at
+FROM workspace_invitations
+WHERE token = $1 LIMIT 1;
+
+-- name: MarkInvitationUsed :exec
+UPDATE workspace_invitations
+SET used_at = now()
+WHERE token = $1;
+-- name: DeletePagesByDocument :exec
+DELETE FROM pages WHERE document_id = $1;
+
+-- name: DeleteChunksByDocument :exec
+DELETE FROM chunks WHERE page_id IN (SELECT id FROM pages WHERE document_id = $1);
+
+-- name: GetDocumentByIDAndTenant :one
+SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL
+LIMIT 1;

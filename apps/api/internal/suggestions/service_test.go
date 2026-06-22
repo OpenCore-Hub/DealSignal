@@ -63,3 +63,11 @@ func TestPriorityAndTitle(t *testing.T) {
 		t.Fatal("unexpected follow_up title")
 	}
 }
+
+func TestHeatInputUsesUniqueVisitorsAsForwardSignals(t *testing.T) {
+	m := suggestionMetrics{uniqueVisitors: 5}
+	input := m.heatInput()
+	if input.ForwardSignals != 5 {
+		t.Fatalf("expected ForwardSignals=5, got %d", input.ForwardSignals)
+	}
+}

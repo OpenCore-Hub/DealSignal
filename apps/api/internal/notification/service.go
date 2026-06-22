@@ -2,6 +2,7 @@ package notification
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -120,7 +121,13 @@ func (s *Service) sendSlack(ctx context.Context, n db.Notification) error {
 	if !settings.SlackConnected || !settings.SlackWebhookUrl.Valid {
 		return errors.New("slack not connected")
 	}
-	payload := fmt.Sprintf(`{"text":"*%s*\n%s"}`, escape(n.Subject), escape(n.Body))
+	payloadBytes, err := json.Marshal(map[string]string{
+		"text": n.Subject + "\n" + n.Body,
+	})
+	if err != nil {
+		return err
+	}
+	payload := string(payloadBytes)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, settings.SlackWebhookUrl.String, strings.NewReader(payload))
 	if err != nil {
 		return err

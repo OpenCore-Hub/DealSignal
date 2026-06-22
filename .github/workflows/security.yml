@@ -34,6 +34,59 @@ jobs:
       - name: Run security Makefile target
         run: make security
 
+  trivy-fs:
+    name: Trivy filesystem scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Run Trivy filesystem scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          scanners: 'vuln'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
+          version: 'latest'
+
+  trivy-image:
+    name: Trivy container image scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build API image
+        working-directory: apps/api
+        run: docker build -t dealsignal-api:${{ github.sha }} -f Dockerfile .
+
+      - name: Run Trivy image scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'dealsignal-api:${{ github.sha }}'
+          scan-type: 'image'
+          scanners: 'vuln'
+          severity: 'HIGH,CRITICAL'
+          ignore-unfixed: true
+          exit-code: '1'
+          format: 'sarif'
+          output: 'apps/api/trivy-image-results.sarif'
+          limit-severities-for-sarif: true
+          version: 'latest'
+
+      - name: Upload image scan results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-image-results
+          path: apps/api/trivy-image-results.sarif
+
   secrets:
     name: Secret scan
     runs-on: ubuntu-latest

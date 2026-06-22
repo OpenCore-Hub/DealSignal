@@ -41,6 +41,7 @@ var (
 	ErrRequiresPassword     = errors.New("password required")
 	ErrInvalidPassword      = errors.New("invalid password")
 	ErrWhitelistDenied      = errors.New("email not in whitelist")
+	ErrRequiresNDA          = errors.New("nda agreement required")
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
 )
 
@@ -132,10 +133,11 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 
 // AccessRequest is the input for public access.
 type AccessRequest struct {
-	Email    string
-	Password string
-	IP       string
-	UA       string
+	Email     string
+	Password  string
+	NDAAgreed bool
+	IP        string
+	UA        string
 }
 
 // AccessResult is returned after a successful access check.
@@ -185,6 +187,13 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		if err := bcrypt.CompareHashAndPassword([]byte(link.PasswordHash.String), []byte(req.Password)); err != nil {
 			return AccessResult{}, ErrInvalidPassword
 		}
+	case "nda":
+		if strings.TrimSpace(req.Email) == "" {
+			return AccessResult{}, ErrRequiresEmail
+		}
+		if !req.NDAAgreed {
+			return AccessResult{}, ErrRequiresNDA
+		}
 	}
 
 	visitorID := makeVisitorID(req.Email, req.UA)
@@ -220,7 +229,7 @@ func normalizePermission(p string) string {
 
 func validatePermissionConfig(perm, password string, emails, domains []string) error {
 	switch perm {
-	case "public", "email_required":
+	case "public", "email_required", "nda":
 		return nil
 	case "whitelist":
 		if len(emails) == 0 && len(domains) == 0 {
