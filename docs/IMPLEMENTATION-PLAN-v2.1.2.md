@@ -39,11 +39,12 @@ linked_docs:
 
 ## 1. 当前状态
 
-- **前端 v2.1.1** 已完成并合并到 `main`：i18n（en/zh-CN）、Settings Language、Workspace Switcher、Theme Toggle、基础 Viewer/AI/Links/Contacts/DealRooms UI。
-- **后端 MVP** 已完成：Go 服务骨架、auth/workspace、upload/ingestion、search/evidence/assistant、links/analytics/rooms、notifications/integrations、security scan 均已实现并通过基本测试。
-- **文档一致性评审** 已识别关键缺口：API 路径/响应格式、字段命名、缺失端点、任务拆分/依赖/估算问题。
+- **前端 v2.1.2** 已合入 `main`：i18n（en/zh-CN）、Settings Language、Workspace Switcher、Theme Toggle、Viewer 子组件拆分、悬浮 AI 助手、Dashboard 信号排序、前端-后端集成层、MSW 开关、P0 E2E 覆盖。
+- **后端 MVP** 已合入 `main`：Go 服务骨架、auth/workspace、upload/ingestion、search/evidence/assistant、links/analytics/rooms、notifications/integrations、tenant subdomain/custom domain/SSL、security scan 均已实现并通过测试。
+- **测试与安全**：Vitest 覆盖率门禁、Go race-detector 测试、k6 压测脚本、Playwright P0 E2E、Trivy image/fs、gitleaks、govulncheck、`pnpm audit` 全部接入 CI。
+- **文档**：PRD/TDD/API/DB/ARCHITECTURE/PLAN/TASK 随代码同步更新，v2.1.2 已具备可发布状态。
 
-本计划在前序评审基础上，对 v2.1.2 工作进行重新拆分与对齐。
+本计划状态：**已完成**。
 
 ---
 
@@ -174,15 +175,15 @@ TASK-FRONTEND-001 → TASK-FRONTEND-002 → TASK-FRONTEND-004
 
 ## 6. 验收标准
 
-- [ ] 前端 `pnpm lint && pnpm test && pnpm build` 全绿。
-- [ ] 后端 `make lint && make test && make build` 全绿；`docker compose up --build` 可启动。
-- [ ] 前端可通过 `VITE_API_BASE_URL` 切换真实后端；未配置时回退 MSW。
-- [ ] Auth/Workspace 端点可被前端调用完成登录/注册/邀请。
-- [ ] 文档上传、解析、签名 URL、Viewer 渲染可端到端跑通。
-- [ ] 智能链接创建、公开访问、事件上报、热度评分可端到端跑通。
-- [ ] AI 问答返回 evidence，可跳转高亮对应页面区域。
-- [ ] `make security` 无 HIGH/CRITICAL 漏洞。
-- [ ] 全量文档（PRD/TDD/API/DB/PLAN/TASK）在字段、枚举、路径、依赖上保持一致。
+- [x] 前端 `pnpm lint && pnpm test && pnpm build` 全绿。
+- [x] 后端 `make lint && make test && make build` 全绿；`docker compose up --build` 可启动。
+- [x] 前端可通过 `VITE_API_BASE_URL` 切换真实后端；未配置时回退 MSW。
+- [x] Auth/Workspace 端点可被前端调用完成登录/注册/邀请。
+- [x] 文档上传、解析、签名 URL、Viewer 渲染可端到端跑通。
+- [x] 智能链接创建、公开访问、事件上报、热度评分可端到端跑通。
+- [x] AI 问答返回 evidence，可跳转高亮对应页面区域。
+- [x] `make security` 无 HIGH/CRITICAL 漏洞。
+- [x] 全量文档（PRD/TDD/API/DB/PLAN/TASK）在字段、枚举、路径、依赖上保持一致。
 
 ---
 

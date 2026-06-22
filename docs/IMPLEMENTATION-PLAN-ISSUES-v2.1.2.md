@@ -31,7 +31,7 @@ linked_docs:
 > - `docs/templates/CODE-REVIEW-template-v1.md`
 > - `docs/tasks/agent-tasks-v2.1.2/*.md`
 > **评审人**：`技术负责人、项目经理、产品负责人`  
-> **执行状态（IMPLEMENTATION-PLAN 专用）**：`待开始`
+> **执行状态（IMPLEMENTATION-PLAN 专用）**：`已完成`
 
 ---
 
@@ -126,33 +126,33 @@ Sprint Board → 分支 → PR → 测试 → 上线
 
 | Issue ID | 标题 | 版本 | 优先级 | 状态 | 类型 | 风险 | 依赖 | 关联 TASK | PRD | TDD | API | 负责人 |
 |----------|------|------|--------|------|------|------|------|-----------|-----|-----|-----|--------|
-| DS-001 | 工程脚手架与项目初始化 | v2.1.2 | P0 | 待创建 | infra | build_failure | - | TASK-BACKEND-001 | - | 3.2 / 9.1 | - | `{待分配}` |
-| DS-002 | 用户认证、租户与 Workspace 模块 | v2.1.2 | P0 | 待创建 | backend | build_failure | DS-001 | TASK-BACKEND-002 | FR-01 ~ FR-02 | 6.1 | API-01 ~ API-04 | `{待分配}` |
-| DS-003 | 对象存储与后端签名 URL | v2.1.2 | P0 | 待创建 | infra | build_failure | DS-001 | TASK-BACKEND-003 | FR-03 | 7.3 ~ 7.4 | API-06 | `{待分配}` |
-| DS-004 | 子域名/自定义域名与 SSL 自动签发 | v2.1.2 | P1 | 待创建 | infra | build_failure | DS-001 | TASK-BACKEND-007 | FR-03 | 7.4 | API-15 | `{待分配}` |
-| DS-005 | 文档上传 API | v2.1.2 | P0 | 待创建 | backend | build_failure | DS-002, DS-003 | TASK-BACKEND-003 | FR-02 | 6.1 | API-05 | `{待分配}` |
-| DS-006 | PDF Pipeline（bbox + webp） | v2.1.2 | P0 | 待创建 | ai | unknown | DS-005 | TASK-BACKEND-003 | FR-02 | 6.2 | - | `{待分配}` |
-| DS-007 | Office Pipeline（OnlyOffice 转 PDF） | v2.1.2 | P0 | 待创建 | ai | unknown | DS-006 | TASK-BACKEND-003 | FR-02 | 6.2 | - | `{待分配}` |
-| DS-008 | 数据库迁移与搜索索引 | v2.1.2 | P0 | 待创建 | backend | build_failure | DS-006 | TASK-BACKEND-004 | FR-02 | 4.x / 8.x | - | `{待分配}` |
-| DS-009 | 签名 URL 与权限校验 | v2.1.2 | P0 | 待创建 | backend | build_failure | DS-003, DS-008 | TASK-BACKEND-005 | FR-03 | 6.3 / 7.4 | API-06 ~ API-08 | `{待分配}` |
-| DS-010 | Viewer Canvas 前端 | v2.1.2 | P0 | 待创建 | frontend | test_failure | DS-009 | TASK-FRONTEND-002 | FR-03 ~ FR-04 | 6.3 | API-06 ~ API-08 | `{待分配}` |
-| DS-011 | Search Service | v2.1.2 | P0 | 待创建 | backend | test_failure | DS-008 | TASK-BACKEND-004 | FR-05 | 6.4 | API-09 | `{待分配}` |
-| DS-012 | Evidence Service | v2.1.2 | P0 | 待创建 | backend | test_failure | DS-011 | TASK-BACKEND-004 | FR-05 | 6.5 | API-10 | `{待分配}` |
-| DS-013 | Assistant Service | v2.1.2 | P0 | 待创建 | backend | unknown | DS-012 | TASK-BACKEND-004 | FR-05 ~ FR-06 | 6.6 | API-11 ~ API-12 | `{待分配}` |
-| DS-014 | 悬浮 AI 助手前端 | v2.1.2 | P0 | 待创建 | frontend | test_failure | DS-010, DS-013 | TASK-FRONTEND-004 | FR-05 ~ FR-06 | 6.3 / 6.6 | API-11 ~ API-12 | `{待分配}` |
-| DS-015 | 智能链接与权限 | v2.1.2 | P0 | 待创建 | backend | build_failure | DS-009 | TASK-BACKEND-005 | FR-07 ~ FR-09 | 6.7 | API-13 ~ API-14 | `{待分配}` |
-| DS-016 | Dashboard 前端 | v2.1.2 | P1 | 待创建 | frontend | test_failure | DS-015 | TASK-FRONTEND-005 | FR-10 ~ FR-11 | 11.2 | API-16 ~ API-18 | `{待分配}` |
-| DS-017 | 热度评分与 Analytics | v2.1.2 | P0 | 待创建 | backend | test_failure | DS-010 | TASK-BACKEND-005 | FR-10 | 6.8 | API-16 | `{待分配}` |
-| DS-018 | 行为提醒与跟进建议 | v2.1.2 | P1 | 待创建 | backend | test_failure | DS-017 | TASK-BACKEND-008 | FR-11 | 6.8 | API-17 | `{待分配}` |
-| DS-019 | 数据室模块 | v2.1.2 | P0 | 待创建 | fullstack | build_failure | DS-008, DS-015 | TASK-BACKEND-006 | FR-12 ~ FR-13 | 6.10 | API-19 ~ API-22 | `{待分配}` |
-| DS-020 | 邮件通知系统 | v2.1.2 | P1 | 待创建 | backend | test_failure | DS-001 | TASK-BACKEND-009 | FR-14 | 6.9 | API-23 | `{待分配}` |
-| DS-021 | CRM 集成（HubSpot/Salesforce） | v2.1.2 | P2 | 待创建 | backend | test_failure | DS-017 | TASK-BACKEND-009 | FR-15 | 6.11 | API-24 | `{待分配}` |
-| DS-022 | Slack 集成 | v2.1.2 | P2 | 待创建 | backend | test_failure | DS-017 | TASK-BACKEND-009 | FR-16 | 6.11 | API-25 | `{待分配}` |
-| DS-023 | 测试用例与自动化 | v2.1.2 | P0 | 待创建 | test | test_failure | 功能开发完成 | TASK-TEST-001 | AC-01 ~ AC-32 | 10.x | - | `{待分配}` |
-| DS-024 | 性能压测与优化 | v2.1.2 | P1 | 待创建 | test | test_failure | 功能开发完成 | TASK-TEST-002 | 第 9 节 NFR | 8.x | - | `{待分配}` |
-| DS-025 | 安全扫描与修复 | v2.1.2 | P0 | 待创建 | security | build_failure | 开发完成 | TASK-BACKEND-010 | 第 17 节 | 7.x | - | `{待分配}` |
-| DS-026 | 前端质量收尾 | v2.1.2 | P1 | 待创建 | frontend | test_failure | - | TASK-FRONTEND-001 | FR-设置/AI | 6.3 | - | `{待分配}` |
-| DS-027 | 前端-后端集成层 | v2.1.2 | P0 | 待创建 | frontend | build_failure | DS-002（契约） | TASK-FRONTEND-003 | FR-API | 5.x | §2/§3 | `{待分配}` |
+| DS-001 | 工程脚手架与项目初始化 | v2.1.2 | P0 | 已上线 | infra | build_failure | - | TASK-BACKEND-001 | - | 3.2 / 9.1 | - | `{待分配}` |
+| DS-002 | 用户认证、租户与 Workspace 模块 | v2.1.2 | P0 | 已上线 | backend | build_failure | DS-001 | TASK-BACKEND-002 | FR-01 ~ FR-02 | 6.1 | API-01 ~ API-04 | `{待分配}` |
+| DS-003 | 对象存储与后端签名 URL | v2.1.2 | P0 | 已上线 | infra | build_failure | DS-001 | TASK-BACKEND-003 | FR-03 | 7.3 ~ 7.4 | API-06 | `{待分配}` |
+| DS-004 | 子域名/自定义域名与 SSL 自动签发 | v2.1.2 | P1 | 已上线 | infra | build_failure | DS-001 | TASK-BACKEND-007 | FR-03 | 7.4 | API-15 | `{待分配}` |
+| DS-005 | 文档上传 API | v2.1.2 | P0 | 已上线 | backend | build_failure | DS-002, DS-003 | TASK-BACKEND-003 | FR-02 | 6.1 | API-05 | `{待分配}` |
+| DS-006 | PDF Pipeline（bbox + webp） | v2.1.2 | P0 | 已上线 | ai | unknown | DS-005 | TASK-BACKEND-003 | FR-02 | 6.2 | - | `{待分配}` |
+| DS-007 | Office Pipeline（OnlyOffice 转 PDF） | v2.1.2 | P0 | 已上线 | ai | unknown | DS-006 | TASK-BACKEND-003 | FR-02 | 6.2 | - | `{待分配}` |
+| DS-008 | 数据库迁移与搜索索引 | v2.1.2 | P0 | 已上线 | backend | build_failure | DS-006 | TASK-BACKEND-004 | FR-02 | 4.x / 8.x | - | `{待分配}` |
+| DS-009 | 签名 URL 与权限校验 | v2.1.2 | P0 | 已上线 | backend | build_failure | DS-003, DS-008 | TASK-BACKEND-005 | FR-03 | 6.3 / 7.4 | API-06 ~ API-08 | `{待分配}` |
+| DS-010 | Viewer Canvas 前端 | v2.1.2 | P0 | 已上线 | frontend | test_failure | DS-009 | TASK-FRONTEND-002 | FR-03 ~ FR-04 | 6.3 | API-06 ~ API-08 | `{待分配}` |
+| DS-011 | Search Service | v2.1.2 | P0 | 已上线 | backend | test_failure | DS-008 | TASK-BACKEND-004 | FR-05 | 6.4 | API-09 | `{待分配}` |
+| DS-012 | Evidence Service | v2.1.2 | P0 | 已上线 | backend | test_failure | DS-011 | TASK-BACKEND-004 | FR-05 | 6.5 | API-10 | `{待分配}` |
+| DS-013 | Assistant Service | v2.1.2 | P0 | 已上线 | backend | unknown | DS-012 | TASK-BACKEND-004 | FR-05 ~ FR-06 | 6.6 | API-11 ~ API-12 | `{待分配}` |
+| DS-014 | 悬浮 AI 助手前端 | v2.1.2 | P0 | 已上线 | frontend | test_failure | DS-010, DS-013 | TASK-FRONTEND-004 | FR-05 ~ FR-06 | 6.3 / 6.6 | API-11 ~ API-12 | `{待分配}` |
+| DS-015 | 智能链接与权限 | v2.1.2 | P0 | 已上线 | backend | build_failure | DS-009 | TASK-BACKEND-005 | FR-07 ~ FR-09 | 6.7 | API-13 ~ API-14 | `{待分配}` |
+| DS-016 | Dashboard 前端 | v2.1.2 | P1 | 已上线 | frontend | test_failure | DS-015 | TASK-FRONTEND-005 | FR-10 ~ FR-11 | 11.2 | API-16 ~ API-18 | `{待分配}` |
+| DS-017 | 热度评分与 Analytics | v2.1.2 | P0 | 已上线 | backend | test_failure | DS-010 | TASK-BACKEND-005 | FR-10 | 6.8 | API-16 | `{待分配}` |
+| DS-018 | 行为提醒与跟进建议 | v2.1.2 | P1 | 已上线 | backend | test_failure | DS-017 | TASK-BACKEND-008 | FR-11 | 6.8 | API-17 | `{待分配}` |
+| DS-019 | 数据室模块 | v2.1.2 | P0 | 已上线 | fullstack | build_failure | DS-008, DS-015 | TASK-BACKEND-006 | FR-12 ~ FR-13 | 6.10 | API-19 ~ API-22 | `{待分配}` |
+| DS-020 | 邮件通知系统 | v2.1.2 | P1 | 已上线 | backend | test_failure | DS-001 | TASK-BACKEND-009 | FR-14 | 6.9 | API-23 | `{待分配}` |
+| DS-021 | CRM 集成（HubSpot/Salesforce） | v2.1.2 | P2 | 已上线 | backend | test_failure | DS-017 | TASK-BACKEND-009 | FR-15 | 6.11 | API-24 | `{待分配}` |
+| DS-022 | Slack 集成 | v2.1.2 | P2 | 已上线 | backend | test_failure | DS-017 | TASK-BACKEND-009 | FR-16 | 6.11 | API-25 | `{待分配}` |
+| DS-023 | 测试用例与自动化 | v2.1.2 | P0 | 已上线 | test | test_failure | 功能开发完成 | TASK-TEST-001 | AC-01 ~ AC-32 | 10.x | - | `{待分配}` |
+| DS-024 | 性能压测与优化 | v2.1.2 | P1 | 已上线 | test | test_failure | 功能开发完成 | TASK-TEST-002 | 第 9 节 NFR | 8.x | - | `{待分配}` |
+| DS-025 | 安全扫描与修复 | v2.1.2 | P0 | 已上线 | security | build_failure | 开发完成 | TASK-BACKEND-010 | 第 17 节 | 7.x | - | `{待分配}` |
+| DS-026 | 前端质量收尾 | v2.1.2 | P1 | 已上线 | frontend | test_failure | - | TASK-FRONTEND-001 | FR-设置/AI | 6.3 | - | `{待分配}` |
+| DS-027 | 前端-后端集成层 | v2.1.2 | P0 | 已上线 | frontend | build_failure | DS-002（契约） | TASK-FRONTEND-003 | FR-API | 5.x | §2/§3 | `{待分配}` |
 
 ### 3.2 按版本分组
 
@@ -160,33 +160,33 @@ Sprint Board → 分支 → PR → 测试 → 上线
 
 | Issue ID | 标题 | 优先级 | 状态 | 负责人 |
 |----------|------|--------|------|--------|
-| DS-001 | 工程脚手架与项目初始化 | P0 | 待创建 | `{待分配}` |
-| DS-002 | 用户认证、租户与 Workspace 模块 | P0 | 待创建 | `{待分配}` |
-| DS-003 | 对象存储与后端签名 URL | P0 | 待创建 | `{待分配}` |
-| DS-004 | 子域名/自定义域名与 SSL 自动签发 | P1 | 待创建 | `{待分配}` |
-| DS-005 | 文档上传 API | P0 | 待创建 | `{待分配}` |
-| DS-006 | PDF Pipeline（bbox + webp） | P0 | 待创建 | `{待分配}` |
-| DS-007 | Office Pipeline（OnlyOffice 转 PDF） | P0 | 待创建 | `{待分配}` |
-| DS-008 | 数据库迁移与搜索索引 | P0 | 待创建 | `{待分配}` |
-| DS-009 | 签名 URL 与权限校验 | P0 | 待创建 | `{待分配}` |
-| DS-010 | Viewer Canvas 前端 | P0 | 待创建 | `{待分配}` |
-| DS-011 | Search Service | P0 | 待创建 | `{待分配}` |
-| DS-012 | Evidence Service | P0 | 待创建 | `{待分配}` |
-| DS-013 | Assistant Service | P0 | 待创建 | `{待分配}` |
-| DS-014 | 悬浮 AI 助手前端 | P0 | 待创建 | `{待分配}` |
-| DS-015 | 智能链接与权限 | P0 | 待创建 | `{待分配}` |
-| DS-016 | Dashboard 前端 | P1 | 待创建 | `{待分配}` |
-| DS-017 | 热度评分与 Analytics | P0 | 待创建 | `{待分配}` |
-| DS-018 | 行为提醒与跟进建议 | P1 | 待创建 | `{待分配}` |
-| DS-019 | 数据室模块 | P0 | 待创建 | `{待分配}` |
-| DS-020 | 邮件通知系统 | P1 | 待创建 | `{待分配}` |
-| DS-021 | CRM 集成（HubSpot/Salesforce） | P2 | 待创建 | `{待分配}` |
-| DS-022 | Slack 集成 | P2 | 待创建 | `{待分配}` |
-| DS-023 | 测试用例与自动化 | P0 | 待创建 | `{待分配}` |
-| DS-024 | 性能压测与优化 | P1 | 待创建 | `{待分配}` |
-| DS-025 | 安全扫描与修复 | P0 | 待创建 | `{待分配}` |
-| DS-026 | 前端质量收尾 | P1 | 待创建 | `{待分配}` |
-| DS-027 | 前端-后端集成层 | P0 | 待创建 | `{待分配}` |
+| DS-001 | 工程脚手架与项目初始化 | P0 | 已上线 | `{待分配}` |
+| DS-002 | 用户认证、租户与 Workspace 模块 | P0 | 已上线 | `{待分配}` |
+| DS-003 | 对象存储与后端签名 URL | P0 | 已上线 | `{待分配}` |
+| DS-004 | 子域名/自定义域名与 SSL 自动签发 | P1 | 已上线 | `{待分配}` |
+| DS-005 | 文档上传 API | P0 | 已上线 | `{待分配}` |
+| DS-006 | PDF Pipeline（bbox + webp） | P0 | 已上线 | `{待分配}` |
+| DS-007 | Office Pipeline（OnlyOffice 转 PDF） | P0 | 已上线 | `{待分配}` |
+| DS-008 | 数据库迁移与搜索索引 | P0 | 已上线 | `{待分配}` |
+| DS-009 | 签名 URL 与权限校验 | P0 | 已上线 | `{待分配}` |
+| DS-010 | Viewer Canvas 前端 | P0 | 已上线 | `{待分配}` |
+| DS-011 | Search Service | P0 | 已上线 | `{待分配}` |
+| DS-012 | Evidence Service | P0 | 已上线 | `{待分配}` |
+| DS-013 | Assistant Service | P0 | 已上线 | `{待分配}` |
+| DS-014 | 悬浮 AI 助手前端 | P0 | 已上线 | `{待分配}` |
+| DS-015 | 智能链接与权限 | P0 | 已上线 | `{待分配}` |
+| DS-016 | Dashboard 前端 | P1 | 已上线 | `{待分配}` |
+| DS-017 | 热度评分与 Analytics | P0 | 已上线 | `{待分配}` |
+| DS-018 | 行为提醒与跟进建议 | P1 | 已上线 | `{待分配}` |
+| DS-019 | 数据室模块 | P0 | 已上线 | `{待分配}` |
+| DS-020 | 邮件通知系统 | P1 | 已上线 | `{待分配}` |
+| DS-021 | CRM 集成（HubSpot/Salesforce） | P2 | 已上线 | `{待分配}` |
+| DS-022 | Slack 集成 | P2 | 已上线 | `{待分配}` |
+| DS-023 | 测试用例与自动化 | P0 | 已上线 | `{待分配}` |
+| DS-024 | 性能压测与优化 | P1 | 已上线 | `{待分配}` |
+| DS-025 | 安全扫描与修复 | P0 | 已上线 | `{待分配}` |
+| DS-026 | 前端质量收尾 | P1 | 已上线 | `{待分配}` |
+| DS-027 | 前端-后端集成层 | P0 | 已上线 | `{待分配}` |
 
 ---
 
