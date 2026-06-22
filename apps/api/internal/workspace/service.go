@@ -158,6 +158,19 @@ func (s *Service) List(ctx context.Context, userID string) ([]Workspace, error) 
 	return out, nil
 }
 
+// GetBySlug returns a workspace by slug if the user is a member.
+func (s *Service) GetBySlug(ctx context.Context, userID, slug string) (Workspace, error) {
+	ws, err := s.queries.GetWorkspaceBySlug(ctx, slug)
+	if err != nil {
+		return Workspace{}, err
+	}
+	wsID := uuidToString(ws.ID)
+	if _, err := s.requireMember(ctx, userID, wsID); err != nil {
+		return Workspace{}, err
+	}
+	return workspaceFromRow(ws), nil
+}
+
 // Get returns a workspace if the user is a member.
 func (s *Service) Get(ctx context.Context, userID, workspaceID string) (Workspace, error) {
 	wsUUID, err := pgUUID(workspaceID)

@@ -6,7 +6,57 @@ package db
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
+
+type Chunk struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageID      pgtype.UUID
+	Text        string
+	Bbox        []byte
+	Embedding   pgvector.Vector
+}
+
+type Document struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+type IngestionJob struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	DocumentID   pgtype.UUID
+	Status       string
+	Attempts     pgtype.Int4
+	ErrorMessage pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type Page struct {
+	ID             pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	DocumentID     pgtype.UUID
+	PageNumber     int32
+	ImageObjectKey pgtype.Text
+	Width          pgtype.Int4
+	Height         pgtype.Int4
+	CreatedAt      pgtype.Timestamptz
+}
 
 type Tenant struct {
 	ID        pgtype.UUID

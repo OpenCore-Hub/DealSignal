@@ -5,6 +5,10 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
 )
@@ -33,8 +37,25 @@ func (s *Server) registerRoutes() {
 		authHandler := auth.NewHandler(auth.NewService(queries))
 		authHandler.RegisterRoutes(api)
 
-		workspaceHandler := workspace.NewHandler(workspace.NewService(queries))
+		workspaceSvc := workspace.NewService(queries)
+		workspaceHandler := workspace.NewHandler(workspaceSvc)
 		workspaceHandler.RegisterRoutes(api)
+
+		if s.cfg.S3Bucket != "" {
+			storageClient, err := storage.NewS3Client(s.cfg)
+			if err != nil {
+				panic(err)
+			}
+			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, storageClient)
+			ingestionSvc := ingestion.NewService(queries, storageClient, converter)
+			uploadSvc := upload.NewService(queries, storageClient)
+			uploadHandler := upload.NewHandler(uploadSvc, ingestionSvc, storageClient)
+
+			ws := api.Group("/workspaces/:workspaceSlug")
+			ws.Use(middleware.Auth())
+			ws.Use(workspace.AuthMiddleware(workspaceSvc))
+			uploadHandler.RegisterRoutes(ws)
+		}
 	}
 
 	s.engine.NoRoute(func(c *gin.Context) {
