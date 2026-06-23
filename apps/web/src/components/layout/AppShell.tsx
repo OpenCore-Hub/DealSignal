@@ -1,6 +1,7 @@
 import { Sidebar } from "./Sidebar";
 import { TopNav } from "./TopNav";
 import { AIAssistant } from "@/components/ai/AIAssistant";
+import { UploadDialog } from "@/components/upload/UploadDialog";
 
 interface AppShellProps {
   children: React.ReactNode;
@@ -17,6 +18,7 @@ export function AppShell({ children }: AppShellProps) {
         </main>
       </div>
       <AIAssistant />
+      <UploadDialog />
     </div>
   );
 }

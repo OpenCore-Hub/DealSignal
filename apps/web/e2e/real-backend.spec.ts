@@ -91,4 +91,45 @@ test.describe("real backend P0 flow", () => {
     await expect(page.getByText("sample.pdf")).toBeVisible();
     await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
   });
+
+  test("upload dialog from top nav uploads a file and document appears in the list", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+    await page.goto(`/${seed.workspaceSlug}/dashboard`);
+
+    await page.getByRole("button", { name: "Upload document" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "Upload Document" });
+    await expect(dialog).toBeVisible({ timeout: 30000 });
+
+    const fileInput = dialog.locator("input#file-upload");
+    await fileInput.setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
+
+    await expect(dialog.getByText("sample.pdf")).toBeVisible();
+    await expect(dialog.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
+
+    await page.goto(`/${seed.workspaceSlug}/documents`);
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
+  });
+
+  test("create a link for a document and open the public share URL", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    // Upload a document via UI so we have a ready document.
+    await page.goto(`/${seed.workspaceSlug}/documents/upload`);
+    await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible({ timeout: 30000 });
+    await page.locator("input#file-upload").setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
+    await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
+
+    await page.goto(`/${seed.workspaceSlug}/documents`);
+    await page.getByText("sample.pdf").first().click();
+    await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
+    await page.getByRole("button", { name: "Create link" }).click();
+
+    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links/new`), { timeout: 30000 });
+    await page.getByTestId("create-link-button").click();
+
+    await expect(page.getByTestId("generated-link")).toBeVisible({ timeout: 30000 });
+  });
 });
