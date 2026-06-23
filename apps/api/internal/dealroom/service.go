@@ -114,6 +114,45 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	return room, nil
 }
 
+// RoomSummary enriches a deal room with computed aggregates.
+type RoomSummary struct {
+	Room             db.DealRoom
+	DocumentCount    int64
+	MemberCount      int64
+	PendingApprovals int64
+}
+
+// ListRooms returns all rooms in a workspace with computed aggregates.
+func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSummary, error) {
+	wsUUID := pgUUID(workspaceID)
+	rooms, err := s.queries.ListDealRoomsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]RoomSummary, len(rooms))
+	for i, room := range rooms {
+		docs, _ := s.queries.ListDealRoomDocuments(ctx, room.ID)
+		members, _ := s.queries.ListRoomMembers(ctx, room.ID)
+		requests, _ := s.queries.ListAccessRequestsByRoom(ctx, room.ID)
+
+		var pending int64
+		for _, r := range requests {
+			if r.Status == "pending" {
+				pending++
+			}
+		}
+
+		out[i] = RoomSummary{
+			Room:             room,
+			DocumentCount:    int64(len(docs)),
+			MemberCount:      int64(len(members)),
+			PendingApprovals: pending,
+		}
+	}
+	return out, nil
+}
+
 // GetRoom returns a room scoped to a workspace.
 func (s *Service) GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error) {
 	id := pgUUID(roomID)

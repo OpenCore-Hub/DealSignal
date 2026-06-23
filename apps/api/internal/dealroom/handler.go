@@ -4,6 +4,7 @@ package dealroom
 import (
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -26,12 +27,15 @@ func NewHandler(s *Service) *Handler {
 // RegisterWorkspaceRoutes mounts authenticated workspace routes.
 func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g := r.Group("/deal-rooms")
+	g.GET("", h.List)
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
 	g.POST("/:id/members", h.AddMember)
 	g.POST("/:id/access-requests/:requestId/approve", h.ApproveRequest)
 	g.POST("/:id/documents", h.AddDocument)
 	g.POST("/:id/folder-permissions", h.SetFolderPermission)
+
+	r.GET("/deal-room-templates", h.ListTemplates)
 }
 
 // RegisterPublicRoutes mounts public room routes.
@@ -50,6 +54,93 @@ type CreateRequest struct {
 	Settings         map[string]interface{} `json:"settings,omitempty"`
 	RequiresNDA      bool                   `json:"requires_nda,omitempty"`
 	RequiresApproval bool                   `json:"requires_approval,omitempty"`
+}
+
+// List returns all deal rooms in the workspace.
+func (h *Handler) List(c *gin.Context) {
+	rooms, err := h.service.ListRooms(c.Request.Context(), middleware.WorkspaceIDFrom(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	out := make([]gin.H, len(rooms))
+	for i, r := range rooms {
+		out[i] = roomSummaryResponse(r)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// ListTemplates returns available deal room templates.
+func (h *Handler) ListTemplates(c *gin.Context) {
+	out := []gin.H{
+		{
+			"id":                     "tmpl_seed",
+			"name":                   "Seed Round Due Diligence",
+			"description":            "Standard due diligence room for seed investors, including deck, financial model, team and legal documents.",
+			"scenario":               "seed",
+			"folderStructure": []gin.H{
+				{"name": "01 Pitch Deck", "description": "Latest fundraising deck"},
+				{"name": "02 Financials", "description": "Historical financials, projections and key assumptions"},
+				{"name": "03 Team", "description": "Founder resumes, org chart and hiring plan"},
+				{"name": "04 Product", "description": "Product demo, roadmap and technical architecture"},
+				{"name": "05 Legal", "description": "Incorporation, shareholder agreement and option plan"},
+			},
+			"recommendedFiles":       []string{"Pitch Deck.pdf", "Financial Model.xlsx", "Cap Table"},
+			"defaultPermissionLevel": "medium",
+			"ndaEnabled":             false,
+		},
+		{
+			"id":                     "tmpl_series_a",
+			"name":                   "Series A Data Room",
+			"description":            "In-depth due diligence for Series A firms, emphasizing product data, growth metrics and financial transparency.",
+			"scenario":               "series-a",
+			"folderStructure": []gin.H{
+				{"name": "01 Executive Summary"},
+				{"name": "02 Growth Metrics"},
+				{"name": "03 Financials & Projections"},
+				{"name": "04 Customer Proof"},
+				{"name": "05 Product & Tech"},
+				{"name": "06 Legal & Compliance"},
+			},
+			"recommendedFiles":       []string{"Investor Deck.pdf", "Metrics Dashboard", "ARR Waterfall"},
+			"defaultPermissionLevel": "high",
+			"ndaEnabled":             true,
+		},
+		{
+			"id":                     "tmpl_lp_update",
+			"name":                   "LP Quarterly Update",
+			"description":            "Quarterly performance, distribution and operations report for LPs, with bulk distribution and access tracking.",
+			"scenario":               "lp-update",
+			"folderStructure": []gin.H{
+				{"name": "01 GP Letter"},
+				{"name": "02 Performance & IRR"},
+				{"name": "03 Portfolio Updates"},
+				{"name": "04 Distributions & Capital Calls"},
+				{"name": "05 Governance & AML/KYC"},
+			},
+			"recommendedFiles":       []string{"GP Letter.pdf", "LP Report.xlsx"},
+			"defaultPermissionLevel": "low",
+			"ndaEnabled":             false,
+		},
+		{
+			"id":                     "tmpl_sales_proposal",
+			"name":                   "Enterprise Sales Proposal",
+			"description":            "Proposal data room for enterprise procurement committees, including proposal, case studies, security and implementation plan.",
+			"scenario":               "sales-proposal",
+			"folderStructure": []gin.H{
+				{"name": "01 Proposal"},
+				{"name": "02 ROI & Business Case"},
+				{"name": "03 Case Studies"},
+				{"name": "04 Security & Compliance"},
+				{"name": "05 Implementation Plan"},
+			},
+			"recommendedFiles":       []string{"Proposal.pdf", "Security Whitepaper", "Implementation Plan"},
+			"defaultPermissionLevel": "medium",
+			"ndaEnabled":             true,
+		},
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 // Create handles data room creation.
@@ -273,16 +364,37 @@ func mapPublicError(c *gin.Context, err error) {
 }
 
 func roomResponse(r db.DealRoom) gin.H {
+	resp := baseRoomResponse(r)
+	resp["documentCount"] = 0
+	resp["memberCount"] = 0
+	resp["pendingApprovals"] = 0
+	return resp
+}
+
+func roomSummaryResponse(r RoomSummary) gin.H {
+	resp := baseRoomResponse(r.Room)
+	resp["documentCount"] = r.DocumentCount
+	resp["memberCount"] = r.MemberCount
+	resp["pendingApprovals"] = r.PendingApprovals
+	return resp
+}
+
+func baseRoomResponse(r db.DealRoom) gin.H {
+	template := ""
+	if r.TemplateType.Valid {
+		template = strings.ReplaceAll(r.TemplateType.String, "_", "-")
+	}
 	resp := gin.H{
-		"id":                 uuid.UUID(r.ID.Bytes).String(),
-		"slug":               r.Slug,
-		"name":               r.Name,
-		"template_type":      textOrNil(r.TemplateType),
-		"requires_nda":       r.RequiresNda,
-		"requires_approval":  r.RequiresApproval,
-		"status":             r.Status,
-		"created_at":         r.CreatedAt.Time.Format(time.RFC3339),
-		"updated_at":         r.UpdatedAt.Time.Format(time.RFC3339),
+		"id":                uuid.UUID(r.ID.Bytes).String(),
+		"slug":              r.Slug,
+		"name":              r.Name,
+		"template":          template,
+		"ndaEnabled":        r.RequiresNda,
+		"requiresApproval":  r.RequiresApproval,
+		"status":            r.Status,
+		"createdAt":         r.CreatedAt.Time.Format(time.RFC3339),
+		"updatedAt":         r.UpdatedAt.Time.Format(time.RFC3339),
+		"lastAccessedAt":    nil,
 	}
 	if r.Description.Valid {
 		resp["description"] = r.Description.String
