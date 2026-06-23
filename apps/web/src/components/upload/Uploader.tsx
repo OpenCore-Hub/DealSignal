@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTranslation } from "react-i18next";
+import { api } from "@/lib/api";
 
 interface UploadFile {
   id: string;
@@ -35,27 +36,37 @@ export function Uploader() {
         setFiles((prev) =>
           prev.map((f) => {
             if (f.id !== uploadFile.id) return f;
-            if (f.status === "error") {
+            if (f.status !== "uploading") {
               clearInterval(interval);
               return f;
             }
-            const nextProgress = Math.min(f.progress + Math.random() * 20, 100);
-            if (nextProgress >= 100) {
-              clearInterval(interval);
-              return { ...f, progress: 100, status: "processing" };
-            }
-            return { ...f, progress: nextProgress };
+            return { ...f, progress: Math.min(f.progress + Math.random() * 10, 90) };
           })
         );
       }, 300);
 
-      setTimeout(() => {
-        setFiles((prev) =>
-          prev.map((f) =>
-            f.id === uploadFile.id ? { ...f, status: "done" as const } : f
-          )
-        );
-      }, 3000 + Math.random() * 2000);
+      api
+        .uploadDocument(uploadFile.file)
+        .then(() => {
+          clearInterval(interval);
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === uploadFile.id
+                ? { ...f, progress: 100, status: "done" }
+                : f
+            )
+          );
+        })
+        .catch((err: Error) => {
+          clearInterval(interval);
+          setFiles((prev) =>
+            prev.map((f) =>
+              f.id === uploadFile.id
+                ? { ...f, status: "error", error: err.message }
+                : f
+            )
+          );
+        });
     });
   }, []);
 
@@ -132,6 +143,9 @@ export function Uploader() {
                 </p>
                 {uploadFile.status !== "done" && uploadFile.status !== "error" && (
                   <Progress value={uploadFile.progress} className="mt-2 h-1.5" />
+                )}
+                {uploadFile.status === "error" && uploadFile.error && (
+                  <p className="mt-1 text-caption text-error-500">{uploadFile.error}</p>
                 )}
               </div>
               <div className="flex items-center gap-2">

@@ -13,7 +13,6 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useUIStore } from "@/stores/uiStore";
 import { api } from "@/lib/api";
-import { toast } from "sonner";
 import type { Workspace } from "@/types";
 
 export function WorkspaceSwitcher() {
@@ -96,9 +95,7 @@ export function WorkspaceSwitcher() {
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="gap-2"
-          onClick={() =>
-            toast.info(tLayout("workspaceSwitcher.createWorkspaceComingSoon"))
-          }
+          onClick={() => navigate("/workspaces/new")}
         >
           <Plus size={16} />
           <span>{tLayout("workspaceSwitcher.createWorkspace")}</span>

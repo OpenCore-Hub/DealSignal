@@ -23,16 +23,6 @@ const DEFAULT_WATERMARK: WatermarkInfo = {
   email: "viewer@example.test",
 };
 
-const DEFAULT_EVIDENCE: Evidence[] = [
-  {
-    chunk_id: "ev-demo-001",
-    page_number: 1,
-    quote: "Revenue grew 3x.",
-    boxes: [{ x: 0.15, y: 0.25, w: 0.45, h: 0.06 }],
-    score: 0.92,
-  },
-];
-
 interface CanvasViewerProps {
   evidence?: Evidence[];
   watermark?: WatermarkInfo | null;
@@ -127,7 +117,7 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
 
   const pageWidth = Math.max(300, zoom * 6);
   const pageHeight = Math.max(400, zoom * 8);
-  const activeEvidence = (evidence ?? DEFAULT_EVIDENCE)
+  const activeEvidence = (evidence ?? [])
     .filter((e) => e.page_number === page)
     .concat(
       highlightedEvidence && highlightedEvidence.page_number === page ? [highlightedEvidence] : []

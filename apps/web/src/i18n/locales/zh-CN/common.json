@@ -122,7 +122,13 @@
   },
   "usageNearLimit": "接近上限",
   "createWorkspace": "创建工作区",
+  "creating": "创建中...",
   "createWorkspaceDisabled": "创建工作区需后端支持",
+  "workspaceName": "工作区名称",
+  "workspaceNamePlaceholder": "Acme Capital",
+  "workspaceSlug": "工作区标识",
+  "workspaceSlugPlaceholder": "acme-capital",
+  "brandColor": "品牌色",
   "visitor": {
     "unknownOrganization": "未知机构",
     "visitCount": "{{count}} 次访问",

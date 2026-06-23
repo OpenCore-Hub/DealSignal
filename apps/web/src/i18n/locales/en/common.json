@@ -123,7 +123,13 @@
   },
   "usageNearLimit": "Near limit",
   "createWorkspace": "Create workspace",
+  "creating": "Creating...",
   "createWorkspaceDisabled": "Creating workspaces requires backend support",
+  "workspaceName": "Workspace name",
+  "workspaceNamePlaceholder": "Acme Capital",
+  "workspaceSlug": "Workspace slug",
+  "workspaceSlugPlaceholder": "acme-capital",
+  "brandColor": "Brand color",
   "visitor": {
     "unknownOrganization": "Unknown organization",
     "visitCount": "{{count}} visits",

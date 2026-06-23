@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { List, Bell, UploadSimple, SignOut, Gear } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
@@ -20,8 +20,9 @@ import type { WorkspaceSettings } from "@/types";
 
 export function TopNav() {
   const { t } = useTranslation("layout");
+  const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const { toggleSidebar, setUploadDialogOpen } = useUIStore();
+  const { toggleSidebar, setUploadDialogOpen, reset: resetUI } = useUIStore();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
 
   useEffect(() => {
@@ -105,7 +106,13 @@ export function TopNav() {
                 <Gear size={16} className="mr-2" />
                 {t("topNav.account.settings")}
               </DropdownMenuItem>
-              <DropdownMenuItem disabled title={t("topNav.account.logoutComingSoon")}>
+              <DropdownMenuItem
+                onClick={() => {
+                  localStorage.removeItem("access_token");
+                  resetUI();
+                  navigate("/", { replace: true });
+                }}
+              >
                 <SignOut size={16} className="mr-2" />
                 {t("topNav.account.logout")}
               </DropdownMenuItem>

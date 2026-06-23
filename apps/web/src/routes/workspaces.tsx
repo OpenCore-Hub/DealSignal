@@ -100,9 +100,7 @@ export function WorkspacesPage() {
         <Button
           variant="outline"
           className="w-full gap-2"
-          onClick={() => {}}
-          disabled
-          title={t("createWorkspaceDisabled")}
+          onClick={() => navigate("/workspaces/new")}
         >
           <Buildings size={18} />
           {t("createWorkspace")}

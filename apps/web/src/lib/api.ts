@@ -64,6 +64,11 @@ function getWorkspaceSlug(): string {
 
 export const api = {
   getWorkspaces: () => request<{ data: Workspace[] }>(undefined, "/workspaces"),
+  createWorkspace: (payload: { name: string; slug: string; brand_color?: string }) =>
+    request<Workspace>(undefined, "/workspaces", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
 
   getDashboardStats: () =>
     request<DashboardStats>(getWorkspaceSlug(), "/dashboard/stats"),

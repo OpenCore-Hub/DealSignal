@@ -15,6 +15,8 @@ interface UIState {
 
   uploadDialogOpen: boolean;
   setUploadDialogOpen: (open: boolean) => void;
+
+  reset: () => void;
 }
 
 export const useUIStore = create<UIState>()(
@@ -32,6 +34,8 @@ export const useUIStore = create<UIState>()(
 
       uploadDialogOpen: false,
       setUploadDialogOpen: (open) => set({ uploadDialogOpen: open }),
+
+      reset: () => set({ currentWorkspace: null, uploadDialogOpen: false }),
     }),
     {
       name: "dealsignal-ui",

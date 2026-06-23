@@ -33,6 +33,7 @@ const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").the
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
 const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ default: m.NotFoundPage })));
 const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
+const CreateWorkspacePage = lazy(() => import("@/routes/workspaces/new").then((m) => ({ default: m.CreateWorkspacePage })));
 
 function PageLoader() {
   return (
@@ -130,5 +131,6 @@ export const router = createBrowserRouter([
       { path: "*", element: <NotFoundPage /> },
     ],
   },
+  { path: "/workspaces/new", element: <Suspense fallback={<PageLoader />}><CreateWorkspacePage /></Suspense> },
   { path: "/viewer/:documentId", element: <Suspense fallback={<PageLoader />}><ViewerPage /></Suspense> },
 ]);
