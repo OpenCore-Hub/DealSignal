@@ -219,6 +219,59 @@ func (s *Service) GetByID(ctx context.Context, linkID, workspaceID string) (db.L
 	return link, nil
 }
 
+// List returns all non-deleted links in a workspace.
+func (s *Service) List(ctx context.Context, workspaceID string) ([]db.Link, error) {
+	return s.queries.ListLinksByWorkspace(ctx, pgUUID(workspaceID))
+}
+
+// ListByDocument returns links for a specific document.
+func (s *Service) ListByDocument(ctx context.Context, workspaceID, documentID string) ([]db.Link, error) {
+	docID, err := uuid.Parse(documentID)
+	if err != nil {
+		return nil, errors.New("invalid document id")
+	}
+	return s.queries.ListLinksByDocument(ctx, db.ListLinksByDocumentParams{
+		WorkspaceID: pgUUID(workspaceID),
+		DocumentID:  pgtype.UUID{Bytes: docID, Valid: true},
+	})
+}
+
+// UpdateStatus updates a link's status (e.g. active / revoked).
+func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status string) (db.Link, error) {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return db.Link{}, errors.New("invalid link id")
+	}
+	if status != "active" && status != "revoked" {
+		return db.Link{}, errors.New("invalid status")
+	}
+	link, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+		Status:      status,
+		ID:          pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID: pgUUID(workspaceID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Link{}, ErrNotFoundInWorkspace
+		}
+		return db.Link{}, err
+	}
+	return link, nil
+}
+
+// ListAccessLogs returns access logs for a link.
+func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string) ([]db.AccessLog, error) {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return nil, errors.New("invalid link id")
+	}
+	// Verify link exists in workspace.
+	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
+		return nil, err
+	}
+	return s.queries.ListAccessLogsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+}
+
 func normalizePermission(p string) string {
 	p = strings.ToLower(strings.TrimSpace(p))
 	if p == "" {

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
@@ -134,25 +135,40 @@ func (s *Service) run(ctx context.Context, doc db.Document) error {
 			}
 		} else {
 			var embeddings [][]float32
+			embedErr := error(nil)
 			if len(texts) > 0 {
-				var err error
-				embeddings, err = s.embedder.EmbedBatch(ctx, texts)
-				if err != nil {
-					return fmt.Errorf("embed chunks: %w", err)
+				embeddings, embedErr = s.embedder.EmbedBatch(ctx, texts)
+				if embedErr != nil {
+					fmt.Printf(`{"time":"%s","level":"warn","document_id":"%s","message":"embedding failed, continuing without vectors: %s"}`+"\n",
+						time.Now().UTC().Format(time.RFC3339), docID, embedErr.Error())
 				}
 			}
 
-			for i, ch := range chunks {
-				err := s.queries.CreateChunkWithEmbedding(ctx, db.CreateChunkWithEmbeddingParams{
-					TenantID:    doc.TenantID,
-					WorkspaceID: doc.WorkspaceID,
-					PageID:      page.ID,
-					Text:        ch.Text,
-					Bbox:        ch.Bbox,
-					Embedding:   pgvector.NewVector(embeddings[i]),
-				})
-				if err != nil {
-					return fmt.Errorf("create chunk: %w", err)
+			if embedErr != nil {
+				for _, ch := range chunks {
+					if err := s.queries.CreateChunk(ctx, db.CreateChunkParams{
+						TenantID:    doc.TenantID,
+						WorkspaceID: doc.WorkspaceID,
+						PageID:      page.ID,
+						Text:        ch.Text,
+						Bbox:        ch.Bbox,
+					}); err != nil {
+						return fmt.Errorf("create chunk: %w", err)
+					}
+				}
+			} else {
+				for i, ch := range chunks {
+					err := s.queries.CreateChunkWithEmbedding(ctx, db.CreateChunkWithEmbeddingParams{
+						TenantID:    doc.TenantID,
+						WorkspaceID: doc.WorkspaceID,
+						PageID:      page.ID,
+						Text:        ch.Text,
+						Bbox:        ch.Bbox,
+						Embedding:   pgvector.NewVector(embeddings[i]),
+					})
+					if err != nil {
+						return fmt.Errorf("create chunk: %w", err)
+					}
 				}
 			}
 		}

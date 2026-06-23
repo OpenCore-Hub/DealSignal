@@ -1388,6 +1388,32 @@ func (q *Queries) GetInvitationByToken(ctx context.Context, token pgtype.UUID) (
 	return i, err
 }
 
+const getLastAccessLogByLink = `-- name: GetLastAccessLogByLink :one
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE link_id = $1
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (AccessLog, error) {
+	row := q.db.QueryRow(ctx, getLastAccessLogByLink, linkID)
+	var i AccessLog
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.EventType,
+		&i.Ip,
+		&i.UserAgent,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLinkAccessMetrics = `-- name: GetLinkAccessMetrics :one
 SELECT
     COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
@@ -1923,6 +1949,44 @@ func (q *Queries) IncrementLinkAccessCount(ctx context.Context, id pgtype.UUID) 
 	return err
 }
 
+const listAccessLogsByLink = `-- name: ListAccessLogsByLink :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE link_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAccessLogsByLink(ctx context.Context, linkID pgtype.UUID) ([]AccessLog, error) {
+	rows, err := q.db.Query(ctx, listAccessLogsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccessLog
+	for rows.Next() {
+		var i AccessLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.EventType,
+			&i.Ip,
+			&i.UserAgent,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAccessRequestsByRoom = `-- name: ListAccessRequestsByRoom :many
 SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
 FROM room_access_requests
@@ -2189,6 +2253,60 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinksByDocument = `-- name: ListLinksByDocument :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
+ORDER BY created_at DESC
+`
+
+type ListLinksByDocumentParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocumentParams) ([]Link, error) {
+	rows, err := q.db.Query(ctx, listLinksByDocument, arg.WorkspaceID, arg.DocumentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Link
+	for rows.Next() {
+		var i Link
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.DocumentID,
+			&i.PublicToken,
+			&i.Name,
+			&i.PermissionType,
+			&i.AllowedEmails,
+			&i.AllowedDomains,
+			&i.PasswordHash,
+			&i.ExpiresAt,
+			&i.MaxAccessCount,
+			&i.AccessCount,
+			&i.DownloadEnabled,
+			&i.WatermarkEnabled,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -2978,6 +3096,22 @@ func (q *Queries) SetFolderPermission(ctx context.Context, arg SetFolderPermissi
 	return i, err
 }
 
+const softDeleteDocument = `-- name: SoftDeleteDocument :exec
+UPDATE documents
+SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
+`
+
+type SoftDeleteDocumentParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocumentParams) error {
+	_, err := q.db.Exec(ctx, softDeleteDocument, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const updateAccessRequestStatus = `-- name: UpdateAccessRequestStatus :exec
 UPDATE room_access_requests
 SET status = $1, reviewed_by = $2, reviewed_at = now(), updated_at = now()
@@ -3092,6 +3226,48 @@ func (q *Queries) UpdateIngestionJob(ctx context.Context, arg UpdateIngestionJob
 		arg.ID,
 	)
 	return err
+}
+
+const updateLinkStatus = `-- name: UpdateLinkStatus :one
+UPDATE links
+SET status = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+`
+
+type UpdateLinkStatusParams struct {
+	Status      string
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusParams) (Link, error) {
+	row := q.db.QueryRow(ctx, updateLinkStatus, arg.Status, arg.ID, arg.WorkspaceID)
+	var i Link
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PublicToken,
+		&i.Name,
+		&i.PermissionType,
+		&i.AllowedEmails,
+		&i.AllowedDomains,
+		&i.PasswordHash,
+		&i.ExpiresAt,
+		&i.MaxAccessCount,
+		&i.AccessCount,
+		&i.DownloadEnabled,
+		&i.WatermarkEnabled,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateRoomMemberNDA = `-- name: UpdateRoomMemberNDA :exec

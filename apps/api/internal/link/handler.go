@@ -5,14 +5,17 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -32,6 +35,10 @@ func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service) *Hand
 func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g := r.Group("/links")
 	g.POST("", h.Create)
+	g.GET("", h.List)
+	g.GET("/:id", h.Get)
+	g.PATCH("/:id", h.Update)
+	g.GET("/:id/access-logs", h.AccessLogs)
 }
 
 // RegisterPublicRoutes mounts public link routes.
@@ -122,6 +129,98 @@ type CreateRequest struct {
 	WatermarkEnabled bool     `json:"watermark_enabled,omitempty"`
 }
 
+// List returns links for the workspace, optionally filtered by document_id.
+func (h *Handler) List(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	ctx := c.Request.Context()
+
+	var links []db.Link
+	var err error
+	if docID := c.Query("documentId"); docID != "" {
+		links, err = h.service.ListByDocument(ctx, workspaceID, docID)
+	} else {
+		links, err = h.service.List(ctx, workspaceID)
+	}
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	out := make([]gin.H, 0, len(links))
+	for _, link := range links {
+		item, err := h.linkResponse(c, link)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// Get returns a single link.
+func (h *Handler) Get(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	link, err := h.service.GetByID(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	item, err := h.linkResponse(c, link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+// Update changes a link's status.
+func (h *Handler) Update(c *gin.Context) {
+	var req struct {
+		Status string `json:"status" binding:"required,oneof=active revoked"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	link, err := h.service.UpdateStatus(c.Request.Context(), c.Param("id"), workspaceID, req.Status)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	item, err := h.linkResponse(c, link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+// AccessLogs returns access logs for a link.
+func (h *Handler) AccessLogs(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	logs, err := h.service.ListAccessLogs(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": accessLogList(logs)})
+}
+
 // Create handles smart-link creation.
 func (h *Handler) Create(c *gin.Context) {
 	var req CreateRequest
@@ -167,18 +266,12 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	publicURL := publicURL(c, link.PublicToken)
-	c.JSON(http.StatusCreated, gin.H{
-		"id":               uuidToString(link.ID),
-		"public_token":     link.PublicToken,
-		"name":             textOrNil(link.Name),
-		"permission_type":  link.PermissionType,
-		"status":           link.Status,
-		"short_url":        publicURL,
-		"download_enabled": link.DownloadEnabled,
-		"watermark_enabled": link.WatermarkEnabled,
-		"created_at":       link.CreatedAt.Time.Format(time.RFC3339),
-	})
+	item, err := h.linkResponse(c, link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, item)
 }
 
 // Access handles public link access.
@@ -283,4 +376,88 @@ func textOrNil(t pgtype.Text) interface{} {
 
 func uuidToString(u pgtype.UUID) string {
 	return uuid.UUID(u.Bytes).String()
+}
+
+func linkUUID(id string) pgtype.UUID {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
+	ctx := c.Request.Context()
+
+	doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          link.DocumentID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return nil, err
+	}
+	documentTitle := doc.Title
+
+	metrics, _ := h.service.queries.GetLinkPageViewMetrics(ctx, link.ID)
+	lastLog, _ := h.service.queries.GetLastAccessLogByLink(ctx, link.ID)
+
+	score, _ := h.analytics.GetScore(ctx, link.ID, link.WorkspaceID, heat.CircleDefault)
+	if score.Level == "" {
+		score.Level = "cold"
+	}
+
+	now := time.Now()
+	isActive := link.Status == "active" && (!link.ExpiresAt.Valid || link.ExpiresAt.Time.After(now))
+
+	item := gin.H{
+		"id":                   uuidToString(link.ID),
+		"documentId":           uuidToString(link.DocumentID),
+		"documentTitle":        documentTitle,
+		"name":                 textOrNil(link.Name),
+		"shortUrl":             publicURL(c, link.PublicToken),
+		"accessCount":          link.AccessCount,
+		"heatLevel":            score.Level,
+		"status":               link.Status,
+		"createdAt":            link.CreatedAt.Time.Format(time.RFC3339),
+		"isActive":             isActive,
+		"permissionType":       mapPermissionType(link.PermissionType),
+		"downloadEnabled":      link.DownloadEnabled,
+		"watermarkEnabled":     link.WatermarkEnabled,
+		"avgDurationSeconds":   int(metrics.AvgDurationSeconds),
+	}
+	if link.ExpiresAt.Valid {
+		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)
+	}
+	if lastLog.CreatedAt.Valid {
+		item["lastViewedAt"] = lastLog.CreatedAt.Time.Format(time.RFC3339)
+	}
+	return item, nil
+}
+
+func mapPermissionType(t string) string {
+	switch strings.ToLower(t) {
+	case "email_required":
+		return "email"
+	default:
+		return t
+	}
+}
+
+func accessLogList(logs []db.AccessLog) []gin.H {
+	out := make([]gin.H, 0, len(logs))
+	for _, log := range logs {
+		item := gin.H{
+			"id":             uuidToString(log.ID),
+			"linkId":         uuidToString(log.LinkID),
+			"visitorEmail":   textOrNil(log.VisitorEmail),
+			"eventType":      log.EventType,
+			"timestamp":      log.CreatedAt.Time.Format(time.RFC3339),
+			"durationSeconds": 0,
+		}
+		if log.UserAgent.Valid {
+			item["device"] = log.UserAgent.String
+		}
+		out = append(out, item)
+	}
+	return out
 }

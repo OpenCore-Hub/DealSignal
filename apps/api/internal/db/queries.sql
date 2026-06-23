@@ -78,6 +78,11 @@ UPDATE documents
 SET status = $1, page_count = $2, updated_at = now()
 WHERE id = $3;
 
+-- name: SoftDeleteDocument :exec
+UPDATE documents
+SET deleted_at = now(), updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
+
 -- name: CreateIngestionJob :one
 INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
 VALUES ($1, $2, $3, $4)
@@ -220,6 +225,22 @@ FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC;
 
+-- name: ListLinksByDocument :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
+ORDER BY created_at DESC;
+
+-- name: UpdateLinkStatus :one
+UPDATE links
+SET status = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at;
+
 -- name: CreateAccessLog :exec
 INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
@@ -267,6 +288,19 @@ WHERE a.link_id = $1
       SELECT 1 FROM page_views p
       WHERE p.link_id = $1 AND p.visitor_id = a.visitor_id
   );
+
+-- name: ListAccessLogsByLink :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE link_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetLastAccessLogByLink :one
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE link_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
 -- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
