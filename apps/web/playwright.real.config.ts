@@ -20,9 +20,12 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "VITE_API_BASE_URL=http://localhost:8080 pnpm dev",
+    command: "pnpm dev",
+    env: {
+      VITE_API_BASE_URL: "http://localhost:8080",
+    },
     url: "http://localhost:5173",
-    reuseExistingServer: !process.env.CI,
+    reuseExistingServer: false,
     timeout: 120 * 1000,
   },
 });
