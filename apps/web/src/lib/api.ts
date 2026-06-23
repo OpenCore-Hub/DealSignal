@@ -80,6 +80,34 @@ export const api = {
   deleteDocument: (id: string) =>
     request<void>(getWorkspaceSlug(), `/documents/${id}`, { method: "DELETE" }),
 
+  getDocumentPages: async (id: string) => {
+    const res = await request<{
+      document_id: string;
+      pages: { page_number: number; width: number; height: number }[];
+      total: number;
+    }>(getWorkspaceSlug(), `/documents/${id}/pages`);
+    return {
+      documentId: res.document_id,
+      pages: res.pages.map((p) => ({
+        pageNumber: p.page_number,
+        width: p.width,
+        height: p.height,
+      })),
+      total: res.total,
+    };
+  },
+  getPageSignedUrl: (id: string, pageNumber: number) =>
+    request<{ page_number: number; image_url: string; expires_at: string; width: number; height: number }>(
+      getWorkspaceSlug(),
+      `/documents/${id}/pages/signed-url`,
+      { method: "POST", body: JSON.stringify({ page_number: pageNumber }) }
+    ),
+  getDocumentDownloadUrl: (id: string) =>
+    request<{ download_url: string; expires_at: string; filename: string; content_type: string }>(
+      getWorkspaceSlug(),
+      `/documents/${id}/download-url`
+    ),
+
   uploadDocument: (file: File) => {
     const formData = new FormData();
     formData.append("file", file);

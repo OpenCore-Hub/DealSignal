@@ -188,10 +188,21 @@ export function DocumentDetail() {
             {
               label: t("common:download"),
               icon: <DownloadSimple size={16} />,
-              onClick: () => {},
-              disabled: true,
-              title: t("documents:detail.downloadDisabled"),
-              pro: true,
+              onClick: async () => {
+                try {
+                  const res = await api.getDocumentDownloadUrl(doc.id);
+                  const a = document.createElement("a");
+                  a.href = res.download_url;
+                  a.download = res.filename || doc.title;
+                  a.target = "_blank";
+                  a.rel = "noopener noreferrer";
+                  document.body.appendChild(a);
+                  a.click();
+                  a.remove();
+                } catch (e) {
+                  // TODO: surface error toast
+                }
+              },
             },
             {
               label: t("common:delete"),

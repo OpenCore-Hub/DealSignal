@@ -28,11 +28,19 @@ interface CanvasViewerProps {
   watermark?: WatermarkInfo | null;
 }
 
+interface PageInfo {
+  pageNumber: number;
+  width: number;
+  height: number;
+}
+
 export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
   const { documentId } = useParams<{ documentId: string }>();
   const { t } = useTranslation(["documents", "common"]);
   const [doc, setDoc] = useState<Document | null>(null);
   const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
+  const [pages, setPages] = useState<PageInfo[]>([]);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
@@ -53,6 +61,14 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
           setDoc(d);
           setAnalytics(a.data);
           setPage(1);
+          if (d.status === "ready") {
+            const pagesRes = await api.getDocumentPages(id!);
+            if (!cancelled) {
+              setPages(pagesRes.pages);
+            }
+          } else {
+            setPages([]);
+          }
         }
       } catch (e) {
         if (!cancelled) setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
@@ -68,11 +84,47 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
 
   useEffect(() => {
     if (highlightedPage && highlightedPage !== page) {
-      // External evidence click requests a page jump; sync viewer state once.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setPage(highlightedPage);
     }
   }, [highlightedPage, page]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = documentId;
+    if (!id || pages.length === 0) {
+      setImageUrl(null);
+      return;
+    }
+    async function loadSignedUrl() {
+      try {
+        const res = await api.getPageSignedUrl(id!, page);
+        if (!cancelled) setImageUrl(res.image_url);
+      } catch (e) {
+        if (!cancelled) setImageUrl(null);
+      }
+    }
+    loadSignedUrl();
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId, page, pages.length]);
+
+  const handleDownload = async () => {
+    if (!documentId || !doc) return;
+    try {
+      const res = await api.getDocumentDownloadUrl(documentId);
+      const a = document.createElement("a");
+      a.href = res.download_url;
+      a.download = res.filename || doc.title;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
+    }
+  };
 
   if (loading) {
     return (
@@ -107,16 +159,24 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
     );
   }
 
-  const totalPages = doc.pageCount;
+  const totalPages = pages.length > 0 ? pages.length : doc.pageCount;
   const pageAnalytics = analytics.find((a) => a.pageNumber === page);
-  const pages = Array.from({ length: totalPages }, (_, i) => {
+  const pageList = Array.from({ length: totalPages }, (_, i) => {
     const num = i + 1;
     const a = analytics.find((x) => x.pageNumber === num);
-    return { pageNumber: num, viewCount: a?.viewCount ?? 0, avgDurationSeconds: a?.avgDurationSeconds ?? 0 };
+    const p = pages.find((x) => x.pageNumber === num);
+    return { pageNumber: num, viewCount: a?.viewCount ?? 0, avgDurationSeconds: a?.avgDurationSeconds ?? 0, width: p?.width, height: p?.height };
   });
 
-  const pageWidth = Math.max(300, zoom * 6);
-  const pageHeight = Math.max(400, zoom * 8);
+  const currentPageInfo = pages.find((p) => p.pageNumber === page);
+  const aspectRatio = currentPageInfo && currentPageInfo.height > 0
+    ? currentPageInfo.width / currentPageInfo.height
+    : 0.75;
+
+  const baseWidth = Math.max(300, 800);
+  const pageWidth = Math.max(300, baseWidth * (zoom / 100));
+  const pageHeight = pageWidth / aspectRatio;
+
   const activeEvidence = (evidence ?? [])
     .filter((e) => e.page_number === page)
     .concat(
@@ -189,9 +249,7 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
             size="icon-sm"
             variant="ghost"
             aria-label={t("common:download")}
-            disabled
-            title={t("documents:viewer.downloadDisabled")}
-            onClick={() => {}}
+            onClick={handleDownload}
           >
             <Download size={16} />
           </Button>
@@ -200,7 +258,7 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
 
       <div className="flex flex-1 overflow-hidden">
         <ThumbnailNav
-          pages={pages}
+          pages={pageList}
           currentPage={page}
           onSelect={setPage}
           className="hidden w-48 md:flex"
@@ -212,28 +270,38 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
             className="relative overflow-hidden rounded-md bg-white shadow-card"
             style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
           >
-            <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
-              <div className="text-h1 text-muted-foreground">
-                {t("documents:viewer.pagePlaceholder", { pageNumber: page })}
+            {doc.status !== "ready" ? (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
+                <FileText size={48} className="text-muted-foreground/50" />
+                <p className="text-body">{t("documents:viewer.processing", { status: doc.status })}</p>
               </div>
-              <p className="text-body text-muted-foreground">{t("documents:viewer.previewPlaceholder")}</p>
-              <p className="text-caption max-w-xs">
-                {t("documents:viewer.signedUrlNotice")}
-                {pageAnalytics && (
-                  <>
-                    <br />
-                    {t("documents:viewer.currentPageStats", {
-                      count: pageAnalytics.viewCount,
-                      duration: formatDuration(pageAnalytics.avgDurationSeconds),
-                    })}
-                  </>
-                )}
-              </p>
-            </div>
+            ) : imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={t("documents:viewer.pageLabel", { pageNumber: page })}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
+                <div className="text-h1 text-muted-foreground">
+                  {t("documents:viewer.pagePlaceholder", { pageNumber: page })}
+                </div>
+                <p className="text-body text-muted-foreground">{t("documents:viewer.previewPlaceholder")}</p>
+              </div>
+            )}
 
             <HighlightOverlay evidences={activeEvidence} />
             <WatermarkOverlay watermark={activeWatermark} />
           </div>
+
+          {pageAnalytics && (
+            <p className="absolute bottom-2 left-1/2 -translate-x-1/2 text-caption text-muted-foreground">
+              {t("documents:viewer.currentPageStats", {
+                count: pageAnalytics.viewCount,
+                duration: formatDuration(pageAnalytics.avgDurationSeconds),
+              })}
+            </p>
+          )}
         </div>
       </div>
     </div>

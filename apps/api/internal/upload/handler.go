@@ -36,6 +36,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
 	g.GET("/:id/status", h.GetStatus)
+	g.GET("/:id/download-url", h.DownloadURL)
 	g.GET("/:id/pages", h.ListPages)
 	g.POST("/:id/pages/signed-url", h.SignedURL)
 }
@@ -134,6 +135,41 @@ func (h *Handler) ListPages(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"document_id": uuidToString(doc.ID), "pages": pageList(pages), "total": len(pages)})
+}
+
+// DownloadURL generates a temporary URL for downloading the original document.
+func (h *Handler) DownloadURL(c *gin.Context) {
+	doc, _, err := h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+
+	expiry := 15 * time.Minute
+	url, err := h.storage.PresignedGetURL(c.Request.Context(), doc.StorageKey, expiry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+		return
+	}
+
+	contentType := "application/octet-stream"
+	switch doc.SourceType {
+	case "pdf":
+		contentType = "application/pdf"
+	case "docx":
+		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "pptx":
+		contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case "xlsx":
+		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"download_url": url,
+		"expires_at":   time.Now().Add(expiry).UTC().Format(time.RFC3339),
+		"filename":     doc.Title,
+		"content_type": contentType,
+	})
 }
 
 // SignedURL generates a temporary URL for a page image.

@@ -200,7 +200,7 @@ func (s *Service) renderAndUploadPage(ctx context.Context, key string, p PageInf
 		return err
 	}
 
-	if err := s.storage.PutObject(ctx, key, bytes.NewReader(img), int64(len(img)), "image/webp"); err != nil {
+	if err := s.storage.PutObject(ctx, key, bytes.NewReader(img), int64(len(img)), "image/png"); err != nil {
 		return fmt.Errorf("upload page image: %w", err)
 	}
 	return nil
