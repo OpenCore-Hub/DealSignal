@@ -13,7 +13,8 @@ ORIG_KEY=""
 
 cleanup() {
   if [[ -n "$ORIG_KEY" ]]; then
-    sed -i '' "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$ORIG_KEY|" "$API_ENV"
+    sed -e "s|^OPENAI_API_KEY=.*|OPENAI_API_KEY=$ORIG_KEY|" "$API_ENV" > "$API_ENV.tmp"
+    mv "$API_ENV.tmp" "$API_ENV"
     echo "[cleanup] restored OPENAI_API_KEY"
   fi
   echo "[cleanup] restarting API with restored env"
@@ -31,7 +32,8 @@ if [[ -z "$ORIG_KEY" ]]; then
   ORIG_KEY=""
 fi
 
-sed -i '' 's|^OPENAI_API_KEY=.*|OPENAI_API_KEY=|' "$API_ENV"
+sed -e 's|^OPENAI_API_KEY=.*|OPENAI_API_KEY=|' "$API_ENV" > "$API_ENV.tmp"
+mv "$API_ENV.tmp" "$API_ENV"
 echo "[env] OPENAI_API_KEY temporarily cleared"
 
 echo "[api] restarting to disable AI"

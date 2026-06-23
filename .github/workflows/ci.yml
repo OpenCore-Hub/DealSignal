@@ -159,3 +159,101 @@ jobs:
           name: playwright-report
           path: apps/web/playwright-report/
 
+  backend-e2e:
+    name: Backend E2E
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/api
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure docker-compose binary
+        run: |
+          if ! command -v docker-compose &> /dev/null; then
+            echo 'docker compose "$@"' | sudo tee /usr/local/bin/docker-compose > /dev/null
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+
+      - name: Prepare env
+        run: |
+          cp .env.example .env
+          sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' .env
+          sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' .env
+
+      - name: Start services
+        run: docker-compose up -d
+
+      - name: Wait for API
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:8080/healthz && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Run backend E2E
+        run: PDF=../web/e2e/fixtures/sample.pdf ./e2e-test.sh
+
+      - name: Tear down
+        if: always()
+        run: docker-compose down
+
+  frontend-e2e-real:
+    name: Frontend real-backend E2E
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ensure docker-compose binary
+        run: |
+          if ! command -v docker-compose &> /dev/null; then
+            echo 'docker compose "$@"' | sudo tee /usr/local/bin/docker-compose > /dev/null
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+
+      - name: Prepare backend env
+        run: |
+          cp apps/api/.env.example apps/api/.env
+          sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' apps/api/.env
+          sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' apps/api/.env
+
+      - name: Start backend
+        run: cd apps/api && docker-compose up -d
+
+      - name: Wait for API
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:8080/healthz && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+          package_json_file: apps/web/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: cd apps/web && pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: cd apps/web && pnpm exec playwright install --with-deps chromium
+
+      - name: Run real-backend E2E
+        run: cd apps/web && ./e2e-real-backend.sh
+
+      - name: Tear down backend
+        if: always()
+        run: cd apps/api && docker-compose down
+

@@ -16,7 +16,8 @@ cleanup() {
   echo "[cleanup] stopping mock LLM server"
   docker rm -f "$MOCK_CONTAINER" >/dev/null 2>&1 || true
   if [[ -n "$ORIG_BASE_URL" ]]; then
-    sed -i '' "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=$ORIG_BASE_URL|" .env
+    sed -e "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=$ORIG_BASE_URL|" .env > .env.tmp
+    mv .env.tmp .env
     echo "[cleanup] restored OPENAI_BASE_URL=$ORIG_BASE_URL"
   fi
   docker-compose up -d --no-deps api >/dev/null 2>&1 || true
@@ -60,7 +61,8 @@ ORIG_BASE_URL=$(grep '^OPENAI_BASE_URL=' .env | cut -d= -f2- || true)
 if [[ -z "$ORIG_BASE_URL" ]]; then
   ORIG_BASE_URL=""
 fi
-sed -i '' "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=http://$MOCK_CONTAINER:$MOCK_PORT/v1|" .env
+sed -e "s|^OPENAI_BASE_URL=.*|OPENAI_BASE_URL=http://$MOCK_CONTAINER:$MOCK_PORT/v1|" .env > .env.tmp
+mv .env.tmp .env
 echo "[env] OPENAI_BASE_URL -> http://$MOCK_CONTAINER:$MOCK_PORT/v1"
 
 # Restart API to pick up the new base URL.
