@@ -67,6 +67,16 @@ func (h *Handler) Create(c *gin.Context) {
 
 	// Trigger ingestion asynchronously; status is queryable via /status.
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Printf(`{"time":"%s","level":"error","document_id":"%s","panic":"%v"}`+"\n",
+					time.Now().UTC().Format(time.RFC3339),
+					doc.ID,
+					r,
+				)
+			}
+		}()
+
 		ctx := context.Background()
 		if err := h.ingestionService.ProcessDocument(ctx, db.Document{
 			ID:          pgUUID(doc.ID),

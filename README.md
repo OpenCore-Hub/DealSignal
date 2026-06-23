@@ -72,8 +72,8 @@ pnpm build
 ```bash
 cd apps/api
 
-# 启动本地依赖（PostgreSQL + Redis + MinIO）
-docker compose up -d
+# 启动本地依赖（PostgreSQL + Redis + MinIO + OnlyOffice）
+docker-compose up -d
 
 # 运行测试
 make test
@@ -95,7 +95,7 @@ go run ./cmd/server
 
 ```bash
 cd apps/api
-docker compose up --build
+docker-compose up --build
 ```
 
 然后访问 `http://localhost:5173`（前端开发服务器）或 `http://localhost:8080`（API）。
@@ -108,7 +108,9 @@ docker compose up --build
 关键变量：
 
 - `VITE_API_BASE_URL`：前端调用的 API 地址；留空则回退到 MSW。
-- `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`S3_*`、`OPENAI_API_KEY`：后端必需配置。
+- `DATABASE_URL`、`REDIS_URL`、`JWT_SECRET`、`S3_*`：后端必需配置。
+- `OPENAI_API_KEY`：后端可选；留空则禁用向量搜索与 AI assistant。
+- `OPENAI_BASE_URL`、`OPENAI_REFERER`、`OPENAI_APP_TITLE`：OpenAI-compatible / OpenRouter 配置。
 
 ## 设计文档
 
@@ -138,6 +140,19 @@ cd apps/api && make trivy-fs
 
 # 前端依赖审计
 cd apps/web && pnpm security
+```
+
+## 端到端验证
+
+```bash
+# 后端 P0 E2E（无需 AI key）
+cd apps/api && ./e2e-test.sh
+
+# 后端 P0 + AI E2E（本地 mock LLM）
+cd apps/api && ./e2e-ai.sh
+
+# 前端真实后端 E2E
+cd apps/web && ./e2e-real-backend.sh
 ```
 
 ## 持续集成

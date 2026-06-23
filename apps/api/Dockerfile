@@ -13,6 +13,10 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-w -s" -o server ./cmd/server
 
+# Create a writable /tmp directory for the scratch runtime.
+FROM alpine:3.21 AS tmp
+RUN mkdir -p /tmp && chmod 1777 /tmp
+
 # Empty runtime image — only the static binary and CA bundle are included.
 # This removes the distroless Debian base layer and eliminates Trivy OS-package
 # findings while keeping the container non-root.
@@ -22,6 +26,7 @@ WORKDIR /app
 
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /build/server /app/server
+COPY --chown=65532:65532 --from=tmp /tmp /tmp
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 

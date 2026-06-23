@@ -5,3 +5,4 @@
 coverage.out
 coverage.html
 *.coverage
+e2e-test.pdf

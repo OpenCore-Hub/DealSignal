@@ -64,6 +64,10 @@ func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query str
 }
 
 func (s *Service) vectorSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]Evidence, error) {
+	if s.embedder == nil {
+		return nil, nil
+	}
+
 	vec, err := s.embedder.Embed(ctx, query)
 	if err != nil {
 		return nil, err

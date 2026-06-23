@@ -10,6 +10,9 @@ ALTER TABLE assistant_sessions
         FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE;
 
 ALTER TABLE assistant_sessions
+    DROP CONSTRAINT IF EXISTS fk_assistant_sessions_links;
+
+ALTER TABLE assistant_sessions
     ADD CONSTRAINT fk_assistant_sessions_links
         FOREIGN KEY (link_id) REFERENCES links(id) ON DELETE CASCADE;
 

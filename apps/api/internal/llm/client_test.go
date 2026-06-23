@@ -74,3 +74,116 @@ func TestCustomBaseURL(t *testing.T) {
 		t.Fatalf("expected path to end with /chat/completions, got %s", requestPath)
 	}
 }
+
+func TestCustomHeadersSent(t *testing.T) {
+	var gotReferer, gotTitle, gotAuth string
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotReferer = r.Header.Get("HTTP-Referer")
+		gotTitle = r.Header.Get("X-Title")
+		gotAuth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"id":      "chatcmpl-test",
+			"object":  "chat.completion",
+			"created": 1234567890,
+			"model":   "gpt-4o-mini",
+			"choices": []map[string]interface{}{
+				{
+					"index": 0,
+					"message": map[string]interface{}{
+						"role":    "assistant",
+						"content": "ok",
+					},
+					"finish_reason": "stop",
+				},
+			},
+		})
+	}))
+	defer ts.Close()
+
+	c, err := NewClient(Config{
+		APIKey:     "sk-test",
+		BaseURL:    ts.URL,
+		ChatModel:  "gpt-4o-mini",
+		Referer:    "https://example.com",
+		AppTitle:   "TestApp",
+		HTTPClient: ts.Client(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	_, err = c.ChatCompletion(context.Background(), "", []Message{{Role: "user", Content: "hi"}})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if gotReferer != "https://example.com" {
+		t.Fatalf("expected HTTP-Referer header %q, got %q", "https://example.com", gotReferer)
+	}
+	if gotTitle != "TestApp" {
+		t.Fatalf("expected X-Title header %q, got %q", "TestApp", gotTitle)
+	}
+	if gotAuth != "Bearer sk-test" {
+		t.Fatalf("expected Authorization header %q, got %q", "Bearer sk-test", gotAuth)
+	}
+}
+
+func TestEmbedBatch(t *testing.T) {
+	var requestBody map[string]interface{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&requestBody); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"object": "list",
+			"data": []map[string]interface{}{
+				{
+					"object":    "embedding",
+					"index":     0,
+					"embedding": []float32{0.1, 0.2, 0.3},
+				},
+				{
+					"object":    "embedding",
+					"index":     1,
+					"embedding": []float32{0.4, 0.5, 0.6},
+				},
+			},
+			"model": "text-embedding-3-small",
+			"usage": map[string]interface{}{
+				"prompt_tokens": 4,
+				"total_tokens":  4,
+			},
+		})
+	}))
+	defer ts.Close()
+
+	c, err := NewClient(Config{
+		APIKey:         "sk-test",
+		BaseURL:        ts.URL,
+		EmbeddingModel: "text-embedding-3-small",
+		ChatModel:      "gpt-4o-mini",
+		HTTPClient:     ts.Client(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	vecs, err := c.EmbedBatch(context.Background(), []string{"hello", "world"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(vecs) != 2 {
+		t.Fatalf("expected 2 embeddings, got %d", len(vecs))
+	}
+	if len(vecs[0]) != 3 || len(vecs[1]) != 3 {
+		t.Fatalf("expected 3-dim embeddings, got %d and %d", len(vecs[0]), len(vecs[1]))
+	}
+
+	input, ok := requestBody["input"].([]interface{})
+	if !ok || len(input) != 2 {
+		t.Fatalf("expected input array of length 2, got %v", requestBody["input"])
+	}
+}

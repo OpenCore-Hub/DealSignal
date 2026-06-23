@@ -21,6 +21,7 @@ var (
 	ErrMessageRequired = errors.New("message is required")
 	ErrInvalidSession  = errors.New("invalid session id")
 	ErrSessionNotFound = errors.New("session not found")
+	ErrLLMNotConfigured = errors.New("llm not configured")
 )
 
 const (
@@ -117,6 +118,10 @@ func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req Chat
 
 	evContext := s.formatter.BuildContext(evidenceList)
 	evContext = truncateToLength(evContext, maxEvidenceChars)
+
+	if s.llm == nil {
+		return nil, ErrLLMNotConfigured
+	}
 
 	history := buildHistory(msgs, req.Message, evContext)
 	answer, err := s.llm.ChatCompletion(ctx, systemPrompt, history)

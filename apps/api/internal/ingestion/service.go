@@ -120,26 +120,40 @@ func (s *Service) run(ctx context.Context, doc db.Document) error {
 			texts[i] = ch.Text
 		}
 
-		var embeddings [][]float32
-		if len(texts) > 0 {
-			var err error
-			embeddings, err = s.embedder.EmbedBatch(ctx, texts)
-			if err != nil {
-				return fmt.Errorf("embed chunks: %w", err)
+		if s.embedder == nil {
+			for _, ch := range chunks {
+				if err := s.queries.CreateChunk(ctx, db.CreateChunkParams{
+					TenantID:    doc.TenantID,
+					WorkspaceID: doc.WorkspaceID,
+					PageID:      page.ID,
+					Text:        ch.Text,
+					Bbox:        ch.Bbox,
+				}); err != nil {
+					return fmt.Errorf("create chunk: %w", err)
+				}
 			}
-		}
+		} else {
+			var embeddings [][]float32
+			if len(texts) > 0 {
+				var err error
+				embeddings, err = s.embedder.EmbedBatch(ctx, texts)
+				if err != nil {
+					return fmt.Errorf("embed chunks: %w", err)
+				}
+			}
 
-		for i, ch := range chunks {
-			err := s.queries.CreateChunkWithEmbedding(ctx, db.CreateChunkWithEmbeddingParams{
-				TenantID:    doc.TenantID,
-				WorkspaceID: doc.WorkspaceID,
-				PageID:      page.ID,
-				Text:        ch.Text,
-				Bbox:        ch.Bbox,
-				Embedding:   pgvector.NewVector(embeddings[i]),
-			})
-			if err != nil {
-				return fmt.Errorf("create chunk: %w", err)
+			for i, ch := range chunks {
+				err := s.queries.CreateChunkWithEmbedding(ctx, db.CreateChunkWithEmbeddingParams{
+					TenantID:    doc.TenantID,
+					WorkspaceID: doc.WorkspaceID,
+					PageID:      page.ID,
+					Text:        ch.Text,
+					Bbox:        ch.Bbox,
+					Embedding:   pgvector.NewVector(embeddings[i]),
+				})
+				if err != nil {
+					return fmt.Errorf("create chunk: %w", err)
+				}
 			}
 		}
 	}

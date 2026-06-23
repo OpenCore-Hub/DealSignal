@@ -30,6 +30,8 @@ type Config struct {
 	OpenAIBaseURL        string
 	OpenAIEmbeddingModel string
 	OpenAIChatModel      string
+	OpenAIReferer        string // optional, e.g. for OpenRouter
+	OpenAIAppTitle       string // optional, e.g. for OpenRouter
 
 	BaseDomain   string
 	CNAMETarget  string
@@ -51,7 +53,7 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Port:     getEnv("PORT", "8080"),
 		LogLevel: getEnv("LOG_LEVEL", "info"),
-		Version:  getEnv("VERSION", "v2.1.0"),
+		Version:  getEnv("VERSION", "v2.1.2"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
 		JWTSecret:   os.Getenv("JWT_SECRET"),
@@ -71,6 +73,8 @@ func Load() (*Config, error) {
 		OpenAIBaseURL:        os.Getenv("OPENAI_BASE_URL"),
 		OpenAIEmbeddingModel: os.Getenv("OPENAI_EMBEDDING_MODEL"),
 		OpenAIChatModel:      os.Getenv("OPENAI_CHAT_MODEL"),
+		OpenAIReferer:        os.Getenv("OPENAI_REFERER"),
+		OpenAIAppTitle:       os.Getenv("OPENAI_APP_TITLE"),
 
 		BaseDomain:   getEnv("BASE_DOMAIN", "dealsignal.com"),
 		CNAMETarget:  getEnv("CNAME_TARGET", "cname.dealsignal.com"),
@@ -101,9 +105,6 @@ func Load() (*Config, error) {
 	}
 	if cfg.S3AccessKey == "" || cfg.S3SecretKey == "" {
 		return nil, fmt.Errorf("S3_ACCESS_KEY and S3_SECRET_KEY are required")
-	}
-	if cfg.OpenAIAPIKey == "" {
-		return nil, fmt.Errorf("OPENAI_API_KEY is required")
 	}
 
 	if _, err := strconv.Atoi(cfg.Port); err != nil {

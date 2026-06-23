@@ -1,62 +1,57 @@
-# Agent 工作规范
+# Agent Notes
 
-## 项目背景
+## Project layout
 
-DealSignal 是一个面向创始人、投资人和销售团队的智能文档分享与交易信号平台。
+- `apps/api` — Go 1.25 backend (Gin, sqlc, pgx, PostgreSQL, Redis, MinIO, OnlyOffice)
+- `apps/web` — React 19 + Vite 8 frontend (TypeScript, Tailwind CSS, shadcn/ui, MSW)
+- `docs/` — Architecture, API spec, implementation plans
 
-- **前端**：React 19 + Vite 8 + Tailwind CSS 4 + Base UI + Zustand。
-- **后端**：Go 1.25 + Gin + PostgreSQL（pgx/sqlc）+ Redis + S3-compatible 存储 + OpenAI。
-- **当前版本**：`v2.1.2`（见 `VERSION` / `CHANGELOG.md`）。
+## Local backend stack
 
-## 工作原则
+```bash
+cd apps/api
+cp .env.example .env
+# edit .env, especially JWT_SECRET
+docker-compose up --build
+```
 
-1. **设计优先**：任何 UI 改动前，先对照 `docs/DESIGN-TOKENS-v2.1.1.md` 与 `docs/INTERACTION-SPEC-v2.1.1-REFINED.md`。
-2. **零假交互**：不要保留 `onClick={() => {}}`。未实现的功能应 `disabled` 并加 Tooltip 说明，或从 UI 移除。
-3. **即时反馈**：复制、删除、保存、重置等操作必须提供图标变化、toast 或二次确认。
-4. **键盘可达**：所有可点击元素必须可通过 Tab 聚焦，Enter/Space 触发。
-5. **中文 SaaS 语境**：界面标签、微文案、数据单位使用中文。
-6. **不要引用 Mock**：业务组件应调用 `src/lib/api.ts` 中的 API，不要直接 import `src/lib/mocks/data.ts`。
-7. **MSW 仅开发**：生产构建不要启动 MSW；Mock 逻辑只写在 `src/lib/mocks/` 中。
-8. **后端安全第一**：Go 依赖和容器镜像需通过 `make security` / Trivy 扫描；不得为绕过扫描而放宽规则。
-9. **测试门禁**：前端改动通过 `pnpm test`，后端改动通过 `make test`（含 `-race`）后方可提交。
+Health check: `curl http://localhost:8080/healthz`
 
-## 目录约定
+## Key environment variables
 
-### 前端
+- `OPENAI_API_KEY` — optional. Leave empty to disable vector search and assistant.
+- `OPENAI_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
+- `OPENAI_REFERER` / `OPENAI_APP_TITLE` — optional headers for OpenRouter-compatible providers.
 
-- `apps/web/src/routes/`：页面入口，尽量保持薄。
-- `apps/web/src/components/`：业务与通用组件。
-- `apps/web/src/components/ui/`：基础 UI 组件，基于 Base UI 封装。
-- `apps/web/src/lib/`：API 客户端、工具函数、类型。
-- `apps/web/src/stores/`：Zustand 状态管理。
+## Testing
 
-### 后端
+Backend:
 
-- `apps/api/cmd/server/`：服务入口。
-- `apps/api/internal/server/`：HTTP 路由、中间件。
-- `apps/api/internal/{domain,upload,search,link,dealroom,...}/`：按业务域组织的 handler / service / repository。
-- `apps/api/internal/db/`：sqlc 生成的模型与查询。
-- `apps/api/internal/db/migrations/`：数据库迁移文件。
-- `apps/api/scripts/loadtest/`：k6 压测脚本。
+```bash
+cd apps/api
+go test ./...
+./e2e-test.sh      # P0 backend E2E (no AI)
+./e2e-ai.sh        # P0 + AI E2E with mock LLM
+```
 
-## 代码风格
+Frontend:
 
-### 前端
+```bash
+cd apps/web
+pnpm lint
+pnpm typecheck
+pnpm test
+pnpm test:e2e          # MSW mocks
+./e2e-real-backend.sh  # real backend
+```
 
-- 使用 TypeScript 严格模式。
-- Tailwind 类名优先使用语义化 Token，避免任意值（如 `text-[10px]`）。
-- 组件 props 必须显式类型化。
-- 异步请求必须包含错误处理。
+## Docker notes
 
-### 后端
+- Use the `docker-compose` binary (not the `docker compose` plugin) in this repo.
+- MinIO and OnlyOffice run with `platform: linux/amd64` for Apple Silicon compatibility.
+- The API image is `FROM scratch`; a writable `/tmp` directory is copied into the final image for document ingestion.
 
-- 遵循 Go 标准项目布局。
-- Handler 只负责 HTTP 转换；业务逻辑放在 service。
-- 数据库访问通过 sqlc 生成的 repository，避免手写裸 SQL。
-- 错误返回统一 JSON 格式 `{ "code": "...", "message": "..." }`。
-- 配置通过环境变量注入，禁止硬编码密钥或默认密码。
+## Release version
 
-## 当前重点
-
-- v2.1.2 已合入 `main`：后端 MVP、前端集成、测试自动化、安全扫描均已就绪。
-- 下一步参见 [前端审计与优化计划 v2.1.3](./docs/FRONTEND-AUDIT-AND-REFINEMENT-PLAN-v2.1.3.md) 与 backlog issue。
+- `apps/api/.env.example` and `apps/api/docker-compose.yml` should default to the current release version.
+- `internal/config/config.go` default version should match the release tag.

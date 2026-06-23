@@ -78,28 +78,36 @@ func (s *Server) registerRoutes() {
 			}
 
 			var llmClient *llm.Client
+			var ingestionEmbedder ingestion.Embedder
+			var searchEmbedder search.Embedder
+			var chatCompleter assistant.ChatCompleter
 			if s.cfg.OpenAIAPIKey != "" {
 				llmClient, err = llm.NewClient(llm.Config{
 					APIKey:         s.cfg.OpenAIAPIKey,
 					BaseURL:        s.cfg.OpenAIBaseURL,
 					EmbeddingModel: s.cfg.OpenAIEmbeddingModel,
 					ChatModel:      s.cfg.OpenAIChatModel,
+					Referer:        s.cfg.OpenAIReferer,
+					AppTitle:       s.cfg.OpenAIAppTitle,
 				})
 				if err != nil {
 					panic(err)
 				}
+				ingestionEmbedder = llmClient
+				searchEmbedder = llmClient
+				chatCompleter = llmClient
 			}
 
 			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, s.cfg.OnlyOfficeJWTSecret, storageClient)
-			ingestionSvc := ingestion.NewService(queries, storageClient, converter, llmClient)
+			ingestionSvc := ingestion.NewService(queries, storageClient, converter, ingestionEmbedder)
 			uploadSvc := upload.NewService(queries, storageClient)
 			uploadHandler := upload.NewHandler(uploadSvc, ingestionSvc, storageClient)
 
-			searchSvc := search.NewService(queries, llmClient)
+			searchSvc := search.NewService(queries, searchEmbedder)
 			searchHandler := search.NewHandler(searchSvc)
 
 			evidenceFormatter := evidence.NewFormatter()
-			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, llmClient)
+			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
 			linkSvc := link.NewService(queries)

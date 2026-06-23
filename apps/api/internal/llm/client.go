@@ -23,6 +23,8 @@ type Config struct {
 	BaseURL        string // optional, for self-hosted / Azure / OpenAI-compatible endpoints
 	EmbeddingModel string
 	ChatModel      string
+	Referer        string       // optional, e.g. HTTP-Referer for OpenRouter
+	AppTitle       string       // optional, e.g. X-Title for OpenRouter
 	HTTPClient     *http.Client // optional, mainly for tests
 }
 
@@ -48,14 +50,47 @@ func NewClient(cfg Config) (*Client, error) {
 	if cfg.BaseURL != "" {
 		oCfg.BaseURL = cfg.BaseURL
 	}
-	if cfg.HTTPClient != nil {
-		oCfg.HTTPClient = cfg.HTTPClient
+
+	httpClient := cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{}
 	}
+
+	headers := make(map[string]string)
+	if cfg.Referer != "" {
+		headers["HTTP-Referer"] = cfg.Referer
+	}
+	if cfg.AppTitle != "" {
+		headers["X-Title"] = cfg.AppTitle
+	}
+	if len(headers) > 0 {
+		base := httpClient.Transport
+		if base == nil {
+			base = http.DefaultTransport
+		}
+		httpClient.Transport = &headerTransport{base: base, headers: headers}
+	}
+	oCfg.HTTPClient = httpClient
 
 	return &Client{
 		cfg:    cfg,
 		client: openai.NewClientWithConfig(oCfg),
 	}, nil
+}
+
+type headerTransport struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (t *headerTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if len(t.headers) > 0 {
+		req = req.Clone(req.Context())
+		for k, v := range t.headers {
+			req.Header.Set(k, v)
+		}
+	}
+	return t.base.RoundTrip(req)
 }
 
 // Embed returns the embedding vector for a single text input.

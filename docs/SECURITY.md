@@ -34,7 +34,7 @@ The following risks are accepted because they originate from upstream images or 
 
 | Asset | Risk | Rationale | Review date |
 |-------|------|-----------|-------------|
-| `minio/minio:RELEASE.2025-10-15T17-29-55Z` | Potential future CVEs in the last official MinIO Community Edition image | MinIO Community Edition moved to source-only distribution after this release. We pinned the final pre-built image and will either build from source or migrate to a supported object-store alternative for production. | 2026-09-30 |
+| `minio/minio:RELEASE.2025-09-07T16-13-09Z` | Potential future CVEs in the pinned MinIO Community Edition image | MinIO Community Edition has moved to source-only distribution for newer releases. We pinned a recent pre-built image and will either build from source or migrate to a supported object-store alternative for production. | 2026-09-30 |
 | `onlyoffice/documentserver:8.3.3` | Vulnerabilities in bundled OS/packages that ONLYOFFICE has not patched in this tag | The image is pinned to a stable release; upgrades require validating document-editor compatibility. Critical fixes will be back-ported by bumping to the next stable tag after QA. | 2026-09-30 |
 
 ## Secret handling

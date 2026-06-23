@@ -1,4 +1,7 @@
 ALTER TABLE deal_rooms
+    DROP CONSTRAINT IF EXISTS uk_deal_rooms_slug;
+
+ALTER TABLE deal_rooms
     ADD CONSTRAINT uk_deal_rooms_slug UNIQUE (slug);
 
 CREATE OR REPLACE FUNCTION prevent_access_request_mutation()
