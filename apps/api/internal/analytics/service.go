@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
@@ -35,6 +36,7 @@ type Querier interface {
 	GetPageAnalyticsByDocument(ctx context.Context, arg db.GetPageAnalyticsByDocumentParams) ([]db.GetPageAnalyticsByDocumentRow, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.Document, error)
 	GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (db.AccessLog, error)
+	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
 }
 
 // Service records events and computes heat scores.
@@ -98,6 +100,54 @@ func (s *Service) RecordDownload(ctx context.Context, link db.Link, visitorID, e
 		Ip:           parseIP(ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
+}
+
+// ErrNoLinkForDocument is returned when an authenticated event cannot be attributed to a link.
+var ErrNoLinkForDocument = errors.New("no active link found for document")
+
+// RecordAuthenticatedEvent records an authenticated viewer event against an active link for the document.
+func (s *Service) RecordAuthenticatedEvent(ctx context.Context, workspaceID, documentID, visitorID, email, ip, ua, eventType string, pageNumber, durationSeconds int32, scrollDepth float64) error {
+	wsUUID, err := parseUUID(workspaceID)
+	if err != nil {
+		return err
+	}
+	docUUID, err := parseUUID(documentID)
+	if err != nil {
+		return err
+	}
+
+	links, err := s.queries.ListLinksByDocument(ctx, db.ListLinksByDocumentParams{
+		WorkspaceID: wsUUID,
+		DocumentID:  docUUID,
+	})
+	if err != nil {
+		return fmt.Errorf("list links: %w", err)
+	}
+
+	var link *db.Link
+	now := time.Now()
+	for i := range links {
+		if links[i].Status != "active" {
+			continue
+		}
+		if links[i].ExpiresAt.Valid && links[i].ExpiresAt.Time.Before(now) {
+			continue
+		}
+		link = &links[i]
+		break
+	}
+	if link == nil {
+		return ErrNoLinkForDocument
+	}
+
+	switch eventType {
+	case "page_viewed":
+		return s.RecordPageView(ctx, *link, visitorID, pageNumber, durationSeconds, scrollDepth)
+	case "download_attempted":
+		return s.RecordDownload(ctx, *link, visitorID, email, ip, ua)
+	default:
+		return fmt.Errorf("unsupported event type: %s", eventType)
+	}
 }
 
 // GetScore returns the heat score for a link scoped to a workspace.

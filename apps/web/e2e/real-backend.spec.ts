@@ -147,4 +147,52 @@ test.describe("real backend P0 flow", () => {
     await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
     await expect(page.getByText(/\d+ visits?/).first()).toBeVisible({ timeout: 30000 });
   });
+
+  test("authenticated viewer reports page views to analytics", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    // Upload a document and create a link so the authenticated viewer has an active link to attribute views to.
+    await page.goto(`/${seed.workspaceSlug}/documents/upload`);
+    await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible({ timeout: 30000 });
+    await page.locator("input#file-upload").setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
+    await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
+
+    await page.goto(`/${seed.workspaceSlug}/documents`);
+    await page.getByText("sample.pdf").first().click();
+    await page.getByRole("button", { name: "Create link" }).click();
+    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links/new`), { timeout: 30000 });
+    await page.getByTestId("create-link-button").click();
+    await expect(page.getByTestId("generated-link")).toBeVisible({ timeout: 30000 });
+
+    // Look up the document id via API so we can navigate directly to the authenticated viewer.
+    const docsRes = await apiFetch(`/api/workspaces/${seed.workspaceSlug}/documents`, {
+      headers: { Authorization: `Bearer ${seed.token}` },
+    });
+    expect(docsRes.ok).toBe(true);
+    const docsBody = (await docsRes.json()) as { data: { id: string; title: string }[] };
+    const documentId = docsBody.data.find((d) => d.title === "sample.pdf")?.id;
+    expect(documentId).toBeTruthy();
+
+    // Open the document detail inside the workspace shell so the current workspace
+    // is selected, then click Preview to open the authenticated viewer.
+    await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
+    await page.getByRole("button", { name: "Preview" }).first().click();
+    await expect(page).toHaveURL(/\/viewer\//, { timeout: 30000 });
+    await expect(page.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    // The authenticated viewer reports the page view after a short dwell time.
+    await page.waitForTimeout(3000);
+
+    // Poll the analytics API until the view is recorded.
+    await expect.poll(
+      async () => {
+        const res = await apiFetch(`/api/workspaces/${seed.workspaceSlug}/insights/pages/${documentId}`, {
+          headers: { Authorization: `Bearer ${seed.token}` },
+        });
+        const body = (await res.json()) as { data: { pageNumber: number; viewCount: number }[] };
+        return body.data?.[0]?.viewCount ?? 0;
+      },
+      { timeout: 30000 }
+    ).toBeGreaterThan(0);
+  });
 });

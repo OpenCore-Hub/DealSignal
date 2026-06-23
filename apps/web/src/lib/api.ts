@@ -177,6 +177,18 @@ export const api = {
       skipAuth: true,
     }),
 
+  recordViewerEvent: (payload: {
+    documentId: string;
+    eventType: "page_viewed" | "download_attempted";
+    pageNumber?: number;
+    durationSeconds?: number;
+    scrollDepth?: number;
+  }) =>
+    request<void>(getWorkspaceSlug(), "/events", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   uploadDocument: (file: File) => {
     const formData = new FormData();
     formData.append("file", file);

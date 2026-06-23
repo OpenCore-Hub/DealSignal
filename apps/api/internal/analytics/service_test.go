@@ -87,6 +87,10 @@ func (m *mockAnalyticsQuerier) GetLastAccessLogByLink(_ context.Context, _ pgtyp
 	return db.AccessLog{}, nil
 }
 
+func (m *mockAnalyticsQuerier) ListLinksByDocument(_ context.Context, _ db.ListLinksByDocumentParams) ([]db.Link, error) {
+	return nil, nil
+}
+
 func TestRecordLinkOpenedAtomicSuccess(t *testing.T) {
 	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1}
 	svc := NewService(q)

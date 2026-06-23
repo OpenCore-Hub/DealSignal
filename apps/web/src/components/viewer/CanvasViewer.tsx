@@ -143,17 +143,31 @@ export function CanvasViewer({
     pageStartRef.current = Date.now();
     return () => {
       const duration = Math.max(0, Math.round((Date.now() - pageStartRef.current) / 1000));
-      if (duration > 0) {
-        void api.recordPublicEvent({
-          event_type: "page_viewed",
-          public_token: publicToken,
-          visitor_id: publicVisitorId,
-          page_number: page,
-          duration_seconds: duration,
-        });
-      }
+      if (duration <= 0) return;
+      void api.recordPublicEvent({
+        event_type: "page_viewed",
+        public_token: publicToken,
+        visitor_id: publicVisitorId,
+        page_number: page,
+        duration_seconds: duration,
+      });
     };
   }, [publicToken, documentId, page, publicVisitorId]);
+
+  // For authenticated viewers, report a page view after the user has dwelled on the page.
+  useEffect(() => {
+    if (publicToken || !documentId || !doc || doc.status !== "ready") return;
+    pageStartRef.current = Date.now();
+    const timer = setTimeout(() => {
+      void api.recordViewerEvent({
+        documentId,
+        eventType: "page_viewed",
+        pageNumber: page,
+        durationSeconds: Math.max(1, Math.round((Date.now() - pageStartRef.current) / 1000)),
+      });
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [publicToken, documentId, page, doc]);
 
   const handleDownload = async () => {
     if (!documentId || !doc) return;
@@ -178,6 +192,11 @@ export function CanvasViewer({
           event_type: "download_attempted",
           public_token: publicToken,
           visitor_id: publicVisitorId,
+        });
+      } else {
+        void api.recordViewerEvent({
+          documentId,
+          eventType: "download_attempted",
         });
       }
     } catch (e) {

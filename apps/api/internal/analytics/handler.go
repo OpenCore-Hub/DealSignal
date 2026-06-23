@@ -2,6 +2,7 @@
 package analytics
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -34,6 +35,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	r.GET("/dashboard/stats", h.GetDashboardStats)
 	r.GET("/insights/overview", h.GetInsightsOverview)
 	r.GET("/insights/pages/:documentId", h.GetPageAnalytics)
+	r.POST("/events", h.RecordViewerEvent)
 }
 
 // GetScore returns the heat score for a link.
@@ -120,6 +122,40 @@ func (h *Handler) GetPageAnalytics(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+type viewerEventRequest struct {
+	DocumentID      string  `json:"documentId" binding:"required,uuid"`
+	EventType       string  `json:"eventType" binding:"required,oneof=page_viewed download_attempted"`
+	PageNumber      int32   `json:"pageNumber"`
+	DurationSeconds int32   `json:"durationSeconds"`
+	ScrollDepth     float64 `json:"scrollDepth"`
+}
+
+// RecordViewerEvent records an authenticated viewer event (page view / download).
+func (h *Handler) RecordViewerEvent(c *gin.Context) {
+	var req viewerEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	visitorID := middleware.UserIDFrom(c)
+	ip := c.ClientIP()
+	ua := c.Request.UserAgent()
+
+	err := h.service.RecordAuthenticatedEvent(c.Request.Context(), workspaceID, req.DocumentID, visitorID, "", ip, ua, req.EventType, req.PageNumber, req.DurationSeconds, req.ScrollDepth)
+	if err != nil {
+		if errors.Is(err, ErrNoLinkForDocument) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "no_link_for_document", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 func circleFromQuery(c *gin.Context) heat.Circle {
