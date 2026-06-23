@@ -115,8 +115,8 @@ func (s *Server) registerRoutes() {
 			analyticsSvc := analytics.NewService(queries)
 			notificationSvc := notification.NewService(queries, s.cfg)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
-			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc)
-			analyticsHandler := analytics.NewHandler(analyticsSvc)
+			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
+			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 
 			dealroomSvc := dealroom.NewService(queries, s.dbPool)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)

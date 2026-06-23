@@ -67,6 +67,13 @@ const { apiMock, resolveGetDocument, resolveGetPageAnalytics } = vi.hoisted(() =
       getDocumentDownloadUrl: vi.fn(() =>
         Promise.resolve({ download_url: "", expires_at: "", filename: "doc.pdf", content_type: "application/pdf" })
       ),
+      getPublicDocumentPages: vi.fn((id: string) =>
+        Promise.resolve({ documentId: id, pages: makePages(3), total: 3 })
+      ),
+      getPublicPageSignedUrl: vi.fn(() =>
+        Promise.resolve({ page_number: 1, image_url: "", expires_at: "", width: 612, height: 792 })
+      ),
+      recordPublicEvent: vi.fn(() => Promise.resolve(undefined)),
     },
     resolveGetDocument: (value: Document) => resolveDoc(value),
     resolveGetPageAnalytics: (value: { data: PageAnalytics[] }) => resolveAnalytics(value),
@@ -159,6 +166,9 @@ describe("CanvasViewer", () => {
     apiMock.getDocumentPages.mockClear();
     apiMock.getPageSignedUrl.mockClear();
     apiMock.getDocumentDownloadUrl.mockClear();
+    apiMock.getPublicDocumentPages.mockClear();
+    apiMock.getPublicPageSignedUrl.mockClear();
+    apiMock.recordPublicEvent.mockClear();
   });
 
   it("renders document, thumbnails, highlight and watermark", async () => {
@@ -206,5 +216,21 @@ describe("CanvasViewer", () => {
     await waitFor(() => {
       expect(screen.getByText("2 / 3")).toBeInTheDocument();
     });
+  });
+
+  it("renders in public mode using provided document and token", async () => {
+    const i18n = await createViewerI18n();
+    render(
+      <I18nextProvider i18n={i18n}>
+        <CanvasViewer
+          publicToken="token-123"
+          publicDocument={mockDocument}
+          publicVisitorId="visitor-1"
+        />
+      </I18nextProvider>
+    );
+
+    expect(await screen.findByText("Q3 Pitch")).toBeInTheDocument();
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123");
   });
 });

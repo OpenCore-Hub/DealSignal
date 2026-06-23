@@ -123,6 +123,14 @@
     "pagePlaceholder": "Page {{pageNumber}}",
     "previewPlaceholder": "Document preview placeholder",
     "signedUrlNotice": "Real page content will render here once the backend signed URL is loaded.",
-    "currentPageStats": "Viewed {{count}} times · avg. time {{duration}}."
+    "currentPageStats": "Viewed {{count}} times · avg. time {{duration}}.",
+    "loading": "Loading document...",
+    "gateTitle": "This document is shared securely",
+    "emailLabel": "Email",
+    "emailPlaceholder": "Enter your email",
+    "passwordLabel": "Password",
+    "passwordPlaceholder": "Enter the link password",
+    "ndaLabel": "I agree to the non-disclosure agreement",
+    "continue": "Continue"
   }
 }

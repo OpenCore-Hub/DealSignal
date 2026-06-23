@@ -12,6 +12,7 @@
     "document": "Document",
     "accessCount": "Visits",
     "accessCountValue": "{{count}} visits",
+    "accessCountValue_one": "{{count}} view",
     "avgDuration": "Avg. time",
     "lastViewed": "Last Viewed",
     "heat": "Heat",

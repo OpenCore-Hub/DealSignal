@@ -5,13 +5,16 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -24,11 +27,13 @@ type Handler struct {
 	service     *Service
 	analytics   *analytics.Service
 	suggestions *suggestions.Service
+	storage     *storage.Client
+	cfg         *config.Config
 }
 
 // NewHandler creates a link handler.
-func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service) *Handler {
-	return &Handler{service: s, analytics: a, suggestions: sg}
+func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service, st *storage.Client, cfg *config.Config) *Handler {
+	return &Handler{service: s, analytics: a, suggestions: sg, storage: st, cfg: cfg}
 }
 
 // RegisterWorkspaceRoutes mounts authenticated workspace routes.
@@ -45,6 +50,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/links/:publicToken", h.Access)
 	r.POST("/events", h.RecordEvent)
+	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
+	r.POST("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
+	r.GET("/documents/:documentId/download-url", h.PublicDownloadURL)
 }
 
 // EventRequest is the public event payload.
@@ -310,23 +318,182 @@ func (h *Handler) Access(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"link": gin.H{
-			"id":                uuidToString(link.ID),
-			"name":              textOrNil(link.Name),
-			"document_id":       uuidToString(link.DocumentID),
-			"permission_type":   link.PermissionType,
-			"download_enabled":  link.DownloadEnabled,
-			"watermark_enabled": link.WatermarkEnabled,
+			"id":               uuidToString(link.ID),
+			"name":             textOrNil(link.Name),
+			"documentId":       uuidToString(link.DocumentID),
+			"permissionType":   link.PermissionType,
+			"downloadEnabled":  link.DownloadEnabled,
+			"watermarkEnabled": link.WatermarkEnabled,
 		},
 		"document": gin.H{
 			"id":         uuidToString(doc.ID),
 			"title":      doc.Title,
-			"page_count": doc.PageCount.Int32,
+			"pageCount":  doc.PageCount.Int32,
 			"status":     doc.Status,
+			"sourceType": doc.SourceType,
+			"fileSize":   0,
 		},
-		"visitor_id":        result.VisitorID,
-		"requires_email":    result.Link.PermissionType == "email_required" || result.Link.PermissionType == "whitelist" || result.Link.PermissionType == "nda",
-		"requires_password": result.Link.PermissionType == "password",
-		"requires_nda":      result.Link.PermissionType == "nda",
+		"visitorId":        result.VisitorID,
+		"requiresEmail":    result.Link.PermissionType == "email_required" || result.Link.PermissionType == "whitelist" || result.Link.PermissionType == "nda",
+		"requiresPassword": result.Link.PermissionType == "password",
+		"requiresNda":      result.Link.PermissionType == "nda",
+	})
+}
+
+// PublicSignedURL returns a presigned image URL for a public link visitor.
+func (h *Handler) PublicSignedURL(c *gin.Context) {
+	ctx := c.Request.Context()
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+
+	docID, err := uuid.Parse(c.Param("documentId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
+		return
+	}
+	if uuid.UUID(result.Link.DocumentID.Bytes) != docID {
+		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
+		return
+	}
+
+	pageNum, err := strconv.Atoi(c.Query("page_number"))
+	if err != nil || pageNum <= 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page_number required"})
+		return
+	}
+
+	page, err := h.service.queries.GetPageByDocumentAndNumber(ctx, db.GetPageByDocumentAndNumberParams{
+		DocumentID: result.Link.DocumentID,
+		PageNumber: int32(pageNum),
+	})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "page_not_found", "message": err.Error()})
+		return
+	}
+
+	url, err := h.storage.PresignedGetURL(ctx, page.ImageObjectKey.String, 15*time.Minute)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"pageNumber": pageNum,
+		"imageUrl":   url,
+		"expiresAt":  time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339),
+		"width":      page.Width.Int32,
+		"height":     page.Height.Int32,
+	})
+}
+
+// PublicDownloadURL returns a presigned download URL for a public link visitor.
+func (h *Handler) PublicDownloadURL(c *gin.Context) {
+	ctx := c.Request.Context()
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+
+	docID, err := uuid.Parse(c.Param("documentId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
+		return
+	}
+	if uuid.UUID(result.Link.DocumentID.Bytes) != docID {
+		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
+		return
+	}
+	if !result.Link.DownloadEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "download_disabled", "message": "download is disabled for this link"})
+		return
+	}
+
+	doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          result.Link.DocumentID,
+		WorkspaceID: result.Link.WorkspaceID,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	url, err := h.storage.PresignedGetURL(ctx, doc.StorageKey, 15*time.Minute)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+		return
+	}
+
+	contentType := "application/octet-stream"
+	switch doc.SourceType {
+	case "pdf":
+		contentType = "application/pdf"
+	case "docx":
+		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "pptx":
+		contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case "xlsx":
+		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"downloadUrl": url,
+		"expiresAt":   time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339),
+		"filename":    doc.Title,
+		"contentType": contentType,
+	})
+}
+
+// PublicDocumentPages returns the page list for a public link visitor.
+func (h *Handler) PublicDocumentPages(c *gin.Context) {
+	ctx := c.Request.Context()
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+
+	docID, err := uuid.Parse(c.Param("documentId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
+		return
+	}
+	if uuid.UUID(result.Link.DocumentID.Bytes) != docID {
+		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
+		return
+	}
+
+	rows, err := h.service.queries.ListPagesByDocument(ctx, result.Link.DocumentID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	pages := make([]gin.H, len(rows))
+	for i, p := range rows {
+		pages[i] = gin.H{
+			"pageNumber": p.PageNumber,
+			"width":      p.Width.Int32,
+			"height":     p.Height.Int32,
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"documentId": uuidToString(result.Link.DocumentID), "pages": pages, "total": len(pages)})
+}
+
+func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
+	token := c.Query("token")
+	if token == "" {
+		return AccessResult{}, ErrLinkNotFound
+	}
+	return h.service.Access(c.Request.Context(), token, AccessRequest{
+		Email:     c.Query("email"),
+		Password:  c.Query("password"),
+		NDAAgreed: c.Query("nda_agreed") == "true",
+		IP:        c.ClientIP(),
+		UA:        c.Request.UserAgent(),
 	})
 }
 
@@ -355,16 +522,23 @@ func mapAccessError(c *gin.Context, err error) {
 	}
 }
 
-func publicURL(c *gin.Context, token string) string {
-	scheme := "http"
-	if c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
+func publicURL(c *gin.Context, cfg *config.Config, token string) string {
+	base := cfg.ViewerBaseURL
+	if base == "" {
+		base = c.Request.Header.Get("Origin")
 	}
-	host := c.Request.Host
-	if host == "" {
-		host = "localhost"
+	if base == "" {
+		scheme := "http"
+		if c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		host := c.Request.Host
+		if host == "" {
+			host = "localhost"
+		}
+		base = scheme + "://" + host
 	}
-	return scheme + "://" + host + "/api/v1/public/links/" + token
+	return strings.TrimSuffix(base, "/") + "/l/" + token
 }
 
 func textOrNil(t pgtype.Text) interface{} {
@@ -414,7 +588,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"documentId":           uuidToString(link.DocumentID),
 		"documentTitle":        documentTitle,
 		"name":                 textOrNil(link.Name),
-		"shortUrl":             publicURL(c, link.PublicToken),
+		"shortUrl":             publicURL(c, h.cfg, link.PublicToken),
 		"accessCount":          link.AccessCount,
 		"heatLevel":            score.Level,
 		"status":               link.Status,

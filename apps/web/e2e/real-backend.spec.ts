@@ -131,5 +131,20 @@ test.describe("real backend P0 flow", () => {
     await page.getByTestId("create-link-button").click();
 
     await expect(page.getByTestId("generated-link")).toBeVisible({ timeout: 30000 });
+
+    const shareUrl = await page.getByTestId("generated-link").textContent();
+    expect(shareUrl).toBeTruthy();
+
+    // Open the public share URL in a fresh context (no auth).
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await visitorPage.goto(shareUrl!);
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+
+    // Back in owner context, refresh the link detail and verify the view was recorded.
+    await page.goto(`/${seed.workspaceSlug}/links`);
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/\d+ visits?/).first()).toBeVisible({ timeout: 30000 });
   });
 });

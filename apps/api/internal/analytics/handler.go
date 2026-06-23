@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
@@ -17,11 +18,12 @@ import (
 // Handler exposes analytics endpoints.
 type Handler struct {
 	service *Service
+	cfg     *config.Config
 }
 
 // NewHandler creates an analytics handler.
-func NewHandler(s *Service) *Handler {
-	return &Handler{service: s}
+func NewHandler(s *Service, cfg *config.Config) *Handler {
+	return &Handler{service: s, cfg: cfg}
 }
 
 // RegisterWorkspaceRoutes mounts workspace analytics routes.
@@ -69,7 +71,7 @@ func (h *Handler) GetDashboardStats(c *gin.Context) {
 		"warmCount":       stats.WarmCount,
 		"coldCount":       stats.ColdCount,
 		"recentDocuments": documentList(stats.RecentDocuments),
-		"recentLinks":     linkOverviewList(c, stats.RecentLinks),
+		"recentLinks":     linkOverviewList(c, h.cfg, stats.RecentLinks),
 		"heatAlerts":      heatAlertList(stats.Signals),
 		"riskAlerts":      riskAlertList(stats.Signals),
 		"signals":         signalFeedList(stats.Signals),
@@ -89,7 +91,7 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"tierCounts":   overview.TierCounts,
 		"topDocuments": documentScoreList(overview.TopDocuments),
-		"topLinks":     linkScoreList(c, overview.TopLinks),
+		"topLinks":     linkScoreList(c, h.cfg, overview.TopLinks),
 		"topContacts":  contactScoreList(overview.TopContacts),
 	})
 }
@@ -173,22 +175,22 @@ func documentItem(d db.Document) gin.H {
 	return item
 }
 
-func linkOverviewList(c *gin.Context, links []LinkOverview) []gin.H {
+func linkOverviewList(c *gin.Context, cfg *config.Config, links []LinkOverview) []gin.H {
 	out := make([]gin.H, len(links))
 	for i, l := range links {
-		out[i] = linkOverviewItem(c, l)
+		out[i] = linkOverviewItem(c, cfg, l)
 	}
 	return out
 }
 
-func linkOverviewItem(c *gin.Context, l LinkOverview) gin.H {
+func linkOverviewItem(c *gin.Context, cfg *config.Config, l LinkOverview) gin.H {
 	now := time.Now()
 	isActive := l.Link.Status == "active" && (!l.Link.ExpiresAt.Valid || l.Link.ExpiresAt.Time.After(now))
 	item := gin.H{
 		"id":                 uuidToString(l.Link.ID),
 		"documentId":         uuidToString(l.Link.DocumentID),
 		"documentTitle":      l.DocumentTitle,
-		"shortUrl":           publicURL(c, l.Link.PublicToken),
+		"shortUrl":           publicURL(c, cfg, l.Link.PublicToken),
 		"accessCount":        l.Link.AccessCount,
 		"heatLevel":          l.Level,
 		"status":             l.Link.Status,
@@ -206,12 +208,12 @@ func linkOverviewItem(c *gin.Context, l LinkOverview) gin.H {
 	return item
 }
 
-func linkScoreList(c *gin.Context, links []LinkScore) []gin.H {
+func linkScoreList(c *gin.Context, cfg *config.Config, links []LinkScore) []gin.H {
 	out := make([]gin.H, len(links))
 	for i, l := range links {
 		out[i] = gin.H{
 			"id":        uuidToString(l.Link.ID),
-			"shortUrl":  publicURL(c, l.Link.PublicToken),
+			"shortUrl":  publicURL(c, cfg, l.Link.PublicToken),
 			"views":     l.Link.AccessCount,
 			"heatLevel": l.Level,
 		}
@@ -347,16 +349,23 @@ func riskAlertList(signals []db.Signal) []gin.H {
 	return out
 }
 
-func publicURL(c *gin.Context, token string) string {
-	scheme := "http"
-	if c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https" {
-		scheme = "https"
+func publicURL(c *gin.Context, cfg *config.Config, token string) string {
+	base := cfg.ViewerBaseURL
+	if base == "" {
+		base = c.Request.Header.Get("Origin")
 	}
-	host := c.Request.Host
-	if host == "" {
-		host = "localhost"
+	if base == "" {
+		scheme := "http"
+		if c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https" {
+			scheme = "https"
+		}
+		host := c.Request.Host
+		if host == "" {
+			host = "localhost"
+		}
+		base = scheme + "://" + host
 	}
-	return scheme + "://" + host + "/api/v1/public/links/" + token
+	return strings.TrimSuffix(base, "/") + "/l/" + token
 }
 
 func mapPermissionType(t string) string {

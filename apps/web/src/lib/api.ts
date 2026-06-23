@@ -108,6 +108,75 @@ export const api = {
       `/documents/${id}/download-url`
     ),
 
+  accessPublicLink: (token: string, opts?: { email?: string; password?: string; ndaAgreed?: boolean }) => {
+    const params = new URLSearchParams();
+    if (opts?.email) params.set("email", opts.email);
+    if (opts?.password) params.set("password", opts.password);
+    if (opts?.ndaAgreed) params.set("nda_agreed", "true");
+    const query = params.toString();
+    return request<{
+      link: { id: string; name?: string; documentId: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean };
+      document: { id: string; title: string; pageCount: number; status: string; sourceType: string; fileSize: number };
+      visitorId: string;
+      requiresEmail: boolean;
+      requiresPassword: boolean;
+      requiresNda: boolean;
+    }>(undefined, `/v1/public/links/${token}${query ? `?${query}` : ""}`, {
+      skipAuth: true,
+    });
+  },
+
+  getPublicDocumentPages: (documentId: string, token: string) =>
+    request<{ documentId: string; pages: { pageNumber: number; width: number; height: number }[]; total: number }>(
+      undefined,
+      `/v1/public/documents/${documentId}/pages?token=${encodeURIComponent(token)}`,
+      { skipAuth: true }
+    ).then((res) => ({
+      documentId: res.documentId,
+      pages: res.pages.map((p) => ({ pageNumber: p.pageNumber, width: p.width, height: p.height })),
+      total: res.total,
+    })),
+
+  getPublicPageSignedUrl: (documentId: string, token: string, pageNumber: number) =>
+    request<{ pageNumber: number; imageUrl: string; expiresAt: string; width: number; height: number }>(
+      undefined,
+      `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
+      { method: "POST", skipAuth: true }
+    ).then((res) => ({
+      page_number: res.pageNumber,
+      image_url: res.imageUrl,
+      expires_at: res.expiresAt,
+      width: res.width,
+      height: res.height,
+    })),
+
+  getPublicDocumentDownloadUrl: (documentId: string, token: string) =>
+    request<{ downloadUrl: string; expiresAt: string; filename: string; contentType: string }>(
+      undefined,
+      `/v1/public/documents/${documentId}/download-url?token=${encodeURIComponent(token)}`,
+      { skipAuth: true }
+    ).then((res) => ({
+      download_url: res.downloadUrl,
+      expires_at: res.expiresAt,
+      filename: res.filename,
+      content_type: res.contentType,
+    })),
+
+  recordPublicEvent: (payload: {
+    event_type: string;
+    public_token: string;
+    visitor_id?: string;
+    email?: string;
+    page_number?: number;
+    duration_seconds?: number;
+    scroll_depth?: number;
+  }) =>
+    request<void>(undefined, "/v1/public/events", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      skipAuth: true,
+    }),
+
   uploadDocument: (file: File) => {
     const formData = new FormData();
     formData.append("file", file);

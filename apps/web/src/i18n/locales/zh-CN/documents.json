@@ -119,6 +119,14 @@
     "pagePlaceholder": "第 {{pageNumber}} 页",
     "previewPlaceholder": "文档预览占位",
     "signedUrlNotice": "后端签名 URL 加载后将在此渲染真实页面内容。",
-    "currentPageStats": "当前页浏览 {{count}} 次，平均停留 {{duration}}。"
+    "currentPageStats": "当前页浏览 {{count}} 次，平均停留 {{duration}}。",
+    "loading": "加载文档中...",
+    "gateTitle": "该文档已安全共享",
+    "emailLabel": "邮箱",
+    "emailPlaceholder": "输入您的邮箱",
+    "passwordLabel": "密码",
+    "passwordPlaceholder": "输入链接密码",
+    "ndaLabel": "我同意保密协议",
+    "continue": "继续"
   }
 }

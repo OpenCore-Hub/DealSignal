@@ -37,6 +37,7 @@ type Config struct {
 	CNAMETarget  string
 	CertProvider string
 	AppBaseURL            string
+	ViewerBaseURL         string
 	SMTPHost              string
 	SMTPPort              string
 	SMTPUser              string
@@ -80,6 +81,7 @@ func Load() (*Config, error) {
 		CNAMETarget:  getEnv("CNAME_TARGET", "cname.dealsignal.com"),
 		CertProvider: getEnv("CERT_PROVIDER", "noop"),
 		AppBaseURL:          getEnv("APP_BASE_URL", "http://localhost:8080"),
+		ViewerBaseURL:       getEnv("VIEWER_BASE_URL", ""),
 		SMTPHost:            os.Getenv("SMTP_HOST"),
 		SMTPPort:            getEnv("SMTP_PORT", "587"),
 		SMTPUser:            os.Getenv("SMTP_USER"),

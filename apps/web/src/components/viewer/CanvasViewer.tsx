@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import {
   Download,
@@ -26,6 +26,10 @@ const DEFAULT_WATERMARK: WatermarkInfo = {
 interface CanvasViewerProps {
   evidence?: Evidence[];
   watermark?: WatermarkInfo | null;
+  publicToken?: string;
+  publicLink?: { id: string; downloadEnabled: boolean; watermarkEnabled: boolean };
+  publicDocument?: Document;
+  publicVisitorId?: string;
 }
 
 interface PageInfo {
@@ -34,8 +38,16 @@ interface PageInfo {
   height: number;
 }
 
-export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
-  const { documentId } = useParams<{ documentId: string }>();
+export function CanvasViewer({
+  evidence,
+  watermark,
+  publicToken,
+  publicLink,
+  publicDocument,
+  publicVisitorId,
+}: CanvasViewerProps = {}) {
+  const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
+  const documentId = publicDocument?.id ?? routeDocumentId;
   const { t } = useTranslation(["documents", "common"]);
   const [doc, setDoc] = useState<Document | null>(null);
   const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
@@ -56,18 +68,32 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
       try {
         setLoading(true);
         setError(null);
-        const [d, a] = await Promise.all([api.getDocumentById(id!), api.getPageAnalytics(id!)]);
-        if (!cancelled) {
-          setDoc(d);
-          setAnalytics(a.data);
+        if (publicDocument) {
+          setDoc(publicDocument);
+          setAnalytics([]);
           setPage(1);
-          if (d.status === "ready") {
-            const pagesRes = await api.getDocumentPages(id!);
+          if (publicDocument.status === "ready" && publicToken) {
+            const pagesRes = await api.getPublicDocumentPages(id!, publicToken);
             if (!cancelled) {
               setPages(pagesRes.pages);
             }
           } else {
             setPages([]);
+          }
+        } else {
+          const [d, a] = await Promise.all([api.getDocumentById(id!), api.getPageAnalytics(id!)]);
+          if (!cancelled) {
+            setDoc(d);
+            setAnalytics(a.data);
+            setPage(1);
+            if (d.status === "ready") {
+              const pagesRes = await api.getDocumentPages(id!);
+              if (!cancelled) {
+                setPages(pagesRes.pages);
+              }
+            } else {
+              setPages([]);
+            }
           }
         }
       } catch (e) {
@@ -80,7 +106,7 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, retryTick, t]);
+  }, [documentId, retryTick, t, publicDocument, publicToken]);
 
   useEffect(() => {
     if (highlightedPage && highlightedPage !== page) {
@@ -97,7 +123,9 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
     }
     async function loadSignedUrl() {
       try {
-        const res = await api.getPageSignedUrl(id!, page);
+        const res = publicToken
+          ? await api.getPublicPageSignedUrl(id!, publicToken, page)
+          : await api.getPageSignedUrl(id!, page);
         if (!cancelled) setImageUrl(res.image_url);
       } catch (e) {
         if (!cancelled) setImageUrl(null);
@@ -107,12 +135,36 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [documentId, page, pages.length]);
+  }, [documentId, page, pages.length, publicToken]);
+
+  const pageStartRef = useRef<number>(Date.now());
+  useEffect(() => {
+    if (!publicToken || !documentId) return;
+    pageStartRef.current = Date.now();
+    return () => {
+      const duration = Math.max(0, Math.round((Date.now() - pageStartRef.current) / 1000));
+      if (duration > 0) {
+        void api.recordPublicEvent({
+          event_type: "page_viewed",
+          public_token: publicToken,
+          visitor_id: publicVisitorId,
+          page_number: page,
+          duration_seconds: duration,
+        });
+      }
+    };
+  }, [publicToken, documentId, page, publicVisitorId]);
 
   const handleDownload = async () => {
     if (!documentId || !doc) return;
     try {
-      const res = await api.getDocumentDownloadUrl(documentId);
+      const res = publicToken
+        ? await api.getPublicDocumentDownloadUrl(documentId, publicToken)
+        : await api.getDocumentDownloadUrl(documentId);
+      if (publicToken && publicLink && !publicLink.downloadEnabled) {
+        setError(t("documents:viewer.downloadDisabled"));
+        return;
+      }
       const a = document.createElement("a");
       a.href = res.download_url;
       a.download = res.filename || doc.title;
@@ -121,6 +173,13 @@ export function CanvasViewer({ evidence, watermark }: CanvasViewerProps = {}) {
       document.body.appendChild(a);
       a.click();
       a.remove();
+      if (publicToken) {
+        void api.recordPublicEvent({
+          event_type: "download_attempted",
+          public_token: publicToken,
+          visitor_id: publicVisitorId,
+        });
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
     }

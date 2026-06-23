@@ -12,6 +12,7 @@
     "document": "文档",
     "accessCount": "访问次数",
     "accessCountValue": "{{count}} 次访问",
+    "accessCountValue_one": "{{count}} 次访问",
     "avgDuration": "平均时长",
     "lastViewed": "最近访问",
     "heat": "热度",

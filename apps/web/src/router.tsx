@@ -31,6 +31,7 @@ const SettingsBillingPage = lazy(() => import("@/routes/settings/billing").then(
 const SettingsSecurityPage = lazy(() => import("@/routes/settings/security").then((m) => ({ default: m.SettingsSecurityPage })));
 const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").then((m) => ({ default: m.SettingsLanguagePage })));
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
+const PublicViewerPage = lazy(() => import("@/components/viewer/PublicViewerPage").then((m) => ({ default: m.PublicViewerPage })));
 const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ default: m.NotFoundPage })));
 const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
 const CreateWorkspacePage = lazy(() => import("@/routes/workspaces/new").then((m) => ({ default: m.CreateWorkspacePage })));
@@ -133,4 +134,5 @@ export const router = createBrowserRouter([
   },
   { path: "/workspaces/new", element: <Suspense fallback={<PageLoader />}><CreateWorkspacePage /></Suspense> },
   { path: "/viewer/:documentId", element: <Suspense fallback={<PageLoader />}><ViewerPage /></Suspense> },
+  { path: "/l/:token", element: <Suspense fallback={<PageLoader />}><PublicViewerPage /></Suspense> },
 ]);
