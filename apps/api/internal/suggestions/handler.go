@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
 )
 
@@ -23,21 +24,24 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/suggestions", h.List)
 	g.POST("/suggestions", h.Generate)
 	g.POST("/suggestions/:id/dismiss", h.Dismiss)
+
+	ig := r.Group("/insights")
+	ig.GET("/suggestions", h.ListWorkspace)
 }
 
 func (h *Handler) List(c *gin.Context) {
-	workspaceID, _ := c.Get("workspaceID")
-	items, err := h.service.List(c.Request.Context(), workspaceID.(string), c.Param("linkId"))
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	items, err := h.service.List(c.Request.Context(), workspaceID, c.Param("linkId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"link_id": c.Param("linkId"), "suggestions": items})
+	c.JSON(http.StatusOK, gin.H{"linkId": c.Param("linkId"), "suggestions": items})
 }
 
 func (h *Handler) Generate(c *gin.Context) {
-	workspaceID, _ := c.Get("workspaceID")
-	items, err := h.service.Generate(c.Request.Context(), workspaceID.(string), c.Param("linkId"))
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	items, err := h.service.Generate(c.Request.Context(), workspaceID, c.Param("linkId"))
 	if err != nil {
 		if errors.Is(err, ErrLinkNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
@@ -46,12 +50,12 @@ func (h *Handler) Generate(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, gin.H{"link_id": c.Param("linkId"), "suggestions": items})
+	c.JSON(http.StatusCreated, gin.H{"linkId": c.Param("linkId"), "suggestions": items})
 }
 
 func (h *Handler) Dismiss(c *gin.Context) {
-	workspaceID, _ := c.Get("workspaceID")
-	if err := h.service.Dismiss(c.Request.Context(), workspaceID.(string), c.Param("id")); err != nil {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if err := h.service.Dismiss(c.Request.Context(), workspaceID, c.Param("id")); err != nil {
 		if errors.Is(err, ErrSuggestionNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
 			return
@@ -60,4 +64,14 @@ func (h *Handler) Dismiss(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *Handler) ListWorkspace(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	items, err := h.service.ListWorkspace(c.Request.Context(), workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
 }

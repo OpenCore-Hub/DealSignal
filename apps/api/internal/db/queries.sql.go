@@ -1181,6 +1181,70 @@ func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessi
 	return i, err
 }
 
+const getContactAggregatesByWorkspace = `-- name: GetContactAggregatesByWorkspace :many
+SELECT
+    LOWER(COALESCE(c.email, al.visitor_email)) AS email,
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT al.link_id) AS unique_links,
+    COUNT(DISTINCT al.visitor_id) AS unique_visitors,
+    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
+    COUNT(pv.id)::bigint AS total_page_views,
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
+    MAX(al.created_at)::timestamptz AS last_seen_at
+FROM access_logs al
+LEFT JOIN contacts c ON c.id = al.contact_id
+LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
+WHERE al.workspace_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+GROUP BY LOWER(COALESCE(c.email, al.visitor_email))
+ORDER BY opens DESC
+LIMIT $2
+`
+
+type GetContactAggregatesByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+type GetContactAggregatesByWorkspaceRow struct {
+	Email                string
+	Opens                int64
+	UniqueLinks          int64
+	UniqueVisitors       int64
+	TotalDurationSeconds int64
+	TotalPageViews       int64
+	Downloads            int64
+	LastSeenAt           pgtype.Timestamptz
+}
+
+func (q *Queries) GetContactAggregatesByWorkspace(ctx context.Context, arg GetContactAggregatesByWorkspaceParams) ([]GetContactAggregatesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, getContactAggregatesByWorkspace, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetContactAggregatesByWorkspaceRow
+	for rows.Next() {
+		var i GetContactAggregatesByWorkspaceRow
+		if err := rows.Scan(
+			&i.Email,
+			&i.Opens,
+			&i.UniqueLinks,
+			&i.UniqueVisitors,
+			&i.TotalDurationSeconds,
+			&i.TotalPageViews,
+			&i.Downloads,
+			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDealRoomByID = `-- name: GetDealRoomByID :one
 SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
        requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
@@ -1311,6 +1375,50 @@ func (q *Queries) GetDocumentByIDAndTenant(ctx context.Context, arg GetDocumentB
 		&i.DeletedAt,
 	)
 	return i, err
+}
+
+const getDocumentViewMetrics = `-- name: GetDocumentViewMetrics :many
+SELECT
+    d.id,
+    d.title,
+    COALESCE(SUM(l.access_count), 0)::bigint AS views
+FROM documents d
+LEFT JOIN links l ON l.document_id = d.id AND l.status != 'deleted'
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+GROUP BY d.id, d.title
+ORDER BY views DESC, d.created_at DESC
+LIMIT $2
+`
+
+type GetDocumentViewMetricsParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+type GetDocumentViewMetricsRow struct {
+	ID    pgtype.UUID
+	Title string
+	Views int64
+}
+
+func (q *Queries) GetDocumentViewMetrics(ctx context.Context, arg GetDocumentViewMetricsParams) ([]GetDocumentViewMetricsRow, error) {
+	rows, err := q.db.Query(ctx, getDocumentViewMetrics, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDocumentViewMetricsRow
+	for rows.Next() {
+		var i GetDocumentViewMetricsRow
+		if err := rows.Scan(&i.ID, &i.Title, &i.Views); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getFolderPermission = `-- name: GetFolderPermission :one
@@ -1597,6 +1705,57 @@ func (q *Queries) GetOAuthState(ctx context.Context, arg GetOAuthStateParams) (O
 		&i.ExpiresAt,
 	)
 	return i, err
+}
+
+const getPageAnalyticsByDocument = `-- name: GetPageAnalyticsByDocument :many
+SELECT
+    p.page_number,
+    COUNT(pv.id) AS view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COALESCE(MAX(pv.created_at), p.created_at) AS last_viewed_at
+FROM pages p
+LEFT JOIN links l ON l.document_id = p.document_id AND l.status != 'deleted'
+LEFT JOIN page_views pv ON pv.link_id = l.id AND pv.page_number = p.page_number
+WHERE p.document_id = $1 AND p.workspace_id = $2
+GROUP BY p.page_number, p.created_at
+ORDER BY p.page_number
+`
+
+type GetPageAnalyticsByDocumentParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetPageAnalyticsByDocumentRow struct {
+	PageNumber         int32
+	ViewCount          int64
+	AvgDurationSeconds float64
+	LastViewedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) GetPageAnalyticsByDocument(ctx context.Context, arg GetPageAnalyticsByDocumentParams) ([]GetPageAnalyticsByDocumentRow, error) {
+	rows, err := q.db.Query(ctx, getPageAnalyticsByDocument, arg.DocumentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPageAnalyticsByDocumentRow
+	for rows.Next() {
+		var i GetPageAnalyticsByDocumentRow
+		if err := rows.Scan(
+			&i.PageNumber,
+			&i.ViewCount,
+			&i.AvgDurationSeconds,
+			&i.LastViewedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getPageByDocumentAndNumber = `-- name: GetPageByDocumentAndNumber :one
@@ -1987,6 +2146,44 @@ func (q *Queries) ListAccessLogsByLink(ctx context.Context, linkID pgtype.UUID) 
 	return items, nil
 }
 
+const listAccessLogsByWorkspace = `-- name: ListAccessLogsByWorkspace :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListAccessLogsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]AccessLog, error) {
+	rows, err := q.db.Query(ctx, listAccessLogsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccessLog
+	for rows.Next() {
+		var i AccessLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.EventType,
+			&i.Ip,
+			&i.UserAgent,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAccessRequestsByRoom = `-- name: ListAccessRequestsByRoom :many
 SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
 FROM room_access_requests
@@ -2132,6 +2329,39 @@ func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAs
 			&i.Role,
 			&i.Content,
 			&i.Evidence,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContactsByWorkspace = `-- name: ListContactsByWorkspace :many
+SELECT id, workspace_id, email, name, created_at
+FROM contacts
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListContactsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Contact, error) {
+	rows, err := q.db.Query(ctx, listContactsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Contact
+	for rows.Next() {
+		var i Contact
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Email,
+			&i.Name,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -2367,6 +2597,43 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 	return items, nil
 }
 
+const listPageViewsByWorkspace = `-- name: ListPageViewsByWorkspace :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth, created_at
+FROM page_views
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListPageViewsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]PageView, error) {
+	rows, err := q.db.Query(ctx, listPageViewsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PageView
+	for rows.Next() {
+		var i PageView
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.PageNumber,
+			&i.DurationSeconds,
+			&i.ScrollDepth,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPagesByDocument = `-- name: ListPagesByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
 FROM pages
@@ -2431,6 +2698,107 @@ func (q *Queries) ListPendingNotifications(ctx context.Context) ([]Notification,
 			&i.Status,
 			&i.Attempts,
 			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentDocumentsByWorkspace = `-- name: ListRecentDocumentsByWorkspace :many
+SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListRecentDocumentsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRecentDocumentsByWorkspaceParams) ([]Document, error) {
+	rows, err := q.db.Query(ctx, listRecentDocumentsByWorkspace, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Document
+	for rows.Next() {
+		var i Document
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE workspace_id = $1 AND status != 'deleted'
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListRecentLinksByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecentLinksByWorkspaceParams) ([]Link, error) {
+	rows, err := q.db.Query(ctx, listRecentLinksByWorkspace, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Link
+	for rows.Next() {
+		var i Link
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.DocumentID,
+			&i.PublicToken,
+			&i.Name,
+			&i.PermissionType,
+			&i.AllowedEmails,
+			&i.AllowedDomains,
+			&i.PasswordHash,
+			&i.ExpiresAt,
+			&i.MaxAccessCount,
+			&i.AccessCount,
+			&i.DownloadEnabled,
+			&i.WatermarkEnabled,
+			&i.Status,
+			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {

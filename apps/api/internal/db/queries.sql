@@ -73,6 +73,13 @@ FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
+-- name: ListRecentDocumentsByWorkspace :many
+SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT $2;
+
 -- name: UpdateDocumentStatus :exec
 UPDATE documents
 SET status = $1, page_count = $2, updated_at = now()
@@ -225,6 +232,15 @@ FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC;
 
+-- name: ListRecentLinksByWorkspace :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+FROM links
+WHERE workspace_id = $1 AND status != 'deleted'
+ORDER BY created_at DESC
+LIMIT $2;
+
 -- name: ListLinksByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
@@ -240,6 +256,18 @@ WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at;
+
+-- name: GetDocumentViewMetrics :many
+SELECT
+    d.id,
+    d.title,
+    COALESCE(SUM(l.access_count), 0)::bigint AS views
+FROM documents d
+LEFT JOIN links l ON l.document_id = d.id AND l.status != 'deleted'
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+GROUP BY d.id, d.title
+ORDER BY views DESC, d.created_at DESC
+LIMIT $2;
 
 -- name: CreateAccessLog :exec
 INSERT INTO access_logs (tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent)
@@ -301,6 +329,32 @@ FROM access_logs
 WHERE link_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ListAccessLogsByWorkspace :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE workspace_id = $1
+ORDER BY created_at DESC;
+
+-- name: ListPageViewsByWorkspace :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth, created_at
+FROM page_views
+WHERE workspace_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetPageAnalyticsByDocument :many
+SELECT
+    p.page_number,
+    COUNT(pv.id) AS view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COALESCE(MAX(pv.created_at), p.created_at) AS last_viewed_at
+FROM pages p
+LEFT JOIN links l ON l.document_id = p.document_id AND l.status != 'deleted'
+LEFT JOIN page_views pv ON pv.link_id = l.id AND pv.page_number = p.page_number
+WHERE p.document_id = $1 AND p.workspace_id = $2
+GROUP BY p.page_number, p.created_at
+ORDER BY p.page_number;
+
 -- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
@@ -642,3 +696,27 @@ SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, ac
 FROM action_items
 WHERE signal_id = $1
 ORDER BY created_at DESC;
+
+-- name: ListContactsByWorkspace :many
+SELECT id, workspace_id, email, name, created_at
+FROM contacts
+WHERE workspace_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetContactAggregatesByWorkspace :many
+SELECT
+    LOWER(COALESCE(c.email, al.visitor_email)) AS email,
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT al.link_id) AS unique_links,
+    COUNT(DISTINCT al.visitor_id) AS unique_visitors,
+    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
+    COUNT(pv.id)::bigint AS total_page_views,
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
+    MAX(al.created_at)::timestamptz AS last_seen_at
+FROM access_logs al
+LEFT JOIN contacts c ON c.id = al.contact_id
+LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
+WHERE al.workspace_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+GROUP BY LOWER(COALESCE(c.email, al.visitor_email))
+ORDER BY opens DESC
+LIMIT $2;

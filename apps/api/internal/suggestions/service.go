@@ -137,6 +137,107 @@ func (s *Service) List(ctx context.Context, workspaceID, linkID string) ([]Sugge
 	return out, nil
 }
 
+// WorkspaceSuggestion is the camelCase view used by the workspace insights list.
+type WorkspaceSuggestion struct {
+	ID             string `json:"id"`
+	ContactID      string `json:"contactId"`
+	ContactEmail   string `json:"contactEmail"`
+	DocumentTitle  string `json:"documentTitle"`
+	LinkID         string `json:"linkId"`
+	HeatLevel      string `json:"heatLevel"`
+	Score          int    `json:"score"`
+	Reason         string `json:"reason"`
+	Action         string `json:"action"`
+	LastActivityAt string `json:"lastActivityAt"`
+}
+
+// ListWorkspace returns active suggestions across the workspace enriched for display.
+func (s *Service) ListWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceSuggestion, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.queries.ListSuggestionsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	contacts, err := s.queries.ListContactsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return nil, err
+	}
+	contactEmailByID := make(map[string]string, len(contacts))
+	for _, c := range contacts {
+		contactEmailByID[uuidToString(c.ID)] = c.Email.String
+	}
+
+	out := make([]WorkspaceSuggestion, 0, len(rows))
+	for _, r := range rows {
+		su := WorkspaceSuggestion{
+			ID:             uuidToString(r.ID),
+			ContactID:      uuidToString(r.ContactID),
+			LinkID:         uuidToString(r.LinkID),
+			Reason:         r.Reason,
+			Action:         r.Action,
+			LastActivityAt: r.UpdatedAt.Time.Format(time.RFC3339),
+		}
+		if su.ContactID != "" {
+			su.ContactEmail = contactEmailByID[su.ContactID]
+		}
+
+		if r.DocumentID.Valid {
+			doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+				ID:          r.DocumentID,
+				WorkspaceID: wsUUID,
+			})
+			if err == nil {
+				su.DocumentTitle = doc.Title
+			}
+		}
+
+		if r.LinkID.Valid {
+			res := s.linkHeatResult(ctx, r.LinkID)
+			su.Score = res.Score
+			su.HeatLevel = res.Level
+			if su.HeatLevel == "" {
+				su.HeatLevel = "cold"
+			}
+		}
+
+		out = append(out, su)
+	}
+	return out, nil
+}
+
+func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.Result {
+	access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
+	if err != nil {
+		return heat.Result{Level: "cold"}
+	}
+	pageViews, err := s.queries.GetLinkPageViewMetrics(ctx, linkID)
+	if err != nil {
+		return heat.Result{Level: "cold"}
+	}
+	bounce, err := s.queries.GetLinkBounceCount(ctx, linkID)
+	if err != nil {
+		bounce = 0
+	}
+	revisits := int(access.Opens) - int(access.UniqueVisitors)
+	if revisits < 0 {
+		revisits = 0
+	}
+	return heat.Compute(heat.CircleDefault, heat.Input{
+		Opens:              int(access.Opens),
+		Revisits:           revisits,
+		AvgDurationMinutes: pageViews.AvgDurationSeconds / 60.0,
+		KeyPageViews:       int(pageViews.KeyPageViews),
+		ForwardSignals:     int(access.UniqueVisitors),
+		Downloads:          int(access.Downloads),
+		BouncePenalty:      int(bounce),
+	})
+}
+
 // Dismiss marks a suggestion as dismissed.
 func (s *Service) Dismiss(ctx context.Context, workspaceID, suggestionID string) error {
 	wsUUID, err := pgUUID(workspaceID)

@@ -77,16 +77,16 @@ func signalItem(s db.Signal) gin.H {
 		"explanation": s.Explanation,
 		"suggestion":  s.Suggestion,
 		"priority":    s.Priority,
-		"created_at":  s.CreatedAt.Time.Format(time.RFC3339),
+		"createdAt":   s.CreatedAt.Time.Format(time.RFC3339),
 	}
 	if s.DocumentID.Valid {
-		item["document_id"] = uuid.UUID(s.DocumentID.Bytes).String()
+		item["documentId"] = uuid.UUID(s.DocumentID.Bytes).String()
 	}
 	if s.ContactID.Valid {
-		item["contact_id"] = uuid.UUID(s.ContactID.Bytes).String()
+		item["contactId"] = uuid.UUID(s.ContactID.Bytes).String()
 	}
 	if s.LinkID.Valid {
-		item["link_id"] = uuid.UUID(s.LinkID.Bytes).String()
+		item["linkId"] = uuid.UUID(s.LinkID.Bytes).String()
 	}
 	return item
 }
@@ -101,14 +101,14 @@ func actionList(actions []db.ActionItem) []gin.H {
 
 func actionItem(a db.ActionItem) gin.H {
 	return gin.H{
-		"id":          uuid.UUID(a.ID.Bytes).String(),
-		"signal_id":   uuid.UUID(a.SignalID.Bytes).String(),
-		"title":       a.Title,
-		"impact":      a.Impact,
-		"due_at":      a.DueAt.Time.Format(time.RFC3339),
-		"status":      a.Status,
-		"action_type": a.ActionType,
-		"created_at":  a.CreatedAt.Time.Format(time.RFC3339),
-		"updated_at":  a.UpdatedAt.Time.Format(time.RFC3339),
+		"id":         uuid.UUID(a.ID.Bytes).String(),
+		"signalId":   uuid.UUID(a.SignalID.Bytes).String(),
+		"title":      a.Title,
+		"impact":     a.Impact,
+		"dueAt":      a.DueAt.Time.Format(time.RFC3339),
+		"status":     a.Status,
+		"actionType": a.ActionType,
+		"createdAt":  a.CreatedAt.Time.Format(time.RFC3339),
+		"updatedAt":  a.UpdatedAt.Time.Format(time.RFC3339),
 	}
 }

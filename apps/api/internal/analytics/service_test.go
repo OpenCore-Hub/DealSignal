@@ -47,6 +47,46 @@ func (m *mockAnalyticsQuerier) GetLinkBounceCount(_ context.Context, _ pgtype.UU
 	return m.bounce, nil
 }
 
+func (m *mockAnalyticsQuerier) ListRecentDocumentsByWorkspace(_ context.Context, _ db.ListRecentDocumentsByWorkspaceParams) ([]db.Document, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListRecentLinksByWorkspace(_ context.Context, _ db.ListRecentLinksByWorkspaceParams) ([]db.Link, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListLinksByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.Link, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentViewMetrics(_ context.Context, _ db.GetDocumentViewMetricsParams) ([]db.GetDocumentViewMetricsRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListSignalsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.Signal, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListActionItemsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ActionItem, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetContactAggregatesByWorkspace(_ context.Context, _ db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetPageAnalyticsByDocument(_ context.Context, _ db.GetPageAnalyticsByDocumentParams) ([]db.GetPageAnalyticsByDocumentRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.Document, error) {
+	return db.Document{}, nil
+}
+
+func (m *mockAnalyticsQuerier) GetLastAccessLogByLink(_ context.Context, _ pgtype.UUID) (db.AccessLog, error) {
+	return db.AccessLog{}, nil
+}
+
 func TestRecordLinkOpenedAtomicSuccess(t *testing.T) {
 	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1}
 	svc := NewService(q)

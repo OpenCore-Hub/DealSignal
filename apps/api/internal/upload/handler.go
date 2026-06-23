@@ -391,9 +391,9 @@ func documentFileName(doc db.Document) string {
 func documentFileType(sourceType string) string {
 	switch strings.ToLower(sourceType) {
 	case "pdf", "docx", "pptx", "xlsx":
-		return strings.ToUpper(sourceType)
+		return strings.ToLower(sourceType)
 	default:
-		return strings.ToUpper(sourceType)
+		return strings.ToLower(sourceType)
 	}
 }
 
