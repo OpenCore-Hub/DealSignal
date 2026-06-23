@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -34,6 +35,8 @@ type Querier interface {
 	ListActionItemsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ActionItem, error)
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
 	GetPageAnalyticsByDocument(ctx context.Context, arg db.GetPageAnalyticsByDocumentParams) ([]db.GetPageAnalyticsByDocumentRow, error)
+	GetPageTitlesByDocument(ctx context.Context, arg db.GetPageTitlesByDocumentParams) ([]db.GetPageTitlesByDocumentRow, error)
+	GetPageExitCountsByDocument(ctx context.Context, documentID pgtype.UUID) ([]db.GetPageExitCountsByDocumentRow, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.Document, error)
 	GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (db.AccessLog, error)
 	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
@@ -427,8 +430,18 @@ func levelForDocumentViews(views int64) string {
 	}
 }
 
+// PageAnalytic is per-page engagement enriched with title and exit rate.
+type PageAnalytic struct {
+	PageNumber         int32
+	ViewCount          int64
+	AvgDurationSeconds float64
+	LastViewedAt       time.Time
+	Title              string
+	ExitRate           float64
+}
+
 // PageAnalytics returns per-page engagement for a document.
-func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID string) ([]db.GetPageAnalyticsByDocumentRow, error) {
+func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID string) ([]PageAnalytic, error) {
 	docUUID, err := parseUUID(documentID)
 	if err != nil {
 		return nil, err
@@ -437,10 +450,63 @@ func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID str
 	if err != nil {
 		return nil, err
 	}
-	return s.queries.GetPageAnalyticsByDocument(ctx, db.GetPageAnalyticsByDocumentParams{
+
+	rows, err := s.queries.GetPageAnalyticsByDocument(ctx, db.GetPageAnalyticsByDocumentParams{
 		DocumentID:  docUUID,
 		WorkspaceID: wsUUID,
 	})
+	if err != nil {
+		return nil, err
+	}
+
+	titles, err := s.queries.GetPageTitlesByDocument(ctx, db.GetPageTitlesByDocumentParams{
+		DocumentID:  docUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	titleByPage := make(map[int32]string, len(titles))
+	for _, t := range titles {
+		if strings.TrimSpace(t.Title) != "" {
+			titleByPage[t.PageNumber] = strings.TrimSpace(t.Title)
+		}
+	}
+
+	exits, err := s.queries.GetPageExitCountsByDocument(ctx, docUUID)
+	if err != nil {
+		return nil, err
+	}
+	exitByPage := make(map[int32]int64, len(exits))
+	for _, e := range exits {
+		exitByPage[e.PageNumber] = e.ExitCount
+	}
+
+	out := make([]PageAnalytic, len(rows))
+	for i, r := range rows {
+		title := titleByPage[r.PageNumber]
+		if title == "" {
+			title = fmt.Sprintf("Page %d", r.PageNumber)
+		}
+
+		var exitRate float64
+		if r.ViewCount > 0 {
+			exitRate = float64(exitByPage[r.PageNumber]) / float64(r.ViewCount)
+		}
+		if exitRate > 1 {
+			exitRate = 1
+		}
+
+		out[i] = PageAnalytic{
+			PageNumber:         r.PageNumber,
+			ViewCount:          r.ViewCount,
+			AvgDurationSeconds: r.AvgDurationSeconds,
+			LastViewedAt:       r.LastViewedAt.Time,
+			Title:              title,
+			ExitRate:           exitRate,
+		}
+	}
+	return out, nil
 }
 
 func parseUUID(id string) (pgtype.UUID, error) {

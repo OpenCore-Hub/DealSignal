@@ -79,6 +79,14 @@ func (m *mockAnalyticsQuerier) GetPageAnalyticsByDocument(_ context.Context, _ d
 	return nil, nil
 }
 
+func (m *mockAnalyticsQuerier) GetPageTitlesByDocument(_ context.Context, _ db.GetPageTitlesByDocumentParams) ([]db.GetPageTitlesByDocumentRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetPageExitCountsByDocument(_ context.Context, _ pgtype.UUID) ([]db.GetPageExitCountsByDocumentRow, error) {
+	return nil, nil
+}
+
 func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.Document, error) {
 	return db.Document{}, nil
 }

@@ -109,16 +109,12 @@ func (h *Handler) GetPageAnalytics(c *gin.Context) {
 
 	out := make([]gin.H, len(rows))
 	for i, r := range rows {
-		exitRate := 0.0
-		if r.ViewCount > 0 && r.PageNumber > 1 {
-			exitRate = 0.1
-		}
 		out[i] = gin.H{
 			"pageNumber":         r.PageNumber,
 			"viewCount":          r.ViewCount,
 			"avgDurationSeconds": r.AvgDurationSeconds,
-			"exitRate":           exitRate,
-			"title":              nil,
+			"exitRate":           r.ExitRate,
+			"title":              r.Title,
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})

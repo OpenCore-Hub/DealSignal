@@ -75,9 +75,9 @@ export function InsightsSuggestionsPage() {
                 <div className="space-y-2">
                   <div className="flex items-center gap-2">
                     <Lightning size={18} className="text-warning-500" />
-                    <h3 className="text-h3">{t(s.action)}</h3>
+                    <h3 className="text-h3">{s.action}</h3>
                   </div>
-                  <p className="text-body text-muted-foreground">{t(s.reason)}</p>
+                  <p className="text-body text-muted-foreground">{s.reason}</p>
                   <div className="flex flex-wrap items-center gap-3 text-caption text-muted-foreground">
                     <span>{s.contactEmail}</span>
                     <span>·</span>

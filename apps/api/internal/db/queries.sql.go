@@ -1787,6 +1787,86 @@ func (q *Queries) GetPageByDocumentAndNumber(ctx context.Context, arg GetPageByD
 	return i, err
 }
 
+const getPageExitCountsByDocument = `-- name: GetPageExitCountsByDocument :many
+SELECT page_number, COUNT(*) AS exit_count
+FROM (
+    SELECT DISTINCT ON (link_id, visitor_id) link_id, visitor_id, page_number
+    FROM page_views
+    WHERE link_id IN (
+        SELECT id FROM links WHERE document_id = $1 AND status != 'deleted'
+    )
+    ORDER BY link_id, visitor_id, created_at DESC
+) last_views
+GROUP BY page_number
+`
+
+type GetPageExitCountsByDocumentRow struct {
+	PageNumber int32
+	ExitCount  int64
+}
+
+func (q *Queries) GetPageExitCountsByDocument(ctx context.Context, documentID pgtype.UUID) ([]GetPageExitCountsByDocumentRow, error) {
+	rows, err := q.db.Query(ctx, getPageExitCountsByDocument, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPageExitCountsByDocumentRow
+	for rows.Next() {
+		var i GetPageExitCountsByDocumentRow
+		if err := rows.Scan(&i.PageNumber, &i.ExitCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPageTitlesByDocument = `-- name: GetPageTitlesByDocument :many
+SELECT
+    p.page_number,
+    LEFT(c.text, 80) AS title
+FROM pages p
+LEFT JOIN LATERAL (
+    SELECT text FROM chunks WHERE page_id = p.id ORDER BY id LIMIT 1
+) c ON true
+WHERE p.document_id = $1 AND p.workspace_id = $2
+ORDER BY p.page_number
+`
+
+type GetPageTitlesByDocumentParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetPageTitlesByDocumentRow struct {
+	PageNumber int32
+	Title      string
+}
+
+func (q *Queries) GetPageTitlesByDocument(ctx context.Context, arg GetPageTitlesByDocumentParams) ([]GetPageTitlesByDocumentRow, error) {
+	rows, err := q.db.Query(ctx, getPageTitlesByDocument, arg.DocumentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPageTitlesByDocumentRow
+	for rows.Next() {
+		var i GetPageTitlesByDocumentRow
+		if err := rows.Scan(&i.PageNumber, &i.Title); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getRoomMemberByEmail = `-- name: GetRoomMemberByEmail :one
 SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
 FROM room_members

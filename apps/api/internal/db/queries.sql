@@ -355,6 +355,29 @@ WHERE p.document_id = $1 AND p.workspace_id = $2
 GROUP BY p.page_number, p.created_at
 ORDER BY p.page_number;
 
+-- name: GetPageTitlesByDocument :many
+SELECT
+    p.page_number,
+    LEFT(c.text, 80) AS title
+FROM pages p
+LEFT JOIN LATERAL (
+    SELECT text FROM chunks WHERE page_id = p.id ORDER BY id LIMIT 1
+) c ON true
+WHERE p.document_id = $1 AND p.workspace_id = $2
+ORDER BY p.page_number;
+
+-- name: GetPageExitCountsByDocument :many
+SELECT page_number, COUNT(*) AS exit_count
+FROM (
+    SELECT DISTINCT ON (link_id, visitor_id) link_id, visitor_id, page_number
+    FROM page_views
+    WHERE link_id IN (
+        SELECT id FROM links WHERE document_id = $1 AND status != 'deleted'
+    )
+    ORDER BY link_id, visitor_id, created_at DESC
+) last_views
+GROUP BY page_number;
+
 -- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
