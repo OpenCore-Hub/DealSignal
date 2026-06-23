@@ -28,10 +28,24 @@ export const useSignalStore = create<SignalState>((set, get) => ({
     }
   },
 
-  updateActionStatus: (id, status) => {
+  updateActionStatus: async (id, status) => {
+    const previous = get().actions.find((a) => a.id === id);
     set((state) => ({
       actions: state.actions.map((a) => (a.id === id ? { ...a, status } : a)),
     }));
+    try {
+      const updated = await api.updateActionStatus(id, status);
+      set((state) => ({
+        actions: state.actions.map((a) => (a.id === id ? updated : a)),
+      }));
+    } catch (err) {
+      if (previous) {
+        set((state) => ({
+          actions: state.actions.map((a) => (a.id === id ? previous : a)),
+        }));
+      }
+      set({ error: err instanceof Error ? err.message : "Unknown error" });
+    }
   },
 
   getSignalById: (id) => get().signals.find((s) => s.id === id),

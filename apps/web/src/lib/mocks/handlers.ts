@@ -1,6 +1,8 @@
 import { http, HttpResponse } from "msw";
+import type { ActionItem } from "@/types";
 import {
   mockAccessLogs,
+  mockActionItems,
   mockActivities,
   mockContacts,
   mockDealRooms,
@@ -206,6 +208,14 @@ export const handlers = [
     const signal = mockSignals.find((s) => s.id === params.id);
     if (!signal) return new HttpResponse(null, { status: 404 });
     return HttpResponse.json(signal);
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/signals/actions/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { status?: string };
+    const action = mockActionItems.find((a) => a.id === params.id);
+    if (!action) return new HttpResponse(null, { status: 404 });
+    if (body?.status) action.status = body.status as ActionItem["status"];
+    return HttpResponse.json(action);
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/deal-room-templates", () => {

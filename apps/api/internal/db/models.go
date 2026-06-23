@@ -24,6 +24,20 @@ type AccessLog struct {
 	CreatedAt    pgtype.Timestamptz
 }
 
+type ActionItem struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	SignalID    pgtype.UUID
+	Title       string
+	Impact      string
+	DueAt       pgtype.Timestamptz
+	Status      string
+	ActionType  string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type AssistantMessage struct {
 	ID        pgtype.UUID
 	SessionID pgtype.UUID
@@ -257,6 +271,24 @@ type RoomNdaAgreement struct {
 	Ip        *netip.Addr
 	UserAgent pgtype.Text
 	AgreedAt  pgtype.Timestamptz
+}
+
+type Signal struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	SuggestionID pgtype.UUID
+	Type         string
+	Title        string
+	Description  string
+	Explanation  string
+	Suggestion   string
+	DocumentID   pgtype.UUID
+	ContactID    pgtype.UUID
+	LinkID       pgtype.UUID
+	Priority     string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type Suggestion struct {

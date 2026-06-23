@@ -46,11 +46,26 @@ const demoWatermark: WatermarkInfo = {
 const { apiMock, resolveGetDocument, resolveGetPageAnalytics } = vi.hoisted(() => {
   let resolveDoc: (value: Document) => void = () => {};
   let resolveAnalytics: (value: { data: PageAnalytics[] }) => void = () => {};
+  const makePages = (count: number) =>
+    Array.from({ length: count }, (_, i) => ({
+      pageNumber: i + 1,
+      width: 612,
+      height: 792,
+    }));
   return {
     apiMock: {
       getDocumentById: vi.fn(() => new Promise<Document>((r) => { resolveDoc = r; })),
       getPageAnalytics: vi.fn(
         () => new Promise<{ data: PageAnalytics[] }>((r) => { resolveAnalytics = r; })
+      ),
+      getDocumentPages: vi.fn((id: string) =>
+        Promise.resolve({ documentId: id, pages: makePages(3), total: 3 })
+      ),
+      getPageSignedUrl: vi.fn(() =>
+        Promise.resolve({ page_number: 1, image_url: "", expires_at: "", width: 612, height: 792 })
+      ),
+      getDocumentDownloadUrl: vi.fn(() =>
+        Promise.resolve({ download_url: "", expires_at: "", filename: "doc.pdf", content_type: "application/pdf" })
       ),
     },
     resolveGetDocument: (value: Document) => resolveDoc(value),
@@ -141,6 +156,9 @@ describe("CanvasViewer", () => {
   beforeEach(() => {
     apiMock.getDocumentById.mockClear();
     apiMock.getPageAnalytics.mockClear();
+    apiMock.getDocumentPages.mockClear();
+    apiMock.getPageSignedUrl.mockClear();
+    apiMock.getDocumentDownloadUrl.mockClear();
   });
 
   it("renders document, thumbnails, highlight and watermark", async () => {

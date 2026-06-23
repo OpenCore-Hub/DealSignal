@@ -552,3 +552,59 @@ SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, stor
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL
 LIMIT 1;
+
+-- name: CreateSignal :one
+INSERT INTO signals (
+    tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+    document_id, contact_id, link_id, priority
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+          document_id, contact_id, link_id, priority, created_at, updated_at;
+
+-- name: GetSignalBySuggestion :one
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+       document_id, contact_id, link_id, priority, created_at, updated_at
+FROM signals
+WHERE suggestion_id = $1 AND workspace_id = $2 LIMIT 1;
+
+-- name: ListSignalsByWorkspace :many
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+       document_id, contact_id, link_id, priority, created_at, updated_at
+FROM signals
+WHERE workspace_id = $1
+ORDER BY created_at DESC;
+
+-- name: CreateActionItem :one
+INSERT INTO action_items (
+    tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at;
+
+-- name: ListActionItemsByWorkspace :many
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+FROM action_items
+WHERE workspace_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetActionItemByID :one
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+FROM action_items
+WHERE id = $1 AND workspace_id = $2 LIMIT 1;
+
+-- name: UpdateActionItemStatus :one
+UPDATE action_items
+SET status = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at;
+
+-- name: ListSuggestionsByWorkspace :many
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+FROM suggestions
+WHERE workspace_id = $1 AND dismissed = false
+ORDER BY created_at DESC;
+
+-- name: ListActionItemsBySignal :many
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+FROM action_items
+WHERE signal_id = $1
+ORDER BY created_at DESC;

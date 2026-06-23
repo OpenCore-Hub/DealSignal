@@ -20,6 +20,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
@@ -121,6 +122,8 @@ func (s *Server) registerRoutes() {
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
 
 			suggestionHandler := suggestions.NewHandler(suggestionSvc)
+			signalSvc := signal.NewService(queries)
+			signalHandler := signal.NewHandler(signalSvc)
 
 			ws := api.Group("/workspaces/:workspaceSlug")
 			ws.Use(middleware.Auth())
@@ -132,6 +135,7 @@ func (s *Server) registerRoutes() {
 			analyticsHandler.RegisterWorkspaceRoutes(ws)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)
+			signalHandler.RegisterRoutes(ws)
 
 			notification.NewWorker(notificationSvc, 30*time.Second).Start(context.Background())
 			domain.NewRenewalWorker(domainSvc, 1*time.Hour, 7*24*time.Hour).Start(context.Background())

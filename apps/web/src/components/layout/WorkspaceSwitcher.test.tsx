@@ -111,7 +111,7 @@ describe("WorkspaceSwitcher", () => {
     expect(navigateMock).toHaveBeenCalledWith("/ventura-fund/dashboard");
   });
 
-  it("shows coming-soon toast when creating workspace", async () => {
+  it("navigates to create workspace page", async () => {
     await renderWithProviders();
     await loadWorkspaces();
 
@@ -123,7 +123,7 @@ describe("WorkspaceSwitcher", () => {
     fireEvent.click(createItem);
 
     await waitFor(() => {
-      expect(toastInfoMock).toHaveBeenCalledWith("Workspace creation requires backend support.");
+      expect(navigateMock).toHaveBeenCalledWith("/workspaces/new");
     });
   });
 });

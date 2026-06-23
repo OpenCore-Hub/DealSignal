@@ -263,6 +263,11 @@ export const api = {
   getSignals: () => request<SignalFeed>(getWorkspaceSlug(), "/signals"),
   getSignalById: (id: string) =>
     request<Signal>(getWorkspaceSlug(), `/signals/${id}`),
+  updateActionStatus: (id: string, status: ActionItem["status"]) =>
+    request<ActionItem>(getWorkspaceSlug(), `/signals/actions/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
 
   getDealRoomTemplates: () =>
     request<{ data: DealRoomTemplate[] }>(getWorkspaceSlug(), "/deal-room-templates"),

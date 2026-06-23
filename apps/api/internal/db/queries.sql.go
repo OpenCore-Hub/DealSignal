@@ -211,6 +211,52 @@ func (q *Queries) CreateAccessRequest(ctx context.Context, arg CreateAccessReque
 	return i, err
 }
 
+const createActionItem = `-- name: CreateActionItem :one
+INSERT INTO action_items (
+    tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+`
+
+type CreateActionItemParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	SignalID    pgtype.UUID
+	Title       string
+	Impact      string
+	DueAt       pgtype.Timestamptz
+	Status      string
+	ActionType  string
+}
+
+func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemParams) (ActionItem, error) {
+	row := q.db.QueryRow(ctx, createActionItem,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.SignalID,
+		arg.Title,
+		arg.Impact,
+		arg.DueAt,
+		arg.Status,
+		arg.ActionType,
+	)
+	var i ActionItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SignalID,
+		&i.Title,
+		&i.Impact,
+		&i.DueAt,
+		&i.Status,
+		&i.ActionType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createAssistantMessage = `-- name: CreateAssistantMessage :one
 INSERT INTO assistant_messages (session_id, role, content, evidence)
 VALUES ($1, $2, $3, $4)
@@ -719,6 +765,66 @@ func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) 
 	return err
 }
 
+const createSignal = `-- name: CreateSignal :one
+INSERT INTO signals (
+    tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+    document_id, contact_id, link_id, priority
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+RETURNING id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+          document_id, contact_id, link_id, priority, created_at, updated_at
+`
+
+type CreateSignalParams struct {
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	SuggestionID pgtype.UUID
+	Type         string
+	Title        string
+	Description  string
+	Explanation  string
+	Suggestion   string
+	DocumentID   pgtype.UUID
+	ContactID    pgtype.UUID
+	LinkID       pgtype.UUID
+	Priority     string
+}
+
+func (q *Queries) CreateSignal(ctx context.Context, arg CreateSignalParams) (Signal, error) {
+	row := q.db.QueryRow(ctx, createSignal,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.SuggestionID,
+		arg.Type,
+		arg.Title,
+		arg.Description,
+		arg.Explanation,
+		arg.Suggestion,
+		arg.DocumentID,
+		arg.ContactID,
+		arg.LinkID,
+		arg.Priority,
+	)
+	var i Signal
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SuggestionID,
+		&i.Type,
+		&i.Title,
+		&i.Description,
+		&i.Explanation,
+		&i.Suggestion,
+		&i.DocumentID,
+		&i.ContactID,
+		&i.LinkID,
+		&i.Priority,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createSuggestion = `-- name: CreateSuggestion :one
 INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -1010,6 +1116,36 @@ func (q *Queries) GetAccessRequestByID(ctx context.Context, arg GetAccessRequest
 		&i.Status,
 		&i.ReviewedBy,
 		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getActionItemByID = `-- name: GetActionItemByID :one
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+FROM action_items
+WHERE id = $1 AND workspace_id = $2 LIMIT 1
+`
+
+type GetActionItemByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetActionItemByID(ctx context.Context, arg GetActionItemByIDParams) (ActionItem, error) {
+	row := q.db.QueryRow(ctx, getActionItemByID, arg.ID, arg.WorkspaceID)
+	var i ActionItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SignalID,
+		&i.Title,
+		&i.Impact,
+		&i.DueAt,
+		&i.Status,
+		&i.ActionType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -1498,6 +1634,41 @@ func (q *Queries) GetRoomMemberByEmail(ctx context.Context, arg GetRoomMemberByE
 	return i, err
 }
 
+const getSignalBySuggestion = `-- name: GetSignalBySuggestion :one
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+       document_id, contact_id, link_id, priority, created_at, updated_at
+FROM signals
+WHERE suggestion_id = $1 AND workspace_id = $2 LIMIT 1
+`
+
+type GetSignalBySuggestionParams struct {
+	SuggestionID pgtype.UUID
+	WorkspaceID  pgtype.UUID
+}
+
+func (q *Queries) GetSignalBySuggestion(ctx context.Context, arg GetSignalBySuggestionParams) (Signal, error) {
+	row := q.db.QueryRow(ctx, getSignalBySuggestion, arg.SuggestionID, arg.WorkspaceID)
+	var i Signal
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SuggestionID,
+		&i.Type,
+		&i.Title,
+		&i.Description,
+		&i.Explanation,
+		&i.Suggestion,
+		&i.DocumentID,
+		&i.ContactID,
+		&i.LinkID,
+		&i.Priority,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSuggestionByID = `-- name: GetSuggestionByID :one
 SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
 FROM suggestions
@@ -1778,6 +1949,84 @@ func (q *Queries) ListAccessRequestsByRoom(ctx context.Context, roomID pgtype.UU
 			&i.Status,
 			&i.ReviewedBy,
 			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActionItemsBySignal = `-- name: ListActionItemsBySignal :many
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+FROM action_items
+WHERE signal_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListActionItemsBySignal(ctx context.Context, signalID pgtype.UUID) ([]ActionItem, error) {
+	rows, err := q.db.Query(ctx, listActionItemsBySignal, signalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ActionItem
+	for rows.Next() {
+		var i ActionItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.SignalID,
+			&i.Title,
+			&i.Impact,
+			&i.DueAt,
+			&i.Status,
+			&i.ActionType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActionItemsByWorkspace = `-- name: ListActionItemsByWorkspace :many
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+FROM action_items
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ActionItem, error) {
+	rows, err := q.db.Query(ctx, listActionItemsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ActionItem
+	for rows.Next() {
+		var i ActionItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.SignalID,
+			&i.Title,
+			&i.Impact,
+			&i.DueAt,
+			&i.Status,
+			&i.ActionType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2117,6 +2366,50 @@ func (q *Queries) ListRoomMembers(ctx context.Context, roomID pgtype.UUID) ([]Ro
 	return items, nil
 }
 
+const listSignalsByWorkspace = `-- name: ListSignalsByWorkspace :many
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
+       document_id, contact_id, link_id, priority, created_at, updated_at
+FROM signals
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Signal, error) {
+	rows, err := q.db.Query(ctx, listSignalsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Signal
+	for rows.Next() {
+		var i Signal
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.SuggestionID,
+			&i.Type,
+			&i.Title,
+			&i.Description,
+			&i.Explanation,
+			&i.Suggestion,
+			&i.DocumentID,
+			&i.ContactID,
+			&i.LinkID,
+			&i.Priority,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSuggestionsByLink = `-- name: ListSuggestionsByLink :many
 SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
 FROM suggestions
@@ -2131,6 +2424,46 @@ type ListSuggestionsByLinkParams struct {
 
 func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestionsByLinkParams) ([]Suggestion, error) {
 	rows, err := q.db.Query(ctx, listSuggestionsByLink, arg.LinkID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Suggestion
+	for rows.Next() {
+		var i Suggestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.ContactID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.Type,
+			&i.Reason,
+			&i.Action,
+			&i.Dismissed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSuggestionsByWorkspace = `-- name: ListSuggestionsByWorkspace :many
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+FROM suggestions
+WHERE workspace_id = $1 AND dismissed = false
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListSuggestionsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Suggestion, error) {
+	rows, err := q.db.Query(ctx, listSuggestionsByWorkspace, workspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -2660,6 +2993,38 @@ type UpdateAccessRequestStatusParams struct {
 func (q *Queries) UpdateAccessRequestStatus(ctx context.Context, arg UpdateAccessRequestStatusParams) error {
 	_, err := q.db.Exec(ctx, updateAccessRequestStatus, arg.Status, arg.ReviewedBy, arg.ID)
 	return err
+}
+
+const updateActionItemStatus = `-- name: UpdateActionItemStatus :one
+UPDATE action_items
+SET status = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+`
+
+type UpdateActionItemStatusParams struct {
+	Status      string
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateActionItemStatus(ctx context.Context, arg UpdateActionItemStatusParams) (ActionItem, error) {
+	row := q.db.QueryRow(ctx, updateActionItemStatus, arg.Status, arg.ID, arg.WorkspaceID)
+	var i ActionItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SignalID,
+		&i.Title,
+		&i.Impact,
+		&i.DueAt,
+		&i.Status,
+		&i.ActionType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateAssistantSessionTitle = `-- name: UpdateAssistantSessionTitle :exec
