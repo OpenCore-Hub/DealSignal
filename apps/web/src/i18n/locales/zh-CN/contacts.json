@@ -1,7 +1,7 @@
 {
   "page": {
-    "title": "访问者",
-    "description": "追踪谁看过你的材料，识别高意向联系人。"
+    "title": "联系人",
+    "description": "追踪谁看过你的材料，识别高意向访问者。"
   },
   "searchPlaceholder": "搜索联系人...",
   "unknownOrganization": "未知机构",
