@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { FileText } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
@@ -52,9 +52,28 @@ export function CanvasViewer({
     publicVisitorId,
   });
 
-  const error = loadError || actionError;
+  const totalPages = doc ? (pages.length > 0 ? pages.length : doc.pageCount) : 0;
 
-  const handleDownload = async () => {
+  const goToPreviousPage = useCallback(() => {
+    setPage((p) => Math.max(1, p - 1));
+  }, [setPage]);
+
+  const goToNextPage = useCallback(() => {
+    setPage((p) => Math.min(totalPages, p + 1));
+  }, [setPage, totalPages]);
+
+  const zoomOut = useCallback(() => {
+    setZoom((z) => Math.max(50, z - 10));
+  }, [setZoom]);
+
+  const zoomIn = useCallback(() => {
+    setZoom((z) => Math.min(200, z + 10));
+  }, [setZoom]);
+
+  const goToFirstPage = useCallback(() => setPage(1), [setPage]);
+  const goToLastPage = useCallback(() => setPage(totalPages), [setPage, totalPages]);
+
+  const handleDownload = useCallback(async () => {
     if (!documentId || !doc) return;
     try {
       if (publicToken && publicLink && !publicLink.downloadEnabled) {
@@ -88,7 +107,66 @@ export function CanvasViewer({
     } catch (e) {
       setActionError(e instanceof Error ? e.message : t("common:error.loadFailed"));
     }
-  };
+  }, [documentId, doc, publicToken, publicLink, publicVisitorId, t]);
+
+  // Keyboard shortcuts for viewer navigation.
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      const target = event.target as HTMLElement;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target.isContentEditable
+      ) {
+        return;
+      }
+
+      switch (event.key) {
+        case "ArrowLeft":
+        case "PageUp":
+          event.preventDefault();
+          goToPreviousPage();
+          break;
+        case "ArrowRight":
+        case "PageDown":
+          event.preventDefault();
+          goToNextPage();
+          break;
+        case "Home":
+          event.preventDefault();
+          goToFirstPage();
+          break;
+        case "End":
+          event.preventDefault();
+          goToLastPage();
+          break;
+        case "+":
+        case "=":
+          event.preventDefault();
+          zoomIn();
+          break;
+        case "-":
+        case "_":
+          event.preventDefault();
+          zoomOut();
+          break;
+        case "d":
+        case "D":
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            void handleDownload();
+          }
+          break;
+        default:
+          break;
+      }
+    }
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [goToPreviousPage, goToNextPage, goToFirstPage, goToLastPage, zoomIn, zoomOut, handleDownload]);
+
+  const error = loadError || actionError;
 
   if (loading) {
     return (
@@ -123,8 +201,6 @@ export function CanvasViewer({
     );
   }
 
-  const totalPages = pages.length > 0 ? pages.length : doc.pageCount;
-
   return (
     <div className="flex flex-1 flex-col bg-neutral-50 dark:bg-background">
       <ViewerToolbar
@@ -132,10 +208,10 @@ export function CanvasViewer({
         page={page}
         totalPages={totalPages}
         zoom={zoom}
-        onZoomOut={() => setZoom((z) => Math.max(50, z - 10))}
-        onZoomIn={() => setZoom((z) => Math.min(200, z + 10))}
-        onPreviousPage={() => setPage((p) => Math.max(1, p - 1))}
-        onNextPage={() => setPage((p) => Math.min(totalPages, p + 1))}
+        onZoomOut={zoomOut}
+        onZoomIn={zoomIn}
+        onPreviousPage={goToPreviousPage}
+        onNextPage={goToNextPage}
         onDownload={handleDownload}
       />
       <ViewerCanvas

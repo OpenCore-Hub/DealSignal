@@ -36,14 +36,14 @@ export function ViewerToolbar({
   const { t } = useTranslation(["documents", "common"]);
 
   return (
-    <header className="flex h-14 items-center justify-between border-b border-border bg-background px-4">
-      <div className="flex items-center gap-3">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
+    <header className="flex h-14 items-center justify-between gap-2 border-b border-border bg-background px-4">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-primary text-xs font-bold text-primary-foreground">
           D
         </div>
-        <div>
-          <p className="text-sm font-medium">{doc.title}</p>
-          <p className="text-caption text-muted-foreground">
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium">{doc.title}</p>
+          <p className="hidden text-caption text-muted-foreground sm:block">
             {t("documents:viewer.meta", {
               fileType: doc.fileType.toUpperCase(),
               fileSize: formatFileSize(doc.fileSize),
@@ -53,7 +53,7 @@ export function ViewerToolbar({
         </div>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="hidden items-center gap-1 sm:flex">
         <Button
           size="icon-sm"
           variant="ghost"
@@ -73,7 +73,7 @@ export function ViewerToolbar({
         </Button>
       </div>
 
-      <div className="flex items-center gap-1">
+      <div className="flex shrink-0 items-center gap-1">
         <Button
           size="icon-sm"
           variant="ghost"

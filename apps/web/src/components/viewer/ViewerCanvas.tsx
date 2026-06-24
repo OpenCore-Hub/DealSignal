@@ -83,7 +83,7 @@ export function ViewerCanvas({
         className="hidden w-48 md:flex"
       />
 
-      <div className="relative flex flex-1 items-center justify-center overflow-auto p-8">
+      <div className="relative flex flex-1 items-center justify-center overflow-auto p-2 sm:p-4 lg:p-8">
         <div
           className="relative overflow-hidden rounded-md bg-white shadow-card"
           style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
