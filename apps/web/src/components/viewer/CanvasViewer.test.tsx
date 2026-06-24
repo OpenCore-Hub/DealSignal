@@ -233,4 +233,40 @@ describe("CanvasViewer", () => {
     expect(await screen.findByText("Q3 Pitch")).toBeInTheDocument();
     expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123");
   });
+
+  it("navigates pages and zoom with keyboard shortcuts", async () => {
+    await renderWithProviders("/viewer/doc-001", { evidence: demoEvidence });
+    await loadDocument();
+    await screen.findByText("1 / 3");
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowRight" });
+    });
+    await waitFor(() => expect(screen.getByText("2 / 3")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "ArrowLeft" });
+    });
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "End" });
+    });
+    await waitFor(() => expect(screen.getByText("3 / 3")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "Home" });
+    });
+    await waitFor(() => expect(screen.getByText("1 / 3")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "=" });
+    });
+    await waitFor(() => expect(screen.getByText("110%")).toBeInTheDocument());
+
+    await act(async () => {
+      fireEvent.keyDown(window, { key: "-" });
+    });
+    await waitFor(() => expect(screen.getByText("100%")).toBeInTheDocument());
+  });
 });
