@@ -151,6 +151,7 @@ export function SettingsBrandPage() {
                 ref={fileInputRef}
                 type="file"
                 accept="image/*"
+                aria-label={t("brand.upload")}
                 className="hidden"
                 onChange={handleFileChange}
               />
