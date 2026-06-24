@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -34,7 +34,7 @@ export function PublicViewerPage() {
     nda: false,
   });
 
-  async function tryAccess(gateParams?: { email?: string; password?: string; ndaAgreed?: boolean }) {
+  const tryAccess = useCallback(async (gateParams?: { email?: string; password?: string; ndaAgreed?: boolean }) => {
     if (!token) return;
     setLoading(true);
     setError(null);
@@ -60,11 +60,12 @@ export function PublicViewerPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [token, t]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void tryAccess();
-  }, [token]);
+  }, [token, tryAccess]);
 
   if (loading) {
     return (

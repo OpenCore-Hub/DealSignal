@@ -108,8 +108,10 @@ export function CanvasViewer({
     };
   }, [documentId, retryTick, t, publicDocument, publicToken]);
 
+  // Synchronize the viewer page with the AI highlight from the global store.
   useEffect(() => {
     if (highlightedPage && highlightedPage !== page) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- external store synchronization
       setPage(highlightedPage);
     }
   }, [highlightedPage, page]);
@@ -117,17 +119,14 @@ export function CanvasViewer({
   useEffect(() => {
     let cancelled = false;
     const id = documentId;
-    if (!id || pages.length === 0) {
-      setImageUrl(null);
-      return;
-    }
+    if (!id || pages.length === 0) return;
     async function loadSignedUrl() {
       try {
         const res = publicToken
           ? await api.getPublicPageSignedUrl(id!, publicToken, page)
           : await api.getPageSignedUrl(id!, page);
         if (!cancelled) setImageUrl(res.image_url);
-      } catch (e) {
+      } catch {
         if (!cancelled) setImageUrl(null);
       }
     }
@@ -137,7 +136,7 @@ export function CanvasViewer({
     };
   }, [documentId, page, pages.length, publicToken]);
 
-  const pageStartRef = useRef<number>(Date.now());
+  const pageStartRef = useRef<number>(0);
   useEffect(() => {
     if (!publicToken || !documentId) return;
     pageStartRef.current = Date.now();

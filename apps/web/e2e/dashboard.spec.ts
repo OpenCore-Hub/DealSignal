@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { setupAuthenticatedPage, WORKSPACE_SLUG } from "./helpers";
+import { setupAuthenticatedPage } from "./helpers";
 
 test.describe("Dashboard", () => {
   test.beforeEach(async ({ page }) => {

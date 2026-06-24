@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { FileText, MagnifyingGlassPlus, MagnifyingGlass } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
@@ -26,8 +26,10 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
   const [evidences, setEvidences] = useState<Evidence[]>(initialEvidences ?? []);
   const [searchQuery, setSearchQuery] = useState("");
   const [searching, setSearching] = useState(false);
-  const [imgLoaded, setImgLoaded] = useState(false);
-  const imgRef = useRef<HTMLImageElement>(null);
+  const [imageSizeForPage, setImageSizeForPage] = useState<{
+    page: number;
+    size: { width: number; height: number };
+  } | null>(null);
 
   const pages = Array.from({ length: pageCount }, (_, i) => {
     const pageNumber = i + 1;
@@ -59,14 +61,10 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
 
   // Load signed URL for selected page (only depends on page + document, NOT evidences)
   useEffect(() => {
-    if (!selectedPage || !documentId) {
-      setPageImageUrl(null);
-      setImgLoaded(false);
-      return;
-    }
+    if (!selectedPage || !documentId) return;
     let cancelled = false;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading state for async fetch
     setLoadingImageUrl(true);
-    setImgLoaded(false);
     api
       .getPageSignedUrl(documentId, selectedPage)
       .then((res) => {
@@ -85,11 +83,9 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
 
   // Update highlight boxes when page or evidences change (separate from image loading)
   useEffect(() => {
-    if (!selectedPage) {
-      setHighlightBoxes([]);
-      return;
-    }
+    if (!selectedPage) return;
     const pageEvidence = evidences?.filter((e) => e.page_number === selectedPage) ?? [];
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived UI state from props
     setHighlightBoxes(pageEvidence.flatMap((e) => e.boxes || []));
   }, [selectedPage, evidences]);
 
@@ -202,29 +198,34 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
               ) : pageImageUrl ? (
                 <div className="relative inline-block">
                   <img
-                    ref={imgRef}
                     src={pageImageUrl}
                     alt={t("documents:content.pageLabel", { pageNumber: selectedPage })}
                     className="max-h-[600px] w-auto rounded-md shadow-sm"
-                    onLoad={() => setImgLoaded(true)}
+                    onLoad={(e) => {
+                      const img = e.currentTarget;
+                      setImageSizeForPage({
+                        page: selectedPage,
+                        size: { width: img.clientWidth, height: img.clientHeight },
+                      });
+                    }}
                   />
-                  {/* Bounding box highlights - only render after image is loaded so imgRef has dimensions */}
-                  {imgLoaded && imgRef.current && highlightBoxes.map((box, idx) => {
-                    const w = imgRef.current!.clientWidth;
-                    const h = imgRef.current!.clientHeight;
-                    return (
-                      <div
-                        key={idx}
-                        className="pointer-events-none absolute border-2 border-primary bg-primary/20 animate-pulse rounded-sm"
-                        style={{
-                          left: `${box.x * w}px`,
-                          top: `${box.y * h}px`,
-                          width: `${box.w * w}px`,
-                          height: `${box.h * h}px`,
-                        }}
-                      />
-                    );
-                  })}
+                  {/* Bounding box highlights - only render after image is loaded and dimensions are known */}
+                  {imageSizeForPage?.page === selectedPage &&
+                    highlightBoxes.map((box, idx) => {
+                      const { width: w, height: h } = imageSizeForPage.size;
+                      return (
+                        <div
+                          key={idx}
+                          className="pointer-events-none absolute border-2 border-primary bg-primary/20 animate-pulse rounded-sm"
+                          style={{
+                            left: `${box.x * w}px`,
+                            top: `${box.y * h}px`,
+                            width: `${box.w * w}px`,
+                            height: `${box.h * h}px`,
+                          }}
+                        />
+                      );
+                    })}
                 </div>
               ) : (
                 <div className="flex h-[400px] w-[300px] flex-col items-center justify-center text-muted-foreground">

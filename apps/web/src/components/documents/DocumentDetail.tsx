@@ -199,7 +199,7 @@ export function DocumentDetail() {
                   document.body.appendChild(a);
                   a.click();
                   a.remove();
-                } catch (e) {
+                } catch {
                   // TODO: surface error toast
                 }
               },

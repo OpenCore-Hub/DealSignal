@@ -11,7 +11,6 @@ import {
   mockHeatAlerts,
   mockLinks,
   mockPageAnalytics,
-  mockRiskAlerts,
   mockSignals,
   mockSuggestions,
   mockWorkspaceMembers,
@@ -211,7 +210,7 @@ export const handlers = [
     const file = formData.get("file") as File | null;
     const title = file?.name ?? "uploaded.pdf";
     const ext = title.split(".").pop()?.toLowerCase() ?? "pdf";
-    const fileType = (["pdf", "docx", "pptx", "xlsx"] as const).includes(ext as never) ? ext : "pdf";
+    const fileType = (["pdf", "docx", "pptx", "xlsx"] as const).includes(ext as never) ? (ext as import("@/types").Document["fileType"]) : "pdf";
     const newDoc = {
       id: generateId("doc"),
       title,
