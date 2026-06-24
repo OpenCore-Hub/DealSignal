@@ -1,17 +1,22 @@
 -- name: CreateUser :one
 INSERT INTO users (email, password_hash)
 VALUES ($1, $2)
-RETURNING id, email, password_hash, created_at;
+RETURNING *;
 
 -- name: GetUserByEmail :one
-SELECT id, email, password_hash, created_at
+SELECT *
 FROM users
 WHERE email = $1 LIMIT 1;
 
 -- name: GetUserByID :one
-SELECT id, email, password_hash, created_at
+SELECT *
 FROM users
 WHERE id = $1 LIMIT 1;
+
+-- name: VerifyUserEmail :exec
+UPDATE users
+SET email_verified = TRUE
+WHERE id = $1;
 
 -- name: CreateTenant :one
 INSERT INTO tenants (name, slug)
@@ -20,20 +25,28 @@ RETURNING id, name, slug, created_at;
 
 -- name: CreateWorkspace :one
 INSERT INTO workspaces (tenant_id, name, slug, brand_color)
-VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, name, slug, brand_color, created_at;
+VALUES ($1, $2, $3, $4) RETURNING *;
 
 -- name: GetWorkspaceByID :one
-SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at
-FROM workspaces w
-WHERE w.id = $1 LIMIT 1;
+SELECT * FROM workspaces WHERE id = $1 LIMIT 1;
 
 -- name: GetWorkspaceBySlug :one
-SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at
-FROM workspaces w
-WHERE w.slug = $1 LIMIT 1;
+SELECT * FROM workspaces WHERE slug = $1 LIMIT 1;
+
+-- name: UpdateWorkspace :one
+UPDATE workspaces
+SET name = $2, brand_color = $3
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateWorkspaceSecurity :one
+UPDATE workspaces
+SET force_email_verification = $1, watermark_downloads = $2, two_factor_enabled = $3
+WHERE id = $4
+RETURNING *;
 
 -- name: ListWorkspacesByUser :many
-SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at, m.role
+SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.force_email_verification, w.watermark_downloads, w.two_factor_enabled, w.created_at, m.role
 FROM workspaces w
 JOIN workspace_members m ON m.workspace_id = w.id
 WHERE m.user_id = $1
@@ -50,31 +63,37 @@ FROM workspace_members
 WHERE workspace_id = $1 AND user_id = $2 LIMIT 1;
 
 -- name: ListWorkspaceMembers :many
-SELECT workspace_id, user_id, role, joined_at
-FROM workspace_members
-WHERE workspace_id = $1
-ORDER BY joined_at DESC;
+SELECT
+    wm.workspace_id,
+    wm.user_id,
+    wm.role,
+    wm.joined_at,
+    u.email
+FROM workspace_members wm
+JOIN users u ON u.id = wm.user_id
+WHERE wm.workspace_id = $1
+ORDER BY wm.joined_at DESC;
 
 -- name: CreateDocument :one
 INSERT INTO documents (
-    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at;
+    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, file_size
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at;
 
 -- name: GetDocumentByID :one
-SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: ListDocumentsByWorkspace :many
-SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
 -- name: ListRecentDocumentsByWorkspace :many
-SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -100,6 +119,15 @@ SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1;
+
+-- name: ListPendingIngestionJobs :many
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+FROM ingestion_jobs
+WHERE status = 'queued'
+   OR (status = 'failed' AND attempts < 3)
+   OR (status = 'processing' AND updated_at < now() - interval '5 minutes')
+ORDER BY created_at ASC
+LIMIT $1;
 
 -- name: UpdateIngestionJob :exec
 UPDATE ingestion_jobs
@@ -260,7 +288,7 @@ RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permissi
 -- name: GetDocumentViewMetrics :many
 SELECT
     d.id,
-    d.title,
+    COALESCE(d.title, ''::text) as title,
     COALESCE(SUM(l.access_count), 0)::bigint AS views
 FROM documents d
 LEFT JOIN links l ON l.document_id = d.id AND l.status != 'deleted'
@@ -358,7 +386,7 @@ ORDER BY p.page_number;
 -- name: GetPageTitlesByDocument :many
 SELECT
     p.page_number,
-    LEFT(c.text, 80) AS title
+    COALESCE(LEFT(c.text, 80), '')::text AS title
 FROM pages p
 LEFT JOIN LATERAL (
     SELECT text FROM chunks WHERE page_id = p.id ORDER BY id LIMIT 1
@@ -526,12 +554,10 @@ FROM tenants
 WHERE slug = $1 LIMIT 1;
 
 -- name: GetWorkspaceByTenantAndSlug :one
-SELECT id, tenant_id, name, slug, brand_color, created_at
-FROM workspaces
-WHERE tenant_id = $1 AND slug = $2 LIMIT 1;
+SELECT * FROM workspaces WHERE tenant_id = $1 AND slug = $2 LIMIT 1;
 
 -- name: ListWorkspacesByUserAndTenant :many
-SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.created_at, m.role
+SELECT w.id, w.tenant_id, w.name, w.slug, w.brand_color, w.force_email_verification, w.watermark_downloads, w.two_factor_enabled, w.created_at, m.role
 FROM workspaces w
 JOIN workspace_members m ON m.workspace_id = w.id
 WHERE m.user_id = $1 AND w.tenant_id = $2
@@ -621,6 +647,25 @@ LIMIT 1;
 -- name: DeleteOAuthState :exec
 DELETE FROM oauth_states WHERE state = $1;
 
+-- name: UpsertIntegrationToken :exec
+INSERT INTO integration_tokens (workspace_id, provider, access_token, refresh_token, expires_at, scope, external_id)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, provider) DO UPDATE SET
+    access_token = EXCLUDED.access_token,
+    refresh_token = EXCLUDED.refresh_token,
+    expires_at = EXCLUDED.expires_at,
+    scope = EXCLUDED.scope,
+    external_id = EXCLUDED.external_id,
+    updated_at = now();
+
+-- name: GetIntegrationToken :one
+SELECT workspace_id, provider, access_token, refresh_token, expires_at, scope, external_id, created_at, updated_at
+FROM integration_tokens
+WHERE workspace_id = $1 AND provider = $2 LIMIT 1;
+
+-- name: DeleteIntegrationToken :exec
+DELETE FROM integration_tokens WHERE workspace_id = $1 AND provider = $2;
+
 -- name: CreateSyncLog :one
 INSERT INTO integration_sync_logs (workspace_id, provider, direction, record_type, external_id, status, payload)
 VALUES ($1, $2, $3, $4, $5, $6, $7)
@@ -634,9 +679,7 @@ ORDER BY created_at DESC
 LIMIT 50;
 
 -- name: GetWorkspaceByIDAndTenant :one
-SELECT id, tenant_id, name, slug, brand_color, created_at
-FROM workspaces
-WHERE id = $1 AND tenant_id = $2 LIMIT 1;
+SELECT * FROM workspaces WHERE id = $1 AND tenant_id = $2 LIMIT 1;
 
 -- name: CreateInvitation :one
 INSERT INTO workspace_invitations (workspace_id, email, role, expires_at)
@@ -656,10 +699,64 @@ WHERE token = $1;
 DELETE FROM pages WHERE document_id = $1;
 
 -- name: DeleteChunksByDocument :exec
-DELETE FROM chunks WHERE page_id IN (SELECT id FROM pages WHERE document_id = $1);
+DELETE FROM chunks WHERE chunks.document_id = $1 OR chunks.page_id IN (SELECT id FROM pages WHERE pages.document_id = $1);
+
+-- name: CreateChunkBox :exec
+INSERT INTO chunk_boxes (chunk_id, document_id, page_number, coordinate_space, x, y, w, h, source, confidence)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
+
+-- name: CreateChunkWithBBox :one
+INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_tsvector('english', $7))
+RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector;
+
+-- name: CreateChunkWithBBoxNoEmbed :one
+INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $7))
+RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector;
+
+-- name: SearchChunksByTrigram :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    c.normalized_text,
+    p.page_number,
+    p.document_id,
+    similarity(c.normalized_text, sqlc.arg(query)) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND c.normalized_text IS NOT NULL
+  AND c.normalized_text <> ''
+  AND similarity(c.normalized_text, sqlc.arg(query)) > 0.1
+ORDER BY rank DESC
+LIMIT $2;
+
+-- name: SearchHybridWithBBox :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    cb.x AS box_x,
+    cb.y AS box_y,
+    cb.w AS box_w,
+    cb.h AS box_h,
+    'hybrid' AS match_type
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+LEFT JOIN LATERAL (
+    SELECT x, y, w, h FROM chunk_boxes WHERE chunk_id = c.id ORDER BY id LIMIT 1
+) cb ON true
+WHERE c.workspace_id = $1
+  AND c.id = ANY(sqlc.arg(chunk_ids)::uuid[])
+ORDER BY p.page_number
+LIMIT $2;
 
 -- name: GetDocumentByIDAndTenant :one
-SELECT id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL
 LIMIT 1;
@@ -737,7 +834,7 @@ SELECT
     COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
     MAX(al.created_at)::timestamptz AS last_seen_at
 FROM access_logs al
-LEFT JOIN contacts c ON c.id = al.contact_id
+LEFT JOIN contacts c ON c.email = al.visitor_email AND c.workspace_id = al.workspace_id
 LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
 WHERE al.workspace_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
 GROUP BY LOWER(COALESCE(c.email, al.visitor_email))

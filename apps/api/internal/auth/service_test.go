@@ -11,7 +11,7 @@ func init() {
 }
 
 func TestRegisterValidation(t *testing.T) {
-	svc := NewService(nil)
+	svc := NewService(nil, NewMemoryTokenStore())
 	ctx := context.Background()
 
 	cases := []struct {
@@ -21,7 +21,8 @@ func TestRegisterValidation(t *testing.T) {
 		err      error
 	}{
 		{"invalid email", "not-an-email", "password123", ErrInvalidEmail},
-		{"short password", "user@example.com", "short", errors.New("password must be at least 8 characters")},
+		{"short password", "user@example.com", "short", ErrWeakPassword},
+		{"weak password no special", "user@example.com", "Password123", ErrWeakPassword},
 	}
 
 	for _, c := range cases {

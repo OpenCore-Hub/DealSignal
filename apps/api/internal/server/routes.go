@@ -17,12 +17,13 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/integration"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
@@ -59,15 +60,25 @@ func (s *Server) registerRoutes() {
 
 	if s.dbPool != nil {
 		queries := db.New(s.dbPool)
-		authHandler := auth.NewHandler(auth.NewService(queries))
+		var tokenStore auth.TokenStore
+		if s.redisClient != nil {
+			tokenStore = s.redisClient
+		} else {
+			tokenStore = auth.NewMemoryTokenStore()
+		}
+		authSvc := auth.NewService(queries, tokenStore,
+			auth.WithMailer(mailer.New(s.cfg)),
+			auth.WithAppBaseURL(s.cfg.FrontendURL),
+		)
+		authHandler := auth.NewHandler(authSvc)
 		authHandler.RegisterRoutes(api)
 
 		workspaceSvc := workspace.NewService(queries)
-		workspaceHandler := workspace.NewHandler(workspaceSvc)
+		workspaceHandler := workspace.NewHandler(workspaceSvc, authSvc)
 		workspaceHandler.RegisterRoutes(api)
 
 		domainSvc := domain.NewService(queries, certProvider(s.cfg.CertProvider), s.cfg.CNAMETarget)
-		domainHandler := domain.NewHandler(domainSvc, workspaceSvc)
+		domainHandler := domain.NewHandler(domainSvc, workspaceSvc, authSvc)
 		domainHandler.RegisterRoutes(api)
 
 		s.engine.Use(middleware.HostMiddleware(s.cfg.BaseDomain, hostLookup(domainSvc, s.cfg.BaseDomain)))
@@ -102,7 +113,11 @@ func (s *Server) registerRoutes() {
 			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, s.cfg.OnlyOfficeJWTSecret, storageClient)
 			ingestionSvc := ingestion.NewService(queries, storageClient, converter, ingestionEmbedder)
 			uploadSvc := upload.NewService(queries, storageClient)
-			uploadHandler := upload.NewHandler(uploadSvc, ingestionSvc, storageClient)
+			uploadHandler := upload.NewHandler(uploadSvc, storageClient)
+
+			ingestionWorker := ingestion.NewWorker(ingestionSvc, 1*time.Second)
+			s.registerWorker(ingestionWorker)
+			ingestionWorker.Start(context.Background())
 
 			searchSvc := search.NewService(queries, searchEmbedder)
 			searchHandler := search.NewHandler(searchSvc)
@@ -126,7 +141,7 @@ func (s *Server) registerRoutes() {
 			signalHandler := signal.NewHandler(signalSvc)
 
 			ws := api.Group("/workspaces/:workspaceSlug")
-			ws.Use(middleware.Auth())
+			ws.Use(middleware.Auth(authSvc))
 			ws.Use(workspace.AuthMiddleware(workspaceSvc))
 			uploadHandler.RegisterRoutes(ws)
 			searchHandler.RegisterRoutes(ws)
@@ -137,8 +152,13 @@ func (s *Server) registerRoutes() {
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)
 
-			notification.NewWorker(notificationSvc, 30*time.Second).Start(context.Background())
-			domain.NewRenewalWorker(domainSvc, 1*time.Hour, 7*24*time.Hour).Start(context.Background())
+			notificationWorker := notification.NewWorker(notificationSvc, 30*time.Second)
+			s.registerWorker(notificationWorker)
+			notificationWorker.Start(context.Background())
+
+			renewalWorker := domain.NewRenewalWorker(domainSvc, 1*time.Hour, 7*24*time.Hour)
+			s.registerWorker(renewalWorker)
+			renewalWorker.Start(context.Background())
 
 			integrationSvc := integration.NewService(queries, s.cfg)
 			integrationHandler := integration.NewHandler(integrationSvc)

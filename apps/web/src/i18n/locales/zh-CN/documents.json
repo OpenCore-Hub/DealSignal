@@ -11,7 +11,12 @@
     "selectFiles": "选择文件",
     "processing": "解析中...",
     "removeFile": "移除文件",
-    "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+    "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx",
+    "fileCount": "{{count}} 个文件",
+    "clearCompleted": "清除已完成",
+    "uploadNow": "立即上传",
+    "uploading": "上传中...",
+    "pending": "等待上传"
   },
   "table": {
     "emptyTitle": "文档库为空",
@@ -80,7 +85,10 @@
     "avgDuration": "平均停留",
     "exitRate": "退出率",
     "evidenceHighlight": "AI 证据高亮",
-    "sourceLocation": "原文定位"
+    "sourceLocation": "原文定位",
+    "matchType": "{{type}} 匹配 · 分数 {{score}}",
+    "allEvidence": "全部证据（点击跳转）",
+    "searchPlaceholder": "搜索文档内容..."
   },
   "aiInsights": {
     "emptyTitle": "暂无分析数据",

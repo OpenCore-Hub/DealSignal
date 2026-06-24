@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
@@ -29,8 +30,39 @@ func AuthMiddleware(svc *Service) gin.HandlerFunc {
 			return
 		}
 
+		security, err := svc.GetSecurity(c.Request.Context(), ws.ID)
+		if err != nil {
+			c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to load workspace security settings"})
+			return
+		}
+
+		if security.ForceEmailVerification {
+			verified, err := svc.IsUserEmailVerified(c.Request.Context(), userID)
+			if err != nil {
+				c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to verify user email status"})
+				return
+			}
+			if !verified {
+				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "email_verification_required", "message": "email verification required"})
+				return
+			}
+		}
+
 		c.Set("workspaceID", ws.ID)
 		c.Set("tenantID", ws.TenantID)
 		c.Next()
 	}
+}
+
+// IsUserEmailVerified reports whether the given user has verified their email.
+func (s *Service) IsUserEmailVerified(ctx context.Context, userID string) (bool, error) {
+	uuid, err := pgUUID(userID)
+	if err != nil {
+		return false, err
+	}
+	user, err := s.queries.GetUserByID(ctx, uuid)
+	if err != nil {
+		return false, err
+	}
+	return user.EmailVerified, nil
 }

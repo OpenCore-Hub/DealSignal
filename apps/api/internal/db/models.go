@@ -59,14 +59,33 @@ type AssistantSession struct {
 }
 
 type Chunk struct {
-	ID           pgtype.UUID
-	TenantID     pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	PageID       pgtype.UUID
-	Text         string
-	Bbox         []byte
-	Embedding    pgvector.Vector
-	SearchVector interface{}
+	ID             pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	PageID         pgtype.UUID
+	Text           string
+	Bbox           []byte
+	Embedding      pgvector.Vector
+	SearchVector   interface{}
+	DocumentID     pgtype.UUID
+	ChunkIndex     pgtype.Int4
+	NormalizedText pgtype.Text
+	ChunkType      pgtype.Text
+}
+
+type ChunkBox struct {
+	ID              pgtype.UUID
+	ChunkID         pgtype.UUID
+	DocumentID      pgtype.UUID
+	PageNumber      int32
+	CoordinateSpace string
+	X               float64
+	Y               float64
+	W               float64
+	H               float64
+	Source          string
+	Confidence      float64
+	CreatedAt       pgtype.Timestamptz
 }
 
 type Contact struct {
@@ -119,6 +138,7 @@ type Document struct {
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 	DeletedAt   pgtype.Timestamptz
+	FileSize    pgtype.Int8
 }
 
 type IngestionJob struct {
@@ -144,6 +164,18 @@ type IntegrationSyncLog struct {
 	Payload      []byte
 	ErrorMessage pgtype.Text
 	CreatedAt    pgtype.Timestamptz
+}
+
+type IntegrationToken struct {
+	WorkspaceID  pgtype.UUID
+	Provider     string
+	AccessToken  string
+	RefreshToken pgtype.Text
+	ExpiresAt    pgtype.Timestamptz
+	Scope        pgtype.Text
+	ExternalID   pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type Link struct {
@@ -327,19 +359,23 @@ type TenantDomain struct {
 }
 
 type User struct {
-	ID           pgtype.UUID
-	Email        string
-	PasswordHash string
-	CreatedAt    pgtype.Timestamptz
+	ID            pgtype.UUID
+	Email         string
+	PasswordHash  string
+	CreatedAt     pgtype.Timestamptz
+	EmailVerified bool
 }
 
 type Workspace struct {
-	ID         pgtype.UUID
-	TenantID   pgtype.UUID
-	Name       string
-	Slug       string
-	BrandColor pgtype.Text
-	CreatedAt  pgtype.Timestamptz
+	ID                     pgtype.UUID
+	TenantID               pgtype.UUID
+	Name                   string
+	Slug                   string
+	BrandColor             pgtype.Text
+	CreatedAt              pgtype.Timestamptz
+	ForceEmailVerification bool
+	WatermarkDownloads     bool
+	TwoFactorEnabled       bool
 }
 
 type WorkspaceInvitation struct {

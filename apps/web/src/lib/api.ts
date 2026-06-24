@@ -18,7 +18,9 @@ import type {
   SecuritySettings,
   Signal,
   Suggestion,
+  User,
   Workspace,
+  WorkspaceInvitation,
   WorkspaceMember,
   WorkspaceSettings,
 } from "@/types";
@@ -55,14 +57,77 @@ export interface SignalFeed {
 }
 
 function getWorkspaceSlug(): string {
-  const slug = useUIStore.getState().currentWorkspace?.slug;
-  if (!slug) {
-    throw new Error("No workspace selected");
+  // Priority 1: from URL path (most reliable for page-level API calls)
+  if (typeof window !== "undefined") {
+    const match = window.location.pathname.match(/^\/([^/]+)/);
+    if (match && match[1] && !match[1].startsWith("api") && !["login", "register", "viewer", "l", "workspaces"].includes(match[1])) {
+      return match[1];
+    }
   }
-  return slug;
+  // Priority 2: from UI store (set after workspace selection)
+  const slug = useUIStore.getState().currentWorkspace?.slug;
+  if (slug) return slug;
+  throw new Error("No workspace selected");
+}
+
+function setTokens(accessToken: string, refreshToken: string) {
+  localStorage.setItem("access_token", accessToken);
+  localStorage.setItem("refresh_token", refreshToken);
+}
+
+export function clearTokens() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
 }
 
 export const api = {
+  login: async (email: string, password: string) => {
+    const res = await request<{ user: User; access_token: string; refresh_token: string; expires_in: number }>(
+      undefined,
+      "/auth/login",
+      { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
+    );
+    setTokens(res.access_token, res.refresh_token);
+    return res.user;
+  },
+  register: async (email: string, password: string) => {
+    const res = await request<{ user: User; access_token: string; refresh_token: string; expires_in: number }>(
+      undefined,
+      "/auth/register",
+      { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
+    );
+    setTokens(res.access_token, res.refresh_token);
+    return res.user;
+  },
+  logout: async () => {
+    const refreshToken = localStorage.getItem("refresh_token");
+    try {
+      await request<void>(undefined, "/auth/logout", {
+        method: "POST",
+        body: JSON.stringify({ refresh_token: refreshToken }),
+      });
+    } finally {
+      clearTokens();
+    }
+  },
+  refresh: async () => {
+    const refreshToken = localStorage.getItem("refresh_token");
+    if (!refreshToken) throw new Error("No refresh token");
+    const res = await request<{ access_token: string; refresh_token: string; expires_in: number }>(
+      undefined,
+      "/auth/refresh",
+      { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }), skipAuth: true }
+    );
+    setTokens(res.access_token, res.refresh_token);
+    return res.access_token;
+  },
+
+  verifyEmail: async (token: string) => {
+    return request<{ code: string; message: string }>(undefined, `/auth/verify-email/${token}`, {
+      skipAuth: true,
+    });
+  },
+
   getWorkspaces: () => request<{ data: Workspace[] }>(undefined, "/workspaces"),
   createWorkspace: (payload: { name: string; slug: string; brand_color?: string }) =>
     request<Workspace>(undefined, "/workspaces", {
@@ -294,17 +359,17 @@ export const api = {
     }),
 
   getWorkspaceMembers: () =>
-    request<{ data: WorkspaceMember[] }>(getWorkspaceSlug(), "/workspace/members"),
+    request<{ data: WorkspaceMember[] }>(getWorkspaceSlug(), "/members"),
   inviteWorkspaceMember: (email: string, role: WorkspaceMember["role"]) =>
-    request<{ data: WorkspaceMember }>(getWorkspaceSlug(), "/workspace/members", {
+    request<{ data: WorkspaceInvitation }>(getWorkspaceSlug(), "/invitations", {
       method: "POST",
       body: JSON.stringify({ email, role }),
     }),
 
   getWorkspaceSettings: () =>
-    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/workspace/settings"),
+    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/settings"),
   updateWorkspaceSettings: (settings: WorkspaceSettings) =>
-    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/workspace/settings", {
+    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/settings", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
@@ -314,7 +379,7 @@ export const api = {
     formData.append("file", file);
     return request<{ data: { logoUrl: string } }>(
       getWorkspaceSlug(),
-      "/workspace/logo",
+      "/logo",
       {
         method: "POST",
         body: formData,
@@ -323,20 +388,37 @@ export const api = {
   },
 
   getBillingInfo: () =>
-    request<{ data: BillingInfo }>(getWorkspaceSlug(), "/workspace/billing"),
+    request<{ data: BillingInfo }>(getWorkspaceSlug(), "/billing"),
 
   getIntegrations: () =>
-    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/workspace/integrations"),
+    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/integrations/settings"),
   updateIntegrations: (status: IntegrationStatus) =>
-    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/workspace/integrations", {
+    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/integrations/settings", {
       method: "PUT",
       body: JSON.stringify(status),
     }),
 
+  connectSlack: () =>
+    request<{ url: string }>(getWorkspaceSlug(), "/integrations/slack/connect", {
+      method: "POST",
+    }),
+  disconnectSlack: () =>
+    request<{ code: string; message: string }>(getWorkspaceSlug(), "/integrations/slack/disconnect", {
+      method: "POST",
+    }),
+  connectHubSpot: () =>
+    request<{ url: string }>(getWorkspaceSlug(), "/integrations/hubspot/connect", {
+      method: "POST",
+    }),
+  disconnectHubSpot: () =>
+    request<{ code: string; message: string }>(getWorkspaceSlug(), "/integrations/hubspot/disconnect", {
+      method: "POST",
+    }),
+
   getSecuritySettings: () =>
-    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/workspace/security"),
+    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/security"),
   updateSecuritySettings: (settings: SecuritySettings) =>
-    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/workspace/security", {
+    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/security", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),

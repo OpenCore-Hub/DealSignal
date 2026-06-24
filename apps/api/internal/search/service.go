@@ -5,6 +5,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
+	"sort"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -14,6 +16,7 @@ import (
 const (
 	defaultTopK = 5
 	maxTopK     = 20
+	rrfK        = 60 // RRF constant for score fusion
 )
 
 // Embedder creates vector embeddings for text.
@@ -21,16 +24,26 @@ type Embedder interface {
 	Embed(ctx context.Context, text string) ([]float32, error)
 }
 
-// Evidence is a single retrieved chunk with its source location.
-type Evidence struct {
-	ChunkID    string      `json:"chunk_id"`
-	DocumentID string      `json:"document_id"`
-	PageNumber int32       `json:"page_number"`
-	Text       string      `json:"text"`
-	Bbox       interface{} `json:"bbox,omitempty"`
+// BoundingBox is a normalized bounding box in PAGE_IMAGE_NORMALIZED coordinate space.
+type BoundingBox struct {
+	X     float64 `json:"x"`
+	Y     float64 `json:"y"`
+	W     float64 `json:"w"`
+	H     float64 `json:"h"`
 }
 
-// Service performs hybrid vector + full-text search.
+// Evidence is a single retrieved chunk with its source location and precise bbox.
+type Evidence struct {
+	ChunkID    string        `json:"chunk_id"`
+	DocumentID string        `json:"document_id"`
+	PageNumber int32         `json:"page_number"`
+	Quote      string        `json:"quote"`
+	Score      float64       `json:"score"`
+	MatchType  string        `json:"match_type"`
+	Boxes      []BoundingBox `json:"boxes,omitempty"`
+}
+
+// Service performs hybrid vector + full-text + trigram search with RRF fusion.
 type Service struct {
 	queries  *db.Queries
 	embedder Embedder
@@ -42,6 +55,8 @@ func NewService(q *db.Queries, e Embedder) *Service {
 }
 
 // Search retrieves the most relevant evidence for a query within a workspace.
+// It performs three retrieval strategies (vector, full-text, trigram) and fuses
+// results using Reciprocal Rank Fusion (RRF).
 func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]Evidence, error) {
 	if topK <= 0 {
 		topK = defaultTopK
@@ -50,6 +65,7 @@ func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query str
 		topK = maxTopK
 	}
 
+	// Run all three search strategies in parallel-like fashion (sequential but independent)
 	vectorResults, err := s.vectorSearch(ctx, workspaceID, query, topK)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -57,20 +73,32 @@ func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query str
 
 	textResults, err := s.textSearch(ctx, workspaceID, query, topK)
 	if err != nil {
-		return nil, fmt.Errorf("text search: %w", err)
+		return nil, fmt.Errorf("full-text search: %w", err)
 	}
 
-	return mergeEvidence(vectorResults, textResults, topK), nil
+	trigramResults, err := s.trigramSearch(ctx, workspaceID, query, topK)
+	if err != nil {
+		return nil, fmt.Errorf("trigram search: %w", err)
+	}
+
+	return rrfFuse(topK, vectorResults, textResults, trigramResults), nil
 }
 
-func (s *Service) vectorSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]Evidence, error) {
+// rankedEvidence holds an evidence item and its rank within a single strategy.
+type rankedEvidence struct {
+	evidence Evidence
+	rank     int // 1-indexed
+}
+
+func (s *Service) vectorSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
 	if s.embedder == nil {
 		return nil, nil
 	}
 
 	vec, err := s.embedder.Embed(ctx, query)
 	if err != nil {
-		return nil, err
+		log.Printf(`{"level":"warn","component":"search","message":"vector embed failed, skipping vector search: %s"}`, err.Error())
+		return nil, nil
 	}
 
 	rows, err := s.queries.SearchChunksByVector(ctx, db.SearchChunksByVectorParams{
@@ -82,14 +110,16 @@ func (s *Service) vectorSearch(ctx context.Context, workspaceID pgtype.UUID, que
 		return nil, err
 	}
 
-	out := make([]Evidence, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox))
+	out := make([]rankedEvidence, 0, len(rows))
+	for i, r := range rows {
+		ev := rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox)
+		ev.MatchType = "vector"
+		out = append(out, rankedEvidence{evidence: ev, rank: i + 1})
 	}
 	return out, nil
 }
 
-func (s *Service) textSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]Evidence, error) {
+func (s *Service) textSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
 	rows, err := s.queries.SearchChunksByText(ctx, db.SearchChunksByTextParams{
 		WorkspaceID: workspaceID,
 		Limit:       int32(topK),
@@ -99,9 +129,35 @@ func (s *Service) textSearch(ctx context.Context, workspaceID pgtype.UUID, query
 		return nil, err
 	}
 
-	out := make([]Evidence, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox))
+	out := make([]rankedEvidence, 0, len(rows))
+	for i, r := range rows {
+		ev := rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox)
+		ev.MatchType = "fulltext"
+		out = append(out, rankedEvidence{evidence: ev, rank: i + 1})
+	}
+	return out, nil
+}
+
+func (s *Service) trigramSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
+	normalizedQuery := normalizeQuery(query)
+	if normalizedQuery == "" {
+		return nil, nil
+	}
+
+	rows, err := s.queries.SearchChunksByTrigram(ctx, db.SearchChunksByTrigramParams{
+		WorkspaceID: workspaceID,
+		Limit:       int32(topK),
+		Query:       normalizedQuery,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]rankedEvidence, 0, len(rows))
+	for i, r := range rows {
+		ev := rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox)
+		ev.MatchType = "exact"
+		out = append(out, rankedEvidence{evidence: ev, rank: i + 1})
 	}
 	return out, nil
 }
@@ -111,43 +167,90 @@ func rowToEvidence(chunkID, docID pgtype.UUID, pageNumber int32, text string, bb
 		ChunkID:    pgUUIDToString(chunkID),
 		DocumentID: pgUUIDToString(docID),
 		PageNumber: pageNumber,
-		Text:       text,
+		Quote:      text,
 	}
 	if len(bbox) > 0 {
-		var parsed interface{}
-		if err := json.Unmarshal(bbox, &parsed); err == nil {
-			ev.Bbox = parsed
+		// Try parsing as normalized bbox {x,y,w,h}
+		var box BoundingBox
+		if err := json.Unmarshal(bbox, &box); err == nil && box.W > 0 && box.H > 0 {
+			ev.Boxes = []BoundingBox{box}
 		}
 	}
 	return ev
 }
 
-func mergeEvidence(vector, text []Evidence, topK int) []Evidence {
-	seen := make(map[string]struct{}, len(vector)+len(text))
-	out := make([]Evidence, 0, topK)
+// rrfFuse combines multiple ranked lists using Reciprocal Rank Fusion.
+// score = Σ 1/(k + rank_i) for each list where the chunk appears.
+func rrfFuse(topK int, lists ...[]rankedEvidence) []Evidence {
+	scores := make(map[string]float64)
+	evidenceMap := make(map[string]Evidence)
 
-	for _, e := range vector {
-		if _, ok := seen[e.ChunkID]; ok {
-			continue
-		}
-		seen[e.ChunkID] = struct{}{}
-		out = append(out, e)
-		if len(out) == topK {
-			return out
+	for _, list := range lists {
+		for _, re := range list {
+			id := re.evidence.ChunkID
+			if id == "" {
+				continue
+			}
+			scores[id] += 1.0 / float64(rrfK+re.rank)
+			// Keep first occurrence as the base evidence
+			if _, ok := evidenceMap[id]; !ok {
+				evidenceMap[id] = re.evidence
+			}
+			// Prefer evidence that already has boxes
+			if existing, ok := evidenceMap[id]; ok && len(re.evidence.Boxes) > 0 && len(existing.Boxes) == 0 {
+				evidenceMap[id] = re.evidence
+			}
 		}
 	}
 
-	for _, e := range text {
-		if _, ok := seen[e.ChunkID]; ok {
-			continue
-		}
-		seen[e.ChunkID] = struct{}{}
-		out = append(out, e)
-		if len(out) == topK {
-			break
+	// Build result slice sorted by RRF score
+	result := make([]Evidence, 0, len(scores))
+	for id, score := range scores {
+		ev := evidenceMap[id]
+		ev.Score = score
+		result = append(result, ev)
+	}
+
+	sort.Slice(result, func(i, j int) bool {
+		return result[i].Score > result[j].Score
+	})
+
+	if len(result) > topK {
+		result = result[:topK]
+	}
+	return result
+}
+
+func normalizeQuery(s string) string {
+	var out []rune
+	for _, r := range s {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || (r >= 0x4e00 && r <= 0x9fff) {
+			out = append(out, r)
+		} else if r >= 'A' && r <= 'Z' {
+			out = append(out, r+32) // to lowercase
+		} else {
+			out = append(out, ' ')
 		}
 	}
-	return out
+	// Trim and collapse spaces
+	result := make([]rune, 0, len(out))
+	prevSpace := false
+	for _, r := range out {
+		if r == ' ' {
+			if !prevSpace && len(result) > 0 {
+				result = append(result, r)
+			}
+			prevSpace = true
+		} else {
+			result = append(result, r)
+			prevSpace = false
+		}
+	}
+	// Trim trailing space
+	if len(result) > 0 && result[len(result)-1] == ' ' {
+		result = result[:len(result)-1]
+	}
+	return string(result)
 }
 
 func pgUUIDToString(u pgtype.UUID) string {

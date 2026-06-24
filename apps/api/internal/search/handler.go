@@ -24,10 +24,10 @@ func NewHandler(s *Service) *Handler {
 // RegisterRoutes mounts the search route under a workspace-scoped group.
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/search", h.Search)
-	r.POST("/search", h.Search)
+	r.POST("/search", h.SearchPost)
 }
 
-// Search returns matching chunks for a query.
+// Search handles GET /search?q=...&limit=...
 func (h *Handler) Search(c *gin.Context) {
 	q := c.Query("q")
 	if q == "" {
@@ -35,17 +35,9 @@ func (h *Handler) Search(c *gin.Context) {
 		return
 	}
 
-	limit := defaultTopK
-	if v := c.Query("limit"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n > 0 {
-			limit = n
-		}
-	}
-	if limit > maxTopK {
-		limit = maxTopK
-	}
-
+	limit := parseLimit(c.Query("limit"))
 	workspaceID := middleware.WorkspaceIDFrom(c)
+
 	evidence, err := h.service.Search(c.Request.Context(), pgUUID(workspaceID), q, limit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "search_error", "message": err.Error()})
@@ -53,6 +45,72 @@ func (h *Handler) Search(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"query": q, "evidence": evidence})
+}
+
+// SearchPost handles POST /search with JSON body supporting document_id filtering.
+func (h *Handler) SearchPost(c *gin.Context) {
+	var req struct {
+		Query      string `json:"query"`
+		DocumentID string `json:"document_id,omitempty"`
+		Mode       string `json:"mode,omitempty"`
+		TopK       int    `json:"top_k,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	if req.Query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "query is required"})
+		return
+	}
+
+	limit := req.TopK
+	if limit <= 0 {
+		limit = defaultTopK
+	}
+	if limit > maxTopK {
+		limit = maxTopK
+	}
+
+	workspaceID := middleware.WorkspaceIDFrom(c)
+
+	evidence, err := h.service.Search(c.Request.Context(), pgUUID(workspaceID), req.Query, limit)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "search_error", "message": err.Error()})
+		return
+	}
+
+	// Filter by document_id if specified
+	if req.DocumentID != "" {
+		filtered := make([]Evidence, 0, len(evidence))
+		for _, e := range evidence {
+			if e.DocumentID == req.DocumentID {
+				filtered = append(filtered, e)
+			}
+		}
+		evidence = filtered
+	}
+
+	// Return both "evidence" and "results" for backward compatibility
+	c.JSON(http.StatusOK, gin.H{
+		"query":       req.Query,
+		"document_id": req.DocumentID,
+		"evidence":    evidence,
+		"results":     evidence,
+	})
+}
+
+func parseLimit(s string) int {
+	limit := defaultTopK
+	if s != "" {
+		if n, err := strconv.Atoi(s); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	if limit > maxTopK {
+		limit = maxTopK
+	}
+	return limit
 }
 
 func pgUUID(id string) pgtype.UUID {

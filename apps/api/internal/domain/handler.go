@@ -13,17 +13,18 @@ import (
 type Handler struct {
 	service       *Service
 	workspaceSvc  *workspace.Service
+	validator     middleware.TokenValidator
 }
 
 // NewHandler creates a domain handler.
-func NewHandler(s *Service, ws *workspace.Service) *Handler {
-	return &Handler{service: s, workspaceSvc: ws}
+func NewHandler(s *Service, ws *workspace.Service, v middleware.TokenValidator) *Handler {
+	return &Handler{service: s, workspaceSvc: ws, validator: v}
 }
 
 // RegisterRoutes mounts domain management routes.
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g := r.Group("/tenant/domains")
-	g.Use(middleware.Auth())
+	g.Use(middleware.Auth(h.validator))
 	g.POST("", h.Register)
 	g.GET("", h.List)
 	g.POST("/:id/verify", h.Verify)

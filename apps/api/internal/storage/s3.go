@@ -121,6 +121,21 @@ func (c *Client) PresignedGetURL(ctx context.Context, key string, expiry time.Du
 	return req.URL, nil
 }
 
+// PresignedGetURLInternal returns a temporary URL using the internal S3 endpoint (e.g. http://minio:9000).
+// Use this for server-side downloads where the caller runs inside the same Docker network as MinIO.
+func (c *Client) PresignedGetURLInternal(ctx context.Context, key string, expiry time.Duration) (string, error) {
+	req, err := c.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
+		Bucket: c.bucketPtr(),
+		Key:    c.keyPtr(key),
+	}, func(o *s3.PresignOptions) {
+		o.Expires = expiry
+	})
+	if err != nil {
+		return "", fmt.Errorf("presign get internal %s: %w", key, err)
+	}
+	return req.URL, nil
+}
+
 // PresignedPutURL returns a temporary URL for uploading an object.
 func (c *Client) PresignedPutURL(ctx context.Context, key string, expiry time.Duration, contentType string) (string, error) {
 	presigner := c.presigner

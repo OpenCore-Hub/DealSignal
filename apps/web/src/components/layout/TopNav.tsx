@@ -107,10 +107,10 @@ export function TopNav() {
                 {t("topNav.account.settings")}
               </DropdownMenuItem>
               <DropdownMenuItem
-                onClick={() => {
-                  localStorage.removeItem("access_token");
+                onClick={async () => {
+                  await api.logout().catch(() => {});
                   resetUI();
-                  navigate("/", { replace: true });
+                  navigate("/login", { replace: true });
                 }}
               >
                 <SignOut size={16} className="mr-2" />

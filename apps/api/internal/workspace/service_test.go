@@ -136,7 +136,7 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 	rows := make([][]interface{}, len(f.listRows))
 	for i, r := range f.listRows {
 		rows[i] = []interface{}{
-			r.ID, r.TenantID, r.Name, r.Slug, r.BrandColor, r.CreatedAt, r.Role,
+			r.ID, r.TenantID, r.Name, r.Slug, r.BrandColor, r.ForceEmailVerification, r.WatermarkDownloads, r.TwoFactorEnabled, r.CreatedAt, r.Role,
 		}
 	}
 	return &fakeRows{rows: rows}, nil
@@ -159,14 +159,17 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 
 	case strings.Contains(sqlLower, "insert into workspaces"):
 		f.workspace = db.Workspace{
-			ID:         newPGUUID(),
-			TenantID:   argUUID(args, 0),
-			Name:       argString(args, 1),
-			Slug:       argString(args, 2),
-			BrandColor: argText(args, 3),
-			CreatedAt:  now,
+			ID:                     newPGUUID(),
+			TenantID:               argUUID(args, 0),
+			Name:                   argString(args, 1),
+			Slug:                   argString(args, 2),
+			BrandColor:             argText(args, 3),
+			ForceEmailVerification: false,
+			WatermarkDownloads:     false,
+			TwoFactorEnabled:       false,
+			CreatedAt:              now,
 		}
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
 
 	case strings.Contains(sqlLower, "insert into workspace_members"):
 		f.member = db.WorkspaceMember{
@@ -191,11 +194,14 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 	case strings.Contains(sqlLower, "from workspace_invitations"):
 		return fakeRow{values: []interface{}{f.invitation.Token, f.invitation.WorkspaceID, f.invitation.Email, f.invitation.Role, f.invitation.ExpiresAt, f.invitation.UsedAt, f.invitation.CreatedAt}}
 
-	case strings.Contains(sqlLower, "from workspaces") && (strings.Contains(sqlLower, "where w.id") || strings.Contains(sqlLower, "where id = $1 and tenant_id")):
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt}}
+	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 limit"):
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
+
+	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 and tenant_id"):
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where slug"):
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
 
 	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "where workspace_id"):
 		if f.memberRole == "" || !bytesEqual(argUUID(args, 1).Bytes, pgUUIDFromString(f.actorUserID).Bytes) {

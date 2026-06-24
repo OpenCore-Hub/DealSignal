@@ -23,7 +23,7 @@ func TestProcessDocumentMaxAttempts(t *testing.T) {
 	fake := &fakeDB{job: job}
 	svc := NewService(db.New(fake), nil, nil, nil)
 
-	err := svc.ProcessDocument(context.Background(), db.Document{ID: job.DocumentID})
+	err := svc.ProcessDocument(context.Background(), db.GetDocumentByIDRow{ID: job.DocumentID})
 	if !errors.Is(err, ErrMaxAttemptsExceeded) {
 		t.Fatalf("expected ErrMaxAttemptsExceeded, got %v", err)
 	}

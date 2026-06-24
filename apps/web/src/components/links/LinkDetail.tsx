@@ -114,7 +114,7 @@ export function LinkDetail() {
       <BackButton to={`/${workspaceSlug}/links`} label={t("backToLinks")} />
 
       <PageHeader
-        title={link.shortUrl.split("/").pop() || link.id}
+        title={(link.shortUrl || link.id).split("/").pop() || link.id}
         description={t("detail.headerDescription", { doc: link.documentTitle, date: formatDate(link.createdAt) })}
       >
         <Button variant="outline" className="gap-1.5" disabled title={t("detail.editProTooltip")} onClick={() => {}}>

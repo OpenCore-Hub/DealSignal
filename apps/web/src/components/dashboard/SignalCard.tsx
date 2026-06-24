@@ -45,7 +45,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon, i18n } = useTranslation("common");
-  const config = typeConfig[signal.type];
+  const config = typeConfig[signal.type] ?? typeConfig.warm;
   const Icon = config.icon;
 
   const handleNavigate = () => {

@@ -1,17 +1,21 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Plug, CloudArrowUp, Database } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router";
 import type { IntegrationStatus } from "@/types";
+
+type Provider = "slack" | "hubspot" | "zapier";
 
 export function SettingsIntegrationsPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const integrationsConfig = [
     { id: "slack" as const, name: "Slack", description: t("integrations.slackDescription"), icon: CloudArrowUp },
     { id: "hubspot" as const, name: "HubSpot", description: t("integrations.hubspotDescription"), icon: Database },
@@ -21,6 +25,16 @@ export function SettingsIntegrationsPage() {
   const [status, setStatus] = useState<IntegrationStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [connecting, setConnecting] = useState<Provider | null>(null);
+
+  const loadStatus = useCallback(async () => {
+    try {
+      const res = await api.getIntegrations();
+      setStatus(res.data);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("integrations.updateFailed"));
+    }
+  }, [t]);
 
   useEffect(() => {
     async function load() {
@@ -38,20 +52,57 @@ export function SettingsIntegrationsPage() {
     load();
   }, [tc, t]);
 
-  const toggle = async (id: keyof IntegrationStatus) => {
-    if (!status) return;
-    const previous = status;
-    const next = { ...status, [id]: !status[id] };
-    setStatus(next);
+  useEffect(() => {
+    const provider = searchParams.get("provider") as Provider | null;
+    const result = searchParams.get("status");
+    if (!provider || !result) return;
+
+    if (result === "connected") {
+      toast.success(t("integrations.connectedSuccess", { provider: provider.charAt(0).toUpperCase() + provider.slice(1) }));
+      void (async () => {
+        await loadStatus();
+      })();
+    } else if (result === "error") {
+      const message = searchParams.get("message") || "";
+      toast.error(t("integrations.connectionFailed", { provider, message }));
+    }
+
+    // Clean query params so a refresh does not re-trigger the toast.
+    const next = new URLSearchParams(searchParams);
+    next.delete("provider");
+    next.delete("status");
+    next.delete("message");
+    setSearchParams(next, { replace: true });
+  }, [searchParams, setSearchParams, t, loadStatus]);
+
+  const connect = async (id: Provider) => {
+    if (id === "zapier") {
+      toast.info(t("integrations.comingSoon"));
+      return;
+    }
+    setConnecting(id);
     try {
-      const res = await api.updateIntegrations(next);
-      setStatus(res.data);
-      const name = integrationsConfig.find((c) => c.id === id)?.name ?? id;
-      const state = res.data[id] ? t("integrations.connected") : t("integrations.disconnected");
-      toast.success(`${name} ${state}`);
+      const res = id === "slack" ? await api.connectSlack() : await api.connectHubSpot();
+      window.open(res.url, "_blank", "noopener,noreferrer");
     } catch (e) {
-      setStatus(previous);
-      toast.error(e instanceof Error ? e.message : t("integrations.updateFailed"));
+      toast.error(e instanceof Error ? e.message : t("integrations.connectionFailed", { provider: id }));
+    } finally {
+      setConnecting(null);
+    }
+  };
+
+  const disconnect = async (id: Provider) => {
+    if (id === "zapier") return;
+    try {
+      if (id === "slack") {
+        await api.disconnectSlack();
+      } else {
+        await api.disconnectHubSpot();
+      }
+      toast.success(t("integrations.disconnectedSuccess", { provider: id }));
+      await loadStatus();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("integrations.disconnectFailed", { provider: id }));
     }
   };
 
@@ -102,10 +153,25 @@ export function SettingsIntegrationsPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
-                    <Switch checked={connected} onCheckedChange={() => toggle(integration.id)} />
-                    <Button variant="outline" size="sm" disabled={!connected}>
-                      {connected ? t("integrations.configure") : t("integrations.connect")}
-                    </Button>
+                    {connected && (
+                      <span className="text-caption text-green-600">{t("integrations.connected")}</span>
+                    )}
+                    {connected ? (
+                      <Button variant="outline" size="sm" onClick={() => disconnect(integration.id)}>
+                        {t("integrations.disconnect")}
+                      </Button>
+                    ) : (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={connecting === integration.id}
+                        onClick={() => connect(integration.id)}
+                      >
+                        {connecting === integration.id
+                          ? t("integrations.connecting")
+                          : t("integrations.connect")}
+                      </Button>
+                    )}
                   </div>
                 </li>
               );

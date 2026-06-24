@@ -35,12 +35,12 @@ export function FileTypeIcon({
   className,
 }: FileTypeIconProps) {
   const { t } = useTranslation("common");
-  const cfg = config[type] || {
+  const cfg = config[type as Document["fileType"]] || {
     icon: FileText,
     key: undefined,
   };
   const Icon = cfg.icon;
-  const label = cfg.key ? (t(cfg.key) as string) : type.toUpperCase();
+  const label = cfg.key ? (t(cfg.key) as string) : (type || "file").toUpperCase();
 
   if (showLabel) {
     return (

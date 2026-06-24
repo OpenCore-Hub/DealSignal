@@ -1,7 +1,9 @@
 package integration
 
 import (
+	"fmt"
 	"net/http"
+	"net/url"
 
 	"github.com/gin-gonic/gin"
 )
@@ -22,7 +24,9 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/settings", h.GetSettings)
 	g.PUT("/settings", h.SaveSettings)
 	g.POST("/slack/connect", h.SlackConnect)
+	g.POST("/slack/disconnect", h.SlackDisconnect)
 	g.POST("/hubspot/connect", h.HubSpotConnect)
+	g.POST("/hubspot/disconnect", h.HubSpotDisconnect)
 	g.POST("/hubspot/sync", h.HubSpotSync)
 	g.GET("/sync-logs", h.ListSyncLogs)
 }
@@ -34,11 +38,8 @@ func (h *Handler) RegisterOAuthRoutes(r *gin.RouterGroup) {
 }
 
 type saveSettingsRequest struct {
-	EmailEnabled        bool   `json:"email_enabled"`
-	SlackWebhookURL     string `json:"slack_webhook_url"`
-	SlackConnected      bool   `json:"slack_connected"`
-	HubSpotConnected    bool   `json:"hubspot_connected"`
-	SalesforceConnected bool   `json:"salesforce_connected"`
+	EmailEnabled    bool   `json:"email_enabled"`
+	SlackWebhookURL string `json:"slack_webhook_url"`
 }
 
 func workspaceID(c *gin.Context) string {
@@ -84,6 +85,14 @@ func (h *Handler) SlackConnect(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"url": url})
 }
 
+func (h *Handler) SlackDisconnect(c *gin.Context) {
+	if err := h.service.Disconnect(c.Request.Context(), workspaceID(c), "slack"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "ok", "message": "slack disconnected"})
+}
+
 func (h *Handler) HubSpotConnect(c *gin.Context) {
 	url, err := h.service.OAuthURL(c.Request.Context(), workspaceID(c), "hubspot")
 	if err != nil {
@@ -91,6 +100,14 @@ func (h *Handler) HubSpotConnect(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"url": url})
+}
+
+func (h *Handler) HubSpotDisconnect(c *gin.Context) {
+	if err := h.service.Disconnect(c.Request.Context(), workspaceID(c), "hubspot"); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "ok", "message": "hubspot disconnected"})
 }
 
 func (h *Handler) OAuthCallback(c *gin.Context) {
@@ -101,11 +118,18 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "missing state or code"})
 		return
 	}
-	if err := h.service.OAuthCallback(c.Request.Context(), provider, state, code); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_state", "message": err.Error()})
+	slug, err := h.service.OAuthCallback(c.Request.Context(), provider, state, code)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "oauth_failed", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"code": "ok", "message": "connected"})
+
+	redirectURL := fmt.Sprintf("%s/%s/settings/integrations?provider=%s&status=connected",
+		h.service.cfg.FrontendURL,
+		slug,
+		url.QueryEscape(provider),
+	)
+	c.Redirect(http.StatusFound, redirectURL)
 }
 
 func (h *Handler) HubSpotSync(c *gin.Context) {

@@ -38,7 +38,7 @@ REGISTER=$(curl -fsS -X POST "$BASE_URL/api/auth/register" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
 echo "$REGISTER" | jq -c '{user_id: .user.id, email: .user.email}'
-TOKEN=$(echo "$REGISTER" | jq -r '.token')
+TOKEN=$(echo "$REGISTER" | jq -r '.access_token')
 
 # 3. Create workspace
 echo -n "[workspace create] "

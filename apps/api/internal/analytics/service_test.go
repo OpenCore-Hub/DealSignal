@@ -47,7 +47,7 @@ func (m *mockAnalyticsQuerier) GetLinkBounceCount(_ context.Context, _ pgtype.UU
 	return m.bounce, nil
 }
 
-func (m *mockAnalyticsQuerier) ListRecentDocumentsByWorkspace(_ context.Context, _ db.ListRecentDocumentsByWorkspaceParams) ([]db.Document, error) {
+func (m *mockAnalyticsQuerier) ListRecentDocumentsByWorkspace(_ context.Context, _ db.ListRecentDocumentsByWorkspaceParams) ([]db.ListRecentDocumentsByWorkspaceRow, error) {
 	return nil, nil
 }
 
@@ -87,8 +87,8 @@ func (m *mockAnalyticsQuerier) GetPageExitCountsByDocument(_ context.Context, _ 
 	return nil, nil
 }
 
-func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.Document, error) {
-	return db.Document{}, nil
+func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error) {
+	return db.GetDocumentByIDRow{}, nil
 }
 
 func (m *mockAnalyticsQuerier) GetLastAccessLogByLink(_ context.Context, _ pgtype.UUID) (db.AccessLog, error) {

@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { ActionItem } from "@/types";
+import type { ActionItem, WorkspaceMember } from "@/types";
 import {
   mockAccessLogs,
   mockActionItems,
@@ -20,7 +20,6 @@ import {
   getMockDashboardStats,
   getMockSignalFeed,
 } from "./data";
-import type { DealRoom, WorkspaceMember } from "@/types";
 
 let workspaceSettings = { ...defaultWorkspaceSettings };
 
@@ -36,15 +35,160 @@ let securitySettings = {
   twoFactorEnabled: false,
 };
 
+// Snapshot of initial state so E2E tests can reset between cases.
+const initialState = {
+  workspaces: structuredClone(mockWorkspaces),
+  documents: structuredClone(mockDocuments),
+  links: structuredClone(mockLinks),
+  dealRooms: structuredClone(mockDealRooms),
+  members: structuredClone(mockWorkspaceMembers),
+  settings: structuredClone(defaultWorkspaceSettings),
+  integrations: structuredClone(integrationsStatus),
+  security: structuredClone(securitySettings),
+};
+
+function resetMockState() {
+  mockUsers.clear();
+  mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
+  mockDocuments.splice(0, mockDocuments.length, ...initialState.documents);
+  mockLinks.splice(0, mockLinks.length, ...initialState.links);
+  mockDealRooms.splice(0, mockDealRooms.length, ...initialState.dealRooms);
+  mockWorkspaceMembers.splice(0, mockWorkspaceMembers.length, ...initialState.members);
+  workspaceSettings = { ...initialState.settings };
+  integrationsStatus = { ...initialState.integrations };
+  securitySettings = { ...initialState.security };
+}
+
+// In-memory auth store for the mock environment.
+interface MockUser {
+  id: string;
+  email: string;
+  password: string;
+  name: string;
+}
+const mockUsers = new Map<string, MockUser>();
+
+function generateId(prefix: string): string {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+}
+
+function createTokenResponse(userId: string, email: string) {
+  return {
+    user: { id: userId, email, name: email.split("@")[0] },
+    access_token: `mock_access_${userId}`,
+    refresh_token: `mock_refresh_${userId}`,
+    expires_in: 900,
+  };
+}
+
+function validatePassword(password: string): boolean {
+  if (password.length < 8) return false;
+  let hasUpper = false;
+  let hasLower = false;
+  let hasDigit = false;
+  let hasSpecial = false;
+  for (const ch of password) {
+    if (/[A-Z]/.test(ch)) hasUpper = true;
+    else if (/[a-z]/.test(ch)) hasLower = true;
+    else if (/\d/.test(ch)) hasDigit = true;
+    else if (/[^\w\s]/.test(ch)) hasSpecial = true;
+  }
+  return hasUpper && hasLower && hasDigit && hasSpecial;
+}
+
+function placeholdImageUrl(width: number, height: number): string {
+  return `data:image/svg+xml,${encodeURIComponent(
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#e2e8f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="24">Page</text></svg>`
+  )}`;
+}
+
 export const handlers = [
+  // Auth
+  http.post("*/api/auth/register", async ({ request }) => {
+    const body = (await request.json()) as { email?: string; password?: string };
+    const email = body.email?.trim().toLowerCase();
+    const password = body.password ?? "";
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return HttpResponse.json({ code: "invalid_email", message: "invalid email address" }, { status: 400 });
+    }
+    if (!validatePassword(password)) {
+      return HttpResponse.json(
+        { code: "weak_password", message: "password must be at least 8 characters and include uppercase, lowercase, digit and special character" },
+        { status: 400 }
+      );
+    }
+    if (Array.from(mockUsers.values()).some((u) => u.email === email)) {
+      return HttpResponse.json({ code: "email_conflict", message: "email already registered" }, { status: 409 });
+    }
+    const id = generateId("u");
+    mockUsers.set(id, { id, email, password, name: email.split("@")[0] });
+    return HttpResponse.json(createTokenResponse(id, email), { status: 201 });
+  }),
+
+  http.post("*/api/auth/login", async ({ request }) => {
+    const body = (await request.json()) as { email?: string; password?: string };
+    const email = body.email?.trim().toLowerCase();
+    const user = Array.from(mockUsers.values()).find((u) => u.email === email);
+    if (!user || user.password !== body.password) {
+      return HttpResponse.json({ code: "unauthorized", message: "invalid email or password" }, { status: 401 });
+    }
+    return HttpResponse.json(createTokenResponse(user.id, user.email));
+  }),
+
+  http.post("*/api/auth/refresh", async ({ request }) => {
+    const body = (await request.json()) as { refresh_token?: string };
+    const token = body.refresh_token ?? "";
+    const userId = token.replace("mock_refresh_", "");
+    const user = mockUsers.get(userId);
+    if (!user) {
+      return HttpResponse.json({ code: "unauthorized", message: "invalid or expired refresh token" }, { status: 401 });
+    }
+    return HttpResponse.json({
+      access_token: `mock_access_${user.id}`,
+      refresh_token: `mock_refresh_${user.id}`,
+      expires_in: 900,
+    });
+  }),
+
+  http.post("*/api/auth/logout", async () => {
+    return HttpResponse.json({ code: "ok", message: "logged out" });
+  }),
+
+  http.get("*/api/auth/verify-email/:token", () => {
+    return HttpResponse.json({ code: "verified", message: "email verified successfully" });
+  }),
+
+  // Test-only reset endpoint used by E2E suites to isolate cases.
+  http.post("*/__e2e/reset", () => {
+    resetMockState();
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Workspaces
   http.get("*/api/workspaces", () => {
     return HttpResponse.json({ data: mockWorkspaces });
   }),
 
+  http.post("*/api/workspaces", async ({ request }) => {
+    const body = (await request.json()) as { name: string; slug: string; brand_color?: string };
+    const newWorkspace = {
+      id: generateId("ws"),
+      name: body.name,
+      slug: body.slug,
+      logoUrl: "",
+      brandColor: body.brand_color ?? "#0055ff",
+    };
+    mockWorkspaces.push(newWorkspace);
+    workspaceSettings = { ...workspaceSettings, name: body.name, slug: body.slug };
+    return HttpResponse.json(newWorkspace, { status: 201 });
+  }),
+
+  // Dashboard
   http.get("*/api/workspaces/:workspaceSlug/dashboard/stats", () => {
     return HttpResponse.json(getMockDashboardStats());
   }),
 
+  // Documents
   http.get("*/api/workspaces/:workspaceSlug/documents", () => {
     return HttpResponse.json({ data: mockDocuments });
   }),
@@ -62,16 +206,73 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.post("*/api/workspaces/:workspaceSlug/documents", async () => {
-    return HttpResponse.json(mockDocuments[0], { status: 201 });
+  http.post("*/api/workspaces/:workspaceSlug/documents", async ({ request }) => {
+    const formData = await request.formData();
+    const file = formData.get("file") as File | null;
+    const title = file?.name ?? "uploaded.pdf";
+    const ext = title.split(".").pop()?.toLowerCase() ?? "pdf";
+    const fileType = (["pdf", "docx", "pptx", "xlsx"] as const).includes(ext as never) ? ext : "pdf";
+    const newDoc = {
+      id: generateId("doc"),
+      title,
+      fileName: title,
+      fileType,
+      fileSize: file?.size ?? 1_000_000,
+      pageCount: 10,
+      status: "ready" as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    mockDocuments.unshift(newDoc);
+    return HttpResponse.json(newDoc, { status: 201 });
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/documents/:id/pages", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    const pages = Array.from({ length: doc.pageCount }, (_, i) => ({
+      page_number: i + 1,
+      width: 800,
+      height: 1000,
+    }));
+    return HttpResponse.json({ document_id: doc.id, pages, total: pages.length });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/documents/:id/pages/signed-url", async ({ params, request }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { page_number?: number };
+    const pageNumber = body.page_number ?? 1;
+    return HttpResponse.json({
+      page_number: pageNumber,
+      image_url: placeholdImageUrl(800, 1000),
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      width: 800,
+      height: 1000,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/documents/:id/download-url", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({
+      download_url: placeholdImageUrl(200, 200),
+      expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      filename: doc.fileName,
+      content_type: "application/pdf",
+    });
+  }),
+
+  // Viewer events
+  http.post("*/api/workspaces/:workspaceSlug/events", async () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Links
   http.get("*/api/workspaces/:workspaceSlug/links", ({ request }) => {
     const url = new URL(request.url);
     const documentId = url.searchParams.get("documentId");
-    const data = documentId
-      ? mockLinks.filter((l) => l.documentId === documentId)
-      : mockLinks;
+    const data = documentId ? mockLinks.filter((l) => l.documentId === documentId) : mockLinks;
     return HttpResponse.json({ data });
   }),
 
@@ -93,10 +294,36 @@ export const handlers = [
     return HttpResponse.json({ data: mockAccessLogs.filter((l) => l.linkId === params.id) });
   }),
 
-  http.post("*/api/workspaces/:workspaceSlug/links", async () => {
-    return HttpResponse.json(mockLinks[0], { status: 201 });
+  http.post("*/api/workspaces/:workspaceSlug/links", async ({ request }) => {
+    const body = (await request.json()) as {
+      document_id: string;
+      name?: string;
+      permission_type?: string;
+      password?: string;
+      expires_at?: string;
+      max_access_count?: number;
+      download_enabled?: boolean;
+      watermark_enabled?: boolean;
+    };
+    const doc = mockDocuments.find((d) => d.id === body.document_id);
+    const newLink = {
+      id: generateId("link"),
+      documentId: body.document_id,
+      documentTitle: doc?.title ?? "Untitled",
+      shortUrl: `https://invest.acme.capital/d/${generateId("sh")}`,
+      accessCount: 0,
+      heatLevel: "cold" as const,
+      createdAt: new Date().toISOString(),
+      expiresAt: body.expires_at,
+      isActive: true,
+      avgDurationSeconds: 0,
+      permissionType: (body.permission_type === "public" ? "public" : body.permission_type === "email_required" ? "email" : body.permission_type === "whitelist" ? "email" : "public") as "public" | "email" | "password" | "nda",
+    };
+    mockLinks.unshift(newLink);
+    return HttpResponse.json(newLink, { status: 201 });
   }),
 
+  // Contacts
   http.get("*/api/workspaces/:workspaceSlug/contacts", () => {
     return HttpResponse.json({ data: mockContacts });
   }),
@@ -111,6 +338,7 @@ export const handlers = [
     return HttpResponse.json({ data: mockActivities.filter((a) => a.contactId === params.id) });
   }),
 
+  // Deal rooms
   http.get("*/api/workspaces/:workspaceSlug/deal-rooms", () => {
     return HttpResponse.json({ data: mockDealRooms });
   }),
@@ -132,18 +360,18 @@ export const handlers = [
     };
     const scenario = body.template_type?.replace(/_/g, "-") ?? "custom";
     const template = mockDealRoomTemplates.find((t) => t.scenario === scenario);
-    const newRoom: DealRoom = {
-      id: `dr_${Date.now()}`,
+    const newRoom = {
+      id: generateId("dr"),
       name: body.name,
       description: body.description ?? "",
-      template: template?.scenario ?? (scenario as DealRoom["template"]),
+      template: (template?.scenario ?? scenario) as import("@/types").DealRoom["template"],
       ndaEnabled: body.requires_nda ?? false,
       documentCount: 0,
       memberCount: 0,
       pendingApprovals: 0,
       createdAt: new Date().toISOString(),
       lastAccessedAt: undefined,
-      status: "active",
+      status: "active" as const,
       uploadedFiles: [],
       recentVisitors: [],
     };
@@ -151,6 +379,11 @@ export const handlers = [
     return HttpResponse.json(newRoom, { status: 201 });
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/deal-room-templates", () => {
+    return HttpResponse.json({ data: mockDealRoomTemplates });
+  }),
+
+  // Insights
   http.get("*/api/workspaces/:workspaceSlug/insights/overview", () => {
     const tierCounts = {
       hot: mockHeatAlerts.filter((a) => a.heatLevel === "hot").length + 2,
@@ -196,40 +429,11 @@ export const handlers = [
     return HttpResponse.json({ data: mockSuggestions });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/workspace/members", () => {
-    return HttpResponse.json({ data: mockWorkspaceMembers });
-  }),
-
-  http.get("*/api/workspaces/:workspaceSlug/signals", () => {
-    return HttpResponse.json(getMockSignalFeed());
-  }),
-
-  http.get("*/api/workspaces/:workspaceSlug/signals/:id", ({ params }) => {
-    const signal = mockSignals.find((s) => s.id === params.id);
-    if (!signal) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json(signal);
-  }),
-
-  http.patch("*/api/workspaces/:workspaceSlug/signals/actions/:id", async ({ params, request }) => {
-    const body = (await request.json()) as { status?: string };
-    const action = mockActionItems.find((a) => a.id === params.id);
-    if (!action) return new HttpResponse(null, { status: 404 });
-    if (body?.status) action.status = body.status as ActionItem["status"];
-    return HttpResponse.json(action);
-  }),
-
-  http.get("*/api/workspaces/:workspaceSlug/deal-room-templates", () => {
-    return HttpResponse.json({ data: mockDealRoomTemplates });
-  }),
-
-  http.get("*/api/workspaces/:workspaceSlug/risk-alerts", () => {
-    return HttpResponse.json({ data: mockRiskAlerts });
-  }),
-
+  // Assistant
   http.post("*/api/workspaces/:workspaceSlug/assistant/chat", async ({ request }) => {
     const body = (await request.json()) as { query: string; document_id?: string; session_id?: string };
     return HttpResponse.json({
-      session_id: body.session_id || `sess_${Date.now()}`,
+      session_id: body.session_id || generateId("sess"),
       answer: `Based on the document, here's an answer to "${body.query}".`,
       evidence: body.document_id
         ? [
@@ -246,6 +450,7 @@ export const handlers = [
     });
   }),
 
+  // Search
   http.post("*/api/workspaces/:workspaceSlug/search", async ({ request }) => {
     const body = (await request.json()) as { query: string; document_id?: string };
     return HttpResponse.json({
@@ -265,24 +470,44 @@ export const handlers = [
     });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/workspace/settings", () => {
+  // Members
+  http.get("*/api/workspaces/:workspaceSlug/members", () => {
+    return HttpResponse.json({ data: mockWorkspaceMembers });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/invitations", async ({ request }) => {
+    const body = (await request.json()) as { email: string; role: WorkspaceMember["role"] };
+    const newMember = {
+      id: generateId("wm"),
+      userId: generateId("u"),
+      email: body.email,
+      name: body.email.split("@")[0],
+      role: body.role,
+      joinedAt: new Date().toISOString(),
+      status: "pending" as const,
+    };
+    mockWorkspaceMembers.push(newMember);
+    return HttpResponse.json({ data: newMember }, { status: 201 });
+  }),
+
+  // Workspace settings
+  http.get("*/api/workspaces/:workspaceSlug/settings", () => {
     return HttpResponse.json({ data: workspaceSettings });
   }),
 
-  http.put("*/api/workspaces/:workspaceSlug/workspace/settings", async ({ request }) => {
+  http.put("*/api/workspaces/:workspaceSlug/settings", async ({ request }) => {
     const body = (await request.json()) as typeof workspaceSettings;
     workspaceSettings = { ...workspaceSettings, ...body };
     return HttpResponse.json({ data: workspaceSettings });
   }),
 
-  http.post("*/api/workspaces/:workspaceSlug/workspace/logo", async () => {
-    // 模拟上传：返回固定 CDN 图片 URL（生产环境会替换为实际上传地址）
+  http.post("*/api/workspaces/:workspaceSlug/logo", async () => {
     const mockLogoUrl = "https://placehold.co/128x128/0f172a/ffffff?text=Logo";
     workspaceSettings = { ...workspaceSettings, logoUrl: mockLogoUrl };
     return HttpResponse.json({ data: { logoUrl: mockLogoUrl } }, { status: 201 });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/workspace/billing", () => {
+  http.get("*/api/workspaces/:workspaceSlug/billing", () => {
     const totalStorage = mockDocuments.reduce((sum, d) => sum + d.fileSize, 0);
     return HttpResponse.json({
       data: {
@@ -298,38 +523,132 @@ export const handlers = [
     });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/workspace/integrations", () => {
+  // Integrations
+  http.get("*/api/workspaces/:workspaceSlug/integrations/settings", () => {
     return HttpResponse.json({ data: integrationsStatus });
   }),
 
-  http.put("*/api/workspaces/:workspaceSlug/workspace/integrations", async ({ request }) => {
+  http.put("*/api/workspaces/:workspaceSlug/integrations/settings", async ({ request }) => {
     const body = (await request.json()) as typeof integrationsStatus;
     integrationsStatus = { ...integrationsStatus, ...body };
     return HttpResponse.json({ data: integrationsStatus });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/workspace/security", () => {
+  http.post("*/api/workspaces/:workspaceSlug/integrations/slack/connect", () => {
+    return HttpResponse.json({ url: "https://slack.com/oauth/v2/authorize?client_id=mock" });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/integrations/slack/disconnect", () => {
+    integrationsStatus.slack = false;
+    return HttpResponse.json({ code: "ok", message: "disconnected" });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/integrations/hubspot/connect", () => {
+    return HttpResponse.json({ url: "https://app.hubspot.com/oauth/authorize?client_id=mock" });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/integrations/hubspot/disconnect", () => {
+    integrationsStatus.hubspot = false;
+    return HttpResponse.json({ code: "ok", message: "disconnected" });
+  }),
+
+  // Security
+  http.get("*/api/workspaces/:workspaceSlug/security", () => {
     return HttpResponse.json({ data: securitySettings });
   }),
 
-  http.put("*/api/workspaces/:workspaceSlug/workspace/security", async ({ request }) => {
+  http.put("*/api/workspaces/:workspaceSlug/security", async ({ request }) => {
     const body = (await request.json()) as typeof securitySettings;
     securitySettings = { ...securitySettings, ...body };
     return HttpResponse.json({ data: securitySettings });
   }),
 
-  http.post("*/api/workspaces/:workspaceSlug/workspace/members", async ({ request }) => {
-    const body = (await request.json()) as { email: string; role: WorkspaceMember["role"] };
-    const newMember: WorkspaceMember = {
-      id: `wm_${Date.now()}`,
-      userId: `u_${Date.now()}`,
-      email: body.email,
-      name: body.email.split("@")[0],
-      role: body.role,
-      joinedAt: new Date().toISOString(),
-      status: "pending",
-    };
-    mockWorkspaceMembers.push(newMember);
-    return HttpResponse.json({ data: newMember }, { status: 201 });
+  // Signals
+  http.get("*/api/workspaces/:workspaceSlug/signals", () => {
+    return HttpResponse.json(getMockSignalFeed());
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/signals/:id", ({ params }) => {
+    const signal = mockSignals.find((s) => s.id === params.id);
+    if (!signal) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(signal);
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/signals/actions/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { status?: string };
+    const action = mockActionItems.find((a) => a.id === params.id);
+    if (!action) return new HttpResponse(null, { status: 404 });
+    if (body?.status) action.status = body.status as ActionItem["status"];
+    return HttpResponse.json(action);
+  }),
+
+  // Public viewer
+  http.get("*/api/v1/public/links/:token", ({ params, request }) => {
+    const url = new URL(request.url);
+    const token = params.token as string;
+    const link = mockLinks.find((l) => l.shortUrl.endsWith(token)) ?? mockLinks[0];
+    const doc = mockDocuments.find((d) => d.id === link.documentId) ?? mockDocuments[0];
+    return HttpResponse.json({
+      link: {
+        id: link.id,
+        name: link.documentTitle,
+        documentId: link.documentId,
+        permissionType: link.permissionType ?? "public",
+        downloadEnabled: true,
+        watermarkEnabled: false,
+      },
+      document: {
+        id: doc.id,
+        title: doc.title,
+        pageCount: doc.pageCount,
+        status: doc.status,
+        sourceType: doc.fileType,
+        fileSize: doc.fileSize,
+      },
+      visitorId: generateId("visitor"),
+      requiresEmail: link.permissionType === "email" && !url.searchParams.get("email"),
+      requiresPassword: link.permissionType === "password" && !url.searchParams.get("password"),
+      requiresNda: link.permissionType === "nda" && url.searchParams.get("nda_agreed") !== "true",
+    });
+  }),
+
+  http.get("*/api/v1/public/documents/:documentId/pages", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.documentId);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    const pages = Array.from({ length: doc.pageCount }, (_, i) => ({
+      pageNumber: i + 1,
+      width: 800,
+      height: 1000,
+    }));
+    return HttpResponse.json({ documentId: doc.id, pages, total: pages.length });
+  }),
+
+  http.post("*/api/v1/public/documents/:documentId/pages/signed-url", async ({ params, request }) => {
+    const doc = mockDocuments.find((d) => d.id === params.documentId);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    const url = new URL(request.url);
+    const pageNumber = Number(url.searchParams.get("page_number") ?? "1");
+    return HttpResponse.json({
+      pageNumber,
+      imageUrl: placeholdImageUrl(800, 1000),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      width: 800,
+      height: 1000,
+    });
+  }),
+
+  http.get("*/api/v1/public/documents/:documentId/download-url", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.documentId);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({
+      downloadUrl: placeholdImageUrl(200, 200),
+      expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+      filename: doc.fileName,
+      contentType: "application/pdf",
+    });
+  }),
+
+  http.post("*/api/v1/public/events", async () => {
+    return new HttpResponse(null, { status: 204 });
   }),
 ];

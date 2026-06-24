@@ -29,10 +29,10 @@ func (f *Formatter) BuildContext(evidence []search.Evidence) string {
 		"If the evidence does not contain the answer, say you could not find a basis for the answer.\n\n")
 	for i, e := range evidence {
 		b.WriteString(fmt.Sprintf("[%d] Page %d", i+1, e.PageNumber))
-		if e.Bbox != nil {
-			b.WriteString(fmt.Sprintf(" %v", e.Bbox))
+		if len(e.Boxes) > 0 {
+			b.WriteString(fmt.Sprintf(" %v", e.Boxes))
 		}
-		b.WriteString(fmt.Sprintf(": %s\n", strings.ReplaceAll(e.Text, "\n", " ")))
+		b.WriteString(fmt.Sprintf(": %s\n", strings.ReplaceAll(e.Quote, "\n", " ")))
 	}
 	return b.String()
 }

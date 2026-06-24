@@ -69,6 +69,72 @@ function getAuthToken(): string | null {
   }
 }
 
+function getRefreshToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem("refresh_token");
+  } catch {
+    return null;
+  }
+}
+
+function setTokens(accessToken: string, refreshToken: string) {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("access_token", accessToken);
+    localStorage.setItem("refresh_token", refreshToken);
+  } catch {
+    // ignore
+  }
+}
+
+function clearTokens() {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.removeItem("access_token");
+    localStorage.removeItem("refresh_token");
+  } catch {
+    // ignore
+  }
+}
+
+let refreshPromise: Promise<string> | null = null;
+
+async function doRefresh(baseUrl: string): Promise<string> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) {
+    throw new Error("No refresh token");
+  }
+  const res = await fetch(`${baseUrl}/api/auth/refresh`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  });
+  if (!res.ok) {
+    throw new Error("Refresh failed");
+  }
+  const data = (await res.json()) as { access_token: string; refresh_token: string };
+  setTokens(data.access_token, data.refresh_token);
+  return data.access_token;
+}
+
+function refreshAccessToken(baseUrl: string): Promise<string> {
+  if (!refreshPromise) {
+    refreshPromise = doRefresh(baseUrl)
+      .finally(() => {
+        refreshPromise = null;
+      });
+  }
+  return refreshPromise;
+}
+
+function redirectToLogin() {
+  if (typeof window !== "undefined") {
+    clearTokens();
+    window.location.href = "/login";
+  }
+}
+
 function getLanguage(): string {
   try {
     return i18next.language || getBrowserLanguage();
@@ -118,9 +184,6 @@ export async function request<T>(
   }
 
   const token = options.token ?? getAuthToken();
-  if (token && !options.skipAuth) {
-    headers.set("Authorization", `Bearer ${token}`);
-  }
 
   const requestId = generateRequestId();
   headers.set("X-Request-ID", requestId);
@@ -129,9 +192,16 @@ export async function request<T>(
     headers.set("Idempotency-Key", options.idempotencyKey);
   }
 
+  const execute = async (authToken: string | null): Promise<Response> => {
+    if (authToken && !options.skipAuth) {
+      headers.set("Authorization", `Bearer ${authToken}`);
+    }
+    return fetch(url, { ...options, headers });
+  };
+
   let response: Response;
   try {
-    response = await fetch(url, { ...options, headers });
+    response = await execute(token);
   } catch (err) {
     throw new ApiError({
       status: 0,
@@ -139,6 +209,22 @@ export async function request<T>(
       message: err instanceof Error ? err.message : "Network error",
       requestId,
     });
+  }
+
+  // Attempt silent refresh on 401 (unless this is an auth endpoint).
+  if (response.status === 401 && !options.skipAuth) {
+    try {
+      const newToken = await refreshAccessToken(getBaseUrl());
+      response = await execute(newToken);
+    } catch {
+      redirectToLogin();
+      throw new ApiError({
+        status: 401,
+        code: "unauthorized",
+        message: "Session expired. Please sign in again.",
+        requestId,
+      });
+    }
   }
 
   if (!response.ok) {

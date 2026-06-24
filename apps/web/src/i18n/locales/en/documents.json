@@ -11,7 +11,12 @@
     "selectFiles": "Select files",
     "processing": "Processing...",
     "removeFile": "Remove file",
-    "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx"
+    "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx",
+    "fileCount": "{{count}} file(s)",
+    "clearCompleted": "Clear completed",
+    "uploadNow": "Upload now",
+    "uploading": "Uploading...",
+    "pending": "Pending"
   },
   "table": {
     "emptyTitle": "Document library is empty",
@@ -84,7 +89,10 @@
     "avgDuration": "Avg. duration",
     "exitRate": "Exit rate",
     "evidenceHighlight": "AI evidence highlights",
-    "sourceLocation": "Source location"
+    "sourceLocation": "Source location",
+    "matchType": "{{type}} match · score {{score}}",
+    "allEvidence": "All evidence (click to jump)",
+    "searchPlaceholder": "Search document content..."
   },
   "aiInsights": {
     "emptyTitle": "No analysis data yet",

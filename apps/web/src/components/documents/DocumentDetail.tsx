@@ -46,7 +46,7 @@ interface VisitorSummary {
 function aggregateVisitors(logs: AccessLog[]): VisitorSummary[] {
   const byEmail = new Map<string, { duration: number; count: number; lastSeen: string; name?: string }>();
   for (const log of logs) {
-    const email = log.visitorEmail;
+    const email = log.visitorEmail || "unknown";
     const existing = byEmail.get(email);
     const timestamp = new Date(log.timestamp).toISOString();
     if (existing) {
@@ -330,7 +330,7 @@ export function DocumentDetail() {
             </Card>
           </TabsContent>
           <TabsContent value="content">
-            <DocumentContent title={doc.title} pageCount={doc.pageCount} analytics={analytics} evidences={[]} />
+            <DocumentContent title={doc.title} pageCount={doc.pageCount} documentId={doc.id} analytics={analytics} evidences={[]} />
           </TabsContent>
           <TabsContent value="analytics">
             <DocumentAnalytics analytics={analytics} />

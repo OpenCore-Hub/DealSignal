@@ -14,6 +14,7 @@ import (
 
 var (
 	ErrInvalidSlug       = errors.New("slug must be lowercase alphanumeric with hyphens")
+	ErrSlugExists        = errors.New("workspace slug already exists")
 	ErrNotMember         = errors.New("user is not a member of this workspace")
 	ErrAlreadyMember     = errors.New("user is already a member")
 	ErrInvalidRole       = errors.New("invalid role")
@@ -167,6 +168,9 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 		BrandColor: pgtype.Text{String: brandColor, Valid: brandColor != ""},
 	})
 	if err != nil {
+		if isUniqueViolation(err) {
+			return Workspace{}, ErrSlugExists
+		}
 		return Workspace{}, err
 	}
 

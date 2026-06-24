@@ -76,10 +76,12 @@ export interface ChatMessage {
 
 export interface Evidence {
   chunk_id: string;
+  document_id?: string;
   quote: string;
   page_number: number;
   boxes: Array<{ x: number; y: number; w: number; h: number }>;
   score: number;
+  match_type?: string;
 }
 
 export interface Contact {
@@ -169,6 +171,15 @@ export interface WorkspaceMember {
   joinedAt: string;
   status: "active" | "pending" | "suspended";
   avatarUrl?: string;
+}
+
+export interface WorkspaceInvitation {
+  id: string;
+  email: string;
+  role: "owner" | "admin" | "member" | "guest";
+  status: "pending" | "accepted" | "expired";
+  expiresAt: string;
+  createdAt: string;
 }
 
 export interface WorkspaceSettings {

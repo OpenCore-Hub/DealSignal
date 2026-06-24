@@ -99,6 +99,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		SourceType:  sourceType,
 		Status:      "uploaded",
 		StorageKey:  storageKey,
+		FileSize:    pgtype.Int8{Int64: fileHeader.Size, Valid: true},
 	})
 	if err != nil {
 		return Document{}, fmt.Errorf("create document record: %w", err)
@@ -117,7 +118,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	return documentFromDB(d), nil
 }
 
-func documentFromDB(d db.Document) Document {
+func documentFromDB(d db.CreateDocumentRow) Document {
 	doc := Document{
 		ID:         uuid.UUID(d.ID.Bytes).String(),
 		Title:      d.Title,

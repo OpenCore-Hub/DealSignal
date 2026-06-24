@@ -53,7 +53,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
       ) : (
         <AnimatePresence initial={false}>
           {pending.map((action) => {
-            const config = actionConfig[action.actionType];
+            const config = actionConfig[action.actionType] ?? { icon: Warning };
             const Icon = config.icon;
             const overdue = isOverdue(action.dueAt);
             const impactLabel =
@@ -125,7 +125,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
           <p className="text-caption mb-2 text-muted-foreground">{t("actions.completedWithCount", { count: done.length })}</p>
           <div className="space-y-2 opacity-60">
             {done.map((action) => {
-              const config = actionConfig[action.actionType];
+              const config = actionConfig[action.actionType] ?? { icon: Warning };
               const Icon = config.icon;
               return (
                 <div key={action.id} className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3 line-through">
@@ -158,7 +158,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                 className="space-y-2 overflow-hidden opacity-60"
               >
                 {hidden.map((action) => {
-                  const config = actionConfig[action.actionType];
+                  const config = actionConfig[action.actionType] ?? { icon: Warning };
                   const Icon = config.icon;
                   const statusLabel = action.status === "snoozed" ? tCommon("status.snoozed") : tCommon("status.ignored");
                   return (

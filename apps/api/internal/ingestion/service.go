@@ -3,6 +3,7 @@ package ingestion
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -39,7 +40,7 @@ func NewService(q *db.Queries, s *storage.Client, c *Converter, e Embedder) *Ser
 }
 
 // ProcessDocument parses a document and populates pages and chunks.
-func (s *Service) ProcessDocument(ctx context.Context, doc db.Document) error {
+func (s *Service) ProcessDocument(ctx context.Context, doc db.GetDocumentByIDRow) error {
 	job, err := s.queries.GetIngestionJobByDocument(ctx, doc.ID)
 	if err != nil {
 		return fmt.Errorf("find ingestion job: %w", err)
@@ -65,7 +66,7 @@ func (s *Service) ProcessDocument(ctx context.Context, doc db.Document) error {
 	return s.updateJob(ctx, job.ID, "completed", currentAttempts+1, "")
 }
 
-func (s *Service) run(ctx context.Context, doc db.Document) error {
+func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 	if err := s.cleanupDocumentData(ctx, doc.ID); err != nil {
 		return fmt.Errorf("cleanup existing document data: %w", err)
 	}
@@ -98,7 +99,7 @@ func (s *Service) run(ctx context.Context, doc db.Document) error {
 	pageCount := int32(len(pages))
 	for _, p := range pages {
 		key := pageObjectKey(tenantID, workspaceID, docID, p.Number)
-		if err := s.renderAndUploadPage(ctx, key, p); err != nil {
+		if err := s.renderAndUploadPage(ctx, key, p, pdfPath); err != nil {
 			return fmt.Errorf("render page %d: %w", p.Number, err)
 		}
 
@@ -115,22 +116,36 @@ func (s *Service) run(ctx context.Context, doc db.Document) error {
 			return fmt.Errorf("create page record: %w", err)
 		}
 
-		chunks := splitText(p.Text, p.Number, p.Width, p.Height)
+		chunks := splitTextChunks(p)
 		texts := make([]string, len(chunks))
 		for i, ch := range chunks {
 			texts[i] = ch.Text
 		}
 
+		// Compute normalized texts for exact/fuzzy search
+		normalizedTexts := make([]string, len(chunks))
+		for i, ch := range chunks {
+			normalizedTexts[i] = normalizeText(ch.Text)
+		}
+
 		if s.embedder == nil {
-			for _, ch := range chunks {
-				if err := s.queries.CreateChunk(ctx, db.CreateChunkParams{
-					TenantID:    doc.TenantID,
-					WorkspaceID: doc.WorkspaceID,
-					PageID:      page.ID,
-					Text:        ch.Text,
-					Bbox:        ch.Bbox,
-				}); err != nil {
+			for i, ch := range chunks {
+				chunkRow, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
+					TenantID:       doc.TenantID,
+					WorkspaceID:    doc.WorkspaceID,
+					PageID:         page.ID,
+					DocumentID:     doc.ID,
+					ChunkIndex:     pgtype.Int4{Int32: int32(i), Valid: true},
+					ChunkType:      pgtype.Text{String: "paragraph", Valid: true},
+					Text:           ch.Text,
+					NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
+					Bbox:           ch.Bbox,
+				})
+				if err != nil {
 					return fmt.Errorf("create chunk: %w", err)
+				}
+				if err := s.createChunkBox(ctx, chunkRow.ID, doc.ID, int32(p.Number), ch.Bbox); err != nil {
+					return fmt.Errorf("create chunk box: %w", err)
 				}
 			}
 		} else {
@@ -145,29 +160,44 @@ func (s *Service) run(ctx context.Context, doc db.Document) error {
 			}
 
 			if embedErr != nil {
-				for _, ch := range chunks {
-					if err := s.queries.CreateChunk(ctx, db.CreateChunkParams{
-						TenantID:    doc.TenantID,
-						WorkspaceID: doc.WorkspaceID,
-						PageID:      page.ID,
-						Text:        ch.Text,
-						Bbox:        ch.Bbox,
-					}); err != nil {
+				for i, ch := range chunks {
+					chunkRow, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
+						TenantID:       doc.TenantID,
+						WorkspaceID:    doc.WorkspaceID,
+						PageID:         page.ID,
+						DocumentID:     doc.ID,
+						ChunkIndex:     pgtype.Int4{Int32: int32(i), Valid: true},
+						ChunkType:      pgtype.Text{String: "paragraph", Valid: true},
+						Text:           ch.Text,
+						NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
+						Bbox:           ch.Bbox,
+					})
+					if err != nil {
 						return fmt.Errorf("create chunk: %w", err)
+					}
+					if err := s.createChunkBox(ctx, chunkRow.ID, doc.ID, int32(p.Number), ch.Bbox); err != nil {
+						return fmt.Errorf("create chunk box: %w", err)
 					}
 				}
 			} else {
 				for i, ch := range chunks {
-					err := s.queries.CreateChunkWithEmbedding(ctx, db.CreateChunkWithEmbeddingParams{
-						TenantID:    doc.TenantID,
-						WorkspaceID: doc.WorkspaceID,
-						PageID:      page.ID,
-						Text:        ch.Text,
-						Bbox:        ch.Bbox,
-						Embedding:   pgvector.NewVector(embeddings[i]),
+					chunkRow, err := s.queries.CreateChunkWithBBox(ctx, db.CreateChunkWithBBoxParams{
+						TenantID:       doc.TenantID,
+						WorkspaceID:    doc.WorkspaceID,
+						PageID:         page.ID,
+						DocumentID:     doc.ID,
+						ChunkIndex:     pgtype.Int4{Int32: int32(i), Valid: true},
+						ChunkType:      pgtype.Text{String: "paragraph", Valid: true},
+						Text:           ch.Text,
+						NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
+						Bbox:           ch.Bbox,
+						Embedding:      pgvector.NewVector(embeddings[i]),
 					})
 					if err != nil {
 						return fmt.Errorf("create chunk: %w", err)
+					}
+					if err := s.createChunkBox(ctx, chunkRow.ID, doc.ID, int32(p.Number), ch.Bbox); err != nil {
+						return fmt.Errorf("create chunk box: %w", err)
 					}
 				}
 			}
@@ -210,8 +240,38 @@ func (s *Service) cleanupDocumentData(ctx context.Context, documentID pgtype.UUI
 	return nil
 }
 
-func (s *Service) renderAndUploadPage(ctx context.Context, key string, p PageInfo) error {
-	img, err := renderPage(p)
+// createChunkBox parses bbox JSON and creates a chunk_boxes record.
+func (s *Service) createChunkBox(ctx context.Context, chunkID, docID pgtype.UUID, pageNumber int32, bboxJSON []byte) error {
+	var bbox struct {
+		X float64 `json:"x"`
+		Y float64 `json:"y"`
+		W float64 `json:"w"`
+		H float64 `json:"h"`
+	}
+	if err := json.Unmarshal(bboxJSON, &bbox); err != nil {
+		// If bbox is not in normalized format, skip creating chunk_boxes
+		return nil
+	}
+	// Only create chunk_boxes for normalized coordinates (0-1 range)
+	if bbox.X < 0 || bbox.X > 1 || bbox.Y < 0 || bbox.Y > 1 {
+		return nil
+	}
+	return s.queries.CreateChunkBox(ctx, db.CreateChunkBoxParams{
+		ChunkID:         chunkID,
+		DocumentID:      docID,
+		PageNumber:      pageNumber,
+		CoordinateSpace: "PAGE_IMAGE_NORMALIZED",
+		X:               bbox.X,
+		Y:               bbox.Y,
+		W:               bbox.W,
+		H:               bbox.H,
+		Source:          "PDF_TEXT_LAYER",
+		Confidence:      1.0,
+	})
+}
+
+func (s *Service) renderAndUploadPage(ctx context.Context, key string, p PageInfo, pdfPath string) error {
+	img, err := renderPage(p, pdfPath)
 	if err != nil {
 		return err
 	}

@@ -8,9 +8,11 @@ import (
 
 // RenewalWorker periodically renews SSL certificates that are close to expiry.
 type RenewalWorker struct {
-	svc      *Service
-	interval time.Duration
+	svc       *Service
+	interval  time.Duration
 	lookAhead time.Duration
+	stop      chan struct{}
+	done      chan struct{}
 }
 
 // NewRenewalWorker creates a worker that checks for expiring certificates.
@@ -21,15 +23,23 @@ func NewRenewalWorker(svc *Service, interval, lookAhead time.Duration) *RenewalW
 	if lookAhead <= 0 {
 		lookAhead = 7 * 24 * time.Hour
 	}
-	return &RenewalWorker{svc: svc, interval: interval, lookAhead: lookAhead}
+	return &RenewalWorker{
+		svc:       svc,
+		interval:  interval,
+		lookAhead: lookAhead,
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
+	}
 }
 
-// Start runs the renewal loop until the context is cancelled.
+// Start runs the renewal loop until the context is cancelled or Stop is called.
 func (w *RenewalWorker) Start(ctx context.Context) {
 	go w.loop(ctx)
 }
 
 func (w *RenewalWorker) loop(ctx context.Context) {
+	defer close(w.done)
+
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
 
@@ -37,6 +47,8 @@ func (w *RenewalWorker) loop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			return
+		case <-w.stop:
 			return
 		case <-ticker.C:
 			w.run(ctx)
@@ -56,4 +68,10 @@ func (w *RenewalWorker) run(ctx context.Context) {
 		fmt.Printf(`{"time":"%s","level":"info","message":"renewed %d domain certificate(s)"}%s`,
 			time.Now().Format(time.RFC3339Nano), renewed, "\n")
 	}
+}
+
+// Stop signals the worker to stop and waits for the current iteration to finish.
+func (w *RenewalWorker) Stop() {
+	close(w.stop)
+	<-w.done
 }

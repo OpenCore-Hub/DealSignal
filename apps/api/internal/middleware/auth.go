@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"context"
 	"net/http"
 	"strings"
 
@@ -8,14 +9,19 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// TokenValidator is the subset of the auth service used by the auth middleware.
+type TokenValidator interface {
+	ValidateAccessToken(ctx context.Context, token string) (*auth.TokenClaims, error)
+}
+
 const (
-	userIDKey    = "userID"
+	userIDKey      = "userID"
 	workspaceIDKey = "workspaceID"
 	tenantIDKey    = "tenantID"
 )
 
-// Auth validates the JWT bearer token and injects the user ID into the context.
-func Auth() gin.HandlerFunc {
+// Auth creates a middleware that validates the JWT bearer token and injects the user ID into the context.
+func Auth(validator TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		header := c.GetHeader("Authorization")
 		if header == "" {
@@ -29,9 +35,10 @@ func Auth() gin.HandlerFunc {
 			return
 		}
 
-		claims, err := auth.ParseToken(parts[1])
+		claims, err := validator.ValidateAccessToken(c.Request.Context(), parts[1])
+		_ = claims
 		if err != nil {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": err.Error()})
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid or expired token"})
 			return
 		}
 

@@ -3,6 +3,7 @@ package analytics
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -103,6 +104,12 @@ func (h *Handler) GetPageAnalytics(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	rows, err := h.service.PageAnalytics(c.Request.Context(), c.Param("documentId"), workspaceID)
 	if err != nil {
+		fmt.Printf(`{"time":"%s","level":"error","handler":"GetPageAnalytics","document_id":"%s","workspace_id":"%s","error":"%s"}`+"\n",
+			time.Now().UTC().Format(time.RFC3339),
+			c.Param("documentId"),
+			workspaceID,
+			err.Error(),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -174,7 +181,7 @@ func uuidToString(u pgtype.UUID) string {
 	return uuid.UUID(u.Bytes).String()
 }
 
-func documentList(docs []db.Document) []gin.H {
+func documentList(docs []db.ListRecentDocumentsByWorkspaceRow) []gin.H {
 	out := make([]gin.H, len(docs))
 	for i, d := range docs {
 		out[i] = documentItem(d)
@@ -182,7 +189,7 @@ func documentList(docs []db.Document) []gin.H {
 	return out
 }
 
-func documentItem(d db.Document) gin.H {
+func documentItem(d db.ListRecentDocumentsByWorkspaceRow) gin.H {
 	status := d.Status
 	progress := 50
 	if status == "ready" {
@@ -195,7 +202,7 @@ func documentItem(d db.Document) gin.H {
 		"title":     d.Title,
 		"fileName":  d.Title,
 		"fileType":  strings.ToLower(d.SourceType),
-		"fileSize":  0,
+		"fileSize":  d.FileSize.Int64,
 		"status":    status,
 		"progress":  progress,
 		"createdAt": d.CreatedAt.Time.Format(time.RFC3339),

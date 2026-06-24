@@ -11,6 +11,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
@@ -40,9 +41,18 @@ func NewConverter(baseURL, jwtSecret string, s *storage.Client) *Converter {
 // ConvertToPDF downloads the original file, asks OnlyOffice to convert it, and
 // returns a local temporary PDF path.
 func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey string) (string, error) {
-	presigned, err := c.storage.PresignedGetURL(ctx, storageKey, 10*time.Minute)
+	// Use internal presigned URL so OnlyOffice (running inside Docker network)
+	// can reach MinIO via its internal hostname (e.g. http://minio:9000).
+	presigned, err := c.storage.PresignedGetURLInternal(ctx, storageKey, 10*time.Minute)
 	if err != nil {
 		return "", fmt.Errorf("presign original: %w", err)
+	}
+
+	// Use only the document ID as the OnlyOffice cache key (full path with slashes causes error -7)
+	parts := strings.Split(storageKey, "/")
+	cacheKey := storageKey
+	if len(parts) >= 5 && parts[0] == "tenants" && parts[2] == "workspaces" && parts[3] == "documents" {
+		cacheKey = parts[4]
 	}
 
 	payload := map[string]interface{}{
@@ -50,7 +60,7 @@ func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey str
 		"filetype":   sourceType,
 		"outputtype": "pdf",
 		"url":        presigned,
-		"key":        storageKey,
+		"key":        cacheKey,
 	}
 	body, _ := json.Marshal(payload)
 

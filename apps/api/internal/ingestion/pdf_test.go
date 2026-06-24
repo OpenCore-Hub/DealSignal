@@ -5,8 +5,15 @@ import (
 )
 
 func TestSplitText(t *testing.T) {
-	text := "First paragraph.\n\nSecond paragraph.\n   "
-	chunks := splitText(text, 1, 200, 100)
+	// Test fallback path: no blocks, so splitTextChunks falls back to paragraph splitting
+	p := PageInfo{
+		Number: 1,
+		Width:  200,
+		Height: 100,
+		Text:   "First paragraph.\n\nSecond paragraph.\n   ",
+		Blocks: nil, // no precise bbox → fallback
+	}
+	chunks := splitTextChunks(p)
 	if len(chunks) != 2 {
 		t.Fatalf("expected 2 chunks, got %d", len(chunks))
 	}
@@ -20,7 +27,8 @@ func TestSplitText(t *testing.T) {
 
 func TestRenderPage(t *testing.T) {
 	p := PageInfo{Number: 1, Width: 200, Height: 100}
-	data, err := renderPage(p)
+	// Test with non-existent pdf path → should fall back to placeholder
+	data, err := renderPage(p, "/nonexistent/file.pdf")
 	if err != nil {
 		t.Fatalf("render page: %v", err)
 	}

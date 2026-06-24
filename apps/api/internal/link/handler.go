@@ -189,26 +189,40 @@ func (h *Handler) Get(c *gin.Context) {
 // Update changes a link's status.
 func (h *Handler) Update(c *gin.Context) {
 	var req struct {
-		Status string `json:"status" binding:"required,oneof=active revoked"`
+		Status   string `json:"status" binding:"omitempty,oneof=active revoked"`
+		IsActive *bool  `json:"isActive" binding:"omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
+	if req.Status == "" && req.IsActive == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "status or isActive is required"})
+		return
+	}
+
+	status := req.Status
+	if status == "" && req.IsActive != nil {
+		if *req.IsActive {
+			status = "active"
+		} else {
+			status = "revoked"
+		}
+	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	link, err := h.service.UpdateStatus(c.Request.Context(), c.Param("id"), workspaceID, req.Status)
+	link, err := h.service.UpdateStatus(c.Request.Context(), c.Param("id"), workspaceID, status)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update link"})
 		return
 	}
 	item, err := h.linkResponse(c, link)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to build link response"})
 		return
 	}
 	c.JSON(http.StatusOK, item)

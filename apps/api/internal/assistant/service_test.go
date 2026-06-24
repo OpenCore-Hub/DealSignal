@@ -81,7 +81,7 @@ func TestChatCreatesSessionAndReturnsEvidence(t *testing.T) {
 		sessionID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
 	}
 	s := &mockSearcher{evidence: []search.Evidence{
-		{ChunkID: "chunk-1", PageNumber: 3, Text: "Revenue grew 3x YoY."},
+		{ChunkID: "chunk-1", PageNumber: 3, Quote: "Revenue grew 3x YoY."},
 	}}
 	l := &mockLLM{answer: "Revenue grew 3x YoY according to page 3."}
 	svc := NewService(q, s, evidence.NewFormatter(), l)
@@ -153,7 +153,7 @@ func TestChatKeepsMultiTurnContext(t *testing.T) {
 		},
 	}
 	s := &mockSearcher{evidence: []search.Evidence{
-		{ChunkID: "chunk-1", PageNumber: 3, Text: "Revenue grew 3x YoY."},
+		{ChunkID: "chunk-1", PageNumber: 3, Quote: "Revenue grew 3x YoY."},
 	}}
 	l := &mockLLM{answer: "It grew 3x YoY."}
 	svc := NewService(q, s, evidence.NewFormatter(), l)

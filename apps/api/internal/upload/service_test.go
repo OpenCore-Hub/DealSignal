@@ -46,7 +46,7 @@ func TestValidateFileHeader(t *testing.T) {
 func TestDocumentFromDB(t *testing.T) {
 	now := time.Now()
 	docID := uuid.New()
-	d := db.Document{
+	d := db.CreateDocumentRow{
 		ID:         pgtype.UUID{Bytes: docID, Valid: true},
 		Title:      "report.pdf",
 		SourceType: "pdf",

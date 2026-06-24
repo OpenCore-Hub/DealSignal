@@ -45,9 +45,9 @@ export function SettingsMembersPage() {
     if (!email.trim()) return;
     setInviting(true);
     try {
-      const res = await api.inviteWorkspaceMember(email.trim(), "member");
-      setMembers((prev) => [...prev, res.data]);
+      await api.inviteWorkspaceMember(email.trim(), "member");
       setEmail("");
+      setRetryKey((k) => k + 1);
     } finally {
       setInviting(false);
     }

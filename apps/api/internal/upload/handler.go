@@ -1,15 +1,12 @@
 package upload
 
 import (
-	"context"
 	"errors"
-	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/gin-gonic/gin"
@@ -22,14 +19,13 @@ var errInvalidDocumentID = errors.New("invalid document id")
 
 // Handler exposes document upload HTTP endpoints.
 type Handler struct {
-	uploadService    *Service
-	ingestionService *ingestion.Service
-	storage          *storage.Client
+	uploadService *Service
+	storage       *storage.Client
 }
 
 // NewHandler creates an upload handler.
-func NewHandler(u *Service, i *ingestion.Service, s *storage.Client) *Handler {
-	return &Handler{uploadService: u, ingestionService: i, storage: s}
+func NewHandler(u *Service, s *storage.Client) *Handler {
+	return &Handler{uploadService: u, storage: s}
 }
 
 // RegisterRoutes mounts document routes under a workspace-scoped group.
@@ -70,34 +66,6 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	// Trigger ingestion asynchronously; status is queryable via /status.
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				fmt.Printf(`{"time":"%s","level":"error","document_id":"%s","panic":"%v"}`+"\n",
-					time.Now().UTC().Format(time.RFC3339),
-					doc.ID,
-					r,
-				)
-			}
-		}()
-
-		ctx := context.Background()
-		if err := h.ingestionService.ProcessDocument(ctx, db.Document{
-			ID:          pgUUID(doc.ID),
-			TenantID:    pgUUID(tenantID),
-			WorkspaceID: pgUUID(workspaceID),
-			SourceType:  doc.SourceType,
-			StorageKey:  h.objectKey(doc.ID, tenantID, workspaceID, fileHeader.Filename),
-		}); err != nil {
-			fmt.Printf(`{"time":"%s","level":"error","document_id":"%s","error":"%s"}`+"\n",
-				time.Now().UTC().Format(time.RFC3339),
-				doc.ID,
-				err.Error(),
-			)
-		}
-	}()
-
 	dbDoc, err := h.uploadService.queries.GetDocumentByIDAndTenant(c.Request.Context(), db.GetDocumentByIDAndTenantParams{
 		ID:          pgUUID(doc.ID),
 		WorkspaceID: pgUUID(workspaceID),
@@ -112,7 +80,17 @@ func (h *Handler) Create(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusCreated, documentResponse(dbDoc, job))
+	c.JSON(http.StatusCreated, documentResponse(docInfo{
+		ID:         dbDoc.ID,
+		Title:      dbDoc.Title,
+		SourceType: dbDoc.SourceType,
+		StorageKey: dbDoc.StorageKey,
+		Status:     dbDoc.Status,
+		FileSize:   dbDoc.FileSize.Int64,
+		PageCount:  dbDoc.PageCount,
+		CreatedAt:  dbDoc.CreatedAt,
+		UpdatedAt:  dbDoc.UpdatedAt,
+	}, job))
 }
 
 // Get returns document details.
@@ -151,9 +129,19 @@ func (h *Handler) List(c *gin.Context) {
 	}
 
 	out := make([]gin.H, 0, len(docs))
-	for _, doc := range docs {
-		job, _ := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), doc.ID)
-		out = append(out, documentResponse(doc, job))
+	for _, d := range docs {
+		job, _ := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), d.ID)
+		out = append(out, documentResponse(docInfo{
+			ID:         d.ID,
+			Title:      d.Title,
+			SourceType: d.SourceType,
+			StorageKey: d.StorageKey,
+			Status:     d.Status,
+			FileSize:   d.FileSize.Int64,
+			PageCount:  d.PageCount,
+			CreatedAt:  d.CreatedAt,
+			UpdatedAt:  d.UpdatedAt,
+		}, job))
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
@@ -300,28 +288,38 @@ func (h *Handler) SignedURL(c *gin.Context) {
 	})
 }
 
-func (h *Handler) getDocumentAndJob(c *gin.Context) (db.Document, db.IngestionJob, error) {
+func (h *Handler) getDocumentAndJob(c *gin.Context) (docInfo, db.IngestionJob, error) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	tenantID := middleware.TenantIDFrom(c)
 	docID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return db.Document{}, db.IngestionJob{}, errInvalidDocumentID
+		return docInfo{}, db.IngestionJob{}, errInvalidDocumentID
 	}
 
-	doc, err := h.uploadService.queries.GetDocumentByIDAndTenant(c.Request.Context(), db.GetDocumentByIDAndTenantParams{
+	row, err := h.uploadService.queries.GetDocumentByIDAndTenant(c.Request.Context(), db.GetDocumentByIDAndTenantParams{
 		ID:          pgtype.UUID{Bytes: docID, Valid: true},
 		WorkspaceID: pgUUID(workspaceID),
 		TenantID:    pgUUID(tenantID),
 	})
 	if err != nil {
-		return db.Document{}, db.IngestionJob{}, err
+		return docInfo{}, db.IngestionJob{}, err
 	}
 
-	job, err := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), doc.ID)
+	job, err := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), row.ID)
 	if err != nil {
-		return db.Document{}, db.IngestionJob{}, err
+		return docInfo{}, db.IngestionJob{}, err
 	}
-	return doc, job, nil
+	return docInfo{
+		ID:         row.ID,
+		Title:      row.Title,
+		SourceType: row.SourceType,
+		StorageKey: row.StorageKey,
+		Status:     row.Status,
+		FileSize:   row.FileSize.Int64,
+		PageCount:  row.PageCount,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
+	}, job, nil
 }
 
 func (h *Handler) handleDocError(c *gin.Context, err error) {
@@ -332,19 +330,28 @@ func (h *Handler) handleDocError(c *gin.Context, err error) {
 	c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": err.Error()})
 }
 
-func (h *Handler) objectKey(docID, tenantID, workspaceID, fileName string) string {
-	return storage.ObjectKey(tenantID, workspaceID, docID, fileName)
+// docInfo holds the common document fields needed for API responses.
+type docInfo struct {
+	ID         pgtype.UUID
+	Title      string
+	SourceType string
+	StorageKey string
+	Status     string
+	FileSize   int64
+	PageCount  pgtype.Int4
+	CreatedAt  pgtype.Timestamptz
+	UpdatedAt  pgtype.Timestamptz
 }
 
-func documentResponse(doc db.Document, job db.IngestionJob) gin.H {
+func documentResponse(doc docInfo, job db.IngestionJob) gin.H {
 	resp := gin.H{
 		"id":         uuidToString(doc.ID),
 		"title":      doc.Title,
 		"sourceType": doc.SourceType,
 		"fileType":   documentFileType(doc.SourceType),
-		"fileName":   documentFileName(doc),
-		"fileSize":   0,
-		"status":     documentStatus(doc, job),
+		"fileName":   documentFileNameDI(doc),
+		"fileSize":   doc.FileSize,
+		"status":     documentStatusDI(doc, job),
 		"progress":   documentProgress(job.Status),
 		"createdAt":  doc.CreatedAt.Time.Format(time.RFC3339),
 		"updatedAt":  doc.UpdatedAt.Time.Format(time.RFC3339),
@@ -361,7 +368,7 @@ func documentResponse(doc db.Document, job db.IngestionJob) gin.H {
 	return resp
 }
 
-func documentStatus(doc db.Document, job db.IngestionJob) string {
+func documentStatusDI(doc docInfo, job db.IngestionJob) string {
 	if doc.Status == "failed" || job.Status == "failed" {
 		return "failed"
 	}
@@ -374,7 +381,7 @@ func documentStatus(doc db.Document, job db.IngestionJob) string {
 	return "processing"
 }
 
-func documentFileName(doc db.Document) string {
+func documentFileNameDI(doc docInfo) string {
 	ext := strings.ToLower(doc.SourceType)
 	if ext == "" {
 		return doc.Title

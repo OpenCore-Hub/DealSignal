@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
 // Config holds all runtime configuration loaded from environment variables.
@@ -18,13 +19,13 @@ type Config struct {
 	S3Endpoint       string
 	S3PublicEndpoint string
 	S3Bucket         string
-	S3AccessKey    string
-	S3SecretKey    string
-	S3Region       string
-	S3UsePathStyle string
+	S3AccessKey      string
+	S3SecretKey      string
+	S3Region         string
+	S3UsePathStyle   string
 
-	OnlyOfficeURL         string
-	OnlyOfficeJWTSecret   string
+	OnlyOfficeURL       string
+	OnlyOfficeJWTSecret string
 
 	OpenAIAPIKey         string
 	OpenAIBaseURL        string
@@ -33,28 +34,40 @@ type Config struct {
 	OpenAIReferer        string // optional, e.g. for OpenRouter
 	OpenAIAppTitle       string // optional, e.g. for OpenRouter
 
-	BaseDomain   string
-	CNAMETarget  string
-	CertProvider string
-	AppBaseURL            string
-	ViewerBaseURL         string
-	SMTPHost              string
-	SMTPPort              string
-	SMTPUser              string
-	SMTPPass              string
-	SMTPFrom              string
-	SlackClientID         string
-	SlackClientSecret     string
-	HubSpotClientID       string
-	HubSpotClientSecret   string
+	BaseDomain          string
+	CNAMETarget         string
+	CertProvider        string
+	AppBaseURL          string
+	FrontendURL         string
+	ViewerBaseURL       string
+	SMTPHost            string
+	SMTPPort            string
+	SMTPUser            string
+	SMTPPass            string
+	SMTPFrom            string
+	SlackClientID       string
+	SlackClientSecret   string
+	HubSpotClientID     string
+	HubSpotClientSecret string
+
+	RateLimitPublicRPM     int
+	RateLimitAuthRPM       int
+	RateLimitUploadRPM     int
+	RateLimitWorkspaceRPM  int
+	IdempotencyTTLHours    int
+	IdempotencyMaxBodySize int
+
+	CORSAllowedOrigins string
+	MetricsEnabled     bool
+	PprofEnabled       bool
 }
 
 // Load parses environment variables into Config and validates required fields.
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:     getEnv("PORT", "8080"),
-		LogLevel: getEnv("LOG_LEVEL", "info"),
-		Version:  getEnv("VERSION", "v2.1.2"),
+		Port:        getEnv("PORT", "8080"),
+		LogLevel:    getEnv("LOG_LEVEL", "info"),
+		Version:     getEnv("VERSION", "v2.1.2"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
 		JWTSecret:   os.Getenv("JWT_SECRET"),
@@ -77,10 +90,11 @@ func Load() (*Config, error) {
 		OpenAIReferer:        os.Getenv("OPENAI_REFERER"),
 		OpenAIAppTitle:       os.Getenv("OPENAI_APP_TITLE"),
 
-		BaseDomain:   getEnv("BASE_DOMAIN", "dealsignal.com"),
-		CNAMETarget:  getEnv("CNAME_TARGET", "cname.dealsignal.com"),
-		CertProvider: getEnv("CERT_PROVIDER", "noop"),
+		BaseDomain:          getEnv("BASE_DOMAIN", "dealsignal.com"),
+		CNAMETarget:         getEnv("CNAME_TARGET", "cname.dealsignal.com"),
+		CertProvider:        getEnv("CERT_PROVIDER", "noop"),
 		AppBaseURL:          getEnv("APP_BASE_URL", "http://localhost:8080"),
+		FrontendURL:         getEnv("FRONTEND_URL", "http://localhost:5173"),
 		ViewerBaseURL:       getEnv("VIEWER_BASE_URL", ""),
 		SMTPHost:            os.Getenv("SMTP_HOST"),
 		SMTPPort:            getEnv("SMTP_PORT", "587"),
@@ -91,6 +105,17 @@ func Load() (*Config, error) {
 		SlackClientSecret:   os.Getenv("SLACK_CLIENT_SECRET"),
 		HubSpotClientID:     os.Getenv("HUBSPOT_CLIENT_ID"),
 		HubSpotClientSecret: os.Getenv("HUBSPOT_CLIENT_SECRET"),
+
+		RateLimitPublicRPM:     getEnvInt("RATE_LIMIT_PUBLIC_RPM", 100),
+		RateLimitAuthRPM:       getEnvInt("RATE_LIMIT_AUTH_RPM", 20),
+		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", 10),
+		RateLimitWorkspaceRPM:  getEnvInt("RATE_LIMIT_WORKSPACE_RPM", 200),
+		IdempotencyTTLHours:    getEnvInt("IDEMPOTENCY_TTL_HOURS", 24),
+		IdempotencyMaxBodySize: getEnvInt("IDEMPOTENCY_MAX_BODY_SIZE", 1<<20),
+
+		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
+		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",
+		PprofEnabled:       strings.ToLower(getEnv("PPROF_ENABLED", "false")) == "true",
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -131,4 +156,16 @@ func getEnv(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func getEnvInt(key string, fallback int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return fallback
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return fallback
+	}
+	return n
 }

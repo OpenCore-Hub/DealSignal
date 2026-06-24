@@ -45,7 +45,8 @@ func TestAuthMiddleware(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := gin.New()
-			r.GET("/me", Auth(), func(c *gin.Context) {
+			validator := auth.NewService(nil, auth.NewMemoryTokenStore())
+			r.GET("/me", Auth(validator), func(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{"user_id": UserIDFrom(c)})
 			})
 

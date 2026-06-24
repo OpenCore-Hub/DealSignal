@@ -33,7 +33,7 @@ async function seedRealBackend(): Promise<SeedResult> {
   if (!registerRes.ok) {
     throw new Error(`register failed: ${registerRes.status} ${await registerRes.text()}`);
   }
-  const { token } = (await registerRes.json()) as { token: string };
+  const { access_token: token } = (await registerRes.json()) as { access_token: string };
 
   const workspaceSlug = `e2e-${timestamp}`;
   const workspaceRes = await apiFetch("/api/workspaces", {
@@ -58,6 +58,30 @@ async function authenticate(page: import("@playwright/test").Page, token: string
   await page.addInitScript((t: string) => {
     localStorage.setItem("access_token", t);
   }, token);
+}
+
+async function waitForReadyDocument(token: string, workspaceSlug: string) {
+  await expect.poll(
+    async () => {
+      const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await res.json()) as { data: { status: string }[] };
+      return body.data.some((d) => d.status === "ready");
+    },
+    { timeout: 30000 }
+  ).toBe(true);
+}
+
+async function getReadySamplePdfId(token: string, workspaceSlug: string): Promise<string> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  expect(res.ok).toBe(true);
+  const body = (await res.json()) as { data: { id: string; title: string; status: string }[] };
+  const doc = body.data.find((d) => d.title === "sample.pdf" && d.status === "ready");
+  expect(doc).toBeTruthy();
+  return doc!.id;
 }
 
 function attachDebug(page: import("@playwright/test").Page) {
@@ -122,8 +146,11 @@ test.describe("real backend P0 flow", () => {
     await page.locator("input#file-upload").setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
     await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
 
-    await page.goto(`/${seed.workspaceSlug}/documents`);
-    await page.getByText("sample.pdf").first().click();
+    // Wait for the ingestion worker to finish processing before creating a link.
+    await waitForReadyDocument(seed.token, seed.workspaceSlug);
+    const documentId = await getReadySamplePdfId(seed.token, seed.workspaceSlug);
+
+    await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
     await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
     await page.getByRole("button", { name: "Create link" }).click();
 
@@ -158,21 +185,16 @@ test.describe("real backend P0 flow", () => {
     await page.locator("input#file-upload").setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
     await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
 
-    await page.goto(`/${seed.workspaceSlug}/documents`);
-    await page.getByText("sample.pdf").first().click();
+    // Wait for the ingestion worker to finish processing before creating a link.
+    await waitForReadyDocument(seed.token, seed.workspaceSlug);
+    const documentId = await getReadySamplePdfId(seed.token, seed.workspaceSlug);
+
+    await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
+    await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
     await page.getByRole("button", { name: "Create link" }).click();
     await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links/new`), { timeout: 30000 });
     await page.getByTestId("create-link-button").click();
     await expect(page.getByTestId("generated-link")).toBeVisible({ timeout: 30000 });
-
-    // Look up the document id via API so we can navigate directly to the authenticated viewer.
-    const docsRes = await apiFetch(`/api/workspaces/${seed.workspaceSlug}/documents`, {
-      headers: { Authorization: `Bearer ${seed.token}` },
-    });
-    expect(docsRes.ok).toBe(true);
-    const docsBody = (await docsRes.json()) as { data: { id: string; title: string }[] };
-    const documentId = docsBody.data.find((d) => d.title === "sample.pdf")?.id;
-    expect(documentId).toBeTruthy();
 
     // Open the document detail inside the workspace shell so the current workspace
     // is selected, then click Preview to open the authenticated viewer.

@@ -20,7 +20,7 @@ func TestFormatterBuildContextNoEvidence(t *testing.T) {
 func TestFormatterBuildContextWithEvidence(t *testing.T) {
 	f := NewFormatter()
 	ctx := f.BuildContext([]search.Evidence{
-		{PageNumber: 3, Text: "Revenue grew 3x YoY.", Bbox: map[string]int{"x": 0, "y": 0, "w": 100, "h": 30}},
+		{PageNumber: 3, Quote: "Revenue grew 3x YoY.", Boxes: []search.BoundingBox{{X: 0, Y: 0, W: 0.5, H: 0.1}}},
 	})
 	if ctx == "" {
 		t.Fatal("expected non-empty context")

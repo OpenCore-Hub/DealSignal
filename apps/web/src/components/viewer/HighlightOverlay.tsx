@@ -12,7 +12,7 @@ export function HighlightOverlay({ evidences, className }: HighlightOverlayProps
   return (
     <div className={cn("pointer-events-none absolute inset-0", className)} aria-hidden="true">
       {evidences.map((ev) =>
-        ev.boxes.map((box, index) => (
+        (ev.boxes || []).map((box, index) => (
           <div
             key={`${ev.chunk_id}-${index}`}
             className="absolute animate-pulse rounded-sm border border-primary/60 bg-primary/20"

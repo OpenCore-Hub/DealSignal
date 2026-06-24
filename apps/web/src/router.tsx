@@ -33,6 +33,9 @@ const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").the
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
 const PublicViewerPage = lazy(() => import("@/components/viewer/PublicViewerPage").then((m) => ({ default: m.PublicViewerPage })));
 const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ default: m.NotFoundPage })));
+const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
+const RegisterPage = lazy(() => import("@/routes/register").then((m) => ({ default: m.RegisterPage })));
+const VerifyEmailPage = lazy(() => import("@/routes/verify-email").then((m) => ({ default: m.VerifyEmailPage })));
 const WorkspacesPage = lazy(() => import("@/routes/workspaces").then((m) => ({ default: m.WorkspacesPage })));
 const CreateWorkspacePage = lazy(() => import("@/routes/workspaces/new").then((m) => ({ default: m.CreateWorkspacePage })));
 
@@ -56,6 +59,23 @@ function WorkspaceLayout() {
       </Suspense>
     </AppShell>
   );
+}
+
+function getAuthToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem("access_token");
+  } catch {
+    return null;
+  }
+}
+
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const token = getAuthToken();
+  if (!token) {
+    return <Navigate to={`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`} replace />;
+  }
+  return <>{children}</>;
 }
 
 function RouteError() {
@@ -82,14 +102,47 @@ export const router = createBrowserRouter([
     path: "/",
     element: (
       <Suspense fallback={<PageLoader />}>
-        <WorkspacesPage />
+        <ProtectedRoute>
+          <WorkspacesPage />
+        </ProtectedRoute>
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/login",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <LoginPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/register",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <RegisterPage />
+      </Suspense>
+    ),
+    errorElement: <RouteError />,
+  },
+  {
+    path: "/verify-email/:token",
+    element: (
+      <Suspense fallback={<PageLoader />}>
+        <VerifyEmailPage />
       </Suspense>
     ),
     errorElement: <RouteError />,
   },
   {
     path: "/:workspaceSlug",
-    element: <WorkspaceLayout />,
+    element: (
+      <ProtectedRoute>
+        <WorkspaceLayout />
+      </ProtectedRoute>
+    ),
     errorElement: <RouteError />,
     children: [
       { index: true, element: <Navigate to="dashboard" replace /> },
