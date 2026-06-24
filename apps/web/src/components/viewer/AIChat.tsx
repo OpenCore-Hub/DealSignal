@@ -72,7 +72,7 @@ export function AIChat() {
             animate={{ opacity: 1, y: 0 }}
             exit={reducedMotion ? undefined : { opacity: 0, y: 20 }}
             transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
-            className="fixed right-4 bottom-4 z-40 flex h-[520px] w-full max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-card shadow-xl sm:max-w-[360px]"
+            className="fixed right-4 bottom-4 z-40 flex h-[520px] max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-card shadow-xl sm:max-w-[360px]"
           >
             <div className="flex h-12 items-center justify-between border-b border-border px-4">
               <div className="flex items-center gap-2">

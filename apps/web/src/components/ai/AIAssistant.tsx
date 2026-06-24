@@ -115,7 +115,7 @@ export function AIAssistant() {
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.95 }}
             transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
-            className="mb-4 flex h-[520px] w-full max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-card shadow-xl sm:w-[360px]"
+            className="mb-4 flex h-[520px] max-h-[calc(100dvh-2rem)] w-full max-w-[calc(100vw-2rem)] flex-col rounded-xl border border-border bg-card shadow-xl sm:w-[360px]"
           >
             <div className="flex h-12 items-center justify-between border-b border-border px-4">
               <div className="flex items-center gap-2">
