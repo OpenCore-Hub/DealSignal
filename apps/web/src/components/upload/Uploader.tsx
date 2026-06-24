@@ -183,6 +183,7 @@ export function Uploader() {
           ref={inputRef}
           type="file"
           accept={supportedTypes}
+          data-testid="file-upload"
           multiple
           tabIndex={-1}
           aria-hidden
@@ -261,7 +262,7 @@ export function Uploader() {
                     </span>
                   )}
                   {uploadFile.status === "done" && (
-                    <Check size={18} weight="bold" className="text-success-500" />
+                    <Check size={18} weight="bold" className="text-success-500" data-testid="upload-success" />
                   )}
                   {uploadFile.status === "error" && (
                     <Warning size={18} weight="bold" className="text-error-500" />

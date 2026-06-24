@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Completed `useAsyncData` rollout across remaining data-fetching routes: `WorkspacesPage`, `NewDealRoomPage`, and `InsightsSuggestionsPage`.
+- Added unit tests for `WorkspacesPage`, `InsightsSuggestionsPage`, `NewDealRoomPage`, `DealRoomDetailPage`, `ContactDetailPage`, `InsightsOverviewPage`, and `SettingsIntegrationsPage` (141 frontend tests total).
+- Added `node` types to `apps/web/tsconfig.app.json` so test files can import Node built-ins (e.g. `node:fs`) for loading locale JSON.
+- Added viewer tests for `ViewerToolbar`, `ViewerCanvas`, `useViewerDocument`, and keyboard navigation in `CanvasViewer`.
+
+### Changed
+
+- Migrated settings, deal-room, contact, and insights detail pages to the shared `useAsyncData` hook with combined fetchers and `refetch`-based retry UIs.
+- Moved `WorkspacesPage` single-workspace redirect into `useEffect` to avoid React setState-during-render warnings.
+- Aligned `docs/API-SPEC-v2.1.0.md` with the current backend routing and response shapes:
+  - API-10 heat score: added `circle` query param and camelCase `level`/`trend`/`breakdown` response.
+  - API-11 suggestions: documented workspace list (`/insights/suggestions`) and link-level generate endpoints with actual response fields.
+  - API-12/13 deal rooms: documented actual create/get request/response fields (`template`, `ndaEnabled`, etc.) and noted that folders/members/access_requests are not yet populated.
+  - API-15/16 integrations: aligned HubSpot sync and Slack connect response examples with the backend.
+
+### Fixed
+
+- Playwright MSW E2E now forces `VITE_API_BASE_URL=` in `apps/web/playwright.config.ts` so `.env` cannot accidentally disable mocks.
+- Stabilized Playwright E2E selectors and upload flow: updated dashboard risk-alert assertions, added `id="file-upload"` / `data-testid="upload-success"` to `Uploader`, and clicked "Upload now" in the P0 test.
+- Updated `apps/api/e2e-test.sh` to parse the public token from `short_url` after the backend removed the `public_token` field.
+
 ## [v2.1.2] - 2026-06-22
 
 ### Added

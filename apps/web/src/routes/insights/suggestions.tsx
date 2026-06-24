@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Lightning, Envelope, Lightbulb } from "@phosphor-icons/react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -7,39 +6,30 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
-import type { Suggestion } from "@/types";
 
 export function InsightsSuggestionsPage() {
   const { t } = useTranslation("insights");
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.getSuggestions();
-        setSuggestions(res.data);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
+  const {
+    data: suggestions,
+    loading,
+    error,
+    refetch,
+  } = useAsyncData(async () => {
+    const res = await api.getSuggestions();
+    return res.data;
   }, [tc]);
 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
+        <Button onClick={refetch}>{tc("retry")}</Button>
       </div>
     );
   }
@@ -54,7 +44,7 @@ export function InsightsSuggestionsPage() {
     );
   }
 
-  if (suggestions.length === 0) {
+  if (!suggestions || suggestions.length === 0) {
     return (
       <EmptyState
         icon={<Lightbulb size={48} />}

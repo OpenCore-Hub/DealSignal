@@ -14,9 +14,10 @@ test.describe("P0 user flow", () => {
     await page.goto(`/${WORKSPACE_SLUG}/documents/upload`);
     await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible();
 
-    const fileInput = page.locator("input#file-upload");
+    const fileInput = page.locator('[data-testid="file-upload"]');
     await fileInput.setInputFiles(path.join(__dirname, "fixtures", "sample.pdf"));
 
+    await page.getByRole("button", { name: "Upload now" }).click();
     await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 10000 });
   });
 

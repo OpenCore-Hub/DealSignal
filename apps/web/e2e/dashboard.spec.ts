@@ -16,8 +16,8 @@ test.describe("Dashboard", () => {
     await expect(page.getByText("Actions", { exact: true }).first()).toBeVisible();
     await expect(page.getByText("Heat map", { exact: true })).toBeVisible();
 
-    await expect(page.getByText("Risk alerts")).toBeVisible();
-    await expect(page.getByText("Sarah Chen is heating up")).toBeVisible();
+    await expect(page.getByText("Risk alerts", { exact: true })).toBeVisible();
+    await expect(page.getByText("Unidentified email downloaded Pitch Deck")).toBeVisible();
   });
 
   test("marks a pending action as done", async ({ page }) => {

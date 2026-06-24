@@ -740,20 +740,30 @@ Content-Type: application/json
 | 对应 PRD | FR-10 |
 | 对应 TDD | 5.4.6 |
 
+**查询参数**：
+
+| 参数 | 类型 | 必填 | 说明 |
+|------|------|------|------|
+| circle | string | 否 | 计算圈型：`founder` / `investor_ir` / `sales`，默认 `founder` |
+
 **成功响应 200**：
 
 ```json
 {
-  "link_id": "link_xxx",
+  "linkId": "link_xxx",
   "score": 78,
-  "tier": "hot",
-  "factors": [
-    { "name": "open_count", "value": 3, "weight": 0.2 },
-    { "name": "key_page_views", "value": 2, "weight": 0.35 },
-    { "name": "total_duration_min", "value": 8.5, "weight": 0.25 },
-    { "name": "forward_signals", "value": 1, "weight": 0.2 }
-  ],
-  "updated_at": "2026-06-20T10:05:00Z"
+  "level": "hot",
+  "trend": "rising",
+  "breakdown": {
+    "opens": 9,
+    "revisits": 18,
+    "avgDurationMinutes": 96,
+    "keyPageViews": 25,
+    "forwardSignals": 15,
+    "downloads": 8,
+    "bouncePenalty": -10
+  },
+  "updatedAt": "2026-06-20T10:05:00Z"
 }
 ```
 
@@ -765,38 +775,57 @@ Content-Type: application/json
 |------|-----|
 | 接口编号 | API-11 |
 | 名称 | List / Generate Follow-up Suggestions |
-| 方法 | `GET` 列表，`POST` 生成 |
-| 路径 | `/api/workspaces/{workspaceSlug}/suggestions` |
+| 方法 | `GET` 工作区列表，`POST` 按 link 生成 |
+| 路径 | `GET /api/workspaces/{workspaceSlug}/insights/suggestions`<br>`POST /api/workspaces/{workspaceSlug}/analytics/links/{linkId}/suggestions` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-11 |
 | 对应 TDD | 5.4.6 |
-| 说明 | 后端当前未提供按 link 维度获取建议的接口；建议统一通过 workspace 级 suggestions 资源操作。 |
+| 说明 | 工作区列表端点返回聚合后的跟进建议；生成端点针对单个 link 创建建议。 |
 
-**`GET /suggestions` 成功响应 200**：
+**`GET /insights/suggestions` 成功响应 200**：
 
 ```json
 {
   "data": [
     {
       "id": "sg_xxx",
-      "type": "follow_up",
-      "priority": "high",
-      "title": "重复查看财务页",
-      "description": "投资人在 24 小时内 3 次查看财务页，建议发送 financial model。",
-      "recommended_action": "发送 follow-up 邮件",
-      "dismissed": false,
-      "created_at": "2026-06-20T10:00:00Z"
+      "contactId": "c_xxx",
+      "contactEmail": "investor@vc.com",
+      "documentTitle": "Series A Deck",
+      "linkId": "link_xxx",
+      "heatLevel": "hot",
+      "score": 92,
+      "reason": "投资人在 24 小时内 3 次查看财务页",
+      "action": "发送 follow-up 邮件",
+      "lastActivityAt": "2026-06-20T10:00:00Z"
     }
   ]
 }
 ```
 
-**`POST /suggestions` 成功响应 202**：
+**`POST /analytics/links/{linkId}/suggestions` 成功响应 201**：
 
 ```json
 {
-  "code": "ok",
-  "message": "suggestions generated"
+  "linkId": "link_xxx",
+  "suggestions": [
+    {
+      "id": "sg_xxx",
+      "tenant_id": "tenant_xxx",
+      "workspace_id": "ws_xxx",
+      "contact_id": "c_xxx",
+      "link_id": "link_xxx",
+      "document_id": "doc_xxx",
+      "type": "follow_up",
+      "priority": "high",
+      "title": "跟进建议",
+      "reason": "联系人重复访问了 2 次，表现出持续兴趣",
+      "action": "发送针对性的内容或安排一次通话",
+      "dismissed": false,
+      "created_at": "2026-06-20T10:00:00Z",
+      "updated_at": "2026-06-20T10:00:00Z"
+    }
+  ]
 }
 ```
 
@@ -823,10 +852,13 @@ Content-Type: application/json
 |------|------|------|------|
 | name | string | 是 | 数据室名称 |
 | slug | string | 是 | URL 标识 |
-| template_type | string | 否 | seed / series_a / lp_update / sales_proposal |
-| requires_nda | boolean | 否 | 默认 false |
-| requires_approval | boolean | 否 | 默认 false |
-| documents | array | 否 | 初始文档列表 `{ document_id, folder_path }` |
+| description | string | 否 | 数据室描述 |
+| template_type | string | 否 | `seed` / `series-a` / `series-b` / `lp-update` / `sales-proposal` / `ma` / `custom` |
+| settings | object | 否 | 扩展配置键值对 |
+| requires_nda | boolean | 否 | 是否要求 NDA，默认 false |
+| requires_approval | boolean | 否 | 是否要求审批，默认 false |
+
+> 注：当前实现暂不接收 `documents` 初始文档列表；文档需通过后续上传接口添加。
 
 **成功响应 201**：
 
@@ -835,10 +867,17 @@ Content-Type: application/json
   "id": "room_xxx",
   "slug": "series-a-dataroom",
   "name": "Series A Data Room",
-  "template_type": "series_a",
-  "requires_nda": true,
-  "requires_approval": true,
-  "created_at": "2026-06-20T10:00:00Z"
+  "description": "Due diligence materials",
+  "template": "series-a",
+  "ndaEnabled": true,
+  "requiresApproval": true,
+  "status": "active",
+  "documentCount": 0,
+  "memberCount": 0,
+  "pendingApprovals": 0,
+  "createdAt": "2026-06-20T10:00:00Z",
+  "updatedAt": "2026-06-20T10:00:00Z",
+  "lastAccessedAt": null
 }
 ```
 
@@ -851,10 +890,12 @@ Content-Type: application/json
 | 接口编号 | API-13 |
 | 名称 | Get Deal Room |
 | 方法 | GET |
-| 路径 | `/api/workspaces/{workspaceSlug}/deal-rooms/{roomId}` |
+| 路径 | `/api/workspaces/{workspaceSlug}/deal-rooms/{id}` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-12 ~ FR-13 |
 | 对应 TDD | 5.4.7 |
+
+> 注：当前实现返回基础数据室记录；`folders`、`members`、`access_requests` 等详情尚未在此端点展开，需通过后续专用接口或前端聚合获取。
 
 **成功响应 200**：
 
@@ -863,20 +904,17 @@ Content-Type: application/json
   "id": "room_xxx",
   "slug": "series-a-dataroom",
   "name": "Series A Data Room",
-  "folders": [
-    {
-      "path": "/Financials",
-      "documents": [
-        { "document_id": "doc_xxx", "title": "Financial Model.xlsx" }
-      ]
-    }
-  ],
-  "members": [
-    { "email": "investor@vc.com", "role": "viewer", "nda_confirmed_at": "2026-06-20T10:00:00Z" }
-  ],
-  "access_requests": [
-    { "email": "new@vc.com", "status": "pending", "reason": "Due diligence" }
-  ]
+  "description": "Due diligence materials",
+  "template": "series-a",
+  "ndaEnabled": true,
+  "requiresApproval": true,
+  "status": "active",
+  "documentCount": 0,
+  "memberCount": 0,
+  "pendingApprovals": 0,
+  "createdAt": "2026-06-20T10:00:00Z",
+  "updatedAt": "2026-06-20T10:00:00Z",
+  "lastAccessedAt": null
 }
 ```
 

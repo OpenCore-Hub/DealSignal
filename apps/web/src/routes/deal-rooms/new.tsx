@@ -21,6 +21,7 @@ import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
 import { BackButton } from "@/components/common/BackButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { DealRoomTemplate } from "@/types";
@@ -37,14 +38,32 @@ export function NewDealRoomPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const reducedMotion = useReducedMotion();
-  const [templates, setTemplates] = useState<DealRoomTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [nda, setNda] = useState(true);
   const [creating, setCreating] = useState(false);
+
+  const {
+    data: templates,
+    loading,
+    error,
+    refetch,
+  } = useAsyncData(async () => {
+    const res = await api.getDealRoomTemplates();
+    return res.data;
+  }, [tc]);
+
+  useEffect(() => {
+    if (templates && templates.length > 0 && !selectedTemplateId) {
+      const first = templates[0];
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive initial form state from fetched templates
+      setSelectedTemplateId(first.id);
+      setNda(first.ndaEnabled);
+      setName(first.name);
+      setDescription(first.description);
+    }
+  }, [templates, selectedTemplateId]);
 
   const selectTemplate = (template: DealRoomTemplate, fillFields = false) => {
     setSelectedTemplateId(template.id);
@@ -53,26 +72,8 @@ export function NewDealRoomPage() {
     if (fillFields || !description) setDescription(template.description);
   };
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.getDealRoomTemplates();
-        setTemplates(res.data);
-        if (res.data[0]) selectTemplate(res.data[0], true);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tc]);
-
   const selectedTemplate = useMemo(
-    () => templates.find((t) => t.id === selectedTemplateId),
+    () => templates?.find((tpl) => tpl.id === selectedTemplateId),
     [templates, selectedTemplateId]
   );
 
@@ -122,7 +123,7 @@ export function NewDealRoomPage() {
       {error ? (
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
           <p className="text-body text-muted-foreground">{error}</p>
-          <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
+          <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
       ) : loading ? (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -132,7 +133,7 @@ export function NewDealRoomPage() {
         </div>
       ) : (
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {templates.map((template) => {
+          {templates?.map((template) => {
             const selected = selectedTemplateId === template.id;
             return (
               <Card

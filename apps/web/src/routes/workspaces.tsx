@@ -1,39 +1,31 @@
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useNavigate } from "react-router";
 import { Buildings } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
-import type { Workspace } from "@/types";
 
 export function WorkspacesPage() {
   const { t } = useTranslation("common");
   const navigate = useNavigate();
-  const [workspaces, setWorkspaces] = useState<Workspace[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: workspaces,
+    loading,
+    error,
+    refetch,
+  } = useAsyncData(async () => {
+    const res = await api.getWorkspaces();
+    return res.data;
+  }, [t]);
 
   useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.getWorkspaces();
-        if (!cancelled) setWorkspaces(res.data);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : t("error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+    if (workspaces?.length === 1) {
+      navigate(`/${workspaces[0].slug}/dashboard`, { replace: true });
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [t]);
+  }, [workspaces, navigate]);
 
   if (loading) {
     return (
@@ -51,13 +43,12 @@ export function WorkspacesPage() {
     return (
       <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 p-6 text-center">
         <p className="text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>{t("retry")}</Button>
+        <Button onClick={refetch}>{t("retry")}</Button>
       </div>
     );
   }
 
-  if (workspaces.length === 1) {
-    navigate(`/${workspaces[0].slug}/dashboard`, { replace: true });
+  if (workspaces?.length === 1) {
     return null;
   }
 
@@ -72,7 +63,7 @@ export function WorkspacesPage() {
         </div>
 
         <div className="space-y-3">
-          {workspaces.map((workspace) => {
+          {workspaces?.map((workspace) => {
             const displayName = t(workspace.name);
             return (
               <Card
