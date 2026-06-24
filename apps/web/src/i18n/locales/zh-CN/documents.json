@@ -30,7 +30,7 @@
   "columns": {
     "file": "文件",
     "heat": "热度",
-    "views": "访问次数",
+    "views": "次访问",
     "pages": "{{count}} 页",
     "links": "{{count}} 个链接",
     "viewCount": "{{count}} 次访问",
@@ -81,7 +81,7 @@
     "evidenceBadge": "证据",
     "evidenceSrOnly": "此页包含 AI 证据高亮",
     "pageDetailTitle": "第 {{pageNumber}} 页详情",
-    "viewCount": "浏览次数",
+    "viewCount": "次访问",
     "avgDuration": "平均停留",
     "exitRate": "退出率",
     "evidenceHighlight": "AI 证据高亮",
