@@ -96,9 +96,9 @@ LINK=$(curl -fsS -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links" \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d "{\"document_id\":\"$DOC_ID\",\"name\":\"E2E Link\",\"permission_type\":\"public\",\"download_enabled\":true}")
-echo "$LINK" | jq -c '{id: .id, public_token: .public_token, short_url: .short_url}'
+echo "$LINK" | jq -c '{id: .id, short_url: .shortUrl}'
 LINK_ID=$(echo "$LINK" | jq -r '.id')
-TOKEN_PUBLIC=$(echo "$LINK" | jq -r '.public_token')
+TOKEN_PUBLIC=$(echo "$LINK" | jq -r '.shortUrl' | sed 's|.*/l/||')
 
 # 8. Access public link
 echo -n "[public access] "
