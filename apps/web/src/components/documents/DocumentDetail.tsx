@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
@@ -17,54 +17,40 @@ import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
 import { DeleteDocumentDialog } from "./DeleteDocumentDialog";
 import { api } from "@/lib/api";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
 import { toast } from "sonner";
 import type { Document, Link, PageAnalytics, AccessLog } from "@/types";
+
+interface DocumentDetailData {
+  doc: Document;
+  links: Link[];
+  analytics: PageAnalytics[];
+  logs: AccessLog[];
+}
 
 export function DocumentDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
   const { t } = useTranslation(["documents", "common"]);
-  const [doc, setDoc] = useState<Document | null>(null);
-  const [links, setLinks] = useState<Link[]>([]);
-  const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
-  const [logs, setLogs] = useState<AccessLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryTick, setRetryTick] = useState(0);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = documentId;
-    if (!id) return;
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const [d, l, a] = await Promise.all([
-          api.getDocumentById(id!),
-          api.getLinksByDocumentId(id!),
-          api.getPageAnalytics(id!),
-        ]);
-        const allLogs = await Promise.all(l.data.map((link) => api.getAccessLogs(link.id).then((r) => r.data)));
-        if (!cancelled) {
-          setDoc(d);
-          setLinks(l.data);
-          setAnalytics(a.data);
-          setLogs(allLogs.flat());
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const loadDetail = useCallback(async (): Promise<DocumentDetailData> => {
+    if (!documentId) {
+      throw new Error(t("documents:detail.notFound"));
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, retryTick, t]);
+    const [d, l, a] = await Promise.all([
+      api.getDocumentById(documentId),
+      api.getLinksByDocumentId(documentId),
+      api.getPageAnalytics(documentId),
+    ]);
+    const allLogs = await Promise.all(
+      l.data.map((link) => api.getAccessLogs(link.id).then((r) => r.data))
+    );
+    return { doc: d, links: l.data, analytics: a.data, logs: allLogs.flat() };
+  }, [documentId, t]);
+
+  const { data, loading, error, refetch } = useAsyncData(loadDetail, [loadDetail]);
 
   if (error) {
     return (
@@ -74,13 +60,15 @@ export function DocumentDetail() {
           <p className="text-body text-destructive mb-4">
             {t("documents:detail.loadFailed", { error })}
           </p>
-          <Button onClick={() => setRetryTick((t) => t + 1)}>{t("common:retry")}</Button>
+          <Button onClick={refetch}>{t("common:retry")}</Button>
         </div>
       </div>
     );
   }
 
-  if (loading || !doc) return <SkeletonDetail />;
+  if (loading || !data) return <SkeletonDetail />;
+
+  const { doc, links, analytics, logs } = data;
 
   return (
     <div className="space-y-6">
