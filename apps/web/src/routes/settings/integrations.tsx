@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { Plug, CloudArrowUp, Database } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router";
-import type { IntegrationStatus } from "@/types";
+import { useAsyncData } from "@/hooks/useAsyncData";
 
 type Provider = "slack" | "hubspot" | "zapier";
 
@@ -22,35 +22,11 @@ export function SettingsIntegrationsPage() {
     { id: "zapier" as const, name: "Zapier", description: t("integrations.zapierDescription"), icon: Plug },
   ];
 
-  const [status, setStatus] = useState<IntegrationStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data: status, loading, error, refetch } = useAsyncData(
+    () => api.getIntegrations().then((res) => res.data),
+    []
+  );
   const [connecting, setConnecting] = useState<Provider | null>(null);
-
-  const loadStatus = useCallback(async () => {
-    try {
-      const res = await api.getIntegrations();
-      setStatus(res.data);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("integrations.updateFailed"));
-    }
-  }, [t]);
-
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.getIntegrations();
-        setStatus(res.data);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [tc, t]);
 
   useEffect(() => {
     const provider = searchParams.get("provider") as Provider | null;
@@ -59,9 +35,7 @@ export function SettingsIntegrationsPage() {
 
     if (result === "connected") {
       toast.success(t("integrations.connectedSuccess", { provider: provider.charAt(0).toUpperCase() + provider.slice(1) }));
-      void (async () => {
-        await loadStatus();
-      })();
+      refetch();
     } else if (result === "error") {
       const message = searchParams.get("message") || "";
       toast.error(t("integrations.connectionFailed", { provider, message }));
@@ -73,7 +47,7 @@ export function SettingsIntegrationsPage() {
     next.delete("status");
     next.delete("message");
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, t, loadStatus]);
+  }, [searchParams, setSearchParams, t, refetch]);
 
   const connect = async (id: Provider) => {
     if (id === "zapier") {
@@ -100,7 +74,7 @@ export function SettingsIntegrationsPage() {
         await api.disconnectHubSpot();
       }
       toast.success(t("integrations.disconnectedSuccess", { provider: id }));
-      await loadStatus();
+      refetch();
     } catch (e) {
       toast.error(e instanceof Error ? e.message : t("integrations.disconnectFailed", { provider: id }));
     }
@@ -112,7 +86,7 @@ export function SettingsIntegrationsPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-4 p-12 text-center">
             <p className="text-body text-muted-foreground">{error}</p>
-            <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
+            <Button onClick={refetch}>{tc("retry")}</Button>
           </CardContent>
         </Card>
       </div>
