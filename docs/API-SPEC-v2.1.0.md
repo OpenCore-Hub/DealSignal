@@ -50,12 +50,13 @@ owner: "后端架构师 / 产品经理"
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
 | v2.1.0 | 2026-06-20 | 后端架构师 | 按 API-SPEC-template-v1 创建 DealSignal v2.1.0 API 规范，继承 TDD 第 5 节接口契约并补充版本策略、SDK、同步清单 | 全文档 |
+| v2.1.0-patch | 2026-06-24 | 前端工程师 | 将内部 API 基地址从 `/{workspaceSlug}/api/v1` 修正为 `/api/workspaces/{workspaceSlug}`，与后端路由及前端 `apiClient` 保持一致 | 全文档 |
 
 ### 1.2 API 版本
 
 | 版本 | 状态 | 基地址 | 说明 |
 |------|------|--------|------|
-| v1 | 当前 | `/{workspaceSlug}/api/v1`（内部）<br>`/api/v1/public`（公开） | v2.1.0 初始版本 |
+| v1 | 当前 | `/api/workspaces/{workspaceSlug}`（内部）<br>`/api/v1/public`（公开） | v2.1.0 初始版本 |
 
 ---
 
@@ -82,7 +83,7 @@ owner: "后端架构师 / 产品经理"
 - 嵌套资源不超过 2 层，如 `/documents/{id}/pages`。
 
 **路由策略**：
-- **内部 Workspace API 基路径**：`https://{tenantSlug}.dealsignal.com/{workspaceSlug}/api/v1`
+- **内部 Workspace API 基路径**：`https://{tenantSlug}.dealsignal.com/api/workspaces/{workspaceSlug}`
 - **公开访问 API 基路径**：`https://{publicDomain}/api/v1/public`
 - Workspace 上下文通过 URL 路径 `/{workspaceSlug}` 传递；tenant 上下文通过子域名 Host 解析。
 - 公开链接落地页使用品牌方自定义域名，通过 query 参数传递 tenant/workspace/token。
@@ -213,36 +214,36 @@ owner: "后端架构师 / 产品经理"
 
 | 资源名 | 路径前缀 | 说明 |
 |--------|----------|------|
-| Documents | `/{workspaceSlug}/api/v1/documents` | 文档管理 |
-| Pages | `/{workspaceSlug}/api/v1/documents/{id}/pages` | 文档页面 |
-| Search | `/{workspaceSlug}/api/v1/search` | 文档内搜索 |
-| Assistant | `/{workspaceSlug}/api/v1/assistant` | AI 助手会话 |
-| Links | `/{workspaceSlug}/api/v1/links` | 智能链接 |
-| Analytics | `/{workspaceSlug}/api/v1/analytics` | 热度评分与跟进建议 |
-| Deal Rooms | `/{workspaceSlug}/api/v1/deal-rooms` | 数据室 |
-| Integrations | `/{workspaceSlug}/api/v1/integrations` | 第三方集成 |
+| Documents | `/api/workspaces/{workspaceSlug}/documents` | 文档管理 |
+| Pages | `/api/workspaces/{workspaceSlug}/documents/{id}/pages` | 文档页面 |
+| Search | `/api/workspaces/{workspaceSlug}/search` | 文档内搜索 |
+| Assistant | `/api/workspaces/{workspaceSlug}/assistant` | AI 助手会话 |
+| Links | `/api/workspaces/{workspaceSlug}/links` | 智能链接 |
+| Analytics | `/api/workspaces/{workspaceSlug}/analytics` | 热度评分与跟进建议 |
+| Deal Rooms | `/api/workspaces/{workspaceSlug}/deal-rooms` | 数据室 |
+| Integrations | `/api/workspaces/{workspaceSlug}/integrations` | 第三方集成 |
 | Public | `/api/v1/public/...` | 公开访问接口 |
 
 ### 3.2 路由总览
 
 | 方法 | 路径 | 操作 | 认证 | 对应 API |
 |------|------|------|------|----------|
-| POST | `/{workspaceSlug}/api/v1/documents` | 上传文档 | Bearer | API-01 |
-| GET | `/{workspaceSlug}/api/v1/documents/{documentId}` | 获取文档状态 | Bearer | API-02 |
-| GET | `/{workspaceSlug}/api/v1/documents/{documentId}/pages` | 获取页面列表 | Bearer | API-03 |
-| POST | `/{workspaceSlug}/api/v1/documents/{documentId}/pages/signed-url` | 获取签名 URL | Bearer | API-04 |
+| POST | `/api/workspaces/{workspaceSlug}/documents` | 上传文档 | Bearer | API-01 |
+| GET | `/api/workspaces/{workspaceSlug}/documents/{documentId}` | 获取文档状态 | Bearer | API-02 |
+| GET | `/api/workspaces/{workspaceSlug}/documents/{documentId}/pages` | 获取页面列表 | Bearer | API-03 |
+| POST | `/api/workspaces/{workspaceSlug}/documents/{documentId}/pages/signed-url` | 获取签名 URL | Bearer | API-04 |
 | POST | `/api/v1/public/events` | 上报阅读事件 | Signed URL | API-05 |
-| POST | `/{workspaceSlug}/api/v1/search` | 文档内搜索 | Bearer | API-06 |
-| POST | `/{workspaceSlug}/api/v1/assistant/chat` | AI 问答 | Bearer | API-07 |
-| POST | `/{workspaceSlug}/api/v1/links` | 创建智能链接 | Bearer | API-08 |
+| POST | `/api/workspaces/{workspaceSlug}/search` | 文档内搜索 | Bearer | API-06 |
+| POST | `/api/workspaces/{workspaceSlug}/assistant/chat` | AI 问答 | Bearer | API-07 |
+| POST | `/api/workspaces/{workspaceSlug}/links` | 创建智能链接 | Bearer | API-08 |
 | GET | `/api/v1/public/links/{publicToken}` | 访问公开链接 | Signed URL | API-09 |
-| GET | `/{workspaceSlug}/api/v1/analytics/links/{linkId}/score` | 热度评分 | Bearer | API-10 |
-| GET | `/{workspaceSlug}/api/v1/analytics/links/{linkId}/suggestions` | 跟进建议 | Bearer | API-11 |
-| POST | `/{workspaceSlug}/api/v1/deal-rooms` | 创建数据室 | Bearer | API-12 |
-| GET | `/{workspaceSlug}/api/v1/deal-rooms/{roomId}` | 获取数据室 | Bearer | API-13 |
+| GET | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/score` | 热度评分 | Bearer | API-10 |
+| GET | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/suggestions` | 跟进建议 | Bearer | API-11 |
+| POST | `/api/workspaces/{workspaceSlug}/deal-rooms` | 创建数据室 | Bearer | API-12 |
+| GET | `/api/workspaces/{workspaceSlug}/deal-rooms/{roomId}` | 获取数据室 | Bearer | API-13 |
 | POST | `/api/v1/public/deal-rooms/{roomId}/access-requests` | 数据室访问申请 | 无 | API-14 |
-| POST | `/{workspaceSlug}/api/v1/integrations/crm/sync` | CRM 同步 | Bearer | API-15 |
-| POST | `/{workspaceSlug}/api/v1/integrations/slack/notify` | Slack 通知 | Bearer | API-16 |
+| POST | `/api/workspaces/{workspaceSlug}/integrations/crm/sync` | CRM 同步 | Bearer | API-15 |
+| POST | `/api/workspaces/{workspaceSlug}/integrations/slack/notify` | Slack 通知 | Bearer | API-16 |
 
 ---
 
@@ -259,14 +260,14 @@ owner: "后端架构师 / 产品经理"
 | 接口编号 | API-01 |
 | 名称 | Upload Document |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/documents` |
+| 路径 | `/api/workspaces/{workspaceSlug}/documents` |
 | 认证 | Bearer Token |
 | 幂等 | 否 |
 | 对应 PRD | FR-02 |
 | 对应 TDD | 5.4.1 |
 
 ```http
-POST /{workspaceSlug}/api/v1/documents
+POST /api/workspaces/{workspaceSlug}/documents
 Host: {tenantSlug}.dealsignal.com
 Authorization: Bearer {jwt}
 Content-Type: multipart/form-data
@@ -312,7 +313,7 @@ Content-Type: multipart/form-data
 | 接口编号 | API-02 |
 | 名称 | Get Document Status |
 | 方法 | GET |
-| 路径 | `/{workspaceSlug}/api/v1/documents/{documentId}` |
+| 路径 | `/api/workspaces/{workspaceSlug}/documents/{documentId}` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-02 |
 | 对应 TDD | 5.4.1 |
@@ -355,7 +356,7 @@ Content-Type: multipart/form-data
 | 接口编号 | API-03 |
 | 名称 | List Document Pages |
 | 方法 | GET |
-| 路径 | `/{workspaceSlug}/api/v1/documents/{documentId}/pages` |
+| 路径 | `/api/workspaces/{workspaceSlug}/documents/{documentId}/pages` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-03 |
 | 对应 TDD | 5.4.2 |
@@ -395,7 +396,7 @@ Content-Type: multipart/form-data
 | 接口编号 | API-04 |
 | 名称 | Get Signed Page URL |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/documents/{documentId}/pages/signed-url` |
+| 路径 | `/api/workspaces/{workspaceSlug}/documents/{documentId}/pages/signed-url` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-03 |
 | 对应 TDD | 5.4.2 |
@@ -495,7 +496,7 @@ Content-Type: application/json
 | 接口编号 | API-06 |
 | 名称 | Search Within Document |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/search` |
+| 路径 | `/api/workspaces/{workspaceSlug}/search` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-05 |
 | 对应 TDD | 5.4.4 |
@@ -556,7 +557,7 @@ Content-Type: application/json
 | 接口编号 | API-07 |
 | 名称 | AI Assistant Chat |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/assistant/chat` |
+| 路径 | `/api/workspaces/{workspaceSlug}/assistant/chat` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-05 ~ FR-06 |
 | 对应 TDD | 5.4.4 |
@@ -620,7 +621,7 @@ Content-Type: application/json
 | 接口编号 | API-08 |
 | 名称 | Create Smart Link |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/links` |
+| 路径 | `/api/workspaces/{workspaceSlug}/links` |
 | 认证 | Bearer Token |
 | 幂等 | 是 |
 | 对应 PRD | FR-07 ~ FR-09 |
@@ -733,7 +734,7 @@ Content-Type: application/json
 | 接口编号 | API-10 |
 | 名称 | Get Link Heat Score |
 | 方法 | GET |
-| 路径 | `/{workspaceSlug}/api/v1/analytics/links/{linkId}/score` |
+| 路径 | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/score` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-10 |
 | 对应 TDD | 5.4.6 |
@@ -764,7 +765,7 @@ Content-Type: application/json
 | 接口编号 | API-11 |
 | 名称 | Get Follow-up Suggestions |
 | 方法 | GET |
-| 路径 | `/{workspaceSlug}/api/v1/analytics/links/{linkId}/suggestions` |
+| 路径 | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/suggestions` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-11 |
 | 对应 TDD | 5.4.6 |
@@ -798,7 +799,7 @@ Content-Type: application/json
 | 接口编号 | API-12 |
 | 名称 | Create Deal Room |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/deal-rooms` |
+| 路径 | `/api/workspaces/{workspaceSlug}/deal-rooms` |
 | 认证 | Bearer Token |
 | 幂等 | 是 |
 | 对应 PRD | FR-12 ~ FR-13 |
@@ -838,7 +839,7 @@ Content-Type: application/json
 | 接口编号 | API-13 |
 | 名称 | Get Deal Room |
 | 方法 | GET |
-| 路径 | `/{workspaceSlug}/api/v1/deal-rooms/{roomId}` |
+| 路径 | `/api/workspaces/{workspaceSlug}/deal-rooms/{roomId}` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-12 ~ FR-13 |
 | 对应 TDD | 5.4.7 |
@@ -911,7 +912,7 @@ Content-Type: application/json
 | 接口编号 | API-15 |
 | 名称 | Sync to CRM |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/integrations/crm/sync` |
+| 路径 | `/api/workspaces/{workspaceSlug}/integrations/crm/sync` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-15 |
 | 对应 TDD | 5.4.8 |
@@ -942,7 +943,7 @@ Content-Type: application/json
 | 接口编号 | API-16 |
 | 名称 | Send Slack Notification |
 | 方法 | POST |
-| 路径 | `/{workspaceSlug}/api/v1/integrations/slack/notify` |
+| 路径 | `/api/workspaces/{workspaceSlug}/integrations/slack/notify` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-16 |
 | 对应 TDD | 5.4.8 |
