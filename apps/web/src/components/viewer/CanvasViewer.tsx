@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useParams } from "react-router";
 import { FileText } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import { useAIStore } from "@/stores/aiStore";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { ViewerCanvas } from "./ViewerCanvas";
+import { useViewerDocument } from "./useViewerDocument";
 import type { WatermarkInfo } from "./WatermarkOverlay";
-import type { Document, Evidence, PageAnalytics } from "@/types";
+import type { Document, Evidence } from "@/types";
 
 interface CanvasViewerProps {
   evidence?: Evidence[];
@@ -20,12 +20,6 @@ interface CanvasViewerProps {
   publicVisitorId?: string;
 }
 
-interface PageInfo {
-  pageNumber: number;
-  width: number;
-  height: number;
-}
-
 export function CanvasViewer({
   evidence,
   watermark,
@@ -34,138 +28,42 @@ export function CanvasViewer({
   publicDocument,
   publicVisitorId,
 }: CanvasViewerProps = {}) {
+  const { t } = useTranslation(["documents", "common"]);
   const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
   const documentId = publicDocument?.id ?? routeDocumentId;
-  const { t } = useTranslation(["documents", "common"]);
-  const [doc, setDoc] = useState<Document | null>(null);
-  const [analytics, setAnalytics] = useState<PageAnalytics[]>([]);
-  const [pages, setPages] = useState<PageInfo[]>([]);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryTick, setRetryTick] = useState(0);
-  const [page, setPage] = useState(1);
-  const [zoom, setZoom] = useState(100);
-  const { highlightedPage } = useAIStore();
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = documentId;
-    if (!id) return;
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        if (publicDocument) {
-          setDoc(publicDocument);
-          setAnalytics([]);
-          setPage(1);
-          if (publicDocument.status === "ready" && publicToken) {
-            const pagesRes = await api.getPublicDocumentPages(id!, publicToken);
-            if (!cancelled) {
-              setPages(pagesRes.pages);
-            }
-          } else {
-            setPages([]);
-          }
-        } else {
-          const [d, a] = await Promise.all([api.getDocumentById(id!), api.getPageAnalytics(id!)]);
-          if (!cancelled) {
-            setDoc(d);
-            setAnalytics(a.data);
-            setPage(1);
-            if (d.status === "ready") {
-              const pagesRes = await api.getDocumentPages(id!);
-              if (!cancelled) {
-                setPages(pagesRes.pages);
-              }
-            } else {
-              setPages([]);
-            }
-          }
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, retryTick, t, publicDocument, publicToken]);
+  const {
+    doc,
+    pages,
+    analytics,
+    imageUrl,
+    loading,
+    error: loadError,
+    refetch,
+    page,
+    setPage,
+    zoom,
+    setZoom,
+  } = useViewerDocument({
+    publicToken,
+    publicLink,
+    publicDocument,
+    publicVisitorId,
+  });
 
-  // Synchronize the viewer page with the AI highlight from the global store.
-  useEffect(() => {
-    if (highlightedPage && highlightedPage !== page) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- external store synchronization
-      setPage(highlightedPage);
-    }
-  }, [highlightedPage, page]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const id = documentId;
-    if (!id || pages.length === 0) return;
-    async function loadSignedUrl() {
-      try {
-        const res = publicToken
-          ? await api.getPublicPageSignedUrl(id!, publicToken, page)
-          : await api.getPageSignedUrl(id!, page);
-        if (!cancelled) setImageUrl(res.image_url);
-      } catch {
-        if (!cancelled) setImageUrl(null);
-      }
-    }
-    loadSignedUrl();
-    return () => {
-      cancelled = true;
-    };
-  }, [documentId, page, pages.length, publicToken]);
-
-  const pageStartRef = useRef<number>(0);
-  useEffect(() => {
-    if (!publicToken || !documentId) return;
-    pageStartRef.current = Date.now();
-    return () => {
-      const duration = Math.max(0, Math.round((Date.now() - pageStartRef.current) / 1000));
-      if (duration <= 0) return;
-      void api.recordPublicEvent({
-        event_type: "page_viewed",
-        public_token: publicToken,
-        visitor_id: publicVisitorId,
-        page_number: page,
-        duration_seconds: duration,
-      });
-    };
-  }, [publicToken, documentId, page, publicVisitorId]);
-
-  // For authenticated viewers, report a page view after the user has dwelled on the page.
-  useEffect(() => {
-    if (publicToken || !documentId || !doc || doc.status !== "ready") return;
-    pageStartRef.current = Date.now();
-    const timer = setTimeout(() => {
-      void api.recordViewerEvent({
-        documentId,
-        eventType: "page_viewed",
-        pageNumber: page,
-        durationSeconds: Math.max(1, Math.round((Date.now() - pageStartRef.current) / 1000)),
-      });
-    }, 2000);
-    return () => clearTimeout(timer);
-  }, [publicToken, documentId, page, doc]);
+  const error = loadError || actionError;
 
   const handleDownload = async () => {
     if (!documentId || !doc) return;
     try {
+      if (publicToken && publicLink && !publicLink.downloadEnabled) {
+        setActionError(t("documents:viewer.downloadDisabled"));
+        return;
+      }
       const res = publicToken
         ? await api.getPublicDocumentDownloadUrl(documentId, publicToken)
         : await api.getDocumentDownloadUrl(documentId);
-      if (publicToken && publicLink && !publicLink.downloadEnabled) {
-        setError(t("documents:viewer.downloadDisabled"));
-        return;
-      }
       const a = document.createElement("a");
       a.href = res.download_url;
       a.download = res.filename || doc.title;
@@ -186,8 +84,9 @@ export function CanvasViewer({
           eventType: "download_attempted",
         });
       }
+      setActionError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : t("common:error.loadFailed"));
+      setActionError(e instanceof Error ? e.message : t("common:error.loadFailed"));
     }
   };
 
@@ -210,7 +109,7 @@ export function CanvasViewer({
       <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-50 dark:bg-background">
         <FileText size={48} className="text-muted-foreground/50" />
         <p className="text-body text-destructive">{t("documents:viewer.loadFailed", { error })}</p>
-        <Button onClick={() => setRetryTick((x) => x + 1)}>{t("common:retry")}</Button>
+        <Button onClick={() => { refetch(); setActionError(null); }}>{t("common:retry")}</Button>
       </div>
     );
   }
