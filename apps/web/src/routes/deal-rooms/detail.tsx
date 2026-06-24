@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useParams } from "react-router";
 import { FileText, Users, Lock, Envelope, Folder, Check, UploadSimple } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -12,48 +12,26 @@ import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/formatters";
 import { useTranslation } from "react-i18next";
-import type { DealRoom, DealRoomTemplate } from "@/types";
+import { useAsyncData } from "@/hooks/useAsyncData";
 
 export function DealRoomDetailPage() {
   const { t, i18n } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
-  const [room, setRoom] = useState<DealRoom | null>(null);
-  const [templates, setTemplates] = useState<DealRoomTemplate[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryKey, setRetryKey] = useState(0);
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = roomId;
-    if (!id) return;
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const [r, t] = await Promise.all([api.getDealRoomById(id!), api.getDealRoomTemplates()]);
-        if (!cancelled) {
-          setRoom(r);
-          setTemplates(t.data);
-        }
-      } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const { data, loading, error, refetch } = useAsyncData(async () => {
+    if (!roomId) {
+      throw new Error(t("detail.notFound"));
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId, retryKey, tc]);
+    const [r, tRes] = await Promise.all([api.getDealRoomById(roomId), api.getDealRoomTemplates()]);
+    return { room: r, templates: tRes.data };
+  }, [roomId, t]);
+
+  const room = data?.room ?? null;
 
   const template = useMemo(
-    () => templates.find((t) => t.scenario === room?.template),
-    [templates, room]
+    () => (data?.templates ?? []).find((tmpl) => tmpl.scenario === room?.template),
+    [data?.templates, room]
   );
 
   const uploaded = useMemo(() => new Set(room?.uploadedFiles ?? []), [room]);
@@ -77,7 +55,7 @@ export function DealRoomDetailPage() {
         <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border p-12 text-center">
           <p className="text-muted-foreground">{error}</p>
-          <Button onClick={() => setRetryKey((k) => k + 1)}>{tc("retry")}</Button>
+          <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
       </div>
     );

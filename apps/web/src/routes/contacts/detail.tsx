@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   Envelope,
@@ -23,7 +23,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { useTranslation } from "react-i18next";
-import type { Activity, Contact, Document } from "@/types";
+import { useAsyncData } from "@/hooks/useAsyncData";
 
 function ContactScoreChart({
   scoreHistory,
@@ -50,46 +50,25 @@ export function ContactDetailPage() {
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug, contactId } = useParams<{ workspaceSlug: string; contactId: string }>();
-  const [contact, setContact] = useState<Contact | null>(null);
-  const [activities, setActivities] = useState<Activity[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const locale = i18n.language;
 
-  useEffect(() => {
-    let cancelled = false;
-    const id = contactId;
-    if (!id) return;
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const [c, a, docsRes] = await Promise.all([
-          api.getContactById(id!),
-          api.getActivitiesByContactId(id!),
-          api.getDocuments(),
-        ]);
-        if (!cancelled) {
-          setContact(c);
-          setActivities(a.data);
-          setDocuments(docsRes.data);
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
+  const { data, loading, error, refetch } = useAsyncData(async () => {
+    if (!contactId) {
+      throw new Error(t("detail.notFound"));
     }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [contactId, tc]);
+    const [c, a, docsRes] = await Promise.all([
+      api.getContactById(contactId),
+      api.getActivitiesByContactId(contactId),
+      api.getDocuments(),
+    ]);
+    return { contact: c, activities: a.data, documents: docsRes.data };
+  }, [contactId, t]);
+
+  const contact = data?.contact ?? null;
 
   const timelineActivities = useMemo(
     () =>
-      activities.map((a) => ({
+      (data?.activities ?? []).map((a) => ({
         id: a.id,
         time: formatRelativeTime(a.timestamp, locale),
         title: `${a.contactEmail} ${
@@ -103,19 +82,19 @@ export function ContactDetailPage() {
         }`,
         description: `${a.documentTitle} · ${t(a.description)}`,
       })),
-    [activities, locale, t]
+    [data?.activities, locale, t]
   );
 
   const viewedDocuments = useMemo(
-    () => documents.filter((d) => contact?.viewedDocuments.includes(d.id)),
-    [documents, contact]
+    () => (data?.documents ?? []).filter((d) => contact?.viewedDocuments.includes(d.id)),
+    [data?.documents, contact]
   );
 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
+        <Button onClick={refetch}>{tc("retry")}</Button>
       </div>
     );
   }
@@ -178,7 +157,7 @@ export function ContactDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {activities.length === 0 ? (
+                {(data?.activities ?? []).length === 0 ? (
                   <EmptyState
                     icon={<Clock size={48} />}
                     title={t("detail.noActivities.title")}
@@ -187,7 +166,7 @@ export function ContactDetailPage() {
                   />
                 ) : (
                   <ul className="space-y-2">
-                    {activities.slice(0, 5).map((a) => (
+                    {(data?.activities ?? []).slice(0, 5).map((a) => (
                       <li key={a.id} className="flex items-center justify-between rounded-md border border-border p-3">
                         <div>
                           <p className="text-sm font-medium">{a.documentTitle}</p>

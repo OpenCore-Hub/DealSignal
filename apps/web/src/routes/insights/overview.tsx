@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useNavigate, useParams } from "react-router";
 import { FileText, Link as LinkIcon, Users } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,6 +9,7 @@ import { HeatBadge } from "@/components/common/HeatBadge";
 import { TrendChart } from "@/components/common/TrendChart";
 import { api, type InsightsOverview } from "@/lib/api";
 import { useTranslation } from "react-i18next";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import type { AccessLog } from "@/types";
 
 function buildLast7DaysTrend(logs: AccessLog[], locale: string): { labels: string[]; data: number[] } {
@@ -36,51 +37,31 @@ export function InsightsOverviewPage() {
   const { i18n } = useTranslation();
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const [data, setData] = useState<InsightsOverview | null>(null);
-  const [logs, setLogs] = useState<AccessLog[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const locale = i18n.language;
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const overview = await api.getInsightsOverview();
-        const linksRes = await api.getLinks();
-        const allLogs = await Promise.all(
-          linksRes.data.map((link) => api.getAccessLogs(link.id).then((r) => r.data))
-        );
-        if (!cancelled) {
-          setData(overview);
-          setLogs(allLogs.flat());
-        }
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [tc]);
+  const { data, loading, error, refetch } = useAsyncData(async () => {
+    const overview = await api.getInsightsOverview();
+    const linksRes = await api.getLinks();
+    const allLogs = await Promise.all(
+      linksRes.data.map((link) => api.getAccessLogs(link.id).then((r) => r.data))
+    );
+    return { overview, logs: allLogs.flat() };
+  }, []);
 
-  const trend = useMemo(() => buildLast7DaysTrend(logs, locale), [logs, locale]);
+  const overview: InsightsOverview | null = data?.overview ?? null;
+
+  const trend = useMemo(() => buildLast7DaysTrend(data?.logs ?? [], locale), [data?.logs, locale]);
 
   if (error) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
         <p className="text-body text-muted-foreground">{error}</p>
-        <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
+        <Button onClick={refetch}>{tc("retry")}</Button>
       </div>
     );
   }
 
-  if (loading || !data) {
+  if (loading || !overview) {
     return (
       <div className="space-y-6">
         <Skeleton className="h-8 w-64" />
@@ -96,10 +77,10 @@ export function InsightsOverviewPage() {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label={t("overview.hot")} value={data.tierCounts.hot} icon={<HeatBadge level="hot" />} />
-        <StatCard label={t("overview.warm")} value={data.tierCounts.warm} icon={<HeatBadge level="warm" />} />
-        <StatCard label={t("overview.cold")} value={data.tierCounts.cold} icon={<HeatBadge level="cold" />} />
-        <StatCard label={t("overview.signals")} value={data.tierCounts.hot + data.tierCounts.warm} />
+        <StatCard label={t("overview.hot")} value={overview.tierCounts.hot} icon={<HeatBadge level="hot" />} />
+        <StatCard label={t("overview.warm")} value={overview.tierCounts.warm} icon={<HeatBadge level="warm" />} />
+        <StatCard label={t("overview.cold")} value={overview.tierCounts.cold} icon={<HeatBadge level="cold" />} />
+        <StatCard label={t("overview.signals")} value={overview.tierCounts.hot + overview.tierCounts.warm} />
       </div>
 
       <TrendChart
@@ -119,7 +100,7 @@ export function InsightsOverviewPage() {
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
-              {data.topDocuments.map((doc) => {
+              {overview.topDocuments.map((doc) => {
                 const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
                 return (
                   <li
@@ -155,7 +136,7 @@ export function InsightsOverviewPage() {
           </CardHeader>
           <CardContent>
             <ul className="space-y-2">
-              {data.topLinks.map((link) => {
+              {overview.topLinks.map((link) => {
                 const handleClick = () => navigate(`/${workspaceSlug}/links/${link.id}`);
                 return (
                   <li
@@ -192,7 +173,7 @@ export function InsightsOverviewPage() {
         </CardHeader>
         <CardContent>
           <ul className="space-y-2">
-            {data.topContacts.map((contact) => {
+            {overview.topContacts.map((contact) => {
               const handleClick = () => navigate(`/${workspaceSlug}/contacts/${contact.id}`);
               return (
                 <li
