@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
@@ -77,15 +77,20 @@ async function initI18n() {
 
 async function renderPage(path = "/acme/settings/brand") {
   const i18nInstance = await initI18n();
-  return render(
-    <I18nextProvider i18n={i18nInstance}>
-      <MemoryRouter initialEntries={[path]}>
-        <Routes>
-          <Route path=":slug/settings/brand" element={<SettingsBrandPage />} />
-        </Routes>
-      </MemoryRouter>
-    </I18nextProvider>
-  );
+  let result!: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter initialEntries={[path]}>
+          <Routes>
+            <Route path=":slug/settings/brand" element={<SettingsBrandPage />} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>
+    );
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  return result;
 }
 
 describe("SettingsBrandPage", () => {
