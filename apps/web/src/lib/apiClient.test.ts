@@ -171,7 +171,7 @@ describe("apiClient", () => {
     expect(captured!.headers.get("Content-Type")).toBe("application/json");
     expect(captured!.headers.get("Accept")).toBe("application/json");
     expect(captured!.headers.get("Accept-Language")).toBe("en-US");
-    expect(captured!.headers.get("Idempotency-Key")).toBe("idem-1");
+    expect(captured!.headers.get("X-Idempotency-Key")).toBe("idem-1");
     expect(captured!.headers.get("X-Request-ID")).toBeTruthy();
   });
 

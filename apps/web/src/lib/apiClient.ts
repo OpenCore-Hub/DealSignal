@@ -189,7 +189,7 @@ export async function request<T>(
   headers.set("X-Request-ID", requestId);
   headers.set("Accept-Language", getLanguage());
   if (options.idempotencyKey) {
-    headers.set("Idempotency-Key", options.idempotencyKey);
+    headers.set("X-Idempotency-Key", options.idempotencyKey);
   }
 
   const execute = async (authToken: string | null): Promise<Response> => {
