@@ -10,6 +10,8 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { WorkspaceSettings } from "@/types";
 
+const MAX_LOGO_SIZE = 5 * 1024 * 1024;
+
 export function SettingsBrandPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
@@ -48,6 +50,54 @@ export function SettingsBrandPage() {
       toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const cleanupPreview = () => {
+    if (previewRef.current) {
+      URL.revokeObjectURL(previewRef.current);
+      previewRef.current = null;
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !settings) {
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (!file.type.startsWith("image/")) {
+      toast.error(t("brand.invalidType"));
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    if (file.size > MAX_LOGO_SIZE) {
+      toast.error(t("brand.tooLarge"));
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
+
+    const previousUrl = settings.logoUrl;
+    const objectUrl = URL.createObjectURL(file);
+    cleanupPreview();
+    previewRef.current = objectUrl;
+    setSettings((s) => (s ? { ...s, logoUrl: objectUrl } : s));
+    setUploading(true);
+
+    try {
+      const res = await api.uploadWorkspaceLogo(file);
+      cleanupPreview();
+      setSettings((s) => (s ? { ...s, logoUrl: res.data.logoUrl } : s));
+      toast.success(t("brand.uploadSuccess"));
+    } catch (err) {
+      cleanupPreview();
+      setSettings((s) => (s ? { ...s, logoUrl: previousUrl } : s));
+      toast.error(err instanceof Error ? err.message : t("brand.uploadFailed"));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
@@ -102,29 +152,7 @@ export function SettingsBrandPage() {
                 type="file"
                 accept="image/*"
                 className="hidden"
-                onChange={async (e) => {
-                  const file = e.target.files?.[0];
-                  if (!file) return;
-                  const objectUrl = URL.createObjectURL(file);
-                  if (previewRef.current) URL.revokeObjectURL(previewRef.current);
-                  previewRef.current = objectUrl;
-                  setSettings((s) => (s ? { ...s, logoUrl: objectUrl } : s));
-
-                  setUploading(true);
-                  try {
-                    const res = await api.uploadWorkspaceLogo(file);
-                    setSettings((s) => (s ? { ...s, logoUrl: res.data.logoUrl } : s));
-                    if (previewRef.current === objectUrl) {
-                      URL.revokeObjectURL(previewRef.current);
-                      previewRef.current = null;
-                    }
-                    toast.success(t("brand.uploadSuccess"));
-                  } catch (err) {
-                    toast.error(err instanceof Error ? err.message : t("brand.uploadFailed"));
-                  } finally {
-                    setUploading(false);
-                  }
-                }}
+                onChange={handleFileChange}
               />
               <Button
                 type="button"

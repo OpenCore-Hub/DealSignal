@@ -39,7 +39,9 @@
     "save": "保存品牌设置",
     "saving": "保存中...",
     "saved": "品牌设置已保存",
-    "hint": "上传的 Logo 会先保存到文件存储，随后写入品牌设置。"
+    "hint": "上传的 Logo 会先保存到文件存储，随后写入品牌设置。",
+    "invalidType": "请选择图片文件",
+    "tooLarge": "Logo 大小不能超过 5 MB"
   },
   "members": {
     "title": "成员管理",

@@ -39,7 +39,9 @@
     "save": "Save brand settings",
     "saving": "Saving...",
     "saved": "Brand settings saved",
-    "hint": "Uploaded logo is saved to file storage first, then written to brand settings."
+    "hint": "Uploaded logo is saved to file storage first, then written to brand settings.",
+    "invalidType": "Please select an image file",
+    "tooLarge": "Logo must be smaller than 5 MB"
   },
   "members": {
     "title": "Members",
