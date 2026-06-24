@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { CreditCard, Crown } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,35 +5,15 @@ import { UsageBar } from "@/components/common/UsageBar";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
-import type { BillingInfo } from "@/types";
+import { useAsyncData } from "@/hooks/useAsyncData";
 
 export function SettingsBillingPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const [billing, setBilling] = useState<BillingInfo | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await api.getBillingInfo();
-        if (!cancelled) setBilling(res.data);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [retryKey, tc]);
+  const { data: billing, loading, error, refetch } = useAsyncData(
+    () => api.getBillingInfo().then((res) => res.data),
+    []
+  );
 
   if (loading) {
     return (
@@ -59,7 +38,7 @@ export function SettingsBillingPage() {
             <div className="rounded-lg border border-error-500/20 bg-error-100 p-4">
               <p className="text-sm font-medium text-error-500">{t("billing.loadFailed")}</p>
               <p className="text-caption mt-1 text-error-500/80">{error}</p>
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => setRetryKey((k) => k + 1)}>
+              <Button variant="outline" size="sm" className="mt-3" onClick={refetch}>
                 {tc("retry")}
               </Button>
             </div>

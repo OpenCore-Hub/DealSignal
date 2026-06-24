@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Shield, Key, FileText } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,46 +6,30 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import type { SecuritySettings } from "@/types";
 
 export function SettingsSecurityPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const [settings, setSettings] = useState<SecuritySettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [retryKey, setRetryKey] = useState(0);
+  const { data, loading, error, refetch } = useAsyncData(
+    () => api.getSecuritySettings().then((res) => res.data),
+    []
+  );
+  const [draft, setDraft] = useState<SecuritySettings | null>(null);
 
-  useEffect(() => {
-    let cancelled = false;
-    async function load() {
-      setLoading(true);
-      setError(null);
-      try {
-        const res = await api.getSecuritySettings();
-        if (!cancelled) setSettings(res.data);
-      } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, [retryKey, tc]);
+  const settings = draft ?? data ?? null;
 
   const update = async (patch: Partial<SecuritySettings>) => {
     if (!settings) return;
     const next = { ...settings, ...patch };
-    setSettings(next);
+    setDraft(next);
     try {
       const res = await api.updateSecuritySettings(next);
-      setSettings(res.data);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : tc("error.saveFailed"));
-      setRetryKey((k) => k + 1);
+      setDraft(res.data);
+    } catch {
+      setDraft(null);
+      refetch();
     }
   };
 
@@ -72,7 +56,7 @@ export function SettingsSecurityPage() {
             <div className="rounded-lg border border-error-500/20 bg-error-100 p-4">
               <p className="text-sm font-medium text-error-500">{t("security.loadFailed")}</p>
               <p className="text-caption mt-1 text-error-500/80">{error}</p>
-              <Button variant="outline" size="sm" className="mt-3" onClick={() => setRetryKey((k) => k + 1)}>
+              <Button variant="outline" size="sm" className="mt-3" onClick={refetch}>
                 {tc("retry")}
               </Button>
             </div>
