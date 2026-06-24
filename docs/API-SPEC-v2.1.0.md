@@ -51,6 +51,7 @@ owner: "后端架构师 / 产品经理"
 |------|------|--------|----------|----------|
 | v2.1.0 | 2026-06-20 | 后端架构师 | 按 API-SPEC-template-v1 创建 DealSignal v2.1.0 API 规范，继承 TDD 第 5 节接口契约并补充版本策略、SDK、同步清单 | 全文档 |
 | v2.1.0-patch | 2026-06-24 | 前端工程师 | 将内部 API 基地址从 `/{workspaceSlug}/api/v1` 修正为 `/api/workspaces/{workspaceSlug}`，与后端路由及前端 `apiClient` 保持一致 | 全文档 |
+| v2.1.0-patch | 2026-06-24 | 后端工程师 | 修正 API-11/14/15/16 路径与后端实际路由一致：建议改到 `/suggestions`、数据室公开申请使用 `{slug}`、HubSpot 同步使用 `/integrations/hubspot/sync`、Slack 连接使用 `/integrations/slack/connect` | 第 4 节 |
 
 ### 1.2 API 版本
 
@@ -238,12 +239,12 @@ owner: "后端架构师 / 产品经理"
 | POST | `/api/workspaces/{workspaceSlug}/links` | 创建智能链接 | Bearer | API-08 |
 | GET | `/api/v1/public/links/{publicToken}` | 访问公开链接 | Signed URL | API-09 |
 | GET | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/score` | 热度评分 | Bearer | API-10 |
-| GET | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/suggestions` | 跟进建议 | Bearer | API-11 |
+| GET / POST | `/api/workspaces/{workspaceSlug}/suggestions` | 跟进建议（列表/生成） | Bearer | API-11 |
 | POST | `/api/workspaces/{workspaceSlug}/deal-rooms` | 创建数据室 | Bearer | API-12 |
 | GET | `/api/workspaces/{workspaceSlug}/deal-rooms/{roomId}` | 获取数据室 | Bearer | API-13 |
-| POST | `/api/v1/public/deal-rooms/{roomId}/access-requests` | 数据室访问申请 | 无 | API-14 |
-| POST | `/api/workspaces/{workspaceSlug}/integrations/crm/sync` | CRM 同步 | Bearer | API-15 |
-| POST | `/api/workspaces/{workspaceSlug}/integrations/slack/notify` | Slack 通知 | Bearer | API-16 |
+| POST | `/api/v1/public/deal-rooms/{slug}/access-requests` | 数据室访问申请 | 无 | API-14 |
+| POST | `/api/workspaces/{workspaceSlug}/integrations/hubspot/sync` | HubSpot 同步 | Bearer | API-15 |
+| POST | `/api/workspaces/{workspaceSlug}/integrations/slack/connect` | Slack 连接 | Bearer | API-16 |
 
 ---
 
@@ -763,28 +764,39 @@ Content-Type: application/json
 | 属性 | 值 |
 |------|-----|
 | 接口编号 | API-11 |
-| 名称 | Get Follow-up Suggestions |
-| 方法 | GET |
-| 路径 | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/suggestions` |
+| 名称 | List / Generate Follow-up Suggestions |
+| 方法 | `GET` 列表，`POST` 生成 |
+| 路径 | `/api/workspaces/{workspaceSlug}/suggestions` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-11 |
 | 对应 TDD | 5.4.6 |
+| 说明 | 后端当前未提供按 link 维度获取建议的接口；建议统一通过 workspace 级 suggestions 资源操作。 |
 
-**成功响应 200**：
+**`GET /suggestions` 成功响应 200**：
 
 ```json
 {
-  "link_id": "link_xxx",
-  "suggestions": [
+  "data": [
     {
+      "id": "sg_xxx",
       "type": "follow_up",
       "priority": "high",
       "title": "重复查看财务页",
       "description": "投资人在 24 小时内 3 次查看财务页，建议发送 financial model。",
       "recommended_action": "发送 follow-up 邮件",
-      "email_draft": "Hi, 注意到你对财务部分很感兴趣..."
+      "dismissed": false,
+      "created_at": "2026-06-20T10:00:00Z"
     }
   ]
+}
+```
+
+**`POST /suggestions` 成功响应 202**：
+
+```json
+{
+  "code": "ok",
+  "message": "suggestions generated"
 }
 ```
 
@@ -877,7 +889,7 @@ Content-Type: application/json
 | 接口编号 | API-14 |
 | 名称 | Request Deal Room Access |
 | 方法 | POST |
-| 路径 | `/api/v1/public/deal-rooms/{roomId}/access-requests` |
+| 路径 | `/api/v1/public/deal-rooms/{slug}/access-requests` |
 | 认证 | 无 |
 | 对应 PRD | FR-12 ~ FR-13 |
 | 对应 TDD | 5.4.7 |
@@ -905,63 +917,48 @@ Content-Type: application/json
 
 ### 4.8 集成
 
-#### API-15：CRM 同步
+#### API-15：HubSpot 同步
 
 | 属性 | 值 |
 |------|-----|
 | 接口编号 | API-15 |
-| 名称 | Sync to CRM |
+| 名称 | Sync to HubSpot |
 | 方法 | POST |
-| 路径 | `/api/workspaces/{workspaceSlug}/integrations/crm/sync` |
+| 路径 | `/api/workspaces/{workspaceSlug}/integrations/hubspot/sync` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-15 |
 | 对应 TDD | 5.4.8 |
-
-**请求参数**：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| provider | string | 是 | hubspot / salesforce |
-| event_type | string | 是 | hot_event / follow_up / page_view |
-| payload | object | 是 | 事件数据 |
+| 说明 | 后端当前仅实现 HubSpot 同步，Salesforce 尚未支持。请求无需 body。 |
 
 **成功响应 202**：
 
 ```json
 {
-  "sync_id": "sync_xxx",
-  "status": "queued"
+  "code": "ok",
+  "message": "sync started"
 }
 ```
 
 ---
 
-#### API-16：Slack 通知
+#### API-16：Slack 连接
 
 | 属性 | 值 |
 |------|-----|
 | 接口编号 | API-16 |
-| 名称 | Send Slack Notification |
+| 名称 | Connect Slack |
 | 方法 | POST |
-| 路径 | `/api/workspaces/{workspaceSlug}/integrations/slack/notify` |
+| 路径 | `/api/workspaces/{workspaceSlug}/integrations/slack/connect` |
 | 认证 | Bearer Token |
 | 对应 PRD | FR-16 |
 | 对应 TDD | 5.4.8 |
+| 说明 | 后端当前未提供主动发送 Slack 通知的接口；该端点返回 Slack OAuth 授权 URL。 |
 
-**请求参数**：
-
-| 字段 | 类型 | 必填 | 说明 |
-|------|------|------|------|
-| channel | string | 是 | 目标频道 |
-| event_type | string | 是 | hot_event / forward / anomaly |
-| message | object | 是 | 消息内容 |
-
-**成功响应 202**：
+**成功响应 200**：
 
 ```json
 {
-  "notification_id": "notif_xxx",
-  "status": "queued"
+  "url": "https://slack.com/oauth/v2/authorize?..."
 }
 ```
 
