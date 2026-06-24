@@ -206,7 +206,7 @@ export const api = {
     request<{ pageNumber: number; imageUrl: string; expiresAt: string; width: number; height: number }>(
       undefined,
       `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
-      { method: "POST", skipAuth: true }
+      { method: "GET", skipAuth: true }
     ).then((res) => ({
       page_number: res.pageNumber,
       image_url: res.imageUrl,
@@ -328,16 +328,13 @@ export const api = {
     request<{ data: Suggestion[] }>(getWorkspaceSlug(), "/insights/suggestions"),
 
   assistantChat: (payload: {
-    query: string;
-    document_id?: string;
+    message: string;
     session_id?: string;
-    history?: { role: "user" | "assistant"; content: string }[];
   }) =>
     request<{
       session_id: string;
       answer: string;
       evidence?: Evidence[];
-      follow_up_questions?: string[];
     }>(getWorkspaceSlug(), "/assistant/chat", {
       method: "POST",
       body: JSON.stringify(payload),

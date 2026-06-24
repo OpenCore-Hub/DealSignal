@@ -33,13 +33,6 @@ function getInitialMessages(): ChatMessage[] {
   return [WELCOME_MESSAGE];
 }
 
-function buildHistory(messages: ChatMessage[]): { role: "user" | "assistant"; content: string }[] {
-  return messages
-    .filter((m) => m.id !== "welcome")
-    .slice(-10)
-    .map((m) => ({ role: m.role, content: m.content }));
-}
-
 function mapSearchResult(result: unknown): Evidence {
   const r = result as {
     chunk_id: string;
@@ -100,11 +93,9 @@ export const useAIStore = create<AIState>((set, get) => ({
           createdAt: new Date().toISOString(),
         };
       } else {
-        const history = buildHistory(get().messages);
         const res = await api.assistantChat({
-          query: content,
+          message: content,
           session_id: get().sessionId ?? undefined,
-          history: history.length > 0 ? history : undefined,
         });
         assistantMessage = {
           id: `a_${Date.now()}`,

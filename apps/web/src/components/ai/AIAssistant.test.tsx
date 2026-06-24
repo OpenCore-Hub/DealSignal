@@ -170,7 +170,7 @@ describe("AIAssistant", () => {
     fireEvent.submit(input.closest("form")!);
 
     expect(apiMock.assistantChat).toHaveBeenCalledWith(
-      expect.objectContaining({ query: "What are today’s signals?" })
+      expect.objectContaining({ message: "What are today’s signals?" })
     );
     expect(apiMock.searchDocument).not.toHaveBeenCalled();
 

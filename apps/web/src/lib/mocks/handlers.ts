@@ -622,7 +622,7 @@ export const handlers = [
     return HttpResponse.json({ documentId: doc.id, pages, total: pages.length });
   }),
 
-  http.post("*/api/v1/public/documents/:documentId/pages/signed-url", async ({ params, request }) => {
+  http.get("*/api/v1/public/documents/:documentId/pages/signed-url", ({ params, request }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
     const url = new URL(request.url);
