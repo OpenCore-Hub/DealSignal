@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Palette, Upload } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
+import { useAsyncData } from "@/hooks/useAsyncData";
 import type { WorkspaceSettings } from "@/types";
 
 const MAX_LOGO_SIZE = 5 * 1024 * 1024;
@@ -15,36 +16,24 @@ const MAX_LOGO_SIZE = 5 * 1024 * 1024;
 export function SettingsBrandPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, refetch } = useAsyncData(
+    () => api.getWorkspaceSettings().then((res) => res.data),
+    []
+  );
+  const [draft, setDraft] = useState<WorkspaceSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const previewRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    async function load() {
-      try {
-        setLoading(true);
-        setError(null);
-        const res = await api.getWorkspaceSettings();
-        setSettings(res.data);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : tc("error.loadFailed"));
-      } finally {
-        setLoading(false);
-      }
-    }
-    load();
-  }, [tc]);
+  const settings = draft ?? data ?? null;
 
   const handleSave = async () => {
     if (!settings) return;
     setSaving(true);
     try {
       const res = await api.updateWorkspaceSettings(settings);
-      setSettings(res.data);
+      setDraft(res.data);
       toast.success(t("brand.saved"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
@@ -83,17 +72,17 @@ export function SettingsBrandPage() {
     const objectUrl = URL.createObjectURL(file);
     cleanupPreview();
     previewRef.current = objectUrl;
-    setSettings((s) => (s ? { ...s, logoUrl: objectUrl } : s));
+    setDraft((prev) => (prev ?? data ? { ...(prev ?? data!), logoUrl: objectUrl } : prev));
     setUploading(true);
 
     try {
       const res = await api.uploadWorkspaceLogo(file);
       cleanupPreview();
-      setSettings((s) => (s ? { ...s, logoUrl: res.data.logoUrl } : s));
+      setDraft((prev) => (prev ?? data ? { ...(prev ?? data!), logoUrl: res.data.logoUrl } : prev));
       toast.success(t("brand.uploadSuccess"));
     } catch (err) {
       cleanupPreview();
-      setSettings((s) => (s ? { ...s, logoUrl: previousUrl } : s));
+      setDraft((prev) => (prev ?? data ? { ...(prev ?? data!), logoUrl: previousUrl } : prev));
       toast.error(err instanceof Error ? err.message : t("brand.uploadFailed"));
     } finally {
       setUploading(false);
@@ -107,7 +96,7 @@ export function SettingsBrandPage() {
         <Card>
           <CardContent className="flex flex-col items-center justify-center gap-4 p-12 text-center">
             <p className="text-body text-muted-foreground">{error}</p>
-            <Button onClick={() => window.location.reload()}>{tc("retry")}</Button>
+            <Button onClick={refetch}>{tc("retry")}</Button>
           </CardContent>
         </Card>
       </div>
@@ -122,6 +111,10 @@ export function SettingsBrandPage() {
       </div>
     );
   }
+
+  const updateField = <K extends keyof WorkspaceSettings>(field: K, value: WorkspaceSettings[K]) => {
+    setDraft((prev) => (prev ?? data ? { ...(prev ?? data!), [field]: value } : prev));
+  };
 
   return (
     <div className="space-y-6">
@@ -174,7 +167,7 @@ export function SettingsBrandPage() {
               <Input
                 id="brand-color"
                 value={settings.brandColor}
-                onChange={(e) => setSettings((s) => (s ? { ...s, brandColor: e.target.value } : s))}
+                onChange={(e) => updateField("brandColor", e.target.value)}
               />
               <span
                 className="h-9 w-9 shrink-0 rounded-md border border-border"
@@ -189,7 +182,7 @@ export function SettingsBrandPage() {
               id="viewer-domain"
               placeholder="invest.yourdomain.com"
               value={settings.viewerDomain}
-              onChange={(e) => setSettings((s) => (s ? { ...s, viewerDomain: e.target.value } : s))}
+              onChange={(e) => updateField("viewerDomain", e.target.value)}
             />
           </div>
           <Button onClick={handleSave} disabled={saving}>
