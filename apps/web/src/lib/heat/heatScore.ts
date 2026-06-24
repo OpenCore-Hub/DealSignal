@@ -136,13 +136,29 @@ export function computeHeatScore(
   const keyPages = Object.values(config.keyPages).flat();
   const topKeyPages = pageAnalytics
     ? pageAnalytics
-        .filter((p) => {
-          const text = [p.title, String(p.pageNumber)].filter(Boolean).join(" ").toLowerCase();
-          return keyPages.some((kw) => text.includes(kw.toLowerCase()));
+        .map((p) => {
+          const text = (p.title ?? "").toLowerCase();
+          const relevance = keyPages.reduce((sum, kw) => {
+            const pattern = kw.toLowerCase();
+            let count = 0;
+            let idx = text.indexOf(pattern);
+            while (idx !== -1) {
+              count += 1;
+              idx = text.indexOf(pattern, idx + pattern.length);
+            }
+            return sum + count;
+          }, 0);
+          return { page: p, relevance };
         })
-        .sort((a, b) => b.viewCount - a.viewCount)
+        .filter(({ relevance }) => relevance > 0)
+        .sort((a, b) => {
+          // Rank by relevance weighted by view count so popular key pages surface first.
+          const scoreA = a.relevance * (a.page.viewCount || 1);
+          const scoreB = b.relevance * (b.page.viewCount || 1);
+          return scoreB - scoreA;
+        })
         .slice(0, 3)
-        .map((p) => p.title ?? `Page ${p.pageNumber}`)
+        .map(({ page }) => page.title ?? `第 ${page.pageNumber} 页`)
     : [];
 
   return { score, level, trend, breakdown, topKeyPages };

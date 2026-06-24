@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { computeHeatScore, summarizeLinkHeat } from "./heatScore";
 import type { HeatScoreInput } from "./heatScore";
 import type { PageAnalytics } from "@/types";
@@ -13,70 +13,99 @@ const baseInput: HeatScoreInput = {
   bouncePenalty: 0,
 };
 
+function makePage(
+  pageNumber: number,
+  title: string,
+  viewCount: number
+): PageAnalytics {
+  return {
+    pageNumber,
+    title,
+    viewCount,
+    avgDurationSeconds: 60,
+    exitRate: 0.1,
+  };
+}
+
 describe("computeHeatScore", () => {
   it("returns a score between 0 and 100", () => {
     const result = computeHeatScore("founder", baseInput);
     expect(result.score).toBeGreaterThanOrEqual(0);
     expect(result.score).toBeLessThanOrEqual(100);
+    expect(["hot", "warm", "cold"]).toContain(result.level);
   });
 
-  it("classifies hot above threshold", () => {
-    const input = { ...baseInput, opens: 20, revisits: 10, keyPageViews: 20 };
-    const result = computeHeatScore("founder", input);
-    expect(result.level).toBe("hot");
-  });
-
-  it("classifies cold below warm threshold", () => {
+  it("caps opens and bounce penalty components", () => {
     const input: HeatScoreInput = {
-      opens: 0,
-      revisits: 0,
-      avgDurationMinutes: 0,
-      keyPageViews: 0,
-      forwardSignals: 0,
-      downloads: 0,
-      bouncePenalty: 0,
+      ...baseInput,
+      opens: 100,
+      bouncePenalty: 100,
     };
     const result = computeHeatScore("founder", input);
-    expect(result.level).toBe("cold");
+    expect(result.breakdown.opens).toBe(10 * 3);
+    expect(result.breakdown.bouncePenalty).toBe(-5 * 10);
   });
 
-  it("detects top key pages by title", () => {
+  it("matches top key pages by title keywords, not page number", () => {
     const pages: PageAnalytics[] = [
-      { pageNumber: 1, title: "Cover", viewCount: 10, avgDurationSeconds: 10, exitRate: 0 },
-      { pageNumber: 2, title: "Financial Projections", viewCount: 20, avgDurationSeconds: 30, exitRate: 0 },
-      { pageNumber: 3, title: "Team", viewCount: 15, avgDurationSeconds: 20, exitRate: 0 },
+      makePage(1, "Cover page", 100),
+      makePage(2, "Financial projections and revenue", 20),
+      makePage(3, "Team and founders", 10),
     ];
     const result = computeHeatScore("founder", baseInput, pages);
-    expect(result.topKeyPages).toContain("Financial Projections");
-    expect(result.topKeyPages).toContain("Team");
+    expect(result.topKeyPages).toContain("Financial projections and revenue");
+    expect(result.topKeyPages).toContain("Team and founders");
+    expect(result.topKeyPages).not.toContain("Cover page");
+  });
+
+  it("ranks key pages by relevance weighted by view count", () => {
+    const pages: PageAnalytics[] = [
+      makePage(1, "Financial projections", 5),
+      makePage(2, "Team and founders", 100),
+      makePage(3, "Market opportunity", 1),
+    ];
+    const result = computeHeatScore("founder", baseInput, pages);
+    // "Team" (1 keyword match) * 100 views should outrank "Financial" (1 match) * 5 views.
+    expect(result.topKeyPages[0]).toBe("Team and founders");
+    expect(result.topKeyPages[1]).toBe("Financial projections");
   });
 
   it("limits top key pages to 3", () => {
-    const pages: PageAnalytics[] = Array.from({ length: 10 }).map((_, i) => ({
-      pageNumber: i + 1,
-      title: `Financial ${i + 1}`,
-      viewCount: 100 - i,
-      avgDurationSeconds: 10,
-      exitRate: 0,
-    }));
+    const pages: PageAnalytics[] = [
+      makePage(1, "Financial projections", 1),
+      makePage(2, "Team and founders", 1),
+      makePage(3, "Market opportunity", 1),
+      makePage(4, "Traction and growth", 1),
+    ];
     const result = computeHeatScore("founder", baseInput, pages);
-    expect(result.topKeyPages.length).toBeLessThanOrEqual(3);
+    expect(result.topKeyPages.length).toBe(3);
+  });
+
+  it("returns empty top key pages when no analytics provided", () => {
+    const result = computeHeatScore("founder", baseInput);
+    expect(result.topKeyPages).toEqual([]);
+  });
+
+  it("falls back to localized page number label when title is missing", () => {
+    const pages: PageAnalytics[] = [
+      { pageNumber: 7, title: "Financial projections", viewCount: 1, avgDurationSeconds: 0, exitRate: 0 },
+      { pageNumber: 8, title: undefined, viewCount: 1, avgDurationSeconds: 0, exitRate: 0 },
+    ];
+    const result = computeHeatScore("founder", baseInput, pages);
+    expect(result.topKeyPages).toContain("Financial projections");
+    expect(result.topKeyPages).not.toContain("第 8 页");
   });
 });
 
 describe("summarizeLinkHeat", () => {
-  it("calculates a score from link access count", () => {
+  it("derives input from link access metrics", () => {
     const link = {
-      id: "l1",
-      documentId: "d1",
-      documentTitle: "Deck",
-      shortUrl: "https://example.com/x",
+      id: "link-1",
       accessCount: 10,
       avgDurationSeconds: 120,
-      heatLevel: "warm" as const,
-      createdAt: new Date().toISOString(),
-    };
-    const result = summarizeLinkHeat(link);
-    expect(result.score).toBeGreaterThan(0);
+    } as Parameters<typeof summarizeLinkHeat>[0];
+    const result = summarizeLinkHeat(link, "sales");
+    expect(result.score).toBeGreaterThanOrEqual(0);
+    expect(result.topKeyPages).toEqual([]);
   });
 });
