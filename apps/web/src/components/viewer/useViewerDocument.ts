@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
 import { api } from "@/lib/api";
 import { useAIStore } from "@/stores/aiStore";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -49,8 +49,13 @@ export function useViewerDocument({
 }: UseViewerDocumentOptions = {}): ViewerDocumentResult {
   const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
   const documentId = publicDocument?.id ?? routeDocumentId;
+  const [searchParams] = useSearchParams();
+  const initialPage = Math.max(
+    1,
+    Number.parseInt(searchParams.get("page") || "1", 10) || 1
+  );
 
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(initialPage);
   const [zoom, setZoom] = useState(100);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const { highlightedPage } = useAIStore();
@@ -63,10 +68,8 @@ export function useViewerDocument({
     if (publicDocument) {
       if (publicDocument.status === "ready" && publicToken) {
         const pagesRes = await api.getPublicDocumentPages(id, publicToken);
-        setPage(1);
         return { doc: publicDocument, pages: pagesRes.pages, analytics: [] };
       }
-      setPage(1);
       return { doc: publicDocument, pages: [], analytics: [] };
     }
     const [d, a] = await Promise.all([
@@ -75,10 +78,8 @@ export function useViewerDocument({
     ]);
     if (d.status === "ready") {
       const pagesRes = await api.getDocumentPages(id);
-      setPage(1);
       return { doc: d, pages: pagesRes.pages, analytics: a.data };
     }
-    setPage(1);
     return { doc: d, pages: [], analytics: a.data };
   }, [documentId, publicDocument, publicToken]);
 
@@ -87,6 +88,16 @@ export function useViewerDocument({
   const doc = data?.doc ?? null;
   const pages = data?.pages ?? [];
   const analytics = data?.analytics ?? [];
+
+  // Clamp the page to the valid range once pages are known.
+  useEffect(() => {
+    if (pages.length === 0) return;
+    const validPage = Math.min(Math.max(1, page), pages.length);
+    if (validPage !== page) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- derived state after load
+      setPage(validPage);
+    }
+  }, [pages.length, page]);
 
   // Synchronize the viewer page with the AI highlight from the global store.
   useEffect(() => {

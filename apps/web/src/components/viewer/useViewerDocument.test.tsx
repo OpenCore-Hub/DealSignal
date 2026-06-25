@@ -125,4 +125,16 @@ describe("useViewerDocument", () => {
     await waitFor(() => expect(result.current.imageUrl).toBe("https://example.test/page.png"));
     expect(apiMock.getPageSignedUrl).toHaveBeenCalledWith("doc-001", 1);
   });
+
+  it("initializes page from ?page query param", async () => {
+    const { result } = renderHook(() => useViewerDocument(), {
+      wrapper: wrapper("/viewer/doc-001?page=2"),
+    });
+
+    expect(result.current.page).toBe(2);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    await waitFor(() =>
+      expect(apiMock.getPageSignedUrl).toHaveBeenCalledWith("doc-001", 2)
+    );
+  });
 });

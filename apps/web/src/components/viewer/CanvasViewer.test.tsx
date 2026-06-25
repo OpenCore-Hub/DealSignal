@@ -223,11 +223,13 @@ describe("CanvasViewer", () => {
     const i18n = await createViewerI18n();
     render(
       <I18nextProvider i18n={i18n}>
-        <CanvasViewer
-          publicToken="token-123"
-          publicDocument={mockDocument}
-          publicVisitorId="visitor-1"
-        />
+        <MemoryRouter>
+          <CanvasViewer
+            publicToken="token-123"
+            publicDocument={mockDocument}
+            publicVisitorId="visitor-1"
+          />
+        </MemoryRouter>
       </I18nextProvider>
     );
 

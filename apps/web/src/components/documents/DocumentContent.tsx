@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router";
 import { FileText, MagnifyingGlassPlus, MagnifyingGlass } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
@@ -19,6 +20,7 @@ interface DocumentContentProps {
 
 export function DocumentContent({ title, pageCount, documentId, analytics, evidences: initialEvidences }: DocumentContentProps) {
   const { t } = useTranslation("documents");
+  const navigate = useNavigate();
   const [selectedPage, setSelectedPage] = useState<number | null>(null);
   const [pageImageUrl, setPageImageUrl] = useState<string | null>(null);
   const [loadingImageUrl, setLoadingImageUrl] = useState(false);
@@ -126,11 +128,15 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
               className={`cursor-pointer overflow-hidden transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
                 selectedPage === page.pageNumber ? "ring-2 ring-primary" : ""
               }`}
-              onClick={() => setSelectedPage(page.pageNumber)}
+              onClick={() => {
+                setSelectedPage(page.pageNumber);
+                navigate(`/viewer/${documentId}?page=${page.pageNumber}`);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   setSelectedPage(page.pageNumber);
+                  navigate(`/viewer/${documentId}?page=${page.pageNumber}`);
                 }
               }}
             >
