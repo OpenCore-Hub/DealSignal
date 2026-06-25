@@ -418,6 +418,41 @@ test.describe("real backend P0 flow", () => {
     await visitorPage.close();
   });
 
+  test("whitelist link works again after revoke and re-enable", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `whitelist-revive-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "whitelist", {
+      allowedEmails: [visitorEmail],
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+
+    // First access works.
+    await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail });
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+
+    // Revoke and verify blocked.
+    await revokeLinkViaApi(seed.token, seed.workspaceSlug, link.id);
+    await visitorPage.reload();
+    await expect(visitorPage.getByText(/link revoked/i)).toBeVisible({ timeout: 30000 });
+
+    // Re-enable and verify access again.
+    await apiFetch(`/api/workspaces/${seed.workspaceSlug}/links/${link.id}`, {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${seed.token}` },
+      body: JSON.stringify({ status: "active" }),
+    });
+    await visitorPage.goto(link.shortUrl);
+    await expect(visitorPage.locator("#email")).toBeVisible({ timeout: 30000 });
+    await visitorPage.locator("#email").fill(visitorEmail);
+    await visitorPage.getByRole("button", { name: "Continue" }).click();
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
   test("revoking a link blocks public access", async ({ page }) => {
     attachDebug(page);
     await authenticate(page, seed.token);
