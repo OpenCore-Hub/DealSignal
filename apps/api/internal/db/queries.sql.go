@@ -2308,6 +2308,70 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 	return i, err
 }
 
+const getVisitorSummariesByDocument = `-- name: GetVisitorSummariesByDocument :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.link_id IN (SELECT l.id FROM links l WHERE l.document_id = $1 AND l.workspace_id = $2 AND l.status != 'deleted')
+      AND al.workspace_id = $2
+      AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    pv.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    COUNT(*)::bigint AS page_view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    MAX(pv.created_at)::timestamptz AS last_seen_at
+FROM page_views pv
+LEFT JOIN visitor_emails ve ON ve.visitor_id = pv.visitor_id
+WHERE pv.link_id IN (SELECT l.id FROM links l WHERE l.document_id = $1 AND l.workspace_id = $2 AND l.status != 'deleted')
+  AND pv.workspace_id = $2
+GROUP BY pv.visitor_id, ve.visitor_email
+ORDER BY last_seen_at DESC
+LIMIT $3
+`
+
+type GetVisitorSummariesByDocumentParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+type GetVisitorSummariesByDocumentRow struct {
+	VisitorID          pgtype.Text
+	VisitorEmail       string
+	PageViewCount      int64
+	AvgDurationSeconds float64
+	LastSeenAt         pgtype.Timestamptz
+}
+
+func (q *Queries) GetVisitorSummariesByDocument(ctx context.Context, arg GetVisitorSummariesByDocumentParams) ([]GetVisitorSummariesByDocumentRow, error) {
+	rows, err := q.db.Query(ctx, getVisitorSummariesByDocument, arg.DocumentID, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetVisitorSummariesByDocumentRow
+	for rows.Next() {
+		var i GetVisitorSummariesByDocumentRow
+		if err := rows.Scan(
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.PageViewCount,
+			&i.AvgDurationSeconds,
+			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getWorkspaceByID = `-- name: GetWorkspaceByID :one
 SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled FROM workspaces WHERE id = $1 LIMIT 1
 `
@@ -2456,21 +2520,84 @@ func (q *Queries) IncrementLinkAccessCount(ctx context.Context, id pgtype.UUID) 
 }
 
 const listAccessLogsByLink = `-- name: ListAccessLogsByLink :many
-SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
-FROM access_logs
-WHERE link_id = $1
-ORDER BY created_at DESC
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.link_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    e.id,
+    e.tenant_id,
+    e.workspace_id,
+    e.link_id,
+    e.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    e.event_type,
+    e.ip,
+    e.user_agent,
+    e.page_number,
+    e.duration_seconds,
+    e.created_at
+FROM (
+    SELECT
+        id,
+        tenant_id,
+        workspace_id,
+        link_id,
+        visitor_id,
+        'page_viewed'::text AS event_type,
+        NULL::inet AS ip,
+        NULL::text AS user_agent,
+        page_number,
+        duration_seconds,
+        created_at
+    FROM page_views
+    WHERE page_views.link_id = $1
+    UNION ALL
+    SELECT
+        id,
+        tenant_id,
+        workspace_id,
+        link_id,
+        visitor_id,
+        event_type,
+        ip,
+        user_agent,
+        NULL::int AS page_number,
+        0 AS duration_seconds,
+        created_at
+    FROM access_logs
+    WHERE access_logs.link_id = $1
+) e
+LEFT JOIN visitor_emails ve ON ve.visitor_id = e.visitor_id
+ORDER BY e.created_at DESC
 `
 
-func (q *Queries) ListAccessLogsByLink(ctx context.Context, linkID pgtype.UUID) ([]AccessLog, error) {
+type ListAccessLogsByLinkRow struct {
+	ID              pgtype.UUID
+	TenantID        pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       pgtype.Text
+	VisitorEmail    string
+	EventType       string
+	Ip              *netip.Addr
+	UserAgent       pgtype.Text
+	PageNumber      int32
+	DurationSeconds int32
+	CreatedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) ListAccessLogsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListAccessLogsByLinkRow, error) {
 	rows, err := q.db.Query(ctx, listAccessLogsByLink, linkID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AccessLog
+	var items []ListAccessLogsByLinkRow
 	for rows.Next() {
-		var i AccessLog
+		var i ListAccessLogsByLinkRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -2481,6 +2608,8 @@ func (q *Queries) ListAccessLogsByLink(ctx context.Context, linkID pgtype.UUID) 
 			&i.EventType,
 			&i.Ip,
 			&i.UserAgent,
+			&i.PageNumber,
+			&i.DurationSeconds,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

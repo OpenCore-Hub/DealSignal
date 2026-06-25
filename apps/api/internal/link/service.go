@@ -259,8 +259,9 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 	return link, nil
 }
 
-// ListAccessLogs returns access logs for a link.
-func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string) ([]db.AccessLog, error) {
+// ListAccessLogs returns access events for a link, including both raw access logs
+// and per-page views with their durations.
+func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string) ([]db.ListAccessLogsByLinkRow, error) {
 	id, err := uuid.Parse(linkID)
 	if err != nil {
 		return nil, errors.New("invalid link id")

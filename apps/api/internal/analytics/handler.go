@@ -36,6 +36,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	r.GET("/dashboard/stats", h.GetDashboardStats)
 	r.GET("/insights/overview", h.GetInsightsOverview)
 	r.GET("/insights/pages/:documentId", h.GetPageAnalytics)
+	r.GET("/insights/documents/:documentId/visitors", h.GetDocumentVisitors)
 	r.POST("/events", h.RecordViewerEvent)
 }
 
@@ -97,6 +98,28 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 		"topLinks":     linkScoreList(c, h.cfg, overview.TopLinks),
 		"topContacts":  contactScoreList(overview.TopContacts),
 	})
+}
+
+// GetDocumentVisitors returns per-visitor engagement for a document.
+func (h *Handler) GetDocumentVisitors(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	visitors, err := h.service.DocumentVisitors(c.Request.Context(), c.Param("documentId"), workspaceID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	out := make([]gin.H, len(visitors))
+	for i, v := range visitors {
+		out[i] = gin.H{
+			"visitorId":          v.VisitorID,
+			"visitorEmail":       v.VisitorEmail,
+			"pageViewCount":      v.PageViewCount,
+			"avgDurationSeconds": v.AvgDurationSeconds,
+			"lastSeenAt":         v.LastSeenAt.Format(time.RFC3339),
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 // GetPageAnalytics returns per-page metrics for a document.

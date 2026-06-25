@@ -87,6 +87,10 @@ func (m *mockAnalyticsQuerier) GetPageExitCountsByDocument(_ context.Context, _ 
 	return nil, nil
 }
 
+func (m *mockAnalyticsQuerier) GetVisitorSummariesByDocument(_ context.Context, _ db.GetVisitorSummariesByDocumentParams) ([]db.GetVisitorSummariesByDocumentRow, error) {
+	return nil, nil
+}
+
 func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error) {
 	return db.GetDocumentByIDRow{}, nil
 }

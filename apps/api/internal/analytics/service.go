@@ -37,6 +37,7 @@ type Querier interface {
 	GetPageAnalyticsByDocument(ctx context.Context, arg db.GetPageAnalyticsByDocumentParams) ([]db.GetPageAnalyticsByDocumentRow, error)
 	GetPageTitlesByDocument(ctx context.Context, arg db.GetPageTitlesByDocumentParams) ([]db.GetPageTitlesByDocumentRow, error)
 	GetPageExitCountsByDocument(ctx context.Context, documentID pgtype.UUID) ([]db.GetPageExitCountsByDocumentRow, error)
+	GetVisitorSummariesByDocument(ctx context.Context, arg db.GetVisitorSummariesByDocumentParams) ([]db.GetVisitorSummariesByDocumentRow, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
 	GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (db.AccessLog, error)
 	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
@@ -430,6 +431,15 @@ func levelForDocumentViews(views int64) string {
 	}
 }
 
+// VisitorSummary is per-visitor engagement for a document.
+type VisitorSummary struct {
+	VisitorID          string
+	VisitorEmail       string
+	PageViewCount      int64
+	AvgDurationSeconds float64
+	LastSeenAt         time.Time
+}
+
 // PageAnalytic is per-page engagement enriched with title and exit rate.
 type PageAnalytic struct {
 	PageNumber         int32
@@ -504,6 +514,39 @@ func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID str
 			LastViewedAt:       r.LastViewedAt.Time,
 			Title:              title,
 			ExitRate:           exitRate,
+		}
+	}
+	return out, nil
+}
+
+// DocumentVisitors returns per-visitor engagement for a document.
+func (s *Service) DocumentVisitors(ctx context.Context, documentID, workspaceID string) ([]VisitorSummary, error) {
+	docUUID, err := parseUUID(documentID)
+	if err != nil {
+		return nil, err
+	}
+	wsUUID, err := parseUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.queries.GetVisitorSummariesByDocument(ctx, db.GetVisitorSummariesByDocumentParams{
+		DocumentID:  docUUID,
+		WorkspaceID: wsUUID,
+		Limit:       100,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]VisitorSummary, len(rows))
+	for i, r := range rows {
+		out[i] = VisitorSummary{
+			VisitorID:          r.VisitorID.String,
+			VisitorEmail:       r.VisitorEmail,
+			PageViewCount:      r.PageViewCount,
+			AvgDurationSeconds: r.AvgDurationSeconds,
+			LastSeenAt:         r.LastSeenAt.Time,
 		}
 	}
 	return out, nil

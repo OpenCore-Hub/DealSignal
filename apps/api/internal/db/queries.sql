@@ -346,10 +346,81 @@ WHERE a.link_id = $1
   );
 
 -- name: ListAccessLogsByLink :many
-SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
-FROM access_logs
-WHERE link_id = $1
-ORDER BY created_at DESC;
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.link_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    e.id,
+    e.tenant_id,
+    e.workspace_id,
+    e.link_id,
+    e.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    e.event_type,
+    e.ip,
+    e.user_agent,
+    e.page_number,
+    e.duration_seconds,
+    e.created_at
+FROM (
+    SELECT
+        id,
+        tenant_id,
+        workspace_id,
+        link_id,
+        visitor_id,
+        'page_viewed'::text AS event_type,
+        NULL::inet AS ip,
+        NULL::text AS user_agent,
+        page_number,
+        duration_seconds,
+        created_at
+    FROM page_views
+    WHERE page_views.link_id = $1
+    UNION ALL
+    SELECT
+        id,
+        tenant_id,
+        workspace_id,
+        link_id,
+        visitor_id,
+        event_type,
+        ip,
+        user_agent,
+        NULL::int AS page_number,
+        0 AS duration_seconds,
+        created_at
+    FROM access_logs
+    WHERE access_logs.link_id = $1
+) e
+LEFT JOIN visitor_emails ve ON ve.visitor_id = e.visitor_id
+ORDER BY e.created_at DESC;
+
+-- name: GetVisitorSummariesByDocument :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.link_id IN (SELECT l.id FROM links l WHERE l.document_id = $1 AND l.workspace_id = $2 AND l.status != 'deleted')
+      AND al.workspace_id = $2
+      AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    pv.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    COUNT(*)::bigint AS page_view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    MAX(pv.created_at)::timestamptz AS last_seen_at
+FROM page_views pv
+LEFT JOIN visitor_emails ve ON ve.visitor_id = pv.visitor_id
+WHERE pv.link_id IN (SELECT l.id FROM links l WHERE l.document_id = $1 AND l.workspace_id = $2 AND l.status != 'deleted')
+  AND pv.workspace_id = $2
+GROUP BY pv.visitor_id, ve.visitor_email
+ORDER BY last_seen_at DESC
+LIMIT $3;
 
 -- name: GetLastAccessLogByLink :one
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at

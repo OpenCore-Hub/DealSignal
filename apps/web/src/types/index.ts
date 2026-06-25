@@ -133,6 +133,14 @@ export interface AccessLog {
   timestamp: string;
 }
 
+export interface VisitorSummary {
+  visitorId: string;
+  visitorEmail: string;
+  pageViewCount: number;
+  avgDurationSeconds: number;
+  lastSeenAt: string;
+}
+
 export interface PageAnalytics {
   pageNumber: number;
   viewCount: number;

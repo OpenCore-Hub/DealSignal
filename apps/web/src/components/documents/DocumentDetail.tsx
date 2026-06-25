@@ -20,13 +20,13 @@ import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
 import { toast } from "sonner";
-import type { Document, Link, PageAnalytics, AccessLog } from "@/types";
+import type { Document, Link, PageAnalytics, VisitorSummary } from "@/types";
 
 interface DocumentDetailData {
   doc: Document;
   links: Link[];
   analytics: PageAnalytics[];
-  logs: AccessLog[];
+  visitors: VisitorSummary[];
 }
 
 export function DocumentDetail() {
@@ -39,15 +39,13 @@ export function DocumentDetail() {
     if (!documentId) {
       throw new Error(t("documents:detail.notFound"));
     }
-    const [d, l, a] = await Promise.all([
+    const [d, l, a, v] = await Promise.all([
       api.getDocumentById(documentId),
       api.getLinksByDocumentId(documentId),
       api.getPageAnalytics(documentId),
+      api.getDocumentVisitors(documentId),
     ]);
-    const allLogs = await Promise.all(
-      l.data.map((link) => api.getAccessLogs(link.id).then((r) => r.data))
-    );
-    return { doc: d, links: l.data, analytics: a.data, logs: allLogs.flat() };
+    return { doc: d, links: l.data, analytics: a.data, visitors: v.data };
   }, [documentId, t]);
 
   const { data, loading, error, refetch } = useAsyncData(loadDetail, [loadDetail]);
@@ -68,7 +66,7 @@ export function DocumentDetail() {
 
   if (loading || !data) return <SkeletonDetail />;
 
-  const { doc, links, analytics, logs } = data;
+  const { doc, links, analytics, visitors } = data;
 
   return (
     <div className="space-y-6">
@@ -123,7 +121,7 @@ export function DocumentDetail() {
         />
       </PageHeader>
 
-      <DetailLayout sidebar={<DocumentStats links={links} logs={logs} />}>
+      <DetailLayout sidebar={<DocumentStats links={links} visitors={visitors} />}>
         <Tabs defaultValue="overview" className="w-full">
           <TabsList className="mb-4">
             <TabsTrigger value="overview">{t("documents:detail.tabs.overview")}</TabsTrigger>
@@ -133,7 +131,7 @@ export function DocumentDetail() {
           </TabsList>
           <TabsContent value="overview" className="space-y-6">
             <DocumentAnalytics analytics={analytics} />
-            <DocumentVisitorsCard logs={logs} />
+            <DocumentVisitorsCard visitors={visitors} />
             <DocumentLinksCard doc={doc} links={links} workspaceSlug={workspaceSlug!} />
           </TabsContent>
           <TabsContent value="content">

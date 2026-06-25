@@ -3,19 +3,18 @@ import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/common/StatCard";
 import { formatDuration } from "@/lib/formatters";
-import { calculateUniqueVisitors } from "@/lib/calculations";
-import type { AccessLog, HeatLevel, Link } from "@/types";
+import type { HeatLevel, Link, VisitorSummary } from "@/types";
 
 interface DocumentStatsProps {
   links: Link[];
-  logs: AccessLog[];
+  visitors: VisitorSummary[];
 }
 
-export function DocumentStats({ links, logs }: DocumentStatsProps) {
+export function DocumentStats({ links, visitors }: DocumentStatsProps) {
   const { t } = useTranslation(["documents", "common"]);
 
   const totalViews = links.reduce((sum, l) => sum + l.accessCount, 0);
-  const uniqueVisitors = calculateUniqueVisitors(logs);
+  const uniqueVisitors = visitors.length;
   const avgDuration =
     links.length > 0
       ? Math.round(links.reduce((sum, l) => sum + (l.avgDurationSeconds || 0), 0) / links.length)
