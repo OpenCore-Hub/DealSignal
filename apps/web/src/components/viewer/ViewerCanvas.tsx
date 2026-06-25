@@ -51,8 +51,8 @@ export function ViewerCanvas({
     if (!el || typeof ResizeObserver === "undefined") return;
 
     const updateSize = () => {
-      const rect = el.getBoundingClientRect();
-      setViewportSize({ width: rect.width, height: rect.height });
+      // clientWidth/Height excludes padding, giving the true available space.
+      setViewportSize({ width: el.clientWidth, height: el.clientHeight });
     };
 
     updateSize();
@@ -81,11 +81,8 @@ export function ViewerCanvas({
     : 0.75;
 
   // Fit the page inside the available viewport at zoom = 100%.
-  // Account for padding so the page does not overflow initially.
-  const paddingX = 16;
-  const paddingY = 16;
-  const availableWidth = Math.max(300, viewportSize.width - paddingX * 2);
-  const availableHeight = Math.max(300, viewportSize.height - paddingY * 2);
+  const availableWidth = Math.max(300, viewportSize.width);
+  const availableHeight = Math.max(300, viewportSize.height);
   const fitWidth = Math.min(availableWidth, availableHeight * aspectRatio);
   const fitHeight = fitWidth / aspectRatio;
   const baseWidth = Math.max(300, Math.min(fitWidth, fitHeight * aspectRatio));
