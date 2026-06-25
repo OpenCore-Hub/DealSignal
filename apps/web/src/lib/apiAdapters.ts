@@ -13,13 +13,19 @@ export interface CreateLinkPayload {
   watermark_enabled?: boolean;
 }
 
-function mapPermissionLevel(level: PermissionConfig["level"]): string {
-  switch (level) {
+function mapPermissionLevel(config: PermissionConfig): string {
+  switch (config.level) {
     case "low":
       return "public";
     case "medium":
       return "email_required";
     case "high":
+      if (config.whitelistEnabled && config.whitelist.length > 0) {
+        return "whitelist";
+      }
+      if (config.passwordEnabled && config.password) {
+        return "password";
+      }
       return "whitelist";
     default:
       return "public";
@@ -34,7 +40,7 @@ export function toCreateLinkPayload(
   const payload: CreateLinkPayload = {
     document_id: documentId,
     name,
-    permission_type: mapPermissionLevel(config.level),
+    permission_type: mapPermissionLevel(config),
     allowed_emails:
       config.whitelistEnabled && config.whitelist.length > 0
         ? config.whitelist

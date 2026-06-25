@@ -30,6 +30,11 @@ describe("toCreateLinkPayload", () => {
     expect(toCreateLinkPayload("doc-1", { ...baseConfig, level: "high" }).permission_type).toBe("whitelist");
   });
 
+  it("maps high + password to password permission type", () => {
+    const config: PermissionConfig = { ...baseConfig, level: "high", passwordEnabled: true, password: "secret" };
+    expect(toCreateLinkPayload("doc-1", config).permission_type).toBe("password");
+  });
+
   it("includes whitelist emails when enabled", () => {
     const config: PermissionConfig = { ...baseConfig, level: "high", whitelistEnabled: true, whitelist: ["a@example.test"] };
     const payload = toCreateLinkPayload("doc-1", config);
