@@ -84,6 +84,18 @@ export function SmartLinkCreator() {
     }));
   };
 
+  const deriveLevelFromConfig = (next: PermissionConfig): PermissionLevel => {
+    if (next.passwordEnabled || next.whitelistEnabled) return "high";
+    if (next.requireEmail) return "medium";
+    return "low";
+  };
+
+  const handleConfigChange = (next: PermissionConfig) => {
+    const nextLevel = deriveLevelFromConfig(next);
+    setLevel(nextLevel);
+    setConfig({ ...next, level: nextLevel });
+  };
+
   const createLink = async () => {
     if (!selectedDocumentId) return;
     setCreating(true);
@@ -145,7 +157,7 @@ export function SmartLinkCreator() {
             </CardHeader>
             <CardContent className="space-y-6">
               <PermissionPanel level={level} onLevelChange={handleLevelChange} />
-              <SecurityOptions config={config} onChange={setConfig} />
+              <SecurityOptions config={config} onChange={handleConfigChange} />
             </CardContent>
           </Card>
         </div>
