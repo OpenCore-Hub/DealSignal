@@ -317,12 +317,26 @@ func isAllowed(email string, allowedEmails, allowedDomains []byte) bool {
 	_ = json.Unmarshal(allowedDomains, &domains)
 
 	for _, e := range emails {
-		if strings.EqualFold(e, email) {
-			return true
+		entry := strings.TrimSpace(e)
+		if entry == "" {
+			continue
+		}
+		// Treat entries without '@' or with a leading '@' as domains for backward
+		// compatibility with UI-created links that may store domains in the emails list.
+		if strings.HasPrefix(entry, "@") || !strings.Contains(entry, "@") {
+			entry = strings.TrimPrefix(entry, "@")
+			if strings.EqualFold(entry, domain) {
+				return true
+			}
+		} else {
+			if strings.EqualFold(entry, email) {
+				return true
+			}
 		}
 	}
 	for _, d := range domains {
-		if strings.EqualFold(d, domain) {
+		entry := strings.TrimSpace(strings.TrimPrefix(d, "@"))
+		if entry != "" && strings.EqualFold(entry, domain) {
 			return true
 		}
 	}

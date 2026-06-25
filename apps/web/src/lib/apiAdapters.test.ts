@@ -46,6 +46,18 @@ describe("toCreateLinkPayload", () => {
     expect(payload.allowed_emails).toBeUndefined();
   });
 
+  it("splits whitelist emails and domains into separate fields", () => {
+    const config: PermissionConfig = {
+      ...baseConfig,
+      level: "high",
+      whitelistEnabled: true,
+      whitelist: ["a@example.test", "example.org", " @example.io ", "b@example.test"],
+    };
+    const payload = toCreateLinkPayload("doc-1", config);
+    expect(payload.allowed_emails).toEqual(["a@example.test", "b@example.test"]);
+    expect(payload.allowed_domains).toEqual(["example.org", "@example.io"]);
+  });
+
   it("includes password when enabled", () => {
     const payload = toCreateLinkPayload("doc-1", { ...baseConfig, passwordEnabled: true, password: "secret" });
     expect(payload.password).toBe("secret");

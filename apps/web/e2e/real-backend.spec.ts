@@ -117,7 +117,7 @@ async function createLinkViaApi(
   workspaceSlug: string,
   documentId: string,
   permissionType: string,
-  opts: { password?: string; allowedEmails?: string[]; downloadEnabled?: boolean } = {}
+  opts: { password?: string; allowedEmails?: string[]; allowedDomains?: string[]; downloadEnabled?: boolean } = {}
 ): Promise<{ id: string; shortUrl: string }> {
   const body: Record<string, unknown> = {
     document_id: documentId,
@@ -127,6 +127,7 @@ async function createLinkViaApi(
   };
   if (opts.password) body.password = opts.password;
   if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
+  if (opts.allowedDomains) body.allowed_domains = opts.allowedDomains;
 
   const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links`, {
     method: "POST",
@@ -395,6 +396,25 @@ test.describe("real backend P0 flow", () => {
     attachDebug(visitorPage);
     await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail });
     await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("whitelist link gate denies a non-whitelisted email", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const allowedEmail = `whitelist-allowed-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "whitelist", {
+      allowedEmails: [allowedEmail],
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await visitorPage.goto(link.shortUrl);
+    await expect(visitorPage.locator("#email")).toBeVisible({ timeout: 30000 });
+    await visitorPage.locator("#email").fill(`blocked-${Date.now()}@example.com`);
+    await visitorPage.getByRole("button", { name: "Continue" }).click();
+    await expect(visitorPage.getByText(/email not in whitelist/i)).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
   });
 

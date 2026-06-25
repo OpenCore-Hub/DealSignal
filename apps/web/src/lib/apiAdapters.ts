@@ -37,14 +37,18 @@ export function toCreateLinkPayload(
   config: PermissionConfig,
   name?: string
 ): CreateLinkPayload {
+  const whitelist = (config.whitelistEnabled ? config.whitelist : [])
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const allowedEmails = whitelist.filter((s) => s.includes("@") && !s.startsWith("@"));
+  const allowedDomains = whitelist.filter((s) => !s.includes("@") || s.startsWith("@"));
+
   const payload: CreateLinkPayload = {
     document_id: documentId,
     name,
     permission_type: mapPermissionLevel(config),
-    allowed_emails:
-      config.whitelistEnabled && config.whitelist.length > 0
-        ? config.whitelist
-        : undefined,
+    allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
+    allowed_domains: allowedDomains.length > 0 ? allowedDomains : undefined,
     password: config.passwordEnabled ? config.password : undefined,
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,

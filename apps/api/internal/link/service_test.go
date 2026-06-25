@@ -56,6 +56,19 @@ func TestIsAllowed(t *testing.T) {
 	if isAllowed("not-an-email", emails, domains) {
 		t.Error("expected invalid email to be denied")
 	}
+
+	// Domains stored in the allowed_emails column (e.g. from older UI clients) should
+	// still match any email under that domain.
+	mixed := []byte(`["example.com", "@example.io"]`)
+	if !isAllowed("carol@example.com", mixed, []byte("[]")) {
+		t.Error("expected domain in allowed_emails to match")
+	}
+	if !isAllowed("dave@example.io", mixed, []byte("[]")) {
+		t.Error("expected @-prefixed domain in allowed_emails to match")
+	}
+	if isAllowed("eve@example.net", mixed, []byte("[]")) {
+		t.Error("expected non-matching domain to be denied")
+	}
 }
 
 func TestMakeVisitorID(t *testing.T) {
