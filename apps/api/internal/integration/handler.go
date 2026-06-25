@@ -65,10 +65,7 @@ func (h *Handler) SaveSettings(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), SaveSettingsRequest{
-		EmailEnabled:    req.EmailEnabled,
-		SlackWebhookURL: req.SlackWebhookURL,
-	})
+	s, err := h.service.SaveSettings(c.Request.Context(), workspaceID(c), SaveSettingsRequest(req))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return

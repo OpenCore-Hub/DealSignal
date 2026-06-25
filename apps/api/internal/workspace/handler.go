@@ -258,11 +258,7 @@ func (h *Handler) UpdateSecurity(c *gin.Context) {
 		return
 	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	settings, err := h.service.UpdateSecurity(c.Request.Context(), workspaceID, SecuritySettings{
-		ForceEmailVerification: req.ForceEmailVerification,
-		WatermarkDownloads:     req.WatermarkDownloads,
-		TwoFactorEnabled:       req.TwoFactorEnabled,
-	})
+	settings, err := h.service.UpdateSecurity(c.Request.Context(), workspaceID, SecuritySettings(req))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update security settings"})
 		return

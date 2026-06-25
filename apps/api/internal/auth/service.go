@@ -285,7 +285,7 @@ func (s *Service) VerifyEmailByToken(ctx context.Context, token string) error {
 	if err != nil {
 		return ErrTokenInvalid
 	}
-	defer s.verifyStore.DeleteVerificationToken(ctx, token)
+	defer func() { _ = s.verifyStore.DeleteVerificationToken(ctx, token) }()
 	return s.VerifyEmail(ctx, userID)
 }
 

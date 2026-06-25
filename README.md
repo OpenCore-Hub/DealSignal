@@ -59,9 +59,12 @@ pnpm lint
 # 单元测试
 pnpm test
 
-# E2E 测试
+# E2E 测试（MSW Mock）
 pnpm exec playwright install --with-deps chromium
 pnpm test:e2e
+
+# 真实后端 E2E 测试
+pnpm test:e2e:real
 
 # 构建
 pnpm build
@@ -154,7 +157,10 @@ cd apps/api && ./e2e-test.sh
 # 后端 P0 + AI E2E（本地 mock LLM）
 cd apps/api && ./e2e-ai.sh
 
-# 前端真实后端 E2E
+# 前端真实后端 E2E（npm script）
+cd apps/web && pnpm test:e2e:real
+
+# 前端真实后端 E2E（脚本入口）
 cd apps/web && ./e2e-real-backend.sh
 ```
 

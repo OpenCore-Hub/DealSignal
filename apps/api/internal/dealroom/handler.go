@@ -11,7 +11,6 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Handler exposes deal room endpoints.
@@ -456,11 +455,4 @@ func folderPermissionResponse(p db.RoomMemberFolderPermission) gin.H {
 		"folder_path": p.FolderPath,
 		"permission":  p.Permission,
 	}
-}
-
-func textOrNil(t pgtype.Text) interface{} {
-	if t.Valid {
-		return t.String
-	}
-	return nil
 }

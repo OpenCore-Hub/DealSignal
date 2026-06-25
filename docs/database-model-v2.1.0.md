@@ -48,14 +48,15 @@ owner: "后端架构师"
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
 | v2.1.0 | 2026-06-20 | 后端架构师 | 按 PRD-v2.1.0 第 10.1 节数据模型初始版本 | 全资源 |
+| v2.1.3 | 2026-06-24 | 后端架构师 | 对齐 migrations 013~016：`users.email_verified`、`workspaces` 安全开关、`documents.file_size`/`storage_key`、新增 `integration_tokens`、重命名 `document_chunks` → `chunks` 并调整 `chunk_boxes` 结构 | 第 4 章、第 11 章 |
 
 ### 1.2 相关 ADR
 
 | ADR 编号 | 标题 | 影响表/字段 |
 |----------|------|-------------|
 | D-13 | 租户隔离采用"子域名 + Workspace"混合模式 | 全部业务表增加 tenant_id + workspace_id |
-| D-05 | 搜索采用 hybrid（exact + fts + vector） | document_chunks.search_vector / embedding |
-| D-03 | 使用 PAGE_IMAGE_NORMALIZED 坐标 | chunk_boxes.bbox / document_blocks.bbox |
+| D-05 | 搜索采用 hybrid（exact + fts + vector） | `chunks.normalized_text` / `chunks.embedding` |
+| D-03 | 使用 PAGE_IMAGE_NORMALIZED 坐标 | `chunk_boxes.coordinate_space` / `chunk_boxes.x,y,w,h` |
 | D-16 | 支持企业自定义域名 | tenant_domains |
 
 ### 1.3 评审记录
@@ -68,6 +69,22 @@ owner: "后端架构师"
 | 合规评审 | 2026-06-20 | 合规负责人 | 通过 | 数据保留与审计日志策略已确认 |
 | 性能评审 | 2026-06-20 | 后端负责人 + DBA | 通过 | 核心查询执行计划已确认 |
 | 最终评审 | 2026-06-20 | 全体 | 已批准 | database-model-v2.1.0 进入实施阶段 |
+
+### 1.4 v2.1.3 Schema 变更摘要
+
+本资源最初按 PRD-v2.1.0 设计，v2.1.3 实际迁移做了以下简化与调整：
+
+- **`users`**：`email_verified_at` → `email_verified BOOLEAN`。
+- **`workspaces`**：新增 `force_email_verification`、`watermark_downloads`、`two_factor_enabled`。
+- **`documents`**：新增 `storage_key`、`file_size`；无 `metadata` jsonb；`source_type` 枚举为小写。
+- **`chunks`**（原 `document_chunks`）：按实际迁移重命名；通过 `page_id` 关联 `pages`；v2.1.3 追加 `document_id`、`chunk_index`、`normalized_text`、`chunk_type`；`embedding` 可选。
+- **`chunk_boxes`**：由 JSONB `bbox` 展开为 `coordinate_space`、`x`、`y`、`w`、`h`、`source`、`confidence`；无 `tenant_id`/`workspace_id`/`item_index`/`box_type`。
+- **`links`**：`permission_type` 增加 `'nda'`。
+- **`deal_rooms`**：新增 `requires_nda`、`requires_approval`。
+- **`room_member_folder_permissions`**：`permission` 枚举改为 `('view', 'download', 'none')`。
+- **`room_access_requests`**：`status` 枚举增加 `'cancelled'`、`'revoked'`。
+- **新增 `integration_tokens`**：workspace 级 OAuth 令牌表，复合主键 `(workspace_id, provider)`。
+- **迁移工具**：当前使用自定义文件名作为 version key，存在两个 `016` 迁移和缺失 `014` down 文件，后续若切回 golang-migrate 需统一版本号。
 
 ---
 
@@ -243,7 +260,7 @@ ALTER TABLE tenant_domains ADD CONSTRAINT chk_tenant_domains_ssl
 | id | uuid | NOT NULL | gen_random_uuid() | 主键 |
 | email | varchar(255) | NOT NULL | - | 全局唯一邮箱 |
 | encrypted_password | varchar(255) | NULL | - | bcrypt/Argon2 哈希 |
-| email_verified_at | timestamptz | NULL | - | 邮箱验证时间 |
+| email_verified | boolean | NOT NULL | false | 邮箱是否已验证 |
 | full_name | varchar(255) | NULL | - | 姓名 |
 | avatar_url | text | NULL | - | 头像 URL |
 | status | varchar(32) | NOT NULL | 'active' | active / inactive / deleted |
@@ -276,6 +293,9 @@ ALTER TABLE users ADD CONSTRAINT chk_users_status
 | name | varchar(255) | NOT NULL | - | Workspace 名称 |
 | status | varchar(32) | NOT NULL | 'active' | active / archived / deleted |
 | settings | jsonb | NOT NULL | '{}' | 工作空间配置 |
+| force_email_verification | boolean | NOT NULL | false | 是否强制成员邮箱验证 |
+| watermark_downloads | boolean | NOT NULL | false | 下载时是否强制水印 |
+| two_factor_enabled | boolean | NOT NULL | false | 是否启用 workspace 级 2FA |
 | created_at | timestamptz | NOT NULL | now() | 创建时间 |
 | updated_at | timestamptz | NOT NULL | now() | 更新时间 |
 | deleted_at | timestamptz | NULL | - | 软删除 |
@@ -397,6 +417,8 @@ ALTER TABLE workspace_invitations ADD CONSTRAINT chk_workspace_invitations_statu
 | title | varchar(500) | NOT NULL | - | 文档标题 |
 | source_type | varchar(32) | NOT NULL | - | PDF / DOCX / PPTX / XLSX |
 | source_hash | varchar(128) | NOT NULL | - | 原始文件 hash，用于去重 |
+| storage_key | text | NOT NULL | - | 对象存储中原始文件 key |
+| file_size | bigint | NOT NULL | 0 | 原始文件大小（字节），v2.1.3 新增 |
 | status | varchar(32) | NOT NULL | 'uploaded' | uploaded / processing / ready / failed / archived |
 | page_count | int | NULL | - | 总页数 |
 | metadata | jsonb | NOT NULL | '{}' | 文件元数据：大小、MIME、版本等 |
@@ -430,12 +452,14 @@ ALTER TABLE documents ADD CONSTRAINT fk_documents_users
 **约束**：
 ```sql
 ALTER TABLE documents ADD CONSTRAINT chk_documents_source_type
-  CHECK (source_type IN ('PDF', 'DOCX', 'PPTX', 'XLSX'));
+  CHECK (source_type IN ('pdf', 'docx', 'pptx', 'xlsx'));
 ALTER TABLE documents ADD CONSTRAINT chk_documents_status
   CHECK (status IN ('uploaded', 'processing', 'ready', 'failed', 'archived'));
 ALTER TABLE documents ADD CONSTRAINT chk_documents_page_count
   CHECK (page_count IS NULL OR page_count >= 0);
 ```
+
+> **v2.1.3 实际迁移说明**：`documents` 表未包含 `metadata` jsonb 字段；文件位置由 `storage_key` 维护，`file_size` 在 migration `016_document_file_size` 中追加。
 
 #### 4.2.2 表：`document_files`
 
@@ -560,82 +584,84 @@ ALTER TABLE document_blocks ADD CONSTRAINT chk_document_blocks_bbox
   CHECK (jsonb_typeof(bbox) = 'object');
 ```
 
-#### 4.2.5 表：`document_chunks`（AI 检索）
+#### 4.2.5 表：`chunks`（AI 检索）
+
+> **v2.1.3 重命名说明**：实际迁移中表名为 `chunks`（非 `document_chunks`），通过 `page_id` 关联 `pages`，并在 migration `016_chunk_boxes` 中追加 `document_id`、`chunk_index`、`normalized_text`、`chunk_type`。
 
 | 字段 | 类型 | 可空 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | id | uuid | NOT NULL | gen_random_uuid() | 主键 |
 | tenant_id | uuid | NOT NULL | - | 所属租户 |
 | workspace_id | uuid | NOT NULL | - | 所属 workspace |
-| document_id | uuid | NOT NULL | - | 关联文档 |
-| chunk_index | int | NOT NULL | - | chunk 序号 |
-| normalized_text | text | NOT NULL | - | 归一化文本 |
-| search_vector | tsvector | NULL | - | PostgreSQL 全文搜索向量 |
+| page_id | uuid | NOT NULL | - | 关联 page |
+| document_id | uuid | NULL → NOT NULL | - | 关联文档（v2.1.3 新增） |
+| chunk_index | int | NOT NULL | 0 | chunk 序号（v2.1.3 新增） |
+| text | text | NOT NULL | - | 原始文本 |
+| normalized_text | text | NOT NULL | - | 归一化文本（v2.1.3 新增） |
+| chunk_type | text | NOT NULL | 'paragraph' | chunk 类型（v2.1.3 新增） |
+| bbox | jsonb | NULL | - | 页面定位框（原始格式） |
 | embedding | vector(1536) | NULL | - | OpenAI-compatible embedding |
-| embedding_model | varchar(128) | NULL | - | 生成 embedding 的模型 |
-| metadata | jsonb | NOT NULL | '{}' | 额外元数据 |
 | created_at | timestamptz | NOT NULL | now() | 创建时间 |
 
 **主键**：`id`
 
 **索引**：
 ```sql
-CREATE UNIQUE INDEX uk_document_chunks_doc_index ON document_chunks(document_id, chunk_index);
-CREATE INDEX idx_document_chunks_tenant_workspace ON document_chunks(tenant_id, workspace_id);
-CREATE INDEX idx_document_chunks_search_vector ON document_chunks USING gin(search_vector);
-CREATE INDEX idx_document_chunks_embedding ON document_chunks USING hnsw (embedding vector_cosine_ops);
+CREATE INDEX idx_chunks_page_id ON chunks(page_id);
+CREATE INDEX idx_chunks_document ON chunks(document_id);
+CREATE INDEX idx_chunks_normalized_trgm ON chunks USING gin(normalized_text gin_trgm_ops);
+-- 可选：向量索引（当 OpenAI key 配置且写入 embedding 时）
+CREATE INDEX idx_chunks_embedding ON chunks USING hnsw (embedding vector_cosine_ops);
 ```
 
 **外键**：
 ```sql
-ALTER TABLE document_chunks ADD CONSTRAINT fk_document_chunks_documents
+ALTER TABLE chunks ADD CONSTRAINT fk_chunks_pages
+  FOREIGN KEY (page_id) REFERENCES pages(id) ON DELETE CASCADE;
+ALTER TABLE chunks ADD CONSTRAINT fk_chunks_documents
   FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE;
 ```
 
 **约束**：
 ```sql
-ALTER TABLE document_chunks ADD CONSTRAINT chk_document_chunks_index
+ALTER TABLE chunks ADD CONSTRAINT chk_chunks_index
   CHECK (chunk_index >= 0);
 ```
 
 #### 4.2.6 表：`chunk_boxes`（页面定位框）
 
+> **v2.1.3 变更说明**：`chunk_boxes` 不再使用 JSONB `bbox`，而是展开为 `coordinate_space`、`x`、`y`、`w`、`h` 等字段；无 `tenant_id`/`workspace_id`/`item_index`/`box_type`。
+
 | 字段 | 类型 | 可空 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | id | uuid | NOT NULL | gen_random_uuid() | 主键 |
-| tenant_id | uuid | NOT NULL | - | 所属租户 |
-| workspace_id | uuid | NOT NULL | - | 所属 workspace |
 | chunk_id | uuid | NOT NULL | - | 关联 chunk |
 | document_id | uuid | NOT NULL | - | 关联文档 |
 | page_number | int | NOT NULL | - | 页码 |
-| item_index | int | NOT NULL | - | 同一 chunk 内框序号 |
-| box_type | varchar(32) | NOT NULL | 'text' | text / heading / table / image / list |
-| bbox | jsonb | NOT NULL | - | PAGE_IMAGE_NORMALIZED 坐标 {x, y, w, h} |
+| coordinate_space | text | NOT NULL | 'PAGE_IMAGE_NORMALIZED' | 坐标空间 |
+| x | double precision | NOT NULL | - | 左上角 x |
+| y | double precision | NOT NULL | - | 左上角 y |
+| w | double precision | NOT NULL | - | 宽度 |
+| h | double precision | NOT NULL | - | 高度 |
+| source | text | NOT NULL | 'PDF_TEXT_LAYER' | 框来源 |
+| confidence | double precision | NOT NULL | 1.0 | 置信度 |
 | created_at | timestamptz | NOT NULL | now() | 创建时间 |
 
 **主键**：`id`
 
 **索引**：
 ```sql
-CREATE INDEX idx_chunk_boxes_chunk_id ON chunk_boxes(chunk_id);
-CREATE INDEX idx_chunk_boxes_document_page ON chunk_boxes(document_id, page_number);
-CREATE INDEX idx_chunk_boxes_tenant_workspace ON chunk_boxes(tenant_id, workspace_id);
+CREATE INDEX idx_chunk_boxes_chunk ON chunk_boxes(chunk_id);
+CREATE INDEX idx_chunk_boxes_doc_page ON chunk_boxes(document_id, page_number);
 ```
 
 **外键**：
 ```sql
-ALTER TABLE chunk_boxes ADD CONSTRAINT fk_chunk_boxes_document_chunks
-  FOREIGN KEY (chunk_id) REFERENCES document_chunks(id) ON DELETE CASCADE;
+ALTER TABLE chunk_boxes ADD CONSTRAINT fk_chunk_boxes_chunks
+  FOREIGN KEY (chunk_id) REFERENCES chunks(id) ON DELETE CASCADE;
 ALTER TABLE chunk_boxes ADD CONSTRAINT fk_chunk_boxes_documents
   FOREIGN KEY (document_id) REFERENCES documents(id) ON DELETE CASCADE;
 ```
-
-**约束**：
-```sql
-ALTER TABLE chunk_boxes ADD CONSTRAINT chk_chunk_boxes_type
-  CHECK (box_type IN ('text', 'heading', 'table', 'image', 'list'));
-ALTER TABLE chunk_boxes ADD CONSTRAINT chk_chunk_boxes_bbox
-  CHECK (jsonb_typeof(bbox) = 'object');
 ALTER TABLE chunk_boxes ADD CONSTRAINT chk_chunk_boxes_page_number
   CHECK (page_number > 0);
 ```
@@ -699,7 +725,7 @@ ALTER TABLE ingestion_jobs ADD CONSTRAINT chk_ingestion_jobs_retry
 | document_id | uuid | NOT NULL | - | 关联文档 |
 | public_token | varchar(255) | NOT NULL | - | 公开 token，唯一 |
 | name | varchar(255) | NULL | - | 链接名称 |
-| permission_type | varchar(32) | NOT NULL | 'public' | public / email_required / whitelist / password |
+| permission_type | varchar(32) | NOT NULL | 'public' | public / email_required / whitelist / password / nda |
 | allowed_emails | jsonb | NOT NULL | '[]' | 白名单邮箱/域名列表 |
 | password_hash | varchar(255) | NULL | - | 密码哈希 |
 | expires_at | timestamptz | NULL | - | 过期时间 |
@@ -737,7 +763,7 @@ ALTER TABLE links ADD CONSTRAINT fk_links_users
 **约束**：
 ```sql
 ALTER TABLE links ADD CONSTRAINT chk_links_permission_type
-  CHECK (permission_type IN ('public', 'email_required', 'whitelist', 'password'));
+  CHECK (permission_type IN ('public', 'email_required', 'whitelist', 'password', 'nda'));
 ALTER TABLE links ADD CONSTRAINT chk_links_status
   CHECK (status IN ('active', 'disabled', 'revoked'));
 ALTER TABLE links ADD CONSTRAINT chk_links_access_count
@@ -969,6 +995,8 @@ ALTER TABLE assistant_sessions ADD CONSTRAINT chk_assistant_sessions_identity
 | description | text | NULL | - | 描述 |
 | template_type | varchar(64) | NULL | - | Seed / SeriesA / LP_Update / Sales_Proposal |
 | settings | jsonb | NOT NULL | '{}' | 数据室配置：NDA、审批等 |
+| requires_nda | boolean | NOT NULL | false | 是否要求 NDA |
+| requires_approval | boolean | NOT NULL | false | 是否要求访问审批 |
 | status | varchar(32) | NOT NULL | 'active' | active / archived / deleted |
 | created_by | uuid | NOT NULL | - | 创建人 |
 | created_at | timestamptz | NOT NULL | now() | 创建时间 |
@@ -1089,7 +1117,7 @@ ALTER TABLE deal_room_documents ADD CONSTRAINT chk_deal_room_documents_sort
 | room_id | uuid | NOT NULL | - | 关联数据室 |
 | email | varchar(255) | NOT NULL | - | 成员邮箱 |
 | folder_path | varchar(512) | NOT NULL | - | 文件夹路径 |
-| permission | varchar(32) | NOT NULL | 'allow' | allow / deny |
+| permission | varchar(32) | NOT NULL | 'view' | view / download / none |
 | created_at | timestamptz | NOT NULL | now() | 创建时间 |
 | updated_at | timestamptz | NOT NULL | now() | 更新时间 |
 
@@ -1111,7 +1139,7 @@ ALTER TABLE room_member_folder_permissions ADD CONSTRAINT fk_room_folder_permiss
 **约束**：
 ```sql
 ALTER TABLE room_member_folder_permissions ADD CONSTRAINT chk_room_folder_permissions
-  CHECK (permission IN ('allow', 'deny'));
+  CHECK (permission IN ('view', 'download', 'none'));
 ```
 
 #### 4.6.5 表：`room_access_requests`
@@ -1124,7 +1152,7 @@ ALTER TABLE room_member_folder_permissions ADD CONSTRAINT chk_room_folder_permis
 | room_id | uuid | NOT NULL | - | 关联数据室 |
 | email | varchar(255) | NOT NULL | - | 申请者邮箱 |
 | reason | text | NULL | - | 申请理由 |
-| status | varchar(32) | NOT NULL | 'pending' | pending / approved / rejected |
+| status | varchar(32) | NOT NULL | 'pending' | pending / approved / rejected / cancelled / revoked |
 | reviewed_by | uuid | NULL | - | 审批人 |
 | reviewed_at | timestamptz | NULL | - | 审批时间 |
 | created_at | timestamptz | NOT NULL | now() | 创建时间 |
@@ -1151,7 +1179,42 @@ ALTER TABLE room_access_requests ADD CONSTRAINT fk_room_access_requests_users
 **约束**：
 ```sql
 ALTER TABLE room_access_requests ADD CONSTRAINT chk_room_access_requests_status
-  CHECK (status IN ('pending', 'approved', 'rejected'));
+  CHECK (status IN ('pending', 'approved', 'rejected', 'cancelled', 'revoked'));
+```
+
+#### 4.6.6 表：`integration_tokens`（第三方集成令牌）
+
+> **v2.1.3 新增**：用于存储 workspace 级别的 Slack / HubSpot / Salesforce OAuth 令牌。
+
+| 字段 | 类型 | 可空 | 默认值 | 说明 |
+|------|------|------|--------|------|
+| workspace_id | uuid | NOT NULL | - | 所属 workspace（复合主键） |
+| provider | text | NOT NULL | - | slack / hubspot / salesforce |
+| access_token | text | NOT NULL | - | 访问令牌 |
+| refresh_token | text | NULL | - | 刷新令牌 |
+| expires_at | timestamptz | NULL | - | 过期时间 |
+| scope | text | NULL | - | 授权 scope |
+| external_id | text | NULL | - | 第三方账号 ID |
+| created_at | timestamptz | NOT NULL | now() | 创建时间 |
+| updated_at | timestamptz | NOT NULL | now() | 更新时间 |
+
+**主键**：`(workspace_id, provider)`
+
+**索引**：
+```sql
+CREATE INDEX idx_integration_tokens_workspace ON integration_tokens(workspace_id);
+```
+
+**外键**：
+```sql
+ALTER TABLE integration_tokens ADD CONSTRAINT fk_integration_tokens_workspaces
+  FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE;
+```
+
+**约束**：
+```sql
+ALTER TABLE integration_tokens ADD CONSTRAINT chk_integration_tokens_provider
+  CHECK (provider IN ('slack', 'hubspot', 'salesforce'));
 ```
 
 
@@ -1790,8 +1853,9 @@ CREATE TABLE audit_logs (
 
 - **数据库访问层**：sqlc（基于 SQL 生成类型安全 Go 代码）+ pgx（PostgreSQL 驱动）
 - **迁移工具**：golang-migrate（推荐）或 Atlas
-- **迁移脚本位置**：`apps/api/migrations/`
-- **迁移命名**：`{timestamp}_{description}.up.sql` / `{timestamp}_{description}.down.sql`
+- **迁移脚本位置**：`apps/api/internal/db/migrations/`
+- **迁移命名**：`{version}_{description}.up.sql` / `{version}_{description}.down.sql`
+- **v2.1.3 现状**：当前 `MigrateUp` 使用完整文件名作为 version key，因此允许非连续 version；但存在两个 `016` 迁移（`016_chunk_boxes`、`016_document_file_size`）且 `014_workspace_security` 缺少 down 文件。若后续切回标准 golang-migrate，需重新整理版本号并补全 down 脚本。
 - **环境**：本地 / staging / production 分别通过 `make migrate-up` / `atlas migrate apply` 执行；sqlc 查询文件位于 `apps/api/internal/db/queries/`
 
 ### 11.2 sqlc 配置示例
@@ -1856,6 +1920,7 @@ CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- 可选，用于模糊匹配
 ### 11.5 回滚策略
 
 - golang-migrate 要求每个 up 迁移对应一个 down 迁移；重大变更前需人工审查 down 脚本。
+- **v2.1.3 债务**：`014_workspace_security.down.sql` 缺失；`016_chunk_boxes` 与 `016_document_file_size` 共享版本号，需在切回标准迁移工具前修复。
 - 生产迁移前对目标库做快照备份。
 - 破坏性变更（如删除列）分两步：先弃用，再删除。
 - 分区表变更失败时，可 detach 问题分区并重建。

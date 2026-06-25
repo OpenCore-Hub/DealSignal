@@ -3,7 +3,7 @@
 > 本文件用于持续跟踪 DealSignal 各版本的实际落地进度。  
 > 最后更新：`2026-06-24`  
 > 当前分支：`main`  
-> 当前版本：`v2.1.2`（已发布），`main` 领先 tag `v2.1.2` 14 个 commit（`v2.1.2-14-g3447cfd`）
+> 当前版本：`v2.1.2`（已发布），`v2.1.3` 进度已合入 `main`；`main` 领先 tag `v2.1.2` 43 个 commit（`v2.1.2-43-g87ed9ea`），工作区干净
 
 ---
 
@@ -12,9 +12,9 @@
 | 维度 | 结论 |
 |---|---|
 | **v2.1.2 里程碑** | 已 100% 完成并发布（CHANGELOG 日期 2026-06-22） |
-| **v2.1.3 工作区** | 存在大量未提交改动：72 个修改文件、35 个未跟踪文件、代码净增约 +4,451/-718 行 |
-| **当前阶段** | v2.1.3 前端审计优化 + 后端加固已进入实现，但尚未形成新的 task/issue 清单 |
-| **最大风险** | 大段未落库 diff、文档滞后于代码、v2.1.3 阻塞项与工程债务仍需收尾 |
+| **v2.1.3 合入状态** | `feat/v2.1.3-progress` 已合入 `main`，工作区干净 |
+| **当前阶段** | v2.1.3 进度已落库；剩余 Phase A~D 条目需基于当前 `main` 重新验证并关闭 |
+| **最大风险** | 部分阻塞项/UI/算法任务状态需重新确认；database-model、ARCHITECTURE、README 需随代码同步 |
 
 ---
 
@@ -61,46 +61,46 @@
 
 ---
 
-## 3. 当前工作区状态（v2.1.3 进行中）
+## 3. 当前工作区状态（v2.1.3 已合入 main）
 
 ### 3.1 改动统计
 
 | 类别 | 数量 | 备注 |
 |---|---|---|
-| 已修改文件 | 72 | 均为 `apps/api` 与 `apps/web` 代码 |
-| 未跟踪文件 | 35 | 含迁移脚本、新模块、前端新页面、环境文件等 |
-| 代码净增量 | +4,451 / -718 | 基于 `git diff --stat` |
-| 文档改动 | 0 | `docs/` 目录无 diff，文档滞后于代码 |
+| 已修改文件 | 0 | 工作区干净 |
+| 未跟踪文件 | 0 | 工作区干净 |
+| 代码净增量 | 0 | 工作区干净 |
+| 文档改动 | 已同步 | v2.1.3 实施计划、issue 清单、task 文件、API-SPEC 已随代码更新 |
 
 ### 3.2 后端改动地图
 
 | 模块 | 主要变更 | 状态 |
 |---|---|---|
-| `internal/ingestion/pdf.go` | PDF bbox/webp 解析大幅扩展 | 🟡 进行中 |
-| `internal/integration/*` | HubSpot/Slack 集成逻辑增强 | 🟡 进行中 |
-| `internal/search/*` | 搜索 service/handler 重构与测试补强 | 🟡 进行中 |
-| `internal/server/*` | 路由与服务端初始化调整 | 🟡 进行中 |
-| `internal/upload/handler.go` | 上传接口改造 | 🟡 进行中 |
-| `internal/workspace/*` | workspace handler/middleware/service 扩展 | 🟡 进行中 |
-| `internal/middleware/*` | 新增限流、幂等中间件（未跟踪文件） | 🟡 进行中 |
-| `internal/auth/memory_store.go` | 新增内存 store | 🟡 进行中 |
-| `internal/logger/` / `internal/mailer/` / `internal/redis/` | 新增基础模块 | 🟡 进行中 |
-| 数据库迁移 | 新增 013~016 号迁移 | 🟡 进行中 |
+| `internal/ingestion/pdf.go` | PDF bbox/webp 解析大幅扩展 | ✅ 已完成（已合入 main） |
+| `internal/integration/*` | HubSpot/Slack 集成逻辑增强 | ✅ 已完成（已合入 main） |
+| `internal/search/*` | 搜索 service/handler 重构与测试补强 | ✅ 已完成（已合入 main） |
+| `internal/server/*` | 路由与服务端初始化调整 | ✅ 已完成（已合入 main） |
+| `internal/upload/handler.go` | 上传接口改造 | ✅ 已完成（已合入 main） |
+| `internal/workspace/*` | workspace handler/middleware/service 扩展 | ✅ 已完成（已合入 main） |
+| `internal/middleware/*` | 新增限流、幂等中间件 | ✅ 已完成（已合入 main） |
+| `internal/auth/memory_store.go` | 新增内存 store | ✅ 已完成（已合入 main） |
+| `internal/logger/` / `internal/mailer/` / `internal/redis/` | 新增基础模块 | ✅ 已完成（已合入 main） |
+| 数据库迁移 | 新增 013~016 号迁移 | ✅ 已完成（已合入 main） |
 
 ### 3.3 前端改动地图
 
 | 模块 | 主要变更 | 状态 |
 |---|---|---|
-| `src/lib/apiClient.ts` + `.test.ts` | 新增 apiClient 测试与改造 | 🟡 进行中 |
-| `src/lib/api.ts` | request/Content-Type/FormData 适配 | 🟡 进行中 |
-| `src/lib/mocks/handlers.ts` | mock handler 大幅扩展 | 🟡 进行中 |
-| `components/upload/Uploader.tsx` | 上传组件重写 | 🟡 进行中 |
-| `components/documents/DocumentContent.tsx` | 文档内容展示增强 | 🟡 进行中 |
-| `components/layout/TopNav.tsx` | TopNav 微调 | 🟡 进行中 |
-| `routes/settings/integrations.tsx` | 集成设置页增强 | 🟡 进行中 |
-| `e2e/*` | P0 + real-backend E2E 用例更新 | 🟡 进行中 |
-| `router.tsx` | 路由调整 | 🟡 进行中 |
-| `login.tsx` / `register.tsx` / `verify-email.tsx` | 新增认证页面（未跟踪） | 🟡 进行中 |
+| `src/lib/apiClient.ts` + `.test.ts` | 新增 apiClient 测试与改造 | ✅ 已完成（已合入 main） |
+| `src/lib/api.ts` | request/Content-Type/FormData 适配 | ✅ 已完成（已合入 main） |
+| `src/lib/mocks/handlers.ts` | mock handler 大幅扩展 | ✅ 已完成（已合入 main） |
+| `components/upload/Uploader.tsx` | 上传组件重写 | ✅ 已完成（已合入 main） |
+| `components/documents/DocumentContent.tsx` | 文档内容展示增强 | ✅ 已完成（已合入 main） |
+| `components/layout/TopNav.tsx` | TopNav 微调 | ✅ 已完成（已合入 main） |
+| `routes/settings/integrations.tsx` | 集成设置页增强 | ✅ 已完成（已合入 main） |
+| `e2e/*` | P0 + real-backend E2E 用例更新 | ✅ 已完成（已合入 main） |
+| `router.tsx` | 路由调整 | ✅ 已完成（已合入 main） |
+| `login.tsx` / `register.tsx` / `verify-email.tsx` | 新增认证页面 | ✅ 已完成（已合入 main） |
 
 ---
 
@@ -116,8 +116,8 @@
 | A2 | InsightsSuggestions「写跟进邮件」按钮无响应 | `routes/insights/suggestions.tsx` | 🔲 待处理 | 未在 diff 中观察到改动 |
 | A3 | TopNav 通知铃铛无响应 | `components/layout/TopNav.tsx` | 🔲 待处理 | TopNav 有微调，需验证 |
 | A4 | SmartLinkCreator 复制后无 toast/图标反馈 | `components/links/SmartLinkCreator.tsx` | 🔲 待处理 | 未在 diff 中观察到改动 |
-| A5 | SettingsGeneral/Brand/Integrations 保存无 toast/catch | `routes/settings/general.tsx`、`brand.tsx`、`integrations.tsx` | 🔲 待处理 | integrations 有改动，需验证 |
-| A6 | Brand Logo 仅本地预览，未持久化 | `routes/settings/brand.tsx` | 🔲 待处理 | 未在 diff 中观察到改动 |
+| A5 | SettingsGeneral/Brand/Integrations 保存无 toast/catch | `routes/settings/general.tsx`、`brand.tsx`、`integrations.tsx` | 🟡 需验证 | integrations 已改用 `useAsyncData`，需确认是否统一了保存反馈 |
+| A6 | Brand Logo 仅本地预览，未持久化 | `routes/settings/brand.tsx` | ✅ 已完成 | commit `9c3c832` 实现 workspace logo 上传持久化与错误回退 |
 | A7 | TopNav 头像硬编码 "JD"，无账户菜单 | `components/layout/TopNav.tsx` | 🔲 待处理 | 需验证当前改动是否覆盖 |
 | A8 | DocumentDetail/LinksTable 仍使用 `window.confirm` | `DocumentDetail.tsx`、`LinksTable.tsx` | 🔲 待处理 | 未确认 |
 | A9 | 界面文案中英混杂 | 多处 | 🔲 待处理 | 未确认 |
@@ -126,17 +126,17 @@
 
 | # | 问题 | 状态 | 备注 |
 |---|---|---|---|
-| B1 | `request` 强制 `Content-Type: application/json`，与 FormData 冲突 | 🟡 进行中 | `api.ts` 与 `Uploader.tsx` 已有改动 |
-| B2 | API 路径、认证头、分页/幂等未对齐 API-SPEC | 🟡 进行中 | `apiClient.ts` 与 `api.ts` 已有改动 |
-| B3 | `heatScore.ts` `topKeyPages` 用页码字符串匹配，与算法文档不符 | 🔲 待处理 | 未在 diff 中观察到改动 |
+| B1 | `request` 强制 `Content-Type: application/json`，与 FormData 冲突 | ✅ 已完成 | 已移除强制 JSON，FormData 上传已适配 |
+| B2 | API 路径、认证头、分页/幂等未对齐 API-SPEC | ✅ 已完成 | 已统一 `X-Idempotency-Key`、workspace-scoped 路径与响应契约 |
+| B3 | `heatScore.ts` `topKeyPages` 用页码字符串匹配，与算法文档不符 | ✅ 已完成 | commit `d2ac14a` 对齐 `topKeyPages` 匹配逻辑 |
 
 ### Phase C：统一数据层与组件拆分
 
 | # | 问题 | 状态 | 备注 |
 |---|---|---|---|
-| C1 | 18+ 处重复 fetch 样板 | 🔲 待处理 | 需引入 `useAsyncData` 或类似 hook |
+| C1 | 18+ 处重复 fetch 样板 | ✅ 已完成 | `useAsyncData` 已推广至剩余数据获取路由 |
 | C2 | `api.ts` 仍 re-export 工具函数 | 🔲 待处理 | 职责需解耦 |
-| C3 | oversized 组件拆分 | 🔲 待处理 | SmartLinkCreator / DocumentsTable / DocumentDetail / DashboardPage |
+| C3 | oversized 组件拆分 | 🟡 部分完成 | `DocumentDetail`、`CanvasViewer` 已拆分；其余组件待评估 |
 | C4 | 日期格式化、事件映射、日趋势聚合重复逻辑集中化 | 🔲 待处理 | 抽离到 `formatters.ts` / `calculations.ts` |
 | C5 | 核心工具函数补单元测试 | 🔲 待处理 | `heatScore.ts`、`formatters.ts`、`calculations.ts` |
 
@@ -146,7 +146,7 @@
 |---|---|---|---|
 | D1 | 空状态统一使用 `EmptyState` | 🔲 待处理 | DocumentDetail、contacts/detail、insights/pages |
 | D2 | HeatMap / ContactDetail 键盘可达性 | 🔲 待处理 | 需加 `role`/`tabIndex` 或改为 `<Link>` |
-| D3 | AIAssistant/AIChat 移动端高度适配 | 🔲 待处理 | 改为 `max-h-[calc(100dvh-2rem)]` |
+| D3 | AIAssistant/AIChat 移动端高度适配 | ✅ 已完成 | commit `83990a7` 已适配小视口 |
 | D4 | 表格小屏横向滚动 | 🔲 待处理 | 设置 `min-w-[640px]` |
 | D5 | AI 面板圆角/阴影统一 | 🔲 待处理 | 统一 `rounded-xl` + `shadow-lg` |
 | D6 | Sidebar 折叠态图标 Tooltip | 🔲 待处理 | 未确认 |
@@ -157,9 +157,9 @@
 
 | 风险 | 影响 | 下一步行动 |
 |---|---|---|
-| 大段未提交 diff | 丢失/冲突风险高 | 将当前 72+35 个文件按功能切分为多个 PR 提交 |
-| 文档滞后 | 后续维护与审计困难 | 同步更新 API-SPEC、database-model、ARCHITECTURE、README |
-| v2.1.3 缺 task/issue 清单 | 进度不可追踪 | 将本清单中的 Phase A~D 拆分为 `DS-028+` issue 与 `TASK-*-v2.1.3` 任务文件 |
+| 已合入 diff 的收尾验证 | 部分 Phase A/D 任务状态需重新确认 | 基于当前 `main` 逐项验证剩余阻塞项与 UI 细节 |
+| 文档滞后 | 后续维护与审计困难 | 同步更新 API-SPEC、database-model、ARCHITECTURE、README（本次执行） |
+| v2.1.3 缺 task/issue 清单 | 进度不可追踪 | 已补充 `docs/IMPLEMENTATION-PLAN-ISSUES-v2.1.3.md` 与 `docs/tasks/agent-tasks-v2.1.3/*` |
 | API 路径/响应未最终统一 | 前后端联调可能返工 | 在 `TASK-FRONTEND-003` 后续工作中明确 `/api${path}` → `/{ws}/api/v1/*` 迁移方案 |
 | 测试覆盖不足 | 回归风险高 | 随 Phase C 为核心工具函数与组件补测试 |
 
@@ -170,6 +170,7 @@
 | 日期 | 版本 | 更新内容 | 更新人 |
 |---|---|---|---|
 | 2026-06-24 | v2.1.3 | 初始进度追踪，汇总 v2.1.2 完成情况与 v2.1.3 工作区状态 | Kimi Code CLI |
+| 2026-06-24 | v2.1.3 | `feat/v2.1.3-progress` 已合入 `main`，更新工作区状态与任务进度 | Kimi Code CLI |
 
 ---
 

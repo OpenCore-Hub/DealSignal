@@ -566,14 +566,6 @@ func uuidToString(u pgtype.UUID) string {
 	return uuid.UUID(u.Bytes).String()
 }
 
-func linkUUID(id string) pgtype.UUID {
-	parsed, err := uuid.Parse(id)
-	if err != nil {
-		return pgtype.UUID{}
-	}
-	return pgtype.UUID{Bytes: parsed, Valid: true}
-}
-
 func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	ctx := c.Request.Context()
 

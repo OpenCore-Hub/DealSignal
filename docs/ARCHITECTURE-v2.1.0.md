@@ -7,19 +7,19 @@ owner: 技术团队
 
 # DealSignal 架构与流程图资源 v2.1.0
 
-> **资源编号**：`ARC-2024-001`  
-> **版本**：`v2.1.0`  
-> **模板版本**：`v1`  
-> **状态**：`已批准`  
-> **编写人/适用对象**：`技术团队 / 架构师 / 后端负责人 / 前端负责人`  
-> **编写日期**：`2026-06-20`  
-> **最后更新**：`2026-06-21`  
-> **关联资源**：  
-> - `docs/PRD-v2.1.0.md`  
-> - `docs/TDD-v2.1.0.md`  
-> - `docs/database-model-v2.1.0.md`  
-> - `docs/templates/ARCHITECTURE-DIAGRAMS-template-v1.md`  
-> **评审人**：`CTO、架构师、后端负责人、前端负责人、产品经理、QA 负责人`  
+> **资源编号**：`ARC-2024-001`
+> **版本**：`v2.1.0`
+> **模板版本**：`v1`
+> **状态**：`已批准`
+> **编写人/适用对象**：`技术团队 / 架构师 / 后端负责人 / 前端负责人`
+> **编写日期**：`2026-06-20`
+> **最后更新**：`2026-06-24`
+> **关联资源**：
+> - `docs/PRD-v2.1.0.md`
+> - `docs/TDD-v2.1.0.md`
+> - `docs/database-model-v2.1.0.md`
+> - `docs/templates/ARCHITECTURE-DIAGRAMS-template-v1.md`
+> **评审人**：`CTO、架构师、后端负责人、前端负责人、产品经理、QA 负责人`
 > **渲染工具**：`Mermaid`
 
 ---
@@ -54,6 +54,7 @@ owner: 技术团队
 | 版本 | 日期 | 修改人 | 修改内容 | 影响范围 |
 |------|------|--------|----------|----------|
 | v2.1.1-sync | 2026-06-21 | 技术团队 | 对齐 Web App 实际栈：React 19 + React Router 8 + Vite 8 + Tailwind CSS 4 + Base UI；补充 i18n、Theme、Zustand 状态、React Router 路由说明 | 第 1、4 章 |
+| v2.1.3-sync | 2026-06-24 | 技术团队 | 对齐 v2.1.3 代码：新增前端 `useAsyncData` / `apiClient` 数据层、Logger/Mailer/Redis/Idempotency/RateLimit 模块、Workspace-scoped 路由、公开链接 `/l/:token`、直接 multipart 上传 | 第 4、6、8 章 |
 | v2.1.0 | 2026-06-20 | 技术团队 | 按 ARCHITECTURE-DIAGRAMS-template-v1 创建 DealSignal v2.1.0 架构图资源，包含业务架构、C4 Container 系统架构、部署拓扑、数据流、业务流程、时序、状态、ERD 及图表管理规范 | 全资源 |
 
 ### 1.2 图表资产清单
@@ -236,21 +237,25 @@ flowchart TB
 | 组件 | 技术栈 | 职责 | 对应 TDD 章节 |
 |------|--------|------|---------------|
 | Web App | React 19 + React Router 8 + Vite 8 + TypeScript + Tailwind CSS 4 + Base UI | Dashboard、Viewer、AI 助手、数据室等前端界面；基于 Canvas 渲染页面与水印 overlay | PRD-v2.1.0 前端设计、TDD 第 6.3 节 Viewer Frontend |
-| API Gateway | Kong / Nginx + OpenTelemetry | 路由、鉴权、限流、租户/Workspace 上下文解析、日志与 trace 入口 | TDD-v2.1.0 第 5.6 节“路由策略” |
-| Upload Service | Go 1.22+ + Gin | 文件上传、校验、hash、去重、创建 ingestion_job、生成直传 URL | TDD-v2.1.0 第 6.1 节“Upload Service” |
+| API Gateway | Gin + 自定义中间件栈（Recovery / RequestID / Logger / Metrics / RateLimit / Idempotency / CORS / Auth / WorkspaceAuth） | 路由、鉴权、限流、幂等、租户/Workspace 上下文解析、结构化日志与 Prometheus 指标入口 | TDD-v2.1.0 第 5.6 节“路由策略”、本资源 §4.4 |
+| Upload Service | Go 1.25 + Gin | 直接接收 `multipart/form-data` 文件上传，创建 documents 记录与 ingestion_job；不再走前端预签名 PUT | TDD-v2.1.0 第 6.1 节“Upload Service”、本资源 §6.1 |
 | Ingestion Worker | Go 1.22+ + PDF 处理库（如 go-fitz / pdfcpu）+ OnlyOffice | 异步解析 PDF / Office，生成 webp、chunks、boxes、embedding，更新文档状态 | TDD-v2.1.0 第 6.2 节“Ingestion Worker” |
 | Search Service | Go 1.22+ + pgx + pgvector | exact / full-text / vector / hybrid search，返回候选 chunks | TDD-v2.1.0 第 6.4 节“Search Service” |
 | Evidence Service | Go 1.22+ | 将 Search Service 结果聚合成 quote + page + bbox 的 evidence 列表 | TDD-v2.1.0 第 6.5 节“Evidence Service” |
 | Assistant Service | Go 1.22+ + openai-go | 基于 evidence 调用 LLM 生成回答，管理 assistant_sessions 上下文 | TDD-v2.1.0 第 6.6 节“Assistant Service” |
 | Link Service | Go 1.22+ + Gin + sqlc + pgx | 智能链接创建、权限策略、token 校验、访问日志、链接生命周期 | TDD-v2.1.0 第 6.7 节“Link & Permission Service” |
 | Analytics Service | Go 1.22+ | 行为事件采集、热度评分、跟进建议、聚合分析 | TDD-v2.1.0 第 6.8 节“Analytics Service” |
-| Notification Service | Go 1.22+ + SMTP / Slack Webhook | 邮件通知、Slack 提醒、事件合并与重试 | TDD-v2.1.0 第 6.9 节“Notification Service” |
+| Notification Service | Go 1.25 + SMTP / Slack Webhook | 邮件通知、Slack 提醒、事件合并与重试 | TDD-v2.1.0 第 6.9 节“Notification Service” |
 | Deal Room Service | Go 1.22+ + Gin + sqlc + pgx | 数据室结构、成员权限、访问审批、NDA gating、Q&A | TDD-v2.1.0 第 6.10 节“Deal Room Service” |
 | Integration Service | Go 1.22+ | CRM 同步、Slack 集成、第三方 OAuth 与 webhook 管理 | TDD-v2.1.0 第 6.11 节“Integration Service” |
 | OnlyOffice 集群 | OnlyOffice Document Server（自托管） | Office 文档转 PDF、格式兼容处理 | TDD-v2.1.0 第 6.2 节“Ingestion Worker” |
 | PostgreSQL | RDS PostgreSQL 15 + pgvector 扩展 | 业务数据、文档元数据、chunks、向量索引、审计日志 | TDD-v2.1.0 第 4.2 节“表结构设计” |
-| Redis | ElastiCache / 阿里云 Redis | 缓存、会话、限流、评分聚合缓存 | TDD-v2.1.0 第 8.2 节“缓存策略”、第 8.3 节“异步处理” |
+| Redis | ElastiCache / 阿里云 Redis | 缓存、会话、限流、评分聚合缓存、JWT token 刷新/黑名单/验证令牌、幂等键、限流桶 | TDD-v2.1.0 第 8.2 节“缓存策略”、第 8.3 节“异步处理” |
 | Object Storage | S3 / 阿里云 OSS（私有 bucket） | 原始文件、PDF canonical、page webp、缩略图 | TDD-v2.1.0 第 7.3 节“对象存储安全” |
+| Logger | Go 1.25 + `slog` | 结构化 JSON 日志、全局初始化、`InfoCtx`/`ErrorCtx`、请求 ID 上下文传播 | 本资源 §4.2 |
+| Mailer | Go 1.25 + SMTP / stdout fallback | 邮件发送，当前用于邮箱验证邮件 | 本资源 §4.2 |
+| Redis Client | Go 1.25 + `go-redis` | 统一 Redis 封装，实现 `TokenStore`、`IdempotencyStore`、`RateLimiter` | 本资源 §4.2、§4.4 |
+| Auth Memory Store | Go 1.25 | Redis 不可用时（开发/测试）的 `TokenStore` 内存兜底实现 | 本资源 §4.2 |
 | CDN | Cloudflare | 静态资源分发、签名 URL 校验、DDoS 防护 | TDD-v2.1.0 第 7.4 节“签名 URL 安全” |
 | OpenAI | OpenAI API / 兼容 Embedding & LLM | text-embedding 与 chat completion，用于搜索向量与 AI 问答 | TDD-v2.1.0 第 6.6 节“Assistant Service” |
 
@@ -265,6 +270,21 @@ flowchart TB
 
 > **说明**：前端 mock 数据中的用户可见文案统一返回 i18n key（如 `dashboard.mock.signals.sig_1.title`），由组件调用 `t(key)` 渲染。该模式在接入真实后端时需要重新评估：后端返回 plain text 则组件无需翻译，后端返回 key 则需保持 key 契约一致。
 
+### 4.2.2 前端数据层与网络层
+
+| 模块 | 实现 | 职责 | 关键文件 |
+|------|------|------|----------|
+| `useAsyncData` | React hook | 统一封装 `data / loading / error / refetch` 与请求取消；已推广至 settings、deal-room、contact、insights、integrations 等页面 | `src/hooks/useAsyncData.ts` |
+| `apiClient` | `fetch` 封装 | 支持 workspace-scoped 路径前缀、自动 JWT 读取、无感知 `refresh`、FormData 自动跳过 JSON `Content-Type`、`X-Request-ID`、`Accept-Language`、`X-Idempotency-Key`、结构化 `ApiError` | `src/lib/apiClient.ts` |
+| `api` | 路由 API 对象 | 集中封装 auth、workspaces、documents、pages、links、contacts、deal rooms、insights、assistant、search、members、settings、integrations 等调用；`uploadDocument` / `uploadWorkspaceLogo` 使用 `FormData` | `src/lib/api.ts` |
+| MSW | `msw` + `src/lib/mocks/handlers.ts` | 本地开发与 E2E 的 API mock；覆盖 auth、workspace、dashboard、documents、viewer、insights、assistant、settings、integrations、public viewer 等完整 v2.1.3 接口 | `src/lib/mocks/handlers.ts` |
+
+**路由约定（v2.1.3）**
+
+- 内部 workspace API：`/api/workspaces/:workspaceSlug/*`，由 `apiClient` 自动拼前缀，后端先过 `AuthMiddleware` 再过 `workspace.AuthMiddleware`。
+- 公开 API：`/api/v1/public/*`，供未登录访客访问公开链接、OAuth callback、行为事件上报。
+- 公开链接前端路径：`/l/:token`（原 query token 形式已废弃）。
+
 ### 4.3 说明
 
 | 属性 | 内容 |
@@ -274,6 +294,26 @@ flowchart TB
 | 更新频率 | 每次架构变更 |
 | 对应 TDD | TDD-v2.1.0 第 6 章“核心模块设计” |
 
+
+### 4.4 API Gateway 中间件流程
+
+请求进入后端后的处理顺序：
+
+```text
+Recovery → RequestID → Logger → Metrics → RateLimit → Idempotency → CORS → Auth → WorkspaceAuth → Handler
+```
+
+| 中间件 | 职责 | 关键文件 |
+|--------|------|----------|
+| Recovery | 捕获 panic，返回 500 并记录错误 | `internal/server/server.go` |
+| RequestID | 注入/透传 `X-Request-ID` | `internal/server/server.go` |
+| Logger | 结构化记录请求方法、路径、状态码、耗时、request_id | `internal/server/server.go`、`internal/logger/logger.go` |
+| Metrics | Prometheus 指标收集，暴露 `/metrics` | `internal/server/server.go` |
+| RateLimit | 按 `public` / `auth` / `upload` / `workspace` 分类限流，Redis sorted-set 桶；Redis 失败时 fail-open | `internal/middleware/ratelimit.go` |
+| Idempotency | 对写方法缓存 `Idempotency-Key` 响应，按 `method:user/ip:path:key` 维度；公开/auth/健康检查路由排除 | `internal/middleware/idempotency.go` |
+| CORS | 跨域配置 | `internal/server/server.go` |
+| Auth | JWT access token 校验，写入 `user_id` / `email` 上下文；`skipAuth` 路由绕过 | `internal/auth/middleware.go` |
+| WorkspaceAuth | 校验当前用户是否属于 `:workspaceSlug` 指向的 workspace；检查邮箱验证、2FA 等安全开关 | `internal/workspace/middleware.go` |
 
 ---
 
@@ -334,12 +374,9 @@ flowchart TB
 ```mermaid
 flowchart LR
     U["用户"] -->|选择文件| FE["Web 前端"]
-    FE -->|POST /documents| Upload["Upload Service"]
+    FE -->|POST /documents<br/>multipart/form-data| Upload["Upload Service"]
     Upload -->|校验/去重/创建记录| DB[(PostgreSQL)]
-    Upload -->|生成预签名 PUT| FE
-    FE -->|直传| OSS["Object Storage"]
-    OSS -->|上传成功回调| FE
-    FE -->|通知上传完成| Upload
+    Upload -->|写入原始文件| OSS["Object Storage"]
     Upload -->|推送 ingestion job| Dispatcher["Go channel + DB job table"]
     Dispatcher -->|分发| Worker["Ingestion Worker"]
     Worker -->|下载原始文件| OSS
@@ -347,7 +384,7 @@ flowchart LR
     OnlyOffice -->|返回 PDF| Worker
     Worker -->|提取 bbox / 文本 / 渲染 webp| Worker
     Worker -->|pages / chunks / boxes| DB
-    Worker -->|search_vector / embedding| DB
+    Worker -->|search_vector / embedding（可选）| DB
     Worker -->|更新 document status| DB
     Worker -->|完成通知| Notify["Notification Service"]
 ```
@@ -356,12 +393,14 @@ flowchart LR
 
 | 步骤 | 数据 | 来源 | 去向 | 存储/处理 |
 |------|------|------|------|-----------|
-| 1 | 原始文件二进制 | 用户 | Web 前端 → Upload Service | OSS（私有 bucket） |
-| 2 | 文档元数据 | Upload Service | PostgreSQL | documents、document_files |
+| 1 | 原始文件二进制 | 用户 | Web 前端 → Upload Service | Upload Service 直接写入 OSS（私有 bucket） |
+| 2 | 文档元数据 | Upload Service | PostgreSQL | `documents` 表 |
 | 3 | 解析任务 | Upload Service | PostgreSQL / Go dispatcher | `ingestion_jobs` 表 + Go channel |
-| 4 | 转换后 PDF / webp | Ingestion Worker | OSS | document_files（PDF_CANONICAL / PAGE_WEBP） |
-| 5 | 页面、chunk、box、向量 | Ingestion Worker | PostgreSQL | document_pages、document_chunks、chunk_boxes |
-| 6 | 状态与通知 | Ingestion Worker | PostgreSQL / Notification Service | document status、邮件通知 |
+| 4 | 转换后 PDF / webp | Ingestion Worker | OSS | 按存储 key 写入 PDF canonical / page webp |
+| 5 | 页面、chunk、box、向量 | Ingestion Worker | PostgreSQL | `pages`、`chunks`、`chunk_boxes`；`embedding` 在 OpenAI key 缺失或失败时跳过 |
+| 6 | 状态与通知 | Ingestion Worker | PostgreSQL / Notification Service | `documents.status`、邮件通知 |
+
+> **v2.1.3 变更说明**：上传由“前端预签名 PUT”改为“前端直接 multipart POST 到 Upload Service，由后端写入 OSS”；`document_files` 表在实际迁移中未创建，文件位置由 `documents.storage_key` 等字段维护。
 
 ### 6.2 安全查看与签名 URL 数据流
 
@@ -386,12 +425,14 @@ flowchart LR
 
 | 步骤 | 数据 | 来源 | 去向 | 存储/处理 |
 |------|------|------|------|-----------|
-| 1 | 公开链接 token | 访客 | Link Service | links 表校验 |
-| 2 | 页面元数据 | Link Service | Viewer | document_pages |
-| 3 | 签名 image URL | Link Service | Viewer | Cloudflare URL Signing |
+| 1 | 公开链接 token | 访客 | Link Service | `links` 表校验；前端路径为 `/l/:token` |
+| 2 | 页面元数据 | Link Service | Viewer | `pages` 表 |
+| 3 | 签名 image URL | Link Service | Viewer | 后端通过 `GET /documents/:documentId/pages/signed-url?token=...&page_number=...` 签发 |
 | 4 | webp 图片 | Object Storage | CDN → Viewer | 签名临时访问 |
-| 5 | 阅读行为事件 | Viewer | Analytics Service | page_views、events |
+| 5 | 阅读行为事件 | Viewer | Analytics Service | `page_views`、`events`；公开端点为 `POST /api/v1/public/events` |
 | 6 | 动态水印信息 | Link Service | Viewer | 前端 Canvas overlay 绘制 |
+
+> **v2.1.3 变更说明**：公开链接前端路径统一为 `/l/:token`；签名 URL 使用 GET 查询参数；公开事件上报走 `/api/v1/public/events`。
 
 ### 6.3 AI 问答数据流
 
@@ -417,7 +458,7 @@ flowchart LR
 |------|------|------|------|-----------|
 | 1 | 用户问题 + 会话上下文 | Viewer | Assistant Service | assistant_sessions |
 | 2 | hybrid search 请求 | Assistant Service | Search Service | exact / full-text / vector |
-| 3 | 候选 chunk | PostgreSQL | Search Service | document_chunks、chunk_boxes |
+| 3 | 候选 chunk | PostgreSQL | Search Service | `chunks`、`chunk_boxes` |
 | 4 | evidence（quote / page / bbox） | Evidence Service | Assistant Service | 内存聚合 |
 | 5 | LLM answer | OpenAI | Assistant Service | 基于 evidence 生成 |
 | 6 | 回答与引用 | Assistant Service | Viewer | 自动定位与高亮 |
@@ -434,7 +475,7 @@ flowchart TD
     A["用户进入文档详情页"] --> B{是否有文档权限？}
     B -->|否| C["展示无权限页面"]
     B -->|是| D["点击创建链接"]
-    D --> E["选择权限类型<br/>公开 / 邮箱验证 / 白名单 / 密码"]
+    D --> E["选择权限类型<br/>公开 / 邮箱验证 / 白名单 / 密码 / NDA"
     E --> F["配置过期时间 / 最大访问次数"]
     F --> G{"是否启用下载？"}
     G -->|是| H["download_enabled = true"]
@@ -455,7 +496,7 @@ flowchart TD
 |----------|------|----------|
 | BR-LINK-01 | 文档状态必须为 READY 才能创建链接 | FR-07 |
 | BR-LINK-02 | 同一文档可创建多个独立配置的智能链接 | FR-07 |
-| BR-LINK-03 | 公开链接使用品牌方自定义域名 + query token 形式，token 不可预测 | FR-07、FR-08 |
+| BR-LINK-03 | 公开链接使用品牌方自定义域名 + 路径 `/l/:token` 形式，token 不可预测 | FR-07、FR-08 |
 | BR-LINK-04 | 权限变更（禁用/撤回/修改）实时生效 | FR-08 |
 
 ### 7.2 Workspace 邀请
@@ -540,16 +581,13 @@ sequenceDiagram
     participant NS as Notification Service
 
     U ->> FE: 选择 PDF / Office 文件
-    FE ->> GW: POST /documents (metadata)
+    FE ->> GW: POST /workspaces/:ws/documents<br/>multipart/form-data
+    Note over GW: Recovery → RequestID → Logger → Metrics<br/>→ RateLimit → Idempotency → CORS<br/>→ Auth → WorkspaceAuth
     GW ->> US: 转发请求
-    US ->> DB: 创建 documents / document_files 记录
-    US -->> FE: 返回 upload_url / document_id
-    FE ->> OSS: PUT 原始文件
-    OSS -->> FE: 上传成功
-    FE ->> GW: PATCH /documents/:documentId/uploaded
-    GW ->> US: 通知上传完成
+    US ->> OSS: 写入原始文件
+    US ->> DB: 创建 documents 记录
     US ->> Q: 推送 ingestion job
-    US -->> FE: 已入队
+    US -->> FE: 返回 document_id / status
     Q -->> IW: 消费任务
     IW ->> DB: 更新 status = PROCESSING
     IW ->> OSS: 下载原始文件
@@ -558,8 +596,8 @@ sequenceDiagram
         Only -->> IW: 返回 PDF
     end
     IW ->> IW: 提取文本 / bbox / 渲染 webp
-    IW ->> OSS: 写入 PDF_CANONICAL / PAGE_WEBP
-    IW ->> DB: 写入 pages / chunks / boxes / vectors
+    IW ->> OSS: 写入 PDF canonical / page webp
+    IW ->> DB: 写入 pages / chunks / boxes / vectors（可选）
     IW ->> DB: 更新 documents.status = READY
     IW ->> NS: 发送解析完成通知
     NS ->> U: 邮件/站内通知
@@ -571,8 +609,9 @@ sequenceDiagram
 |------|------|
 | 用途 | 指导上传、直传、异步解析、通知全链路的接口实现与错误处理 |
 | 涉及服务 | Web 前端、API Gateway、Upload Service、Object Storage、Redis、Ingestion Worker、PostgreSQL、OnlyOffice、Notification Service |
-| 关键数据 | document_id、source_hash、upload_url、ingestion_job、pages、chunks、boxes、document.status |
+| 关键数据 | document_id、source_hash、storage_key、ingestion_job、pages、chunks、boxes、document.status；embedding 在 OpenAI key 不可用时跳过 |
 | 异常分支 | 文件超大/格式错误返回 400；上传中断可重试；解析失败 status = FAILED 并通知；OnlyOffice 不可用时降级或重试 |
+| v2.1.3 变更 | 上传改为前端直接 multipart POST，由 Upload Service 写入 OSS；请求经过完整的 API Gateway 中间件栈；`document_files` 表未使用 |
 | 对应 TDD | TDD-v2.1.0 第 6.1 节“Upload Service”、第 6.2 节“Ingestion Worker” |
 | 对应 API | API-01、API-02 |
 
@@ -589,17 +628,17 @@ sequenceDiagram
     participant AS as Analytics Service
     participant FE as Viewer Web App
 
-    V ->> CDN: GET investor.acme.com/?token=xxx
+    V ->> CDN: GET investor.acme.com/l/:token
     CDN ->> GW: 转发请求
-    GW ->> LS: 校验 token
+    GW ->> LS: GET /api/v1/public/links/:token<br/>校验 token
     LS ->> DB: 查询 links / permissions
     DB -->> LS: 返回链接配置
-    LS ->> LS: 校验过期 / 次数 / 密码 / 白名单
-    LS ->> DB: 写入 link_accesses
+    LS ->> LS: 校验过期 / 次数 / 密码 / 白名单 / NDA
+    LS ->> DB: 写入 access_logs
     LS ->> AS: 上报 link_opened 事件
     LS -->> GW: 返回页面元数据
     GW -->> FE: 渲染 Viewer
-    FE ->> GW: POST /pages/signed-url
+    FE ->> GW: GET /api/v1/public/documents/:id/pages/signed-url?token=...&page_number=...
     GW ->> LS: 签发签名 URL
     LS -->> FE: 返回签名 imageUrl
     FE ->> CDN: GET 签名 webp URL
@@ -608,7 +647,7 @@ sequenceDiagram
     OSS -->> CDN: 返回 webp
     CDN -->> FE: 返回 webp
     FE ->> FE: Canvas 绘制 + 水印 overlay
-    FE ->> GW: POST /events (page_view)
+    FE ->> GW: POST /api/v1/public/events (page_view)
     GW ->> AS: 写入 page_views / events
 ```
 
@@ -618,7 +657,7 @@ sequenceDiagram
 |------|------|
 | 用途 | 指导公开链接落地页、权限校验、签名 URL、CDN 回源、行为上报的完整交互 |
 | 涉及服务 | Cloudflare、API Gateway、Link Service、PostgreSQL、Object Storage、Analytics Service、Viewer Web App |
-| 关键数据 | public_token、link_accesses、page 元数据、签名 imageUrl、page_views |
+| 关键数据 | public_token、`access_logs`、page 元数据、签名 imageUrl、`page_views`；前端路径为 `/l/:token` |
 | 异常分支 | token 无效/过期/超限返回拦截页；签名 URL 过期返回 403；OSS 不可用时 CDN 缓存兜底 |
 | 对应 TDD | TDD-v2.1.0 第 6.7 节“Link & Permission Service”、第 6.8 节“Analytics Service” |
 | 对应 API | API-03、API-04、API-05、API-09 |
