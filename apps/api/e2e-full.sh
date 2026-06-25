@@ -407,8 +407,8 @@ api_call BODY STATUS GET "$BASE_URL/api/v1/public/documents/$DOC_ID/pages?token=
 assert_status "GET /public/documents/:id/pages" 200 "$STATUS"
 
 # 10e. Public page signed URL
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/documents/$DOC_ID/pages/signed-url?token=$PUBLIC_TOKEN&page_number=1" "" ""
-assert_status "POST /public/documents/:id/pages/signed-url" 200 "$STATUS"
+api_call BODY STATUS GET "$BASE_URL/api/v1/public/documents/$DOC_ID/pages/signed-url?token=$PUBLIC_TOKEN&page_number=1" "" ""
+assert_status "GET /public/documents/:id/pages/signed-url" 200 "$STATUS"
 
 # 10f. Public download URL
 api_call BODY STATUS GET "$BASE_URL/api/v1/public/documents/$DOC_ID/download-url?token=$PUBLIC_TOKEN" "" ""

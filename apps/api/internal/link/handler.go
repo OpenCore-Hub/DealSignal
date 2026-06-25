@@ -51,7 +51,7 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.POST("/links/:publicToken", h.Access)
 	r.POST("/events", h.RecordEvent)
 	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
-	r.POST("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
+	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
 	r.GET("/documents/:documentId/download-url", h.PublicDownloadURL)
 }
 
