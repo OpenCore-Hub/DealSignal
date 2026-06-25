@@ -169,6 +169,32 @@ func (s *Service) GetRoom(ctx context.Context, roomID, workspaceID string) (db.D
 	return room, nil
 }
 
+// GetRoomSummary returns a room scoped to a workspace with computed aggregates.
+func (s *Service) GetRoomSummary(ctx context.Context, roomID, workspaceID string) (RoomSummary, error) {
+	room, err := s.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return RoomSummary{}, err
+	}
+
+	docs, _ := s.queries.ListDealRoomDocuments(ctx, room.ID)
+	members, _ := s.queries.ListRoomMembers(ctx, room.ID)
+	requests, _ := s.queries.ListAccessRequestsByRoom(ctx, room.ID)
+
+	var pending int64
+	for _, r := range requests {
+		if r.Status == "pending" {
+			pending++
+		}
+	}
+
+	return RoomSummary{
+		Room:             room,
+		DocumentCount:    int64(len(docs)),
+		MemberCount:      int64(len(members)),
+		PendingApprovals: pending,
+	}, nil
+}
+
 // AddMember adds a member to a room. Only room admins/owners can invite.
 func (s *Service) AddMember(ctx context.Context, roomID, workspaceID, inviterUserID, email, role string) (db.RoomMember, error) {
 	if _, err := mail.ParseAddress(email); err != nil {

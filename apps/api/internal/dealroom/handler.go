@@ -167,12 +167,12 @@ func (h *Handler) Create(c *gin.Context) {
 
 // Get returns a data room.
 func (h *Handler) Get(c *gin.Context) {
-	room, err := h.service.GetRoom(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
+	summary, err := h.service.GetRoomSummary(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, roomResponse(room))
+	c.JSON(http.StatusOK, roomDetailResponse(summary))
 }
 
 // AddMemberRequest invites a member.
@@ -238,8 +238,14 @@ func (h *Handler) PublicView(c *gin.Context) {
 		return
 	}
 
+	summary, _ := h.service.GetRoomSummary(
+		c.Request.Context(),
+		uuid.UUID(room.ID.Bytes).String(),
+		uuid.UUID(room.WorkspaceID.Bytes).String(),
+	)
+
 	c.JSON(http.StatusOK, gin.H{
-		"room":    roomResponse(room),
+		"room":    roomDetailResponse(summary),
 		"member":  memberResponse(member),
 		"documents": documentList(docs),
 	})
@@ -371,6 +377,14 @@ func roomResponse(r db.DealRoom) gin.H {
 }
 
 func roomSummaryResponse(r RoomSummary) gin.H {
+	resp := baseRoomResponse(r.Room)
+	resp["documentCount"] = r.DocumentCount
+	resp["memberCount"] = r.MemberCount
+	resp["pendingApprovals"] = r.PendingApprovals
+	return resp
+}
+
+func roomDetailResponse(r RoomSummary) gin.H {
 	resp := baseRoomResponse(r.Room)
 	resp["documentCount"] = r.DocumentCount
 	resp["memberCount"] = r.MemberCount

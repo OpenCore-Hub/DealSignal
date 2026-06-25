@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 
@@ -11,6 +12,42 @@ const FIXTURES_DIR = path.join(__dirname, "fixtures");
 interface SeedResult {
   token: string;
   workspaceSlug: string;
+}
+
+async function uploadFixtureViaApi(token: string, workspaceSlug: string): Promise<string> {
+  const filePath = path.join(FIXTURES_DIR, "sample.pdf");
+  const buffer = fs.readFileSync(filePath);
+  const file = new File([buffer], "sample.pdf", { type: "application/pdf" });
+  const form = new FormData();
+  form.append("file", file);
+
+  const res = await fetch(`${API_BASE_URL}/api/workspaces/${workspaceSlug}/documents`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  });
+  if (!res.ok) {
+    throw new Error(`api upload failed: ${res.status} ${await res.text()}`);
+  }
+
+  await expect.poll(
+    async () => {
+      const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const body = (await listRes.json()) as { data: { id: string; title: string; status: string }[] };
+      return body.data.find((d) => d.title === "sample.pdf" && d.status === "ready")?.id ?? null;
+    },
+    { timeout: 30000 }
+  ).toBeTruthy();
+
+  const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  const body = (await listRes.json()) as { data: { id: string; title: string; status: string }[] };
+  const doc = body.data.find((d) => d.title === "sample.pdf" && d.status === "ready");
+  if (!doc) throw new Error("shared document not found after polling");
+  return doc.id;
 }
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
@@ -48,39 +85,17 @@ async function seedRealBackend(): Promise<SeedResult> {
 }
 
 let seed: SeedResult;
+let sharedDocumentId: string;
 
 test.beforeAll(async () => {
   seed = await seedRealBackend();
+  sharedDocumentId = await uploadFixtureViaApi(seed.token, seed.workspaceSlug);
 });
 
 async function authenticate(page: import("@playwright/test").Page, token: string) {
   await page.addInitScript((t: string) => {
     localStorage.setItem("access_token", t);
   }, token);
-}
-
-async function waitForReadyDocument(token: string, workspaceSlug: string) {
-  await expect.poll(
-    async () => {
-      const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      const body = (await res.json()) as { data: { status: string }[] };
-      return body.data.some((d) => d.status === "ready");
-    },
-    { timeout: 30000 }
-  ).toBe(true);
-}
-
-async function getReadySamplePdfId(token: string, workspaceSlug: string): Promise<string> {
-  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  expect(res.ok).toBe(true);
-  const body = (await res.json()) as { data: { id: string; title: string; status: string }[] };
-  const doc = body.data.find((d) => d.title === "sample.pdf" && d.status === "ready");
-  expect(doc).toBeTruthy();
-  return doc!.id;
 }
 
 function attachDebug(page: import("@playwright/test").Page) {
@@ -90,6 +105,107 @@ function attachDebug(page: import("@playwright/test").Page) {
   page.on("pageerror", (err) => {
     console.log(`[browser error] ${err.message}`);
   });
+  page.on("response", (response) => {
+    if (response.status() === 403) {
+      console.log(`[browser 403] ${response.url()}`);
+    }
+  });
+}
+
+async function createLinkViaApi(
+  token: string,
+  workspaceSlug: string,
+  documentId: string,
+  permissionType: string,
+  opts: { password?: string; allowedEmails?: string[]; downloadEnabled?: boolean } = {}
+): Promise<{ id: string; shortUrl: string }> {
+  const body: Record<string, unknown> = {
+    document_id: documentId,
+    name: `E2E ${permissionType} link`,
+    permission_type: permissionType,
+    download_enabled: opts.downloadEnabled ?? true,
+  };
+  if (opts.password) body.password = opts.password;
+  if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
+
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, Origin: "http://localhost:5173" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`create link failed: ${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as { id: string; shortUrl: string };
+  return data;
+}
+
+async function openGatedPublicLink(
+  page: import("@playwright/test").Page,
+  shareUrl: string,
+  gate: { email?: string; password?: string }
+) {
+  await page.goto(shareUrl);
+  if (gate.email) {
+    await expect(page.locator("#email")).toBeVisible({ timeout: 30000 });
+    await page.locator("#email").fill(gate.email);
+  }
+  if (gate.password) {
+    await expect(page.locator("#password")).toBeVisible({ timeout: 30000 });
+    await page.locator("#password").fill(gate.password);
+  }
+  await page.getByRole("button", { name: "Continue" }).click();
+  await expect(page.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+}
+
+async function revokeLinkViaApi(token: string, workspaceSlug: string, linkId: string) {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${linkId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ status: "revoked" }),
+  });
+  if (!res.ok) {
+    throw new Error(`revoke link failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+async function createDealRoomViaApi(
+  token: string,
+  workspaceSlug: string,
+  name: string,
+  roomSlug: string
+): Promise<{ id: string; slug: string }> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      name,
+      slug: roomSlug,
+      description: "E2E deal room with document",
+      template_type: "seed",
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`create deal room failed: ${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as { id: string; slug: string };
+  return data;
+}
+
+async function addDocumentToDealRoomViaApi(
+  token: string,
+  workspaceSlug: string,
+  roomId: string,
+  documentId: string
+) {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ document_id: documentId }),
+  });
+  if (!res.ok) {
+    throw new Error(`add document to deal room failed: ${res.status} ${await res.text()}`);
+  }
 }
 
 test.describe("real backend P0 flow", () => {
@@ -108,10 +224,11 @@ test.describe("real backend P0 flow", () => {
     await page.goto(`/${seed.workspaceSlug}/documents/upload`);
     await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible({ timeout: 30000 });
 
-    const fileInput = page.locator("input#file-upload");
+    const fileInput = page.locator('[data-testid="file-upload"]');
     await fileInput.setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
 
     await expect(page.getByText("sample.pdf")).toBeVisible();
+    await page.getByRole("button", { name: "Upload now" }).click();
     await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
   });
 
@@ -125,10 +242,11 @@ test.describe("real backend P0 flow", () => {
     const dialog = page.getByRole("dialog", { name: "Upload Document" });
     await expect(dialog).toBeVisible({ timeout: 30000 });
 
-    const fileInput = dialog.locator("input#file-upload");
+    const fileInput = dialog.locator('[data-testid="file-upload"]');
     await fileInput.setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
 
     await expect(dialog.getByText("sample.pdf")).toBeVisible();
+    await dialog.getByRole("button", { name: "Upload now" }).click();
     await expect(dialog.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
 
     await page.goto(`/${seed.workspaceSlug}/documents`);
@@ -139,16 +257,7 @@ test.describe("real backend P0 flow", () => {
     attachDebug(page);
     await authenticate(page, seed.token);
 
-    // Upload a document via UI so we have a ready document.
-    await page.goto(`/${seed.workspaceSlug}/documents/upload`);
-    await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible({ timeout: 30000 });
-    await page.locator("input#file-upload").setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
-    await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
-
-    // Wait for the ingestion worker to finish processing before creating a link.
-    await waitForReadyDocument(seed.token, seed.workspaceSlug);
-    const documentId = await getReadySamplePdfId(seed.token, seed.workspaceSlug);
-
+    const documentId = sharedDocumentId;
     await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
     await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
     await page.getByRole("button", { name: "Create link" }).click();
@@ -178,16 +287,7 @@ test.describe("real backend P0 flow", () => {
     attachDebug(page);
     await authenticate(page, seed.token);
 
-    // Upload a document and create a link so the authenticated viewer has an active link to attribute views to.
-    await page.goto(`/${seed.workspaceSlug}/documents/upload`);
-    await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible({ timeout: 30000 });
-    await page.locator("input#file-upload").setInputFiles(path.join(FIXTURES_DIR, "sample.pdf"));
-    await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
-
-    // Wait for the ingestion worker to finish processing before creating a link.
-    await waitForReadyDocument(seed.token, seed.workspaceSlug);
-    const documentId = await getReadySamplePdfId(seed.token, seed.workspaceSlug);
-
+    const documentId = sharedDocumentId;
     await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
     await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
     await page.getByRole("button", { name: "Create link" }).click();
@@ -240,5 +340,151 @@ test.describe("real backend P0 flow", () => {
     // Should appear in the deal room list.
     await page.goto(`/${seed.workspaceSlug}/deal-rooms`);
     await expect(page.getByText(roomName)).toBeVisible({ timeout: 30000 });
+  });
+
+  test("email-required link gate collects email and creates a contact", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `gate-test-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "email_required");
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail });
+    // Let CanvasViewer report the page view.
+    await visitorPage.waitForTimeout(3500);
+    await visitorPage.close();
+
+    // Contact should appear in the workspace list.
+    await page.goto(`/${seed.workspaceSlug}/contacts`);
+    await expect(page.getByText(visitorEmail)).toBeVisible({ timeout: 30000 });
+
+    // Navigate to contact detail and verify the timeline shows an open event.
+    await page.getByText(visitorEmail).click();
+    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/contacts/`), { timeout: 30000 });
+    await expect(page.getByRole("tab", { name: "Timeline" })).toBeVisible();
+    await page.getByRole("tab", { name: "Timeline" }).click();
+    await expect(page.getByText("opened the document").first()).toBeVisible({ timeout: 30000 });
+  });
+
+  test("password-protected link gate allows access with the correct password", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const password = `Secret-${Date.now()}`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "password", { password });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await openGatedPublicLink(visitorPage, link.shortUrl, { password });
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("whitelist link gate allows access for an allowed email", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `whitelist-test-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "whitelist", {
+      allowedEmails: [visitorEmail],
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail });
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("revoking a link blocks public access", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "public");
+    await revokeLinkViaApi(seed.token, seed.workspaceSlug, link.id);
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await visitorPage.goto(link.shortUrl);
+    await expect(visitorPage.getByText(/link revoked/i)).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("public viewer download button downloads the document", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "public", {
+      download_enabled: true,
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await visitorPage.goto(link.shortUrl);
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+
+    const [download] = await Promise.all([
+      visitorPage.waitForEvent("download"),
+      visitorPage.getByRole("button", { name: "Download" }).click(),
+    ]);
+    expect(download.suggestedFilename()).toBe("sample.pdf");
+    await visitorPage.close();
+  });
+
+  test("insights overview shows top documents and links", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    await page.goto(`/${seed.workspaceSlug}/insights/overview`);
+    await expect(page.getByText("Top documents")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText("Top links")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
+  });
+
+  test("insights page engagement loads document analytics", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    await page.goto(`/${seed.workspaceSlug}/insights/pages`);
+    await expect(page.getByText("Page engagement")).toBeVisible({ timeout: 30000 });
+    await page.getByRole("combobox").click();
+    await expect(page.getByRole("option", { name: "sample.pdf" }).first()).toBeVisible({ timeout: 30000 });
+  });
+
+  test("settings subpages render", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const cases = [
+      { path: "general", heading: "Workspace" },
+      { path: "brand", heading: "Brand Customization" },
+      { path: "security", heading: "Security" },
+      { path: "members", heading: "Members" },
+      { path: "integrations", heading: "Integrations" },
+      { path: "billing", heading: "Subscription & Usage" },
+      { path: "language", heading: "Language" },
+    ];
+
+    for (const c of cases) {
+      await page.goto(`/${seed.workspaceSlug}/settings/${c.path}`);
+      await expect(page.getByText(c.heading).first()).toBeVisible({ timeout: 30000 });
+    }
+  });
+
+  test("deal room detail shows a document added via API", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const roomSlug = `e2e-room-${Date.now()}`;
+    const room = await createDealRoomViaApi(seed.token, seed.workspaceSlug, "E2E Room With Doc", roomSlug);
+    await addDocumentToDealRoomViaApi(seed.token, seed.workspaceSlug, room.id, sharedDocumentId);
+
+    await page.goto(`/${seed.workspaceSlug}/deal-rooms/${room.id}`);
+    await expect(page.getByRole("heading", { name: "E2E Room With Doc" })).toBeVisible({ timeout: 30000 });
+    const docsCard = page.locator('[data-slot="card"]', { hasText: "Documents" });
+    await expect(docsCard).toBeVisible({ timeout: 30000 });
+    await expect(docsCard.getByText("1")).toBeVisible({ timeout: 30000 });
   });
 });

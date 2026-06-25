@@ -61,6 +61,7 @@ export function useViewerDocument({
   const [zoom, setZoom] = useState(100);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const { highlightedPage } = useAIStore();
+  const publicAccessCredentialsRef = useRef(publicAccessCredentials);
 
   const loadDocument = useCallback(async (): Promise<ViewerDocumentData> => {
     const id = documentId;
@@ -132,6 +133,12 @@ export function useViewerDocument({
     };
   }, [documentId, page, pages.length, publicToken, publicAccessCredentials]);
 
+  // Keep the latest credentials available to the page-view cleanup without
+  // re-triggering the duration effect when they change.
+  useEffect(() => {
+    publicAccessCredentialsRef.current = publicAccessCredentials;
+  }, [publicAccessCredentials]);
+
   // Report public viewer page view duration.
   const pageStartRef = useRef<number>(0);
   useEffect(() => {
@@ -148,7 +155,7 @@ export function useViewerDocument({
           page_number: page,
           duration_seconds: duration,
         },
-        publicAccessCredentials
+        publicAccessCredentialsRef.current
       );
     };
   }, [publicToken, documentId, page, publicVisitorId]);

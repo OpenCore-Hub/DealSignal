@@ -102,11 +102,9 @@ describe("SettingsBrandPage", () => {
     vi.mocked(toast.error).mockClear();
 
     getWorkspaceSettingsMock.mockResolvedValue({
-      data: {
-        logoUrl: "https://cdn.example.com/old-logo.png",
-        brandColor: "#0f172a",
-        viewerDomain: "invest.example.com",
-      },
+      logoUrl: "https://cdn.example.com/old-logo.png",
+      brandColor: "#0f172a",
+      viewerDomain: "invest.example.com",
     });
   });
 
@@ -182,11 +180,9 @@ describe("SettingsBrandPage", () => {
 
   it("saves brand settings", async () => {
     updateWorkspaceSettingsMock.mockResolvedValue({
-      data: {
-        logoUrl: "https://cdn.example.com/old-logo.png",
-        brandColor: "#3b82f6",
-        viewerDomain: "view.example.com",
-      },
+      logoUrl: "https://cdn.example.com/old-logo.png",
+      brandColor: "#3b82f6",
+      viewerDomain: "view.example.com",
     });
 
     await renderPage();

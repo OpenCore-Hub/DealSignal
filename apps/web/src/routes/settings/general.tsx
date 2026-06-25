@@ -14,10 +14,7 @@ import type { WorkspaceSettings } from "@/types";
 export function SettingsGeneralPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const { data, loading, error, refetch } = useAsyncData(
-    () => api.getWorkspaceSettings().then((res) => res.data),
-    []
-  );
+  const { data, loading, error, refetch } = useAsyncData(() => api.getWorkspaceSettings(), []);
   const [draft, setDraft] = useState<WorkspaceSettings | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -32,7 +29,7 @@ export function SettingsGeneralPage() {
     setSaving(true);
     try {
       const res = await api.updateWorkspaceSettings(settings);
-      setDraft(res.data);
+      setDraft(res);
       toast.success(t("general.saved"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));

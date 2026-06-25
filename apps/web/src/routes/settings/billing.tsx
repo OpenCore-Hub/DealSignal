@@ -10,10 +10,7 @@ import { useAsyncData } from "@/hooks/useAsyncData";
 export function SettingsBillingPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const { data: billing, loading, error, refetch } = useAsyncData(
-    () => api.getBillingInfo().then((res) => res.data),
-    []
-  );
+  const { data: billing, loading, error, refetch } = useAsyncData(() => api.getBillingInfo(), []);
 
   if (loading) {
     return (

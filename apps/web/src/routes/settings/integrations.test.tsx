@@ -84,7 +84,7 @@ describe("SettingsIntegrationsPage", () => {
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.info).mockClear();
 
-    getIntegrationsMock.mockResolvedValue({ data: mockStatus });
+    getIntegrationsMock.mockResolvedValue(mockStatus);
   });
 
   it("renders integration statuses", async () => {

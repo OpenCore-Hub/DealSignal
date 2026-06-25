@@ -1971,7 +1971,7 @@ SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
 FROM links
-WHERE public_token = $1 AND status = 'active'
+WHERE public_token = $1
 LIMIT 1
 `
 

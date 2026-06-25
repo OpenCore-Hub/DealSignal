@@ -29,7 +29,7 @@ export function TopNav() {
     async function loadSettings() {
       try {
         const res = await api.getWorkspaceSettings();
-        setSettings(res.data);
+        setSettings(res);
       } catch {
         // Keep fallback avatar on error
       }

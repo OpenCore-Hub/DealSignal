@@ -12,10 +12,7 @@ import type { SecuritySettings } from "@/types";
 export function SettingsSecurityPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const { data, loading, error, refetch } = useAsyncData(
-    () => api.getSecuritySettings().then((res) => res.data),
-    []
-  );
+  const { data, loading, error, refetch } = useAsyncData(() => api.getSecuritySettings(), []);
   const [draft, setDraft] = useState<SecuritySettings | null>(null);
 
   const settings = draft ?? data ?? null;
@@ -26,7 +23,7 @@ export function SettingsSecurityPage() {
     setDraft(next);
     try {
       const res = await api.updateSecuritySettings(next);
-      setDraft(res.data);
+      setDraft(res);
     } catch {
       setDraft(null);
       refetch();

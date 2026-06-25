@@ -16,10 +16,7 @@ const MAX_LOGO_SIZE = 5 * 1024 * 1024;
 export function SettingsBrandPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
-  const { data, loading, error, refetch } = useAsyncData(
-    () => api.getWorkspaceSettings().then((res) => res.data),
-    []
-  );
+  const { data, loading, error, refetch } = useAsyncData(() => api.getWorkspaceSettings(), []);
   const [draft, setDraft] = useState<WorkspaceSettings | null>(null);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -33,7 +30,7 @@ export function SettingsBrandPage() {
     setSaving(true);
     try {
       const res = await api.updateWorkspaceSettings(settings);
-      setDraft(res.data);
+      setDraft(res);
       toast.success(t("brand.saved"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));

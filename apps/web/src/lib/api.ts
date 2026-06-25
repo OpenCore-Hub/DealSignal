@@ -396,10 +396,9 @@ export const api = {
       body: JSON.stringify({ email, role }),
     }),
 
-  getWorkspaceSettings: () =>
-    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/settings"),
+  getWorkspaceSettings: () => request<WorkspaceSettings>(getWorkspaceSlug(), "/settings"),
   updateWorkspaceSettings: (settings: WorkspaceSettings) =>
-    request<{ data: WorkspaceSettings }>(getWorkspaceSlug(), "/settings", {
+    request<WorkspaceSettings>(getWorkspaceSlug(), "/settings", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),
@@ -417,13 +416,11 @@ export const api = {
     );
   },
 
-  getBillingInfo: () =>
-    request<{ data: BillingInfo }>(getWorkspaceSlug(), "/billing"),
+  getBillingInfo: () => request<BillingInfo>(getWorkspaceSlug(), "/billing"),
 
-  getIntegrations: () =>
-    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/integrations/settings"),
+  getIntegrations: () => request<IntegrationStatus>(getWorkspaceSlug(), "/integrations/settings"),
   updateIntegrations: (status: IntegrationStatus) =>
-    request<{ data: IntegrationStatus }>(getWorkspaceSlug(), "/integrations/settings", {
+    request<IntegrationStatus>(getWorkspaceSlug(), "/integrations/settings", {
       method: "PUT",
       body: JSON.stringify(status),
     }),
@@ -445,10 +442,9 @@ export const api = {
       method: "POST",
     }),
 
-  getSecuritySettings: () =>
-    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/security"),
+  getSecuritySettings: () => request<SecuritySettings>(getWorkspaceSlug(), "/security"),
   updateSecuritySettings: (settings: SecuritySettings) =>
-    request<{ data: SecuritySettings }>(getWorkspaceSlug(), "/security", {
+    request<SecuritySettings>(getWorkspaceSlug(), "/security", {
       method: "PUT",
       body: JSON.stringify(settings),
     }),

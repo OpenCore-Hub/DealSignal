@@ -51,7 +51,7 @@ export function Sidebar() {
       try {
         setLoading(true);
         const res = await api.getWorkspaceSettings();
-        setSettings(res.data);
+        setSettings(res);
       } catch {
         // Keep default logo on error
       } finally {

@@ -22,10 +22,7 @@ export function SettingsIntegrationsPage() {
     { id: "zapier" as const, name: "Zapier", description: t("integrations.zapierDescription"), icon: Plug },
   ];
 
-  const { data: status, loading, error, refetch } = useAsyncData(
-    () => api.getIntegrations().then((res) => res.data),
-    []
-  );
+  const { data: status, loading, error, refetch } = useAsyncData(() => api.getIntegrations(), []);
   const [connecting, setConnecting] = useState<Provider | null>(null);
 
   useEffect(() => {
