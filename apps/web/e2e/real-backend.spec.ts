@@ -117,7 +117,14 @@ async function createLinkViaApi(
   workspaceSlug: string,
   documentId: string,
   permissionType: string,
-  opts: { password?: string; allowedEmails?: string[]; allowedDomains?: string[]; downloadEnabled?: boolean } = {}
+  opts: {
+    password?: string;
+    allowedEmails?: string[];
+    allowedDomains?: string[];
+    downloadEnabled?: boolean;
+    expiresAt?: string;
+    maxAccessCount?: number;
+  } = {}
 ): Promise<{ id: string; shortUrl: string }> {
   const body: Record<string, unknown> = {
     document_id: documentId,
@@ -128,6 +135,8 @@ async function createLinkViaApi(
   if (opts.password) body.password = opts.password;
   if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
   if (opts.allowedDomains) body.allowed_domains = opts.allowedDomains;
+  if (opts.expiresAt) body.expires_at = opts.expiresAt;
+  if (typeof opts.maxAccessCount === "number") body.max_access_count = opts.maxAccessCount;
 
   const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links`, {
     method: "POST",
@@ -451,6 +460,75 @@ test.describe("real backend P0 flow", () => {
     await visitorPage.getByRole("button", { name: "Continue" }).click();
     await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
+  });
+
+  test("whitelist link with expiry/max access stays valid after UI toggle disable/enable", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `whitelist-toggle-${Date.now()}@example.com`;
+    const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "whitelist", {
+      allowedEmails: [visitorEmail],
+      expiresAt,
+      maxAccessCount: 5,
+      downloadEnabled: true,
+    });
+
+    // First access works.
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail });
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+
+    // Disable and re-enable via the link detail page toggle.
+    await page.goto(`/${seed.workspaceSlug}/links/${link.id}`);
+    const toggleButton = page.getByRole("button", { name: /^(Enabled|Disabled)$/ });
+    await expect(toggleButton).toBeVisible({ timeout: 30000 });
+    await toggleButton.click();
+    // After disabling, the button label flips to "Enabled".
+    await expect(page.getByRole("button", { name: "Enabled" })).toBeVisible({ timeout: 30000 });
+    await page.getByRole("button", { name: "Enabled" }).click();
+    await expect(page.getByRole("button", { name: "Disabled" })).toBeVisible({ timeout: 30000 });
+
+    // Access again with the allowed email.
+    const visitorPage2 = await page.context().newPage();
+    attachDebug(visitorPage2);
+    await openGatedPublicLink(visitorPage2, link.shortUrl, { email: visitorEmail });
+    await expect(visitorPage2.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage2.close();
+  });
+
+  test("whitelist link stays valid when viewer tab is open during toggle disable/enable", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `whitelist-open-tab-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "whitelist", {
+      allowedEmails: [visitorEmail],
+    });
+
+    // Open viewer in one tab and authenticate in another.
+    const viewerTab = await page.context().newPage();
+    attachDebug(viewerTab);
+    await openGatedPublicLink(viewerTab, link.shortUrl, { email: visitorEmail });
+    await expect(viewerTab.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+
+    // In the authenticated tab, disable and re-enable the link via detail page.
+    await page.goto(`/${seed.workspaceSlug}/links/${link.id}`);
+    await page.getByRole("button", { name: "Disabled" }).click();
+    await expect(page.getByRole("button", { name: "Enabled" })).toBeVisible({ timeout: 30000 });
+    await page.getByRole("button", { name: "Enabled" }).click();
+    await expect(page.getByRole("button", { name: "Disabled" })).toBeVisible({ timeout: 30000 });
+
+    // Back in the viewer tab, retry access with the allowed email.
+    await viewerTab.goto(link.shortUrl);
+    await expect(viewerTab.locator("#email")).toBeVisible({ timeout: 30000 });
+    await viewerTab.locator("#email").fill(visitorEmail);
+    await viewerTab.getByRole("button", { name: "Continue" }).click();
+    await expect(viewerTab.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await viewerTab.close();
   });
 
   test("revoking a link blocks public access", async ({ page }) => {
