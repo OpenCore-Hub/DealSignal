@@ -95,11 +95,14 @@ export function CanvasViewer({
       a.click();
       a.remove();
       if (publicToken) {
-        void api.recordPublicEvent({
-          event_type: "download_attempted",
-          public_token: publicToken,
-          visitor_id: publicVisitorId,
-        });
+        void api.recordPublicEvent(
+          {
+            event_type: "download_attempted",
+            public_token: publicToken,
+            visitor_id: publicVisitorId,
+          },
+          publicAccessCredentials
+        );
       } else {
         void api.recordViewerEvent({
           documentId,

@@ -140,13 +140,16 @@ export function useViewerDocument({
     return () => {
       const duration = Math.max(0, Math.round((Date.now() - pageStartRef.current) / 1000));
       if (duration <= 0) return;
-      void api.recordPublicEvent({
-        event_type: "page_viewed",
-        public_token: publicToken,
-        visitor_id: publicVisitorId,
-        page_number: page,
-        duration_seconds: duration,
-      });
+      void api.recordPublicEvent(
+        {
+          event_type: "page_viewed",
+          public_token: publicToken,
+          visitor_id: publicVisitorId,
+          page_number: page,
+          duration_seconds: duration,
+        },
+        publicAccessCredentials
+      );
     };
   }, [publicToken, documentId, page, publicVisitorId]);
 

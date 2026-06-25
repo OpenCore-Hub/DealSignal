@@ -61,6 +61,8 @@ type EventRequest struct {
 	PublicToken     string  `json:"public_token" binding:"required"`
 	VisitorID       string  `json:"visitor_id"`
 	Email           string  `json:"email,omitempty"`
+	Password        string  `json:"password,omitempty"`
+	NDAAgreed       bool    `json:"nda_agreed,omitempty"`
 	PageNumber      int32   `json:"page_number,omitempty"`
 	DurationSeconds int32   `json:"duration_seconds,omitempty"`
 	ScrollDepth     float64 `json:"scroll_depth,omitempty"`
@@ -75,9 +77,11 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 	}
 
 	res, err := h.service.Access(c.Request.Context(), req.PublicToken, AccessRequest{
-		Email: req.Email,
-		IP:    c.ClientIP(),
-		UA:    c.Request.UserAgent(),
+		Email:     req.Email,
+		Password:  req.Password,
+		NDAAgreed: req.NDAAgreed,
+		IP:        c.ClientIP(),
+		UA:        c.Request.UserAgent(),
 	})
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})

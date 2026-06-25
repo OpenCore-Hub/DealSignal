@@ -247,18 +247,26 @@ export const api = {
       content_type: res.contentType,
     })),
 
-  recordPublicEvent: (payload: {
-    event_type: string;
-    public_token: string;
-    visitor_id?: string;
-    email?: string;
-    page_number?: number;
-    duration_seconds?: number;
-    scroll_depth?: number;
-  }) =>
+  recordPublicEvent: (
+    payload: {
+      event_type: string;
+      public_token: string;
+      visitor_id?: string;
+      email?: string;
+      page_number?: number;
+      duration_seconds?: number;
+      scroll_depth?: number;
+    },
+    creds?: PublicLinkCredentials
+  ) =>
     request<void>(undefined, "/v1/public/events", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        ...payload,
+        email: creds?.email ?? payload.email,
+        password: creds?.password,
+        nda_agreed: creds?.ndaAgreed,
+      }),
       skipAuth: true,
     }),
 
