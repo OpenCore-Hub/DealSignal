@@ -51,8 +51,15 @@ export function ViewerCanvas({
     if (!el || typeof ResizeObserver === "undefined") return;
 
     const updateSize = () => {
-      // clientWidth/Height excludes padding, giving the true available space.
-      setViewportSize({ width: el.clientWidth, height: el.clientHeight });
+      // clientWidth/Height includes padding, so subtract it so the page fits
+      // inside the content area rather than overflowing the padded viewport.
+      const style = window.getComputedStyle(el);
+      const padX = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight);
+      const padY = parseFloat(style.paddingTop) + parseFloat(style.paddingBottom);
+      setViewportSize({
+        width: Math.max(0, el.clientWidth - padX),
+        height: Math.max(0, el.clientHeight - padY),
+      });
     };
 
     updateSize();
