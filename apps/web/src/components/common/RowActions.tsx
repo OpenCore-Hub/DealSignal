@@ -28,10 +28,14 @@ export function RowActions({ actions }: RowActionsProps) {
   const { t } = useTranslation("common");
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger className={buttonVariants({ variant: "ghost", size: "icon" })} aria-label={t("moreActions")}>
+      <DropdownMenuTrigger
+        className={buttonVariants({ variant: "ghost", size: "icon" })}
+        aria-label={t("moreActions")}
+        onClick={(e) => e.stopPropagation()}
+      >
         <DotsThree size={18} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48">
+      <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
         {actions.map((action, index) => (
           <div key={action.label + index}>
             {index > 0 && action.destructive && <DropdownMenuSeparator />}
