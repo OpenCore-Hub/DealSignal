@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
-import { api } from "@/lib/api";
+import { api, type PublicLinkCredentials } from "@/lib/api";
 import { useAIStore } from "@/stores/aiStore";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import type { Document, Evidence, PageAnalytics } from "@/types";
@@ -25,6 +25,7 @@ interface UseViewerDocumentOptions {
   publicLink?: { id: string; downloadEnabled: boolean; watermarkEnabled: boolean };
   publicDocument?: Document;
   publicVisitorId?: string;
+  publicAccessCredentials?: PublicLinkCredentials;
 }
 
 interface ViewerDocumentResult {
@@ -46,6 +47,7 @@ export function useViewerDocument({
   publicToken,
   publicDocument,
   publicVisitorId,
+  publicAccessCredentials,
 }: UseViewerDocumentOptions = {}): ViewerDocumentResult {
   const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
   const documentId = publicDocument?.id ?? routeDocumentId;
@@ -67,7 +69,7 @@ export function useViewerDocument({
     }
     if (publicDocument) {
       if (publicDocument.status === "ready" && publicToken) {
-        const pagesRes = await api.getPublicDocumentPages(id, publicToken);
+        const pagesRes = await api.getPublicDocumentPages(id, publicToken, publicAccessCredentials);
         return { doc: publicDocument, pages: pagesRes.pages, analytics: [] };
       }
       return { doc: publicDocument, pages: [], analytics: [] };
@@ -81,7 +83,7 @@ export function useViewerDocument({
       return { doc: d, pages: pagesRes.pages, analytics: a.data };
     }
     return { doc: d, pages: [], analytics: a.data };
-  }, [documentId, publicDocument, publicToken]);
+  }, [documentId, publicDocument, publicToken, publicAccessCredentials]);
 
   const { data, loading, error, refetch } = useAsyncData(loadDocument, [loadDocument]);
 
@@ -116,7 +118,7 @@ export function useViewerDocument({
     async function loadSignedUrl() {
       try {
         const res = publicToken
-          ? await api.getPublicPageSignedUrl(id!, publicToken, page)
+          ? await api.getPublicPageSignedUrl(id!, publicToken, page, publicAccessCredentials)
           : await api.getPageSignedUrl(id!, page);
         if (!cancelled) setImageUrl(res.image_url);
       } catch {
@@ -128,7 +130,7 @@ export function useViewerDocument({
     return () => {
       cancelled = true;
     };
-  }, [documentId, page, pages.length, publicToken]);
+  }, [documentId, page, pages.length, publicToken, publicAccessCredentials]);
 
   // Report public viewer page view duration.
   const pageStartRef = useRef<number>(0);

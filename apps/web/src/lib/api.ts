@@ -19,6 +19,7 @@ import type {
   Signal,
   Suggestion,
   User,
+  VisitorSummary,
   Workspace,
   WorkspaceInvitation,
   WorkspaceMember,
@@ -54,6 +55,22 @@ export interface InsightsOverview {
 export interface SignalFeed {
   signals: Signal[];
   actions: ActionItem[];
+}
+
+export interface PublicLinkCredentials {
+  email?: string;
+  password?: string;
+  ndaAgreed?: boolean;
+}
+
+function appendPublicCredentials(url: string, creds?: PublicLinkCredentials): string {
+  if (!creds) return url;
+  const params = new URLSearchParams();
+  if (creds.email) params.set("email", creds.email);
+  if (creds.password) params.set("password", creds.password);
+  if (creds.ndaAgreed) params.set("nda_agreed", "true");
+  const query = params.toString();
+  return query ? `${url}&${query}` : url;
 }
 
 function getWorkspaceSlug(): string {
@@ -173,28 +190,28 @@ export const api = {
       `/documents/${id}/download-url`
     ),
 
-  accessPublicLink: (token: string, opts?: { email?: string; password?: string; ndaAgreed?: boolean }) => {
-    const params = new URLSearchParams();
-    if (opts?.email) params.set("email", opts.email);
-    if (opts?.password) params.set("password", opts.password);
-    if (opts?.ndaAgreed) params.set("nda_agreed", "true");
-    const query = params.toString();
-    return request<{
+  accessPublicLink: (token: string, opts?: { email?: string; password?: string; ndaAgreed?: boolean }) =>
+    request<{
       link: { id: string; name?: string; documentId: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean };
       document: { id: string; title: string; pageCount: number; status: string; sourceType: string; fileSize: number };
       visitorId: string;
       requiresEmail: boolean;
       requiresPassword: boolean;
       requiresNda: boolean;
-    }>(undefined, `/v1/public/links/${token}${query ? `?${query}` : ""}`, {
+    }>(undefined, `/v1/public/links/${token}`, {
+      method: "POST",
       skipAuth: true,
-    });
-  },
+      body: JSON.stringify({
+        email: opts?.email,
+        password: opts?.password,
+        nda_agreed: opts?.ndaAgreed ?? false,
+      }),
+    }),
 
-  getPublicDocumentPages: (documentId: string, token: string) =>
+  getPublicDocumentPages: (documentId: string, token: string, creds?: PublicLinkCredentials) =>
     request<{ documentId: string; pages: { pageNumber: number; width: number; height: number }[]; total: number }>(
       undefined,
-      `/v1/public/documents/${documentId}/pages?token=${encodeURIComponent(token)}`,
+      appendPublicCredentials(`/v1/public/documents/${documentId}/pages?token=${encodeURIComponent(token)}`, creds),
       { skipAuth: true }
     ).then((res) => ({
       documentId: res.documentId,
@@ -202,10 +219,13 @@ export const api = {
       total: res.total,
     })),
 
-  getPublicPageSignedUrl: (documentId: string, token: string, pageNumber: number) =>
+  getPublicPageSignedUrl: (documentId: string, token: string, pageNumber: number, creds?: PublicLinkCredentials) =>
     request<{ pageNumber: number; imageUrl: string; expiresAt: string; width: number; height: number }>(
       undefined,
-      `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
+      appendPublicCredentials(
+        `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
+        creds
+      ),
       { method: "GET", skipAuth: true }
     ).then((res) => ({
       page_number: res.pageNumber,
@@ -215,10 +235,10 @@ export const api = {
       height: res.height,
     })),
 
-  getPublicDocumentDownloadUrl: (documentId: string, token: string) =>
+  getPublicDocumentDownloadUrl: (documentId: string, token: string, creds?: PublicLinkCredentials) =>
     request<{ downloadUrl: string; expiresAt: string; filename: string; contentType: string }>(
       undefined,
-      `/v1/public/documents/${documentId}/download-url?token=${encodeURIComponent(token)}`,
+      appendPublicCredentials(`/v1/public/documents/${documentId}/download-url?token=${encodeURIComponent(token)}`, creds),
       { skipAuth: true }
     ).then((res) => ({
       download_url: res.downloadUrl,
@@ -323,6 +343,11 @@ export const api = {
     request<{ data: PageAnalytics[] }>(
       getWorkspaceSlug(),
       `/insights/pages/${documentId}`
+    ),
+  getDocumentVisitors: (documentId: string) =>
+    request<{ data: VisitorSummary[] }>(
+      getWorkspaceSlug(),
+      `/insights/documents/${documentId}/visitors`
     ),
   getSuggestions: () =>
     request<{ data: Suggestion[] }>(getWorkspaceSlug(), "/insights/suggestions"),

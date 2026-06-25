@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { api } from "@/lib/api";
+import { api, type PublicLinkCredentials } from "@/lib/api";
 import { CanvasViewer } from "./CanvasViewer";
 import type { Document } from "@/types";
 
@@ -28,6 +28,7 @@ export function PublicViewerPage() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [ndaAgreed, setNdaAgreed] = useState(false);
+  const [accessCredentials, setAccessCredentials] = useState<PublicLinkCredentials>({});
   const [gate, setGate] = useState<{ email: boolean; password: boolean; nda: boolean }>({
     email: false,
     password: false,
@@ -41,6 +42,11 @@ export function PublicViewerPage() {
     try {
       const res = await api.accessPublicLink(token, gateParams);
       setAccess(res);
+      setAccessCredentials({
+        email: gateParams?.email,
+        password: gateParams?.password,
+        ndaAgreed: gateParams?.ndaAgreed,
+      });
       setGate({
         email: res.requiresEmail && !gateParams?.email,
         password: res.requiresPassword && !gateParams?.password,
@@ -163,7 +169,8 @@ export function PublicViewerPage() {
         publicLink={access.link}
         publicDocument={doc}
         publicVisitorId={access.visitorId}
-        watermark={access.link.watermarkEnabled ? { email: email || access.visitorId } : null}
+        publicAccessCredentials={accessCredentials}
+        watermark={access.link.watermarkEnabled ? { email: accessCredentials.email || email || access.visitorId } : null}
       />
     </div>
   );

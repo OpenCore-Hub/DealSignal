@@ -102,7 +102,9 @@ TOKEN_PUBLIC=$(echo "$LINK" | jq -r '.shortUrl' | sed 's|.*/l/||')
 
 # 8. Access public link
 echo -n "[public access] "
-ACCESS=$(curl -fsS "$BASE_URL/api/v1/public/links/$TOKEN_PUBLIC")
+ACCESS=$(curl -fsS -X POST "$BASE_URL/api/v1/public/links/$TOKEN_PUBLIC" \
+  -H "Content-Type: application/json" \
+  -d '{}')
 echo "$ACCESS" | jq -c '{visitor_id: .visitor_id, document_status: .document.status, page_count: .document.page_count}'
 VISITOR_ID=$(echo "$ACCESS" | jq -r '.visitor_id')
 

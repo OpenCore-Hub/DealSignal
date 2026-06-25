@@ -404,29 +404,26 @@ paths:
         schema:
           type: string
 
-    get:
+    post:
       summary: "访问公开链接"
-      description: "公开接口，返回链接、文档元数据及访问权限校验结果。"
+      description: "公开接口，通过请求体提交 email、password、NDA 同意状态，返回链接、文档元数据及访问权限校验结果。"
       operationId: "accessPublicLink"
       tags:
         - "Link"
       security: []
-      parameters:
-        - name: tenant
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: workspace
-          in: query
-          required: true
-          schema:
-            type: string
-        - name: token
-          in: query
-          required: false
-          schema:
-            type: string
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email:
+                  type: string
+                password:
+                  type: string
+                nda_agreed:
+                  type: boolean
       responses:
         "200":
           description: "成功"

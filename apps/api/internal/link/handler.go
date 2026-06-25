@@ -48,7 +48,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 // RegisterPublicRoutes mounts public link routes.
 func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
-	r.GET("/links/:publicToken", h.Access)
+	r.POST("/links/:publicToken", h.Access)
 	r.POST("/events", h.RecordEvent)
 	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
 	r.POST("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
@@ -299,13 +299,20 @@ func (h *Handler) Create(c *gin.Context) {
 // Access handles public link access.
 func (h *Handler) Access(c *gin.Context) {
 	token := c.Param("publicToken")
-	email := c.Query("email")
-	password := c.Query("password")
+	var body struct {
+		Email     string `json:"email"`
+		Password  string `json:"password"`
+		NDAAgreed bool   `json:"nda_agreed"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
 
 	result, err := h.service.Access(c.Request.Context(), token, AccessRequest{
-		Email:     email,
-		Password:  password,
-		NDAAgreed: c.Query("nda_agreed") == "true",
+		Email:     body.Email,
+		Password:  body.Password,
+		NDAAgreed: body.NDAAgreed,
 		IP:        c.ClientIP(),
 		UA:        c.Request.UserAgent(),
 	})
@@ -314,7 +321,7 @@ func (h *Handler) Access(c *gin.Context) {
 		return
 	}
 
-	if err := h.analytics.RecordLinkOpened(c.Request.Context(), result.Link, result.VisitorID, email, c.ClientIP(), c.Request.UserAgent()); err != nil {
+	if err := h.analytics.RecordLinkOpened(c.Request.Context(), result.Link, result.VisitorID, body.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -623,16 +630,19 @@ func mapPermissionType(t string) string {
 	}
 }
 
-func accessLogList(logs []db.AccessLog) []gin.H {
+func accessLogList(logs []db.ListAccessLogsByLinkRow) []gin.H {
 	out := make([]gin.H, 0, len(logs))
 	for _, log := range logs {
 		item := gin.H{
-			"id":             uuidToString(log.ID),
-			"linkId":         uuidToString(log.LinkID),
-			"visitorEmail":   textOrNil(log.VisitorEmail),
-			"eventType":      log.EventType,
-			"timestamp":      log.CreatedAt.Time.Format(time.RFC3339),
-			"durationSeconds": 0,
+			"id":              uuidToString(log.ID),
+			"linkId":          uuidToString(log.LinkID),
+			"visitorEmail":    log.VisitorEmail,
+			"eventType":       log.EventType,
+			"timestamp":       log.CreatedAt.Time.Format(time.RFC3339),
+			"durationSeconds": log.DurationSeconds,
+		}
+		if log.PageNumber > 0 {
+			item["pageNumber"] = log.PageNumber
 		}
 		if log.UserAgent.Valid {
 			item["device"] = log.UserAgent.String

@@ -234,7 +234,7 @@ describe("CanvasViewer", () => {
     );
 
     expect(await screen.findByText("Q3 Pitch")).toBeInTheDocument();
-    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123");
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined);
   });
 
   it("navigates pages and zoom with keyboard shortcuts", async () => {

@@ -237,7 +237,7 @@ owner: "后端架构师 / 产品经理"
 | POST | `/api/workspaces/{workspaceSlug}/search` | 文档内搜索 | Bearer | API-06 |
 | POST | `/api/workspaces/{workspaceSlug}/assistant/chat` | AI 问答 | Bearer | API-07 |
 | POST | `/api/workspaces/{workspaceSlug}/links` | 创建智能链接 | Bearer | API-08 |
-| GET | `/api/v1/public/links/{publicToken}` | 访问公开链接 | Signed URL | API-09 |
+| POST | `/api/v1/public/links/{publicToken}` | 访问公开链接 | Signed URL | API-09 |
 | GET | `/api/workspaces/{workspaceSlug}/analytics/links/{linkId}/score` | 热度评分 | Bearer | API-10 |
 | GET / POST | `/api/workspaces/{workspaceSlug}/suggestions` | 跟进建议（列表/生成） | Bearer | API-11 |
 | POST | `/api/workspaces/{workspaceSlug}/deal-rooms` | 创建数据室 | Bearer | API-12 |
@@ -674,19 +674,19 @@ Content-Type: application/json
 |------|-----|
 | 接口编号 | API-09 |
 | 名称 | Access Public Link |
-| 方法 | GET |
+| 方法 | POST |
 | 路径 | `/api/v1/public/links/{publicToken}` |
 | 认证 | Signed URL Token |
 | 对应 PRD | FR-07 ~ FR-09 |
 | 对应 TDD | 5.4.5 |
 
-**Query 参数**：
+**请求体**（可选）：
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| tenant | string | 是 | tenant slug |
-| workspace | string | 是 | workspace slug |
-| token | string | 是 | link public_token（可与路径参数二选一，路径优先） |
+| email | string | 否 | 访问者邮箱 |
+| password | string | 否 | 访问密码 |
+| nda_agreed | boolean | 否 | 是否同意 NDA |
 
 **成功响应 200**：
 

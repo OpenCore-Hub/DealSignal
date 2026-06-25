@@ -96,7 +96,7 @@ describe("useViewerDocument", () => {
 
     expect(result.current.doc).toEqual(mockDocument);
     expect(result.current.pages).toHaveLength(3);
-    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123");
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined);
   });
 
   it("exposes error state when loading fails", async () => {

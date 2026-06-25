@@ -194,7 +194,7 @@ CREATE TABLE page_views (
 ### 4.2 行为定义
 
 - `POST /api/links` 创建智能链接，返回 slug 与访问 URL。
-- `GET /api/v1/public/links/:slug` 公开访问，按 access_level 校验并记录日志。
+- `POST /api/v1/public/links/:slug` 公开访问，按 access_level 校验并记录日志，gate 参数通过请求体传递。
 - `POST /api/v1/public/events` 接收阅读事件，后端去重并更新热度评分。
 - `GET /api/analytics/links/:linkId/score` 返回热度分数与完整 factors。
 - 访问日志写入使用事务，确保热度评分与日志记录原子性。
@@ -255,7 +255,9 @@ curl -X POST http://localhost:8080/api/links \
   -d '{"documentId":"doc-001","accessLevel":"email","allowedDomains":["example.test"]}'
 
 # 公开访问
-curl -i http://localhost:8080/api/v1/public/links/{slug}?email=visitor@example.test
+curl -i -X POST http://localhost:8080/api/v1/public/links/{slug} \
+  -H "Content-Type: application/json" \
+  -d '{"email":"visitor@example.test"}'
 ```
 
 ### 7.4 回归测试命令

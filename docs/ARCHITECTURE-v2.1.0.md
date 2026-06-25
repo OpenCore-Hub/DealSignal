@@ -630,7 +630,7 @@ sequenceDiagram
 
     V ->> CDN: GET investor.acme.com/l/:token
     CDN ->> GW: 转发请求
-    GW ->> LS: GET /api/v1/public/links/:token<br/>校验 token
+    GW ->> LS: POST /api/v1/public/links/:token<br/>校验 token / email / password / NDA
     LS ->> DB: 查询 links / permissions
     DB -->> LS: 返回链接配置
     LS ->> LS: 校验过期 / 次数 / 密码 / 白名单 / NDA

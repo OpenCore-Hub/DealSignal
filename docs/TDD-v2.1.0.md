@@ -1278,17 +1278,24 @@ Content-Type: application/json
 ##### API-09：访问公开链接
 
 ```http
-GET /api/v1/public/links/{publicToken}
+POST /api/v1/public/links/{publicToken}
 Host: {publicDomain}
+Content-Type: application/json
+
+{
+  "email": "visitor@example.com",
+  "password": "optional-password",
+  "nda_agreed": true
+}
 ```
 
-**Query 参数**：
+**请求体**（可选）：
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| tenant | string | 是 | tenant slug |
-| workspace | string | 是 | workspace slug |
-| token | string | 是 | link public_token（可与路径参数二选一，路径优先） |
+| email | string | 否 | 访问者邮箱 |
+| password | string | 否 | 访问密码 |
+| nda_agreed | boolean | 否 | 是否同意 NDA |
 
 **成功响应 200**：
 

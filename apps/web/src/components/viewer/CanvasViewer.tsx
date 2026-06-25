@@ -4,7 +4,7 @@ import { FileText } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
-import { api } from "@/lib/api";
+import { api, type PublicLinkCredentials } from "@/lib/api";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { ViewerCanvas } from "./ViewerCanvas";
 import { useViewerDocument } from "./useViewerDocument";
@@ -18,6 +18,7 @@ interface CanvasViewerProps {
   publicLink?: { id: string; downloadEnabled: boolean; watermarkEnabled: boolean };
   publicDocument?: Document;
   publicVisitorId?: string;
+  publicAccessCredentials?: PublicLinkCredentials;
 }
 
 export function CanvasViewer({
@@ -27,6 +28,7 @@ export function CanvasViewer({
   publicLink,
   publicDocument,
   publicVisitorId,
+  publicAccessCredentials,
 }: CanvasViewerProps = {}) {
   const { t } = useTranslation(["documents", "common"]);
   const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
@@ -50,6 +52,7 @@ export function CanvasViewer({
     publicLink,
     publicDocument,
     publicVisitorId,
+    publicAccessCredentials,
   });
 
   const totalPages = doc ? (pages.length > 0 ? pages.length : doc.pageCount) : 0;
@@ -81,7 +84,7 @@ export function CanvasViewer({
         return;
       }
       const res = publicToken
-        ? await api.getPublicDocumentDownloadUrl(documentId, publicToken)
+        ? await api.getPublicDocumentDownloadUrl(documentId, publicToken, publicAccessCredentials)
         : await api.getDocumentDownloadUrl(documentId);
       const a = document.createElement("a");
       a.href = res.download_url;
@@ -107,7 +110,7 @@ export function CanvasViewer({
     } catch (e) {
       setActionError(e instanceof Error ? e.message : t("common:error.loadFailed"));
     }
-  }, [documentId, doc, publicToken, publicLink, publicVisitorId, t]);
+  }, [documentId, doc, publicToken, publicLink, publicVisitorId, publicAccessCredentials, t]);
 
   // Keyboard shortcuts for viewer navigation.
   useEffect(() => {

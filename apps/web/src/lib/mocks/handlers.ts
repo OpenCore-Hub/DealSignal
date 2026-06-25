@@ -583,8 +583,12 @@ export const handlers = [
   }),
 
   // Public viewer
-  http.get("*/api/v1/public/links/:token", ({ params, request }) => {
-    const url = new URL(request.url);
+  http.post("*/api/v1/public/links/:token", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      email?: string;
+      password?: string;
+      nda_agreed?: boolean;
+    };
     const token = params.token as string;
     const link = mockLinks.find((l) => l.shortUrl.endsWith(token)) ?? mockLinks[0];
     const doc = mockDocuments.find((d) => d.id === link.documentId) ?? mockDocuments[0];
@@ -606,9 +610,9 @@ export const handlers = [
         fileSize: doc.fileSize,
       },
       visitorId: generateId("visitor"),
-      requiresEmail: link.permissionType === "email" && !url.searchParams.get("email"),
-      requiresPassword: link.permissionType === "password" && !url.searchParams.get("password"),
-      requiresNda: link.permissionType === "nda" && url.searchParams.get("nda_agreed") !== "true",
+      requiresEmail: link.permissionType === "email" && !body.email,
+      requiresPassword: link.permissionType === "password" && !body.password,
+      requiresNda: link.permissionType === "nda" && !body.nda_agreed,
     });
   }),
 

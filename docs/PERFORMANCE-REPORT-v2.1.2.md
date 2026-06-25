@@ -6,7 +6,7 @@
 
 | Endpoint | 目标 P99 延迟 | 目标 QPS | 优先级 |
 |----------|---------------|----------|--------|
-| 公开链接访问 (`GET /api/v1/public/links/{token}`) | < 200ms | 1000/s | P0 |
+| 公开链接访问 (`POST /api/v1/public/links/{token}`) | < 200ms | 1000/s | P0 |
 | 签名 URL 生成 (`POST /api/v1/workspaces/{slug}/documents/{id}/signed-url`) | < 100ms | 500/s | P0 |
 | 搜索 (`GET /api/v1/workspaces/{slug}/search`) | < 500ms | 100/s | P1 |
 | AI 问答 (`POST /api/v1/workspaces/{slug}/assistant/chat`) | < 3000ms | 30/s | P1 |

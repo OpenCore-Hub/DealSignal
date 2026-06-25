@@ -387,8 +387,8 @@ assert_status "GET /links/:id/access-logs" 200 "$STATUS"
 section "10. Public Link Access & Events"
 
 # 10a. Access public link
-api_call BODY STATUS GET "$BASE_URL/api/v1/public/links/$PUBLIC_TOKEN" "" ""
-assert_status "GET /public/links/:token" 200 "$STATUS"
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PUBLIC_TOKEN" "{}" ""
+assert_status "POST /public/links/:token" 200 "$STATUS"
 assert_json_not_empty "visitorId" '.visitorId' "$BODY"
 VISITOR_ID=$(echo "$BODY" | jq -r '.visitorId')
 
