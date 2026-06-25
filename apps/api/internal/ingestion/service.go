@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
 	"io"
 	"os"
 	"time"
@@ -99,7 +100,8 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 	pageCount := int32(len(pages))
 	for _, p := range pages {
 		key := pageObjectKey(tenantID, workspaceID, docID, p.Number)
-		if err := s.renderAndUploadPage(ctx, key, p, pdfPath); err != nil {
+		_, bounds, err := s.renderAndUploadPage(ctx, key, p, pdfPath)
+		if err != nil {
 			return fmt.Errorf("render page %d: %w", p.Number, err)
 		}
 
@@ -109,8 +111,10 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			DocumentID:     doc.ID,
 			PageNumber:     int32(p.Number),
 			ImageObjectKey: pgtype.Text{String: key, Valid: true},
-			Width:          pgtype.Int4{Int32: int32(p.Width), Valid: true},
-			Height:         pgtype.Int4{Int32: int32(p.Height), Valid: true},
+			// Store the rendered image pixel dimensions so the viewer sizes the
+			// page to match the actual raster, not the PDF point size.
+			Width:          pgtype.Int4{Int32: int32(bounds.Dx()), Valid: true},
+			Height:         pgtype.Int4{Int32: int32(bounds.Dy()), Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("create page record: %w", err)
@@ -270,16 +274,16 @@ func (s *Service) createChunkBox(ctx context.Context, chunkID, docID pgtype.UUID
 	})
 }
 
-func (s *Service) renderAndUploadPage(ctx context.Context, key string, p PageInfo, pdfPath string) error {
-	img, err := renderPage(p, pdfPath)
+func (s *Service) renderAndUploadPage(ctx context.Context, key string, p PageInfo, pdfPath string) ([]byte, image.Rectangle, error) {
+	img, bounds, err := renderPage(p, pdfPath)
 	if err != nil {
-		return err
+		return nil, image.Rectangle{}, err
 	}
 
 	if err := s.storage.PutObject(ctx, key, bytes.NewReader(img), int64(len(img)), "image/png"); err != nil {
-		return fmt.Errorf("upload page image: %w", err)
+		return nil, image.Rectangle{}, fmt.Errorf("upload page image: %w", err)
 	}
-	return nil
+	return img, bounds, nil
 }
 
 func (s *Service) updateJob(ctx context.Context, id pgtype.UUID, status string, attempts int, msg string) error {
@@ -308,7 +312,7 @@ func (s *Service) updateDocumentStatus(ctx context.Context, id pgtype.UUID, stat
 }
 
 func pageObjectKey(tenantID, workspaceID, docID string, pageNumber int) string {
-	return storage.ObjectKey(tenantID, workspaceID, docID, fmt.Sprintf("pages/%d.webp", pageNumber))
+	return storage.ObjectKey(tenantID, workspaceID, docID, fmt.Sprintf("pages/%d.png", pageNumber))
 }
 
 func uuidToString(u pgtype.UUID) string {

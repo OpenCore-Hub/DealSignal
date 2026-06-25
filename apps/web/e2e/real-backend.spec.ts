@@ -581,7 +581,7 @@ test.describe("real backend P0 flow", () => {
     await authenticate(page, seed.token);
 
     await page.goto(`/${seed.workspaceSlug}/insights/pages`);
-    await expect(page.getByText("Page engagement")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("heading", { name: "Page engagement" })).toBeVisible({ timeout: 30000 });
     await page.getByRole("combobox").click();
     await expect(page.getByRole("option", { name: "sample.pdf" }).first()).toBeVisible({ timeout: 30000 });
   });

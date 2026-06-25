@@ -366,29 +366,46 @@ func pageDimensions(p pdf.Page) (int, int) {
 	return int(w * scale), int(h * scale)
 }
 
-// renderPage creates a PNG image for a page.
+// renderPage creates a PNG image for a page and returns its pixel bounds.
 // It tries to render the real PDF page via pdftoppm (poppler-utils).
 // If pdftoppm is unavailable, it falls back to a placeholder image.
-func renderPage(p PageInfo, pdfPath string) ([]byte, error) {
+func renderPage(p PageInfo, pdfPath string) ([]byte, image.Rectangle, error) {
 	// Try real PDF rendering with pdftoppm
-	if img, err := renderPDFPageWithPdftoppm(pdfPath, p.Number, p.Width, p.Height); err == nil {
-		return img, nil
+	if img, bounds, err := renderPDFPageWithPdftoppm(pdfPath, p.Number); err == nil {
+		return img, bounds, nil
 	}
 	// Fallback to placeholder
-	return renderPlaceholderPage(p)
+	img, err := renderPlaceholderPage(p)
+	if err != nil {
+		return nil, image.Rectangle{}, err
+	}
+	bounds, err := pngBounds(img)
+	if err != nil {
+		return nil, image.Rectangle{}, err
+	}
+	return img, bounds, nil
+}
+
+func pngBounds(data []byte) (image.Rectangle, error) {
+	cfg, err := png.DecodeConfig(bytes.NewReader(data))
+	if err != nil {
+		return image.Rectangle{}, fmt.Errorf("decode png config: %w", err)
+	}
+	return image.Rect(0, 0, cfg.Width, cfg.Height), nil
 }
 
 // renderPDFPageWithPdftoppm renders a single PDF page to PNG using pdftoppm.
-func renderPDFPageWithPdftoppm(pdfPath string, pageNumber, width, height int) ([]byte, error) {
+func renderPDFPageWithPdftoppm(pdfPath string, pageNumber int) ([]byte, image.Rectangle, error) {
 	tmpDir, err := os.MkdirTemp("", "pdfrender-*")
 	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
+		return nil, image.Rectangle{}, fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
 
-	// Use fixed 150 DPI for good balance of quality and file size.
-	// PDF dimensions are in points (1/72 inch), so 150 DPI gives ~2x scale.
-	dpi := 150
+	// Use 200 DPI so that fine text and edge content remain readable after the
+	// frontend fits the page into the viewport. PDF dimensions are in points
+	// (1/72 inch), so 200 DPI gives ~2.78x scale.
+	dpi := 200
 
 	outputPrefix := filepath.Join(tmpDir, "page")
 	cmd := exec.Command("pdftoppm",
@@ -401,16 +418,21 @@ func renderPDFPageWithPdftoppm(pdfPath string, pageNumber, width, height int) ([
 		outputPrefix,
 	)
 	if err := cmd.Run(); err != nil {
-		return nil, fmt.Errorf("pdftoppm render: %w", err)
+		return nil, image.Rectangle{}, fmt.Errorf("pdftoppm render: %w", err)
 	}
 
 	outputFile := outputPrefix + ".png"
 	data, err := os.ReadFile(outputFile)
 	if err != nil {
-		return nil, fmt.Errorf("read rendered page: %w", err)
+		return nil, image.Rectangle{}, fmt.Errorf("read rendered page: %w", err)
 	}
 
-	return data, nil
+	bounds, err := pngBounds(data)
+	if err != nil {
+		return nil, image.Rectangle{}, fmt.Errorf("bounds: %w", err)
+	}
+
+	return data, bounds, nil
 }
 
 // renderPlaceholderPage creates a white background with "Page N" label.

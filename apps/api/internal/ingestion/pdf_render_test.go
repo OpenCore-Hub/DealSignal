@@ -58,12 +58,15 @@ startxref
 	}
 	tmpFile.Close()
 
-	data, err := renderPDFPageWithPdftoppm(tmpFile.Name(), 1, 612, 792)
+	data, bounds, err := renderPDFPageWithPdftoppm(tmpFile.Name(), 1)
 	if err != nil {
 		t.Fatalf("render PDF page: %v", err)
 	}
 	if len(data) == 0 {
 		t.Fatal("expected non-empty rendered image")
+	}
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		t.Fatalf("expected positive image dimensions, got %dx%d", bounds.Dx(), bounds.Dy())
 	}
 
 	// PNG magic bytes
@@ -75,19 +78,22 @@ startxref
 	if len(data) < 5000 {
 		t.Logf("warning: rendered image is small (%d bytes), might be low-res", len(data))
 	}
-	t.Logf("rendered PDF page image: %d bytes", len(data))
+	t.Logf("rendered PDF page image: %dx%d, %d bytes", bounds.Dx(), bounds.Dy(), len(data))
 }
 
 // TestRenderPage_FallbackToPlaceholder verifies fallback when pdftoppm fails.
 func TestRenderPage_FallbackToPlaceholder(t *testing.T) {
 	p := PageInfo{Number: 1, Width: 200, Height: 100}
 	// Non-existent PDF path → pdftoppm fails → should fall back to placeholder
-	data, err := renderPage(p, "/nonexistent/path/file.pdf")
+	data, bounds, err := renderPage(p, "/nonexistent/path/file.pdf")
 	if err != nil {
 		t.Fatalf("render page with fallback: %v", err)
 	}
 	if len(data) == 0 {
 		t.Fatal("expected non-empty placeholder image data")
+	}
+	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
+		t.Fatalf("expected positive placeholder dimensions, got %dx%d", bounds.Dx(), bounds.Dy())
 	}
 
 	// PNG magic bytes

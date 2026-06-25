@@ -176,7 +176,7 @@ export function CanvasViewer({
 
   if (loading) {
     return (
-      <div className="flex flex-1 flex-col bg-neutral-50 dark:bg-background">
+      <div className="flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background">
         <header className="flex h-14 items-center border-b border-border bg-background px-4">
           <Skeleton className="h-8 w-64" />
         </header>
@@ -208,7 +208,7 @@ export function CanvasViewer({
   }
 
   return (
-    <div className="flex flex-1 flex-col bg-neutral-50 dark:bg-background">
+    <div className="flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background">
       <ViewerToolbar
         doc={doc}
         page={page}

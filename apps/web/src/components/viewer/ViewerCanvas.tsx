@@ -106,7 +106,7 @@ export function ViewerCanvas({
   const pageAnalytics = analytics.find((a) => a.pageNumber === page);
 
   return (
-    <div className="flex flex-1 overflow-hidden">
+    <div className="flex min-h-0 flex-1 overflow-hidden">
       <ThumbnailNav
         pages={pageList}
         currentPage={page}
