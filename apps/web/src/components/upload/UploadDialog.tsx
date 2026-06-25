@@ -20,7 +20,7 @@ export function UploadDialog() {
           <DialogTitle>{t("upload.title")}</DialogTitle>
           <DialogDescription>{t("upload.description")}</DialogDescription>
         </DialogHeader>
-        <Uploader />
+        <Uploader onUploadComplete={() => setUploadDialogOpen(false)} />
       </DialogContent>
     </Dialog>
   );

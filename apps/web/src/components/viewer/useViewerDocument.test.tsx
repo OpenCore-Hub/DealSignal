@@ -10,6 +10,7 @@ import type { Document, PageAnalytics } from "@/types";
 const mockDocument: Document = {
   id: "doc-001",
   title: "Q3 Pitch",
+  sourceType: "pdf",
   fileName: "Q3 Pitch.pdf",
   fileType: "pdf",
   fileSize: 1024 * 1024,

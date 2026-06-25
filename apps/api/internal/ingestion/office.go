@@ -19,10 +19,10 @@ import (
 
 // Converter calls OnlyOffice Document Server to convert Office files to PDF.
 type Converter struct {
-	baseURL  string
+	baseURL   string
 	jwtSecret []byte
-	storage  *storage.Client
-	client   *http.Client
+	storage   *storage.Client
+	client    *http.Client
 }
 
 // NewConverter creates an OnlyOffice converter.
@@ -38,28 +38,27 @@ func NewConverter(baseURL, jwtSecret string, s *storage.Client) *Converter {
 	}
 }
 
-// ConvertToPDF downloads the original file, asks OnlyOffice to convert it, and
-// returns a local temporary PDF path.
+// ConvertToPDF asks OnlyOffice to convert an Office file to PDF.
+// It uses a public (non-signed) internal URL so the OnlyOffice downloader
+// (which normalizes/re-encodes URLs and breaks AWS presigned signatures) can
+// fetch the file. The S3 bucket must allow anonymous read access.
 func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey string) (string, error) {
-	// Use internal presigned URL so OnlyOffice (running inside Docker network)
-	// can reach MinIO via its internal hostname (e.g. http://minio:9000).
-	presigned, err := c.storage.PresignedGetURLInternal(ctx, storageKey, 10*time.Minute)
-	if err != nil {
-		return "", fmt.Errorf("presign original: %w", err)
-	}
-
-	// Use only the document ID as the OnlyOffice cache key (full path with slashes causes error -7)
+	// Use only the document ID as the OnlyOffice cache key (full path with slashes causes error -7).
+	// Append a timestamp so a previously failed conversion does not poison OnlyOffice's cache.
 	parts := strings.Split(storageKey, "/")
 	cacheKey := storageKey
-	if len(parts) >= 5 && parts[0] == "tenants" && parts[2] == "workspaces" && parts[3] == "documents" {
-		cacheKey = parts[4]
+	if len(parts) >= 6 && parts[0] == "tenants" && parts[2] == "workspaces" && parts[4] == "documents" {
+		cacheKey = parts[5]
 	}
+	cacheKey = fmt.Sprintf("%s-%d", cacheKey, time.Now().UnixNano())
+
+	publicURL := c.storage.PublicURLInternal(storageKey)
 
 	payload := map[string]interface{}{
 		"async":      false,
 		"filetype":   sourceType,
 		"outputtype": "pdf",
-		"url":        presigned,
+		"url":        publicURL,
 		"key":        cacheKey,
 	}
 	body, _ := json.Marshal(payload)

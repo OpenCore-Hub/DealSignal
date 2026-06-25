@@ -32,6 +32,7 @@
     "file": "File",
     "heat": "Heat",
     "views": "Views",
+    "status": "Status",
     "pages": "{{count}} pages",
     "pages_one": "{{count}} page",
     "links": "{{count}} links",
@@ -40,6 +41,13 @@
     "viewCount_one": "{{count}} view",
     "downloadDisabled": "Download requires backend signed URL support",
     "deleteDisabled": "Delete document requires backend support"
+  },
+  "status": {
+    "uploading": "Uploading",
+    "processing": "Processing",
+    "ready": "Ready",
+    "failed": "Failed",
+    "pending": "Pending"
   },
   "detail": {
     "back": "Back to documents",

@@ -14,9 +14,17 @@ export interface User {
   avatarUrl?: string;
 }
 
+export interface IngestionJob {
+  id: string;
+  status: "queued" | "processing" | "completed" | "failed";
+  attempts: number;
+  errorMessage?: string | null;
+}
+
 export interface Document {
   id: string;
   title: string;
+  sourceType: "pdf" | "docx" | "pptx" | "xlsx";
   fileName: string;
   fileType: "pdf" | "docx" | "pptx" | "xlsx";
   fileSize: number;
@@ -25,6 +33,7 @@ export interface Document {
   progress?: number;
   createdAt: string;
   updatedAt: string;
+  ingestionJob?: IngestionJob;
 }
 
 export interface Link {

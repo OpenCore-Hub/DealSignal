@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   useReactTable,
@@ -43,6 +43,24 @@ export function DocumentsTable() {
     const [docsRes, linksRes] = await Promise.all([api.getDocuments(), api.getLinks()]);
     return buildDocumentRows(docsRes.data, linksRes.data);
   }, []);
+
+  // Poll for status updates while any document is still being processed.
+  useEffect(() => {
+    const hasProcessing = data?.some((row) => row.status === "processing" || row.status === "uploading");
+    if (!hasProcessing) return;
+
+    const interval = setInterval(() => {
+      refetch();
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [data, refetch]);
+
+  // Refresh immediately after an upload finishes (from dialog or upload page).
+  useEffect(() => {
+    const handleUploaded = () => refetch();
+    window.addEventListener("documents:uploaded", handleUploaded);
+    return () => window.removeEventListener("documents:uploaded", handleUploaded);
+  }, [refetch]);
 
   const columns = useDocumentColumns({ workspaceSlug, navigate });
 

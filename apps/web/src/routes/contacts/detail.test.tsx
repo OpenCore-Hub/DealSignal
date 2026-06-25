@@ -63,6 +63,7 @@ const mockDocuments: Document[] = [
   {
     id: "doc-1",
     title: "Q3 Pitch",
+    sourceType: "pdf",
     fileName: "Q3 Pitch.pdf",
     fileType: "pdf",
     fileSize: 1024 * 1024,

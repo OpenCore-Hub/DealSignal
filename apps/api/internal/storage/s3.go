@@ -136,6 +136,19 @@ func (c *Client) PresignedGetURLInternal(ctx context.Context, key string, expiry
 	return req.URL, nil
 }
 
+// PublicURLInternal returns a non-signed URL using the internal S3 endpoint.
+// The bucket must allow public read access for this URL to work.
+func (c *Client) PublicURLInternal(key string) string {
+	ep := c.endpoint
+	if strings.HasSuffix(ep, "/") {
+		ep = strings.TrimSuffix(ep, "/")
+	}
+	if c.pathStyle {
+		return fmt.Sprintf("%s/%s/%s", ep, c.bucket, key)
+	}
+	return fmt.Sprintf("%s/%s", ep, key)
+}
+
 // PresignedPutURL returns a temporary URL for uploading an object.
 func (c *Client) PresignedPutURL(ctx context.Context, key string, expiry time.Duration, contentType string) (string, error) {
 	presigner := c.presigner

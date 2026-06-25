@@ -35,6 +35,7 @@ export const mockDocuments: Document[] = [
   {
     id: "doc_1",
     title: "Acme Seed Round Pitch Deck",
+    sourceType: "pdf",
     fileName: "Acme Seed Round Pitch Deck.pdf",
     fileType: "pdf",
     fileSize: 4_200_000,
@@ -46,6 +47,7 @@ export const mockDocuments: Document[] = [
   {
     id: "doc_2",
     title: "Financial Model 2026-2028",
+    sourceType: "xlsx",
     fileName: "Financial Model 2026-2028.xlsx",
     fileType: "xlsx",
     fileSize: 1_800_000,
@@ -57,6 +59,7 @@ export const mockDocuments: Document[] = [
   {
     id: "doc_3",
     title: "Product Roadmap Q3",
+    sourceType: "pptx",
     fileName: "Product Roadmap Q3.pptx",
     fileType: "pptx",
     fileSize: 3_100_000,

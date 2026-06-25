@@ -14,7 +14,11 @@ interface UploadFile {
   error?: string;
 }
 
-export function Uploader() {
+interface UploaderProps {
+  onUploadComplete?: () => void;
+}
+
+export function Uploader({ onUploadComplete }: UploaderProps) {
   const { t } = useTranslation("documents");
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -101,6 +105,9 @@ export function Uploader() {
               f.id === uploadFile.id ? { ...f, progress: 100, status: "done" } : f
             )
           );
+          onUploadComplete?.();
+          // Notify interested components (e.g. document list) that a new upload finished.
+          window.dispatchEvent(new CustomEvent("documents:uploaded"));
         })
         .catch((err: Error) => {
           clearInterval(interval);
@@ -118,7 +125,7 @@ export function Uploader() {
           );
         });
     },
-    [uploadingIds]
+    [uploadingIds, onUploadComplete]
   );
 
   // Upload all pending files

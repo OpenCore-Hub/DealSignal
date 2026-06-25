@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
 import { HeatBadge } from "@/components/common/HeatBadge";
+import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { formatDate, formatFileSize } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -70,6 +71,17 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
             </div>
           );
         },
+      },
+      {
+        accessorKey: "status",
+        header: t("documents:columns.status"),
+        cell: ({ row }) => (
+          <DocumentStatusBadge
+            status={row.original.status}
+            progress={row.original.progress}
+            errorMessage={row.original.ingestionJob?.errorMessage}
+          />
+        ),
       },
       {
         accessorKey: "heatLevel",

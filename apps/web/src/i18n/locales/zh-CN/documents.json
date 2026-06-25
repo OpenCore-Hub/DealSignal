@@ -31,11 +31,19 @@
     "file": "文件",
     "heat": "热度",
     "views": "次访问",
+    "status": "状态",
     "pages": "{{count}} 页",
     "links": "{{count}} 个链接",
     "viewCount": "{{count}} 次访问",
     "downloadDisabled": "下载需后端签名 URL 支持",
     "deleteDisabled": "删除文档需后端支持"
+  },
+  "status": {
+    "uploading": "上传中",
+    "processing": "解析中",
+    "ready": "已完成",
+    "failed": "解析失败",
+    "pending": "等待中"
   },
   "detail": {
     "back": "返回文档库",

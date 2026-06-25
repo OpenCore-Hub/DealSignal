@@ -146,6 +146,7 @@ export function PublicViewerPage() {
   const doc: Document = {
     id: access.document.id,
     title: access.document.title,
+    sourceType: access.document.sourceType.toLowerCase() as Document["sourceType"],
     fileName: access.document.title,
     fileType: access.document.sourceType.toLowerCase() as Document["fileType"],
     fileSize: access.document.fileSize,

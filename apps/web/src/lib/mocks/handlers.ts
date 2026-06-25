@@ -214,6 +214,7 @@ export const handlers = [
     const newDoc = {
       id: generateId("doc"),
       title,
+      sourceType: fileType,
       fileName: title,
       fileType,
       fileSize: file?.size ?? 1_000_000,
