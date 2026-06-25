@@ -9,6 +9,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/contact"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
@@ -140,6 +141,9 @@ func (s *Server) registerRoutes() {
 			signalSvc := signal.NewService(queries)
 			signalHandler := signal.NewHandler(signalSvc)
 
+			contactSvc := contact.NewService(queries)
+			contactHandler := contact.NewHandler(contactSvc)
+
 			ws := api.Group("/workspaces/:workspaceSlug")
 			ws.Use(middleware.Auth(authSvc))
 			ws.Use(workspace.AuthMiddleware(workspaceSvc))
@@ -151,6 +155,7 @@ func (s *Server) registerRoutes() {
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)
+			contactHandler.RegisterRoutes(ws)
 
 			notificationWorker := notification.NewWorker(notificationSvc, 30*time.Second)
 			s.registerWorker(notificationWorker)

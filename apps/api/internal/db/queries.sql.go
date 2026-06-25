@@ -1290,6 +1290,38 @@ func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionPa
 	return err
 }
 
+const findUnsyncedContactEmails = `-- name: FindUnsyncedContactEmails :many
+SELECT DISTINCT al.visitor_email AS email
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.visitor_email IS NOT NULL
+  AND al.visitor_email <> ''
+  AND NOT EXISTS (
+      SELECT 1 FROM contacts c
+      WHERE c.workspace_id = al.workspace_id AND c.email = al.visitor_email
+  )
+`
+
+func (q *Queries) FindUnsyncedContactEmails(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.Text, error) {
+	rows, err := q.db.Query(ctx, findUnsyncedContactEmails, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.Text
+	for rows.Next() {
+		var email pgtype.Text
+		if err := rows.Scan(&email); err != nil {
+			return nil, err
+		}
+		items = append(items, email)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getAccessRequestByID = `-- name: GetAccessRequestByID :one
 SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
 FROM room_access_requests
@@ -1380,6 +1412,50 @@ func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessi
 	return i, err
 }
 
+const getContactAggregateByEmail = `-- name: GetContactAggregateByEmail :one
+SELECT
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT al.link_id) AS unique_links,
+    COUNT(DISTINCT al.visitor_id) AS unique_visitors,
+    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
+    COUNT(pv.id)::bigint AS total_page_views,
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
+    MAX(al.created_at)::timestamptz AS last_seen_at
+FROM access_logs al
+LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
+WHERE al.workspace_id = $1 AND al.visitor_email ILIKE $2
+`
+
+type GetContactAggregateByEmailParams struct {
+	WorkspaceID  pgtype.UUID
+	VisitorEmail pgtype.Text
+}
+
+type GetContactAggregateByEmailRow struct {
+	Opens                int64
+	UniqueLinks          int64
+	UniqueVisitors       int64
+	TotalDurationSeconds int64
+	TotalPageViews       int64
+	Downloads            int64
+	LastSeenAt           pgtype.Timestamptz
+}
+
+func (q *Queries) GetContactAggregateByEmail(ctx context.Context, arg GetContactAggregateByEmailParams) (GetContactAggregateByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getContactAggregateByEmail, arg.WorkspaceID, arg.VisitorEmail)
+	var i GetContactAggregateByEmailRow
+	err := row.Scan(
+		&i.Opens,
+		&i.UniqueLinks,
+		&i.UniqueVisitors,
+		&i.TotalDurationSeconds,
+		&i.TotalPageViews,
+		&i.Downloads,
+		&i.LastSeenAt,
+	)
+	return i, err
+}
+
 const getContactAggregatesByWorkspace = `-- name: GetContactAggregatesByWorkspace :many
 SELECT
     LOWER(COALESCE(c.email, al.visitor_email)) AS email,
@@ -1442,6 +1518,31 @@ func (q *Queries) GetContactAggregatesByWorkspace(ctx context.Context, arg GetCo
 		return nil, err
 	}
 	return items, nil
+}
+
+const getContactByID = `-- name: GetContactByID :one
+SELECT id, workspace_id, email, name, created_at
+FROM contacts
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetContactByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetContactByID(ctx context.Context, arg GetContactByIDParams) (Contact, error) {
+	row := q.db.QueryRow(ctx, getContactByID, arg.ID, arg.WorkspaceID)
+	var i Contact
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getDealRoomByID = `-- name: GetDealRoomByID :one
@@ -2810,6 +2911,145 @@ func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAs
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContactActivitiesByEmail = `-- name: ListContactActivitiesByEmail :many
+WITH visitor_ids AS (
+    SELECT DISTINCT al.visitor_id
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND al.visitor_email ILIKE $2
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_id <> ''
+)
+SELECT
+    e.id,
+    e.link_id,
+    e.event_type,
+    COALESCE(e.page_number, 0)::int AS page_number,
+    COALESCE(e.duration_seconds, 0)::int AS duration_seconds,
+    e.created_at,
+    l.document_id,
+    COALESCE(d.title, '')::text AS document_title
+FROM (
+    SELECT
+        id,
+        link_id,
+        event_type,
+        NULL::int AS page_number,
+        0 AS duration_seconds,
+        created_at,
+        visitor_id
+    FROM access_logs al2
+    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    UNION ALL
+    SELECT
+        id,
+        link_id,
+        'page_viewed'::text AS event_type,
+        page_number,
+        duration_seconds,
+        created_at,
+        visitor_id
+    FROM page_views pv2
+    WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+) e
+JOIN links l ON l.id = e.link_id
+LEFT JOIN documents d ON d.id = l.document_id
+ORDER BY e.created_at DESC
+LIMIT $3
+`
+
+type ListContactActivitiesByEmailParams struct {
+	WorkspaceID  pgtype.UUID
+	VisitorEmail pgtype.Text
+	Limit        int32
+}
+
+type ListContactActivitiesByEmailRow struct {
+	ID              pgtype.UUID
+	LinkID          pgtype.UUID
+	EventType       string
+	PageNumber      int32
+	DurationSeconds int32
+	CreatedAt       pgtype.Timestamptz
+	DocumentID      pgtype.UUID
+	DocumentTitle   string
+}
+
+func (q *Queries) ListContactActivitiesByEmail(ctx context.Context, arg ListContactActivitiesByEmailParams) ([]ListContactActivitiesByEmailRow, error) {
+	rows, err := q.db.Query(ctx, listContactActivitiesByEmail, arg.WorkspaceID, arg.VisitorEmail, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListContactActivitiesByEmailRow
+	for rows.Next() {
+		var i ListContactActivitiesByEmailRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.PageNumber,
+			&i.DurationSeconds,
+			&i.CreatedAt,
+			&i.DocumentID,
+			&i.DocumentTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContactViewedDocumentIDs = `-- name: ListContactViewedDocumentIDs :many
+WITH visitor_ids AS (
+    SELECT DISTINCT al.visitor_id
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND al.visitor_email ILIKE $2
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_id <> ''
+)
+SELECT DISTINCT l.document_id::text AS document_id
+FROM (
+    SELECT link_id FROM access_logs al2
+    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    UNION
+    SELECT link_id FROM page_views pv2
+    WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+) e
+JOIN links l ON l.id = e.link_id
+WHERE l.document_id IS NOT NULL
+`
+
+type ListContactViewedDocumentIDsParams struct {
+	WorkspaceID  pgtype.UUID
+	VisitorEmail pgtype.Text
+}
+
+func (q *Queries) ListContactViewedDocumentIDs(ctx context.Context, arg ListContactViewedDocumentIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listContactViewedDocumentIDs, arg.WorkspaceID, arg.VisitorEmail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var document_id string
+		if err := rows.Scan(&document_id); err != nil {
+			return nil, err
+		}
+		items = append(items, document_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -4471,6 +4711,33 @@ func (q *Queries) UpdateWorkspaceSecurity(ctx context.Context, arg UpdateWorkspa
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+	)
+	return i, err
+}
+
+const upsertContactByEmail = `-- name: UpsertContactByEmail :one
+INSERT INTO contacts (workspace_id, email, name)
+VALUES ($1, $2, NULLIF($3, ''))
+ON CONFLICT (workspace_id, email) DO UPDATE SET
+    name = COALESCE(EXCLUDED.name, contacts.name)
+RETURNING id, workspace_id, email, name, created_at
+`
+
+type UpsertContactByEmailParams struct {
+	WorkspaceID pgtype.UUID
+	Email       pgtype.Text
+	Column3     interface{}
+}
+
+func (q *Queries) UpsertContactByEmail(ctx context.Context, arg UpsertContactByEmailParams) (Contact, error) {
+	row := q.db.QueryRow(ctx, upsertContactByEmail, arg.WorkspaceID, arg.Email, arg.Column3)
+	var i Contact
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Name,
+		&i.CreatedAt,
 	)
 	return i, err
 }

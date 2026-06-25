@@ -104,9 +104,9 @@ TOKEN_PUBLIC=$(echo "$LINK" | jq -r '.shortUrl' | sed 's|.*/l/||')
 echo -n "[public access] "
 ACCESS=$(curl -fsS -X POST "$BASE_URL/api/v1/public/links/$TOKEN_PUBLIC" \
   -H "Content-Type: application/json" \
-  -d '{}')
-echo "$ACCESS" | jq -c '{visitor_id: .visitor_id, document_status: .document.status, page_count: .document.page_count}'
-VISITOR_ID=$(echo "$ACCESS" | jq -r '.visitor_id')
+  -d '{"email":"e2e-contact@example.com"}')
+echo "$ACCESS" | jq -c '{visitor_id: .visitorId, document_status: .document.status, page_count: .document.page_count}'
+VISITOR_ID=$(echo "$ACCESS" | jq -r '.visitorId')
 
 # 9. Record page viewed event
 echo -n "[record event] "
@@ -115,7 +115,22 @@ curl -fsS -X POST "$BASE_URL/api/v1/public/events" \
   -d "{\"event_type\":\"page_viewed\",\"public_token\":\"$TOKEN_PUBLIC\",\"visitor_id\":\"$VISITOR_ID\",\"page_number\":1,\"duration_seconds\":12,\"scroll_depth\":0.75}" \
   -o /dev/null -w "%{http_code}\n"
 
-# 10. Heat score
+# 10. Contacts
+echo -n "[contacts list] "
+CONTACTS=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/contacts")
+echo "$CONTACTS" | jq -c '{count: (.data | length), first: .data[0].email}'
+CONTACT_ID=$(echo "$CONTACTS" | jq -r '.data[0].id')
+
+echo -n "[contacts detail] "
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/contacts/$CONTACT_ID" | jq -c '{id, email, totalVisits, heatLevel}'
+
+echo -n "[contacts activities] "
+curl -fsS -H "Authorization: Bearer $TOKEN" \
+  "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/contacts/$CONTACT_ID/activities" | jq -c '{count: (.data | length)}'
+
+# 11. Heat score
 echo -n "[heat score] "
 SCORE=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/analytics/links/$LINK_ID/score")

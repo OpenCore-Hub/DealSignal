@@ -911,3 +911,106 @@ WHERE al.workspace_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email
 GROUP BY LOWER(COALESCE(c.email, al.visitor_email))
 ORDER BY opens DESC
 LIMIT $2;
+
+-- name: GetContactByID :one
+SELECT id, workspace_id, email, name, created_at
+FROM contacts
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
+
+-- name: UpsertContactByEmail :one
+INSERT INTO contacts (workspace_id, email, name)
+VALUES ($1, $2, NULLIF($3, ''))
+ON CONFLICT (workspace_id, email) DO UPDATE SET
+    name = COALESCE(EXCLUDED.name, contacts.name)
+RETURNING id, workspace_id, email, name, created_at;
+
+-- name: FindUnsyncedContactEmails :many
+SELECT DISTINCT al.visitor_email AS email
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.visitor_email IS NOT NULL
+  AND al.visitor_email <> ''
+  AND NOT EXISTS (
+      SELECT 1 FROM contacts c
+      WHERE c.workspace_id = al.workspace_id AND c.email = al.visitor_email
+  );
+
+-- name: GetContactAggregateByEmail :one
+SELECT
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT al.link_id) AS unique_links,
+    COUNT(DISTINCT al.visitor_id) AS unique_visitors,
+    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
+    COUNT(pv.id)::bigint AS total_page_views,
+    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
+    MAX(al.created_at)::timestamptz AS last_seen_at
+FROM access_logs al
+LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
+WHERE al.workspace_id = $1 AND al.visitor_email ILIKE $2;
+
+-- name: ListContactActivitiesByEmail :many
+WITH visitor_ids AS (
+    SELECT DISTINCT al.visitor_id
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND al.visitor_email ILIKE $2
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_id <> ''
+)
+SELECT
+    e.id,
+    e.link_id,
+    e.event_type,
+    COALESCE(e.page_number, 0)::int AS page_number,
+    COALESCE(e.duration_seconds, 0)::int AS duration_seconds,
+    e.created_at,
+    l.document_id,
+    COALESCE(d.title, '')::text AS document_title
+FROM (
+    SELECT
+        id,
+        link_id,
+        event_type,
+        NULL::int AS page_number,
+        0 AS duration_seconds,
+        created_at,
+        visitor_id
+    FROM access_logs al2
+    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    UNION ALL
+    SELECT
+        id,
+        link_id,
+        'page_viewed'::text AS event_type,
+        page_number,
+        duration_seconds,
+        created_at,
+        visitor_id
+    FROM page_views pv2
+    WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+) e
+JOIN links l ON l.id = e.link_id
+LEFT JOIN documents d ON d.id = l.document_id
+ORDER BY e.created_at DESC
+LIMIT $3;
+
+-- name: ListContactViewedDocumentIDs :many
+WITH visitor_ids AS (
+    SELECT DISTINCT al.visitor_id
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND al.visitor_email ILIKE $2
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_id <> ''
+)
+SELECT DISTINCT l.document_id::text AS document_id
+FROM (
+    SELECT link_id FROM access_logs al2
+    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    UNION
+    SELECT link_id FROM page_views pv2
+    WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+) e
+JOIN links l ON l.id = e.link_id
+WHERE l.document_id IS NOT NULL;
