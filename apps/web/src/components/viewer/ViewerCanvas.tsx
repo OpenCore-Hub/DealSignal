@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText } from "@phosphor-icons/react";
 import { ThumbnailNav } from "./ThumbnailNav";
@@ -42,6 +43,23 @@ export function ViewerCanvas({
 }: ViewerCanvasProps) {
   const { t } = useTranslation("documents");
   const { highlightedEvidence } = useAIStore();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+
+  useEffect(() => {
+    const el = viewportRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      setViewportSize({ width: rect.width, height: rect.height });
+    };
+
+    updateSize();
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   const totalPages = pages.length > 0 ? pages.length : doc.pageCount;
   const pageList = Array.from({ length: totalPages }, (_, i) => {
@@ -62,7 +80,16 @@ export function ViewerCanvas({
     ? currentPageInfo.width / currentPageInfo.height
     : 0.75;
 
-  const baseWidth = Math.max(300, 800);
+  // Fit the page inside the available viewport at zoom = 100%.
+  // Account for padding so the page does not overflow initially.
+  const paddingX = 16;
+  const paddingY = 16;
+  const availableWidth = Math.max(300, viewportSize.width - paddingX * 2);
+  const availableHeight = Math.max(300, viewportSize.height - paddingY * 2);
+  const fitWidth = Math.min(availableWidth, availableHeight * aspectRatio);
+  const fitHeight = fitWidth / aspectRatio;
+  const baseWidth = Math.max(300, Math.min(fitWidth, fitHeight * aspectRatio));
+
   const pageWidth = Math.max(300, baseWidth * (zoom / 100));
   const pageHeight = pageWidth / aspectRatio;
 
@@ -83,7 +110,10 @@ export function ViewerCanvas({
         className="hidden h-full w-48 shrink-0 md:flex"
       />
 
-      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-2 sm:p-4 lg:p-8">
+      <div
+        ref={viewportRef}
+        className="relative flex min-h-0 flex-1 items-start justify-center overflow-auto p-2 sm:p-4 lg:p-8"
+      >
         <div
           className="relative overflow-hidden rounded-md bg-white shadow-card"
           style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
