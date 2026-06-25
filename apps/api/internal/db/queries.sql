@@ -784,7 +784,7 @@ RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_
 -- name: CreateChunkWithBBoxNoEmbed :one
 INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $7))
-RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector;
+RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector;
 
 -- name: SearchChunksByTrigram :many
 SELECT
