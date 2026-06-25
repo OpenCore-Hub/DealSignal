@@ -80,10 +80,10 @@ export function ViewerCanvas({
         pages={pageList}
         currentPage={page}
         onSelect={onSelectPage}
-        className="hidden w-48 md:flex"
+        className="hidden h-full w-48 shrink-0 md:flex"
       />
 
-      <div className="relative flex flex-1 items-center justify-center overflow-auto p-2 sm:p-4 lg:p-8">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-auto p-2 sm:p-4 lg:p-8">
         <div
           className="relative overflow-hidden rounded-md bg-white shadow-card"
           style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}

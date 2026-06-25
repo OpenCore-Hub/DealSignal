@@ -157,7 +157,7 @@ export function PublicViewerPage() {
   };
 
   return (
-    <div className="flex min-h-screen flex-col">
+    <div className="flex h-[100dvh] flex-col overflow-hidden">
       <CanvasViewer
         publicToken={token}
         publicLink={access.link}

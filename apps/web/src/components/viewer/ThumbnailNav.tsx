@@ -22,7 +22,7 @@ export function ThumbnailNav({ pages, currentPage, onSelect, className }: Thumbn
   return (
     <aside
       className={cn(
-        "flex flex-col gap-2 overflow-y-auto border-r border-border bg-card p-3",
+        "flex h-full min-h-0 flex-col gap-2 overflow-y-auto border-r border-border bg-card p-3",
         className
       )}
       aria-label={t("viewer.pageHeat")}
