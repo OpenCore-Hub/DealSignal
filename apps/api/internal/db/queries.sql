@@ -362,8 +362,8 @@ SELECT
     e.event_type,
     e.ip,
     e.user_agent,
-    e.page_number,
-    e.duration_seconds,
+    COALESCE(e.page_number, 0) AS page_number,
+    COALESCE(e.duration_seconds, 0) AS duration_seconds,
     e.created_at
 FROM (
     SELECT
