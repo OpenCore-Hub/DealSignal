@@ -24,6 +24,7 @@ const DEFAULT_CONFIG: PermissionConfig = {
   whitelistEnabled: false,
   whitelist: [],
   passwordEnabled: false,
+  ndaEnabled: false,
   allowDownload: false,
   watermarkEnabled: false,
   expiryDays: 7,
@@ -80,12 +81,13 @@ export function SmartLinkCreator() {
       requireEmail: newLevel !== "low" || prev.requireEmail,
       whitelistEnabled: newLevel === "high" || (newLevel === "medium" && prev.whitelistEnabled),
       passwordEnabled: newLevel === "high" || (newLevel === "medium" && prev.passwordEnabled),
+      ndaEnabled: newLevel === "high" || prev.ndaEnabled,
       watermarkEnabled: newLevel === "high" || prev.watermarkEnabled,
     }));
   };
 
   const deriveLevelFromConfig = (next: PermissionConfig): PermissionLevel => {
-    if (next.passwordEnabled || next.whitelistEnabled) return "high";
+    if (next.passwordEnabled || next.whitelistEnabled || next.ndaEnabled) return "high";
     if (next.requireEmail) return "medium";
     return "low";
   };

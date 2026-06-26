@@ -198,6 +198,9 @@ type Link struct {
 	CreatedBy        pgtype.UUID
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
+	RequireEmail     bool
+	RequirePassword  bool
+	RequireNda       bool
 }
 
 type Notification struct {

@@ -91,6 +91,7 @@
     "whitelistPlaceholder": "输入邮箱或域名，用逗号分隔",
     "password": "访问密码",
     "passwordPlaceholder": "设置密码",
+    "nda": "需要签署 NDA",
     "allowDownload": "允许下载",
     "watermark": "动态水印",
     "expiry": "有效期",

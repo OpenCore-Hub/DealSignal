@@ -132,6 +132,9 @@ type CreateRequest struct {
 	DocumentID       string   `json:"document_id" binding:"required"`
 	Name             string   `json:"name,omitempty"`
 	PermissionType   string   `json:"permission_type,omitempty"`
+	RequireEmail     bool     `json:"require_email,omitempty"`
+	RequirePassword  bool     `json:"require_password,omitempty"`
+	RequireNDA       bool     `json:"require_nda,omitempty"`
 	AllowedEmails    []string `json:"allowed_emails,omitempty"`
 	AllowedDomains   []string `json:"allowed_domains,omitempty"`
 	Password         string   `json:"password,omitempty"`
@@ -272,6 +275,9 @@ func (h *Handler) Create(c *gin.Context) {
 		DocumentID:       req.DocumentID,
 		Name:             req.Name,
 		PermissionType:   req.PermissionType,
+		RequireEmail:     req.RequireEmail,
+		RequirePassword:  req.RequirePassword,
+		RequireNDA:       req.RequireNDA,
 		AllowedEmails:    req.AllowedEmails,
 		AllowedDomains:   req.AllowedDomains,
 		Password:         req.Password,
@@ -359,9 +365,9 @@ func (h *Handler) Access(c *gin.Context) {
 			"fileSize":   0,
 		},
 		"visitorId":        result.VisitorID,
-		"requiresEmail":    result.Link.PermissionType == "email_required" || result.Link.PermissionType == "whitelist" || result.Link.PermissionType == "nda",
-		"requiresPassword": result.Link.PermissionType == "password",
-		"requiresNda":      result.Link.PermissionType == "nda",
+		"requiresEmail":    result.Link.RequireEmail || result.Link.PermissionType == "email_required" || result.Link.PermissionType == "whitelist" || result.Link.PermissionType == "nda",
+		"requiresPassword": result.Link.RequirePassword || result.Link.PermissionType == "password",
+		"requiresNda":      result.Link.RequireNda || result.Link.PermissionType == "nda",
 	})
 }
 

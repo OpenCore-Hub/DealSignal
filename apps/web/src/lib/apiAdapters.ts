@@ -4,6 +4,9 @@ export interface CreateLinkPayload {
   document_id: string;
   name?: string;
   permission_type?: string;
+  require_email?: boolean;
+  require_password?: boolean;
+  require_nda?: boolean;
   allowed_emails?: string[];
   allowed_domains?: string[];
   password?: string;
@@ -47,6 +50,9 @@ export function toCreateLinkPayload(
     document_id: documentId,
     name,
     permission_type: mapPermissionLevel(config),
+    require_email: config.requireEmail || config.whitelistEnabled || config.ndaEnabled,
+    require_password: config.passwordEnabled,
+    require_nda: config.ndaEnabled,
     allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
     allowed_domains: allowedDomains.length > 0 ? allowedDomains : undefined,
     password: config.passwordEnabled ? config.password : undefined,

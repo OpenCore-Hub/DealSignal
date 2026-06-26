@@ -91,6 +91,7 @@
     "whitelistPlaceholder": "Enter emails or domains separated by commas",
     "password": "Access password",
     "passwordPlaceholder": "Set password",
+    "nda": "Require NDA agreement",
     "allowDownload": "Allow download",
     "watermark": "Dynamic watermark",
     "expiry": "Expiration",

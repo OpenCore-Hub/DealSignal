@@ -76,6 +76,16 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
           )}
           <div className="flex items-center gap-2">
             <Checkbox
+              id="nda"
+              checked={config.ndaEnabled}
+              onCheckedChange={(checked) => update({ ndaEnabled: checked === true })}
+            />
+            <Label htmlFor="nda" className="text-sm font-normal">
+              {t("creator.nda")}
+            </Label>
+          </div>
+          <div className="flex items-center gap-2">
+            <Checkbox
               id="download"
               checked={config.allowDownload}
               onCheckedChange={(checked) => update({ allowDownload: checked === true })}

@@ -723,11 +723,13 @@ const createLink = `-- name: CreateLink :one
 INSERT INTO links (
     tenant_id, workspace_id, document_id, public_token, name, permission_type,
     allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-    download_enabled, watermark_enabled, status, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    download_enabled, watermark_enabled, status, created_by,
+    require_email, require_password, require_nda
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+          updated_at, require_email, require_password, require_nda
 `
 
 type CreateLinkParams struct {
@@ -746,6 +748,9 @@ type CreateLinkParams struct {
 	WatermarkEnabled bool
 	Status           string
 	CreatedBy        pgtype.UUID
+	RequireEmail     bool
+	RequirePassword  bool
+	RequireNda       bool
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -765,6 +770,9 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.WatermarkEnabled,
 		arg.Status,
 		arg.CreatedBy,
+		arg.RequireEmail,
+		arg.RequirePassword,
+		arg.RequireNda,
 	)
 	var i Link
 	err := row.Scan(
@@ -787,6 +795,9 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequirePassword,
+		&i.RequireNda,
 	)
 	return i, err
 }
@@ -1926,7 +1937,8 @@ func (q *Queries) GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (i
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -1960,6 +1972,9 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequirePassword,
+		&i.RequireNda,
 	)
 	return i, err
 }
@@ -1967,7 +1982,8 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -1996,6 +2012,9 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequirePassword,
+		&i.RequireNda,
 	)
 	return i, err
 }
@@ -3228,7 +3247,8 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 const listLinksByDocument = `-- name: ListLinksByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -3268,6 +3288,9 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RequireEmail,
+			&i.RequirePassword,
+			&i.RequireNda,
 		); err != nil {
 			return nil, err
 		}
@@ -3282,7 +3305,8 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -3317,6 +3341,9 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RequireEmail,
+			&i.RequirePassword,
+			&i.RequireNda,
 		); err != nil {
 			return nil, err
 		}
@@ -3548,7 +3575,8 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -3589,6 +3617,9 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RequireEmail,
+			&i.RequirePassword,
+			&i.RequireNda,
 		); err != nil {
 			return nil, err
 		}
@@ -4553,7 +4584,8 @@ SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 `
 
 type UpdateLinkStatusParams struct {
@@ -4585,6 +4617,9 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequirePassword,
+		&i.RequireNda,
 	)
 	return i, err
 }

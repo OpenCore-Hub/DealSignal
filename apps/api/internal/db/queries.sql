@@ -225,16 +225,19 @@ LIMIT $2;
 INSERT INTO links (
     tenant_id, workspace_id, document_id, public_token, name, permission_type,
     allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-    download_enabled, watermark_enabled, status, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+    download_enabled, watermark_enabled, status, created_by,
+    require_email, require_password, require_nda
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at;
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+          updated_at, require_email, require_password, require_nda;
 
 -- name: GetLinkByIDAndWorkspace :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
@@ -242,7 +245,8 @@ LIMIT 1;
 -- name: GetLinkByPublicToken :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE public_token = $1
 LIMIT 1;
@@ -255,7 +259,8 @@ WHERE id = $1;
 -- name: ListLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC;
@@ -263,7 +268,8 @@ ORDER BY created_at DESC;
 -- name: ListRecentLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -272,7 +278,8 @@ LIMIT $2;
 -- name: ListLinksByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at
+       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
 ORDER BY created_at DESC;
@@ -283,7 +290,8 @@ SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at;
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda;
 
 -- name: GetDocumentViewMetrics :many
 SELECT

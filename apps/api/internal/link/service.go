@@ -50,6 +50,9 @@ type CreateLinkRequest struct {
 	DocumentID       string
 	Name             string
 	PermissionType   string
+	RequireEmail     bool
+	RequirePassword  bool
+	RequireNDA       bool
 	AllowedEmails    []string
 	AllowedDomains   []string
 	Password         string
@@ -83,13 +86,13 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		return db.Link{}, ErrDocumentNotReady
 	}
 
-	perm := normalizePermission(req.PermissionType)
-	if err := validatePermissionConfig(perm, req.Password, req.AllowedEmails, req.AllowedDomains); err != nil {
+	requireEmail, requirePassword, requireNDA, emails, domains, perm, err := normalizeSecurityConfig(req)
+	if err != nil {
 		return db.Link{}, err
 	}
 
 	var passwordHash pgtype.Text
-	if perm == "password" {
+	if requirePassword {
 		hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 		if err != nil {
 			return db.Link{}, fmt.Errorf("hash password: %w", err)
@@ -119,13 +122,16 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		PublicToken:      token,
 		Name:             name,
 		PermissionType:   perm,
-		AllowedEmails:    mustMarshalJSON(req.AllowedEmails),
-		AllowedDomains:   mustMarshalJSON(req.AllowedDomains),
+		AllowedEmails:    mustMarshalJSON(emails),
+		AllowedDomains:   mustMarshalJSON(domains),
 		PasswordHash:     passwordHash,
 		ExpiresAt:        expiresAt,
 		MaxAccessCount:   maxAccess,
 		DownloadEnabled:  req.DownloadEnabled,
 		WatermarkEnabled: req.WatermarkEnabled,
+		RequireEmail:     requireEmail,
+		RequirePassword:  requirePassword,
+		RequireNda:       requireNDA,
 		Status:           "active",
 		CreatedBy:        userUUID,
 	})
@@ -166,31 +172,30 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		return AccessResult{}, ErrLinkMaxAccessReached
 	}
 
-	switch link.PermissionType {
-	case "public":
-		// no extra check
-	case "email_required":
+	requiresEmail := link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
+	requiresPassword := link.RequirePassword || link.PermissionType == "password"
+	requiresNDA := link.RequireNda || link.PermissionType == "nda"
+	hasWhitelist := len(link.AllowedEmails) > 2 || len(link.AllowedDomains) > 2 // non-empty JSON array '[]'
+
+	if requiresEmail || hasWhitelist {
 		if strings.TrimSpace(req.Email) == "" {
 			return AccessResult{}, ErrRequiresEmail
 		}
-	case "whitelist":
-		if strings.TrimSpace(req.Email) == "" {
-			return AccessResult{}, ErrRequiresEmail
-		}
+	}
+	if hasWhitelist {
 		if !isAllowed(req.Email, link.AllowedEmails, link.AllowedDomains) {
 			return AccessResult{}, ErrWhitelistDenied
 		}
-	case "password":
+	}
+	if requiresPassword {
 		if req.Password == "" {
 			return AccessResult{}, ErrRequiresPassword
 		}
 		if err := bcrypt.CompareHashAndPassword([]byte(link.PasswordHash.String), []byte(req.Password)); err != nil {
 			return AccessResult{}, ErrInvalidPassword
 		}
-	case "nda":
-		if strings.TrimSpace(req.Email) == "" {
-			return AccessResult{}, ErrRequiresEmail
-		}
+	}
+	if requiresNDA {
 		if !req.NDAAgreed {
 			return AccessResult{}, ErrRequiresNDA
 		}
@@ -298,6 +303,61 @@ func validatePermissionConfig(perm, password string, emails, domains []string) e
 	default:
 		return fmt.Errorf("%w: unknown permission type %q", ErrInvalidPermission, perm)
 	}
+}
+
+// normalizeSecurityConfig reconciles the legacy single permission_type with the
+// independent boolean flags sent by the new UI. It returns the resolved booleans,
+// normalized email/domain lists, and a display permission_type.
+func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requirePassword, requireNDA bool, emails, domains []string, perm string, err error) {
+	requireEmail = req.RequireEmail
+	requirePassword = req.RequirePassword
+	requireNDA = req.RequireNDA
+	emails = req.AllowedEmails
+	domains = req.AllowedDomains
+	perm = normalizePermission(req.PermissionType)
+
+	// If the caller only sent the legacy permission_type, derive the flags.
+	if !requireEmail && !requirePassword && !requireNDA && len(emails) == 0 && len(domains) == 0 {
+		switch perm {
+		case "email_required":
+			requireEmail = true
+		case "whitelist":
+			requireEmail = true
+		case "password":
+			requirePassword = true
+		case "nda":
+			requireEmail = true
+			requireNDA = true
+		}
+	}
+
+	// Whitelist always requires an email to check against.
+	if len(emails) > 0 || len(domains) > 0 {
+		requireEmail = true
+	}
+	// NDA always requires an email for audit.
+	if requireNDA {
+		requireEmail = true
+	}
+
+	if requirePassword && req.Password == "" {
+		return false, false, false, nil, nil, "", fmt.Errorf("%w: password required", ErrInvalidPermission)
+	}
+
+	// Derive a canonical permission_type for display/backward compatibility.
+	if requirePassword {
+		perm = "password"
+	} else if requireNDA {
+		perm = "nda"
+	} else if len(emails) > 0 || len(domains) > 0 {
+		perm = "whitelist"
+	} else if requireEmail {
+		perm = "email_required"
+	} else {
+		perm = "public"
+	}
+
+	return requireEmail, requirePassword, requireNDA, emails, domains, perm, nil
 }
 
 func isAllowed(email string, allowedEmails, allowedDomains []byte) bool {

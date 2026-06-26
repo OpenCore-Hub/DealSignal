@@ -69,6 +69,7 @@ export interface PermissionConfig {
   whitelist: string[];
   passwordEnabled: boolean;
   password?: string;
+  ndaEnabled: boolean;
   allowDownload: boolean;
   watermarkEnabled: boolean;
   expiryDays: number | "custom";

@@ -9,6 +9,7 @@ describe("toCreateLinkPayload", () => {
     whitelistEnabled: false,
     whitelist: [],
     passwordEnabled: false,
+    ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: false,
     expiryDays: "custom",
@@ -71,6 +72,23 @@ describe("toCreateLinkPayload", () => {
   it("sets max access count from maxViews", () => {
     const payload = toCreateLinkPayload("doc-1", { ...baseConfig, maxViews: 10 });
     expect(payload.max_access_count).toBe(10);
+  });
+
+  it("sends require_password when password is enabled", () => {
+    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, passwordEnabled: true, password: "secret" });
+    expect(payload.require_password).toBe(true);
+    expect(payload.require_email).toBe(false);
+  });
+
+  it("sends require_email for whitelist and require_nda for NDA", () => {
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      whitelistEnabled: true,
+      whitelist: ["a@example.test"],
+      ndaEnabled: true,
+    });
+    expect(payload.require_email).toBe(true);
+    expect(payload.require_nda).toBe(true);
   });
 });
 
