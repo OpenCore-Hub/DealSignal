@@ -200,6 +200,7 @@ export function LinkDetail() {
             xAxisTitle={t("detail.pageAxisTitle")}
             yAxisTitle={t("detail.durationAxisTitle")}
             tooltipName={t("detail.avgDurationTooltip")}
+            pageLabel={(page) => t("detail.pageLabel", { page })}
           />
           <Card>
             <CardHeader>

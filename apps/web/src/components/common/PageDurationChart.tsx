@@ -20,6 +20,7 @@ interface PageDurationChartProps {
   xAxisTitle?: string;
   yAxisTitle?: string;
   tooltipName?: string;
+  pageLabel?: (page: number) => string;
 }
 
 export function PageDurationChart({
@@ -31,6 +32,7 @@ export function PageDurationChart({
   xAxisTitle,
   yAxisTitle,
   tooltipName,
+  pageLabel,
 }: PageDurationChartProps) {
   const { t } = useTranslation("common");
   const containerRef = useRef<HTMLDivElement>(null);
@@ -77,6 +79,8 @@ export function PageDurationChart({
         },
       },
       tooltip: {
+        title: (_title: string, datum: Record<string, unknown>) =>
+          pageLabel ? pageLabel(datum.page as number) : `Page ${datum.page}`,
         formatter: (datum: Record<string, unknown>) => ({
           name: tooltipName ?? "Avg. duration",
           value: formatValue ? formatValue(datum.duration as number) : `${datum.duration}s`,
@@ -97,7 +101,7 @@ export function PageDurationChart({
     return () => {
       plot.destroy();
     };
-  }, [data, formatValue, t, xAxisTitle, yAxisTitle, tooltipName]);
+  }, [data, formatValue, t, xAxisTitle, yAxisTitle, tooltipName, pageLabel]);
 
   if (!data || data.length === 0) {
     return (
