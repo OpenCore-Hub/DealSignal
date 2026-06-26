@@ -17,7 +17,7 @@ func TestBuildCandidatesHotSignal(t *testing.T) {
 		bounces:            0,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	candidates := buildCandidates(result, m)
+	candidates := buildCandidates(result, m, "zh-CN")
 	if len(candidates) == 0 {
 		t.Fatal("expected at least one candidate")
 	}
@@ -40,7 +40,7 @@ func TestBuildCandidatesRiskAlert(t *testing.T) {
 		bounces:            2,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	candidates := buildCandidates(result, m)
+	candidates := buildCandidates(result, m, "zh-CN")
 	found := false
 	for _, c := range candidates {
 		if c.Type == "risk_alert" {
@@ -59,8 +59,11 @@ func TestPriorityAndTitle(t *testing.T) {
 	if priorityForType("risk_alert") != "medium" {
 		t.Fatal("expected risk_alert priority medium")
 	}
-	if titleForType("follow_up") != "跟进建议" {
+	if titleForType("follow_up", "zh-CN") != "跟进建议" {
 		t.Fatal("unexpected follow_up title")
+	}
+	if titleForType("follow_up", "en") != "Follow-up suggestion" {
+		t.Fatal("unexpected follow_up english title")
 	}
 }
 

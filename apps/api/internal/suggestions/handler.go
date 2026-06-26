@@ -18,6 +18,14 @@ func NewHandler(s *Service) *Handler {
 	return &Handler{service: s}
 }
 
+// langFromContext returns the requested language from the query or Accept-Language header.
+func langFromContext(c *gin.Context) string {
+	if q := c.Query("lang"); q != "" {
+		return q
+	}
+	return c.GetHeader("Accept-Language")
+}
+
 // RegisterRoutes mounts suggestion routes under a workspace group.
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g := r.Group("/analytics/links/:linkId")
@@ -31,7 +39,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 
 func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	items, err := h.service.List(c.Request.Context(), workspaceID, c.Param("linkId"))
+	items, err := h.service.List(c.Request.Context(), workspaceID, c.Param("linkId"), langFromContext(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
@@ -41,7 +49,7 @@ func (h *Handler) List(c *gin.Context) {
 
 func (h *Handler) Generate(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	items, err := h.service.Generate(c.Request.Context(), workspaceID, c.Param("linkId"))
+	items, err := h.service.Generate(c.Request.Context(), workspaceID, c.Param("linkId"), langFromContext(c))
 	if err != nil {
 		if errors.Is(err, ErrLinkNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
@@ -68,7 +76,7 @@ func (h *Handler) Dismiss(c *gin.Context) {
 
 func (h *Handler) ListWorkspace(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	items, err := h.service.ListWorkspace(c.Request.Context(), workspaceID)
+	items, err := h.service.ListWorkspace(c.Request.Context(), workspaceID, langFromContext(c))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return

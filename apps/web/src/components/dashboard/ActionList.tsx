@@ -74,7 +74,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                 </div>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium">{t(action.title)}</p>
+                    <p className="text-sm font-medium">{action.title}</p>
                     <Badge variant="outline" className={impactConfig[action.impact]}>
                       {impactLabel}
                     </Badge>
@@ -130,7 +130,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
               return (
                 <div key={action.id} className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3 line-through">
                   <Icon size={16} className="text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">{t(action.title)}</p>
+                  <p className="text-sm text-muted-foreground">{action.title}</p>
                 </div>
               );
             })}
@@ -165,7 +165,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                     <div key={action.id} className="flex items-center justify-between rounded-lg border bg-muted/50 p-3">
                       <div className="flex items-center gap-3">
                         <Icon size={16} className="text-muted-foreground" />
-                        <p className="text-sm text-muted-foreground">{t(action.title)}</p>
+                        <p className="text-sm text-muted-foreground">{action.title}</p>
                       </div>
                       <div className="flex items-center gap-2">
                         <Badge variant="outline" className="text-xs">

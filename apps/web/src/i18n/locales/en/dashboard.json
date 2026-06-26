@@ -34,7 +34,16 @@
     "collapse": "Collapse",
     "aiExplanation": "AI insight",
     "suggestedAction": "Suggested action",
-    "markDone": "Mark done"
+    "markDone": "Mark done",
+    "types": {
+      "hot_signal": "High-intent signal",
+      "risk_alert": "Risk alert",
+      "follow_up": "Follow-up suggestion",
+      "hot": "High-intent signal",
+      "warm": "Warm signal",
+      "cold": "Cold signal",
+      "risk": "Risk alert"
+    }
   },
   "actions": {
     "completedWithCount": "Completed ({{count}})",

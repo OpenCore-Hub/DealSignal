@@ -52,7 +52,7 @@ func NewService(q *db.Queries, n Notifier) *Service {
 }
 
 // Generate creates suggestions for a link based on recent access events.
-func (s *Service) Generate(ctx context.Context, workspaceID, linkID string) ([]Suggestion, error) {
+func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string) ([]Suggestion, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return nil, err
@@ -76,7 +76,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID string) ([]S
 	}
 
 	result := heat.Compute(heat.CircleDefault, metrics.heatInput())
-	candidates := buildCandidates(result, metrics)
+	candidates := buildCandidates(result, metrics, lang)
 
 	out := make([]Suggestion, 0, len(candidates))
 	for _, c := range candidates {
@@ -100,21 +100,21 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID string) ([]S
 		if err != nil {
 			return nil, fmt.Errorf("create suggestion: %w", err)
 		}
-		out = append(out, suggestionFromRow(row))
+		out = append(out, suggestionFromRow(row, lang))
 
 		if c.Type == "hot_signal" && s.notifier != nil {
 			userID := ""
 			if link.CreatedBy.Valid {
 				userID = uuid.UUID(link.CreatedBy.Bytes).String()
 			}
-			_ = s.notifier.Enqueue(ctx, workspaceID, userID, "email", titleForType(c.Type), c.Reason+"\n"+c.Action)
+			_ = s.notifier.Enqueue(ctx, workspaceID, userID, "email", titleForType(c.Type, lang), c.Reason+"\n"+c.Action)
 		}
 	}
 	return out, nil
 }
 
 // List returns active suggestions for a link.
-func (s *Service) List(ctx context.Context, workspaceID, linkID string) ([]Suggestion, error) {
+func (s *Service) List(ctx context.Context, workspaceID, linkID, lang string) ([]Suggestion, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return nil, err
@@ -132,7 +132,7 @@ func (s *Service) List(ctx context.Context, workspaceID, linkID string) ([]Sugge
 	}
 	out := make([]Suggestion, len(rows))
 	for i, r := range rows {
-		out[i] = suggestionFromRow(r)
+		out[i] = suggestionFromRow(r, lang)
 	}
 	return out, nil
 }
@@ -152,7 +152,7 @@ type WorkspaceSuggestion struct {
 }
 
 // ListWorkspace returns active suggestions across the workspace enriched for display.
-func (s *Service) ListWorkspace(ctx context.Context, workspaceID string) ([]WorkspaceSuggestion, error) {
+func (s *Service) ListWorkspace(ctx context.Context, workspaceID, lang string) ([]WorkspaceSuggestion, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return nil, err
@@ -326,40 +326,41 @@ type candidate struct {
 	Action string
 }
 
-func buildCandidates(result heat.Result, m suggestionMetrics) []candidate {
+func buildCandidates(result heat.Result, m suggestionMetrics, lang string) []candidate {
+	ls := newLocalizedStrings(lang)
 	var out []candidate
 	if result.Level == "hot" && m.opens >= 2 {
 		out = append(out, candidate{
 			Type:   "hot_signal",
-			Reason: fmt.Sprintf("热度评分达到 %d（%s），该联系人在 %d 次打开中查看了 %d 个关键页面", result.Score, result.Level, m.opens, m.keyPageViews),
-			Action: "立即发送 follow-up 邮件并提供深度资料",
+			Reason: fmt.Sprintf(ls.hotSignalReasonTmpl, result.Score, result.Level, m.opens, m.keyPageViews),
+			Action: ls.hotSignalAction,
 		})
 	}
 	if m.downloads > 0 {
 		out = append(out, candidate{
 			Type:   "follow_up",
-			Reason: fmt.Sprintf("联系人在最近 %d 次访问中尝试了下载", m.opens),
-			Action: "确认对方是否收到文件并询问反馈",
+			Reason: fmt.Sprintf(ls.downloadReasonTmpl, m.opens),
+			Action: ls.downloadAction,
 		})
 	}
 	if m.revisits > 0 {
 		out = append(out, candidate{
 			Type:   "follow_up",
-			Reason: fmt.Sprintf("联系人重复访问了 %d 次，表现出持续兴趣", m.revisits),
-			Action: "发送针对性的内容或安排一次通话",
+			Reason: fmt.Sprintf(ls.revisitReasonTmpl, m.revisits),
+			Action: ls.revisitAction,
 		})
 	}
 	if m.bounces > 0 && m.avgDurationMinutes < 0.5 {
 		out = append(out, candidate{
 			Type:   "risk_alert",
-			Reason: fmt.Sprintf("%d 次访问后快速离开，平均停留 %.1f 分钟", m.bounces, m.avgDurationMinutes),
-			Action: "优化材料首屏或换一种触达方式",
+			Reason: fmt.Sprintf(ls.riskReasonTmpl, m.bounces, m.avgDurationMinutes),
+			Action: ls.riskAction,
 		})
 	}
 	return out
 }
 
-func suggestionFromRow(r db.Suggestion) Suggestion {
+func suggestionFromRow(r db.Suggestion, lang string) Suggestion {
 	s := Suggestion{
 		ID:          uuidToString(r.ID),
 		TenantID:    uuidToString(r.TenantID),
@@ -377,7 +378,7 @@ func suggestionFromRow(r db.Suggestion) Suggestion {
 		s.ContactID = uuidToString(r.ContactID)
 	}
 	s.Priority = priorityForType(r.Type)
-	s.Title = titleForType(r.Type)
+	s.Title = titleForType(r.Type, lang)
 	return s
 }
 
@@ -392,15 +393,21 @@ func priorityForType(typ string) string {
 	}
 }
 
-func titleForType(typ string) string {
+func titleForType(typ, lang string) string {
+	ls := newLocalizedStrings(lang)
 	switch typ {
 	case "hot_signal":
-		return "高意向信号"
+		return ls.hotSignalTitle
 	case "risk_alert":
-		return "风险预警"
+		return ls.riskAlertTitle
 	default:
-		return "跟进建议"
+		return ls.followUpTitle
 	}
+}
+
+// TitleForType returns the localized title for a suggestion/signal type.
+func TitleForType(typ, lang string) string {
+	return titleForType(typ, lang)
 }
 
 func uuidToString(u pgtype.UUID) string {

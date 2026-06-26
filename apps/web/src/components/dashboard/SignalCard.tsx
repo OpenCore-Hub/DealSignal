@@ -82,12 +82,12 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-h3 truncate">{t(signal.title)}</h3>
+            <h3 className="text-h3 truncate">{t(`signal.types.${signal.type}`, { defaultValue: signal.title })}</h3>
             <Badge variant="outline" className={priorityConfig[signal.priority]}>
               {priorityLabel}
             </Badge>
           </div>
-          <p className="text-body mt-1 text-muted-foreground">{t(signal.description)}</p>
+          <p className="text-body mt-1 text-muted-foreground">{signal.description}</p>
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={handleNavigate}>
               {tCommon("viewDetails")} <ArrowRight size={14} className="ml-1" />
@@ -118,11 +118,11 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
             <div className="mt-4 space-y-3 border-t border-border pt-4">
               <div>
                 <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t("signal.aiExplanation")}</p>
-                <p className="text-body mt-1">{t(signal.explanation)}</p>
+                <p className="text-body mt-1">{signal.explanation}</p>
               </div>
               <div>
                 <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t("signal.suggestedAction")}</p>
-                <p className="text-body mt-1">{t(signal.suggestion)}</p>
+                <p className="text-body mt-1">{signal.suggestion}</p>
               </div>
               {action && (
                 <div className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
@@ -130,7 +130,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
                     <ActionIcon size={16} />
                   </div>
                   <div className="flex-1">
-                    <p className="text-sm font-medium">{t(action.title)}</p>
+                    <p className="text-sm font-medium">{action.title}</p>
                     <p className="text-caption text-muted-foreground">
                       {tCommon("dueDate")} {new Date(action.dueAt).toLocaleDateString(i18n.language)}
                     </p>

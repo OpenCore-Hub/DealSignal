@@ -115,17 +115,24 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	h.triggerSuggestions(c.Request.Context(), res.Link)
+	h.triggerSuggestions(c.Request.Context(), res.Link, langFromContext(c))
 	c.Status(http.StatusNoContent)
 }
 
-func (h *Handler) triggerSuggestions(ctx context.Context, link db.Link) {
+func (h *Handler) triggerSuggestions(ctx context.Context, link db.Link, lang string) {
 	if h.suggestions == nil {
 		return
 	}
 	workspaceID := uuid.UUID(link.WorkspaceID.Bytes).String()
 	linkID := uuid.UUID(link.ID.Bytes).String()
-	_, _ = h.suggestions.Generate(ctx, workspaceID, linkID)
+	_, _ = h.suggestions.Generate(ctx, workspaceID, linkID, lang)
+}
+
+func langFromContext(c *gin.Context) string {
+	if q := c.Query("lang"); q != "" {
+		return q
+	}
+	return c.GetHeader("Accept-Language")
 }
 
 // CreateRequest is the JSON body for creating a link.
@@ -355,7 +362,7 @@ func (h *Handler) Access(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	h.triggerSuggestions(c.Request.Context(), result.Link)
+	h.triggerSuggestions(c.Request.Context(), result.Link, langFromContext(c))
 
 	link := result.Link
 	doc, err := h.service.queries.GetDocumentByID(c.Request.Context(), db.GetDocumentByIDParams{

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -77,7 +78,7 @@ func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID,
 }
 
 // CreateFromSuggestion ensures a signal and action item exist for a suggestion.
-func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Suggestion) (db.Signal, db.ActionItem, error) {
+func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Suggestion, lang string) (db.Signal, db.ActionItem, error) {
 	existing, err := s.queries.GetSignalBySuggestion(ctx, db.GetSignalBySuggestionParams{
 		SuggestionID: suggestion.ID,
 		WorkspaceID:  suggestion.WorkspaceID,
@@ -102,7 +103,7 @@ func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Sugges
 			Valid: true,
 		},
 		Type:        suggestion.Type,
-		Title:       titleForType(suggestion.Type),
+		Title:       titleForType(suggestion.Type, lang),
 		Description: suggestion.Reason,
 		Explanation: suggestion.Reason,
 		Suggestion:  suggestion.Action,
@@ -142,22 +143,15 @@ func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UU
 		return fmt.Errorf("list suggestions: %w", err)
 	}
 	for _, sug := range suggestions {
-		if _, _, err := s.CreateFromSuggestion(ctx, sug); err != nil {
+		if _, _, err := s.CreateFromSuggestion(ctx, sug, "en"); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func titleForType(typ string) string {
-	switch typ {
-	case "hot_signal":
-		return "高意向信号"
-	case "risk_alert":
-		return "风险预警"
-	default:
-		return "跟进建议"
-	}
+func titleForType(typ, lang string) string {
+	return suggestions.TitleForType(typ, lang)
 }
 
 func priorityForType(typ string) string {

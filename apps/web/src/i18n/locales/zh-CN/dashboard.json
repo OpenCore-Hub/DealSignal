@@ -34,7 +34,16 @@
     "collapse": "收起",
     "aiExplanation": "AI 解释",
     "suggestedAction": "建议行动",
-    "markDone": "标记完成"
+    "markDone": "标记完成",
+    "types": {
+      "hot_signal": "高意向信号",
+      "risk_alert": "风险预警",
+      "follow_up": "跟进建议",
+      "hot": "高意向信号",
+      "warm": "温信号",
+      "cold": "冷信号",
+      "risk": "风险提醒"
+    }
   },
   "actions": {
     "completedWithCount": "已完成 ({{count}})",
