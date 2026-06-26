@@ -140,9 +140,12 @@
     "gateTitle": "该文档已安全共享",
     "emailLabel": "邮箱",
     "emailPlaceholder": "输入您的邮箱",
+    "emailRequired": "请输入邮箱以继续查看文档。",
     "passwordLabel": "密码",
     "passwordPlaceholder": "输入链接密码",
+    "passwordRequired": "请输入链接密码以继续查看文档。",
     "ndaLabel": "我同意保密协议",
+    "ndaRequired": "请勾选同意保密协议以继续查看文档。",
     "continue": "继续"
   }
 }

@@ -527,6 +527,51 @@ func (q *Queries) CreateChunkWithEmbedding(ctx context.Context, arg CreateChunkW
 	return err
 }
 
+const createDeal = `-- name: CreateDeal :one
+INSERT INTO deals (workspace_id, contact_id, name, stage, amount, currency, status, close_date)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at
+`
+
+type CreateDealParams struct {
+	WorkspaceID pgtype.UUID
+	ContactID   pgtype.UUID
+	Name        string
+	Stage       pgtype.Text
+	Amount      pgtype.Numeric
+	Currency    pgtype.Text
+	Status      pgtype.Text
+	CloseDate   pgtype.Timestamptz
+}
+
+func (q *Queries) CreateDeal(ctx context.Context, arg CreateDealParams) (Deal, error) {
+	row := q.db.QueryRow(ctx, createDeal,
+		arg.WorkspaceID,
+		arg.ContactID,
+		arg.Name,
+		arg.Stage,
+		arg.Amount,
+		arg.Currency,
+		arg.Status,
+		arg.CloseDate,
+	)
+	var i Deal
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ContactID,
+		&i.Name,
+		&i.Stage,
+		&i.Amount,
+		&i.Currency,
+		&i.Status,
+		&i.CloseDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createDealRoom = `-- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
@@ -651,6 +696,45 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 	return i, err
 }
 
+const createHubSpotSyncJob = `-- name: CreateHubSpotSyncJob :one
+INSERT INTO hubspot_sync_jobs (workspace_id, record_type, record_id, direction, payload)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, status, record_type, record_id, direction, attempts, error_message, payload, created_at, updated_at
+`
+
+type CreateHubSpotSyncJobParams struct {
+	WorkspaceID pgtype.UUID
+	RecordType  string
+	RecordID    pgtype.UUID
+	Direction   string
+	Payload     []byte
+}
+
+func (q *Queries) CreateHubSpotSyncJob(ctx context.Context, arg CreateHubSpotSyncJobParams) (HubspotSyncJob, error) {
+	row := q.db.QueryRow(ctx, createHubSpotSyncJob,
+		arg.WorkspaceID,
+		arg.RecordType,
+		arg.RecordID,
+		arg.Direction,
+		arg.Payload,
+	)
+	var i HubspotSyncJob
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Status,
+		&i.RecordType,
+		&i.RecordID,
+		&i.Direction,
+		&i.Attempts,
+		&i.ErrorMessage,
+		&i.Payload,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createIngestionJob = `-- name: CreateIngestionJob :one
 INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
 VALUES ($1, $2, $3, $4)
@@ -680,6 +764,53 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		&i.Status,
 		&i.Attempts,
 		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createIntegrationMapping = `-- name: CreateIntegrationMapping :one
+INSERT INTO integration_mappings (workspace_id, provider, local_record_type, local_id, external_id, external_url, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, provider, local_record_type, local_id) DO UPDATE SET
+    external_id = EXCLUDED.external_id,
+    external_url = EXCLUDED.external_url,
+    metadata = EXCLUDED.metadata,
+    updated_at = now()
+RETURNING id, workspace_id, provider, local_record_type, local_id, external_id, external_url, metadata, created_at, updated_at
+`
+
+type CreateIntegrationMappingParams struct {
+	WorkspaceID     pgtype.UUID
+	Provider        string
+	LocalRecordType string
+	LocalID         pgtype.UUID
+	ExternalID      string
+	ExternalUrl     pgtype.Text
+	Metadata        []byte
+}
+
+func (q *Queries) CreateIntegrationMapping(ctx context.Context, arg CreateIntegrationMappingParams) (IntegrationMapping, error) {
+	row := q.db.QueryRow(ctx, createIntegrationMapping,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.LocalRecordType,
+		arg.LocalID,
+		arg.ExternalID,
+		arg.ExternalUrl,
+		arg.Metadata,
+	)
+	var i IntegrationMapping
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.LocalRecordType,
+		&i.LocalID,
+		&i.ExternalID,
+		&i.ExternalUrl,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -802,6 +933,49 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 	return i, err
 }
 
+const createLinkNDAAgreement = `-- name: CreateLinkNDAAgreement :one
+INSERT INTO link_nda_agreements (
+    tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent, nda_agreed, signed_at
+`
+
+type CreateLinkNDAAgreementParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	VisitorID   pgtype.Text
+	Email       pgtype.Text
+	Ip          *netip.Addr
+	UserAgent   pgtype.Text
+}
+
+func (q *Queries) CreateLinkNDAAgreement(ctx context.Context, arg CreateLinkNDAAgreementParams) (LinkNdaAgreement, error) {
+	row := q.db.QueryRow(ctx, createLinkNDAAgreement,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.Email,
+		arg.Ip,
+		arg.UserAgent,
+	)
+	var i LinkNdaAgreement
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.Email,
+		&i.Ip,
+		&i.UserAgent,
+		&i.NdaAgreed,
+		&i.SignedAt,
+	)
+	return i, err
+}
+
 const createNDAAgreement = `-- name: CreateNDAAgreement :exec
 INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)
 VALUES ($1, $2, $3, $4)
@@ -887,9 +1061,9 @@ func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStatePara
 }
 
 const createPage = `-- name: CreatePage :one
-INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
+INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size, created_at
 `
 
 type CreatePageParams struct {
@@ -900,9 +1074,23 @@ type CreatePageParams struct {
 	ImageObjectKey pgtype.Text
 	Width          pgtype.Int4
 	Height         pgtype.Int4
+	FileSize       pgtype.Int8
 }
 
-func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (Page, error) {
+type CreatePageRow struct {
+	ID             pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	DocumentID     pgtype.UUID
+	PageNumber     int32
+	ImageObjectKey pgtype.Text
+	Width          pgtype.Int4
+	Height         pgtype.Int4
+	FileSize       pgtype.Int8
+	CreatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (CreatePageRow, error) {
 	row := q.db.QueryRow(ctx, createPage,
 		arg.TenantID,
 		arg.WorkspaceID,
@@ -911,8 +1099,9 @@ func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (Page, e
 		arg.ImageObjectKey,
 		arg.Width,
 		arg.Height,
+		arg.FileSize,
 	)
-	var i Page
+	var i CreatePageRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -922,6 +1111,7 @@ func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (Page, e
 		&i.ImageObjectKey,
 		&i.Width,
 		&i.Height,
+		&i.FileSize,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -1086,6 +1276,50 @@ func (q *Queries) CreateSyncLog(ctx context.Context, arg CreateSyncLogParams) (I
 		arg.ExternalID,
 		arg.Status,
 		arg.Payload,
+	)
+	var i IntegrationSyncLog
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.Direction,
+		&i.RecordType,
+		&i.ExternalID,
+		&i.Status,
+		&i.Payload,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createSyncLogWithError = `-- name: CreateSyncLogWithError :one
+INSERT INTO integration_sync_logs (workspace_id, provider, direction, record_type, external_id, status, payload, error_message)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, provider, direction, record_type, external_id, status, payload, error_message, created_at
+`
+
+type CreateSyncLogWithErrorParams struct {
+	WorkspaceID  pgtype.UUID
+	Provider     string
+	Direction    string
+	RecordType   string
+	ExternalID   pgtype.Text
+	Status       string
+	Payload      []byte
+	ErrorMessage pgtype.Text
+}
+
+func (q *Queries) CreateSyncLogWithError(ctx context.Context, arg CreateSyncLogWithErrorParams) (IntegrationSyncLog, error) {
+	row := q.db.QueryRow(ctx, createSyncLogWithError,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.Direction,
+		arg.RecordType,
+		arg.ExternalID,
+		arg.Status,
+		arg.Payload,
+		arg.ErrorMessage,
 	)
 	var i IntegrationSyncLog
 	err := row.Scan(
@@ -1554,6 +1788,37 @@ func (q *Queries) GetContactByID(ctx context.Context, arg GetContactByIDParams) 
 	return i, err
 }
 
+const getDealByID = `-- name: GetDealByID :one
+SELECT id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at
+FROM deals
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetDealByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetDealByID(ctx context.Context, arg GetDealByIDParams) (Deal, error) {
+	row := q.db.QueryRow(ctx, getDealByID, arg.ID, arg.WorkspaceID)
+	var i Deal
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ContactID,
+		&i.Name,
+		&i.Stage,
+		&i.Amount,
+		&i.Currency,
+		&i.Status,
+		&i.CloseDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDealRoomByID = `-- name: GetDealRoomByID :one
 SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
        requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
@@ -1812,6 +2077,43 @@ func (q *Queries) GetIngestionJobByDocument(ctx context.Context, documentID pgty
 		&i.Status,
 		&i.Attempts,
 		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getIntegrationMapping = `-- name: GetIntegrationMapping :one
+SELECT id, workspace_id, provider, local_record_type, local_id, external_id, external_url, metadata, created_at, updated_at
+FROM integration_mappings
+WHERE workspace_id = $1 AND provider = $2 AND local_record_type = $3 AND local_id = $4
+LIMIT 1
+`
+
+type GetIntegrationMappingParams struct {
+	WorkspaceID     pgtype.UUID
+	Provider        string
+	LocalRecordType string
+	LocalID         pgtype.UUID
+}
+
+func (q *Queries) GetIntegrationMapping(ctx context.Context, arg GetIntegrationMappingParams) (IntegrationMapping, error) {
+	row := q.db.QueryRow(ctx, getIntegrationMapping,
+		arg.WorkspaceID,
+		arg.Provider,
+		arg.LocalRecordType,
+		arg.LocalID,
+	)
+	var i IntegrationMapping
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Provider,
+		&i.LocalRecordType,
+		&i.LocalID,
+		&i.ExternalID,
+		&i.ExternalUrl,
+		&i.Metadata,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2149,9 +2451,21 @@ type GetPageByDocumentAndNumberParams struct {
 	PageNumber int32
 }
 
-func (q *Queries) GetPageByDocumentAndNumber(ctx context.Context, arg GetPageByDocumentAndNumberParams) (Page, error) {
+type GetPageByDocumentAndNumberRow struct {
+	ID             pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	DocumentID     pgtype.UUID
+	PageNumber     int32
+	ImageObjectKey pgtype.Text
+	Width          pgtype.Int4
+	Height         pgtype.Int4
+	CreatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) GetPageByDocumentAndNumber(ctx context.Context, arg GetPageByDocumentAndNumberParams) (GetPageByDocumentAndNumberRow, error) {
 	row := q.db.QueryRow(ctx, getPageByDocumentAndNumber, arg.DocumentID, arg.PageNumber)
-	var i Page
+	var i GetPageByDocumentAndNumberRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -2605,6 +2919,26 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 		&i.JoinedAt,
 	)
 	return i, err
+}
+
+const getWorkspaceStorageUsage = `-- name: GetWorkspaceStorageUsage :one
+SELECT (
+    COALESCE((
+        SELECT SUM(d.file_size) FROM documents d
+        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+    ), 0) + COALESCE((
+        SELECT SUM(p.file_size) FROM pages p
+        JOIN documents d ON p.document_id = d.id
+        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+    ), 0)
+)::bigint AS total_bytes
+`
+
+func (q *Queries) GetWorkspaceStorageUsage(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceStorageUsage, workspaceID)
+	var total_bytes int64
+	err := row.Scan(&total_bytes)
+	return total_bytes, err
 }
 
 const hasNDAAgreement = `-- name: HasNDAAgreement :one
@@ -3187,6 +3521,45 @@ func (q *Queries) ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listDealsByWorkspace = `-- name: ListDealsByWorkspace :many
+SELECT id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at
+FROM deals
+WHERE workspace_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListDealsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Deal, error) {
+	rows, err := q.db.Query(ctx, listDealsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Deal
+	for rows.Next() {
+		var i Deal
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.ContactID,
+			&i.Name,
+			&i.Stage,
+			&i.Amount,
+			&i.Currency,
+			&i.Status,
+			&i.CloseDate,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocumentsByWorkspace = `-- name: ListDocumentsByWorkspace :many
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -3399,15 +3772,27 @@ WHERE document_id = $1
 ORDER BY page_number
 `
 
-func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUID) ([]Page, error) {
+type ListPagesByDocumentRow struct {
+	ID             pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	DocumentID     pgtype.UUID
+	PageNumber     int32
+	ImageObjectKey pgtype.Text
+	Width          pgtype.Int4
+	Height         pgtype.Int4
+	CreatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUID) ([]ListPagesByDocumentRow, error) {
 	rows, err := q.db.Query(ctx, listPagesByDocument, documentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Page
+	var items []ListPagesByDocumentRow
 	for rows.Next() {
-		var i Page
+		var i ListPagesByDocumentRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -3418,6 +3803,46 @@ func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUI
 			&i.Width,
 			&i.Height,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingHubSpotSyncJobs = `-- name: ListPendingHubSpotSyncJobs :many
+SELECT id, workspace_id, status, record_type, record_id, direction, attempts, error_message, payload, created_at, updated_at
+FROM hubspot_sync_jobs
+WHERE status = 'pending' AND attempts < 3
+ORDER BY created_at ASC
+LIMIT $1
+`
+
+func (q *Queries) ListPendingHubSpotSyncJobs(ctx context.Context, limit int32) ([]HubspotSyncJob, error) {
+	rows, err := q.db.Query(ctx, listPendingHubSpotSyncJobs, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []HubspotSyncJob
+	for rows.Next() {
+		var i HubspotSyncJob
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Status,
+			&i.RecordType,
+			&i.RecordID,
+			&i.Direction,
+			&i.Attempts,
+			&i.ErrorMessage,
+			&i.Payload,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4069,6 +4494,47 @@ func (q *Queries) ListWorkspacesByUserAndTenant(ctx context.Context, arg ListWor
 		return nil, err
 	}
 	return items, nil
+}
+
+const markHubSpotSyncJobCompleted = `-- name: MarkHubSpotSyncJobCompleted :exec
+UPDATE hubspot_sync_jobs
+SET status = 'completed', attempts = attempts + 1, updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) MarkHubSpotSyncJobCompleted(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markHubSpotSyncJobCompleted, id)
+	return err
+}
+
+const markHubSpotSyncJobFailed = `-- name: MarkHubSpotSyncJobFailed :exec
+UPDATE hubspot_sync_jobs
+SET attempts = attempts + 1,
+    error_message = $2,
+    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
+    updated_at = now()
+WHERE id = $1
+`
+
+type MarkHubSpotSyncJobFailedParams struct {
+	ID           pgtype.UUID
+	ErrorMessage pgtype.Text
+}
+
+func (q *Queries) MarkHubSpotSyncJobFailed(ctx context.Context, arg MarkHubSpotSyncJobFailedParams) error {
+	_, err := q.db.Exec(ctx, markHubSpotSyncJobFailed, arg.ID, arg.ErrorMessage)
+	return err
+}
+
+const markHubSpotSyncJobProcessing = `-- name: MarkHubSpotSyncJobProcessing :exec
+UPDATE hubspot_sync_jobs
+SET status = 'processing', attempts = attempts + 1, updated_at = now()
+WHERE id = $1 AND status = 'pending'
+`
+
+func (q *Queries) MarkHubSpotSyncJobProcessing(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markHubSpotSyncJobProcessing, id)
+	return err
 }
 
 const markInvitationUsed = `-- name: MarkInvitationUsed :exec

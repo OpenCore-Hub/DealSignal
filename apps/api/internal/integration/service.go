@@ -244,12 +244,15 @@ func (s *Service) ListSyncLogs(ctx context.Context, workspaceID string) ([]db.In
 	return s.queries.ListSyncLogsByWorkspace(ctx, wsUUID)
 }
 
-// SyncHubSpot pushes contacts to HubSpot using a stored access token.
+// SyncHubSpot pushes a workspace's contacts and deals to HubSpot.
+// It refreshes the access token if needed, upserts records, stores external
+// IDs in integration_mappings, and writes per-record sync logs.
 func (s *Service) SyncHubSpot(ctx context.Context, workspaceID string) error {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return err
 	}
+
 	token, err := s.queries.GetIntegrationToken(ctx, db.GetIntegrationTokenParams{
 		WorkspaceID: wsUUID,
 		Provider:    "hubspot",
@@ -257,18 +260,238 @@ func (s *Service) SyncHubSpot(ctx context.Context, workspaceID string) error {
 	if err != nil {
 		return errors.New("hubspot not connected")
 	}
-	// Stub: real implementation would list contacts and POST to HubSpot API.
-	_ = token.AccessToken
-	_, err = s.queries.CreateSyncLog(ctx, db.CreateSyncLogParams{
+
+	accessToken, err := s.ensureHubSpotToken(ctx, token)
+	if err != nil {
+		return fmt.Errorf("ensure hubspot token: %w", err)
+	}
+
+	client := newHubSpotClient(accessToken, s.httpClient)
+
+	contacts, err := s.queries.ListContactsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return fmt.Errorf("list contacts: %w", err)
+	}
+
+	var syncErrs []string
+	for _, c := range contacts {
+		externalID, err := client.upsertContact(ctx, c)
+		if err != nil {
+			syncErrs = append(syncErrs, fmt.Sprintf("contact %s: %v", c.Email.String, err))
+			s.logSync(ctx, wsUUID, "contact", c.ID, "", "failed", []byte(`{}`), err.Error())
+			continue
+		}
+
+		if _, err := s.queries.CreateIntegrationMapping(ctx, db.CreateIntegrationMappingParams{
+			WorkspaceID:     wsUUID,
+			Provider:        "hubspot",
+			LocalRecordType: "contact",
+			LocalID:         c.ID,
+			ExternalID:      externalID,
+			ExternalUrl:     pgtype.Text{String: "https://app.hubspot.com/contacts/" + externalID, Valid: true},
+			Metadata:        []byte(`{}`),
+		}); err != nil {
+			syncErrs = append(syncErrs, fmt.Sprintf("contact %s mapping: %v", c.Email.String, err))
+		}
+		s.logSync(ctx, wsUUID, "contact", c.ID, externalID, "success", []byte(`{}`), "")
+	}
+
+	deals, err := s.queries.ListDealsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return fmt.Errorf("list deals: %w", err)
+	}
+
+	for _, d := range deals {
+		contactMapping, err := s.queries.GetIntegrationMapping(ctx, db.GetIntegrationMappingParams{
+			WorkspaceID:     wsUUID,
+			Provider:        "hubspot",
+			LocalRecordType: "contact",
+			LocalID:         d.ContactID,
+		})
+		var contactExternalID string
+		if err == nil && contactMapping.ExternalID != "" {
+			contactExternalID = contactMapping.ExternalID
+		}
+		if contactExternalID == "" {
+			syncErrs = append(syncErrs, fmt.Sprintf("deal %s: contact mapping missing", d.Name))
+			continue
+		}
+
+		dealMapping, err := s.queries.GetIntegrationMapping(ctx, db.GetIntegrationMappingParams{
+			WorkspaceID:     wsUUID,
+			Provider:        "hubspot",
+			LocalRecordType: "deal",
+			LocalID:         d.ID,
+		})
+		var dealExternalID string
+		if err == nil && dealMapping.ExternalID != "" {
+			dealExternalID = dealMapping.ExternalID
+		}
+
+		newDealExternalID, err := client.upsertDeal(ctx, d, contactExternalID, dealExternalID)
+		if err != nil {
+			syncErrs = append(syncErrs, fmt.Sprintf("deal %s: %v", d.Name, err))
+			s.logSync(ctx, wsUUID, "deal", d.ID, "", "failed", []byte(`{}`), err.Error())
+			continue
+		}
+
+		if _, err := s.queries.CreateIntegrationMapping(ctx, db.CreateIntegrationMappingParams{
+			WorkspaceID:     wsUUID,
+			Provider:        "hubspot",
+			LocalRecordType: "deal",
+			LocalID:         d.ID,
+			ExternalID:      newDealExternalID,
+			ExternalUrl:     pgtype.Text{String: "https://app.hubspot.com/contacts/" + newDealExternalID, Valid: true},
+			Metadata:        []byte(`{}`),
+		}); err != nil {
+			syncErrs = append(syncErrs, fmt.Sprintf("deal %s mapping: %v", d.Name, err))
+		}
+		s.logSync(ctx, wsUUID, "deal", d.ID, newDealExternalID, "success", []byte(`{}`), "")
+	}
+
+	if len(syncErrs) > 0 {
+		return errors.New(strings.Join(syncErrs, "; "))
+	}
+	return nil
+}
+
+func (s *Service) logSync(ctx context.Context, workspaceID pgtype.UUID, recordType string, localID pgtype.UUID, externalID, status string, payload []byte, errMsg string) {
+	var extID pgtype.Text
+	if externalID != "" {
+		extID = pgtype.Text{String: externalID, Valid: true}
+	}
+	var errorMsg pgtype.Text
+	if errMsg != "" {
+		errorMsg = pgtype.Text{String: errMsg, Valid: true}
+	}
+	_, _ = s.queries.CreateSyncLogWithError(ctx, db.CreateSyncLogWithErrorParams{
+		WorkspaceID:  workspaceID,
+		Provider:     "hubspot",
+		Direction:    "outbound",
+		RecordType:   recordType,
+		ExternalID:   extID,
+		Status:       status,
+		Payload:      payload,
+		ErrorMessage: errorMsg,
+	})
+}
+
+func (s *Service) ensureHubSpotToken(ctx context.Context, token db.IntegrationToken) (string, error) {
+	if token.ExpiresAt.Valid && token.ExpiresAt.Time.Before(time.Now().Add(2*time.Minute)) {
+		return s.refreshHubSpotToken(ctx, token)
+	}
+	return token.AccessToken, nil
+}
+
+func (s *Service) refreshHubSpotToken(ctx context.Context, token db.IntegrationToken) (string, error) {
+	if !token.RefreshToken.Valid || token.RefreshToken.String == "" {
+		return "", errors.New("hubspot refresh token not available")
+	}
+
+	form := url.Values{}
+	form.Set("grant_type", "refresh_token")
+	form.Set("client_id", s.cfg.HubSpotClientID)
+	form.Set("client_secret", s.cfg.HubSpotClientSecret)
+	form.Set("refresh_token", token.RefreshToken.String)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.hubSpotTokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("hubspot refresh returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var parsed hubSpotOAuthResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", err
+	}
+
+	var expiresAt pgtype.Timestamptz
+	if parsed.ExpiresIn > 0 {
+		expiresAt = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(parsed.ExpiresIn) * time.Second), Valid: true}
+	}
+
+	refreshToken := token.RefreshToken
+	if parsed.RefreshToken != "" {
+		refreshToken = pgtype.Text{String: parsed.RefreshToken, Valid: true}
+	}
+
+	if err := s.queries.UpsertIntegrationToken(ctx, db.UpsertIntegrationTokenParams{
+		WorkspaceID:  token.WorkspaceID,
+		Provider:     "hubspot",
+		AccessToken:  parsed.AccessToken,
+		RefreshToken: refreshToken,
+		ExpiresAt:    expiresAt,
+		Scope:        token.Scope,
+		ExternalID:   token.ExternalID,
+	}); err != nil {
+		return "", fmt.Errorf("persist refreshed token: %w", err)
+	}
+
+	return parsed.AccessToken, nil
+}
+
+// EnqueueHubSpotSync creates a pending sync job for the workspace.
+func (s *Service) EnqueueHubSpotSync(ctx context.Context, workspaceID string) error {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.CreateHubSpotSyncJob(ctx, db.CreateHubSpotSyncJobParams{
 		WorkspaceID: wsUUID,
-		Provider:    "hubspot",
+		RecordType:  "workspace",
+		RecordID:    wsUUID,
 		Direction:   "outbound",
-		RecordType:  "contact",
-		ExternalID:  pgtype.Text{},
-		Status:      "success",
-		Payload:     []byte(`{"note":"stub sync"}`),
+		Payload:     []byte(`{}`),
 	})
 	return err
+}
+
+// ProcessPendingHubSpotSyncs fetches and executes pending HubSpot sync jobs.
+func (s *Service) ProcessPendingHubSpotSyncs(ctx context.Context, limit int) error {
+	jobs, err := s.queries.ListPendingHubSpotSyncJobs(ctx, int32(limit))
+	if err != nil {
+		return fmt.Errorf("list pending jobs: %w", err)
+	}
+	for _, job := range jobs {
+		if err := s.ProcessHubSpotSyncJob(ctx, job); err != nil {
+			// Individual job errors are logged inside ProcessHubSpotSyncJob; keep
+			// processing the rest of the batch.
+			continue
+		}
+	}
+	return nil
+}
+
+// ProcessHubSpotSyncJob executes a single sync job and updates its status.
+func (s *Service) ProcessHubSpotSyncJob(ctx context.Context, job db.HubspotSyncJob) error {
+	if err := s.queries.MarkHubSpotSyncJobProcessing(ctx, job.ID); err != nil {
+		return err
+	}
+
+	workspaceID := uuidToString(job.WorkspaceID)
+	if err := s.SyncHubSpot(ctx, workspaceID); err != nil {
+		_ = s.queries.MarkHubSpotSyncJobFailed(ctx, db.MarkHubSpotSyncJobFailedParams{
+			ID: job.ID,
+			ErrorMessage: pgtype.Text{String: err.Error(), Valid: true},
+		})
+		return err
+	}
+
+	return s.queries.MarkHubSpotSyncJobCompleted(ctx, job.ID)
 }
 
 func (s *Service) slackAuthURL(state string) string {
@@ -286,7 +509,7 @@ func (s *Service) hubSpotAuthURL(state string) string {
 	u, _ := url.Parse("https://app.hubspot.com/oauth/authorize")
 	q := u.Query()
 	q.Set("client_id", s.cfg.HubSpotClientID)
-	q.Set("scope", "oauth")
+	q.Set("scope", "crm.objects.contacts.write crm.objects.contacts.read crm.objects.deals.write crm.objects.deals.read")
 	q.Set("redirect_uri", s.cfg.AppBaseURL+"/api/integrations/oauth/hubspot/callback")
 	q.Set("state", state)
 	u.RawQuery = q.Encode()

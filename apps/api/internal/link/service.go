@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"net/mail"
+	"net/netip"
 	"strings"
 	"time"
 
@@ -150,6 +151,7 @@ type AccessRequest struct {
 type AccessResult struct {
 	Link      db.Link
 	VisitorID string
+	Email     string
 }
 
 // Access validates a public token and returns the link if access is granted.
@@ -175,7 +177,7 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	requiresEmail := link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
 	requiresPassword := link.RequirePassword || link.PermissionType == "password"
 	requiresNDA := link.RequireNda || link.PermissionType == "nda"
-	hasWhitelist := len(link.AllowedEmails) > 2 || len(link.AllowedDomains) > 2 // non-empty JSON array '[]'
+	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
 
 	if requiresEmail || hasWhitelist {
 		if strings.TrimSpace(req.Email) == "" {
@@ -202,7 +204,25 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	}
 
 	visitorID := makeVisitorID(req.Email, req.UA)
-	return AccessResult{Link: link, VisitorID: visitorID}, nil
+
+	if requiresNDA {
+		ipAddr, _ := netip.ParseAddr(req.IP)
+		var ip *netip.Addr
+		if ipAddr.IsValid() {
+			ip = &ipAddr
+		}
+		_, _ = s.queries.CreateLinkNDAAgreement(ctx, db.CreateLinkNDAAgreementParams{
+			TenantID:    link.TenantID,
+			WorkspaceID: link.WorkspaceID,
+			LinkID:      link.ID,
+			VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
+			Email:       pgtype.Text{String: req.Email, Valid: req.Email != ""},
+			Ip:          ip,
+			UserAgent:   pgtype.Text{String: req.UA, Valid: req.UA != ""},
+		})
+	}
+
+	return AccessResult{Link: link, VisitorID: visitorID, Email: req.Email}, nil
 }
 
 // GetByID returns a link scoped to a workspace.
@@ -286,25 +306,6 @@ func normalizePermission(p string) string {
 	return p
 }
 
-func validatePermissionConfig(perm, password string, emails, domains []string) error {
-	switch perm {
-	case "public", "email_required", "nda":
-		return nil
-	case "whitelist":
-		if len(emails) == 0 && len(domains) == 0 {
-			return fmt.Errorf("%w: whitelist requires allowed_emails or allowed_domains", ErrInvalidPermission)
-		}
-		return nil
-	case "password":
-		if password == "" {
-			return fmt.Errorf("%w: password required", ErrInvalidPermission)
-		}
-		return nil
-	default:
-		return fmt.Errorf("%w: unknown permission type %q", ErrInvalidPermission, perm)
-	}
-}
-
 // normalizeSecurityConfig reconciles the legacy single permission_type with the
 // independent boolean flags sent by the new UI. It returns the resolved booleans,
 // normalized email/domain lists, and a display permission_type.
@@ -358,6 +359,10 @@ func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requirePasswo
 	}
 
 	return requireEmail, requirePassword, requireNDA, emails, domains, perm, nil
+}
+
+func jsonArrayNotEmpty(b []byte) bool {
+	return len(b) > 0 && string(b) != "[]" && string(b) != "null"
 }
 
 func isAllowed(email string, allowedEmails, allowedDomains []byte) bool {

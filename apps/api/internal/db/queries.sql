@@ -135,9 +135,9 @@ SET status = $1, attempts = $2, error_message = $3, updated_at = now()
 WHERE id = $4;
 
 -- name: CreatePage :one
-INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at;
+INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size, created_at;
 
 -- name: ListPagesByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
@@ -293,6 +293,12 @@ RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permissi
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
        updated_at, require_email, require_password, require_nda;
 
+-- name: CreateLinkNDAAgreement :one
+INSERT INTO link_nda_agreements (
+    tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent, nda_agreed, signed_at;
+
 -- name: GetDocumentViewMetrics :many
 SELECT
     d.id,
@@ -341,6 +347,18 @@ SELECT
     COUNT(*) AS total_page_views
 FROM page_views
 WHERE link_id = $1;
+
+-- name: GetWorkspaceStorageUsage :one
+SELECT (
+    COALESCE((
+        SELECT SUM(d.file_size) FROM documents d
+        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+    ), 0) + COALESCE((
+        SELECT SUM(p.file_size) FROM pages p
+        JOIN documents d ON p.document_id = d.id
+        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+    ), 0)
+)::bigint AS total_bytes;
 
 -- name: GetLinkBounceCount :one
 SELECT COUNT(*) AS bounce_count
@@ -757,6 +775,57 @@ WHERE workspace_id = $1
 ORDER BY created_at DESC
 LIMIT 50;
 
+-- name: CreateSyncLogWithError :one
+INSERT INTO integration_sync_logs (workspace_id, provider, direction, record_type, external_id, status, payload, error_message)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, provider, direction, record_type, external_id, status, payload, error_message, created_at;
+
+-- name: CreateIntegrationMapping :one
+INSERT INTO integration_mappings (workspace_id, provider, local_record_type, local_id, external_id, external_url, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, provider, local_record_type, local_id) DO UPDATE SET
+    external_id = EXCLUDED.external_id,
+    external_url = EXCLUDED.external_url,
+    metadata = EXCLUDED.metadata,
+    updated_at = now()
+RETURNING id, workspace_id, provider, local_record_type, local_id, external_id, external_url, metadata, created_at, updated_at;
+
+-- name: GetIntegrationMapping :one
+SELECT id, workspace_id, provider, local_record_type, local_id, external_id, external_url, metadata, created_at, updated_at
+FROM integration_mappings
+WHERE workspace_id = $1 AND provider = $2 AND local_record_type = $3 AND local_id = $4
+LIMIT 1;
+
+-- name: CreateHubSpotSyncJob :one
+INSERT INTO hubspot_sync_jobs (workspace_id, record_type, record_id, direction, payload)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, status, record_type, record_id, direction, attempts, error_message, payload, created_at, updated_at;
+
+-- name: ListPendingHubSpotSyncJobs :many
+SELECT id, workspace_id, status, record_type, record_id, direction, attempts, error_message, payload, created_at, updated_at
+FROM hubspot_sync_jobs
+WHERE status = 'pending' AND attempts < 3
+ORDER BY created_at ASC
+LIMIT $1;
+
+-- name: MarkHubSpotSyncJobProcessing :exec
+UPDATE hubspot_sync_jobs
+SET status = 'processing', attempts = attempts + 1, updated_at = now()
+WHERE id = $1 AND status = 'pending';
+
+-- name: MarkHubSpotSyncJobCompleted :exec
+UPDATE hubspot_sync_jobs
+SET status = 'completed', attempts = attempts + 1, updated_at = now()
+WHERE id = $1;
+
+-- name: MarkHubSpotSyncJobFailed :exec
+UPDATE hubspot_sync_jobs
+SET attempts = attempts + 1,
+    error_message = $2,
+    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
+    updated_at = now()
+WHERE id = $1;
+
 -- name: GetWorkspaceByIDAndTenant :one
 SELECT * FROM workspaces WHERE id = $1 AND tenant_id = $2 LIMIT 1;
 
@@ -932,6 +1001,23 @@ VALUES ($1, $2, NULLIF($3, ''))
 ON CONFLICT (workspace_id, email) DO UPDATE SET
     name = COALESCE(EXCLUDED.name, contacts.name)
 RETURNING id, workspace_id, email, name, created_at;
+
+-- name: CreateDeal :one
+INSERT INTO deals (workspace_id, contact_id, name, stage, amount, currency, status, close_date)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at;
+
+-- name: ListDealsByWorkspace :many
+SELECT id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at
+FROM deals
+WHERE workspace_id = $1
+ORDER BY created_at DESC;
+
+-- name: GetDealByID :one
+SELECT id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at
+FROM deals
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
 
 -- name: FindUnsyncedContactEmails :many
 SELECT DISTINCT al.visitor_email AS email

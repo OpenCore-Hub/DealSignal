@@ -12,8 +12,9 @@ type Config struct {
 	Port        string
 	DatabaseURL string
 	RedisURL    string
-	JWTSecret   string
-	LogLevel    string
+	JWTSecret         string
+	LinkSessionSecret string
+	LogLevel          string
 	Version     string
 
 	S3Endpoint       string
@@ -70,7 +71,8 @@ func Load() (*Config, error) {
 		Version:     getEnv("VERSION", "v2.1.2"),
 		DatabaseURL: os.Getenv("DATABASE_URL"),
 		RedisURL:    os.Getenv("REDIS_URL"),
-		JWTSecret:   os.Getenv("JWT_SECRET"),
+		JWTSecret:         os.Getenv("JWT_SECRET"),
+		LinkSessionSecret: os.Getenv("LINK_SESSION_SECRET"),
 
 		S3Endpoint:       os.Getenv("S3_ENDPOINT"),
 		S3PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
@@ -126,6 +128,9 @@ func Load() (*Config, error) {
 	}
 	if cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("JWT_SECRET is required")
+	}
+	if cfg.LinkSessionSecret == "" {
+		cfg.LinkSessionSecret = cfg.JWTSecret
 	}
 	if cfg.S3Bucket == "" {
 		return nil, fmt.Errorf("S3_BUCKET is required")

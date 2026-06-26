@@ -96,6 +96,20 @@ type Contact struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type Deal struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	ContactID   pgtype.UUID
+	Name        string
+	Stage       pgtype.Text
+	Amount      pgtype.Numeric
+	Currency    pgtype.Text
+	Status      pgtype.Text
+	CloseDate   pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
 type DealRoom struct {
 	ID               pgtype.UUID
 	TenantID         pgtype.UUID
@@ -141,6 +155,20 @@ type Document struct {
 	FileSize    pgtype.Int8
 }
 
+type HubspotSyncJob struct {
+	ID           pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	Status       string
+	RecordType   string
+	RecordID     pgtype.UUID
+	Direction    string
+	Attempts     int32
+	ErrorMessage pgtype.Text
+	Payload      []byte
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type IngestionJob struct {
 	ID           pgtype.UUID
 	TenantID     pgtype.UUID
@@ -151,6 +179,19 @@ type IngestionJob struct {
 	ErrorMessage pgtype.Text
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+}
+
+type IntegrationMapping struct {
+	ID              pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	Provider        string
+	LocalRecordType string
+	LocalID         pgtype.UUID
+	ExternalID      string
+	ExternalUrl     pgtype.Text
+	Metadata        []byte
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
 }
 
 type IntegrationSyncLog struct {
@@ -203,6 +244,19 @@ type Link struct {
 	RequireNda       bool
 }
 
+type LinkNdaAgreement struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	VisitorID   pgtype.Text
+	Email       pgtype.Text
+	Ip          *netip.Addr
+	UserAgent   pgtype.Text
+	NdaAgreed   bool
+	SignedAt    pgtype.Timestamptz
+}
+
 type Notification struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
@@ -244,6 +298,7 @@ type Page struct {
 	Width          pgtype.Int4
 	Height         pgtype.Int4
 	CreatedAt      pgtype.Timestamptz
+	FileSize       pgtype.Int8
 }
 
 type PageView struct {

@@ -64,6 +64,20 @@ assert_json_not_empty() {
   fi
 }
 
+assert_json_positive() {
+  local label="$1" field="$2" json="$3"
+  local actual
+  actual=$(echo "$json" | jq -r "$field" 2>/dev/null || echo "0")
+  if [[ "$actual" =~ ^[0-9]+$ && "$actual" -gt 0 ]]; then
+    echo "  ✓ $label ($field > 0)"
+    PASS=$((PASS + 1))
+  else
+    echo "  ✗ $label — $field expected > 0, got $actual"
+    FAIL=$((FAIL + 1))
+    ERRORS+=("$label: $field expected > 0, got $actual")
+  fi
+}
+
 skip() {
   echo "  ⊘ $1"
   SKIP=$((SKIP + 1))
@@ -344,6 +358,11 @@ api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/documents/$DOC_ID/downloa
 assert_status "GET /download-url" 200 "$STATUS"
 assert_json_not_empty "download_url" '.download_url' "$BODY"
 
+# 8h. Billing reflects real storage usage
+api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/billing" "" "$TOKEN"
+assert_status "GET /billing after upload" 200 "$STATUS"
+assert_json_positive "billing storage_used" '.storage_used' "$BODY"
+
 # =============================================================================
 # 9. Links — CRUD
 # =============================================================================
@@ -413,6 +432,145 @@ assert_status "GET /public/documents/:id/pages/signed-url" 200 "$STATUS"
 # 10f. Public download URL
 api_call BODY STATUS GET "$BASE_URL/api/v1/public/documents/$DOC_ID/download-url?token=$PUBLIC_TOKEN" "" ""
 assert_status "GET /public/documents/:id/download-url" 200 "$STATUS"
+
+# =============================================================================
+# 10g. Link Security Gates — email / whitelist / password / NDA / combined
+# =============================================================================
+section "10g. Link Security Gates"
+
+# Helper to create a gate link and extract public token
+create_gate_link() {
+  local payload="$1"
+  local tmp
+  tmp=$(mktemp)
+  code=$(curl -sS -o "$tmp" -w "%{http_code}" -X POST "$BASE_URL/api/workspaces/$WS/links" \
+    -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" -d "$payload")
+  body=$(cat "$tmp")
+  rm -f "$tmp"
+  echo "$code|$body"
+}
+
+# email_required gate
+EMAIL_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"email_required\",\"download_enabled\":true}")
+EMAIL_GATE_CODE=${EMAIL_GATE%%|*}
+EMAIL_GATE_BODY=${EMAIL_GATE#*|}
+assert_status "create email_required link" 201 "$EMAIL_GATE_CODE"
+EMAIL_TOKEN=$(echo "$EMAIL_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EMAIL_TOKEN" "{}" ""
+assert_status "email gate rejects missing email" 403 "$STATUS"
+assert_json_field "email gate error code" '.code' "requires_email" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EMAIL_TOKEN" '{"email":"gate@example.com"}' ""
+assert_status "email gate allows valid email" 200 "$STATUS"
+
+# password gate
+PWD_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"password\",\"password\":\"Secret123!\",\"download_enabled\":true}")
+PWD_GATE_CODE=${PWD_GATE%%|*}
+PWD_GATE_BODY=${PWD_GATE#*|}
+assert_status "create password link" 201 "$PWD_GATE_CODE"
+PWD_TOKEN=$(echo "$PWD_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PWD_TOKEN" "{}" ""
+assert_status "password gate rejects missing password" 403 "$STATUS"
+assert_json_field "password gate error code" '.code' "requires_password" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PWD_TOKEN" '{"password":"wrong"}' ""
+assert_status "password gate rejects wrong password" 401 "$STATUS"
+assert_json_field "invalid password error code" '.code' "invalid_password" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PWD_TOKEN" '{"password":"Secret123!"}' ""
+assert_status "password gate allows correct password" 200 "$STATUS"
+
+# whitelist gate
+WL_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"whitelist\",\"allowed_emails\":[\"alice@example.com\"],\"download_enabled\":true}")
+WL_GATE_CODE=${WL_GATE%%|*}
+WL_GATE_BODY=${WL_GATE#*|}
+assert_status "create whitelist link" 201 "$WL_GATE_CODE"
+WL_TOKEN=$(echo "$WL_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$WL_TOKEN" '{"email":"bob@example.com"}' ""
+assert_status "whitelist gate rejects non-listed email" 403 "$STATUS"
+assert_json_field "whitelist denied error code" '.code' "whitelist_denied" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$WL_TOKEN" '{"email":"alice@example.com"}' ""
+assert_status "whitelist gate allows listed email" 200 "$STATUS"
+
+# NDA gate
+NDA_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email\":true,\"require_nda\":true,\"download_enabled\":true}")
+NDA_GATE_CODE=${NDA_GATE%%|*}
+NDA_GATE_BODY=${NDA_GATE#*|}
+assert_status "create NDA link" 201 "$NDA_GATE_CODE"
+NDA_TOKEN=$(echo "$NDA_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$NDA_TOKEN" '{"email":"nda@example.com"}' ""
+assert_status "NDA gate rejects missing agreement" 403 "$STATUS"
+assert_json_field "NDA error code" '.code' "nda_required" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$NDA_TOKEN" '{"email":"nda@example.com","nda_agreed":true}' ""
+assert_status "NDA gate allows agreement" 200 "$STATUS"
+
+# Combined gate: email + password + NDA
+COMBINED_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email\":true,\"require_password\":true,\"require_nda\":true,\"password\":\"Secret123!\",\"download_enabled\":true}")
+COMBINED_GATE_CODE=${COMBINED_GATE%%|*}
+COMBINED_GATE_BODY=${COMBINED_GATE#*|}
+assert_status "create combined gate link" 201 "$COMBINED_GATE_CODE"
+COMBINED_TOKEN=$(echo "$COMBINED_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" '{"email":"combined@example.com"}' ""
+assert_status "combined gate asks for password after email" 403 "$STATUS"
+assert_json_field "combined gate password code" '.code' "requires_password" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" '{"email":"combined@example.com","password":"Secret123!"}' ""
+assert_status "combined gate asks for NDA after password" 403 "$STATUS"
+assert_json_field "combined gate NDA code" '.code' "nda_required" "$BODY"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" '{"email":"combined@example.com","password":"Secret123!","nda_agreed":true}' ""
+assert_status "combined gate grants access" 200 "$STATUS"
+
+# Session token + X-Link-Access header for subsequent public asset requests
+COMBINED_ACCESS_BODY=$(curl -sS -X POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"combined@example.com","password":"Secret123!","nda_agreed":true}')
+SESSION_TOKEN=$(echo "$COMBINED_ACCESS_BODY" | jq -r '.sessionToken')
+assert_json_not_empty "combined access sessionToken" '.sessionToken' "$COMBINED_ACCESS_BODY"
+
+HL_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/public/documents/$DOC_ID/pages?token=$COMBINED_TOKEN" -H "X-Link-Session: $SESSION_TOKEN")
+assert_status "public pages with X-Link-Session header" 200 "$HL_STATUS"
+
+# Backward compatibility: raw credentials via X-Link-Access header.
+ACCESS_HEADER=$(printf '{"email":"combined@example.com","password":"Secret123!","nda_agreed":true}' | base64)
+HL_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/public/documents/$DOC_ID/pages?token=$COMBINED_TOKEN" -H "X-Link-Access: $ACCESS_HEADER")
+assert_status "public pages with X-Link-Access header" 200 "$HL_STATUS"
+
+HL_STATUS_NO=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/public/documents/$DOC_ID/pages?token=$COMBINED_TOKEN")
+assert_status "public pages without credentials rejected" 403 "$HL_STATUS_NO"
+
+# Max access count
+MAX_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"public\",\"max_access_count\":1,\"download_enabled\":true}")
+MAX_GATE_CODE=${MAX_GATE%%|*}
+MAX_GATE_BODY=${MAX_GATE#*|}
+assert_status "create max-access link" 201 "$MAX_GATE_CODE"
+MAX_TOKEN=$(echo "$MAX_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$MAX_TOKEN" "{}" ""
+assert_status "max access first request allowed" 200 "$STATUS"
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$MAX_TOKEN" "{}" ""
+assert_status "max access second request blocked" 429 "$STATUS"
+assert_json_field "max access error code" '.code' "link_max_access_reached" "$BODY"
+
+# Expired link
+EXPIRED_AT=$(date -u -d '1 hour ago' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -v-1H +%Y-%m-%dT%H:%M:%SZ)
+EXP_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"public\",\"expires_at\":\"$EXPIRED_AT\",\"download_enabled\":true}")
+EXP_GATE_CODE=${EXP_GATE%%|*}
+EXP_GATE_BODY=${EXP_GATE#*|}
+assert_status "create expired link" 201 "$EXP_GATE_CODE"
+EXP_TOKEN=$(echo "$EXP_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
+
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EXP_TOKEN" "{}" ""
+assert_status "expired link returns gone" 410 "$STATUS"
+assert_json_field "expired error code" '.code' "link_expired" "$BODY"
 
 # =============================================================================
 # 11. Analytics — Heat Score, Dashboard, Insights

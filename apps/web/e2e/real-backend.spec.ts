@@ -116,8 +116,11 @@ async function createLinkViaApi(
   token: string,
   workspaceSlug: string,
   documentId: string,
-  permissionType: string,
+  permissionType?: string,
   opts: {
+    requireEmail?: boolean;
+    requirePassword?: boolean;
+    requireNDA?: boolean;
     password?: string;
     allowedEmails?: string[];
     allowedDomains?: string[];
@@ -128,10 +131,13 @@ async function createLinkViaApi(
 ): Promise<{ id: string; shortUrl: string }> {
   const body: Record<string, unknown> = {
     document_id: documentId,
-    name: `E2E ${permissionType} link`,
-    permission_type: permissionType,
+    name: `E2E ${permissionType ?? "combined"} link`,
     download_enabled: opts.downloadEnabled ?? true,
   };
+  if (permissionType) body.permission_type = permissionType;
+  if (opts.requireEmail) body.require_email = true;
+  if (opts.requirePassword) body.require_password = true;
+  if (opts.requireNDA) body.require_nda = true;
   if (opts.password) body.password = opts.password;
   if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
   if (opts.allowedDomains) body.allowed_domains = opts.allowedDomains;
@@ -153,19 +159,50 @@ async function createLinkViaApi(
 async function openGatedPublicLink(
   page: import("@playwright/test").Page,
   shareUrl: string,
-  gate: { email?: string; password?: string }
+  gate: { email?: string; password?: string; nda?: boolean }
 ) {
   await page.goto(shareUrl);
   if (gate.email) {
     await expect(page.locator("#email")).toBeVisible({ timeout: 30000 });
     await page.locator("#email").fill(gate.email);
+    await page.getByRole("button", { name: "Continue" }).click();
   }
   if (gate.password) {
     await expect(page.locator("#password")).toBeVisible({ timeout: 30000 });
     await page.locator("#password").fill(gate.password);
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
+  if (gate.nda) {
+    const ndaCheckbox = page.getByRole("checkbox", { name: /I agree to the non-disclosure agreement/i });
+    await expect(ndaCheckbox).toBeVisible({ timeout: 30000 });
+    await ndaCheckbox.check();
+    await page.getByRole("button", { name: "Continue" }).click();
+  }
+  await expect(page.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+}
+
+async function expectGateError(
+  page: import("@playwright/test").Page,
+  shareUrl: string,
+  gate: { email?: string; password?: string; nda?: boolean },
+  expectedText: RegExp
+) {
+  await page.goto(shareUrl);
+  if (gate.email) {
+    await expect(page.locator("#email")).toBeVisible({ timeout: 30000 });
+    if (gate.email !== "") await page.locator("#email").fill(gate.email);
+  }
+  if (gate.password) {
+    await expect(page.locator("#password")).toBeVisible({ timeout: 30000 });
+    if (gate.password !== "") await page.locator("#password").fill(gate.password);
+  }
+  if (gate.nda) {
+    const ndaCheckbox = page.getByRole("checkbox", { name: /I agree to the non-disclosure agreement/i });
+    await expect(ndaCheckbox).toBeVisible({ timeout: 30000 });
+    await ndaCheckbox.check();
   }
   await page.getByRole("button", { name: "Continue" }).click();
-  await expect(page.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+  await expect(page.getByText(expectedText)).toBeVisible({ timeout: 30000 });
 }
 
 async function revokeLinkViaApi(token: string, workspaceSlug: string, linkId: string) {
@@ -290,7 +327,7 @@ test.describe("real backend P0 flow", () => {
     // Back in owner context, refresh the link detail and verify the view was recorded.
     await page.goto(`/${seed.workspaceSlug}/links`);
     await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/\d+ visits?/).first()).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText(/\d+ (visits?|views?)/).first()).toBeVisible({ timeout: 30000 });
   });
 
   test("authenticated viewer reports page views to analytics", async ({ page }) => {
@@ -563,6 +600,122 @@ test.describe("real backend P0 flow", () => {
       visitorPage.getByRole("button", { name: "Download" }).click(),
     ]);
     expect(download.suggestedFilename()).toBe("sample.pdf");
+    await visitorPage.close();
+  });
+
+  test("NDA link gate collects email and agreement", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `nda-test-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, undefined, {
+      requireEmail: true,
+      requireNDA: true,
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail, nda: true });
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("combined email+password+NDA gate requires all credentials", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const visitorEmail = `combined-test-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, undefined, {
+      requireEmail: true,
+      requirePassword: true,
+      requireNDA: true,
+      password: "Secret123!",
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await openGatedPublicLink(visitorPage, link.shortUrl, {
+      email: visitorEmail,
+      password: "Secret123!",
+      nda: true,
+    });
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("password gate shows inline error for wrong password and allows retry", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "password", {
+      password: "Secret123!",
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await expectGateError(visitorPage, link.shortUrl, { password: "wrong" }, /invalid password/i);
+
+    await visitorPage.locator("#password").fill("Secret123!");
+    await visitorPage.getByRole("button", { name: "Continue" }).click();
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("whitelist gate shows inline error for denied email and allows retry", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const allowedEmail = `allowed-${Date.now()}@example.com`;
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "whitelist", {
+      allowedEmails: [allowedEmail],
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await expectGateError(
+      visitorPage,
+      link.shortUrl,
+      { email: `blocked-${Date.now()}@example.com` },
+      /email not in whitelist/i
+    );
+
+    await visitorPage.locator("#email").fill(allowedEmail);
+    await visitorPage.getByRole("button", { name: "Continue" }).click();
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("max access count blocks further public access", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "public", {
+      maxAccessCount: 1,
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await visitorPage.goto(link.shortUrl);
+    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+
+    await visitorPage.reload();
+    await expect(visitorPage.getByText(/link max access reached/i)).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+  });
+
+  test("expired link returns gone error", async ({ page }) => {
+    attachDebug(page);
+    await authenticate(page, seed.token);
+
+    const expiresAt = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, sharedDocumentId, "public", {
+      expiresAt,
+    });
+
+    const visitorPage = await page.context().newPage();
+    attachDebug(visitorPage);
+    await visitorPage.goto(link.shortUrl);
+    await expect(visitorPage.getByText(/link expired/i)).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
   });
 

@@ -1,6 +1,11 @@
 ALTER TABLE links
     DROP CONSTRAINT IF EXISTS chk_links_permission_type;
 
+-- Also drop the original constraint from migration 004 so we don't end up with
+-- two overlapping checks (the old one rejects 'nda').
+ALTER TABLE links
+    DROP CONSTRAINT IF EXISTS links_permission_type_check;
+
 ALTER TABLE links
     ADD CONSTRAINT chk_links_permission_type
         CHECK (permission_type IN ('public','email_required','whitelist','password','nda'));

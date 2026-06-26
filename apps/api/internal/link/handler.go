@@ -3,7 +3,10 @@ package link
 
 import (
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -76,13 +79,7 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		return
 	}
 
-	res, err := h.service.Access(c.Request.Context(), req.PublicToken, AccessRequest{
-		Email:     req.Email,
-		Password:  req.Password,
-		NDAAgreed: req.NDAAgreed,
-		IP:        c.ClientIP(),
-		UA:        c.Request.UserAgent(),
-	})
+	res, err := h.resolvePublicAccess(c, req.PublicToken)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
 		return
@@ -92,11 +89,15 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 	if visitorID == "" {
 		visitorID = res.VisitorID
 	}
+	email := req.Email
+	if email == "" {
+		email = res.Email
+	}
 
 	ctx := c.Request.Context()
 	switch req.EventType {
 	case "link_opened":
-		err = h.analytics.RecordLinkOpened(ctx, res.Link, visitorID, req.Email, c.ClientIP(), c.Request.UserAgent())
+		err = h.analytics.RecordLinkOpened(ctx, res.Link, visitorID, email, c.ClientIP(), c.Request.UserAgent())
 	case "page_viewed":
 		if req.PageNumber <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page_number required"})
@@ -104,7 +105,7 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		}
 		err = h.analytics.RecordPageView(ctx, res.Link, visitorID, req.PageNumber, req.DurationSeconds, req.ScrollDepth)
 	case "download_attempted":
-		err = h.analytics.RecordDownload(ctx, res.Link, visitorID, req.Email, c.ClientIP(), c.Request.UserAgent())
+		err = h.analytics.RecordDownload(ctx, res.Link, visitorID, email, c.ClientIP(), c.Request.UserAgent())
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "unsupported event_type"})
 		return
@@ -327,6 +328,25 @@ func (h *Handler) Access(c *gin.Context) {
 		UA:        c.Request.UserAgent(),
 	})
 	if err != nil {
+		// For credential-gate errors, include the link's security flags so the
+		// UI can render all required fields on the first attempt.
+		if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrWhitelistDenied) {
+			if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
+				requiresEmail, requiresPassword, requiresNda := linkSecurityFlags(link)
+				status := http.StatusForbidden
+				if errors.Is(err, ErrInvalidPassword) {
+					status = http.StatusUnauthorized
+				}
+				c.JSON(status, gin.H{
+					"code":             accessErrorCode(err),
+					"message":          err.Error(),
+					"requiresEmail":    requiresEmail,
+					"requiresPassword": requiresPassword,
+					"requiresNda":      requiresNda,
+				})
+				return
+			}
+		}
 		mapAccessError(c, err)
 		return
 	}
@@ -347,6 +367,18 @@ func (h *Handler) Access(c *gin.Context) {
 		return
 	}
 
+	session, err := signLinkSession(LinkSession{
+		PublicToken: token,
+		Email:       body.Email,
+		Password:    body.Password,
+		NDAAgreed:   body.NDAAgreed,
+		VisitorID:   result.VisitorID,
+	}, h.cfg.LinkSessionSecret)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to create session"})
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"link": gin.H{
 			"id":               uuidToString(link.ID),
@@ -364,10 +396,11 @@ func (h *Handler) Access(c *gin.Context) {
 			"sourceType": doc.SourceType,
 			"fileSize":   0,
 		},
-		"visitorId":        result.VisitorID,
-		"requiresEmail":    result.Link.RequireEmail || result.Link.PermissionType == "email_required" || result.Link.PermissionType == "whitelist" || result.Link.PermissionType == "nda",
-		"requiresPassword": result.Link.RequirePassword || result.Link.PermissionType == "password",
-		"requiresNda":      result.Link.RequireNda || result.Link.PermissionType == "nda",
+		"visitorId":     result.VisitorID,
+		"requiresEmail": link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda",
+		"requiresPassword": link.RequirePassword || link.PermissionType == "password",
+		"requiresNda":   link.RequireNda || link.PermissionType == "nda",
+		"sessionToken":  session,
 	})
 }
 
@@ -514,18 +547,81 @@ func (h *Handler) PublicDocumentPages(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"documentId": uuidToString(result.Link.DocumentID), "pages": pages, "total": len(pages)})
 }
 
-func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
-	token := c.Query("token")
+// resolvePublicAccess validates a public token either by reusing a valid
+// X-Link-Session token or by running the full Access service flow. Asset and
+// event endpoints share this path so that session-based requests do not
+// re-consume max_access_count or re-run gate prompts.
+func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResult, error) {
 	if token == "" {
 		return AccessResult{}, ErrLinkNotFound
 	}
-	return h.service.Access(c.Request.Context(), token, AccessRequest{
-		Email:     c.Query("email"),
-		Password:  c.Query("password"),
-		NDAAgreed: c.Query("nda_agreed") == "true",
+
+	// If the visitor already has a valid session from a previous Access call,
+	// reuse it so asset/event requests don't consume max_access_count.
+	if sessionToken := c.GetHeader("X-Link-Session"); sessionToken != "" {
+		session, ok := verifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
+		if ok && session.PublicToken == token {
+			link, err := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token)
+			if err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return AccessResult{}, ErrLinkNotFound
+				}
+				return AccessResult{}, fmt.Errorf("get link: %w", err)
+			}
+			if link.Status == "revoked" {
+				return AccessResult{}, ErrLinkRevoked
+			}
+			if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+				return AccessResult{}, ErrLinkExpired
+			}
+			return AccessResult{Link: link, VisitorID: session.VisitorID, Email: session.Email}, nil
+		}
+	}
+
+	req := publicAccessRequestFromContext(c)
+	return h.service.Access(c.Request.Context(), token, req)
+}
+
+func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
+	return h.resolvePublicAccess(c, c.Query("token"))
+}
+
+// publicAccessRequestFromContext reads link access credentials from the
+// X-Link-Access header (preferred) and falls back to query parameters for
+// backward compatibility. The header value is base64-encoded JSON so the
+// password is not exposed in URLs.
+func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
+	email := c.Query("email")
+	password := c.Query("password")
+	ndaAgreed := c.Query("nda_agreed") == "true"
+
+	if header := c.GetHeader("X-Link-Access"); header != "" {
+		var decoded struct {
+			Email     string `json:"email"`
+			Password  string `json:"password"`
+			NDAAgreed bool   `json:"nda_agreed"`
+		}
+		if b, err := base64.URLEncoding.DecodeString(header); err == nil {
+			_ = json.Unmarshal(b, &decoded)
+			if decoded.Email != "" {
+				email = decoded.Email
+			}
+			if decoded.Password != "" {
+				password = decoded.Password
+			}
+			if decoded.NDAAgreed {
+				ndaAgreed = decoded.NDAAgreed
+			}
+		}
+	}
+
+	return AccessRequest{
+		Email:     email,
+		Password:  password,
+		NDAAgreed: ndaAgreed,
 		IP:        c.ClientIP(),
 		UA:        c.Request.UserAgent(),
-	})
+	}
 }
 
 func mapAccessError(c *gin.Context, err error) {
@@ -550,6 +646,41 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+	}
+}
+
+// linkSecurityFlags returns the active gate requirements for a link, taking
+// both the modern boolean flags and legacy permission_type values into account.
+func linkSecurityFlags(link db.Link) (requiresEmail, requiresPassword, requiresNda bool) {
+	requiresEmail = link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
+	requiresPassword = link.RequirePassword || link.PermissionType == "password"
+	requiresNda = link.RequireNda || link.PermissionType == "nda"
+	return
+}
+
+// accessErrorCode maps an access error to its public API code.
+func accessErrorCode(err error) string {
+	switch {
+	case errors.Is(err, ErrLinkNotFound):
+		return "link_not_found"
+	case errors.Is(err, ErrLinkExpired):
+		return "link_expired"
+	case errors.Is(err, ErrLinkRevoked):
+		return "link_revoked"
+	case errors.Is(err, ErrLinkMaxAccessReached):
+		return "link_max_access_reached"
+	case errors.Is(err, ErrRequiresEmail):
+		return "requires_email"
+	case errors.Is(err, ErrWhitelistDenied):
+		return "whitelist_denied"
+	case errors.Is(err, ErrRequiresPassword):
+		return "requires_password"
+	case errors.Is(err, ErrInvalidPassword):
+		return "invalid_password"
+	case errors.Is(err, ErrRequiresNDA):
+		return "nda_required"
+	default:
+		return "internal_error"
 	}
 }
 
@@ -607,20 +738,20 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	isActive := link.Status == "active" && (!link.ExpiresAt.Valid || link.ExpiresAt.Time.After(now))
 
 	item := gin.H{
-		"id":                   uuidToString(link.ID),
-		"documentId":           uuidToString(link.DocumentID),
-		"documentTitle":        documentTitle,
-		"name":                 textOrNil(link.Name),
-		"shortUrl":             publicURL(c, h.cfg, link.PublicToken),
-		"accessCount":          link.AccessCount,
-		"heatLevel":            score.Level,
-		"status":               link.Status,
-		"createdAt":            link.CreatedAt.Time.Format(time.RFC3339),
-		"isActive":             isActive,
-		"permissionType":       mapPermissionType(link.PermissionType),
-		"downloadEnabled":      link.DownloadEnabled,
-		"watermarkEnabled":     link.WatermarkEnabled,
-		"avgDurationSeconds":   int(metrics.AvgDurationSeconds),
+		"id":                 uuidToString(link.ID),
+		"documentId":         uuidToString(link.DocumentID),
+		"documentTitle":      documentTitle,
+		"name":               textOrNil(link.Name),
+		"shortUrl":           publicURL(c, h.cfg, link.PublicToken),
+		"accessCount":        link.AccessCount,
+		"heatLevel":          score.Level,
+		"status":             link.Status,
+		"createdAt":          link.CreatedAt.Time.Format(time.RFC3339),
+		"isActive":           isActive,
+		"permissionType":     mapPermissionType(link.PermissionType),
+		"downloadEnabled":    link.DownloadEnabled,
+		"watermarkEnabled":   link.WatermarkEnabled,
+		"avgDurationSeconds": int(metrics.AvgDurationSeconds),
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)

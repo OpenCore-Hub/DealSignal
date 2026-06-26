@@ -122,10 +122,13 @@ type fakeDB struct {
 	actorUserID string
 	listRows    []db.ListWorkspacesByUserRow
 
-	tenant      db.Tenant
-	workspace   db.Workspace
-	member      db.WorkspaceMember
-	invitation  db.WorkspaceInvitation
+	tenant       db.Tenant
+	workspace    db.Workspace
+	member       db.WorkspaceMember
+	invitation   db.WorkspaceInvitation
+	storageUsage int64
+	linksCount   int
+	roomsCount   int
 }
 
 func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{}) (pgconn.CommandTag, error) {
@@ -133,6 +136,26 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 }
 
 func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
+	sqlLower := strings.ToLower(sql)
+
+	if strings.Contains(sqlLower, "from links") {
+		row := make([]interface{}, 22)
+		rows := make([][]interface{}, f.linksCount)
+		for i := range rows {
+			rows[i] = row
+		}
+		return &fakeRows{rows: rows}, nil
+	}
+
+	if strings.Contains(sqlLower, "from deal_rooms") {
+		row := make([]interface{}, 15)
+		rows := make([][]interface{}, f.roomsCount)
+		for i := range rows {
+			rows[i] = row
+		}
+		return &fakeRows{rows: rows}, nil
+	}
+
 	rows := make([][]interface{}, len(f.listRows))
 	for i, r := range f.listRows {
 		rows[i] = []interface{}{
@@ -214,6 +237,9 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			JoinedAt:    now,
 		}
 		return fakeRow{values: []interface{}{f.member.WorkspaceID, f.member.UserID, f.member.Role, f.member.JoinedAt}}
+
+	case strings.Contains(sqlLower, "sum(d.file_size)"):
+		return fakeRow{values: []interface{}{f.storageUsage}}
 	}
 
 	return fakeRow{err: errors.New("unexpected query")}
@@ -438,5 +464,25 @@ func TestAcceptInvitationAlreadyUsed(t *testing.T) {
 	_, err = svc.AcceptInvitation(context.Background(), inv.Token, uuid.NewString())
 	if !errors.Is(err, ErrInvitationUsed) {
 		t.Fatalf("expected ErrInvitationUsed, got %v", err)
+	}
+}
+
+
+func TestGetBillingUsesRealStorageUsage(t *testing.T) {
+	actorID := uuid.NewString()
+	fake := &fakeDB{
+		t:            t,
+		memberRole:   RoleOwner,
+		actorUserID:  actorID,
+		storageUsage: 5 * 1024 * 1024,
+	}
+	svc := NewService(db.New(fake))
+
+	billing, err := svc.GetBilling(context.Background(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("get billing: %v", err)
+	}
+	if billing.StorageUsed != fake.storageUsage {
+		t.Fatalf("expected storage used %d, got %d", fake.storageUsage, billing.StorageUsed)
 	}
 }

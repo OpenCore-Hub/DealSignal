@@ -417,13 +417,13 @@ func documentProgress(status string) int {
 	}
 }
 
-func pageList(pages []db.Page) []gin.H {
+func pageList(pages []db.ListPagesByDocumentRow) []gin.H {
 	out := make([]gin.H, len(pages))
 	for i, p := range pages {
 		out[i] = gin.H{
-			"page_number":        p.PageNumber,
-			"width":              p.Width.Int32,
-			"height":             p.Height.Int32,
+			"page_number":          p.PageNumber,
+			"width":                p.Width.Int32,
+			"height":               p.Height.Int32,
 			"thumbnail_object_key": p.ImageObjectKey.String,
 		}
 	}

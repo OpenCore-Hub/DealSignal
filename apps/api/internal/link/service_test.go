@@ -22,21 +22,91 @@ func TestNormalizePermission(t *testing.T) {
 	}
 }
 
-func TestValidatePermissionConfig(t *testing.T) {
-	if err := validatePermissionConfig("public", "", nil, nil); err != nil {
-		t.Errorf("public should be valid: %v", err)
+func TestNormalizeSecurityConfig(t *testing.T) {
+	cases := []struct {
+		name                             string
+		req                              CreateLinkRequest
+		wantEmail, wantPassword, wantNDA bool
+		wantPerm                         string
+		wantErr                          bool
+	}{
+		{
+			name:     "legacy public",
+			req:      CreateLinkRequest{PermissionType: "public"},
+			wantPerm: "public",
+		},
+		{
+			name:      "legacy email_required",
+			req:       CreateLinkRequest{PermissionType: "email_required"},
+			wantEmail: true,
+			wantPerm:  "email_required",
+		},
+		{
+			name:      "legacy whitelist",
+			req:       CreateLinkRequest{PermissionType: "whitelist", AllowedEmails: []string{"a@b.com"}},
+			wantEmail: true,
+			wantPerm:  "whitelist",
+		},
+		{
+			name:         "legacy password",
+			req:          CreateLinkRequest{PermissionType: "password", Password: "secret"},
+			wantPassword: true,
+			wantPerm:     "password",
+		},
+		{
+			name:      "legacy nda",
+			req:       CreateLinkRequest{PermissionType: "nda"},
+			wantEmail: true,
+			wantNDA:   true,
+			wantPerm:  "nda",
+		},
+		{
+			name:         "combined email+password+nda",
+			req:          CreateLinkRequest{RequireEmail: true, RequirePassword: true, RequireNDA: true, Password: "secret"},
+			wantEmail:    true,
+			wantPassword: true,
+			wantNDA:      true,
+			wantPerm:     "password",
+		},
+		{
+			name:      "nda implies email",
+			req:       CreateLinkRequest{RequireNDA: true},
+			wantEmail: true,
+			wantNDA:   true,
+			wantPerm:  "nda",
+		},
+		{
+			name:    "password required but missing",
+			req:     CreateLinkRequest{RequirePassword: true},
+			wantErr: true,
+		},
 	}
-	if err := validatePermissionConfig("whitelist", "", nil, nil); err == nil {
-		t.Error("whitelist without allowlist should be invalid")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotEmail, gotPassword, gotNDA, _, _, gotPerm, err := normalizeSecurityConfig(tc.req)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("expected error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if gotEmail != tc.wantEmail || gotPassword != tc.wantPassword || gotNDA != tc.wantNDA || gotPerm != tc.wantPerm {
+				t.Fatalf("got email=%v password=%v nda=%v perm=%q, want email=%v password=%v nda=%v perm=%q",
+					gotEmail, gotPassword, gotNDA, gotPerm, tc.wantEmail, tc.wantPassword, tc.wantNDA, tc.wantPerm)
+			}
+		})
 	}
-	if err := validatePermissionConfig("whitelist", "", []string{"a@b.com"}, nil); err != nil {
-		t.Errorf("whitelist with email should be valid: %v", err)
+}
+
+func TestJsonArrayNotEmpty(t *testing.T) {
+	if jsonArrayNotEmpty(nil) || jsonArrayNotEmpty([]byte("[]")) || jsonArrayNotEmpty([]byte("null")) {
+		t.Error("expected empty/null arrays to be false")
 	}
-	if err := validatePermissionConfig("password", "", nil, nil); err == nil {
-		t.Error("password without password should be invalid")
-	}
-	if err := validatePermissionConfig("unknown", "", nil, nil); err == nil {
-		t.Error("unknown permission should be invalid")
+	if !jsonArrayNotEmpty([]byte(`["a"]`)) {
+		t.Error("expected non-empty array to be true")
 	}
 }
 

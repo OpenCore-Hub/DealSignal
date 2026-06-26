@@ -21,11 +21,20 @@ export interface BaseResponse<T> {
   details?: ApiErrorDetails[];
 }
 
+export interface GateErrorFlags {
+  requiresEmail?: boolean;
+  requiresPassword?: boolean;
+  requiresNda?: boolean;
+}
+
 export class ApiError extends Error {
   status: number;
   code: string;
   requestId: string;
   details?: ApiErrorDetails[];
+  requiresEmail?: boolean;
+  requiresPassword?: boolean;
+  requiresNda?: boolean;
 
   constructor({
     status,
@@ -33,19 +42,25 @@ export class ApiError extends Error {
     message,
     requestId,
     details,
+    requiresEmail,
+    requiresPassword,
+    requiresNda,
   }: {
     status: number;
     code: string;
     message: string;
     requestId: string;
     details?: ApiErrorDetails[];
-  }) {
+  } & GateErrorFlags) {
     super(message);
     this.name = "ApiError";
     this.status = status;
     this.code = code;
     this.requestId = requestId;
     this.details = details;
+    this.requiresEmail = requiresEmail;
+    this.requiresPassword = requiresPassword;
+    this.requiresNda = requiresNda;
   }
 }
 
@@ -234,12 +249,16 @@ export async function request<T>(
     } catch {
       // ignore non-JSON error bodies
     }
+    const gateFlags = body as GateErrorFlags | null;
     throw new ApiError({
       status: response.status,
       code: body?.code ?? "http_error",
       message: body?.message ?? response.statusText,
       requestId: body?.request_id ?? requestId,
       details: body?.details,
+      requiresEmail: gateFlags?.requiresEmail,
+      requiresPassword: gateFlags?.requiresPassword,
+      requiresNda: gateFlags?.requiresNda,
     });
   }
 

@@ -130,11 +130,11 @@ func (h *Handler) OAuthCallback(c *gin.Context) {
 }
 
 func (h *Handler) HubSpotSync(c *gin.Context) {
-	if err := h.service.SyncHubSpot(c.Request.Context(), workspaceID(c)); err != nil {
+	if err := h.service.EnqueueHubSpotSync(c.Request.Context(), workspaceID(c)); err != nil {
 		c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "sync_failed", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusAccepted, gin.H{"code": "ok", "message": "sync started"})
+	c.JSON(http.StatusAccepted, gin.H{"code": "ok", "message": "sync enqueued"})
 }
 
 func (h *Handler) ListSyncLogs(c *gin.Context) {

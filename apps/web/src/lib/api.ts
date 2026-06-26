@@ -61,16 +61,21 @@ export interface PublicLinkCredentials {
   email?: string;
   password?: string;
   ndaAgreed?: boolean;
+  sessionToken?: string;
 }
 
-function appendPublicCredentials(url: string, creds?: PublicLinkCredentials): string {
-  if (!creds) return url;
-  const params = new URLSearchParams();
-  if (creds.email) params.set("email", creds.email);
-  if (creds.password) params.set("password", creds.password);
-  if (creds.ndaAgreed) params.set("nda_agreed", "true");
-  const query = params.toString();
-  return query ? `${url}&${query}` : url;
+function publicAccessHeaders(creds?: PublicLinkCredentials): Record<string, string> | undefined {
+  if (!creds) return undefined;
+  if (creds.sessionToken) {
+    return { "X-Link-Session": creds.sessionToken };
+  }
+  if (!creds.email && !creds.password && !creds.ndaAgreed) return undefined;
+  const payload = {
+    email: creds.email,
+    password: creds.password,
+    nda_agreed: creds.ndaAgreed,
+  };
+  return { "X-Link-Access": btoa(JSON.stringify(payload)) };
 }
 
 function getWorkspaceSlug(): string {
@@ -198,6 +203,7 @@ export const api = {
       requiresEmail: boolean;
       requiresPassword: boolean;
       requiresNda: boolean;
+      sessionToken: string;
     }>(undefined, `/v1/public/links/${token}`, {
       method: "POST",
       skipAuth: true,
@@ -211,8 +217,8 @@ export const api = {
   getPublicDocumentPages: (documentId: string, token: string, creds?: PublicLinkCredentials) =>
     request<{ documentId: string; pages: { pageNumber: number; width: number; height: number }[]; total: number }>(
       undefined,
-      appendPublicCredentials(`/v1/public/documents/${documentId}/pages?token=${encodeURIComponent(token)}`, creds),
-      { skipAuth: true }
+      `/v1/public/documents/${documentId}/pages?token=${encodeURIComponent(token)}`,
+      { skipAuth: true, headers: publicAccessHeaders(creds) }
     ).then((res) => ({
       documentId: res.documentId,
       pages: res.pages.map((p) => ({ pageNumber: p.pageNumber, width: p.width, height: p.height })),
@@ -222,11 +228,8 @@ export const api = {
   getPublicPageSignedUrl: (documentId: string, token: string, pageNumber: number, creds?: PublicLinkCredentials) =>
     request<{ pageNumber: number; imageUrl: string; expiresAt: string; width: number; height: number }>(
       undefined,
-      appendPublicCredentials(
-        `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
-        creds
-      ),
-      { method: "GET", skipAuth: true }
+      `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
+      { method: "GET", skipAuth: true, headers: publicAccessHeaders(creds) }
     ).then((res) => ({
       page_number: res.pageNumber,
       image_url: res.imageUrl,
@@ -238,8 +241,8 @@ export const api = {
   getPublicDocumentDownloadUrl: (documentId: string, token: string, creds?: PublicLinkCredentials) =>
     request<{ downloadUrl: string; expiresAt: string; filename: string; contentType: string }>(
       undefined,
-      appendPublicCredentials(`/v1/public/documents/${documentId}/download-url?token=${encodeURIComponent(token)}`, creds),
-      { skipAuth: true }
+      `/v1/public/documents/${documentId}/download-url?token=${encodeURIComponent(token)}`,
+      { skipAuth: true, headers: publicAccessHeaders(creds) }
     ).then((res) => ({
       download_url: res.downloadUrl,
       expires_at: res.expiresAt,
@@ -268,6 +271,7 @@ export const api = {
         nda_agreed: creds?.ndaAgreed,
       }),
       skipAuth: true,
+      headers: publicAccessHeaders(creds),
     }),
 
   recordViewerEvent: (payload: {

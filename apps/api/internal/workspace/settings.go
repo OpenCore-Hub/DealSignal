@@ -161,11 +161,7 @@ func (s *Service) GetBilling(ctx context.Context, workspaceID string) (Billing, 
 	if err != nil {
 		return Billing{}, err
 	}
-	// Count documents, links and deal rooms for the workspace.
-	docs, err := s.queries.ListDocumentsByWorkspace(ctx, wsUUID)
-	if err != nil {
-		return Billing{}, fmt.Errorf("count documents: %w", err)
-	}
+	// Count links and deal rooms for the workspace.
 	links, err := s.queries.ListLinksByWorkspace(ctx, wsUUID)
 	if err != nil {
 		return Billing{}, fmt.Errorf("count links: %w", err)
@@ -174,11 +170,16 @@ func (s *Service) GetBilling(ctx context.Context, workspaceID string) (Billing, 
 	if err != nil {
 		return Billing{}, fmt.Errorf("count deal rooms: %w", err)
 	}
+	storageUsage, err := s.queries.GetWorkspaceStorageUsage(ctx, wsUUID)
+	if err != nil {
+		return Billing{}, fmt.Errorf("get storage usage: %w", err)
+	}
+
 	return Billing{
 		Plan:         "free",
 		Period:       "monthly",
-		StorageUsed:  int64(len(docs)) * 1024 * 1024, // rough placeholder: 1 MB per document
-		StorageLimit: 1073741824,                       // 1 GB
+		StorageUsed:  storageUsage,
+		StorageLimit: 1073741824, // 1 GB
 		LinksUsed:    int64(len(links)),
 		LinksLimit:   100,
 		RoomsUsed:    int64(len(rooms)),

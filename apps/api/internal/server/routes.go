@@ -169,6 +169,10 @@ func (s *Server) registerRoutes() {
 			integrationHandler := integration.NewHandler(integrationSvc)
 			integrationHandler.RegisterRoutes(ws)
 
+			hubSpotWorker := integration.NewWorker(integrationSvc, 30*time.Second)
+			s.registerWorker(hubSpotWorker)
+			hubSpotWorker.Start(context.Background())
+
 			public := s.engine.Group("/api/v1/public")
 			integrationHandler.RegisterOAuthRoutes(public)
 			linkHandler.RegisterPublicRoutes(public)

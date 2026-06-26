@@ -1,0 +1,2 @@
+ALTER TABLE pages
+    DROP COLUMN IF EXISTS file_size;

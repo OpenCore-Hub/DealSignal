@@ -81,23 +81,16 @@ startxref
 	t.Logf("rendered PDF page image: %dx%d, %d bytes", bounds.Dx(), bounds.Dy(), len(data))
 }
 
-// TestRenderPage_FallbackToPlaceholder verifies fallback when pdftoppm fails.
-func TestRenderPage_FallbackToPlaceholder(t *testing.T) {
-	p := PageInfo{Number: 1, Width: 200, Height: 100}
-	// Non-existent PDF path → pdftoppm fails → should fall back to placeholder
-	data, bounds, err := renderPage(p, "/nonexistent/path/file.pdf")
+// TestCheckRenderers verifies the startup renderer check.
+func TestCheckRenderers(t *testing.T) {
+	err := CheckRenderers()
+	if _, notFound := exec.LookPath("pdftoppm"); notFound != nil {
+		if err == nil {
+			t.Fatal("expected error when pdftoppm is missing")
+		}
+		return
+	}
 	if err != nil {
-		t.Fatalf("render page with fallback: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatal("expected non-empty placeholder image data")
-	}
-	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
-		t.Fatalf("expected positive placeholder dimensions, got %dx%d", bounds.Dx(), bounds.Dy())
-	}
-
-	// PNG magic bytes
-	if data[0] != 0x89 || data[1] != 0x50 || data[2] != 0x4E || data[3] != 0x47 {
-		t.Fatalf("expected PNG image, got bytes: %x", data[:4])
+		t.Fatalf("unexpected renderer check error: %v", err)
 	}
 }

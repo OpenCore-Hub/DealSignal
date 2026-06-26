@@ -100,7 +100,7 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 	pageCount := int32(len(pages))
 	for _, p := range pages {
 		key := pageObjectKey(tenantID, workspaceID, docID, p.Number)
-		_, bounds, err := s.renderAndUploadPage(ctx, key, p, pdfPath)
+		img, bounds, err := s.renderAndUploadPage(ctx, key, p, pdfPath)
 		if err != nil {
 			return fmt.Errorf("render page %d: %w", p.Number, err)
 		}
@@ -115,6 +115,7 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			// page to match the actual raster, not the PDF point size.
 			Width:          pgtype.Int4{Int32: int32(bounds.Dx()), Valid: true},
 			Height:         pgtype.Int4{Int32: int32(bounds.Dy()), Valid: true},
+			FileSize:       pgtype.Int8{Int64: int64(len(img)), Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("create page record: %w", err)

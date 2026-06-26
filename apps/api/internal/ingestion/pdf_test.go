@@ -25,17 +25,12 @@ func TestSplitText(t *testing.T) {
 	}
 }
 
-func TestRenderPage(t *testing.T) {
+func TestRenderPage_MissingPDFReturnsError(t *testing.T) {
 	p := PageInfo{Number: 1, Width: 200, Height: 100}
-	// Test with non-existent pdf path → should fall back to placeholder
-	data, bounds, err := renderPage(p, "/nonexistent/file.pdf")
-	if err != nil {
-		t.Fatalf("render page: %v", err)
-	}
-	if len(data) == 0 {
-		t.Fatal("expected non-empty image data")
-	}
-	if bounds.Dx() <= 0 || bounds.Dy() <= 0 {
-		t.Fatalf("expected positive placeholder dimensions, got %dx%d", bounds.Dx(), bounds.Dy())
+	// With the placeholder fallback removed, a missing PDF must surface the
+	// pdftoppm error so ingestion can be marked failed.
+	_, _, err := renderPage(p, "/nonexistent/file.pdf")
+	if err == nil {
+		t.Fatal("expected error when rendering missing PDF, got nil")
 	}
 }

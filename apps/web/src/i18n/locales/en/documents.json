@@ -144,9 +144,12 @@
     "gateTitle": "This document is shared securely",
     "emailLabel": "Email",
     "emailPlaceholder": "Enter your email",
+    "emailRequired": "Please enter your email to continue.",
     "passwordLabel": "Password",
     "passwordPlaceholder": "Enter the link password",
+    "passwordRequired": "Please enter the link password to continue.",
     "ndaLabel": "I agree to the non-disclosure agreement",
+    "ndaRequired": "Please agree to the non-disclosure agreement to continue.",
     "continue": "Continue"
   }
 }

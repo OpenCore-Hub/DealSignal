@@ -7,6 +7,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/server"
 )
 
@@ -31,6 +32,10 @@ func main() {
 	conn.Release()
 
 	auth.InitJWT(cfg.JWTSecret)
+
+	if err := ingestion.CheckRenderers(); err != nil {
+		log.Fatalf("renderer check failed: %v", err)
+	}
 
 	srv := server.NewWithDB(cfg, pool)
 

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { api, type PublicLinkCredentials } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { CanvasViewer } from "./CanvasViewer";
 import type { Document } from "@/types";
 
@@ -17,6 +18,7 @@ interface AccessResult {
   requiresEmail: boolean;
   requiresPassword: boolean;
   requiresNda: boolean;
+  sessionToken: string;
 }
 
 export function PublicViewerPage() {
@@ -27,18 +29,22 @@ export function PublicViewerPage() {
   const [loading, setLoading] = useState(true);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [ndaAgreed, setNdaAgreed] = useState(false);
+  const [ndaAgreed, setNdaAgreed] = useState(true);
   const [accessCredentials, setAccessCredentials] = useState<PublicLinkCredentials>({});
-  const [gate, setGate] = useState<{ email: boolean; password: boolean; nda: boolean }>({
+  const [security, setSecurity] = useState<{ email: boolean; password: boolean; nda: boolean }>({
     email: false,
     password: false,
     nda: false,
   });
+  const [gateError, setGateError] = useState<string | null>(null);
+  const accessingRef = useRef(false);
 
   const tryAccess = useCallback(async (gateParams?: { email?: string; password?: string; ndaAgreed?: boolean }) => {
-    if (!token) return;
+    if (!token || accessingRef.current) return;
+    accessingRef.current = true;
     setLoading(true);
     setError(null);
+    setGateError(null);
     try {
       const res = await api.accessPublicLink(token, gateParams);
       setAccess(res);
@@ -46,24 +52,31 @@ export function PublicViewerPage() {
         email: gateParams?.email,
         password: gateParams?.password,
         ndaAgreed: gateParams?.ndaAgreed,
+        sessionToken: res.sessionToken,
       });
-      setGate({
-        email: res.requiresEmail && !gateParams?.email,
-        password: res.requiresPassword && !gateParams?.password,
-        nda: res.requiresNda && !gateParams?.ndaAgreed,
+      // The backend always returns the link's configured security gates.
+      // Persist them so the UI does not flip between sequential prompts.
+      setSecurity({
+        email: res.requiresEmail,
+        password: res.requiresPassword,
+        nda: res.requiresNda,
       });
     } catch (e) {
-      const err = e as { code?: string; message?: string };
-      if (err.code === "requires_email" || err.code === "requires_password" || err.code === "nda_required") {
-        setGate({
-          email: err.code === "requires_email",
-          password: err.code === "requires_password",
-          nda: err.code === "nda_required",
-        });
-      } else {
-        setError(err.message ?? t("viewer.loadFailed"));
+      const err = e as ApiError;
+      // The backend enriches gate errors with the link's full security config.
+      // Render every configured control on the first response.
+      setSecurity({
+        email: err.requiresEmail ?? false,
+        password: err.requiresPassword ?? false,
+        nda: err.requiresNda ?? false,
+      });
+      // Only show raw backend messages for actual validation failures.
+      // Missing required fields are handled by client-side checks on Continue.
+      if (err.code === "invalid_password" || err.code === "whitelist_denied") {
+        setGateError(err.message ?? t("common:error.loadFailed"));
       }
     } finally {
+      accessingRef.current = false;
       setLoading(false);
     }
   }, [token, t]);
@@ -89,7 +102,8 @@ export function PublicViewerPage() {
     );
   }
 
-  if (!access || gate.email || gate.password || gate.nda) {
+  if (!access) {
+    const hasGates = security.email || security.password || security.nda;
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
         <Card className="w-full max-w-md">
@@ -97,7 +111,12 @@ export function PublicViewerPage() {
             <CardTitle>{t("viewer.gateTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {gate.email && (
+            {gateError && (
+              <p className="text-sm text-destructive" role="alert">
+                {gateError}
+              </p>
+            )}
+            {security.email && (
               <div className="space-y-2">
                 <Label htmlFor="email">{t("viewer.emailLabel")}</Label>
                 <Input
@@ -109,7 +128,7 @@ export function PublicViewerPage() {
                 />
               </div>
             )}
-            {gate.password && (
+            {security.password && (
               <div className="space-y-2">
                 <Label htmlFor="password">{t("viewer.passwordLabel")}</Label>
                 <Input
@@ -121,7 +140,7 @@ export function PublicViewerPage() {
                 />
               </div>
             )}
-            {gate.nda && (
+            {security.nda && (
               <div className="flex items-center gap-2">
                 <Checkbox
                   id="nda"
@@ -133,16 +152,32 @@ export function PublicViewerPage() {
             )}
             <Button
               className="w-full"
-              onClick={() =>
+              onClick={() => {
+                setGateError(null);
+                if (security.email && !email.trim()) {
+                  setGateError(t("viewer.emailRequired"));
+                  return;
+                }
+                if (security.password && !password) {
+                  setGateError(t("viewer.passwordRequired"));
+                  return;
+                }
+                if (security.nda && !ndaAgreed) {
+                  setGateError(t("viewer.ndaRequired"));
+                  return;
+                }
                 void tryAccess({
-                  email: gate.email ? email : undefined,
-                  password: gate.password ? password : undefined,
-                  ndaAgreed: gate.nda ? ndaAgreed : undefined,
-                })
-              }
+                  email: security.email ? email : undefined,
+                  password: security.password ? password : undefined,
+                  ndaAgreed: security.nda ? ndaAgreed : undefined,
+                });
+              }}
             >
               {t("viewer.continue")}
             </Button>
+            {!hasGates && (
+              <p className="text-sm text-muted-foreground">{t("common:error.loadFailed")}</p>
+            )}
           </CardContent>
         </Card>
       </div>

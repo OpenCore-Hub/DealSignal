@@ -6,5 +6,8 @@ ALTER TABLE links
     DROP CONSTRAINT IF EXISTS chk_links_permission_type;
 
 ALTER TABLE links
-    ADD CONSTRAINT chk_links_permission_type
+    DROP CONSTRAINT IF EXISTS links_permission_type_check;
+
+ALTER TABLE links
+    ADD CONSTRAINT links_permission_type_check
         CHECK (permission_type IN ('public','email_required','whitelist','password'));

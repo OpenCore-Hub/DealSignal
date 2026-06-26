@@ -108,6 +108,37 @@ describe("apiClient", () => {
     expect(data).toBeUndefined();
   });
 
+  it("throws ApiError with gate security flags", async () => {
+    server.use(
+      http.post("*/api/workspaces/acme/client-test/gate", () =>
+        HttpResponse.json(
+          {
+            code: "requires_email",
+            message: "email required",
+            request_id: "req_gate",
+            requiresEmail: true,
+            requiresPassword: true,
+            requiresNda: true,
+          },
+          { status: 403 }
+        )
+      )
+    );
+
+    await expect(
+      request("acme", "/client-test/gate", { method: "POST" })
+    ).rejects.toSatisfy((err: ApiError) => {
+      return (
+        err instanceof ApiError &&
+        err.status === 403 &&
+        err.code === "requires_email" &&
+        err.requiresEmail === true &&
+        err.requiresPassword === true &&
+        err.requiresNda === true
+      );
+    });
+  });
+
   it("throws ApiError with backend error body", async () => {
     server.use(
       http.post("*/api/workspaces/acme/client-test/error", () =>

@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
+const TEST_PORT = 5175;
+
 export default defineConfig({
   testDir: "./e2e",
   testIgnore: ["**/real-backend.spec.ts"],
@@ -9,7 +11,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: "list",
   use: {
-    baseURL: "http://localhost:5173",
+    baseURL: `http://localhost:${TEST_PORT}`,
     trace: "on-first-retry",
     locale: "en-US",
   },
@@ -20,9 +22,10 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: "VITE_API_BASE_URL= pnpm dev",
-    url: "http://localhost:5173",
-    reuseExistingServer: !process.env.CI,
+    command: `pnpm dev --port ${TEST_PORT}`,
+    env: { VITE_API_BASE_URL: "" },
+    url: `http://localhost:${TEST_PORT}`,
+    reuseExistingServer: false,
     timeout: 120 * 1000,
   },
 });

@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import type { ActionItem, WorkspaceMember } from "@/types";
+import type { ActionItem, Link, WorkspaceMember } from "@/types";
 import {
   mockAccessLogs,
   mockActionItems,
@@ -299,6 +299,11 @@ export const handlers = [
       document_id: string;
       name?: string;
       permission_type?: string;
+      require_email?: boolean;
+      require_password?: boolean;
+      require_nda?: boolean;
+      allowed_emails?: string[];
+      allowed_domains?: string[];
       password?: string;
       expires_at?: string;
       max_access_count?: number;
@@ -306,6 +311,17 @@ export const handlers = [
       watermark_enabled?: boolean;
     };
     const doc = mockDocuments.find((d) => d.id === body.document_id);
+
+    const requirePassword = body.require_password || body.permission_type === "password" || !!body.password;
+    const requireNDA = body.require_nda || body.permission_type === "nda";
+    const hasWhitelist = (body.allowed_emails && body.allowed_emails.length > 0) || (body.allowed_domains && body.allowed_domains.length > 0);
+    const requireEmail = body.require_email || body.permission_type === "email_required" || body.permission_type === "whitelist" || hasWhitelist || requireNDA;
+
+    let permissionType: "public" | "email" | "password" | "nda" = "public";
+    if (requirePassword) permissionType = "password";
+    else if (requireNDA) permissionType = "nda";
+    else if (requireEmail || hasWhitelist) permissionType = "email";
+
     const newLink = {
       id: generateId("link"),
       documentId: body.document_id,
@@ -317,7 +333,20 @@ export const handlers = [
       expiresAt: body.expires_at,
       isActive: true,
       avgDurationSeconds: 0,
-      permissionType: (body.permission_type === "public" ? "public" : body.permission_type === "email_required" ? "email" : body.permission_type === "whitelist" ? "email" : "public") as "public" | "email" | "password" | "nda",
+      permissionType,
+      _requireEmail: requireEmail,
+      _requirePassword: requirePassword,
+      _requireNDA: requireNDA,
+      _password: body.password,
+      _allowedEmails: body.allowed_emails ?? [],
+      _allowedDomains: body.allowed_domains ?? [],
+    } as Link & {
+      _requireEmail?: boolean;
+      _requirePassword?: boolean;
+      _requireNDA?: boolean;
+      _password?: string;
+      _allowedEmails?: string[];
+      _allowedDomains?: string[];
     };
     mockLinks.unshift(newLink);
     return HttpResponse.json(newLink, { status: 201 });
@@ -591,6 +620,64 @@ export const handlers = [
     };
     const token = params.token as string;
     const link = mockLinks.find((l) => l.shortUrl.endsWith(token)) ?? mockLinks[0];
+    const extended = link as Link & {
+      _requireEmail?: boolean;
+      _requirePassword?: boolean;
+      _requireNDA?: boolean;
+      _password?: string;
+      _allowedEmails?: string[];
+      _allowedDomains?: string[];
+    };
+
+    const requiresEmail =
+      extended._requireEmail || extended.permissionType === "email" || extended.permissionType === "nda";
+    const requiresPassword = extended._requirePassword || extended.permissionType === "password";
+    const requiresNda = extended._requireNDA || extended.permissionType === "nda";
+    const hasWhitelist =
+      (extended._allowedEmails && extended._allowedEmails.length > 0) ||
+      (extended._allowedDomains && extended._allowedDomains.length > 0);
+
+    if ((requiresEmail || hasWhitelist) && !body.email) {
+      return HttpResponse.json(
+        { code: "requires_email", message: "email required", requiresEmail, requiresPassword, requiresNda },
+        { status: 403 }
+      );
+    }
+    if (hasWhitelist) {
+      const domain = body.email!.split("@")[1]?.toLowerCase();
+      const allowed = [
+        ...(extended._allowedEmails ?? []),
+        ...(extended._allowedDomains ?? []),
+      ].some((entry) => {
+        const e = entry.trim().toLowerCase();
+        return e === body.email!.toLowerCase() || (e.startsWith("@") && e.slice(1) === domain);
+      });
+      if (!allowed) {
+        return HttpResponse.json(
+          { code: "whitelist_denied", message: "email not in whitelist", requiresEmail, requiresPassword, requiresNda },
+          { status: 403 }
+        );
+      }
+    }
+    if (requiresPassword && !body.password) {
+      return HttpResponse.json(
+        { code: "requires_password", message: "password required", requiresEmail, requiresPassword, requiresNda },
+        { status: 403 }
+      );
+    }
+    if (requiresPassword && body.password !== extended._password) {
+      return HttpResponse.json(
+        { code: "invalid_password", message: "invalid password", requiresEmail, requiresPassword, requiresNda },
+        { status: 401 }
+      );
+    }
+    if (requiresNda && !body.nda_agreed) {
+      return HttpResponse.json(
+        { code: "nda_required", message: "nda agreement required", requiresEmail, requiresPassword, requiresNda },
+        { status: 403 }
+      );
+    }
+
     const doc = mockDocuments.find((d) => d.id === link.documentId) ?? mockDocuments[0];
     return HttpResponse.json({
       link: {
@@ -610,9 +697,10 @@ export const handlers = [
         fileSize: doc.fileSize,
       },
       visitorId: generateId("visitor"),
-      requiresEmail: link.permissionType === "email" && !body.email,
-      requiresPassword: link.permissionType === "password" && !body.password,
-      requiresNda: link.permissionType === "nda" && !body.nda_agreed,
+      requiresEmail,
+      requiresPassword,
+      requiresNda,
+      sessionToken: "mock_session_token",
     });
   }),
 
