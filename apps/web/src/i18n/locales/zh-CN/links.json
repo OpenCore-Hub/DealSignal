@@ -52,6 +52,9 @@
     "trendTitle": "访问量趋势",
     "pageDurationTitle": "每页停留时间",
     "pageLabel": "第 {{page}} 页",
+    "pageAxisTitle": "页码",
+    "durationAxisTitle": "停留时长（秒）",
+    "avgDurationTooltip": "平均停留时长",
     "trendEmpty": "暂无访问数据，趋势将在首次访问后自动生成。",
     "timelineTitle": "访问者时间线",
     "accessLogTitle": "访问日志"

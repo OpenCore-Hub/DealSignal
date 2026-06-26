@@ -9,7 +9,7 @@ import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
 import { ActivityTimeline } from "@/components/common/ActivityTimeline";
-import { TrendChart } from "@/components/common/TrendChart";
+import { PageDurationChart } from "@/components/common/PageDurationChart";
 import { PermissionBadge } from "@/components/common/PermissionBadge";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { LinkAccessLog } from "./LinkAccessLog";
@@ -17,12 +17,12 @@ import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
-import type { AccessLog, Link } from "@/types";
+import type { AccessLog, Document, Link } from "@/types";
 
-function buildPageDurationTrend(
+function buildPageDurationData(
   logs: AccessLog[],
-  pageLabel: (page: number) => string
-): { labels: string[]; data: number[] } {
+  pageCount: number
+): { page: number; duration: number }[] {
   const groups = new Map<number, { total: number; count: number }>();
   for (const log of logs) {
     if (typeof log.pageNumber !== "number") continue;
@@ -34,11 +34,16 @@ function buildPageDurationTrend(
       groups.set(log.pageNumber, { total: log.durationSeconds || 0, count: 1 });
     }
   }
-  const sorted = Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
-  return {
-    labels: sorted.map(([page]) => pageLabel(page)),
-    data: sorted.map(([, { total, count }]) => (count ? Math.round(total / count) : 0)),
-  };
+
+  const data: { page: number; duration: number }[] = [];
+  for (let page = 1; page <= pageCount; page++) {
+    const existing = groups.get(page);
+    data.push({
+      page,
+      duration: existing ? Math.round(existing.total / existing.count) : 0,
+    });
+  }
+  return data;
 }
 
 export function LinkDetail() {
@@ -46,6 +51,7 @@ export function LinkDetail() {
   const { t } = useTranslation("links");
   const { t: tc } = useTranslation("common");
   const [link, setLink] = useState<Link | null>(null);
+  const [document, setDocument] = useState<Document | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -59,9 +65,14 @@ export function LinkDetail() {
       try {
         setLoading(true);
         setError(null);
-        const [l, logData] = await Promise.all([api.getLinkById(id!), api.getAccessLogs(id!)]);
+        const l = await api.getLinkById(id!);
+        const [logData, docData] = await Promise.all([
+          api.getAccessLogs(id!),
+          api.getDocumentById(l.documentId),
+        ]);
         if (!cancelled) {
           setLink(l);
+          setDocument(docData);
           setLogs(logData.data);
         }
       } catch (e) {
@@ -76,10 +87,13 @@ export function LinkDetail() {
     };
   }, [linkId, retryTick, tc]);
 
-  const trend = useMemo(
-    () => buildPageDurationTrend(logs, (page) => t("detail.pageLabel", { page })),
-    [logs, t]
-  );
+  const pageDurationData = useMemo(() => {
+    const pageCount =
+      document?.pageCount ??
+      Math.max(0, ...logs.filter((l) => typeof l.pageNumber === "number").map((l) => l.pageNumber ?? 0));
+    if (pageCount <= 0) return [];
+    return buildPageDurationData(logs, pageCount);
+  }, [logs, document]);
 
   const timelineActivities = useMemo(() => {
     return [...logs]
@@ -177,12 +191,14 @@ export function LinkDetail() {
         }
       >
         <div className="space-y-6">
-          <TrendChart
+          <PageDurationChart
             title={t("detail.pageDurationTitle")}
-            labels={trend.labels}
-            data={trend.data}
+            data={pageDurationData}
             emptyDescription={t("detail.trendEmpty")}
             formatValue={(v) => formatDuration(v)}
+            xAxisTitle={t("detail.pageAxisTitle")}
+            yAxisTitle={t("detail.durationAxisTitle")}
+            tooltipName={t("detail.avgDurationTooltip")}
           />
           <Card>
             <CardHeader>

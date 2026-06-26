@@ -19,6 +19,7 @@
     "security": "pnpm audit --audit-level high --registry=https://registry.npmjs.org/"
   },
   "dependencies": {
+    "@antv/g2plot": "^2.4.35",
     "@base-ui/react": "^1.6.0",
     "@fontsource-variable/geist": "^5.2.9",
     "@phosphor-icons/react": "^2.1.10",

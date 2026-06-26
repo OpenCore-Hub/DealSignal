@@ -52,6 +52,9 @@
     "trendTitle": "Visit trend",
     "pageDurationTitle": "Avg. time per page",
     "pageLabel": "Page {{page}}",
+    "pageAxisTitle": "Page",
+    "durationAxisTitle": "Duration (s)",
+    "avgDurationTooltip": "Avg. duration",
     "trendEmpty": "No visits yet. Trends appear after the first visit.",
     "timelineTitle": "Visitor Timeline",
     "accessLogTitle": "Access Log"
