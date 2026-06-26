@@ -19,24 +19,25 @@ import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters
 import { calculateUniqueVisitors } from "@/lib/calculations";
 import type { AccessLog, Link } from "@/types";
 
-function buildDailyTrend(logs: AccessLog[]): { labels: string[]; data: number[] } {
-  const counts = new Map<string, { date: Date; count: number }>();
+function buildPageDurationTrend(
+  logs: AccessLog[],
+  pageLabel: (page: number) => string
+): { labels: string[]; data: number[] } {
+  const groups = new Map<number, { total: number; count: number }>();
   for (const log of logs) {
-    const date = new Date(log.timestamp);
-    const dayKey = date.toISOString().slice(0, 10);
-    const existing = counts.get(dayKey);
+    if (typeof log.pageNumber !== "number") continue;
+    const existing = groups.get(log.pageNumber);
     if (existing) {
+      existing.total += log.durationSeconds || 0;
       existing.count += 1;
     } else {
-      counts.set(dayKey, { date, count: 1 });
+      groups.set(log.pageNumber, { total: log.durationSeconds || 0, count: 1 });
     }
   }
-  const sorted = Array.from(counts.entries())
-    .map(([, value]) => value)
-    .sort((a, b) => a.date.getTime() - b.date.getTime());
+  const sorted = Array.from(groups.entries()).sort((a, b) => a[0] - b[0]);
   return {
-    labels: sorted.map((d) => d.date.toLocaleDateString("zh-CN", { month: "short", day: "numeric" })),
-    data: sorted.map((d) => d.count),
+    labels: sorted.map(([page]) => pageLabel(page)),
+    data: sorted.map(([, { total, count }]) => (count ? Math.round(total / count) : 0)),
   };
 }
 
@@ -75,7 +76,10 @@ export function LinkDetail() {
     };
   }, [linkId, retryTick, tc]);
 
-  const trend = useMemo(() => buildDailyTrend(logs), [logs]);
+  const trend = useMemo(
+    () => buildPageDurationTrend(logs, (page) => t("detail.pageLabel", { page })),
+    [logs, t]
+  );
 
   const timelineActivities = useMemo(() => {
     return [...logs]
@@ -174,10 +178,11 @@ export function LinkDetail() {
       >
         <div className="space-y-6">
           <TrendChart
-            title={t("detail.trendTitle")}
+            title={t("detail.pageDurationTitle")}
             labels={trend.labels}
             data={trend.data}
             emptyDescription={t("detail.trendEmpty")}
+            formatValue={(v) => formatDuration(v)}
           />
           <Card>
             <CardHeader>

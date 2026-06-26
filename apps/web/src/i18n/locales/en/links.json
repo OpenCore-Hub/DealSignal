@@ -50,6 +50,8 @@
     "permissionConfig": "Permission Settings",
     "expiresAt": "Expires {{time}}",
     "trendTitle": "Visit trend",
+    "pageDurationTitle": "Avg. time per page",
+    "pageLabel": "Page {{page}}",
     "trendEmpty": "No visits yet. Trends appear after the first visit.",
     "timelineTitle": "Visitor Timeline",
     "accessLogTitle": "Access Log"

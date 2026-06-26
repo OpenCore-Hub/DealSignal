@@ -11,6 +11,7 @@ interface TrendChartProps {
   labels?: string[];
   className?: string;
   emptyDescription?: string;
+  formatValue?: (value: number) => string;
 }
 
 export function TrendChart({
@@ -19,6 +20,7 @@ export function TrendChart({
   labels,
   className,
   emptyDescription,
+  formatValue,
 }: TrendChartProps) {
   const { t } = useTranslation("common");
   const [hovered, setHovered] = useState<number | null>(null);
@@ -53,18 +55,18 @@ export function TrendChart({
           {data.map((h, i) => (
             <div
               key={i}
-              className="group relative flex flex-1 flex-col justify-end"
+              className="group relative flex h-full flex-1 flex-col justify-end"
               onMouseEnter={() => setHovered(i)}
               onMouseLeave={() => setHovered(null)}
             >
               <div
-                className="w-full rounded-t-sm bg-primary/10 transition-colors group-hover:bg-primary/20"
+                className="w-full min-w-2 rounded-t-sm bg-primary transition-colors group-hover:bg-primary/80"
                 style={{ height: `${(h / max) * 100}%` }}
                 aria-hidden="true"
               />
               {hovered === i && (
                 <div className="absolute bottom-full left-1/2 z-10 mb-1 -translate-x-1/2 rounded-md bg-foreground px-2 py-1 text-xs text-background shadow-dropdown">
-                  {h}
+                  {formatValue ? formatValue(h) : h}
                 </div>
               )}
             </div>
