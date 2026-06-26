@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Column } from "@antv/g2plot";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -37,17 +37,32 @@ export function PageDurationChart({
   const { t } = useTranslation("common");
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const chartData = useMemo(() => {
+    return (data ?? []).map((d) => ({
+      page: d.page,
+      pageLabel: String(d.page),
+      duration: d.duration,
+    }));
+  }, [data]);
+
   useEffect(() => {
-    if (!containerRef.current || !data || data.length === 0) return;
+    if (!containerRef.current || chartData.length === 0) return;
 
     const plot = new Column(containerRef.current, {
-      data,
-      xField: "page",
+      data: chartData,
+      xField: "pageLabel",
       yField: "duration",
+      meta: {
+        pageLabel: {
+          type: "cat",
+          values: chartData.map((d) => d.pageLabel),
+        },
+      },
       autoFit: true,
       padding: [16, 16, 48, 48],
-      columnWidthRatio: 0.7,
-      color: "#0f172a",
+      columnWidthRatio: 0.5,
+      maxColumnWidth: 32,
+      color: "#f9a8d4",
       xAxis: {
         title: xAxisTitle
           ? {
@@ -101,7 +116,7 @@ export function PageDurationChart({
     return () => {
       plot.destroy();
     };
-  }, [data, formatValue, t, xAxisTitle, yAxisTitle, tooltipName, pageLabel]);
+  }, [chartData, formatValue, t, xAxisTitle, yAxisTitle, tooltipName, pageLabel]);
 
   if (!data || data.length === 0) {
     return (
