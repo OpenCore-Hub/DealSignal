@@ -165,16 +165,17 @@ export function LinkDetail() {
       <DetailLayout
         sidebar={
           <div className="space-y-4">
-            <StatCard label={t("detail.totalVisits")} value={link.accessCount} />
-            <StatCard label={t("detail.uniqueVisitors")} value={calculateUniqueVisitors(logs)} />
-            <StatCard label={t("detail.avgDuration")} value={formatDuration(link.avgDurationSeconds || 0)} />
+            <StatCard size="sm" label={t("detail.totalVisits")} value={link.accessCount} />
+            <StatCard size="sm" label={t("detail.uniqueVisitors")} value={calculateUniqueVisitors(logs)} />
+            <StatCard size="sm" label={t("detail.avgDuration")} value={formatDuration(link.avgDurationSeconds || 0)} />
             <StatCard
+              size="sm"
               label={t("detail.lastVisit")}
               value={link.lastViewedAt ? formatRelativeTime(link.lastViewedAt) : "-"}
             />
             <Card>
               <CardHeader>
-                <CardTitle className="text-h3">{t("detail.permissionConfig")}</CardTitle>
+                <CardTitle className="text-body font-semibold">{t("detail.permissionConfig")}</CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="flex flex-wrap gap-2">
