@@ -5325,7 +5325,7 @@ func (q *Queries) UpdateDealRoomDocumentSortOrder(ctx context.Context, arg Updat
 
 const updateDealRoomDocumentsFolderPath = `-- name: UpdateDealRoomDocumentsFolderPath :exec
 UPDATE deal_room_documents
-SET folder_path = $1, updated_at = now()
+SET folder_path = $1
 WHERE room_id = $2 AND folder_path = $3
 `
 

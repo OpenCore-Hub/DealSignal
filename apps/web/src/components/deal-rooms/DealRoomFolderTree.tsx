@@ -29,6 +29,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { DocumentPicker } from "./DocumentPicker";
 import type { DealRoomDocumentItem, DealRoomFolder, DealRoomFolderDocs, Document } from "@/types";
 
@@ -220,6 +221,8 @@ export function DealRoomFolderTree({
     try {
       await onFolderRename(renamingFolder.path, renameValue.trim());
       setRenamingFolder(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
     } finally {
       setRenaming(false);
     }
@@ -232,8 +235,12 @@ export function DealRoomFolderTree({
       return;
     }
     if (!confirm(t("folders.deleteConfirm", { name: folder.name }))) return;
-    await onFolderDelete(folder.path);
-    setContextMenu(null);
+    try {
+      await onFolderDelete(folder.path);
+      setContextMenu(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+    }
   };
 
   const handleMove = async () => {

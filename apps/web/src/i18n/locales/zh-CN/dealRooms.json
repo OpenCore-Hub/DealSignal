@@ -70,7 +70,9 @@
     "renamed": "文件夹已重命名",
     "deleted": "文件夹已删除",
     "deleteConfirm": "删除文件夹 '{{name}}'？",
-    "deleteNotEmpty": "无法删除包含文档的文件夹，请先移除文档。"
+    "deleteNotEmpty": "无法删除包含文档的文件夹，请先移除文档。",
+    "renameFailed": "重命名文件夹失败",
+    "deleteFailed": "删除文件夹失败"
   },
   "documents": {
     "dialogDescription": "整理文件夹并管理该数据室中的文档。",

@@ -74,7 +74,9 @@
     "renamed": "Folder renamed",
     "deleted": "Folder deleted",
     "deleteConfirm": "Delete folder '{{name}}'?",
-    "deleteNotEmpty": "Cannot delete a folder that contains documents. Remove documents first."
+    "deleteNotEmpty": "Cannot delete a folder that contains documents. Remove documents first.",
+    "renameFailed": "Failed to rename folder",
+    "deleteFailed": "Failed to delete folder"
   },
   "documents": {
     "dialogDescription": "Organize folders and manage documents in this deal room.",
