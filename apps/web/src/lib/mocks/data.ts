@@ -5,6 +5,10 @@ import type {
   AuditLog,
   Contact,
   DealRoom,
+  DealRoomAccessRequest,
+  DealRoomFolder,
+  DealRoomFolderDocs,
+  DealRoomMember,
   DealRoomTemplate,
   Document,
   HeatAlert,
@@ -384,24 +388,107 @@ export const mockSuggestions: Suggestion[] = [
   },
 ];
 
+export const mockDealRoomFolders: DealRoomFolder[] = [
+  { path: "/", name: "Root", sort_order: 0 },
+  { path: "/pitch", name: "01 Pitch Deck", description: "Latest fundraising deck", sort_order: 1 },
+  { path: "/financials", name: "02 Financials", description: "Historical financials and projections", sort_order: 2 },
+  { path: "/team", name: "03 Team", description: "Founder resumes and org chart", sort_order: 3 },
+];
+
+export const mockDealRoomFolderDocs: DealRoomFolderDocs[] = [
+  {
+    folder: "/pitch",
+    permission: "view",
+    documents: [
+      {
+        id: "rd_1",
+        document_id: "doc_1",
+        title: "Acme Seed Round Pitch Deck",
+        folder_path: "/pitch",
+        sort_order: 0,
+        source_type: "pdf",
+        status: "ready",
+        page_count: 18,
+        file_size: 4_200_000,
+        created_at: "2026-06-18T09:30:00Z",
+      },
+    ],
+  },
+  {
+    folder: "/financials",
+    permission: "view",
+    documents: [
+      {
+        id: "rd_2",
+        document_id: "doc_2",
+        title: "Financial Model 2026-2028",
+        folder_path: "/financials",
+        sort_order: 0,
+        source_type: "xlsx",
+        status: "ready",
+        page_count: 12,
+        file_size: 1_800_000,
+        created_at: "2026-06-17T14:20:00Z",
+      },
+    ],
+  },
+];
+
+export const mockDealRoomMembers: DealRoomMember[] = [
+  {
+    id: "rm_1",
+    email: "john@acme.capital",
+    role: "owner",
+    nda_status: "signed",
+    status: "active",
+    name: "John Doe",
+    nda_signed_at: "2026-06-10T10:00:00Z",
+  },
+  {
+    id: "rm_2",
+    email: "sarah.chen@horizon.vc",
+    role: "viewer",
+    nda_status: "signed",
+    status: "active",
+    name: "Sarah Chen",
+    nda_signed_at: "2026-06-12T10:00:00Z",
+  },
+];
+
+export const mockDealRoomAccessRequests: DealRoomAccessRequest[] = [
+  {
+    id: "ra_1",
+    email: "marcus@boldstart.vc",
+    status: "pending",
+    reason: "Would like to review the deck before the partner meeting.",
+  },
+];
+
 export const mockDealRooms: DealRoom[] = [
   {
     id: "room_1",
     name: "Seed Round Due Diligence",
     description: "Due diligence room for Seed-round investors",
+    slug: "seed-round-due-diligence",
     template: "seed",
-    documentCount: 12,
-    memberCount: 5,
-    pendingApprovals: 3,
+    documentCount: mockDealRoomFolderDocs.reduce((sum, fd) => sum + fd.documents.length, 0),
+    memberCount: mockDealRoomMembers.length,
+    pendingApprovals: mockDealRoomAccessRequests.filter((r) => r.status === "pending").length,
     ndaEnabled: true,
+    requiresApproval: true,
     createdAt: "2026-06-10T10:00:00Z",
     lastAccessedAt: "2026-06-20T14:00:00Z",
     status: "active",
+    folders: mockDealRoomFolders,
+    documents: mockDealRoomFolderDocs,
+    members: mockDealRoomMembers,
+    accessRequests: mockDealRoomAccessRequests,
   },
   {
     id: "room_2",
     name: "Q2 LP Report",
     description: "Q2 2026 LP update report",
+    slug: "q2-lp-report",
     template: "lp-update",
     documentCount: 8,
     memberCount: 25,
@@ -410,11 +497,16 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-06-15T09:00:00Z",
     lastAccessedAt: "2026-06-19T16:30:00Z",
     status: "active",
+    folders: [{ path: "/", name: "Root", sort_order: 0 }],
+    documents: [],
+    members: [],
+    accessRequests: [],
   },
   {
     id: "room_3",
     name: "Enterprise Proposal - Acme Corp",
     description: "Acme Corp enterprise proposal data room",
+    slug: "enterprise-proposal-acme-corp",
     template: "sales-proposal",
     documentCount: 6,
     memberCount: 4,
@@ -423,6 +515,12 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-06-12T11:00:00Z",
     lastAccessedAt: "2026-06-18T10:15:00Z",
     status: "active",
+    folders: [{ path: "/", name: "Root", sort_order: 0 }],
+    documents: [],
+    members: [],
+    accessRequests: [
+      { id: "ra_2", email: "procurement@acme-corp.com", status: "pending", reason: "Committee review" },
+    ],
   },
 ];
 

@@ -164,20 +164,82 @@ export interface Suggestion {
   lastActivityAt: string;
 }
 
+export type DealRoomTemplateScenario =
+  | "seed"
+  | "series-a"
+  | "series-b"
+  | "lp-update"
+  | "sales-proposal"
+  | "ma"
+  | "custom";
+
+export interface DealRoomFolder {
+  path: string;
+  name: string;
+  description?: string;
+  sort_order: number;
+}
+
+export interface DealRoomDocumentItem {
+  id: string;
+  document_id: string;
+  title: string;
+  folder_path: string;
+  sort_order: number;
+  source_type: Document["sourceType"];
+  status: Document["status"];
+  page_count?: number;
+  file_size?: number;
+  created_at: string;
+}
+
+export interface DealRoomFolderDocs {
+  folder: string;
+  permission: "none" | "view" | "download" | "admin";
+  documents: DealRoomDocumentItem[];
+}
+
+export type DealRoomMemberRole = "owner" | "admin" | "member" | "viewer";
+
+export interface DealRoomMember {
+  id: string;
+  email: string;
+  role: DealRoomMemberRole;
+  nda_status: "none" | "pending" | "signed";
+  status: "active" | "pending" | "suspended";
+  name?: string;
+  nda_signed_at?: string;
+}
+
+export interface DealRoomAccessRequest {
+  id: string;
+  email: string;
+  status: "pending" | "approved" | "rejected";
+  reason?: string;
+  reviewed_at?: string;
+}
+
 export interface DealRoom {
   id: string;
   name: string;
   description: string;
-  template: "seed" | "series-a" | "series-b" | "lp-update" | "sales-proposal" | "ma" | "custom";
+  slug?: string;
+  template: DealRoomTemplateScenario;
   documentCount: number;
   memberCount: number;
   pendingApprovals: number;
   ndaEnabled: boolean;
+  requiresApproval?: boolean;
+  isPublic?: boolean;
   createdAt: string;
   lastAccessedAt?: string;
   status: "active" | "archived" | "pending";
   uploadedFiles?: string[];
   recentVisitors?: { email: string; name?: string; heatLevel: HeatLevel; lastSeenAt: string }[];
+  folders?: DealRoomFolder[];
+  documents?: DealRoomFolderDocs[];
+  members?: DealRoomMember[];
+  accessRequests?: DealRoomAccessRequest[];
 }
 
 export interface WorkspaceMember {
@@ -318,7 +380,7 @@ export interface DealRoomTemplate {
   id: string;
   name: string;
   description: string;
-  scenario: "seed" | "series-a" | "series-b" | "lp-update" | "sales-proposal" | "ma" | "custom";
+  scenario: DealRoomTemplateScenario;
   folderStructure: { name: string; description?: string }[];
   recommendedFiles: string[];
   defaultPermissionLevel: "low" | "medium" | "high";

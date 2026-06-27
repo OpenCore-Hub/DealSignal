@@ -5,6 +5,11 @@ import type {
   BillingInfo,
   Contact,
   DealRoom,
+  DealRoomAccessRequest,
+  DealRoomDocumentItem,
+  DealRoomFolder,
+  DealRoomFolderDocs,
+  DealRoomMember,
   DealRoomTemplate,
   Document,
   Evidence,
@@ -64,6 +69,25 @@ export interface PublicLinkCredentials {
   sessionToken?: string;
 }
 
+export interface PublicDealRoomView {
+  room: {
+    id: string;
+    name: string;
+    description: string;
+    ndaEnabled: boolean;
+    requiresApproval: boolean;
+  };
+  member: {
+    id: string;
+    email: string;
+    role: DealRoomMember["role"];
+    ndaStatus: DealRoomMember["nda_status"];
+    status: DealRoomMember["status"];
+  } | null;
+  folders: DealRoomFolder[];
+  documents: DealRoomFolderDocs[];
+}
+
 function publicAccessHeaders(creds?: PublicLinkCredentials): Record<string, string> | undefined {
   if (!creds) return undefined;
   if (creds.sessionToken) {
@@ -82,7 +106,7 @@ function getWorkspaceSlug(): string {
   // Priority 1: from URL path (most reliable for page-level API calls)
   if (typeof window !== "undefined") {
     const match = window.location.pathname.match(/^\/([^/]+)/);
-    if (match && match[1] && !match[1].startsWith("api") && !["login", "register", "viewer", "l", "workspaces"].includes(match[1])) {
+    if (match && match[1] && !match[1].startsWith("api") && !["login", "register", "viewer", "l", "r", "workspaces"].includes(match[1])) {
       return match[1];
     }
   }
@@ -347,6 +371,85 @@ export const api = {
     request<DealRoom>(getWorkspaceSlug(), "/deal-rooms", {
       method: "POST",
       body: JSON.stringify(toCreateDealRoomPayload(payload)),
+    }),
+
+  // Deal room folders
+  getDealRoomFolders: (roomId: string) =>
+    request<{ data: DealRoomFolder[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/folders`),
+  createDealRoomFolder: (roomId: string, payload: { name: string; parent_path?: string }) =>
+    request<{ data: DealRoomFolder[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/folders`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  renameDealRoomFolder: (roomId: string, path: string, payload: { name: string }) =>
+    request<{ data: DealRoomFolder[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/folders/${encodeURIComponent(path)}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  deleteDealRoomFolder: (roomId: string, path: string) =>
+    request<{ data: DealRoomFolder[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/folders/${encodeURIComponent(path)}`, {
+      method: "DELETE",
+    }),
+
+  // Deal room documents
+  getDealRoomDocuments: (roomId: string) =>
+    request<{ data: DealRoomFolderDocs[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/documents`),
+  addDealRoomDocument: (roomId: string, payload: { document_id: string; folder_path?: string; sort_order?: number }) =>
+    request<DealRoomDocumentItem>(getWorkspaceSlug(), `/deal-rooms/${roomId}/documents`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  updateDealRoomDocument: (roomId: string, docId: string, payload: { folder_path?: string; sort_order?: number }) =>
+    request<DealRoomDocumentItem>(getWorkspaceSlug(), `/deal-rooms/${roomId}/documents/${docId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    }),
+  removeDealRoomDocument: (roomId: string, docId: string) =>
+    request<void>(getWorkspaceSlug(), `/deal-rooms/${roomId}/documents/${docId}`, {
+      method: "DELETE",
+    }),
+
+  // Deal room members
+  getDealRoomMembers: (roomId: string) =>
+    request<{ data: DealRoomMember[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members`),
+  inviteDealRoomMember: (roomId: string, payload: { email: string; role: DealRoomMember["role"] }) =>
+    request<{ data: DealRoomMember }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  removeDealRoomMember: (roomId: string, memberId: string) =>
+    request<void>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members/${memberId}`, {
+      method: "DELETE",
+    }),
+
+  // Deal room access requests
+  getDealRoomAccessRequests: (roomId: string) =>
+    request<{ data: DealRoomAccessRequest[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/access-requests`),
+  approveDealRoomAccessRequest: (roomId: string, requestId: string) =>
+    request<DealRoomAccessRequest>(getWorkspaceSlug(), `/deal-rooms/${roomId}/access-requests/${requestId}/approve`, {
+      method: "POST",
+    }),
+  rejectDealRoomAccessRequest: (roomId: string, requestId: string) =>
+    request<DealRoomAccessRequest>(getWorkspaceSlug(), `/deal-rooms/${roomId}/access-requests/${requestId}/reject`, {
+      method: "POST",
+    }),
+
+  // Public deal room
+  getPublicDealRoom: (slug: string, email?: string) =>
+    request<PublicDealRoomView>(undefined, `/v1/public/deal-rooms/${slug}${email ? `?email=${encodeURIComponent(email)}` : ""}`, {
+      skipAuth: true,
+    }),
+  requestDealRoomAccess: (slug: string, payload: { email: string; reason?: string }) =>
+    request<{ request_id: string }>(undefined, `/v1/public/deal-rooms/${slug}/access-requests`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      skipAuth: true,
+    }),
+  signDealRoomNDA: (slug: string, payload: { email: string }) =>
+    request<void>(undefined, `/v1/public/deal-rooms/${slug}/nda`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      skipAuth: true,
     }),
 
   getInsightsOverview: () =>

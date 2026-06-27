@@ -682,6 +682,7 @@ assert_status "GET /deal-rooms/:id" 200 "$STATUS"
 api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/documents" \
   "{\"document_id\":\"$DOC_ID\"}" "$TOKEN"
 assert_status "POST /deal-rooms/:id/documents" 201 "$STATUS"
+ROOM_DOC_ID=$(echo "$BODY" | jq -r '.id')
 
 # 14f. Add member to room
 api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/members" \
@@ -714,6 +715,55 @@ fi
 api_call BODY STATUS POST "$BASE_URL/api/v1/public/deal-rooms/$ROOM_SLUG/access-requests" \
   '{"email":"guest-req@example.com","reason":"Need access for due diligence"}' ""
 assert_status "POST /public/deal-rooms/:slug/access-requests" 201 "$STATUS"
+REQUEST_ID=$(echo "$BODY" | jq -r '.id')
+
+# 14k. Get deal room detail (should include folders, documents, members, accessRequests)
+api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID" "" "$TOKEN"
+assert_status "GET /deal-rooms/:id detail" 200 "$STATUS"
+assert_json_not_empty "detail folders" '.folders' "$BODY"
+assert_json_not_empty "detail documents" '.documents' "$BODY"
+assert_json_not_empty "detail members" '.members' "$BODY"
+assert_json_not_empty "detail accessRequests" '.accessRequests' "$BODY"
+
+# 14l. Create folder
+api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/folders" \
+  '{"name":"E2E Folder"}' "$TOKEN"
+assert_status "POST /deal-rooms/:id/folders" 201 "$STATUS"
+
+# 14m. Rename folder
+api_call BODY STATUS PATCH "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/folders/e2e-folder" \
+  '{"name":"Renamed Folder"}' "$TOKEN"
+assert_status "PATCH /deal-rooms/:id/folders/:path" 200 "$STATUS"
+
+# 14n. Move document into folder and set sort order
+api_call BODY STATUS PATCH "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/documents/$ROOM_DOC_ID" \
+  '{"folder_path":"/renamed-folder","sort_order":1}' "$TOKEN"
+assert_status "PATCH /deal-rooms/:id/documents/:docId" 204 "$STATUS"
+
+# 14o. List room documents grouped by folder
+api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/documents" "" "$TOKEN"
+assert_status "GET /deal-rooms/:id/documents" 200 "$STATUS"
+
+# 14p. List members
+api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/members" "" "$TOKEN"
+assert_status "GET /deal-rooms/:id/members" 200 "$STATUS"
+
+# 14q. List access requests
+api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/access-requests" "" "$TOKEN"
+assert_status "GET /deal-rooms/:id/access-requests" 200 "$STATUS"
+
+# 14r. Reject access request
+api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/access-requests/$REQUEST_ID/reject" \
+  '{}' "$TOKEN"
+assert_status "POST /deal-rooms/:id/access-requests/:requestId/reject" 200 "$STATUS"
+
+# 14s. Move document back to root, then delete folder
+api_call BODY STATUS PATCH "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/documents/$ROOM_DOC_ID" \
+  '{"folder_path":"/"}' "$TOKEN"
+assert_status "PATCH /deal-rooms/:id/documents/:docId (move to root)" 204 "$STATUS"
+
+api_call BODY STATUS DELETE "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/folders/renamed-folder" "" "$TOKEN"
+assert_status "DELETE /deal-rooms/:id/folders/:path" 200 "$STATUS"
 
 # =============================================================================
 # 15. Domain Management

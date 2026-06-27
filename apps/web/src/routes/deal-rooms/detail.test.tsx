@@ -8,34 +8,75 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DealRoomDetailPage } from "./detail";
-import type { DealRoom, DealRoomTemplate } from "@/types";
+import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, DealRoomAccessRequest, DealRoomTemplate, Document } from "@/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock } = vi.hoisted(() => ({
+const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
+  getDocumentsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomById: getDealRoomByIdMock,
     getDealRoomTemplates: getDealRoomTemplatesMock,
+    getDocuments: getDocumentsMock,
   },
 }));
+
+const mockFolders: DealRoomFolder[] = [
+  { path: "/pitch", name: "01 Pitch Deck", description: "Latest fundraising deck", sort_order: 0 },
+  { path: "/financials", name: "02 Financials", description: "Historical financials", sort_order: 1 },
+];
+
+const mockFolderDocs: DealRoomFolderDocs[] = [
+  {
+    folder: "/pitch",
+    permission: "view",
+    documents: [
+      {
+        id: "rd_1",
+        document_id: "doc_1",
+        title: "Acme Seed Round Pitch Deck",
+        folder_path: "/pitch",
+        sort_order: 0,
+        source_type: "pdf",
+        status: "ready",
+        page_count: 18,
+        file_size: 4_200_000,
+        created_at: "2026-06-18T09:30:00Z",
+      },
+    ],
+  },
+];
+
+const mockMembers: DealRoomMember[] = [
+  { id: "rm_1", email: "john@acme.capital", role: "owner", nda_status: "signed", status: "active", name: "John Doe" },
+];
+
+const mockAccessRequests: DealRoomAccessRequest[] = [
+  { id: "ra_1", email: "sarah@horizon.vc", status: "pending", reason: "Would like to review deck" },
+];
 
 const mockRoom: DealRoom = {
   id: "room-1",
   name: "Series A Data Room",
   description: "Due diligence materials",
+  slug: "series-a-data-room",
   template: "series-a",
-  documentCount: 3,
-  memberCount: 2,
+  documentCount: 1,
+  memberCount: 1,
   pendingApprovals: 1,
   ndaEnabled: true,
+  requiresApproval: true,
   createdAt: "2026-06-20T10:00:00Z",
   status: "active",
-  uploadedFiles: ["Pitch deck", "Financial model"],
+  folders: mockFolders,
+  documents: mockFolderDocs,
+  members: mockMembers,
+  accessRequests: mockAccessRequests,
 };
 
 const mockTemplates: DealRoomTemplate[] = [
@@ -48,6 +89,33 @@ const mockTemplates: DealRoomTemplate[] = [
     recommendedFiles: ["Pitch deck", "Financial model", "Cap table"],
     defaultPermissionLevel: "medium",
     ndaEnabled: true,
+  },
+];
+
+const mockWorkspaceDocs: Document[] = [
+  {
+    id: "doc_1",
+    title: "Acme Seed Round Pitch Deck",
+    sourceType: "pdf",
+    fileName: "Acme Seed Round Pitch Deck.pdf",
+    fileType: "pdf",
+    fileSize: 4_200_000,
+    pageCount: 18,
+    status: "ready",
+    createdAt: "2026-06-18T09:30:00Z",
+    updatedAt: "2026-06-18T09:45:00Z",
+  },
+  {
+    id: "doc_2",
+    title: "Financial Model 2026-2028",
+    sourceType: "xlsx",
+    fileName: "Financial Model 2026-2028.xlsx",
+    fileType: "xlsx",
+    fileSize: 1_800_000,
+    pageCount: 12,
+    status: "ready",
+    createdAt: "2026-06-17T14:20:00Z",
+    updatedAt: "2026-06-17T14:25:00Z",
   },
 ];
 
@@ -88,7 +156,9 @@ describe("DealRoomDetailPage", () => {
   beforeEach(() => {
     getDealRoomByIdMock.mockReset();
     getDealRoomTemplatesMock.mockReset();
+    getDocumentsMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
+    getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
   });
 
   it("renders loading skeleton", async () => {
@@ -97,7 +167,7 @@ describe("DealRoomDetailPage", () => {
     expect(document.querySelector("[aria-busy='true']")).toBeInTheDocument();
   });
 
-  it("renders deal room details and checklist", async () => {
+  it("renders deal room details, real folders and checklist", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
     await renderPage();
 
@@ -106,8 +176,11 @@ describe("DealRoomDetailPage", () => {
     });
 
     expect(screen.getByText("Due diligence materials")).toBeInTheDocument();
-    expect(screen.getByText("Financials")).toBeInTheDocument();
+    expect(screen.getByText("01 Pitch Deck")).toBeInTheDocument();
+    expect(screen.getByText("02 Financials")).toBeInTheDocument();
     expect(screen.getByText("Pitch deck")).toBeInTheDocument();
+    expect(screen.getByText("john@acme.capital")).toBeInTheDocument();
+    expect(screen.getByText("sarah@horizon.vc")).toBeInTheDocument();
   });
 
   it("shows error and retries on failure", async () => {

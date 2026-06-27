@@ -1,9 +1,19 @@
-import { useMemo } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { useParams } from "react-router";
-import { FileText, Users, Lock, Envelope, Folder, Check, UploadSimple } from "@phosphor-icons/react";
+import {
+  FileText,
+  Users,
+  Lock,
+  Envelope,
+  Folder,
+  Check,
+  UploadSimple,
+  Plus,
+} from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PageHeader } from "@/components/common/PageHeader";
 import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
@@ -13,41 +23,130 @@ import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/formatters";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { toast } from "sonner";
+import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
+import { MembersCard } from "@/components/deal-rooms/MembersCard";
+import { AccessRequestsCard } from "@/components/deal-rooms/AccessRequestsCard";
+import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
+import type { DealRoomFolderDocs } from "@/types";
+
+function normalizeText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ");
+}
+
+function matchesRecommendedFile(documentTitle: string, recommendedName: string): boolean {
+  const title = normalizeText(documentTitle);
+  const rec = normalizeText(recommendedName);
+  if (title.includes(rec)) return true;
+  if (rec.includes(title) && title.length > 3) return true;
+  const recWords = rec.split(" ").filter(Boolean);
+  if (recWords.length > 1) {
+    return recWords.every((word) => title.includes(word));
+  }
+  return false;
+}
+
+interface RecommendedFile {
+  name: string;
+  matchedDocId?: string;
+  done: boolean;
+  manual: boolean;
+}
 
 export function DealRoomDetailPage() {
   const { t, i18n } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
 
-  const { data, loading, error, refetch } = useAsyncData(async () => {
+  const fetchRoom = useCallback(async () => {
     if (!roomId) {
       throw new Error(t("detail.notFound"));
     }
-    const [r, tRes] = await Promise.all([api.getDealRoomById(roomId), api.getDealRoomTemplates()]);
-    return { room: r, templates: tRes.data };
+    const [r, tRes, docsRes] = await Promise.all([
+      api.getDealRoomById(roomId),
+      api.getDealRoomTemplates(),
+      api.getDocuments(),
+    ]);
+    return { room: r, templates: tRes.data, workspaceDocs: docsRes.data };
   }, [roomId, t]);
 
-  const room = data?.room ?? null;
+  const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
 
+  const room = data?.room ?? null;
   const template = useMemo(
     () => (data?.templates ?? []).find((tmpl) => tmpl.scenario === room?.template),
     [data?.templates, room]
   );
 
-  const uploaded = useMemo(() => new Set(room?.uploadedFiles ?? []), [room]);
-  const checklist = useMemo(
-    () =>
-      template?.recommendedFiles.map((name) => ({
-        name,
-        done: uploaded.has(name),
-      })) ?? [],
-    [template, uploaded]
+  const allRoomDocuments = useMemo(
+    () => (room?.documents ?? []).flatMap((fd: DealRoomFolderDocs) => fd.documents),
+    [room]
   );
 
+  const [manualDone, setManualDone] = useState<Set<string>>(new Set());
+
+  const recommendedFiles: RecommendedFile[] = useMemo(() => {
+    const list = template?.recommendedFiles ?? [];
+    return list.map((name) => {
+      const matched = allRoomDocuments.find((d) => matchesRecommendedFile(d.title, name));
+      const manual = matched ? false : manualDone.has(name);
+      return {
+        name,
+        matchedDocId: matched?.document_id,
+        done: !!matched || manual,
+        manual,
+      };
+    });
+  }, [template, allRoomDocuments, manualDone]);
+
   const completion = useMemo(
-    () => (checklist.length === 0 ? 0 : Math.round((checklist.filter((c) => c.done).length / checklist.length) * 100)),
-    [checklist]
+    () =>
+      recommendedFiles.length === 0
+        ? 0
+        : Math.round((recommendedFiles.filter((c) => c.done).length / recommendedFiles.length) * 100),
+    [recommendedFiles]
   );
+
+  const toggleManualDone = (name: string) => {
+    setManualDone((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+  };
+
+  const handleUpload = async (file: File) => {
+    if (!roomId) return;
+    setUploading(true);
+    try {
+      const doc = await api.uploadDocument(file);
+      // Try to match a recommended folder by file name.
+      let targetFolder = "/";
+      const roomFolders = room?.folders ?? [];
+      for (const folder of roomFolders) {
+        if (matchesRecommendedFile(doc.title, folder.name)) {
+          targetFolder = folder.path;
+          break;
+        }
+      }
+      await api.addDealRoomDocument(roomId, { document_id: doc.id, folder_path: targetFolder });
+      toast.success(t("documents.uploadedAndAdded", { title: doc.title }));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+    } finally {
+      setUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) void handleUpload(file);
+  };
 
   if (error) {
     return (
@@ -70,14 +169,24 @@ export function DealRoomDetailPage() {
       <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
 
       <PageHeader title={room.name} description={room.description}>
-        <Button variant="outline" className="gap-1.5" disabled title={t("detail.inviteDisabled")}>
-          <Envelope size={16} />
-          {t("detail.invite")}
-        </Button>
-        <Button className="gap-1.5" disabled title={t("detail.manageDocsDisabled")}>
-          <FileText size={16} />
-          {t("detail.manageDocs")}
-        </Button>
+        <InviteMemberDialog roomId={room.id} onInvited={refetch}>
+          <Button variant="outline" className="gap-1.5">
+            <Envelope size={16} />
+            {t("detail.invite")}
+          </Button>
+        </InviteMemberDialog>
+        <DealRoomDocumentsDialog
+          roomId={room.id}
+          folders={room.folders ?? []}
+          folderDocs={room.documents ?? []}
+          workspaceDocuments={data?.workspaceDocs ?? []}
+          onChanged={refetch}
+        >
+          <Button className="gap-1.5">
+            <FileText size={16} />
+            {t("detail.manageDocs")}
+          </Button>
+        </DealRoomDocumentsDialog>
       </PageHeader>
 
       <DetailLayout
@@ -99,6 +208,7 @@ export function DealRoomDetailPage() {
                   ) : (
                     <Badge variant="secondary">{t("noNda")}</Badge>
                   )}
+                  {room.requiresApproval && <Badge variant="secondary">{t("approvalRequired")}</Badge>}
                 </div>
                 <p className="mt-3 text-caption text-muted-foreground">
                   {t("createdAt", { time: formatRelativeTime(room.createdAt, i18n.language) })}
@@ -117,22 +227,27 @@ export function DealRoomDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {template ? (
+              {room.folders && room.folders.length > 0 ? (
                 <ul className="space-y-2">
-                  {template.folderStructure.map((folder, idx) => (
-                    <li key={idx} className="flex items-start gap-2 rounded-md border border-border p-3">
-                      <Folder size={18} className="mt-0.5 text-muted-foreground" />
-                      <div>
-                        <p className="text-sm font-medium">{folder.name}</p>
-                        {folder.description && (
-                          <p className="text-caption text-muted-foreground">{folder.description}</p>
-                        )}
-                      </div>
-                    </li>
-                  ))}
+                  {(room.folders ?? [])
+                    .sort((a, b) => a.sort_order - b.sort_order)
+                    .map((folder) => (
+                      <li
+                        key={folder.path}
+                        className="flex items-start gap-2 rounded-md border border-border p-3"
+                      >
+                        <Folder size={18} className="mt-0.5 text-muted-foreground" />
+                        <div>
+                          <p className="text-sm font-medium">{folder.name}</p>
+                          {folder.description && (
+                            <p className="text-caption text-muted-foreground">{folder.description}</p>
+                          )}
+                        </div>
+                      </li>
+                    ))}
                 </ul>
               ) : (
-                <p className="text-body text-muted-foreground">{t("detail.noTemplate")}</p>
+                <p className="text-body text-muted-foreground">{t("detail.noFolders")}</p>
               )}
             </CardContent>
           </Card>
@@ -155,35 +270,93 @@ export function DealRoomDetailPage() {
                   style={{ width: `${completion}%` }}
                 />
               </div>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={onFileChange}
+                className="hidden"
+                accept=".pdf,.docx,.pptx,.xlsx"
+                disabled={uploading}
+              />
               <ul className="space-y-2">
-                {checklist.map((item, idx) => (
+                {recommendedFiles.map((item) => (
                   <li
-                    key={idx}
+                    key={item.name}
                     className={`flex items-center justify-between rounded-md border border-border p-3 ${
                       item.done ? "bg-muted/50" : ""
                     }`}
                   >
-                    <div className="flex items-center gap-2">
-                      <FileText size={16} className={item.done ? "text-success-500" : "text-muted-foreground"} />
-                      <span className={item.done ? "line-through text-muted-foreground" : "text-sm font-medium"}>
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText
+                        size={16}
+                        className={item.done ? "text-success-500 shrink-0" : "text-muted-foreground shrink-0"}
+                      />
+                      <span
+                        className={
+                          item.done ? "line-through text-muted-foreground truncate" : "text-sm font-medium truncate"
+                        }
+                      >
                         {item.name}
                       </span>
                     </div>
-                    {item.done ? (
-                      <Badge variant="outline" className="border-success-500/20 text-success-500">
-                        {t("detail.uploaded")}
-                      </Badge>
-                    ) : (
-                      <Button size="sm" variant="ghost" className="gap-1" disabled title={t("detail.uploadDisabled")}>
-                        <UploadSimple size={14} />
-                        {t("detail.upload")}
-                      </Button>
-                    )}
+                    <div className="flex items-center gap-2 shrink-0">
+                      {item.done ? (
+                        <Badge variant="outline" className="border-success-500/20 text-success-500">
+                          {t("detail.uploaded")}
+                        </Badge>
+                      ) : (
+                        <>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="gap-1"
+                            onClick={() => fileInputRef.current?.click()}
+                            disabled={uploading}
+                          >
+                            <UploadSimple size={14} />
+                            {t("detail.upload")}
+                          </Button>
+                          {!item.matchedDocId && (
+                            <div className="flex items-center gap-1">
+                              <Checkbox
+                                id={`check-${item.name}`}
+                                checked={item.manual}
+                                onCheckedChange={() => toggleManualDone(item.name)}
+                              />
+                              <label htmlFor={`check-${item.name}`} className="sr-only">
+                                {t("detail.markDone")}
+                              </label>
+                            </div>
+                          )}
+                        </>
+                      )}
+                    </div>
                   </li>
                 ))}
               </ul>
+              <Button
+                variant="outline"
+                className="w-full gap-1"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={uploading}
+              >
+                <Plus size={16} />
+                {uploading ? t("detail.uploading") : t("detail.uploadAny")}
+              </Button>
             </CardContent>
           </Card>
+
+          <MembersCard
+            roomId={room.id}
+            members={room.members ?? []}
+            onChanged={refetch}
+          />
+
+          <AccessRequestsCard
+            roomId={room.id}
+            requests={room.accessRequests ?? []}
+            onChanged={refetch}
+          />
         </div>
       </DetailLayout>
     </div>

@@ -1,5 +1,14 @@
 import { http, HttpResponse } from "msw";
-import type { ActionItem, Link, WorkspaceMember } from "@/types";
+import type {
+  ActionItem,
+  DealRoom,
+  DealRoomDocumentItem,
+  DealRoomFolder,
+  DealRoomFolderDocs,
+  DealRoomMember,
+  Link,
+  WorkspaceMember,
+} from "@/types";
 import {
   mockAccessLogs,
   mockActionItems,
@@ -99,6 +108,35 @@ function placeholdImageUrl(width: number, height: number): string {
   return `data:image/svg+xml,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#e2e8f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="24">Page</text></svg>`
   )}`;
+}
+
+function findRoom(roomId: string): DealRoom | undefined {
+  return mockDealRooms.find((r) => r.id === roomId);
+}
+
+function getRoomFolders(room: DealRoom): DealRoomFolder[] {
+  return room.folders ?? [{ path: "/", name: "Root", sort_order: 0 }];
+}
+
+function getRoomFolderDocs(room: DealRoom): DealRoomFolderDocs[] {
+  return room.documents ?? [];
+}
+
+function nextSortOrder(arr: { sort_order: number }[]): number {
+  return arr.length === 0 ? 0 : Math.max(...arr.map((x) => x.sort_order)) + 1;
+}
+
+function sanitizeFolderPath(name: string, parentPath = "/"): string {
+  const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  if (parentPath === "/") return `/${slug}`;
+  return `${parentPath}/${slug}`;
+}
+
+function updateRoomDerivedFields(room: DealRoom) {
+  const docs = getRoomFolderDocs(room);
+  room.documentCount = docs.reduce((sum, fd) => sum + fd.documents.length, 0);
+  room.memberCount = room.members?.length ?? 0;
+  room.pendingApprovals = room.accessRequests?.filter((r) => r.status === "pending").length ?? 0;
 }
 
 export const handlers = [
@@ -373,7 +411,7 @@ export const handlers = [
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id", ({ params }) => {
-    const room = mockDealRooms.find((r) => r.id === params.id);
+    const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
     return HttpResponse.json(room);
   }),
@@ -389,20 +427,32 @@ export const handlers = [
     };
     const scenario = body.template_type?.replace(/_/g, "-") ?? "custom";
     const template = mockDealRoomTemplates.find((t) => t.scenario === scenario);
-    const newRoom = {
+    const folders: DealRoomFolder[] = template
+      ? template.folderStructure.map((f, i) => ({
+          path: `/${f.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
+          name: f.name,
+          description: f.description,
+          sort_order: i,
+        }))
+      : [{ path: "/", name: "Root", sort_order: 0 }];
+    const newRoom: DealRoom = {
       id: generateId("dr"),
       name: body.name,
       description: body.description ?? "",
-      template: (template?.scenario ?? scenario) as import("@/types").DealRoom["template"],
+      slug: body.slug,
+      template: (template?.scenario ?? scenario) as DealRoom["template"],
       ndaEnabled: body.requires_nda ?? false,
+      requiresApproval: body.requires_approval ?? false,
       documentCount: 0,
       memberCount: 0,
       pendingApprovals: 0,
       createdAt: new Date().toISOString(),
       lastAccessedAt: undefined,
-      status: "active" as const,
-      uploadedFiles: [],
-      recentVisitors: [],
+      status: "active",
+      folders,
+      documents: [],
+      members: [],
+      accessRequests: [],
     };
     mockDealRooms.unshift(newRoom);
     return HttpResponse.json(newRoom, { status: 201 });
@@ -410,6 +460,341 @@ export const handlers = [
 
   http.get("*/api/workspaces/:workspaceSlug/deal-room-templates", () => {
     return HttpResponse.json({ data: mockDealRoomTemplates });
+  }),
+
+  // Deal room folders
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/folders", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: getRoomFolders(room) });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/folders", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { name: string; parent_path?: string };
+    const folders = getRoomFolders(room);
+    const path = sanitizeFolderPath(body.name, body.parent_path ?? "/");
+    if (folders.some((f) => f.path === path)) {
+      return HttpResponse.json({ code: "folder_exists", message: "folder already exists" }, { status: 409 });
+    }
+    folders.push({
+      path,
+      name: body.name,
+      sort_order: nextSortOrder(folders),
+    });
+    room.folders = folders;
+    return HttpResponse.json({ data: folders }, { status: 201 });
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/deal-rooms/:id/folders/*path", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const path = `/${params.path as string}`;
+    const folders = getRoomFolders(room);
+    const folder = folders.find((f) => f.path === path);
+    if (!folder) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { name: string };
+    const newPath = sanitizeFolderPath(body.name, "/");
+    if (newPath !== path && folders.some((f) => f.path === newPath)) {
+      return HttpResponse.json({ code: "folder_exists", message: "folder already exists" }, { status: 409 });
+    }
+    folder.name = body.name;
+    folder.path = newPath;
+    // Cascade update documents in this folder.
+    const docs = getRoomFolderDocs(room);
+    for (const fd of docs) {
+      if (fd.folder === path) fd.folder = newPath;
+      for (const doc of fd.documents) {
+        if (doc.folder_path === path) doc.folder_path = newPath;
+      }
+    }
+    room.folders = folders;
+    return HttpResponse.json({ data: folders });
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/deal-rooms/:id/folders/*path", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const path = `/${params.path as string}`;
+    const docs = getRoomFolderDocs(room);
+    const hasDocs = docs.some((fd) => fd.folder === path && fd.documents.length > 0);
+    if (hasDocs) {
+      return HttpResponse.json({ code: "folder_not_empty", message: "folder is not empty" }, { status: 400 });
+    }
+    const folders = getRoomFolders(room).filter((f) => f.path !== path);
+    room.folders = folders;
+    return HttpResponse.json({ data: folders });
+  }),
+
+  // Deal room documents
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: getRoomFolderDocs(room) });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as {
+      document_id: string;
+      folder_path?: string;
+      sort_order?: number;
+    };
+    const doc = mockDocuments.find((d) => d.id === body.document_id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    const folderPath = body.folder_path ?? "/";
+    const folders = getRoomFolders(room);
+    if (!folders.some((f) => f.path === folderPath)) {
+      return HttpResponse.json({ code: "folder_not_found", message: "folder not found" }, { status: 404 });
+    }
+    const docs = getRoomFolderDocs(room);
+    let fd = docs.find((d) => d.folder === folderPath);
+    if (!fd) {
+      fd = { folder: folderPath, permission: "view", documents: [] };
+      docs.push(fd);
+    }
+    const item: DealRoomDocumentItem = {
+      id: generateId("rd"),
+      document_id: doc.id,
+      title: doc.title,
+      folder_path: folderPath,
+      sort_order: body.sort_order ?? nextSortOrder(fd.documents),
+      source_type: doc.sourceType,
+      status: doc.status,
+      page_count: doc.pageCount,
+      file_size: doc.fileSize,
+      created_at: doc.createdAt,
+    };
+    fd.documents.push(item);
+    room.documents = docs;
+    updateRoomDerivedFields(room);
+    return HttpResponse.json(item, { status: 201 });
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents/:docId", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { folder_path?: string; sort_order?: number };
+    const docs = getRoomFolderDocs(room);
+    let item: DealRoomDocumentItem | undefined;
+    let fromFd: DealRoomFolderDocs | undefined;
+    for (const fd of docs) {
+      const found = fd.documents.find((d) => d.id === params.docId);
+      if (found) {
+        item = found;
+        fromFd = fd;
+        break;
+      }
+    }
+    if (!item || !fromFd) return new HttpResponse(null, { status: 404 });
+
+    if (typeof body.sort_order === "number") {
+      item.sort_order = body.sort_order;
+      // Swap sort_order with adjacent document when moving up/down.
+      const siblings = fromFd.documents.filter((d) => d.id !== item!.id).sort((a, b) => a.sort_order - b.sort_order);
+      for (const sibling of siblings) {
+        if (sibling.sort_order === item.sort_order) {
+          sibling.sort_order = item.sort_order + (body.sort_order < sibling.sort_order ? 1 : -1);
+        }
+      }
+    }
+
+    if (body.folder_path !== undefined && body.folder_path !== item.folder_path) {
+      fromFd.documents = fromFd.documents.filter((d) => d.id !== item!.id);
+      if (fromFd.documents.length === 0) {
+        room.documents = docs.filter((d) => d !== fromFd);
+      }
+      let toFd = docs.find((d) => d.folder === body.folder_path);
+      if (!toFd) {
+        toFd = { folder: body.folder_path, permission: "view", documents: [] };
+        docs.push(toFd);
+      }
+      item.folder_path = body.folder_path;
+      item.sort_order = nextSortOrder(toFd.documents);
+      toFd.documents.push(item);
+    }
+
+    room.documents = docs;
+    updateRoomDerivedFields(room);
+    return HttpResponse.json(item);
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents/:docId", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const docs = getRoomFolderDocs(room);
+    for (const fd of docs) {
+      const idx = fd.documents.findIndex((d) => d.id === params.docId);
+      if (idx !== -1) {
+        fd.documents.splice(idx, 1);
+        break;
+      }
+    }
+    room.documents = docs.filter((fd) => fd.documents.length > 0);
+    updateRoomDerivedFields(room);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Deal room members
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/members", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: room.members ?? [] });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/members", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { email: string; role: DealRoomMember["role"] };
+    const members = room.members ?? [];
+    const newMember: DealRoomMember = {
+      id: generateId("rm"),
+      email: body.email,
+      role: body.role,
+      nda_status: room.ndaEnabled ? "pending" : "none",
+      status: "active",
+    };
+    members.push(newMember);
+    room.members = members;
+    updateRoomDerivedFields(room);
+    return HttpResponse.json({ data: newMember }, { status: 201 });
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/deal-rooms/:id/members/:memberId", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const members = room.members ?? [];
+    const index = members.findIndex((m) => m.id === params.memberId);
+    if (index === -1) return new HttpResponse(null, { status: 404 });
+    members.splice(index, 1);
+    room.members = members;
+    updateRoomDerivedFields(room);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Deal room access requests
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/access-requests", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: room.accessRequests ?? [] });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/access-requests/:requestId/approve", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const requests = room.accessRequests ?? [];
+    const request = requests.find((r) => r.id === params.requestId);
+    if (!request) return new HttpResponse(null, { status: 404 });
+    request.status = "approved";
+    request.reviewed_at = new Date().toISOString();
+    // Promote to member if not already present.
+    const members = room.members ?? [];
+    if (!members.some((m) => m.email === request.email)) {
+      members.push({
+        id: generateId("rm"),
+        email: request.email,
+        role: "viewer",
+        nda_status: room.ndaEnabled ? "pending" : "none",
+        status: "active",
+      });
+      room.members = members;
+    }
+    updateRoomDerivedFields(room);
+    return HttpResponse.json(request);
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/access-requests/:requestId/reject", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const requests = room.accessRequests ?? [];
+    const request = requests.find((r) => r.id === params.requestId);
+    if (!request) return new HttpResponse(null, { status: 404 });
+    request.status = "rejected";
+    request.reviewed_at = new Date().toISOString();
+    updateRoomDerivedFields(room);
+    return HttpResponse.json(request);
+  }),
+
+  // Public deal room
+  http.get("*/api/v1/public/deal-rooms/:slug", ({ request, params }) => {
+    const url = new URL(request.url);
+    const email = url.searchParams.get("email")?.toLowerCase();
+    const slug = params.slug as string;
+    const room = mockDealRooms.find((r) => r.slug === slug || r.id === slug);
+    if (!room) return new HttpResponse(null, { status: 404 });
+
+    const member = room.members?.find((m) => m.email.toLowerCase() === email) ?? null;
+    const requests = room.accessRequests ?? [];
+    const pendingRequest = email ? requests.find((r) => r.email.toLowerCase() === email && r.status === "pending") : undefined;
+
+    // If email is not a member and room requires approval, show request form.
+    // If member exists but status is not active, treat as pending.
+    let effectiveMember = member;
+    if (!member && pendingRequest) {
+      effectiveMember = {
+        id: pendingRequest.id,
+        email: pendingRequest.email,
+        role: "viewer",
+        nda_status: "none",
+        status: "pending",
+      };
+    }
+
+    return HttpResponse.json({
+      room: {
+        id: room.id,
+        name: room.name,
+        description: room.description,
+        ndaEnabled: room.ndaEnabled,
+        requiresApproval: room.requiresApproval ?? false,
+      },
+      member: effectiveMember
+        ? {
+            id: effectiveMember.id,
+            email: effectiveMember.email,
+            role: effectiveMember.role,
+            ndaStatus: effectiveMember.nda_status,
+            status: effectiveMember.status,
+          }
+        : null,
+      folders: getRoomFolders(room),
+      documents: getRoomFolderDocs(room),
+    });
+  }),
+
+  http.post("*/api/v1/public/deal-rooms/:slug/access-requests", async ({ request, params }) => {
+    const slug = params.slug as string;
+    const room = mockDealRooms.find((r) => r.slug === slug || r.id === slug);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { email: string; reason?: string };
+    const requests = room.accessRequests ?? [];
+    if (!requests.some((r) => r.email.toLowerCase() === body.email.toLowerCase())) {
+      requests.push({
+        id: generateId("ra"),
+        email: body.email,
+        status: "pending",
+        reason: body.reason,
+      });
+      room.accessRequests = requests;
+      updateRoomDerivedFields(room);
+    }
+    return HttpResponse.json({ request_id: requests[requests.length - 1].id }, { status: 201 });
+  }),
+
+  http.post("*/api/v1/public/deal-rooms/:slug/nda", async ({ request, params }) => {
+    const slug = params.slug as string;
+    const room = mockDealRooms.find((r) => r.slug === slug || r.id === slug);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { email: string };
+    const members = room.members ?? [];
+    const member = members.find((m) => m.email.toLowerCase() === body.email.toLowerCase());
+    if (member) {
+      member.nda_status = "signed";
+      member.nda_signed_at = new Date().toISOString();
+    }
+    return new HttpResponse(null, { status: 204 });
   }),
 
   // Insights

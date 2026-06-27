@@ -121,6 +121,25 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 	return i, err
 }
 
+const countDocumentsInFolder = `-- name: CountDocumentsInFolder :one
+SELECT COUNT(*) AS count
+FROM deal_room_documents
+WHERE room_id = $1
+  AND (folder_path = $2 OR folder_path LIKE $2 || '/%')
+`
+
+type CountDocumentsInFolderParams struct {
+	RoomID     pgtype.UUID
+	FolderPath string
+}
+
+func (q *Queries) CountDocumentsInFolder(ctx context.Context, arg CountDocumentsInFolderParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentsInFolder, arg.RoomID, arg.FolderPath)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
 SELECT COUNT(*) AS count
 FROM suggestions
@@ -1470,6 +1489,21 @@ func (q *Queries) DeleteChunksByDocument(ctx context.Context, documentID pgtype.
 	return err
 }
 
+const deleteDealRoomDocument = `-- name: DeleteDealRoomDocument :exec
+DELETE FROM deal_room_documents
+WHERE id = $1 AND room_id = $2
+`
+
+type DeleteDealRoomDocumentParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) DeleteDealRoomDocument(ctx context.Context, arg DeleteDealRoomDocumentParams) error {
+	_, err := q.db.Exec(ctx, deleteDealRoomDocument, arg.ID, arg.RoomID)
+	return err
+}
+
 const deleteIntegrationToken = `-- name: DeleteIntegrationToken :exec
 DELETE FROM integration_tokens WHERE workspace_id = $1 AND provider = $2
 `
@@ -1499,6 +1533,51 @@ DELETE FROM pages WHERE document_id = $1
 
 func (q *Queries) DeletePagesByDocument(ctx context.Context, documentID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deletePagesByDocument, documentID)
+	return err
+}
+
+const deleteRoomFolderPermissions = `-- name: DeleteRoomFolderPermissions :exec
+DELETE FROM room_member_folder_permissions
+WHERE room_id = $1 AND folder_path = $2
+`
+
+type DeleteRoomFolderPermissionsParams struct {
+	RoomID     pgtype.UUID
+	FolderPath string
+}
+
+func (q *Queries) DeleteRoomFolderPermissions(ctx context.Context, arg DeleteRoomFolderPermissionsParams) error {
+	_, err := q.db.Exec(ctx, deleteRoomFolderPermissions, arg.RoomID, arg.FolderPath)
+	return err
+}
+
+const deleteRoomFolderPermissionsPrefix = `-- name: DeleteRoomFolderPermissionsPrefix :exec
+DELETE FROM room_member_folder_permissions
+WHERE room_id = $1 AND (folder_path = $2 OR folder_path LIKE $2 || '/%')
+`
+
+type DeleteRoomFolderPermissionsPrefixParams struct {
+	RoomID     pgtype.UUID
+	FolderPath string
+}
+
+func (q *Queries) DeleteRoomFolderPermissionsPrefix(ctx context.Context, arg DeleteRoomFolderPermissionsPrefixParams) error {
+	_, err := q.db.Exec(ctx, deleteRoomFolderPermissionsPrefix, arg.RoomID, arg.FolderPath)
+	return err
+}
+
+const deleteRoomMember = `-- name: DeleteRoomMember :exec
+DELETE FROM room_members
+WHERE id = $1 AND room_id = $2
+`
+
+type DeleteRoomMemberParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) DeleteRoomMember(ctx context.Context, arg DeleteRoomMemberParams) error {
+	_, err := q.db.Exec(ctx, deleteRoomMember, arg.ID, arg.RoomID)
 	return err
 }
 
@@ -2592,6 +2671,70 @@ func (q *Queries) GetRoomMemberByEmail(ctx context.Context, arg GetRoomMemberByE
 	return i, err
 }
 
+const getRoomMemberByID = `-- name: GetRoomMemberByID :one
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE id = $1 AND room_id = $2
+LIMIT 1
+`
+
+type GetRoomMemberByIDParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) GetRoomMemberByID(ctx context.Context, arg GetRoomMemberByIDParams) (RoomMember, error) {
+	row := q.db.QueryRow(ctx, getRoomMemberByID, arg.ID, arg.RoomID)
+	var i RoomMember
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.UserID,
+		&i.Role,
+		&i.NdaStatus,
+		&i.NdaSignedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRoomMemberByUserID = `-- name: GetRoomMemberByUserID :one
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE room_id = $1 AND user_id = $2
+LIMIT 1
+`
+
+type GetRoomMemberByUserIDParams struct {
+	RoomID pgtype.UUID
+	UserID pgtype.UUID
+}
+
+func (q *Queries) GetRoomMemberByUserID(ctx context.Context, arg GetRoomMemberByUserIDParams) (RoomMember, error) {
+	row := q.db.QueryRow(ctx, getRoomMemberByUserID, arg.RoomID, arg.UserID)
+	var i RoomMember
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Email,
+		&i.UserID,
+		&i.Role,
+		&i.NdaStatus,
+		&i.NdaSignedAt,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getSignalBySuggestion = `-- name: GetSignalBySuggestion :one
 SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
        document_id, contact_id, link_id, priority, created_at, updated_at
@@ -3477,6 +3620,77 @@ func (q *Queries) ListDealRoomDocuments(ctx context.Context, roomID pgtype.UUID)
 	return items, nil
 }
 
+const listDealRoomDocumentsWithMeta = `-- name: ListDealRoomDocumentsWithMeta :many
+SELECT
+    drd.id,
+    drd.tenant_id,
+    drd.workspace_id,
+    drd.room_id,
+    drd.document_id,
+    drd.folder_path,
+    drd.sort_order,
+    drd.created_at,
+    COALESCE(d.title, ''::text) AS document_title,
+    d.page_count,
+    COALESCE(d.file_size, 0::bigint) AS file_size,
+    d.source_type,
+    d.status
+FROM deal_room_documents drd
+JOIN documents d ON d.id = drd.document_id
+WHERE drd.room_id = $1 AND d.deleted_at IS NULL
+ORDER BY drd.folder_path, drd.sort_order
+`
+
+type ListDealRoomDocumentsWithMetaRow struct {
+	ID            pgtype.UUID
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	RoomID        pgtype.UUID
+	DocumentID    pgtype.UUID
+	FolderPath    string
+	SortOrder     int32
+	CreatedAt     pgtype.Timestamptz
+	DocumentTitle string
+	PageCount     pgtype.Int4
+	FileSize      pgtype.Int8
+	SourceType    string
+	Status        string
+}
+
+func (q *Queries) ListDealRoomDocumentsWithMeta(ctx context.Context, roomID pgtype.UUID) ([]ListDealRoomDocumentsWithMetaRow, error) {
+	rows, err := q.db.Query(ctx, listDealRoomDocumentsWithMeta, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDealRoomDocumentsWithMetaRow
+	for rows.Next() {
+		var i ListDealRoomDocumentsWithMetaRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.DocumentID,
+			&i.FolderPath,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.DocumentTitle,
+			&i.PageCount,
+			&i.FileSize,
+			&i.SourceType,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDealRoomsByWorkspace = `-- name: ListDealRoomsByWorkspace :many
 SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
        requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
@@ -4085,6 +4299,77 @@ func (q *Queries) ListRoomMembers(ctx context.Context, roomID pgtype.UUID) ([]Ro
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRoomMembersWithUser = `-- name: ListRoomMembersWithUser :many
+SELECT
+    rm.id,
+    rm.tenant_id,
+    rm.workspace_id,
+    rm.room_id,
+    rm.email,
+    rm.user_id,
+    rm.role,
+    rm.nda_status,
+    rm.nda_signed_at,
+    rm.status,
+    rm.created_at,
+    rm.updated_at,
+    COALESCE(u.name, '')::text AS user_name
+FROM room_members rm
+LEFT JOIN users u ON u.id = rm.user_id
+WHERE rm.room_id = $1
+ORDER BY rm.created_at DESC
+`
+
+type ListRoomMembersWithUserRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	Email       string
+	UserID      pgtype.UUID
+	Role        string
+	NdaStatus   string
+	NdaSignedAt pgtype.Timestamptz
+	Status      string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	UserName    string
+}
+
+func (q *Queries) ListRoomMembersWithUser(ctx context.Context, roomID pgtype.UUID) ([]ListRoomMembersWithUserRow, error) {
+	rows, err := q.db.Query(ctx, listRoomMembersWithUser, roomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRoomMembersWithUserRow
+	for rows.Next() {
+		var i ListRoomMembersWithUserRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.Email,
+			&i.UserID,
+			&i.Role,
+			&i.NdaStatus,
+			&i.NdaSignedAt,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.UserName,
 		); err != nil {
 			return nil, err
 		}
@@ -5004,6 +5289,74 @@ func (q *Queries) UpdateChunkSearchVector(ctx context.Context, id pgtype.UUID) e
 	return err
 }
 
+const updateDealRoomDocumentFolder = `-- name: UpdateDealRoomDocumentFolder :exec
+UPDATE deal_room_documents
+SET folder_path = $1, updated_at = now()
+WHERE id = $2 AND room_id = $3
+`
+
+type UpdateDealRoomDocumentFolderParams struct {
+	FolderPath string
+	ID         pgtype.UUID
+	RoomID     pgtype.UUID
+}
+
+func (q *Queries) UpdateDealRoomDocumentFolder(ctx context.Context, arg UpdateDealRoomDocumentFolderParams) error {
+	_, err := q.db.Exec(ctx, updateDealRoomDocumentFolder, arg.FolderPath, arg.ID, arg.RoomID)
+	return err
+}
+
+const updateDealRoomDocumentSortOrder = `-- name: UpdateDealRoomDocumentSortOrder :exec
+UPDATE deal_room_documents
+SET sort_order = $1, updated_at = now()
+WHERE id = $2 AND room_id = $3
+`
+
+type UpdateDealRoomDocumentSortOrderParams struct {
+	SortOrder int32
+	ID        pgtype.UUID
+	RoomID    pgtype.UUID
+}
+
+func (q *Queries) UpdateDealRoomDocumentSortOrder(ctx context.Context, arg UpdateDealRoomDocumentSortOrderParams) error {
+	_, err := q.db.Exec(ctx, updateDealRoomDocumentSortOrder, arg.SortOrder, arg.ID, arg.RoomID)
+	return err
+}
+
+const updateDealRoomDocumentsFolderPath = `-- name: UpdateDealRoomDocumentsFolderPath :exec
+UPDATE deal_room_documents
+SET folder_path = $1, updated_at = now()
+WHERE room_id = $2 AND folder_path = $3
+`
+
+type UpdateDealRoomDocumentsFolderPathParams struct {
+	FolderPath   string
+	RoomID       pgtype.UUID
+	FolderPath_2 string
+}
+
+func (q *Queries) UpdateDealRoomDocumentsFolderPath(ctx context.Context, arg UpdateDealRoomDocumentsFolderPathParams) error {
+	_, err := q.db.Exec(ctx, updateDealRoomDocumentsFolderPath, arg.FolderPath, arg.RoomID, arg.FolderPath_2)
+	return err
+}
+
+const updateDealRoomSettings = `-- name: UpdateDealRoomSettings :exec
+UPDATE deal_rooms
+SET settings = $1::jsonb, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+`
+
+type UpdateDealRoomSettingsParams struct {
+	Column1     []byte
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateDealRoomSettings(ctx context.Context, arg UpdateDealRoomSettingsParams) error {
+	_, err := q.db.Exec(ctx, updateDealRoomSettings, arg.Column1, arg.ID, arg.WorkspaceID)
+	return err
+}
+
 const updateDocumentStatus = `-- name: UpdateDocumentStatus :exec
 UPDATE documents
 SET status = $1, page_count = $2, updated_at = now()
@@ -5088,6 +5441,23 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.RequireNda,
 	)
 	return i, err
+}
+
+const updateRoomFolderPermissionsFolderPath = `-- name: UpdateRoomFolderPermissionsFolderPath :exec
+UPDATE room_member_folder_permissions
+SET folder_path = $1, updated_at = now()
+WHERE room_id = $2 AND folder_path = $3
+`
+
+type UpdateRoomFolderPermissionsFolderPathParams struct {
+	FolderPath   string
+	RoomID       pgtype.UUID
+	FolderPath_2 string
+}
+
+func (q *Queries) UpdateRoomFolderPermissionsFolderPath(ctx context.Context, arg UpdateRoomFolderPermissionsFolderPathParams) error {
+	_, err := q.db.Exec(ctx, updateRoomFolderPermissionsFolderPath, arg.FolderPath, arg.RoomID, arg.FolderPath_2)
+	return err
 }
 
 const updateRoomMemberNDA = `-- name: UpdateRoomMemberNDA :exec

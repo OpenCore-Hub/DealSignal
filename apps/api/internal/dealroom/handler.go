@@ -29,9 +29,25 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("", h.List)
 	g.POST("", h.Create)
 	g.GET("/:id", h.Get)
-	g.POST("/:id/members", h.AddMember)
-	g.POST("/:id/access-requests/:requestId/approve", h.ApproveRequest)
+
+	g.GET("/:id/folders", h.ListFolders)
+	g.POST("/:id/folders", h.CreateFolder)
+	g.PATCH("/:id/folders/*path", h.RenameFolder)
+	g.DELETE("/:id/folders/*path", h.DeleteFolder)
+
+	g.GET("/:id/documents", h.GetRoomDocuments)
 	g.POST("/:id/documents", h.AddDocument)
+	g.DELETE("/:id/documents/:docId", h.RemoveDocument)
+	g.PATCH("/:id/documents/:docId", h.UpdateDocument)
+
+	g.GET("/:id/members", h.ListMembers)
+	g.POST("/:id/members", h.AddMember)
+	g.DELETE("/:id/members/:memberId", h.RemoveMember)
+
+	g.GET("/:id/access-requests", h.ListAccessRequests)
+	g.POST("/:id/access-requests/:requestId/approve", h.ApproveRequest)
+	g.POST("/:id/access-requests/:requestId/reject", h.RejectAccessRequest)
+
 	g.POST("/:id/folder-permissions", h.SetFolderPermission)
 
 	r.GET("/deal-room-templates", h.ListTemplates)
@@ -72,72 +88,27 @@ func (h *Handler) List(c *gin.Context) {
 
 // ListTemplates returns available deal room templates.
 func (h *Handler) ListTemplates(c *gin.Context) {
-	out := []gin.H{
-		{
-			"id":                     "tmpl_seed",
-			"name":                   "Seed Round Due Diligence",
-			"description":            "Standard due diligence room for seed investors, including deck, financial model, team and legal documents.",
-			"scenario":               "seed",
-			"folderStructure": []gin.H{
-				{"name": "01 Pitch Deck", "description": "Latest fundraising deck"},
-				{"name": "02 Financials", "description": "Historical financials, projections and key assumptions"},
-				{"name": "03 Team", "description": "Founder resumes, org chart and hiring plan"},
-				{"name": "04 Product", "description": "Product demo, roadmap and technical architecture"},
-				{"name": "05 Legal", "description": "Incorporation, shareholder agreement and option plan"},
-			},
-			"recommendedFiles":       []string{"Pitch Deck.pdf", "Financial Model.xlsx", "Cap Table"},
-			"defaultPermissionLevel": "medium",
-			"ndaEnabled":             false,
-		},
-		{
-			"id":                     "tmpl_series_a",
-			"name":                   "Series A Data Room",
-			"description":            "In-depth due diligence for Series A firms, emphasizing product data, growth metrics and financial transparency.",
-			"scenario":               "series-a",
-			"folderStructure": []gin.H{
-				{"name": "01 Executive Summary"},
-				{"name": "02 Growth Metrics"},
-				{"name": "03 Financials & Projections"},
-				{"name": "04 Customer Proof"},
-				{"name": "05 Product & Tech"},
-				{"name": "06 Legal & Compliance"},
-			},
-			"recommendedFiles":       []string{"Investor Deck.pdf", "Metrics Dashboard", "ARR Waterfall"},
-			"defaultPermissionLevel": "high",
-			"ndaEnabled":             true,
-		},
-		{
-			"id":                     "tmpl_lp_update",
-			"name":                   "LP Quarterly Update",
-			"description":            "Quarterly performance, distribution and operations report for LPs, with bulk distribution and access tracking.",
-			"scenario":               "lp-update",
-			"folderStructure": []gin.H{
-				{"name": "01 GP Letter"},
-				{"name": "02 Performance & IRR"},
-				{"name": "03 Portfolio Updates"},
-				{"name": "04 Distributions & Capital Calls"},
-				{"name": "05 Governance & AML/KYC"},
-			},
-			"recommendedFiles":       []string{"GP Letter.pdf", "LP Report.xlsx"},
-			"defaultPermissionLevel": "low",
-			"ndaEnabled":             false,
-		},
-		{
-			"id":                     "tmpl_sales_proposal",
-			"name":                   "Enterprise Sales Proposal",
-			"description":            "Proposal data room for enterprise procurement committees, including proposal, case studies, security and implementation plan.",
-			"scenario":               "sales-proposal",
-			"folderStructure": []gin.H{
-				{"name": "01 Proposal"},
-				{"name": "02 ROI & Business Case"},
-				{"name": "03 Case Studies"},
-				{"name": "04 Security & Compliance"},
-				{"name": "05 Implementation Plan"},
-			},
-			"recommendedFiles":       []string{"Proposal.pdf", "Security Whitepaper", "Implementation Plan"},
-			"defaultPermissionLevel": "medium",
-			"ndaEnabled":             true,
-		},
+	out := make([]gin.H, len(roomTemplates))
+	for i, t := range roomTemplates {
+		folders := make([]gin.H, len(t.FolderStructure))
+		for j, f := range t.FolderStructure {
+			folders[j] = gin.H{
+				"path":        f.Path,
+				"name":        f.Name,
+				"description": f.Description,
+				"sort_order":  f.SortOrder,
+			}
+		}
+		out[i] = gin.H{
+			"id":                     t.ID,
+			"name":                   t.Name,
+			"description":            t.Description,
+			"scenario":               t.Scenario,
+			"folderStructure":        folders,
+			"recommendedFiles":       t.RecommendedFiles,
+			"defaultPermissionLevel": t.DefaultPermissionLevel,
+			"ndaEnabled":             t.NDAEnabled,
+		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
 }
@@ -165,14 +136,23 @@ func (h *Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, roomResponse(room))
 }
 
-// Get returns a data room.
+// Get returns a data room with full detail.
 func (h *Handler) Get(c *gin.Context) {
-	summary, err := h.service.GetRoomSummary(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
+	detail, err := h.service.GetRoomDetail(
+		c.Request.Context(),
+		c.Param("id"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+	)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		if errors.Is(err, ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, roomDetailResponse(summary))
+	c.JSON(http.StatusOK, roomDetailResponse(detail))
 }
 
 // AddMemberRequest invites a member.
@@ -232,22 +212,24 @@ func (h *Handler) PublicView(c *gin.Context) {
 		return
 	}
 
-	docs, err := h.service.ListDocuments(c.Request.Context(), uuid.UUID(room.ID.Bytes).String(), email)
+	ctx := c.Request.Context()
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	workspaceID := uuid.UUID(room.WorkspaceID.Bytes).String()
+
+	summary, _ := h.service.GetRoomSummary(ctx, roomID, workspaceID)
+
+	folders, _ := h.service.ListFolders(ctx, roomID, workspaceID)
+	docs, err := h.service.ListDocuments(ctx, roomID, workspaceID, email)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
 		return
 	}
 
-	summary, _ := h.service.GetRoomSummary(
-		c.Request.Context(),
-		uuid.UUID(room.ID.Bytes).String(),
-		uuid.UUID(room.WorkspaceID.Bytes).String(),
-	)
-
 	c.JSON(http.StatusOK, gin.H{
-		"room":    roomDetailResponse(summary),
-		"member":  memberResponse(member),
-		"documents": documentList(docs),
+		"room":      roomSummaryResponse(summary),
+		"member":    memberResponse(member),
+		"folders":   folderListResponse(folders),
+		"documents": folderDocsListResponse(docs),
 	})
 }
 
@@ -355,6 +337,239 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 	c.JSON(http.StatusOK, folderPermissionResponse(perm))
 }
 
+// ListFolders returns the folder structure of a room.
+func (h *Handler) ListFolders(c *gin.Context) {
+	folders, err := h.service.ListFolders(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
+	if err != nil {
+		if errors.Is(err, ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": folderListResponse(folders)})
+}
+
+// CreateFolderRequest is the body for creating a folder.
+type CreateFolderRequest struct {
+	Name       string `json:"name" binding:"required"`
+	ParentPath string `json:"parent_path,omitempty"`
+}
+
+// CreateFolder handles folder creation.
+func (h *Handler) CreateFolder(c *gin.Context) {
+	var req CreateFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	folders, err := h.service.CreateFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Name, req.ParentPath)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrFolderExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": err.Error()})
+		case errors.Is(err, ErrFolderNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": folderListResponse(folders)})
+}
+
+// RenameFolderRequest is the body for renaming a folder.
+type RenameFolderRequest struct {
+	Name string `json:"name" binding:"required"`
+}
+
+// RenameFolder handles folder renaming.
+func (h *Handler) RenameFolder(c *gin.Context) {
+	var req RenameFolderRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	folders, err := h.service.RenameFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), "/"+c.Param("path"), req.Name)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrFolderNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+		case errors.Is(err, ErrFolderExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": folderListResponse(folders)})
+}
+
+// DeleteFolder handles folder deletion.
+func (h *Handler) DeleteFolder(c *gin.Context) {
+	folders, err := h.service.DeleteFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), "/"+c.Param("path"))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrFolderNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+		case errors.Is(err, ErrFolderNotEmpty):
+			c.JSON(http.StatusConflict, gin.H{"code": "folder_not_empty", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": folderListResponse(folders)})
+}
+
+// GetRoomDocuments returns documents grouped by folder for a room.
+func (h *Handler) GetRoomDocuments(c *gin.Context) {
+	docs, err := h.service.GetRoomDocuments(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		case errors.Is(err, ErrApprovalRequired):
+			c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": folderDocsListResponse(docs)})
+}
+
+// RemoveDocument removes a document from a room.
+func (h *Handler) RemoveDocument(c *gin.Context) {
+	if err := h.service.RemoveDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId")); err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// UpdateDocumentRequest updates a document's folder or sort order.
+type UpdateDocumentRequest struct {
+	FolderPath string `json:"folder_path,omitempty"`
+	SortOrder  *int32 `json:"sort_order,omitempty"`
+}
+
+// UpdateDocument handles document folder move and reorder.
+func (h *Handler) UpdateDocument(c *gin.Context) {
+	var req UpdateDocumentRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	if req.FolderPath == "" && req.SortOrder == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "folder_path or sort_order required"})
+		return
+	}
+	if req.FolderPath != "" {
+		if err := h.service.MoveDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId"), req.FolderPath, req.SortOrder); err != nil {
+			switch {
+			case errors.Is(err, ErrNotRoomAdmin):
+				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			case errors.Is(err, ErrFolderNotFound):
+				c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			}
+			return
+		}
+	} else {
+		if err := h.service.ReorderDocuments(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), []DocumentOrder{{DocumentID: c.Param("docId"), SortOrder: *req.SortOrder}}); err != nil {
+			switch {
+			case errors.Is(err, ErrNotRoomAdmin):
+				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			default:
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			}
+			return
+		}
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ListMembers returns room members.
+func (h *Handler) ListMembers(c *gin.Context) {
+	members, err := h.service.ListMembers(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": memberDetailListResponse(members)})
+}
+
+// RemoveMember removes a member from a room.
+func (h *Handler) RemoveMember(c *gin.Context) {
+	if err := h.service.RemoveMember(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("memberId")); err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrMemberNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// ListAccessRequests returns pending access requests for a room.
+func (h *Handler) ListAccessRequests(c *gin.Context) {
+	requests, err := h.service.ListAccessRequests(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": requestListResponse(requests)})
+}
+
+// RejectAccessRequest handles access request rejection.
+func (h *Handler) RejectAccessRequest(c *gin.Context) {
+	req, err := h.service.RejectAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrRequestNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, requestResponse(req))
+}
+
 func mapPublicError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrRoomNotFound):
@@ -384,11 +599,15 @@ func roomSummaryResponse(r RoomSummary) gin.H {
 	return resp
 }
 
-func roomDetailResponse(r RoomSummary) gin.H {
+func roomDetailResponse(r RoomDetail) gin.H {
 	resp := baseRoomResponse(r.Room)
 	resp["documentCount"] = r.DocumentCount
 	resp["memberCount"] = r.MemberCount
 	resp["pendingApprovals"] = r.PendingApprovals
+	resp["folders"] = folderListResponse(r.Folders)
+	resp["documents"] = folderDocsListResponse(r.Documents)
+	resp["members"] = memberDetailListResponse(r.Members)
+	resp["accessRequests"] = requestListResponse(r.AccessRequests)
 	return resp
 }
 
@@ -398,16 +617,16 @@ func baseRoomResponse(r db.DealRoom) gin.H {
 		template = strings.ReplaceAll(r.TemplateType.String, "_", "-")
 	}
 	resp := gin.H{
-		"id":                uuid.UUID(r.ID.Bytes).String(),
-		"slug":              r.Slug,
-		"name":              r.Name,
-		"template":          template,
-		"ndaEnabled":        r.RequiresNda,
-		"requiresApproval":  r.RequiresApproval,
-		"status":            r.Status,
-		"createdAt":         r.CreatedAt.Time.Format(time.RFC3339),
-		"updatedAt":         r.UpdatedAt.Time.Format(time.RFC3339),
-		"lastAccessedAt":    nil,
+		"id":               uuid.UUID(r.ID.Bytes).String(),
+		"slug":             r.Slug,
+		"name":             r.Name,
+		"template":         template,
+		"ndaEnabled":       r.RequiresNda,
+		"requiresApproval": r.RequiresApproval,
+		"status":           r.Status,
+		"createdAt":        r.CreatedAt.Time.Format(time.RFC3339),
+		"updatedAt":        r.UpdatedAt.Time.Format(time.RFC3339),
+		"lastAccessedAt":   nil,
 	}
 	if r.Description.Valid {
 		resp["description"] = r.Description.String
@@ -446,11 +665,11 @@ func requestResponse(r db.RoomAccessRequest) gin.H {
 
 func documentResponse(d db.DealRoomDocument) gin.H {
 	return gin.H{
-		"id":           uuid.UUID(d.ID.Bytes).String(),
-		"document_id":  uuid.UUID(d.DocumentID.Bytes).String(),
-		"folder_path":  d.FolderPath,
-		"sort_order":   d.SortOrder,
-		"created_at":   d.CreatedAt.Time.Format(time.RFC3339),
+		"id":          uuid.UUID(d.ID.Bytes).String(),
+		"document_id": uuid.UUID(d.DocumentID.Bytes).String(),
+		"folder_path": d.FolderPath,
+		"sort_order":  d.SortOrder,
+		"created_at":  d.CreatedAt.Time.Format(time.RFC3339),
 	}
 }
 
@@ -469,4 +688,110 @@ func folderPermissionResponse(p db.RoomMemberFolderPermission) gin.H {
 		"folder_path": p.FolderPath,
 		"permission":  p.Permission,
 	}
+}
+
+func folderResponse(f Folder) gin.H {
+	resp := gin.H{
+		"path":       f.Path,
+		"name":       f.Name,
+		"sort_order": f.SortOrder,
+	}
+	if f.Description != "" {
+		resp["description"] = f.Description
+	}
+	return resp
+}
+
+func folderListResponse(folders []Folder) []gin.H {
+	out := make([]gin.H, len(folders))
+	for i, f := range folders {
+		out[i] = folderResponse(f)
+	}
+	return out
+}
+
+func documentMetaResponse(d RoomDocument) gin.H {
+	resp := gin.H{
+		"id":          d.ID,
+		"document_id": d.DocumentID,
+		"title":       d.Title,
+		"folder_path": d.FolderPath,
+		"sort_order":  d.SortOrder,
+		"source_type": d.SourceType,
+		"status":      d.Status,
+		"created_at":  d.CreatedAt.Format(time.RFC3339),
+	}
+	if d.PageCount > 0 {
+		resp["page_count"] = d.PageCount
+	}
+	if d.FileSize > 0 {
+		resp["file_size"] = d.FileSize
+	}
+	return resp
+}
+
+func folderDocsResponse(fd FolderDocs) gin.H {
+	docs := make([]gin.H, len(fd.Documents))
+	for i, d := range fd.Documents {
+		docs[i] = documentMetaResponse(d)
+	}
+	return gin.H{
+		"folder":     folderResponse(fd.Folder),
+		"permission": fd.Permission,
+		"documents":  docs,
+	}
+}
+
+func folderDocsListResponse(list []FolderDocs) []gin.H {
+	out := make([]gin.H, len(list))
+	for i, fd := range list {
+		out[i] = folderDocsResponse(fd)
+	}
+	return out
+}
+
+func publicFolderResponse(f Folder, docs []db.DealRoomDocument) gin.H {
+	children := make([]gin.H, 0)
+	for _, d := range docs {
+		if d.FolderPath == f.Path {
+			children = append(children, documentResponse(d))
+		}
+	}
+	return gin.H{
+		"folder":    folderResponse(f),
+		"documents": children,
+	}
+}
+
+func memberDetailResponse(m RoomMemberDetail) gin.H {
+	resp := gin.H{
+		"id":         uuid.UUID(m.ID.Bytes).String(),
+		"email":      m.Email,
+		"role":       m.Role,
+		"nda_status": m.NdaStatus,
+		"status":     m.Status,
+	}
+	if m.UserName != "" {
+		resp["name"] = m.UserName
+	}
+	if m.NdaSignedAt.Valid {
+		resp["nda_signed_at"] = m.NdaSignedAt.Time.Format(time.RFC3339)
+	}
+	return resp
+}
+
+func memberDetailListResponse(members []RoomMemberDetail) []gin.H {
+	out := make([]gin.H, len(members))
+	for i, m := range members {
+		out[i] = memberDetailResponse(m)
+	}
+	return out
+}
+
+func requestListResponse(requests []db.RoomAccessRequest) []gin.H {
+	out := make([]gin.H, len(requests))
+	for i, r := range requests {
+		out[i] = requestResponse(r)
+	}
+	return out
 }

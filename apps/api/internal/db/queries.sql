@@ -581,6 +581,105 @@ FROM room_access_requests
 WHERE room_id = $1
 ORDER BY created_at DESC;
 
+-- name: UpdateDealRoomSettings :exec
+UPDATE deal_rooms
+SET settings = $1::jsonb, updated_at = now()
+WHERE id = $2 AND workspace_id = $3;
+
+-- name: DeleteDealRoomDocument :exec
+DELETE FROM deal_room_documents
+WHERE id = $1 AND room_id = $2;
+
+-- name: UpdateDealRoomDocumentFolder :exec
+UPDATE deal_room_documents
+SET folder_path = $1, updated_at = now()
+WHERE id = $2 AND room_id = $3;
+
+-- name: UpdateDealRoomDocumentSortOrder :exec
+UPDATE deal_room_documents
+SET sort_order = $1, updated_at = now()
+WHERE id = $2 AND room_id = $3;
+
+-- name: CountDocumentsInFolder :one
+SELECT COUNT(*) AS count
+FROM deal_room_documents
+WHERE room_id = $1
+  AND (folder_path = $2 OR folder_path LIKE $2 || '/%');
+
+-- name: UpdateDealRoomDocumentsFolderPath :exec
+UPDATE deal_room_documents
+SET folder_path = $1, updated_at = now()
+WHERE room_id = $2 AND folder_path = $3;
+
+-- name: UpdateRoomFolderPermissionsFolderPath :exec
+UPDATE room_member_folder_permissions
+SET folder_path = $1, updated_at = now()
+WHERE room_id = $2 AND folder_path = $3;
+
+-- name: DeleteRoomFolderPermissions :exec
+DELETE FROM room_member_folder_permissions
+WHERE room_id = $1 AND folder_path = $2;
+
+-- name: DeleteRoomFolderPermissionsPrefix :exec
+DELETE FROM room_member_folder_permissions
+WHERE room_id = $1 AND (folder_path = $2 OR folder_path LIKE $2 || '/%');
+
+-- name: DeleteRoomMember :exec
+DELETE FROM room_members
+WHERE id = $1 AND room_id = $2;
+
+-- name: GetRoomMemberByID :one
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE id = $1 AND room_id = $2
+LIMIT 1;
+
+-- name: GetRoomMemberByUserID :one
+SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
+FROM room_members
+WHERE room_id = $1 AND user_id = $2
+LIMIT 1;
+
+-- name: ListRoomMembersWithUser :many
+SELECT
+    rm.id,
+    rm.tenant_id,
+    rm.workspace_id,
+    rm.room_id,
+    rm.email,
+    rm.user_id,
+    rm.role,
+    rm.nda_status,
+    rm.nda_signed_at,
+    rm.status,
+    rm.created_at,
+    rm.updated_at,
+    COALESCE(u.name, '')::text AS user_name
+FROM room_members rm
+LEFT JOIN users u ON u.id = rm.user_id
+WHERE rm.room_id = $1
+ORDER BY rm.created_at DESC;
+
+-- name: ListDealRoomDocumentsWithMeta :many
+SELECT
+    drd.id,
+    drd.tenant_id,
+    drd.workspace_id,
+    drd.room_id,
+    drd.document_id,
+    drd.folder_path,
+    drd.sort_order,
+    drd.created_at,
+    COALESCE(d.title, ''::text) AS document_title,
+    d.page_count,
+    COALESCE(d.file_size, 0::bigint) AS file_size,
+    d.source_type,
+    d.status
+FROM deal_room_documents drd
+JOIN documents d ON d.id = drd.document_id
+WHERE drd.room_id = $1 AND d.deleted_at IS NULL
+ORDER BY drd.folder_path, drd.sort_order;
+
 -- name: AddDealRoomDocument :one
 INSERT INTO deal_room_documents (tenant_id, workspace_id, room_id, document_id, folder_path, sort_order)
 VALUES ($1, $2, $3, $4, $5, $6)
