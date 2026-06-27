@@ -63,6 +63,8 @@
   "folders": {
     "newRoot": "New folder",
     "newSubfolder": "New subfolder",
+    "addFile": "Add file",
+    "readOnly": "Read-only",
     "namePlaceholder": "Folder name",
     "create": "Create",
     "rename": "Rename",
@@ -82,6 +84,7 @@
     "addSelected_plural": "Add {{count}} documents",
     "noAvailable": "No available workspace documents.",
     "emptyFolder": "No documents in this folder yet.",
+    "doubleClickToOpen": "Double-click to open document",
     "moveUp": "Move up",
     "moveDown": "Move down",
     "moveTo": "Move to folder",

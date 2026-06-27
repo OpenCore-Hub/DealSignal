@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import {
   FileText,
   Users,
@@ -28,6 +28,7 @@ import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
 import { MembersCard } from "@/components/deal-rooms/MembersCard";
 import { AccessRequestsCard } from "@/components/deal-rooms/AccessRequestsCard";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
+import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
 import type { DealRoomFolderDocs } from "@/types";
 
 function normalizeText(value: string): string {
@@ -57,6 +58,7 @@ export function DealRoomDetailPage() {
   const { t, i18n } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
+  const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
 
@@ -148,6 +150,69 @@ export function DealRoomDetailPage() {
     if (file) void handleUpload(file);
   };
 
+  const handleFolderCreate = async (name: string, parentPath?: string) => {
+    if (!roomId) return;
+    await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
+    toast.success(t("folders.created", { name }));
+    refetch();
+  };
+
+  const handleFolderRename = async (path: string, name: string) => {
+    if (!roomId) return;
+    await api.renameDealRoomFolder(roomId, path, { name });
+    toast.success(t("folders.renamed"));
+    refetch();
+  };
+
+  const handleFolderDelete = async (path: string) => {
+    if (!roomId) return;
+    await api.deleteDealRoomFolder(roomId, path);
+    toast.success(t("folders.deleted"));
+    refetch();
+  };
+
+  const handleDocumentMove = async (docId: string, folderPath: string) => {
+    if (!roomId) return;
+    await api.updateDealRoomDocument(roomId, docId, { folder_path: folderPath });
+    toast.success(t("documents.moved"));
+    refetch();
+  };
+
+  const handleDocumentReorder = async (docId: string, sortOrder: number) => {
+    if (!roomId) return;
+    await api.updateDealRoomDocument(roomId, docId, { sort_order: sortOrder });
+    refetch();
+  };
+
+  const handleDocumentRemove = async (docId: string) => {
+    if (!roomId) return;
+    await api.removeDealRoomDocument(roomId, docId);
+    toast.success(t("documents.removed"));
+    refetch();
+  };
+
+  const handleDocumentsAdd = async (documentIds: string[], folderPath: string) => {
+    if (!roomId) return;
+    let lastOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+    for (const documentId of documentIds) {
+      await api.addDealRoomDocument(roomId, {
+        document_id: documentId,
+        folder_path: folderPath,
+        sort_order: lastOrder++,
+      });
+    }
+    toast.success(t("documents.added", { count: documentIds.length }));
+    refetch();
+  };
+
+  const handleDocumentOpen = (documentId: string) => {
+    if (workspaceSlug) {
+      navigate(`/${workspaceSlug}/documents/${documentId}`);
+    } else {
+      window.open(`/viewer/${documentId}`, "_blank", "noopener,noreferrer");
+    }
+  };
+
   if (error) {
     return (
       <div className="space-y-6">
@@ -227,28 +292,22 @@ export function DealRoomDetailPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              {room.folders && room.folders.length > 0 ? (
-                <ul className="space-y-2">
-                  {(room.folders ?? [])
-                    .sort((a, b) => a.sort_order - b.sort_order)
-                    .map((folder) => (
-                      <li
-                        key={folder.path}
-                        className="flex items-start gap-2 rounded-md border border-border p-3"
-                      >
-                        <Folder size={18} className="mt-0.5 text-muted-foreground" />
-                        <div>
-                          <p className="text-sm font-medium">{folder.name}</p>
-                          {folder.description && (
-                            <p className="text-caption text-muted-foreground">{folder.description}</p>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                </ul>
-              ) : (
-                <p className="text-body text-muted-foreground">{t("detail.noFolders")}</p>
-              )}
+              <DealRoomFolderTree
+                roomId={room.id}
+                folders={room.folders ?? []}
+                folderDocs={room.documents ?? []}
+                workspaceDocuments={data?.workspaceDocs ?? []}
+                roomDocuments={allRoomDocuments}
+                isAdmin={true}
+                onFolderCreate={handleFolderCreate}
+                onFolderRename={handleFolderRename}
+                onFolderDelete={handleFolderDelete}
+                onDocumentMove={handleDocumentMove}
+                onDocumentReorder={handleDocumentReorder}
+                onDocumentRemove={handleDocumentRemove}
+                onDocumentsAdd={handleDocumentsAdd}
+                onDocumentOpen={handleDocumentOpen}
+              />
             </CardContent>
           </Card>
 

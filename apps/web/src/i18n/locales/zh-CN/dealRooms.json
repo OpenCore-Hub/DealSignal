@@ -59,6 +59,8 @@
   "folders": {
     "newRoot": "新建文件夹",
     "newSubfolder": "新建子文件夹",
+    "addFile": "添加文件",
+    "readOnly": "只读",
     "namePlaceholder": "文件夹名称",
     "create": "创建",
     "rename": "重命名",
@@ -77,6 +79,7 @@
     "addSelected": "添加 {{count}} 个文档",
     "noAvailable": "没有可用的工作区文档。",
     "emptyFolder": "该文件夹暂无文档。",
+    "doubleClickToOpen": "双击打开文档",
     "moveUp": "上移",
     "moveDown": "下移",
     "moveTo": "移动到文件夹",

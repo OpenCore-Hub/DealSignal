@@ -20,6 +20,8 @@ interface DocumentPickerProps {
   folders: DealRoomFolder[];
   onAdd: (documentIds: string[], folderPath: string) => void;
   disabled?: boolean;
+  initialFolderPath?: string;
+  allowFolderChange?: boolean;
 }
 
 export function DocumentPicker({
@@ -28,11 +30,13 @@ export function DocumentPicker({
   folders,
   onAdd,
   disabled,
+  initialFolderPath,
+  allowFolderChange = true,
 }: DocumentPickerProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const [search, setSearch] = useState("");
-  const [selectedFolder, setSelectedFolder] = useState<string>(folders[0]?.path ?? "/");
+  const [selectedFolder, setSelectedFolder] = useState<string>(initialFolderPath ?? folders[0]?.path ?? "/");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const roomDocumentIds = useMemo(() => new Set(roomDocuments.map((d) => d.document_id)), [roomDocuments]);
@@ -75,23 +79,25 @@ export function DocumentPicker({
             className="pl-8"
           />
         </div>
-        <div className="flex items-center gap-2">
-          <Label htmlFor="picker-folder" className="sr-only">
-            {t("documents.folder")}
-          </Label>
-          <Select value={selectedFolder} onValueChange={(v) => v && setSelectedFolder(v)}>
-            <SelectTrigger id="picker-folder" className="w-48">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {folders.map((folder) => (
-                <SelectItem key={folder.path} value={folder.path}>
-                  {folder.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+        {allowFolderChange && (
+          <div className="flex items-center gap-2">
+            <Label htmlFor="picker-folder" className="sr-only">
+              {t("documents.folder")}
+            </Label>
+            <Select value={selectedFolder} onValueChange={(v) => v && setSelectedFolder(v)}>
+              <SelectTrigger id="picker-folder" className="w-48">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {folders.map((folder) => (
+                  <SelectItem key={folder.path} value={folder.path}>
+                    {folder.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
       </div>
 
       <div className="max-h-60 overflow-y-auto rounded-md border border-border">
