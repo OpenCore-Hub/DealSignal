@@ -4,6 +4,7 @@ package dealroom
 import (
 	"errors"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -393,7 +394,7 @@ func (h *Handler) RenameFolder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	folders, err := h.service.RenameFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), "/"+c.Param("path"), req.Name)
+	folders, err := h.service.RenameFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")), req.Name)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -412,7 +413,7 @@ func (h *Handler) RenameFolder(c *gin.Context) {
 
 // DeleteFolder handles folder deletion.
 func (h *Handler) DeleteFolder(c *gin.Context) {
-	folders, err := h.service.DeleteFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), "/"+c.Param("path"))
+	folders, err := h.service.DeleteFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):

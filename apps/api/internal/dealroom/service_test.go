@@ -1,15 +1,20 @@
 package dealroom
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -1151,4 +1156,110 @@ func argInt32(args []interface{}, i int) int32 {
 		return int32(n)
 	}
 	return 0
+}
+
+func TestRenameFolderHandlerDecodesEncodedPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil)
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "handler-room",
+		Name: "Handler Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, ownerID, "Pitch", "/"); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+
+	h := NewHandler(svc)
+	router := gin.New()
+	ws := router.Group("/workspaces/:workspaceSlug", func(c *gin.Context) {
+		c.Set("userID", ownerID)
+		c.Set("workspaceID", wsID)
+		c.Next()
+	})
+	h.RegisterWorkspaceRoutes(ws)
+
+	body, _ := json.Marshal(map[string]string{"name": "Renamed Pitch"})
+	req := httptest.NewRequest(http.MethodPatch, "/workspaces/test-workspace/deal-rooms/"+roomID+"/folders/%2Fpitch", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	folders, err := svc.ListFolders(context.Background(), roomID, wsID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if !folderExists(folders, "/renamed-pitch") {
+		t.Fatalf("expected folder /renamed-pitch after rename, got %v", folders)
+	}
+}
+
+func TestDeleteFolderHandlerDecodesEncodedPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil)
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "handler-room",
+		Name: "Handler Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, ownerID, "Docs", "/"); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+
+	h := NewHandler(svc)
+	router := gin.New()
+	ws := router.Group("/workspaces/:workspaceSlug", func(c *gin.Context) {
+		c.Set("userID", ownerID)
+		c.Set("workspaceID", wsID)
+		c.Next()
+	})
+	h.RegisterWorkspaceRoutes(ws)
+
+	req := httptest.NewRequest(http.MethodDelete, "/workspaces/test-workspace/deal-rooms/"+roomID+"/folders/%2Fdocs", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	folders, err := svc.ListFolders(context.Background(), roomID, wsID)
+	if err != nil {
+		t.Fatalf("list folders: %v", err)
+	}
+	if folderExists(folders, "/docs") {
+		t.Fatalf("expected folder /docs to be deleted, got %v", folders)
+	}
 }
