@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DownloadSimple, Eye, Link as LinkIcon, Trash, UploadSimple } from "@phosphor-icons/react";
+import { DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -17,7 +17,6 @@ import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
 import { DeleteDocumentDialog } from "./DeleteDocumentDialog";
 import { api } from "@/lib/api";
-import { useUIStore } from "@/stores/uiStore";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
 import { toast } from "sonner";
@@ -34,7 +33,6 @@ export function DocumentDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
   const { t } = useTranslation(["documents", "common"]);
-  const { setUploadDialogOpen } = useUIStore();
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   const loadDetail = useCallback(async (): Promise<DocumentDetailData> => {
@@ -90,10 +88,6 @@ export function DocumentDetail() {
         <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}>
           <LinkIcon size={16} />
           {t("common:createLink")}
-        </Button>
-        <Button variant="outline" className="gap-1.5" onClick={() => setUploadDialogOpen(true)}>
-          <UploadSimple size={16} weight="bold" />
-          {t("common:uploadDocument")}
         </Button>
         <RowActions
           actions={[
