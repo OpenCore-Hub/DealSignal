@@ -78,6 +78,7 @@ export function PublicViewerPage() {
         "link_not_found",
         "link_expired",
         "link_revoked",
+        "link_disabled",
         "link_max_access_reached",
       ]);
       if (unavailableCodes.has(err.code)) {

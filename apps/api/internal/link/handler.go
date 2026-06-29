@@ -654,6 +654,8 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": err.Error()})
 	case errors.Is(err, ErrLinkRevoked):
 		c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": err.Error()})
+	case errors.Is(err, ErrLinkDisabled):
+		c.JSON(http.StatusGone, gin.H{"code": "link_disabled", "message": err.Error()})
 	case errors.Is(err, ErrLinkMaxAccessReached):
 		c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": err.Error()})
 	case errors.Is(err, ErrRequiresEmail):
@@ -689,6 +691,8 @@ func accessErrorCode(err error) string {
 		return "link_expired"
 	case errors.Is(err, ErrLinkRevoked):
 		return "link_revoked"
+	case errors.Is(err, ErrLinkDisabled):
+		return "link_disabled"
 	case errors.Is(err, ErrLinkMaxAccessReached):
 		return "link_max_access_reached"
 	case errors.Is(err, ErrRequiresEmail):

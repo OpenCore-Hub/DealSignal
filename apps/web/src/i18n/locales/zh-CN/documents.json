@@ -169,6 +169,8 @@
     "link_expiredDescription": "该分享链接已过有效期，请联系分享者重新发送。",
     "link_revokedTitle": "链接已被停用",
     "link_revokedDescription": "该分享链接已被停用，如需查看请联系分享者获取新链接。",
+    "link_disabledTitle": "链接已停用",
+    "link_disabledDescription": "该分享链接当前处于停用状态，请联系分享者确认是否重新启用。",
     "link_max_access_reachedTitle": "访问次数已达上限",
     "link_max_access_reachedDescription": "该链接的访问次数已达上限，请联系分享者。"
   }

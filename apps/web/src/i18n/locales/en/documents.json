@@ -173,6 +173,8 @@
     "link_expiredDescription": "This share link has expired. Please ask the sender for a new link.",
     "link_revokedTitle": "Link disabled",
     "link_revokedDescription": "This share link has been disabled. Please contact the sender for a new link.",
+    "link_disabledTitle": "Link inactive",
+    "link_disabledDescription": "This share link is currently inactive. Please contact the sender to check if it can be re-enabled.",
     "link_max_access_reachedTitle": "Access limit reached",
     "link_max_access_reachedDescription": "This link has reached its access limit. Please contact the sender."
   }

@@ -38,6 +38,7 @@ var (
 	ErrLinkNotFound         = errors.New("link not found")
 	ErrLinkExpired          = errors.New("link expired")
 	ErrLinkRevoked          = errors.New("link revoked")
+	ErrLinkDisabled         = errors.New("link disabled")
 	ErrLinkMaxAccessReached = errors.New("link max access reached")
 	ErrRequiresEmail        = errors.New("email required")
 	ErrRequiresPassword     = errors.New("password required")
@@ -165,8 +166,11 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		return AccessResult{}, fmt.Errorf("get link: %w", err)
 	}
 
-	if link.Status == "revoked" {
-		return AccessResult{}, ErrLinkRevoked
+	switch link.Status {
+	case "deleted":
+		return AccessResult{}, ErrLinkNotFound
+	case "disabled", "revoked":
+		return AccessResult{}, ErrLinkDisabled
 	}
 	if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
 		return AccessResult{}, ErrLinkExpired
