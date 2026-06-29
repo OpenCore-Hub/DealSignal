@@ -35,7 +35,7 @@ export function RowActions({ actions }: RowActionsProps) {
       >
         <DotsThree size={18} />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-48" onClick={(e) => e.stopPropagation()}>
+      <DropdownMenuContent align="end" className="w-56" onClick={(e) => e.stopPropagation()}>
         {actions.map((action, index) => (
           <div key={action.label + index}>
             {index > 0 && action.destructive && <DropdownMenuSeparator />}
@@ -46,7 +46,7 @@ export function RowActions({ actions }: RowActionsProps) {
               className={action.destructive ? "text-error-500 focus:text-error-500" : ""}
             >
               {action.icon && <span className="mr-2">{action.icon}</span>}
-              <span className="flex-1">{action.label}</span>
+              <span className="flex-1 whitespace-nowrap">{action.label}</span>
               {action.pro && (
                 <Badge variant="outline" className="ml-2 text-caption">
                   PRO
