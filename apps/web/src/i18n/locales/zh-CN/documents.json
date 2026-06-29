@@ -162,6 +162,14 @@
     "passwordRequired": "请输入链接密码以继续查看文档。",
     "ndaLabel": "我同意保密协议",
     "ndaRequired": "请勾选同意保密协议以继续查看文档。",
-    "continue": "继续"
+    "continue": "继续",
+    "link_not_foundTitle": "链接不存在",
+    "link_not_foundDescription": "该分享链接不存在或已被删除，请确认链接是否正确。",
+    "link_expiredTitle": "链接已过期",
+    "link_expiredDescription": "该分享链接已过有效期，请联系分享者重新发送。",
+    "link_revokedTitle": "链接已被停用",
+    "link_revokedDescription": "该分享链接已被停用，如需查看请联系分享者获取新链接。",
+    "link_max_access_reachedTitle": "访问次数已达上限",
+    "link_max_access_reachedDescription": "该链接的访问次数已达上限，请联系分享者。"
   }
 }

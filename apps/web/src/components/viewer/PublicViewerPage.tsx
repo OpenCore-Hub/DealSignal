@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { Prohibit } from "@phosphor-icons/react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,6 +24,7 @@ interface AccessResult {
 
 export function PublicViewerPage() {
   const { token } = useParams<{ token: string }>();
+  const navigate = useNavigate();
   const { t } = useTranslation("documents");
   const [access, setAccess] = useState<AccessResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +39,7 @@ export function PublicViewerPage() {
     nda: false,
   });
   const [gateError, setGateError] = useState<string | null>(null);
+  const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
   const accessingRef = useRef(false);
 
   const tryAccess = useCallback(async (gateParams?: { email?: string; password?: string; ndaAgreed?: boolean }) => {
@@ -45,6 +48,7 @@ export function PublicViewerPage() {
     setLoading(true);
     setError(null);
     setGateError(null);
+    setLinkErrorCode(null);
     try {
       const res = await api.accessPublicLink(token, gateParams);
       setAccess(res);
@@ -70,9 +74,17 @@ export function PublicViewerPage() {
         password: err.requiresPassword ?? false,
         nda: err.requiresNda ?? false,
       });
-      // Only show raw backend messages for actual validation failures.
-      // Missing required fields are handled by client-side checks on Continue.
-      if (err.code === "invalid_password" || err.code === "whitelist_denied") {
+      const unavailableCodes = new Set([
+        "link_not_found",
+        "link_expired",
+        "link_revoked",
+        "link_max_access_reached",
+      ]);
+      if (unavailableCodes.has(err.code)) {
+        setLinkErrorCode(err.code);
+      } else if (err.code === "invalid_password" || err.code === "whitelist_denied") {
+        // Only show raw backend messages for actual validation failures.
+        // Missing required fields are handled by client-side checks on Continue.
         setGateError(err.message ?? t("common:error.loadFailed"));
       }
     } finally {
@@ -98,6 +110,27 @@ export function PublicViewerPage() {
     return (
       <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6">
         <p className="text-destructive">{error}</p>
+      </div>
+    );
+  }
+
+  if (linkErrorCode) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
+        <Card className="w-full max-w-md">
+          <CardHeader className="items-center space-y-3">
+            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
+              <Prohibit size={24} className="text-muted-foreground" />
+            </div>
+            <CardTitle className="text-center">{t(`viewer.${linkErrorCode}Title`)}</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4 text-center">
+            <p className="text-muted-foreground">{t(`viewer.${linkErrorCode}Description`)}</p>
+            <Button variant="outline" className="w-full" onClick={() => navigate("/")}>
+              {t("common:backToHome")}
+            </Button>
+          </CardContent>
+        </Card>
       </div>
     );
   }

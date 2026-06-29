@@ -166,6 +166,14 @@
     "passwordRequired": "Please enter the link password to continue.",
     "ndaLabel": "I agree to the non-disclosure agreement",
     "ndaRequired": "Please agree to the non-disclosure agreement to continue.",
-    "continue": "Continue"
+    "continue": "Continue",
+    "link_not_foundTitle": "Link not found",
+    "link_not_foundDescription": "This share link doesn’t exist or has been deleted. Please check the URL.",
+    "link_expiredTitle": "Link expired",
+    "link_expiredDescription": "This share link has expired. Please ask the sender for a new link.",
+    "link_revokedTitle": "Link disabled",
+    "link_revokedDescription": "This share link has been disabled. Please contact the sender for a new link.",
+    "link_max_access_reachedTitle": "Access limit reached",
+    "link_max_access_reachedDescription": "This link has reached its access limit. Please contact the sender."
   }
 }
