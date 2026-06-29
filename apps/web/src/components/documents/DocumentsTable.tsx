@@ -166,7 +166,7 @@ export function DocumentsTable() {
                     {headerGroup.headers.map((header) => (
                       <TableHead
                         key={header.id}
-                        className={header.id === "actions" ? "w-[100px] text-right" : ""}
+                        className={header.id === "actions" ? "w-[100px] text-left" : ""}
                       >
                         {header.isPlaceholder
                           ? null
