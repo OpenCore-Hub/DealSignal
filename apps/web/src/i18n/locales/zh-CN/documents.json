@@ -42,6 +42,7 @@
     "views": "次访问",
     "status": "状态",
     "shareLinks": "分享链",
+    "actions": "操作",
     "pages": "{{count}} 页",
     "links": "{{count}} 个链接",
     "viewCount": "{{count}} 次访问",

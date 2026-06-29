@@ -43,6 +43,7 @@
     "views": "Views",
     "status": "Status",
     "shareLinks": "Links",
+    "actions": "Actions",
     "pages": "{{count}} pages",
     "pages_one": "{{count}} page",
     "links": "{{count}} links",

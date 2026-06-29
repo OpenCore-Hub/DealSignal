@@ -153,7 +153,7 @@ export function useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDe
       },
       {
         id: "actions",
-        header: "",
+        header: t("documents:columns.actions"),
         cell: ({ row }) => {
           const doc = row.original;
           const firstLink = doc.links[0];
