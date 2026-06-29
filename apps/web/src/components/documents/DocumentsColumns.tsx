@@ -174,7 +174,7 @@ export function useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDe
           };
 
           return (
-            <div className="flex items-center justify-end gap-1">
+            <div className="flex items-center justify-start gap-1">
               <Button
                 size="icon-sm"
                 variant="ghost"
