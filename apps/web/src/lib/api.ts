@@ -347,6 +347,10 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify(patch),
     }),
+  deleteLink: (id: string) =>
+    request<void>(getWorkspaceSlug(), `/links/${id}`, {
+      method: "DELETE",
+    }),
 
   getAccessLogs: (linkId: string) =>
     request<{ data: AccessLog[] }>(

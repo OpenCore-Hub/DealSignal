@@ -46,6 +46,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("", h.List)
 	g.GET("/:id", h.Get)
 	g.PATCH("/:id", h.Update)
+	g.DELETE("/:id", h.Delete)
 	g.GET("/:id/access-logs", h.AccessLogs)
 }
 
@@ -241,6 +242,20 @@ func (h *Handler) Update(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, item)
+}
+
+// Delete soft-deletes a link within a workspace.
+func (h *Handler) Delete(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if err := h.service.Delete(c.Request.Context(), c.Param("id"), workspaceID); err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to delete link"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // AccessLogs returns access logs for a link.

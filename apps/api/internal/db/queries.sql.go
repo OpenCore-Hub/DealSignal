@@ -121,6 +121,23 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 	return i, err
 }
 
+const archiveDocument = `-- name: ArchiveDocument :exec
+UPDATE documents
+SET status = 'archived', updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AND status = 'ready'
+`
+
+type ArchiveDocumentParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	TenantID    pgtype.UUID
+}
+
+func (q *Queries) ArchiveDocument(ctx context.Context, arg ArchiveDocumentParams) error {
+	_, err := q.db.Exec(ctx, archiveDocument, arg.ID, arg.WorkspaceID, arg.TenantID)
+	return err
+}
+
 const countDocumentsInFolder = `-- name: CountDocumentsInFolder :one
 SELECT COUNT(*) AS count
 FROM deal_room_documents
@@ -1516,6 +1533,25 @@ type DeleteIntegrationTokenParams struct {
 func (q *Queries) DeleteIntegrationToken(ctx context.Context, arg DeleteIntegrationTokenParams) error {
 	_, err := q.db.Exec(ctx, deleteIntegrationToken, arg.WorkspaceID, arg.Provider)
 	return err
+}
+
+const deleteLink = `-- name: DeleteLink :execrows
+UPDATE links
+SET status = 'deleted', updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteLinkParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) DeleteLink(ctx context.Context, arg DeleteLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteLink, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteOAuthState = `-- name: DeleteOAuthState :exec
@@ -3372,6 +3408,63 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const listArchivedDocumentsByWorkspace = `-- name: ListArchivedDocumentsByWorkspace :many
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status = 'archived'
+ORDER BY d.created_at DESC
+`
+
+type ListArchivedDocumentsByWorkspaceRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListArchivedDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListArchivedDocumentsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listArchivedDocumentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListArchivedDocumentsByWorkspaceRow
+	for rows.Next() {
+		var i ListArchivedDocumentsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
 SELECT id, session_id, role, content, evidence, created_at
 FROM assistant_messages
@@ -4148,6 +4241,70 @@ func (q *Queries) ListPendingNotifications(ctx context.Context) ([]Notification,
 	return items, nil
 }
 
+const listPopularDocumentsByWorkspace = `-- name: ListPopularDocumentsByWorkspace :many
+SELECT
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    COALESCE(SUM(l.access_count), 0)::bigint as total_views
+FROM documents d
+LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+GROUP BY d.id
+HAVING COALESCE(SUM(l.access_count), 0) >= 30
+ORDER BY total_views DESC, d.created_at DESC
+`
+
+type ListPopularDocumentsByWorkspaceRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+	TotalViews  int64
+}
+
+func (q *Queries) ListPopularDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPopularDocumentsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPopularDocumentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPopularDocumentsByWorkspaceRow
+	for rows.Next() {
+		var i ListPopularDocumentsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.TotalViews,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentDocumentsByWorkspace = `-- name: ListRecentDocumentsByWorkspace :many
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -4259,6 +4416,71 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.RequireEmail,
 			&i.RequirePassword,
 			&i.RequireNda,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentlyAccessedDocumentsByWorkspace = `-- name: ListRecentlyAccessedDocumentsByWorkspace :many
+SELECT
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    COALESCE(MAX(al.created_at), d.created_at) as last_accessed_at
+FROM documents d
+LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
+LEFT JOIN access_logs al ON al.link_id = l.id
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+GROUP BY d.id
+HAVING MAX(al.created_at) IS NOT NULL
+ORDER BY last_accessed_at DESC, d.created_at DESC
+`
+
+type ListRecentlyAccessedDocumentsByWorkspaceRow struct {
+	ID             pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	CreatedBy      pgtype.UUID
+	Title          string
+	SourceType     string
+	Status         string
+	StorageKey     string
+	FileSize       pgtype.Int8
+	PageCount      pgtype.Int4
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+	DeletedAt      pgtype.Timestamptz
+	LastAccessedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListRecentlyAccessedDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListRecentlyAccessedDocumentsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listRecentlyAccessedDocumentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentlyAccessedDocumentsByWorkspaceRow
+	for rows.Next() {
+		var i ListRecentlyAccessedDocumentsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.LastAccessedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4614,6 +4836,64 @@ func (q *Queries) ListTenantDomainsExpiringBefore(ctx context.Context, sslExpire
 			&i.VerifiedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnsharedDocumentsByWorkspace = `-- name: ListUnsharedDocumentsByWorkspace :many
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+  AND NOT EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
+ORDER BY d.created_at DESC
+`
+
+type ListUnsharedDocumentsByWorkspaceRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListUnsharedDocumentsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listUnsharedDocumentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListUnsharedDocumentsByWorkspaceRow
+	for rows.Next() {
+		var i ListUnsharedDocumentsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -5210,6 +5490,23 @@ type SoftDeleteDocumentParams struct {
 
 func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocumentParams) error {
 	_, err := q.db.Exec(ctx, softDeleteDocument, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const unarchiveDocument = `-- name: UnarchiveDocument :exec
+UPDATE documents
+SET status = 'ready', updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AND status = 'archived'
+`
+
+type UnarchiveDocumentParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	TenantID    pgtype.UUID
+}
+
+func (q *Queries) UnarchiveDocument(ctx context.Context, arg UnarchiveDocumentParams) error {
+	_, err := q.db.Exec(ctx, unarchiveDocument, arg.ID, arg.WorkspaceID, arg.TenantID)
 	return err
 }
 

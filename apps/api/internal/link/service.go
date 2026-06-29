@@ -284,6 +284,25 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 	return link, nil
 }
 
+// Delete marks a link as deleted so it no longer appears in listings.
+func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return errors.New("invalid link id")
+	}
+	rows, err := s.queries.DeleteLink(ctx, db.DeleteLinkParams{
+		ID:          pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID: pgUUID(workspaceID),
+	})
+	if err != nil {
+		return err
+	}
+	if rows == 0 {
+		return ErrNotFoundInWorkspace
+	}
+	return nil
+}
+
 // ListAccessLogs returns access events for a link, including both raw access logs
 // and per-page views with their durations.
 func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string) ([]db.ListAccessLogsByLinkRow, error) {

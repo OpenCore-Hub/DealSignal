@@ -377,6 +377,13 @@ export const handlers = [
     return HttpResponse.json(link);
   }),
 
+  http.delete("*/api/workspaces/:workspaceSlug/links/:id", ({ params }) => {
+    const index = mockLinks.findIndex((l) => l.id === params.id);
+    if (index === -1) return new HttpResponse(null, { status: 404 });
+    mockLinks.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   http.get("*/api/workspaces/:workspaceSlug/links/:id/access-logs", ({ params }) => {
     return HttpResponse.json({ data: mockAccessLogs.filter((l) => l.linkId === params.id) });
   }),

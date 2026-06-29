@@ -92,6 +92,42 @@ FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
+-- name: ListRecentlyAccessedDocumentsByWorkspace :many
+SELECT
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    COALESCE(MAX(al.created_at), d.created_at) as last_accessed_at
+FROM documents d
+LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
+LEFT JOIN access_logs al ON al.link_id = l.id
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+GROUP BY d.id
+HAVING MAX(al.created_at) IS NOT NULL
+ORDER BY last_accessed_at DESC, d.created_at DESC;
+
+-- name: ListPopularDocumentsByWorkspace :many
+SELECT
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    COALESCE(SUM(l.access_count), 0)::bigint as total_views
+FROM documents d
+LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+GROUP BY d.id
+HAVING COALESCE(SUM(l.access_count), 0) >= 30
+ORDER BY total_views DESC, d.created_at DESC;
+
+-- name: ListUnsharedDocumentsByWorkspace :many
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+  AND NOT EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
+ORDER BY d.created_at DESC;
+
+-- name: ListArchivedDocumentsByWorkspace :many
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status = 'archived'
+ORDER BY d.created_at DESC;
+
 -- name: ListRecentDocumentsByWorkspace :many
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -103,6 +139,16 @@ LIMIT $2;
 UPDATE documents
 SET status = $1, page_count = $2, updated_at = now()
 WHERE id = $3;
+
+-- name: ArchiveDocument :exec
+UPDATE documents
+SET status = 'archived', updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AND status = 'ready';
+
+-- name: UnarchiveDocument :exec
+UPDATE documents
+SET status = 'ready', updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AND status = 'archived';
 
 -- name: SoftDeleteDocument :exec
 UPDATE documents
@@ -292,6 +338,11 @@ RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permissi
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
        updated_at, require_email, require_password, require_nda;
+
+-- name: DeleteLink :execrows
+UPDATE links
+SET status = 'deleted', updated_at = now()
+WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateLinkNDAAgreement :one
 INSERT INTO link_nda_agreements (

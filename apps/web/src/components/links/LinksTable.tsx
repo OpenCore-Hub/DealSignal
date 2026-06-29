@@ -311,8 +311,8 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
                 if (!linkToDelete) return;
                 setIsDeleting(true);
                 try {
-                  await api.updateLink(linkToDelete.id, { isActive: false });
-                  setData((prev) => prev.map((l) => (l.id === linkToDelete.id ? { ...l, isActive: false } : l)));
+                  await api.deleteLink(linkToDelete.id);
+                  setData((prev) => prev.filter((l) => l.id !== linkToDelete.id));
                   toast.success(t("delete.success"));
                   setLinkToDelete(null);
                 } catch (e) {
