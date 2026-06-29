@@ -38,7 +38,7 @@
   },
   "delete": {
     "title": "Delete Link",
-    "description": "Are you sure you want to delete \"{{url}}\"? Related access records will no longer be viewable via this link.",
+    "description": "Are you sure you want to delete the share link for \"{{documentTitle}}\"? This link will stop working and visitors will no longer be able to view the document.",
     "confirmLoading": "Deleting...",
     "success": "Link deleted"
   },

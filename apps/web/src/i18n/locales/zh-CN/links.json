@@ -38,7 +38,7 @@
   },
   "delete": {
     "title": "删除链接",
-    "description": "确定要删除「{{url}}」吗？关联的访问记录将不再可通过该链接查看。",
+    "description": "确定要删除「{{documentTitle}}」的分享链接吗？删除后该链接将失效，访问者无法再通过此链接查看文档。",
     "confirmLoading": "删除中...",
     "success": "链接已删除"
   },

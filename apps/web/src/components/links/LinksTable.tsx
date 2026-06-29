@@ -293,11 +293,11 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
       </div>
 
       <Dialog open={!!linkToDelete} onOpenChange={(open) => !open && setLinkToDelete(null)}>
-        <DialogContent>
+        <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{t("delete.title")}</DialogTitle>
-            <DialogDescription>
-              {t("delete.description", { url: linkToDelete?.shortUrl })}
+            <DialogDescription className="break-words">
+              {t("delete.description", { documentTitle: linkToDelete?.documentTitle })}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
