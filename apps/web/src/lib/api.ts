@@ -12,6 +12,7 @@ import type {
   DealRoomMember,
   DealRoomTemplate,
   Document,
+  DocumentFilter,
   Evidence,
   HeatAlert,
   HeatLevel,
@@ -184,12 +185,19 @@ export const api = {
   getDashboardStats: () =>
     request<DashboardStats>(getWorkspaceSlug(), "/dashboard/stats"),
 
-  getDocuments: () =>
-    request<{ data: Document[] }>(getWorkspaceSlug(), "/documents"),
+  getDocuments: (filter?: DocumentFilter) =>
+    request<{ data: Document[] }>(
+      getWorkspaceSlug(),
+      filter && filter !== "all" ? `/documents?filter=${encodeURIComponent(filter)}` : "/documents"
+    ),
   getDocumentById: (id: string) =>
     request<Document>(getWorkspaceSlug(), `/documents/${id}`),
   deleteDocument: (id: string) =>
     request<void>(getWorkspaceSlug(), `/documents/${id}`, { method: "DELETE" }),
+  archiveDocument: (id: string) =>
+    request<Document>(getWorkspaceSlug(), `/documents/${id}/archive`, { method: "POST" }),
+  unarchiveDocument: (id: string) =>
+    request<Document>(getWorkspaceSlug(), `/documents/${id}/unarchive`, { method: "POST" }),
 
   getDocumentPages: async (id: string) => {
     const res = await request<{

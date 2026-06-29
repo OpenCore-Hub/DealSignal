@@ -1,6 +1,9 @@
+/* eslint-disable react-refresh/only-export-components */
 import { useMemo } from "react";
 import type { NavigateFunction } from "react-router";
-import { Copy, DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
+import { Archive, ArrowCounterClockwise, Buildings, CaretDown, CaretUp, CaretUpDown, Copy, DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
+import { toast } from "sonner";
+import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
@@ -9,7 +12,7 @@ import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { formatDate, formatFileSize } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
-import type { ColumnDef } from "@tanstack/react-table";
+import type { Column, ColumnDef } from "@tanstack/react-table";
 import type { Document, HeatLevel, Link } from "@/types";
 
 export interface DocumentRow extends Document {
@@ -46,9 +49,32 @@ export function buildDocumentRows(documents: Document[], links: Link[]): Documen
 interface UseDocumentColumnsOptions {
   workspaceSlug?: string;
   navigate: NavigateFunction;
+  refetch?: () => void;
+  onAddToDealRoom?: (doc: DocumentRow) => void;
 }
 
-export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColumnsOptions) {
+function SortableHeader({ column, label }: { column: Column<DocumentRow>; label: string }) {
+  const sorted = column.getIsSorted();
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      className="-ml-3 h-8 gap-1 px-2 font-medium"
+      onClick={column.getToggleSortingHandler()}
+    >
+      {label}
+      {sorted === "asc" ? (
+        <CaretUp size={14} />
+      ) : sorted === "desc" ? (
+        <CaretDown size={14} />
+      ) : (
+        <CaretUpDown size={14} className="text-muted-foreground" />
+      )}
+    </Button>
+  );
+}
+
+export function useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDealRoom }: UseDocumentColumnsOptions) {
   const { t } = useTranslation(["documents", "common"]);
 
   return useMemo<ColumnDef<DocumentRow>[]>(
@@ -85,17 +111,45 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
       },
       {
         accessorKey: "heatLevel",
-        header: t("documents:columns.heat"),
+        header: ({ column }) => <SortableHeader column={column} label={t("documents:columns.heat")} />,
+        sortingFn: (rowA, rowB) => {
+          const rank = { hot: 2, warm: 1, cold: 0 } as const;
+          const a = rank[rowA.original.heatLevel];
+          const b = rank[rowB.original.heatLevel];
+          if (a !== b) return a - b;
+          return rowA.original.totalViews - rowB.original.totalViews;
+        },
         cell: ({ row }) => <HeatBadge level={row.original.heatLevel} />,
       },
       {
         accessorKey: "totalViews",
-        header: t("documents:columns.views"),
+        header: ({ column }) => <SortableHeader column={column} label={t("documents:columns.views")} />,
+        sortingFn: "basic",
         cell: ({ row }) => (
           <span className="text-caption tabular-nums">
-            {t("documents:columns.viewCount", { count: row.original.totalViews })}
+            {row.original.totalViews}
           </span>
         ),
+      },
+      {
+        id: "shareLinks",
+        header: t("documents:columns.shareLinks"),
+        cell: ({ row }) => {
+          const doc = row.original;
+          return (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-auto px-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              onClick={(e) => {
+                e.stopPropagation();
+                navigate(`/${workspaceSlug}/links?documentId=${doc.id}&documentTitle=${encodeURIComponent(doc.title)}`);
+              }}
+            >
+              {t("common:view")}
+            </Button>
+          );
+        },
       },
       {
         id: "actions",
@@ -103,6 +157,22 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
         cell: ({ row }) => {
           const doc = row.original;
           const firstLink = doc.links[0];
+
+          const handleArchive = async () => {
+            try {
+              if (doc.status === "archived") {
+                await api.unarchiveDocument(doc.id);
+                toast.success(t("documents:columns.unarchived"));
+              } else {
+                await api.archiveDocument(doc.id);
+                toast.success(t("documents:columns.archived"));
+              }
+              refetch?.();
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : t("documents:columns.archiveFailed"));
+            }
+          };
+
           return (
             <div className="flex items-center justify-end gap-1">
               <Button
@@ -133,6 +203,22 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
                       ]
                     : []),
                   {
+                    label: t("common:addToDealRoom"),
+                    icon: <Buildings size={16} />,
+                    onClick: () => onAddToDealRoom?.(doc),
+                    disabled: doc.status === "uploading" || doc.status === "processing" || doc.status === "failed",
+                  },
+                  {
+                    label: doc.status === "archived" ? t("common:unarchive") : t("common:archive"),
+                    icon: doc.status === "archived" ? <ArrowCounterClockwise size={16} /> : <Archive size={16} />,
+                    onClick: handleArchive,
+                    disabled: doc.status === "uploading" || doc.status === "processing" || doc.status === "failed",
+                    title:
+                      doc.status === "uploading" || doc.status === "processing" || doc.status === "failed"
+                        ? t("documents:columns.archiveDisabled")
+                        : undefined,
+                  },
+                  {
                     label: t("common:download"),
                     icon: <DownloadSimple size={16} />,
                     onClick: () => {},
@@ -156,6 +242,6 @@ export function useDocumentColumns({ workspaceSlug, navigate }: UseDocumentColum
         },
       },
     ],
-    [navigate, workspaceSlug, t]
+    [navigate, workspaceSlug, t, refetch, onAddToDealRoom]
   );
 }

@@ -21,6 +21,10 @@ export interface IngestionJob {
   errorMessage?: string | null;
 }
 
+export type DocumentStatus = "uploading" | "processing" | "ready" | "failed" | "archived";
+
+export type DocumentFilter = "all" | "recent" | "popular" | "unshared" | "archived";
+
 export interface Document {
   id: string;
   title: string;
@@ -29,7 +33,7 @@ export interface Document {
   fileType: "pdf" | "docx" | "pptx" | "xlsx";
   fileSize: number;
   pageCount: number;
-  status: "uploading" | "processing" | "ready" | "failed";
+  status: DocumentStatus;
   progress?: number;
   createdAt: string;
   updatedAt: string;

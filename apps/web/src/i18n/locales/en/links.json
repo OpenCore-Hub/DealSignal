@@ -5,7 +5,8 @@
     "createLink": "Create Link"
   },
   "title": {
-    "allLinks": "All Links"
+    "allLinks": "All Links",
+    "filteredLinks": "Links for {{title}}"
   },
   "table": {
     "link": "Link",
@@ -18,6 +19,7 @@
     "heat": "Heat",
     "status": "Status",
     "totalLinks": "{{count}} links",
+    "clearFilter": "Clear filter",
     "copyLink": "Copy Link"
   },
   "actions": {
@@ -30,7 +32,9 @@
   "empty": {
     "title": "No links yet",
     "description": "Configure permissions and create links to track investor and buyer engagement.",
-    "createLink": "Create Link"
+    "createLink": "Create Link",
+    "filteredTitle": "No links for \"{{title}}\"",
+    "filteredDescription": "Create a link for this document to start tracking engagement."
   },
   "delete": {
     "title": "Delete Link",

@@ -226,8 +226,43 @@ export const handlers = [
   }),
 
   // Documents
-  http.get("*/api/workspaces/:workspaceSlug/documents", () => {
-    return HttpResponse.json({ data: mockDocuments });
+  http.get("*/api/workspaces/:workspaceSlug/documents", ({ request }) => {
+    const filter = new URL(request.url).searchParams.get("filter");
+    let docs: typeof mockDocuments;
+    switch (filter) {
+      case "recent": {
+        const lastAccessedAt = (docId: string) => {
+          const linkDates = mockLinks
+            .filter((l) => l.documentId === docId && l.lastViewedAt)
+            .map((l) => new Date(l.lastViewedAt!).getTime());
+          return Math.max(...linkDates, 0);
+        };
+        docs = [...mockDocuments].sort(
+          (a, b) => lastAccessedAt(b.id) - lastAccessedAt(a.id) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+        break;
+      }
+      case "popular": {
+        const totalViews = (docId: string) =>
+          mockLinks.filter((l) => l.documentId === docId).reduce((sum, l) => sum + l.accessCount, 0);
+        docs = [...mockDocuments]
+          .filter((d) => d.status !== "archived" && totalViews(d.id) >= 30)
+          .sort(
+            (a, b) =>
+              totalViews(b.id) - totalViews(a.id) || new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+          );
+        break;
+      }
+      case "unshared":
+        docs = mockDocuments.filter((d) => !mockLinks.some((l) => l.documentId === d.id && l.isActive));
+        break;
+      case "archived":
+        docs = mockDocuments.filter((d) => d.status === "archived");
+        break;
+      default:
+        docs = mockDocuments;
+    }
+    return HttpResponse.json({ data: docs });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/documents/:id", ({ params }) => {
@@ -241,6 +276,20 @@ export const handlers = [
     if (index === -1) return new HttpResponse(null, { status: 404 });
     mockDocuments.splice(index, 1);
     return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/documents/:id/archive", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    doc.status = "archived";
+    return HttpResponse.json(doc);
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/documents/:id/unarchive", ({ params }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    doc.status = "ready";
+    return HttpResponse.json(doc);
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/documents", async ({ request }) => {

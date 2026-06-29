@@ -18,6 +18,13 @@
     "uploading": "Uploading...",
     "pending": "Pending"
   },
+  "filters": {
+    "all": "All Documents",
+    "recent": "Recently Accessed",
+    "popular": "High Popularity",
+    "unshared": "Unshared",
+    "archived": "Archived"
+  },
   "table": {
     "emptyTitle": "Document library is empty",
     "emptyDescription": "Upload your first document to create secure share links and track investor and buyer engagement.",
@@ -26,13 +33,16 @@
     "documentCount": "{{count}} documents",
     "documentCount_one": "{{count}} document",
     "documentCountFiltered": "{{count}} documents · {{filtered}} filtered",
-    "noMatches": "No matching documents found"
+    "noMatches": "No matching documents found",
+    "emptyFilter": "No documents in this view",
+    "clearFilter": "Clear filter"
   },
   "columns": {
     "file": "File",
     "heat": "Heat",
     "views": "Views",
     "status": "Status",
+    "shareLinks": "Links",
     "pages": "{{count}} pages",
     "pages_one": "{{count}} page",
     "links": "{{count}} links",
@@ -40,13 +50,18 @@
     "viewCount": "{{count}} views",
     "viewCount_one": "{{count}} view",
     "downloadDisabled": "Download requires backend signed URL support",
-    "deleteDisabled": "Delete document requires backend support"
+    "deleteDisabled": "Delete document requires backend support",
+    "archived": "Document archived",
+    "unarchived": "Document unarchived",
+    "archiveFailed": "Failed to update document status",
+    "archiveDisabled": "Only ready documents can be archived"
   },
   "status": {
     "uploading": "Uploading",
     "processing": "Processing",
     "ready": "Ready",
     "failed": "Failed",
+    "archived": "Archived",
     "pending": "Pending"
   },
   "detail": {

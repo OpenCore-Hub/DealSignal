@@ -4,6 +4,7 @@ import { FileText, MagnifyingGlassPlus, MagnifyingGlass } from "@phosphor-icons/
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PageCard } from "./PageCard";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -43,8 +44,6 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
       hasEvidence: evidences?.some((e) => e.page_number === pageNumber) ?? false,
     };
   });
-
-  const maxViews = Math.max(...pages.map((p) => p.viewCount), 1);
 
   // Search for evidence within this document
   const handleSearch = async () => {
@@ -117,50 +116,23 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
         </Button>
       </div>
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        {pages.map((page) => {
-          const heatRatio = page.viewCount / maxViews;
-          return (
-            <Card
-              key={page.pageNumber}
-              role="button"
-              tabIndex={0}
-              className={`cursor-pointer overflow-hidden transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
-                selectedPage === page.pageNumber ? "ring-2 ring-primary" : ""
-              }`}
-              onClick={() => {
-                setSelectedPage(page.pageNumber);
-                navigate(`/viewer/${documentId}?page=${page.pageNumber}`);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") {
-                  e.preventDefault();
-                  setSelectedPage(page.pageNumber);
-                  navigate(`/viewer/${documentId}?page=${page.pageNumber}`);
-                }
-              }}
-            >
-              <CardContent className="relative flex aspect-[3/4] flex-col items-center justify-center">
-                <FileText size={32} className="text-muted-foreground/50" />
-                <p className="mt-2 text-sm font-medium">{t("documents:content.pageLabel", { pageNumber: page.pageNumber })}</p>
-                <div className="absolute bottom-0 left-0 right-0 h-1 bg-muted">
-                  <div
-                    className="h-full bg-hot-500"
-                    style={{ width: `${heatRatio * 100}%` }}
-                  />
-                </div>
-                {page.hasEvidence && (
-                  <>
-                    <Badge className="absolute right-2 top-2 bg-primary text-primary-foreground text-caption">
-                      {t("documents:content.evidenceBadge")}
-                    </Badge>
-                    <span className="sr-only">{t("documents:content.evidenceSrOnly")}</span>
-                  </>
-                )}
-              </CardContent>
-            </Card>
-          );
-        })}
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+        {pages.map((page) => (
+          <PageCard
+            key={page.pageNumber}
+            documentId={documentId}
+            pageNumber={page.pageNumber}
+            viewCount={page.viewCount}
+            avgDurationSeconds={page.avgDurationSeconds}
+            exitRate={analytics.find((a) => a.pageNumber === page.pageNumber)?.exitRate}
+            hasEvidence={page.hasEvidence}
+            isSelected={selectedPage === page.pageNumber}
+            onClick={() => {
+              setSelectedPage(page.pageNumber);
+              navigate(`/viewer/${documentId}?page=${page.pageNumber}`);
+            }}
+          />
+        ))}
       </div>
 
       {selectedPage && (

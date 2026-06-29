@@ -1,13 +1,12 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
+import { Buildings, Eye, Link as LinkIcon } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/common/PageHeader";
 import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
-import { RowActions } from "@/components/common/RowActions";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { DocumentAnalytics } from "./DocumentAnalytics";
 import { DocumentContent } from "./DocumentContent";
@@ -15,11 +14,10 @@ import { DocumentAIInsights } from "./DocumentAIInsights";
 import { DocumentStats } from "./DocumentStats";
 import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
-import { DeleteDocumentDialog } from "./DeleteDocumentDialog";
+import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
-import { toast } from "sonner";
 import type { Document, Link, PageAnalytics, VisitorSummary } from "@/types";
 
 interface DocumentDetailData {
@@ -33,7 +31,7 @@ export function DocumentDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
   const { t } = useTranslation(["documents", "common"]);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [addToRoomOpen, setAddToRoomOpen] = useState(false);
 
   const loadDetail = useCallback(async (): Promise<DocumentDetailData> => {
     if (!documentId) {
@@ -89,36 +87,15 @@ export function DocumentDetail() {
           <LinkIcon size={16} />
           {t("common:createLink")}
         </Button>
-        <RowActions
-          actions={[
-            {
-              label: t("common:download"),
-              icon: <DownloadSimple size={16} />,
-              onClick: async () => {
-                try {
-                  const res = await api.getDocumentDownloadUrl(doc.id);
-                  const a = document.createElement("a");
-                  a.href = res.download_url;
-                  a.download = res.filename || doc.title;
-                  a.target = "_blank";
-                  a.rel = "noopener noreferrer";
-                  document.body.appendChild(a);
-                  a.click();
-                  a.remove();
-                } catch {
-                  toast.error(t("common:error.loadFailed"));
-                }
-              },
-            },
-            {
-              label: t("common:delete"),
-              icon: <Trash size={16} />,
-              onClick: () => setDeleteDialogOpen(true),
-              destructive: true,
-              pro: true,
-            },
-          ]}
-        />
+        <Button
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => setAddToRoomOpen(true)}
+          disabled={doc.status === "uploading" || doc.status === "processing" || doc.status === "failed"}
+        >
+          <Buildings size={16} />
+          {t("common:addToDealRoom")}
+        </Button>
       </PageHeader>
 
       <DetailLayout sidebar={<DocumentStats links={links} visitors={visitors} />}>
@@ -146,11 +123,11 @@ export function DocumentDetail() {
         </Tabs>
       </DetailLayout>
 
-      <DeleteDocumentDialog
-        doc={doc}
-        workspaceSlug={workspaceSlug!}
-        open={deleteDialogOpen}
-        onOpenChange={setDeleteDialogOpen}
+      <AddToDealRoomDialog
+        documentId={doc.id}
+        documentTitle={doc.title}
+        open={addToRoomOpen}
+        onOpenChange={setAddToRoomOpen}
       />
     </div>
   );

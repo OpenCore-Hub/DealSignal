@@ -5,7 +5,8 @@
     "createLink": "创建链接"
   },
   "title": {
-    "allLinks": "全部链接"
+    "allLinks": "全部链接",
+    "filteredLinks": "{{title}} 的分享链接"
   },
   "table": {
     "link": "链接",
@@ -18,6 +19,7 @@
     "heat": "热度",
     "status": "状态",
     "totalLinks": "{{count}} 个链接",
+    "clearFilter": "清除筛选",
     "copyLink": "复制链接"
   },
   "actions": {
@@ -30,7 +32,9 @@
   "empty": {
     "title": "暂无链接",
     "description": "为文档配置权限并创建链接，即可追踪投资人/客户的访问行为。",
-    "createLink": "创建链接"
+    "createLink": "创建链接",
+    "filteredTitle": "「{{title}}」暂无链接",
+    "filteredDescription": "为该文档创建分享链接以开始追踪访问行为。"
   },
   "delete": {
     "title": "删除链接",

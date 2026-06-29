@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { SpinnerGap, CheckCircle, XCircle, Clock } from "@phosphor-icons/react";
+import { SpinnerGap, CheckCircle, XCircle, Clock, Archive } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import type { Document } from "@/types";
 
@@ -40,6 +40,13 @@ export function DocumentStatusBadge({ status, progress, errorMessage }: Document
         <Badge variant="destructive" className="gap-1" title={errorMessage ?? undefined}>
           <XCircle className="size-3" />
           {t("documents:status.failed")}
+        </Badge>
+      );
+    case "archived":
+      return (
+        <Badge variant="secondary" className="gap-1">
+          <Archive className="size-3" />
+          {t("documents:status.archived")}
         </Badge>
       );
     default:

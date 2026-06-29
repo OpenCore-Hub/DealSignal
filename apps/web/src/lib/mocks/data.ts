@@ -73,6 +73,18 @@ export const mockDocuments: Document[] = [
     createdAt: "2026-06-19T11:00:00Z",
     updatedAt: "2026-06-19T11:05:00Z",
   },
+  {
+    id: "doc_4",
+    title: "Q1 Investor Update",
+    sourceType: "pdf",
+    fileName: "Q1 Investor Update.pdf",
+    fileType: "pdf",
+    fileSize: 2_400_000,
+    pageCount: 8,
+    status: "archived",
+    createdAt: "2026-05-10T10:00:00Z",
+    updatedAt: "2026-05-10T10:00:00Z",
+  },
 ];
 
 export const mockLinks: Link[] = [

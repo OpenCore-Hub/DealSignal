@@ -8,7 +8,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon } from "@phosphor-icons/react";
+import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon, X } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -39,16 +39,24 @@ import { useAsyncData } from "@/hooks/useAsyncData";
 import { toast } from "sonner";
 import type { Link } from "@/types";
 
-export function LinksTable() {
+interface LinksTableProps {
+  documentId?: string;
+  documentTitle?: string;
+}
+
+export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { t } = useTranslation("links");
   const { t: tc } = useTranslation("common");
+  const isFiltered = !!documentId;
   const { data: fetchedData, loading, error, refetch } = useAsyncData(async () => {
-    const res = await api.getLinks();
+    const res = isFiltered && documentId
+      ? await api.getLinksByDocumentId(documentId)
+      : await api.getLinks();
     return res.data;
-  }, []);
+  }, [documentId, isFiltered]);
   const [data, setData] = useState<Link[]>([]);
   const [sorting, setSorting] = useState<SortingState>([]);
   const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
@@ -198,14 +206,20 @@ export function LinksTable() {
   }
 
   if (data.length === 0) {
+    const emptyTitle = isFiltered && documentTitle ? t("empty.filteredTitle", { title: documentTitle }) : t("empty.title");
+    const emptyDescription = isFiltered && documentTitle ? t("empty.filteredDescription") : t("empty.description");
+    const createLinkPath = isFiltered && documentId
+      ? `/${workspaceSlug}/links/new?documentId=${documentId}`
+      : `/${workspaceSlug}/links/new`;
+
     return (
       <EmptyState
         icon={<LinkIcon size={64} />}
-        title={t("empty.title")}
-        description={t("empty.description")}
+        title={emptyTitle}
+        description={emptyDescription}
         action={{
           label: t("empty.createLink"),
-          onClick: () => navigate(`/${workspaceSlug}/links/new`),
+          onClick: () => navigate(createLinkPath),
         }}
       />
     );
@@ -214,7 +228,24 @@ export function LinksTable() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-h2">{t("title.allLinks")}</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-h2">
+            {isFiltered && documentTitle
+              ? t("title.filteredLinks", { title: documentTitle })
+              : t("title.allLinks")}
+          </h2>
+          {isFiltered && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1 text-muted-foreground"
+              onClick={() => navigate(`/${workspaceSlug}/links`)}
+            >
+              <X size={14} />
+              {t("table.clearFilter")}
+            </Button>
+          )}
+        </div>
         <span className="text-caption text-muted-foreground">{t("table.totalLinks", { count: data.length })}</span>
       </div>
 

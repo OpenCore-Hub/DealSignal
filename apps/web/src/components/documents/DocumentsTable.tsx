@@ -9,6 +9,8 @@ import {
   type SortingState,
 } from "@tanstack/react-table";
 import { Link as LinkIcon, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import type { DocumentFilter } from "@/types";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,14 +27,19 @@ import { SkeletonList } from "@/components/common/SkeletonLayout";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import { buildDocumentRows, useDocumentColumns } from "./DocumentsColumns";
+import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
+import type { DocumentRow } from "./DocumentsColumns";
 
 export function DocumentsTable() {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { t } = useTranslation(["documents", "common"]);
-  const [sorting, setSorting] = useState<SortingState>([]);
+  const [sorting, setSorting] = useState<SortingState>([{ id: "totalViews", desc: true }]);
   const [globalFilter, setGlobalFilter] = useState("");
+  const [filter, setFilter] = useState<DocumentFilter>("all");
+  const [docToAddToRoom, setDocToAddToRoom] = useState<DocumentRow | null>(null);
+  const filters: DocumentFilter[] = ["all", "recent", "unshared", "archived"];
 
   const {
     data,
@@ -40,9 +47,9 @@ export function DocumentsTable() {
     error,
     refetch,
   } = useAsyncData(async () => {
-    const [docsRes, linksRes] = await Promise.all([api.getDocuments(), api.getLinks()]);
+    const [docsRes, linksRes] = await Promise.all([api.getDocuments(filter), api.getLinks()]);
     return buildDocumentRows(docsRes.data, linksRes.data);
-  }, []);
+  }, [filter]);
 
   // Poll for status updates while any document is still being processed.
   useEffect(() => {
@@ -62,7 +69,7 @@ export function DocumentsTable() {
     return () => window.removeEventListener("documents:uploaded", handleUploaded);
   }, [refetch]);
 
-  const columns = useDocumentColumns({ workspaceSlug, navigate });
+  const columns = useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDealRoom: setDocToAddToRoom });
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
@@ -89,101 +96,131 @@ export function DocumentsTable() {
     return <SkeletonList rows={6} />;
   }
 
-  if (!data || data.length === 0) {
-    return (
-      <EmptyState
-        icon={<LinkIcon size={64} />}
-        title={t("documents:table.emptyTitle")}
-        description={t("documents:table.emptyDescription")}
-        action={{
-          label: t("documents:table.upload"),
-          onClick: () => navigate(`/${workspaceSlug}/documents/upload`),
-        }}
-      />
-    );
-  }
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative max-w-sm flex-1">
-          <MagnifyingGlass
-            size={18}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            placeholder={t("documents:table.searchPlaceholder")}
-            value={globalFilter}
-            onChange={(e) => setGlobalFilter(e.target.value)}
-            className="pl-9"
-          />
-        </div>
-        <Button onClick={() => navigate(`/${workspaceSlug}/documents/upload`)} className="gap-1.5">
-          <Plus size={16} weight="bold" />
-          {t("documents:table.upload")}
-        </Button>
-      </div>
-
-      <p className="text-caption text-muted-foreground">
-        {globalFilter
-          ? t("documents:table.documentCountFiltered", {
-              count: data.length,
-              filtered: table.getRowModel().rows.length,
-            })
-          : t("documents:table.documentCount", { count: data.length })}
-      </p>
-
-      <div className="rounded-lg border border-border bg-card">
-        <Table>
-          <TableHeader>
-            {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
-                {headerGroup.headers.map((header) => (
-                  <TableHead
-                    key={header.id}
-                    className={header.id === "actions" ? "w-[100px] text-right" : ""}
-                  >
-                    {header.isPlaceholder
-                      ? null
-                      : flexRender(header.column.columnDef.header, header.getContext())}
-                  </TableHead>
-                ))}
-              </TableRow>
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <Tabs value={filter} onValueChange={(value) => setFilter(value as DocumentFilter)}>
+          <TabsList variant="line" className="w-full overflow-x-auto">
+            {filters.map((f) => (
+              <TabsTrigger key={f} value={f}>
+                {t(`documents:filters.${f}`)}
+              </TabsTrigger>
             ))}
-          </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
-                  {t("documents:table.noMatches")}
-                </TableCell>
-              </TableRow>
-            ) : (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  className="cursor-pointer"
-                  role="link"
-                  tabIndex={0}
-                  onClick={() => navigate(`/${workspaceSlug}/documents/${row.original.id}`)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      navigate(`/${workspaceSlug}/documents/${row.original.id}`);
-                    }
-                  }}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
+          </TabsList>
+        </Tabs>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative max-w-sm flex-1">
+            <MagnifyingGlass
+              size={18}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              placeholder={t("documents:table.searchPlaceholder")}
+              value={globalFilter}
+              onChange={(e) => setGlobalFilter(e.target.value)}
+              className="pl-9"
+            />
+          </div>
+          <Button onClick={() => navigate(`/${workspaceSlug}/documents/upload`)} className="gap-1.5">
+            <Plus size={16} weight="bold" />
+            {t("documents:table.upload")}
+          </Button>
+        </div>
       </div>
+
+      {!data || data.length === 0 ? (
+        filter !== "all" ? (
+          <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border bg-card p-12 text-center">
+            <p className="text-body text-muted-foreground">{t("documents:table.emptyFilter")}</p>
+            <Button variant="outline" onClick={() => setFilter("all")}>
+              {t("documents:table.clearFilter")}
+            </Button>
+          </div>
+        ) : (
+          <EmptyState
+            icon={<LinkIcon size={64} />}
+            title={t("documents:table.emptyTitle")}
+            description={t("documents:table.emptyDescription")}
+            action={{
+              label: t("documents:table.upload"),
+              onClick: () => navigate(`/${workspaceSlug}/documents/upload`),
+            }}
+          />
+        )
+      ) : (
+        <>
+          <p className="text-caption text-muted-foreground">
+            {globalFilter
+              ? t("documents:table.documentCountFiltered", {
+                  count: data.length,
+                  filtered: table.getRowModel().rows.length,
+                })
+              : t("documents:table.documentCount", { count: data.length })}
+          </p>
+
+          <div className="rounded-lg border border-border bg-card">
+            <Table>
+              <TableHeader>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <TableRow key={headerGroup.id}>
+                    {headerGroup.headers.map((header) => (
+                      <TableHead
+                        key={header.id}
+                        className={header.id === "actions" ? "w-[100px] text-right" : ""}
+                      >
+                        {header.isPlaceholder
+                          ? null
+                          : flexRender(header.column.columnDef.header, header.getContext())}
+                      </TableHead>
+                    ))}
+                  </TableRow>
+                ))}
+              </TableHeader>
+              <TableBody>
+                {table.getRowModel().rows.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={columns.length} className="h-32 text-center text-muted-foreground">
+                      {t("documents:table.noMatches")}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  table.getRowModel().rows.map((row) => (
+                    <TableRow
+                      key={row.id}
+                      className="cursor-pointer"
+                      role="link"
+                      tabIndex={0}
+                      onClick={() => navigate(`/${workspaceSlug}/documents/${row.original.id}`)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          navigate(`/${workspaceSlug}/documents/${row.original.id}`);
+                        }
+                      }}
+                    >
+                      {row.getVisibleCells().map((cell) => (
+                        <TableCell key={cell.id}>
+                          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                        </TableCell>
+                      ))}
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        </>
+      )}
+
+      {docToAddToRoom && (
+        <AddToDealRoomDialog
+          documentId={docToAddToRoom.id}
+          documentTitle={docToAddToRoom.title}
+          open={!!docToAddToRoom}
+          onOpenChange={(open) => !open && setDocToAddToRoom(null)}
+          onAdded={() => setDocToAddToRoom(null)}
+        />
+      )}
     </div>
   );
 }
