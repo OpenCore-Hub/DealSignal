@@ -3120,6 +3120,24 @@ func (q *Queries) GetWorkspaceStorageUsage(ctx context.Context, workspaceID pgty
 	return total_bytes, err
 }
 
+const hardDeleteLink = `-- name: HardDeleteLink :execrows
+DELETE FROM links
+WHERE id = $1 AND workspace_id = $2
+`
+
+type HardDeleteLinkParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) HardDeleteLink(ctx context.Context, arg HardDeleteLinkParams) (int64, error) {
+	result, err := q.db.Exec(ctx, hardDeleteLink, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const hasNDAAgreement = `-- name: HasNDAAgreement :one
 SELECT EXISTS (
     SELECT 1 FROM room_nda_agreements

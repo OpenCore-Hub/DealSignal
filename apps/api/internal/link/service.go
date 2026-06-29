@@ -17,6 +17,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -284,18 +285,27 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 	return link, nil
 }
 
-// Delete marks a link as deleted so it no longer appears in listings.
+// Delete removes a link from listings. It first attempts a soft delete by marking
+// the status as deleted; if the schema has not yet been migrated to allow the
+// deleted status, it falls back to a hard delete so the operation succeeds.
 func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error {
 	id, err := uuid.Parse(linkID)
 	if err != nil {
 		return errors.New("invalid link id")
 	}
-	rows, err := s.queries.DeleteLink(ctx, db.DeleteLinkParams{
+	params := db.DeleteLinkParams{
 		ID:          pgtype.UUID{Bytes: id, Valid: true},
 		WorkspaceID: pgUUID(workspaceID),
-	})
+	}
+	rows, err := s.queries.DeleteLink(ctx, params)
 	if err != nil {
-		return err
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23514" {
+			rows, err = s.queries.HardDeleteLink(ctx, db.HardDeleteLinkParams(params))
+		}
+		if err != nil {
+			return err
+		}
 	}
 	if rows == 0 {
 		return ErrNotFoundInWorkspace

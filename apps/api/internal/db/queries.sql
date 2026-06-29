@@ -344,6 +344,10 @@ UPDATE links
 SET status = 'deleted', updated_at = now()
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: HardDeleteLink :execrows
+DELETE FROM links
+WHERE id = $1 AND workspace_id = $2;
+
 -- name: CreateLinkNDAAgreement :one
 INSERT INTO link_nda_agreements (
     tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent
