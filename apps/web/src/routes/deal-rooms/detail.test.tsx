@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
@@ -12,10 +12,12 @@ import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, Deal
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock } = vi.hoisted(() => ({
+const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, uploadDocumentMock, addDealRoomDocumentMock } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
+  uploadDocumentMock: vi.fn(),
+  addDealRoomDocumentMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -23,6 +25,8 @@ vi.mock("@/lib/api", () => ({
     getDealRoomById: getDealRoomByIdMock,
     getDealRoomTemplates: getDealRoomTemplatesMock,
     getDocuments: getDocumentsMock,
+    uploadDocument: uploadDocumentMock,
+    addDealRoomDocument: addDealRoomDocumentMock,
   },
 }));
 
@@ -157,6 +161,8 @@ describe("DealRoomDetailPage", () => {
     getDealRoomByIdMock.mockReset();
     getDealRoomTemplatesMock.mockReset();
     getDocumentsMock.mockReset();
+    uploadDocumentMock.mockReset();
+    addDealRoomDocumentMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
   });
@@ -196,6 +202,52 @@ describe("DealRoomDetailPage", () => {
 
     await waitFor(() => {
       expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+    });
+  });
+
+  it("uploads a file directly to a folder via the folder upload icon", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    uploadDocumentMock.mockResolvedValue({
+      id: "doc_new",
+      title: "Uploaded File.pdf",
+      sourceType: "pdf",
+      status: "processing",
+    });
+    addDealRoomDocumentMock.mockResolvedValue({});
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+    });
+
+    const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
+    expect(folderRow).toBeInTheDocument();
+
+    // Reveal action icons by hovering the folder row.
+    fireEvent.mouseEnter(folderRow);
+
+    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    expect(uploadButton).toBeInTheDocument();
+
+    // Trigger the hidden file input by clicking the upload icon.
+    fireEvent.click(uploadButton);
+
+    const fileInput = document.querySelector("[data-testid='folder-upload-input']") as HTMLInputElement;
+    expect(fileInput).toBeInTheDocument();
+
+    const file = new File(["pdf content"], "Uploaded File.pdf", { type: "application/pdf" });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => {
+      expect(uploadDocumentMock).toHaveBeenCalledWith(file);
+    });
+    expect(addDealRoomDocumentMock).toHaveBeenCalledWith("room-1", {
+      document_id: "doc_new",
+      folder_path: "/pitch",
+      sort_order: 1,
     });
   });
 });

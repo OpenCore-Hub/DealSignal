@@ -145,6 +145,25 @@ export function DealRoomDetailPage() {
     }
   };
 
+  const handleFolderUpload = async (file: File, folderPath: string) => {
+    if (!roomId) return;
+    setUploading(true);
+    try {
+      const doc = await api.uploadDocument(file);
+      await api.addDealRoomDocument(roomId, {
+        document_id: doc.id,
+        folder_path: folderPath,
+        sort_order: (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0,
+      });
+      toast.success(t("documents.uploadedAndAdded", { title: doc.title }));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+    } finally {
+      setUploading(false);
+    }
+  };
+
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) void handleUpload(file);
@@ -307,6 +326,7 @@ export function DealRoomDetailPage() {
                 onDocumentRemove={handleDocumentRemove}
                 onDocumentsAdd={handleDocumentsAdd}
                 onDocumentOpen={handleDocumentOpen}
+                onFolderUpload={handleFolderUpload}
               />
             </CardContent>
           </Card>

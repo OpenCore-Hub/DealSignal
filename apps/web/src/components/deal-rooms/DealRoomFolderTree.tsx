@@ -4,6 +4,7 @@ import {
   FolderOpen,
   FileText,
   Plus,
+  UploadSimple,
   PencilSimple,
   Trash,
   CaretRight,
@@ -48,6 +49,7 @@ interface DealRoomFolderTreeProps {
   onDocumentRemove: (docId: string) => Promise<void>;
   onDocumentsAdd?: (documentIds: string[], folderPath: string) => Promise<void>;
   onDocumentOpen?: (docId: string) => void;
+  onFolderUpload?: (file: File, folderPath: string) => Promise<void>;
 }
 
 interface TreeNode {
@@ -153,9 +155,11 @@ export function DealRoomFolderTree({
   onDocumentRemove,
   onDocumentsAdd,
   onDocumentOpen,
+  onFolderUpload,
 }: DealRoomFolderTreeProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
+  const { t: td } = useTranslation("documents");
 
   const docsByFolder = useMemo(() => {
     const map = new Map<string, DealRoomDocumentItem[]>();
@@ -184,6 +188,8 @@ export function DealRoomFolderTree({
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folder: DealRoomFolder } | null>(null);
   const [addToFolder, setAddToFolder] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
+  const [uploadingFolder, setUploadingFolder] = useState<string | null>(null);
+  const folderUploadInputRef = useRef<HTMLInputElement>(null);
 
   const toggleFolder = (path: string) => {
     setExpanded((prev) => {
@@ -287,6 +293,23 @@ export function DealRoomFolderTree({
       setAddToFolder(null);
     } finally {
       setAdding(false);
+    }
+  };
+
+  const startFolderUpload = (folderPath: string) => {
+    if (!onFolderUpload) return;
+    setUploadingFolder(folderPath);
+    folderUploadInputRef.current?.click();
+  };
+
+  const handleFolderUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !uploadingFolder || !onFolderUpload) return;
+    try {
+      await onFolderUpload(file, uploadingFolder);
+    } finally {
+      setUploadingFolder(null);
+      e.target.value = "";
     }
   };
 
@@ -423,6 +446,20 @@ export function DealRoomFolderTree({
                 >
                   <Plus size={14} />
                 </Button>
+                {onFolderUpload && (
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={uploadingFolder === node.folder.path}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      startFolderUpload(node.folder.path);
+                    }}
+                    aria-label={t("folders.addFile")}
+                  >
+                    <UploadSimple size={14} />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon-sm"
@@ -481,6 +518,17 @@ export function DealRoomFolderTree({
       )}
 
       {creatingParent === "/" && renderCreateRow("/", 0)}
+
+      <input
+        ref={folderUploadInputRef}
+        type="file"
+        accept={td("upload.supportedTypes")}
+        data-testid="folder-upload-input"
+        tabIndex={-1}
+        aria-hidden
+        className="absolute opacity-0 overflow-hidden w-[1px] h-[1px] p-0 m-[-1px] border-none"
+        onChange={(e) => void handleFolderUploadChange(e)}
+      />
 
       <div className="space-y-0.5">{renderFolder(root, 0)}</div>
 
