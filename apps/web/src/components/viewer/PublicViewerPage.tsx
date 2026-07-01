@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Prohibit } from "@phosphor-icons/react";
@@ -17,6 +17,7 @@ interface AccessResult {
   document: { id: string; title: string; pageCount: number; status: string; sourceType: string; fileSize: number };
   visitorId: string;
   requiresEmail: boolean;
+  requiresEmailVerification: boolean;
   requiresPassword: boolean;
   requiresNda: boolean;
   sessionToken: string;
@@ -25,24 +26,30 @@ interface AccessResult {
 export function PublicViewerPage() {
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation("documents");
   const [access, setAccess] = useState<AccessResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
-  const [email, setEmail] = useState("");
+  const prefilledEmail = searchParams.get("email") ?? "";
+  const [email, setEmail] = useState(prefilledEmail);
+  const [emailCode, setEmailCode] = useState("");
   const [password, setPassword] = useState("");
   const [ndaAgreed, setNdaAgreed] = useState(true);
   const [accessCredentials, setAccessCredentials] = useState<PublicLinkCredentials>({});
-  const [security, setSecurity] = useState<{ email: boolean; password: boolean; nda: boolean }>({
+  const [security, setSecurity] = useState<{ email: boolean; emailVerification: boolean; password: boolean; nda: boolean }>({
     email: false,
+    emailVerification: false,
     password: false,
     nda: false,
   });
   const [gateError, setGateError] = useState<string | null>(null);
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
+  const [codeSent, setCodeSent] = useState(false);
+  const [sendCodeLoading, setSendCodeLoading] = useState(false);
   const accessingRef = useRef(false);
 
-  const tryAccess = useCallback(async (gateParams?: { email?: string; password?: string; ndaAgreed?: boolean }) => {
+  const tryAccess = useCallback(async (gateParams?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean }) => {
     if (!token || accessingRef.current) return;
     accessingRef.current = true;
     setLoading(true);
@@ -54,6 +61,7 @@ export function PublicViewerPage() {
       setAccess(res);
       setAccessCredentials({
         email: gateParams?.email,
+        emailCode: gateParams?.emailCode,
         password: gateParams?.password,
         ndaAgreed: gateParams?.ndaAgreed,
         sessionToken: res.sessionToken,
@@ -62,6 +70,7 @@ export function PublicViewerPage() {
       // Persist them so the UI does not flip between sequential prompts.
       setSecurity({
         email: res.requiresEmail,
+        emailVerification: res.requiresEmailVerification,
         password: res.requiresPassword,
         nda: res.requiresNda,
       });
@@ -71,6 +80,7 @@ export function PublicViewerPage() {
       // Render every configured control on the first response.
       setSecurity({
         email: err.requiresEmail ?? false,
+        emailVerification: err.requiresEmailVerification ?? false,
         password: err.requiresPassword ?? false,
         nda: err.requiresNda ?? false,
       });
@@ -83,7 +93,7 @@ export function PublicViewerPage() {
       ]);
       if (unavailableCodes.has(err.code)) {
         setLinkErrorCode(err.code);
-      } else if (err.code === "invalid_password" || err.code === "whitelist_denied") {
+      } else if (err.code === "invalid_password" || err.code === "whitelist_denied" || err.code === "invalid_email_code") {
         // Only show raw backend messages for actual validation failures.
         // Missing required fields are handled by client-side checks on Continue.
         setGateError(err.message ?? t("common:error.loadFailed"));
@@ -98,6 +108,25 @@ export function PublicViewerPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void tryAccess();
   }, [token, tryAccess]);
+
+  const handleSendCode = async () => {
+    const targetEmail = prefilledEmail || email;
+    if (!token || !targetEmail.trim()) {
+      setGateError(t("viewer.emailRequired"));
+      return;
+    }
+    setSendCodeLoading(true);
+    setGateError(null);
+    try {
+      await api.sendEmailVerificationCode(token, targetEmail.trim());
+      setCodeSent(true);
+    } catch (e) {
+      const err = e as ApiError;
+      setGateError(err.message ?? t("viewer.sendCodeFailed"));
+    } finally {
+      setSendCodeLoading(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -137,7 +166,7 @@ export function PublicViewerPage() {
   }
 
   if (!access) {
-    const hasGates = security.email || security.password || security.nda;
+    const hasGates = security.email || security.emailVerification || security.password || security.nda;
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
         <Card className="w-full max-w-md">
@@ -159,6 +188,30 @@ export function PublicViewerPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder={t("viewer.emailPlaceholder")}
+                />
+              </div>
+            )}
+            {security.emailVerification && (
+              <div className="space-y-2">
+                {(prefilledEmail || (security.email && email.trim())) && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full"
+                    disabled={sendCodeLoading || codeSent}
+                    onClick={handleSendCode}
+                  >
+                    {codeSent ? t("viewer.codeSent") : sendCodeLoading ? t("viewer.sendingCode") : t("viewer.sendCode")}
+                  </Button>
+                )}
+                <Label htmlFor="email-code">{t("viewer.codeLabel")}</Label>
+                <Input
+                  id="email-code"
+                  type="text"
+                  inputMode="numeric"
+                  value={emailCode}
+                  onChange={(e) => setEmailCode(e.target.value)}
+                  placeholder={t("viewer.codePlaceholder")}
                 />
               </div>
             )}
@@ -188,8 +241,13 @@ export function PublicViewerPage() {
               className="w-full"
               onClick={() => {
                 setGateError(null);
-                if (security.email && !email.trim()) {
+                const accessEmail = prefilledEmail || email;
+                if (security.email && !accessEmail.trim()) {
                   setGateError(t("viewer.emailRequired"));
+                  return;
+                }
+                if (security.emailVerification && !emailCode.trim()) {
+                  setGateError(t("viewer.codeRequired"));
                   return;
                 }
                 if (security.password && !password) {
@@ -201,7 +259,8 @@ export function PublicViewerPage() {
                   return;
                 }
                 void tryAccess({
-                  email: security.email ? email : undefined,
+                  email: security.email ? accessEmail : undefined,
+                  emailCode: security.emailVerification ? emailCode : undefined,
                   password: security.password ? password : undefined,
                   ndaAgreed: security.nda ? ndaAgreed : undefined,
                 });

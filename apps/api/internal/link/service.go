@@ -15,6 +15,8 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -22,14 +24,23 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+// Beginner starts a database transaction.
+type Beginner interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 // Service handles smart links.
 type Service struct {
-	queries *db.Queries
+	queries         *db.Queries
+	pool            Beginner
+	redisClient     *redis.Client
+	mailer          mailer.Mailer
+	viewerBaseURL   string
 }
 
 // NewService creates a link service.
-func NewService(q *db.Queries) *Service {
-	return &Service{queries: q}
+func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string) *Service {
+	return &Service{queries: q, pool: pool, redisClient: r, mailer: m, viewerBaseURL: viewerBaseURL}
 }
 
 var (
@@ -45,24 +56,27 @@ var (
 	ErrInvalidPassword      = errors.New("invalid password")
 	ErrWhitelistDenied      = errors.New("email not in whitelist")
 	ErrRequiresNDA          = errors.New("nda agreement required")
+	ErrRequiresEmailCode    = errors.New("email verification code required")
+	ErrInvalidEmailCode     = errors.New("invalid email verification code")
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
 )
 
 // CreateLinkRequest is the input for creating a link.
 type CreateLinkRequest struct {
-	DocumentID       string
-	Name             string
-	PermissionType   string
-	RequireEmail     bool
-	RequirePassword  bool
-	RequireNDA       bool
-	AllowedEmails    []string
-	AllowedDomains   []string
-	Password         string
-	ExpiresAt        *time.Time
-	MaxAccessCount   *int32
-	DownloadEnabled  bool
-	WatermarkEnabled bool
+	DocumentID               string
+	Name                     string
+	PermissionType           string
+	RequireEmailVerification bool
+	RequirePassword          bool
+	RequireNDA               bool
+	AllowedEmails            []string
+	AllowedDomains           []string
+	Password                 string
+	ExpiresAt                *time.Time
+	MaxAccessCount           *int32
+	DownloadEnabled          bool
+	WatermarkEnabled         bool
+	ContactIDs               []string
 }
 
 // CreateLink creates a smart link for a document.
@@ -89,9 +103,13 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		return db.Link{}, ErrDocumentNotReady
 	}
 
-	requireEmail, requirePassword, requireNDA, emails, domains, perm, err := normalizeSecurityConfig(req)
+	requireEmailVerification, requirePassword, requireNDA, emails, domains, perm, legacy, err := normalizeSecurityConfig(req)
 	if err != nil {
 		return db.Link{}, err
+	}
+
+	if requireEmailVerification && len(req.ContactIDs) == 0 {
+		return db.Link{}, fmt.Errorf("%w: at least one contact is required for email verification", ErrInvalidPermission)
 	}
 
 	var passwordHash pgtype.Text
@@ -118,7 +136,14 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		maxAccess.Int32 = *req.MaxAccessCount
 	}
 
-	return s.queries.CreateLink(ctx, db.CreateLinkParams{
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return db.Link{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	link, err := qtx.CreateLink(ctx, db.CreateLinkParams{
 		TenantID:         doc.TenantID,
 		WorkspaceID:      workspaceUUID,
 		DocumentID:       doc.ID,
@@ -132,17 +157,65 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		MaxAccessCount:   maxAccess,
 		DownloadEnabled:  req.DownloadEnabled,
 		WatermarkEnabled: req.WatermarkEnabled,
-		RequireEmail:     requireEmail,
-		RequirePassword:  requirePassword,
-		RequireNda:       requireNDA,
-		Status:           "active",
-		CreatedBy:        userUUID,
+		RequireEmail:             requireEmailVerification && legacy,
+		RequireEmailVerification: requireEmailVerification,
+		RequirePassword:          requirePassword,
+		RequireNda:               requireNDA,
+		Status:                   "active",
+		CreatedBy:                userUUID,
 	})
+	if err != nil {
+		return db.Link{}, fmt.Errorf("create link: %w", err)
+	}
+
+	if requireEmailVerification {
+		contacts, err := qtx.ListContactsByWorkspace(ctx, workspaceUUID)
+		if err != nil {
+			return db.Link{}, fmt.Errorf("list contacts: %w", err)
+		}
+		contactMap := make(map[string]db.Contact, len(contacts))
+		for _, c := range contacts {
+			contactMap[uuid.UUID(c.ID.Bytes).String()] = c
+		}
+		for _, cid := range req.ContactIDs {
+			contact, ok := contactMap[cid]
+			if !ok {
+				return db.Link{}, fmt.Errorf("%w: contact %s not found in workspace", ErrInvalidPermission, cid)
+			}
+			code, err := generateNumericCode(6)
+			if err != nil {
+				return db.Link{}, fmt.Errorf("generate access code: %w", err)
+			}
+			contactUUID := pgUUID(cid)
+			if !contactUUID.Valid {
+				return db.Link{}, fmt.Errorf("invalid contact id: %s", cid)
+			}
+			if err := qtx.CreateLinkContact(ctx, db.CreateLinkContactParams{
+				LinkID:     link.ID,
+				ContactID:  contactUUID,
+				AccessCode: code,
+			}); err != nil {
+				return db.Link{}, fmt.Errorf("create link contact: %w", err)
+			}
+			// Send code outside the transaction so an email failure doesn't roll back the link.
+			go func(email, code, linkName, linkURL string) {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				_ = s.mailer.SendLinkAccessCodeEmail(ctx, email, code, linkName, linkURL)
+			}(contact.Email.String, code, req.Name, publicLinkURL(s.viewerBaseURL, token))
+		}
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return db.Link{}, fmt.Errorf("commit transaction: %w", err)
+	}
+	return link, nil
 }
 
 // AccessRequest is the input for public access.
 type AccessRequest struct {
 	Email     string
+	EmailCode string
 	Password  string
 	NDAAgreed bool
 	IP        string
@@ -179,12 +252,18 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		return AccessResult{}, ErrLinkMaxAccessReached
 	}
 
-	requiresEmail := link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
+	// Legacy permission_type values may not have the boolean flag set.
+	requiresEmailVerification := link.RequireEmailVerification || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
 	requiresPassword := link.RequirePassword || link.PermissionType == "password"
 	requiresNDA := link.RequireNda || link.PermissionType == "nda"
 	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
 
-	if requiresEmail || hasWhitelist {
+	// Modern email-verification links (RequireEmailVerification=true, RequireEmail=false)
+	// identify the recipient by the access code alone. Legacy gates and combined
+	// gates (whitelist/NDA) keep RequireEmail=true and still require explicit email.
+	modernEmailVerification := link.RequireEmailVerification && !link.RequireEmail
+	requiresEmail := link.RequireEmail || hasWhitelist || requiresNDA
+	if requiresEmail {
 		if strings.TrimSpace(req.Email) == "" {
 			return AccessResult{}, ErrRequiresEmail
 		}
@@ -194,12 +273,14 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 			return AccessResult{}, ErrWhitelistDenied
 		}
 	}
+	if requiresEmailVerification {
+		if strings.TrimSpace(req.EmailCode) == "" {
+			return AccessResult{}, ErrRequiresEmailCode
+		}
+	}
 	if requiresPassword {
 		if req.Password == "" {
 			return AccessResult{}, ErrRequiresPassword
-		}
-		if err := bcrypt.CompareHashAndPassword([]byte(link.PasswordHash.String), []byte(req.Password)); err != nil {
-			return AccessResult{}, ErrInvalidPassword
 		}
 	}
 	if requiresNDA {
@@ -208,7 +289,36 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		}
 	}
 
-	visitorID := makeVisitorID(req.Email, req.UA)
+	// Verify credentials only after all required gates are present. The email
+	// verification code is marked as used only when every gate passes so that
+	// a missing password or NDA agreement does not consume the code.
+	var verifiedContact *db.GetLinkContactByEmailRow
+	var verifiedEmail string
+	if requiresEmailVerification {
+		lc, err := s.verifyLinkContactCode(ctx, token, req.Email, req.EmailCode, modernEmailVerification)
+		if err != nil {
+			if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresEmailCode) {
+				return AccessResult{}, err
+			}
+			return AccessResult{}, fmt.Errorf("verify email code: %w", err)
+		}
+		verifiedContact = lc
+		verifiedEmail = strings.TrimSpace(lc.ContactEmail.String)
+	}
+
+	// For modern code-only verification, use the contact email from the database
+	// for visitor identity and NDA records.
+	emailForRecords := req.Email
+	if emailForRecords == "" && verifiedEmail != "" {
+		emailForRecords = verifiedEmail
+	}
+	if requiresPassword {
+		if err := bcrypt.CompareHashAndPassword([]byte(link.PasswordHash.String), []byte(req.Password)); err != nil {
+			return AccessResult{}, ErrInvalidPassword
+		}
+	}
+
+	visitorID := makeVisitorID(emailForRecords, req.UA)
 
 	if requiresNDA {
 		ipAddr, _ := netip.ParseAddr(req.IP)
@@ -221,13 +331,156 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 			WorkspaceID: link.WorkspaceID,
 			LinkID:      link.ID,
 			VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
-			Email:       pgtype.Text{String: req.Email, Valid: req.Email != ""},
+			Email:       pgtype.Text{String: emailForRecords, Valid: emailForRecords != ""},
 			Ip:          ip,
 			UserAgent:   pgtype.Text{String: req.UA, Valid: req.UA != ""},
 		})
 	}
 
-	return AccessResult{Link: link, VisitorID: visitorID, Email: req.Email}, nil
+	if verifiedContact != nil {
+		if err := s.queries.MarkLinkContactCodeUsed(ctx, verifiedContact.ID); err != nil {
+			return AccessResult{}, fmt.Errorf("mark code used: %w", err)
+		}
+	}
+
+	return AccessResult{Link: link, VisitorID: visitorID, Email: emailForRecords}, nil
+}
+
+// SendEmailVerificationCode resends the access code for a contact.
+// It returns no error if the email is not associated with the link to avoid leaking addresses.
+func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, viewerBaseURL string) error {
+	link, err := s.queries.GetLinkByPublicToken(ctx, token)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrLinkNotFound
+		}
+		return fmt.Errorf("get link: %w", err)
+	}
+
+	if !link.RequireEmailVerification {
+		return nil
+	}
+	if link.Status != "active" {
+		return nil
+	}
+	if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+		return nil
+	}
+
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return ErrRequiresEmail
+	}
+
+	lc, err := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+		PublicToken: token,
+		Email:       pgtype.Text{String: email, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// Silently succeed to avoid leaking valid addresses.
+			return nil
+		}
+		return fmt.Errorf("get link contact: %w", err)
+	}
+	if lc.UsedAt.Valid {
+		// Code already consumed; do not resend.
+		return nil
+	}
+
+	allowed, err := s.allowEmailCodeSend(ctx, token, email)
+	if err != nil {
+		return fmt.Errorf("rate limit check: %w", err)
+	}
+	if !allowed {
+		return nil
+	}
+
+	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken)
+	if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
+		return fmt.Errorf("send email: %w", err)
+	}
+	return nil
+}
+
+func publicLinkURL(baseURL, token string) string {
+	if baseURL == "" {
+		return "/l/" + token
+	}
+	return strings.TrimRight(baseURL, "/") + "/l/" + token
+}
+
+func resendRateLimitKey(token, email string) string {
+	h := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(email))))
+	return fmt.Sprintf("link:resend:ratelimit:%s:%s", token, hex.EncodeToString(h[:]))
+}
+
+func (s *Service) allowEmailCodeSend(ctx context.Context, token, email string) (bool, error) {
+	if s.redisClient == nil {
+		return false, errors.New("redis is required for email code resend rate limiting")
+	}
+	return s.redisClient.AllowEmailCodeSend(ctx, resendRateLimitKey(token, email), 3, time.Minute)
+}
+
+func (s *Service) verifyLinkContactCode(ctx context.Context, token, email, code string, modern bool) (*db.GetLinkContactByEmailRow, error) {
+	code = strings.TrimSpace(code)
+	if modern && strings.TrimSpace(email) == "" {
+		lc, err := s.queries.GetLinkContactByCode(ctx, db.GetLinkContactByCodeParams{
+			PublicToken: token,
+			AccessCode:  code,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return nil, ErrInvalidEmailCode
+			}
+			return nil, fmt.Errorf("get link contact by code: %w", err)
+		}
+		if lc.UsedAt.Valid {
+			return nil, ErrInvalidEmailCode
+		}
+		return &db.GetLinkContactByEmailRow{
+			ID:           lc.ID,
+			LinkID:       lc.LinkID,
+			ContactID:    lc.ContactID,
+			AccessCode:   lc.AccessCode,
+			CodeSentAt:   lc.CodeSentAt,
+			UsedAt:       lc.UsedAt,
+			CreatedAt:    lc.CreatedAt,
+			ContactEmail: lc.ContactEmail,
+			ContactName:  lc.ContactName,
+		}, nil
+	}
+
+	lc, err := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+		PublicToken: token,
+		Email:       pgtype.Text{String: strings.TrimSpace(email), Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidEmailCode
+		}
+		return nil, fmt.Errorf("get link contact: %w", err)
+	}
+	if lc.UsedAt.Valid {
+		return nil, ErrInvalidEmailCode
+	}
+	if !strings.EqualFold(lc.AccessCode, code) {
+		return nil, ErrInvalidEmailCode
+	}
+	return &lc, nil
+}
+
+func generateNumericCode(length int) (string, error) {
+	const digits = "0123456789"
+	b := make([]byte, length)
+	for i := range b {
+		raw := make([]byte, 1)
+		if _, err := rand.Read(raw); err != nil {
+			return "", err
+		}
+		b[i] = digits[int(raw[0])%len(digits)]
+	}
+	return string(b), nil
 }
 
 // GetByID returns a link scoped to a workspace.
@@ -341,57 +594,66 @@ func normalizePermission(p string) string {
 
 // normalizeSecurityConfig reconciles the legacy single permission_type with the
 // independent boolean flags sent by the new UI. It returns the resolved booleans,
-// normalized email/domain lists, and a display permission_type.
-func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requirePassword, requireNDA bool, emails, domains []string, perm string, err error) {
-	requireEmail = req.RequireEmail
+// normalized email/domain lists, a display permission_type, and whether the config
+// was derived from a legacy permission_type (which still requires the visitor to
+// enter their email).
+func normalizeSecurityConfig(req CreateLinkRequest) (requireEmailVerification, requirePassword, requireNDA bool, emails, domains []string, perm string, legacy bool, err error) {
+	requireEmailVerification = req.RequireEmailVerification
 	requirePassword = req.RequirePassword
 	requireNDA = req.RequireNDA
 	emails = req.AllowedEmails
 	domains = req.AllowedDomains
 	perm = normalizePermission(req.PermissionType)
+	legacyPerm := perm
 
 	// If the caller only sent the legacy permission_type, derive the flags.
-	if !requireEmail && !requirePassword && !requireNDA && len(emails) == 0 && len(domains) == 0 {
+	if !requireEmailVerification && !requirePassword && !requireNDA && len(emails) == 0 && len(domains) == 0 {
 		switch perm {
 		case "email_required":
-			requireEmail = true
+			requireEmailVerification = true
+			legacy = true
 		case "whitelist":
-			requireEmail = true
+			requireEmailVerification = true
+			legacy = true
 		case "password":
 			requirePassword = true
 		case "nda":
-			requireEmail = true
+			requireEmailVerification = true
 			requireNDA = true
+			legacy = true
 		}
 	}
 
-	// Whitelist always requires an email to check against.
-	if len(emails) > 0 || len(domains) > 0 {
-		requireEmail = true
-	}
-	// NDA always requires an email for audit.
-	if requireNDA {
-		requireEmail = true
+	// Whitelist and NDA links always require email verification so the visitor
+	// identity can be checked.
+	if !requireEmailVerification && (len(emails) > 0 || len(domains) > 0 || requireNDA) {
+		requireEmailVerification = true
 	}
 
 	if requirePassword && req.Password == "" {
-		return false, false, false, nil, nil, "", fmt.Errorf("%w: password required", ErrInvalidPermission)
+		return false, false, false, nil, nil, "", false, fmt.Errorf("%w: password required", ErrInvalidPermission)
 	}
 
 	// Derive a canonical permission_type for display/backward compatibility.
+	// Modern email verification is an independent flag; it should not be mapped
+	// to the legacy "email_required" permission_type.
 	if requirePassword {
 		perm = "password"
 	} else if requireNDA {
 		perm = "nda"
 	} else if len(emails) > 0 || len(domains) > 0 {
 		perm = "whitelist"
-	} else if requireEmail {
-		perm = "email_required"
 	} else {
 		perm = "public"
 	}
 
-	return requireEmail, requirePassword, requireNDA, emails, domains, perm, nil
+	// Preserve the legacy display value for clients that explicitly used the
+	// old "email_required" permission_type.
+	if legacy && legacyPerm == "email_required" {
+		perm = "email_required"
+	}
+
+	return requireEmailVerification, requirePassword, requireNDA, emails, domains, perm, legacy, nil
 }
 
 func jsonArrayNotEmpty(b []byte) bool {

@@ -20,6 +20,11 @@ func (m *recordingMailer) SendVerificationEmail(ctx context.Context, to, verific
 	return nil
 }
 
+func (m *recordingMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) error {
+	m.lastTo = to
+	return nil
+}
+
 func TestVerifyEmailByTokenInvalid(t *testing.T) {
 	svc := NewService(nil, NewMemoryTokenStore())
 	ctx := context.Background()

@@ -4,12 +4,13 @@ export interface CreateLinkPayload {
   document_id: string;
   name?: string;
   permission_type?: string;
-  require_email?: boolean;
+  require_email_verification?: boolean;
   require_password?: boolean;
   require_nda?: boolean;
   allowed_emails?: string[];
   allowed_domains?: string[];
   password?: string;
+  contact_ids?: string[];
   expires_at?: string;
   max_access_count?: number;
   download_enabled?: boolean;
@@ -17,22 +18,18 @@ export interface CreateLinkPayload {
 }
 
 function mapPermissionLevel(config: PermissionConfig): string {
-  switch (config.level) {
-    case "low":
-      return "public";
-    case "medium":
-      return "email_required";
-    case "high":
-      if (config.whitelistEnabled && config.whitelist.length > 0) {
-        return "whitelist";
-      }
-      if (config.passwordEnabled && config.password) {
-        return "password";
-      }
-      return "whitelist";
-    default:
-      return "public";
+  if (config.passwordEnabled && config.password) {
+    return "password";
   }
+  if (config.ndaEnabled) {
+    return "nda";
+  }
+  if (config.whitelistEnabled && config.whitelist.length > 0) {
+    return "whitelist";
+  }
+  // Modern email verification is controlled by the independent boolean flag,
+  // not by the legacy permission_type, so it should remain "public".
+  return "public";
 }
 
 export function toCreateLinkPayload(
@@ -50,12 +47,13 @@ export function toCreateLinkPayload(
     document_id: documentId,
     name,
     permission_type: mapPermissionLevel(config),
-    require_email: config.requireEmail || config.whitelistEnabled || config.ndaEnabled,
+    require_email_verification: config.requireEmailVerification || config.whitelistEnabled || config.ndaEnabled,
     require_password: config.passwordEnabled,
     require_nda: config.ndaEnabled,
     allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
     allowed_domains: allowedDomains.length > 0 ? allowedDomains : undefined,
     password: config.passwordEnabled ? config.password : undefined,
+    contact_ids: config.requireEmailVerification && config.contactId ? [config.contactId] : undefined,
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,
   };

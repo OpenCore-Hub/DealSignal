@@ -220,28 +220,39 @@ type IntegrationToken struct {
 }
 
 type Link struct {
-	ID               pgtype.UUID
-	TenantID         pgtype.UUID
-	WorkspaceID      pgtype.UUID
-	DocumentID       pgtype.UUID
-	PublicToken      string
-	Name             pgtype.Text
-	PermissionType   string
-	AllowedEmails    []byte
-	AllowedDomains   []byte
-	PasswordHash     pgtype.Text
-	ExpiresAt        pgtype.Timestamptz
-	MaxAccessCount   pgtype.Int4
-	AccessCount      int32
-	DownloadEnabled  bool
-	WatermarkEnabled bool
-	Status           string
-	CreatedBy        pgtype.UUID
-	CreatedAt        pgtype.Timestamptz
-	UpdatedAt        pgtype.Timestamptz
-	RequireEmail     bool
-	RequirePassword  bool
-	RequireNda       bool
+	ID                       pgtype.UUID
+	TenantID                 pgtype.UUID
+	WorkspaceID              pgtype.UUID
+	DocumentID               pgtype.UUID
+	PublicToken              string
+	Name                     pgtype.Text
+	PermissionType           string
+	AllowedEmails            []byte
+	AllowedDomains           []byte
+	PasswordHash             pgtype.Text
+	ExpiresAt                pgtype.Timestamptz
+	MaxAccessCount           pgtype.Int4
+	AccessCount              int32
+	DownloadEnabled          bool
+	WatermarkEnabled         bool
+	Status                   string
+	CreatedBy                pgtype.UUID
+	CreatedAt                pgtype.Timestamptz
+	UpdatedAt                pgtype.Timestamptz
+	RequireEmail             bool
+	RequirePassword          bool
+	RequireNda               bool
+	RequireEmailVerification bool
+}
+
+type LinkContact struct {
+	ID         pgtype.UUID
+	LinkID     pgtype.UUID
+	ContactID  pgtype.UUID
+	AccessCode string
+	CodeSentAt pgtype.Timestamptz
+	UsedAt     pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
 }
 
 type LinkNdaAgreement struct {

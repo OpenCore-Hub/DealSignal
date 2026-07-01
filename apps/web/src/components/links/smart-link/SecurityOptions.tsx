@@ -9,7 +9,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "react-i18next";
+import { useParams } from "react-router";
 import type { PermissionConfig } from "@/types";
+import { ContactSelector } from "./ContactSelector";
 
 interface SecurityOptionsProps {
   config: PermissionConfig;
@@ -18,6 +20,7 @@ interface SecurityOptionsProps {
 
 export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
   const { t } = useTranslation("links");
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const update = (patch: Partial<PermissionConfig>) => onChange({ ...config, ...patch });
 
   return (
@@ -27,14 +30,26 @@ export function SecurityOptions({ config, onChange }: SecurityOptionsProps) {
         <div className="space-y-3">
           <div className="flex items-center gap-2">
             <Checkbox
-              id="require-email"
-              checked={config.requireEmail}
-              onCheckedChange={(checked) => update({ requireEmail: checked === true })}
+              id="require-email-verification"
+              checked={config.requireEmailVerification}
+              onCheckedChange={(checked) =>
+                update({
+                  requireEmailVerification: checked === true,
+                  contactId: checked === true ? config.contactId : undefined,
+                })
+              }
             />
-            <Label htmlFor="require-email" className="text-sm font-normal">
-              {t("creator.requireEmail")}
+            <Label htmlFor="require-email-verification" className="text-sm font-normal">
+              {t("creator.requireEmailVerification")}
             </Label>
           </div>
+          {config.requireEmailVerification && workspaceSlug && (
+            <ContactSelector
+              workspaceSlug={workspaceSlug}
+              value={config.contactId}
+              onChange={(contactId) => update({ contactId })}
+            />
+          )}
           <div className="flex items-center gap-2">
             <Checkbox
               id="whitelist"

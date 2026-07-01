@@ -56,5 +56,18 @@
     "pageViewShort": "Viewed page {{page}}",
     "revisitShort": "Returned",
     "downloadShort": "Downloaded"
+  },
+  "new": {
+    "title": "New Contact",
+    "subtitle": "Add a contact so you can send them secure, trackable links.",
+    "cardTitle": "Contact Details",
+    "email": "Email",
+    "emailPlaceholder": "contact@example.com",
+    "name": "Name (optional)",
+    "namePlaceholder": "Contact name",
+    "emailRequired": "Email is required.",
+    "created": "Contact created.",
+    "createFailed": "Failed to create contact.",
+    "create": "Create Contact"
   }
 }

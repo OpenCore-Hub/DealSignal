@@ -1,6 +1,7 @@
 import { http, HttpResponse } from "msw";
 import type {
   ActionItem,
+  Contact,
   DealRoom,
   DealRoomDocumentItem,
   DealRoomFolder,
@@ -394,6 +395,7 @@ export const handlers = [
       name?: string;
       permission_type?: string;
       require_email?: boolean;
+      require_email_verification?: boolean;
       require_password?: boolean;
       require_nda?: boolean;
       allowed_emails?: string[];
@@ -409,12 +411,20 @@ export const handlers = [
     const requirePassword = body.require_password || body.permission_type === "password" || !!body.password;
     const requireNDA = body.require_nda || body.permission_type === "nda";
     const hasWhitelist = (body.allowed_emails && body.allowed_emails.length > 0) || (body.allowed_domains && body.allowed_domains.length > 0);
-    const requireEmail = body.require_email || body.permission_type === "email_required" || body.permission_type === "whitelist" || hasWhitelist || requireNDA;
+    const requireEmailVerification =
+      body.require_email_verification ||
+      body.permission_type === "email_required" ||
+      body.permission_type === "whitelist" ||
+      hasWhitelist ||
+      requireNDA ||
+      false;
 
     let permissionType: "public" | "email" | "password" | "nda" = "public";
     if (requirePassword) permissionType = "password";
     else if (requireNDA) permissionType = "nda";
-    else if (requireEmail || hasWhitelist) permissionType = "email";
+    // Modern email verification uses permission_type "public" + require_email_verification.
+    // Only the legacy "email_required" permission type maps to "email".
+    else if (body.permission_type === "email_required" || body.require_email) permissionType = "email";
 
     const newLink = {
       id: generateId("link"),
@@ -428,14 +438,14 @@ export const handlers = [
       isActive: true,
       avgDurationSeconds: 0,
       permissionType,
-      _requireEmail: requireEmail,
+      _requireEmailVerification: requireEmailVerification,
       _requirePassword: requirePassword,
       _requireNDA: requireNDA,
       _password: body.password,
       _allowedEmails: body.allowed_emails ?? [],
       _allowedDomains: body.allowed_domains ?? [],
     } as Link & {
-      _requireEmail?: boolean;
+      _requireEmailVerification?: boolean;
       _requirePassword?: boolean;
       _requireNDA?: boolean;
       _password?: string;
@@ -449,6 +459,25 @@ export const handlers = [
   // Contacts
   http.get("*/api/workspaces/:workspaceSlug/contacts", () => {
     return HttpResponse.json({ data: mockContacts });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/contacts", async ({ request }) => {
+    const body = (await request.json()) as { email: string; name?: string };
+    const newContact: Contact = {
+      id: generateId("contact"),
+      email: body.email,
+      name: body.name ?? "",
+      organization: "",
+      role: "",
+      heatLevel: "cold",
+      score: 0,
+      scoreHistory: [],
+      totalVisits: 0,
+      totalDurationSeconds: 0,
+      viewedDocuments: [],
+    };
+    mockContacts.unshift(newContact);
+    return HttpResponse.json(newContact, { status: 201 });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/contacts/:id", ({ params }) => {
@@ -1056,13 +1085,14 @@ export const handlers = [
   http.post("*/api/v1/public/links/:token", async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as {
       email?: string;
+      email_code?: string;
       password?: string;
       nda_agreed?: boolean;
     };
     const token = params.token as string;
     const link = mockLinks.find((l) => l.shortUrl.endsWith(token)) ?? mockLinks[0];
     const extended = link as Link & {
-      _requireEmail?: boolean;
+      _requireEmailVerification?: boolean;
       _requirePassword?: boolean;
       _requireNDA?: boolean;
       _password?: string;
@@ -1070,18 +1100,37 @@ export const handlers = [
       _allowedDomains?: string[];
     };
 
-    const requiresEmail =
-      extended._requireEmail || extended.permissionType === "email" || extended.permissionType === "nda";
+    // The mock permissionType "email" corresponds to the legacy "email_required" type,
+    // where the visitor must supply both email and code. Modern email verification uses
+    // permissionType "public" + _requireEmailVerification and is code-only.
+    const isLegacyEmailRequired = extended.permissionType === "email";
+    const requiresEmailVerification =
+      extended._requireEmailVerification || isLegacyEmailRequired || extended.permissionType === "nda";
     const requiresPassword = extended._requirePassword || extended.permissionType === "password";
     const requiresNda = extended._requireNDA || extended.permissionType === "nda";
     const hasWhitelist =
       (extended._allowedEmails && extended._allowedEmails.length > 0) ||
       (extended._allowedDomains && extended._allowedDomains.length > 0);
+    // Email is required for legacy email_required, whitelist matching, or NDA records.
+    // Modern email verification (code-only) should not ask for email.
+    const requiresEmail = isLegacyEmailRequired || hasWhitelist || requiresNda;
 
-    if ((requiresEmail || hasWhitelist) && !body.email) {
+    if (requiresEmail && !body.email) {
       return HttpResponse.json(
-        { code: "requires_email", message: "email required", requiresEmail, requiresPassword, requiresNda },
+        { code: "requires_email", message: "email required", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
         { status: 403 }
+      );
+    }
+    if (requiresEmailVerification && !body.email_code) {
+      return HttpResponse.json(
+        { code: "requires_email_code", message: "email code required", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
+        { status: 403 }
+      );
+    }
+    if (requiresEmailVerification && body.email_code !== "123456") {
+      return HttpResponse.json(
+        { code: "invalid_email_code", message: "invalid email code", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
+        { status: 401 }
       );
     }
     if (hasWhitelist) {
@@ -1095,26 +1144,26 @@ export const handlers = [
       });
       if (!allowed) {
         return HttpResponse.json(
-          { code: "whitelist_denied", message: "email not in whitelist", requiresEmail, requiresPassword, requiresNda },
+          { code: "whitelist_denied", message: "email not in whitelist", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
           { status: 403 }
         );
       }
     }
     if (requiresPassword && !body.password) {
       return HttpResponse.json(
-        { code: "requires_password", message: "password required", requiresEmail, requiresPassword, requiresNda },
+        { code: "requires_password", message: "password required", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
         { status: 403 }
       );
     }
     if (requiresPassword && body.password !== extended._password) {
       return HttpResponse.json(
-        { code: "invalid_password", message: "invalid password", requiresEmail, requiresPassword, requiresNda },
+        { code: "invalid_password", message: "invalid password", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
         { status: 401 }
       );
     }
     if (requiresNda && !body.nda_agreed) {
       return HttpResponse.json(
-        { code: "nda_required", message: "nda agreement required", requiresEmail, requiresPassword, requiresNda },
+        { code: "nda_required", message: "nda agreement required", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
         { status: 403 }
       );
     }
@@ -1139,6 +1188,7 @@ export const handlers = [
       },
       visitorId: generateId("visitor"),
       requiresEmail,
+      requiresEmailVerification,
       requiresPassword,
       requiresNda,
       sessionToken: "mock_session_token",

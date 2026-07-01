@@ -53,6 +53,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 // RegisterPublicRoutes mounts public link routes.
 func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.POST("/links/:publicToken", h.Access)
+	r.POST("/links/:publicToken/send-email-code", h.SendEmailVerificationCode)
+	r.POST("/links/:publicToken/resend-code", h.SendEmailVerificationCode)
 	r.POST("/events", h.RecordEvent)
 	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
@@ -138,19 +140,21 @@ func langFromContext(c *gin.Context) string {
 
 // CreateRequest is the JSON body for creating a link.
 type CreateRequest struct {
-	DocumentID       string   `json:"document_id" binding:"required"`
-	Name             string   `json:"name,omitempty"`
-	PermissionType   string   `json:"permission_type,omitempty"`
-	RequireEmail     bool     `json:"require_email,omitempty"`
-	RequirePassword  bool     `json:"require_password,omitempty"`
-	RequireNDA       bool     `json:"require_nda,omitempty"`
-	AllowedEmails    []string `json:"allowed_emails,omitempty"`
-	AllowedDomains   []string `json:"allowed_domains,omitempty"`
-	Password         string   `json:"password,omitempty"`
-	ExpiresAt        *string  `json:"expires_at,omitempty"`
-	MaxAccessCount   *int32   `json:"max_access_count,omitempty"`
-	DownloadEnabled  bool     `json:"download_enabled,omitempty"`
-	WatermarkEnabled bool     `json:"watermark_enabled,omitempty"`
+	DocumentID               string   `json:"document_id" binding:"required"`
+	Name                     string   `json:"name,omitempty"`
+	PermissionType           string   `json:"permission_type,omitempty"`
+	RequireEmail             bool     `json:"require_email,omitempty"`
+	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
+	RequirePassword          bool     `json:"require_password,omitempty"`
+	RequireNDA               bool     `json:"require_nda,omitempty"`
+	AllowedEmails            []string `json:"allowed_emails,omitempty"`
+	AllowedDomains           []string `json:"allowed_domains,omitempty"`
+	Password                 string   `json:"password,omitempty"`
+	ExpiresAt                *string  `json:"expires_at,omitempty"`
+	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
+	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
+	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
+	ContactIDs               []string `json:"contact_ids,omitempty"`
 }
 
 // List returns links for the workspace, optionally filtered by document_id.
@@ -295,19 +299,20 @@ func (h *Handler) Create(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
 	link, err := h.service.CreateLink(c.Request.Context(), userID, workspaceID, CreateLinkRequest{
-		DocumentID:       req.DocumentID,
-		Name:             req.Name,
-		PermissionType:   req.PermissionType,
-		RequireEmail:     req.RequireEmail,
-		RequirePassword:  req.RequirePassword,
-		RequireNDA:       req.RequireNDA,
-		AllowedEmails:    req.AllowedEmails,
-		AllowedDomains:   req.AllowedDomains,
-		Password:         req.Password,
-		ExpiresAt:        expiresAt,
-		MaxAccessCount:   req.MaxAccessCount,
-		DownloadEnabled:  req.DownloadEnabled,
-		WatermarkEnabled: req.WatermarkEnabled,
+		DocumentID:               req.DocumentID,
+		Name:                     req.Name,
+		PermissionType:           req.PermissionType,
+		RequireEmailVerification: req.RequireEmailVerification,
+		RequirePassword:          req.RequirePassword,
+		RequireNDA:               req.RequireNDA,
+		AllowedEmails:            req.AllowedEmails,
+		AllowedDomains:           req.AllowedDomains,
+		Password:                 req.Password,
+		ExpiresAt:                expiresAt,
+		MaxAccessCount:           req.MaxAccessCount,
+		DownloadEnabled:          req.DownloadEnabled,
+		WatermarkEnabled:         req.WatermarkEnabled,
+		ContactIDs:               req.ContactIDs,
 	})
 	if err != nil {
 		switch {
@@ -334,6 +339,7 @@ func (h *Handler) Access(c *gin.Context) {
 	token := c.Param("publicToken")
 	var body struct {
 		Email     string `json:"email"`
+		EmailCode string `json:"email_code"`
 		Password  string `json:"password"`
 		NDAAgreed bool   `json:"nda_agreed"`
 	}
@@ -344,6 +350,7 @@ func (h *Handler) Access(c *gin.Context) {
 
 	result, err := h.service.Access(c.Request.Context(), token, AccessRequest{
 		Email:     body.Email,
+		EmailCode: body.EmailCode,
 		Password:  body.Password,
 		NDAAgreed: body.NDAAgreed,
 		IP:        c.ClientIP(),
@@ -352,19 +359,20 @@ func (h *Handler) Access(c *gin.Context) {
 	if err != nil {
 		// For credential-gate errors, include the link's security flags so the
 		// UI can render all required fields on the first attempt.
-		if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrWhitelistDenied) {
+		if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrWhitelistDenied) {
 			if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
-				requiresEmail, requiresPassword, requiresNda := linkSecurityFlags(link)
+				requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
-				if errors.Is(err, ErrInvalidPassword) {
+				if errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrInvalidEmailCode) {
 					status = http.StatusUnauthorized
 				}
 				c.JSON(status, gin.H{
-					"code":             accessErrorCode(err),
-					"message":          err.Error(),
-					"requiresEmail":    requiresEmail,
-					"requiresPassword": requiresPassword,
-					"requiresNda":      requiresNda,
+					"code":                     accessErrorCode(err),
+					"message":                  err.Error(),
+					"requiresEmail":            requiresEmail,
+					"requiresEmailVerification": requiresEmailVerification,
+					"requiresPassword":         requiresPassword,
+					"requiresNda":              requiresNda,
 				})
 				return
 			}
@@ -373,7 +381,7 @@ func (h *Handler) Access(c *gin.Context) {
 		return
 	}
 
-	if err := h.analytics.RecordLinkOpened(c.Request.Context(), result.Link, result.VisitorID, body.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
+	if err := h.analytics.RecordLinkOpened(c.Request.Context(), result.Link, result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -391,7 +399,7 @@ func (h *Handler) Access(c *gin.Context) {
 
 	session, err := signLinkSession(LinkSession{
 		PublicToken: token,
-		Email:       body.Email,
+		Email:       result.Email,
 		Password:    body.Password,
 		NDAAgreed:   body.NDAAgreed,
 		VisitorID:   result.VisitorID,
@@ -401,6 +409,7 @@ func (h *Handler) Access(c *gin.Context) {
 		return
 	}
 
+	requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
 	c.JSON(http.StatusOK, gin.H{
 		"link": gin.H{
 			"id":               uuidToString(link.ID),
@@ -418,12 +427,39 @@ func (h *Handler) Access(c *gin.Context) {
 			"sourceType": doc.SourceType,
 			"fileSize":   0,
 		},
-		"visitorId":     result.VisitorID,
-		"requiresEmail": link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda",
-		"requiresPassword": link.RequirePassword || link.PermissionType == "password",
-		"requiresNda":   link.RequireNda || link.PermissionType == "nda",
-		"sessionToken":  session,
+		"visitorId":                 result.VisitorID,
+		"requiresEmail":             requiresEmail,
+		"requiresPassword":          requiresPassword,
+		"requiresNda":               requiresNda,
+		"requiresEmailVerification": requiresEmailVerification,
+		"sessionToken":              session,
 	})
+}
+
+// SendEmailVerificationCode sends a one-time access code to the visitor's email.
+func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
+	token := c.Param("publicToken")
+	var body struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	if err := h.service.SendEmailVerificationCode(c.Request.Context(), token, body.Email, h.cfg.ViewerBaseURL); err != nil {
+		if errors.Is(err, ErrLinkNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrRequiresEmail) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // PublicSignedURL returns a presigned image URL for a public link visitor.
@@ -614,12 +650,14 @@ func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
 // password is not exposed in URLs.
 func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 	email := c.Query("email")
+	emailCode := c.Query("email_code")
 	password := c.Query("password")
 	ndaAgreed := c.Query("nda_agreed") == "true"
 
 	if header := c.GetHeader("X-Link-Access"); header != "" {
 		var decoded struct {
 			Email     string `json:"email"`
+			EmailCode string `json:"email_code"`
 			Password  string `json:"password"`
 			NDAAgreed bool   `json:"nda_agreed"`
 		}
@@ -627,6 +665,9 @@ func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 			_ = json.Unmarshal(b, &decoded)
 			if decoded.Email != "" {
 				email = decoded.Email
+			}
+			if decoded.EmailCode != "" {
+				emailCode = decoded.EmailCode
 			}
 			if decoded.Password != "" {
 				password = decoded.Password
@@ -639,6 +680,7 @@ func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 
 	return AccessRequest{
 		Email:     email,
+		EmailCode: emailCode,
 		Password:  password,
 		NDAAgreed: ndaAgreed,
 		IP:        c.ClientIP(),
@@ -662,6 +704,10 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email", "message": err.Error()})
 	case errors.Is(err, ErrWhitelistDenied):
 		c.JSON(http.StatusForbidden, gin.H{"code": "whitelist_denied", "message": err.Error()})
+	case errors.Is(err, ErrRequiresEmailCode):
+		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email_code", "message": err.Error()})
+	case errors.Is(err, ErrInvalidEmailCode):
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_email_code", "message": err.Error()})
 	case errors.Is(err, ErrRequiresPassword):
 		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": err.Error()})
 	case errors.Is(err, ErrInvalidPassword):
@@ -675,10 +721,16 @@ func mapAccessError(c *gin.Context, err error) {
 
 // linkSecurityFlags returns the active gate requirements for a link, taking
 // both the modern boolean flags and legacy permission_type values into account.
-func linkSecurityFlags(link db.Link) (requiresEmail, requiresPassword, requiresNda bool) {
-	requiresEmail = link.RequireEmail || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
+// requiresEmail is kept for backward compatibility and mirrors email verification.
+func linkSecurityFlags(link db.Link) (requiresEmail, requiresEmailVerification, requiresPassword, requiresNda bool) {
+	requiresEmailVerification = link.RequireEmailVerification || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
 	requiresPassword = link.RequirePassword || link.PermissionType == "password"
 	requiresNda = link.RequireNda || link.PermissionType == "nda"
+	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
+	// Modern email-verification links store RequireEmail=false, so the visitor
+	// only enters the access code. Whitelist and NDA still need an explicit email
+	// for domain checks and agreement records.
+	requiresEmail = link.RequireEmail || hasWhitelist || requiresNda
 	return
 }
 
@@ -699,6 +751,10 @@ func accessErrorCode(err error) string {
 		return "requires_email"
 	case errors.Is(err, ErrWhitelistDenied):
 		return "whitelist_denied"
+	case errors.Is(err, ErrRequiresEmailCode):
+		return "requires_email_code"
+	case errors.Is(err, ErrInvalidEmailCode):
+		return "invalid_email_code"
 	case errors.Is(err, ErrRequiresPassword):
 		return "requires_password"
 	case errors.Is(err, ErrInvalidPassword):
@@ -774,10 +830,11 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"status":             link.Status,
 		"createdAt":          link.CreatedAt.Time.Format(time.RFC3339),
 		"isActive":           isActive,
-		"permissionType":     mapPermissionType(link.PermissionType),
-		"downloadEnabled":    link.DownloadEnabled,
-		"watermarkEnabled":   link.WatermarkEnabled,
-		"avgDurationSeconds": int(metrics.AvgDurationSeconds),
+		"permissionType":           mapPermissionType(link.PermissionType),
+		"downloadEnabled":          link.DownloadEnabled,
+		"watermarkEnabled":         link.WatermarkEnabled,
+		"requireEmailVerification": link.RequireEmailVerification,
+		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)

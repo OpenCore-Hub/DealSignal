@@ -127,7 +127,7 @@ func (s *Server) registerRoutes() {
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
-			linkSvc := link.NewService(queries)
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, mailer.New(s.cfg), s.cfg.ViewerBaseURL)
 			analyticsSvc := analytics.NewService(queries)
 			notificationSvc := notification.NewService(queries, s.cfg)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})

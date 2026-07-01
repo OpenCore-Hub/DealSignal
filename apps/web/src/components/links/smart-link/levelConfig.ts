@@ -30,7 +30,7 @@ export const levelConfig: Record<PermissionLevel, LevelInfo> = {
 
 export function calculateFrictionScore(config: PermissionConfig): number {
   let score = 0;
-  if (config.requireEmail) score += 1;
+  if (config.requireEmailVerification) score += 1;
   if (config.whitelistEnabled) score += 3;
   if (config.passwordEnabled) score += 3;
   if (config.watermarkEnabled) score += 1;
@@ -42,7 +42,7 @@ export function calculateFrictionScore(config: PermissionConfig): number {
 
 export function calculateSecurityScore(config: PermissionConfig): number {
   let score = 0;
-  if (config.requireEmail) score += 1;
+  if (config.requireEmailVerification) score += 2;
   if (config.whitelistEnabled) score += 3;
   if (config.passwordEnabled) score += 3;
   if (config.watermarkEnabled) score += 2;

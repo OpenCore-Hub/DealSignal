@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/mail"
 	"sort"
 	"strings"
 	"time"
@@ -21,6 +22,7 @@ var ErrContactNotFound = errors.New("contact not found")
 
 // Querier isolates the database operations required by the contact service.
 type Querier interface {
+	CreateContact(ctx context.Context, arg db.CreateContactParams) (db.Contact, error)
 	FindUnsyncedContactEmails(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.Text, error)
 	UpsertContactByEmail(ctx context.Context, arg db.UpsertContactByEmailParams) (db.Contact, error)
 	GetContactByID(ctx context.Context, arg db.GetContactByIDParams) (db.Contact, error)
@@ -75,6 +77,39 @@ type Activity struct {
 	DurationSeconds int32  `json:"durationSeconds"`
 	Timestamp       string `json:"timestamp"`
 	Description     string `json:"description"`
+}
+
+// CreateContactRequest is the input for manually creating a contact.
+type CreateContactRequest struct {
+	Email string
+	Name  string
+}
+
+// CreateContact creates a new contact in the workspace.
+func (s *Service) CreateContact(ctx context.Context, workspaceID string, req CreateContactRequest) (Contact, error) {
+	wsUUID, err := parseUUID(workspaceID)
+	if err != nil {
+		return Contact{}, err
+	}
+
+	email := strings.TrimSpace(req.Email)
+	if email == "" {
+		return Contact{}, errors.New("email is required")
+	}
+	if _, err := mail.ParseAddress(email); err != nil {
+		return Contact{}, fmt.Errorf("invalid email: %w", err)
+	}
+
+	c, err := s.queries.CreateContact(ctx, db.CreateContactParams{
+		WorkspaceID: wsUUID,
+		Email:       pgtype.Text{String: strings.ToLower(email), Valid: true},
+		Name:        pgtype.Text{String: strings.TrimSpace(req.Name), Valid: req.Name != ""},
+	})
+	if err != nil {
+		return Contact{}, fmt.Errorf("create contact: %w", err)
+	}
+
+	return s.buildContact(c, db.GetContactAggregatesByWorkspaceRow{}, nil), nil
 }
 
 // SyncContacts materializes contact rows for every visitor email seen in the workspace.

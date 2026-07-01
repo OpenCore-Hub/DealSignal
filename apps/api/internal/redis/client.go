@@ -147,6 +147,39 @@ func (c *Client) StoreIdempotencyResponse(ctx context.Context, key string, resp 
 	return c.rdb.Set(ctx, "idempotency:"+key, data, ttl).Err()
 }
 
+// SetEmailCode stores a short-lived email verification code.
+func (c *Client) SetEmailCode(ctx context.Context, key, code string, ttl time.Duration) error {
+	return c.rdb.Set(ctx, key, code, ttl).Err()
+}
+
+// GetEmailCode retrieves an email verification code.
+func (c *Client) GetEmailCode(ctx context.Context, key string) (string, error) {
+	return c.rdb.Get(ctx, key).Result()
+}
+
+// DeleteEmailCode removes an email verification code after successful verification.
+func (c *Client) DeleteEmailCode(ctx context.Context, key string) error {
+	return c.rdb.Del(ctx, key).Err()
+}
+
+// AllowEmailCodeSend returns true if the caller has not exceeded max sends in the window.
+func (c *Client) AllowEmailCodeSend(ctx context.Context, key string, maxSends int, window time.Duration) (bool, error) {
+	pipe := c.rdb.Pipeline()
+	now := time.Now().UnixMilli()
+	windowStart := now - window.Milliseconds()
+	pipe.ZRemRangeByScore(ctx, key, "0", fmt.Sprintf("%d", windowStart))
+	pipe.ZCard(ctx, key)
+	pipe.ZAdd(ctx, key, redis.Z{Score: float64(now), Member: now})
+	pipe.Expire(ctx, key, window)
+	cmds, err := pipe.Exec(ctx)
+	if err != nil {
+		return false, err
+	}
+	countCmd := cmds[1].(*redis.IntCmd)
+	count := countCmd.Val()
+	return count < int64(maxSends), nil
+}
+
 // RateLimitAllow checks whether a key is within its limit using token bucket approximation.
 func (c *Client) RateLimitAllow(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error) {
 	pipe := c.rdb.Pipeline()

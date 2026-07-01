@@ -18,6 +18,7 @@ const DealRoomDetailPage = lazy(() => import("@/routes/deal-rooms/detail").then(
 const NewDealRoomPage = lazy(() => import("@/routes/deal-rooms/new").then((m) => ({ default: m.NewDealRoomPage })));
 const ContactsPage = lazy(() => import("@/routes/contacts").then((m) => ({ default: m.ContactsPage })));
 const ContactDetailPage = lazy(() => import("@/routes/contacts/detail").then((m) => ({ default: m.ContactDetailPage })));
+const NewContactPage = lazy(() => import("@/routes/contacts/new").then((m) => ({ default: m.NewContactPage })));
 const InsightsPage = lazy(() => import("@/routes/insights").then((m) => ({ default: m.InsightsPage })));
 const InsightsOverviewPage = lazy(() => import("@/routes/insights/overview").then((m) => ({ default: m.InsightsOverviewPage })));
 const InsightsPagesPage = lazy(() => import("@/routes/insights/pages").then((m) => ({ default: m.InsightsPagesPage })));
@@ -158,6 +159,7 @@ export const router = createBrowserRouter([
       { path: "deal-rooms/new", element: <NewDealRoomPage /> },
       { path: "deal-rooms/:roomId", element: <DealRoomDetailPage /> },
       { path: "contacts", element: <ContactsPage /> },
+      { path: "contacts/new", element: <NewContactPage /> },
       { path: "contacts/:contactId", element: <ContactDetailPage /> },
       {
         path: "insights",

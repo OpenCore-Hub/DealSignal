@@ -105,6 +105,10 @@ func (n *noopMailer) SendVerificationEmail(ctx context.Context, to, verification
 	return nil
 }
 
+func (n *noopMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) error {
+	return nil
+}
+
 func userFromDB(u db.User) User {
 	return User{
 		ID:            uuidToString(u.ID),

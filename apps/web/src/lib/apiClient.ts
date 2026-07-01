@@ -23,6 +23,7 @@ export interface BaseResponse<T> {
 
 export interface GateErrorFlags {
   requiresEmail?: boolean;
+  requiresEmailVerification?: boolean;
   requiresPassword?: boolean;
   requiresNda?: boolean;
 }
@@ -33,6 +34,7 @@ export class ApiError extends Error {
   requestId: string;
   details?: ApiErrorDetails[];
   requiresEmail?: boolean;
+  requiresEmailVerification?: boolean;
   requiresPassword?: boolean;
   requiresNda?: boolean;
 
@@ -43,6 +45,7 @@ export class ApiError extends Error {
     requestId,
     details,
     requiresEmail,
+    requiresEmailVerification,
     requiresPassword,
     requiresNda,
   }: {
@@ -59,6 +62,7 @@ export class ApiError extends Error {
     this.requestId = requestId;
     this.details = details;
     this.requiresEmail = requiresEmail;
+    this.requiresEmailVerification = requiresEmailVerification;
     this.requiresPassword = requiresPassword;
     this.requiresNda = requiresNda;
   }
@@ -257,6 +261,7 @@ export async function request<T>(
       requestId: body?.request_id ?? requestId,
       details: body?.details,
       requiresEmail: gateFlags?.requiresEmail,
+      requiresEmailVerification: gateFlags?.requiresEmailVerification,
       requiresPassword: gateFlags?.requiresPassword,
       requiresNda: gateFlags?.requiresNda,
     });

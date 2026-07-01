@@ -68,7 +68,8 @@ export interface HeatAlert {
 
 export interface PermissionConfig {
   level: "low" | "medium" | "high";
-  requireEmail: boolean;
+  requireEmailVerification: boolean;
+  contactId?: string;
   whitelistEnabled: boolean;
   whitelist: string[];
   passwordEnabled: boolean;

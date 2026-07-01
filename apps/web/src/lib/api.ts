@@ -65,6 +65,7 @@ export interface SignalFeed {
 
 export interface PublicLinkCredentials {
   email?: string;
+  emailCode?: string;
   password?: string;
   ndaAgreed?: boolean;
   sessionToken?: string;
@@ -94,9 +95,10 @@ function publicAccessHeaders(creds?: PublicLinkCredentials): Record<string, stri
   if (creds.sessionToken) {
     return { "X-Link-Session": creds.sessionToken };
   }
-  if (!creds.email && !creds.password && !creds.ndaAgreed) return undefined;
+  if (!creds.email && !creds.emailCode && !creds.password && !creds.ndaAgreed) return undefined;
   const payload = {
     email: creds.email,
+    email_code: creds.emailCode,
     password: creds.password,
     nda_agreed: creds.ndaAgreed,
   };
@@ -227,12 +229,13 @@ export const api = {
       `/documents/${id}/download-url`
     ),
 
-  accessPublicLink: (token: string, opts?: { email?: string; password?: string; ndaAgreed?: boolean }) =>
+  accessPublicLink: (token: string, opts?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean }) =>
     request<{
       link: { id: string; name?: string; documentId: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean };
       document: { id: string; title: string; pageCount: number; status: string; sourceType: string; fileSize: number };
       visitorId: string;
       requiresEmail: boolean;
+      requiresEmailVerification: boolean;
       requiresPassword: boolean;
       requiresNda: boolean;
       sessionToken: string;
@@ -241,9 +244,17 @@ export const api = {
       skipAuth: true,
       body: JSON.stringify({
         email: opts?.email,
+        email_code: opts?.emailCode,
         password: opts?.password,
         nda_agreed: opts?.ndaAgreed ?? false,
       }),
+    }),
+
+  sendEmailVerificationCode: (token: string, email: string) =>
+    request<void>(undefined, `/v1/public/links/${token}/send-email-code`, {
+      method: "POST",
+      skipAuth: true,
+      body: JSON.stringify({ email }),
     }),
 
   getPublicDocumentPages: (documentId: string, token: string, creds?: PublicLinkCredentials) =>
@@ -360,6 +371,11 @@ export const api = {
 
   getContacts: () =>
     request<{ data: Contact[] }>(getWorkspaceSlug(), "/contacts"),
+  createContact: (payload: { email: string; name?: string }) =>
+    request<Contact>(getWorkspaceSlug(), "/contacts", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
   getContactById: (id: string) =>
     request<Contact>(getWorkspaceSlug(), `/contacts/${id}`),
   getActivitiesByContactId: (contactId: string) =>

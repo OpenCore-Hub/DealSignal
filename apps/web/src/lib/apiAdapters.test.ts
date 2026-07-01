@@ -5,7 +5,7 @@ import type { PermissionConfig } from "@/types";
 describe("toCreateLinkPayload", () => {
   const baseConfig: PermissionConfig = {
     level: "low",
-    requireEmail: false,
+    requireEmailVerification: false,
     whitelistEnabled: false,
     whitelist: [],
     passwordEnabled: false,
@@ -27,8 +27,19 @@ describe("toCreateLinkPayload", () => {
 
   it("maps permission levels correctly", () => {
     expect(toCreateLinkPayload("doc-1", { ...baseConfig, level: "low" }).permission_type).toBe("public");
-    expect(toCreateLinkPayload("doc-1", { ...baseConfig, level: "medium" }).permission_type).toBe("email_required");
-    expect(toCreateLinkPayload("doc-1", { ...baseConfig, level: "high" }).permission_type).toBe("whitelist");
+    expect(
+      toCreateLinkPayload("doc-1", { ...baseConfig, level: "medium", requireEmailVerification: true, contactId: "contact-1" }).permission_type
+    ).toBe("public");
+    expect(
+      toCreateLinkPayload("doc-1", { ...baseConfig, level: "high", whitelistEnabled: true, whitelist: ["a@example.test"] }).permission_type
+    ).toBe("whitelist");
+  });
+
+  it("maps email verification to public permission type with the boolean flag", () => {
+    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, level: "medium", requireEmailVerification: true, contactId: "contact-1" });
+    expect(payload.permission_type).toBe("public");
+    expect(payload.require_email_verification).toBe(true);
+    expect(payload.contact_ids).toEqual(["contact-1"]);
   });
 
   it("maps high + password to password permission type", () => {
@@ -77,17 +88,17 @@ describe("toCreateLinkPayload", () => {
   it("sends require_password when password is enabled", () => {
     const payload = toCreateLinkPayload("doc-1", { ...baseConfig, passwordEnabled: true, password: "secret" });
     expect(payload.require_password).toBe(true);
-    expect(payload.require_email).toBe(false);
+    expect(payload.require_email_verification).toBe(false);
   });
 
-  it("sends require_email for whitelist and require_nda for NDA", () => {
+  it("sends require_email_verification for whitelist and require_nda for NDA", () => {
     const payload = toCreateLinkPayload("doc-1", {
       ...baseConfig,
       whitelistEnabled: true,
       whitelist: ["a@example.test"],
       ndaEnabled: true,
     });
-    expect(payload.require_email).toBe(true);
+    expect(payload.require_email_verification).toBe(true);
     expect(payload.require_nda).toBe(true);
   });
 });

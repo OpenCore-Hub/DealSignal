@@ -36,6 +36,8 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/:id", h.Get)
 	g.GET("/:id/status", h.GetStatus)
 	g.DELETE("/:id", h.Delete)
+	g.POST("/:id/archive", h.Archive)
+	g.POST("/:id/unarchive", h.Unarchive)
 	g.GET("/:id/download-url", h.DownloadURL)
 	g.GET("/:id/pages", h.ListPages)
 	g.POST("/:id/pages/signed-url", h.SignedURL)
@@ -113,7 +115,7 @@ func (h *Handler) GetStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, documentResponse(doc, job))
 }
 
-// List returns documents in the workspace.
+// List returns documents in the workspace, optionally filtered by a view.
 func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	wsUUID, err := uuid.Parse(workspaceID)
@@ -122,28 +124,182 @@ func (h *Handler) List(c *gin.Context) {
 		return
 	}
 
-	docs, err := h.uploadService.queries.ListDocumentsByWorkspace(c.Request.Context(), pgtype.UUID{Bytes: wsUUID, Valid: true})
+	ctx := c.Request.Context()
+	wsPgUUID := pgtype.UUID{Bytes: wsUUID, Valid: true}
+	filter := strings.ToLower(c.Query("filter"))
+
+	out := make([]gin.H, 0)
+	switch filter {
+	case "recent":
+		docs, err := h.uploadService.queries.ListRecentlyAccessedDocumentsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = append(out, documentResponse(docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job))
+		}
+	case "popular":
+		docs, err := h.uploadService.queries.ListPopularDocumentsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = append(out, documentResponse(docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job))
+		}
+	case "unshared":
+		docs, err := h.uploadService.queries.ListUnsharedDocumentsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = append(out, documentResponse(docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job))
+		}
+	case "archived":
+		docs, err := h.uploadService.queries.ListArchivedDocumentsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = append(out, documentResponse(docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job))
+		}
+	default:
+		docs, err := h.uploadService.queries.ListDocumentsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = append(out, documentResponse(docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job))
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
+// Archive marks a document as archived.
+func (h *Handler) Archive(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	tenantID := middleware.TenantIDFrom(c)
+
+	doc, job, err := h.getDocumentAndJob(c)
 	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+
+	if doc.Status == "archived" {
+		c.JSON(http.StatusOK, documentResponse(doc, job))
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := h.uploadService.queries.ArchiveDocument(ctx, db.ArchiveDocumentParams{
+		ID:          doc.ID,
+		WorkspaceID: pgUUID(workspaceID),
+		TenantID:    pgUUID(tenantID),
+	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
 
-	out := make([]gin.H, 0, len(docs))
-	for _, d := range docs {
-		job, _ := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), d.ID)
-		out = append(out, documentResponse(docInfo{
-			ID:         d.ID,
-			Title:      d.Title,
-			SourceType: d.SourceType,
-			StorageKey: d.StorageKey,
-			Status:     d.Status,
-			FileSize:   d.FileSize.Int64,
-			PageCount:  d.PageCount,
-			CreatedAt:  d.CreatedAt,
-			UpdatedAt:  d.UpdatedAt,
-		}, job))
+	doc, job, err = h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	c.JSON(http.StatusOK, documentResponse(doc, job))
+}
+
+// Unarchive restores an archived document to ready status.
+func (h *Handler) Unarchive(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	tenantID := middleware.TenantIDFrom(c)
+
+	doc, job, err := h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+
+	if doc.Status != "archived" {
+		c.JSON(http.StatusOK, documentResponse(doc, job))
+		return
+	}
+
+	ctx := c.Request.Context()
+	if err := h.uploadService.queries.UnarchiveDocument(ctx, db.UnarchiveDocumentParams{
+		ID:          doc.ID,
+		WorkspaceID: pgUUID(workspaceID),
+		TenantID:    pgUUID(tenantID),
+	}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	doc, job, err = h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, documentResponse(doc, job))
 }
 
 // Delete soft-deletes a document.
@@ -369,6 +525,9 @@ func documentResponse(doc docInfo, job db.IngestionJob) gin.H {
 }
 
 func documentStatusDI(doc docInfo, job db.IngestionJob) string {
+	if doc.Status == "archived" {
+		return "archived"
+	}
 	if doc.Status == "failed" || job.Status == "failed" {
 		return "failed"
 	}

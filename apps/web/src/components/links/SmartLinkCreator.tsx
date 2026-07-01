@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
 import { CaretLeft } from "@phosphor-icons/react";
@@ -20,7 +20,7 @@ import type { PermissionLevel } from "./smart-link/types";
 
 const DEFAULT_CONFIG: PermissionConfig = {
   level: "low",
-  requireEmail: false,
+  requireEmailVerification: false,
   whitelistEnabled: false,
   whitelist: [],
   passwordEnabled: false,
@@ -33,6 +33,7 @@ const DEFAULT_CONFIG: PermissionConfig = {
 
 export function SmartLinkCreator() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [searchParams] = useSearchParams();
   const reducedMotion = useReducedMotion();
@@ -40,8 +41,16 @@ export function SmartLinkCreator() {
   const [documents, setDocuments] = useState<import("@/types").Document[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>("");
-  const [level, setLevel] = useState<PermissionLevel>("low");
-  const [config, setConfig] = useState<PermissionConfig>(DEFAULT_CONFIG);
+  const [level, setLevel] = useState<PermissionLevel>(() => {
+    const newContactId = (location.state as { newContactId?: string } | null)?.newContactId;
+    return newContactId ? "medium" : "low";
+  });
+  const [config, setConfig] = useState<PermissionConfig>(() => {
+    const newContactId = (location.state as { newContactId?: string } | null)?.newContactId;
+    return newContactId
+      ? { ...DEFAULT_CONFIG, level: "medium", requireEmailVerification: true, contactId: newContactId }
+      : DEFAULT_CONFIG;
+  });
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -78,7 +87,7 @@ export function SmartLinkCreator() {
     setConfig((prev) => ({
       ...prev,
       level: newLevel,
-      requireEmail: newLevel !== "low" || prev.requireEmail,
+      requireEmailVerification: newLevel !== "low" || prev.requireEmailVerification,
       whitelistEnabled: newLevel === "high" || (newLevel === "medium" && prev.whitelistEnabled),
       passwordEnabled: newLevel === "high" || (newLevel === "medium" && prev.passwordEnabled),
       ndaEnabled: newLevel === "high" || prev.ndaEnabled,
@@ -88,7 +97,7 @@ export function SmartLinkCreator() {
 
   const deriveLevelFromConfig = (next: PermissionConfig): PermissionLevel => {
     if (next.passwordEnabled || next.whitelistEnabled || next.ndaEnabled) return "high";
-    if (next.requireEmail) return "medium";
+    if (next.requireEmailVerification) return "medium";
     return "low";
   };
 
@@ -98,8 +107,20 @@ export function SmartLinkCreator() {
     setConfig({ ...next, level: nextLevel });
   };
 
+  useEffect(() => {
+    const newContactId = (location.state as { newContactId?: string } | null)?.newContactId;
+    if (newContactId) {
+      // Clear the state so a refresh does not re-select it.
+      navigate(location.pathname + location.search, { replace: true, state: {} });
+    }
+  }, [location.state, location.pathname, location.search, navigate]);
+
   const createLink = async () => {
     if (!selectedDocumentId) return;
+    if (config.requireEmailVerification && !config.contactId) {
+      toast.error(t("creator.contactRequired"));
+      return;
+    }
     setCreating(true);
     try {
       const link = await api.createLink(selectedDocumentId, config);

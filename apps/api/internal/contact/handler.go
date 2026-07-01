@@ -22,8 +22,32 @@ func NewHandler(s *Service) *Handler {
 // RegisterRoutes mounts workspace-scoped contact routes.
 func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	r.GET("/contacts", h.List)
+	r.POST("/contacts", h.Create)
 	r.GET("/contacts/:id", h.Get)
 	r.GET("/contacts/:id/activities", h.ListActivities)
+}
+
+// Create creates a new contact in the workspace.
+func (h *Handler) Create(c *gin.Context) {
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+		Name  string `json:"name,omitempty"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	contact, err := h.service.CreateContact(c.Request.Context(), workspaceID, CreateContactRequest{
+		Email: req.Email,
+		Name:  req.Name,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, contact)
 }
 
 // List returns all contacts for the workspace.

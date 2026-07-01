@@ -24,11 +24,12 @@ func TestNormalizePermission(t *testing.T) {
 
 func TestNormalizeSecurityConfig(t *testing.T) {
 	cases := []struct {
-		name                             string
-		req                              CreateLinkRequest
-		wantEmail, wantPassword, wantNDA bool
-		wantPerm                         string
-		wantErr                          bool
+		name                                           string
+		req                                            CreateLinkRequest
+		wantEmailVerification, wantPassword, wantNDA bool
+		wantLegacy                                     bool
+		wantPerm                                       string
+		wantErr                                        bool
 	}{
 		{
 			name:     "legacy public",
@@ -36,16 +37,18 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 			wantPerm: "public",
 		},
 		{
-			name:      "legacy email_required",
-			req:       CreateLinkRequest{PermissionType: "email_required"},
-			wantEmail: true,
-			wantPerm:  "email_required",
+			name:                  "legacy email_required",
+			req:                   CreateLinkRequest{PermissionType: "email_required"},
+			wantEmailVerification: true,
+			wantLegacy:            true,
+			wantPerm:              "email_required",
 		},
 		{
-			name:      "legacy whitelist",
-			req:       CreateLinkRequest{PermissionType: "whitelist", AllowedEmails: []string{"a@b.com"}},
-			wantEmail: true,
-			wantPerm:  "whitelist",
+			name:                  "legacy whitelist",
+			req:                   CreateLinkRequest{PermissionType: "whitelist", AllowedEmails: []string{"a@b.com"}},
+			wantEmailVerification: true,
+			wantLegacy:            false,
+			wantPerm:              "whitelist",
 		},
 		{
 			name:         "legacy password",
@@ -54,26 +57,34 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 			wantPerm:     "password",
 		},
 		{
-			name:      "legacy nda",
-			req:       CreateLinkRequest{PermissionType: "nda"},
-			wantEmail: true,
-			wantNDA:   true,
-			wantPerm:  "nda",
+			name:                  "legacy nda",
+			req:                   CreateLinkRequest{PermissionType: "nda"},
+			wantEmailVerification: true,
+			wantNDA:               true,
+			wantLegacy:            true,
+			wantPerm:              "nda",
 		},
 		{
-			name:         "combined email+password+nda",
-			req:          CreateLinkRequest{RequireEmail: true, RequirePassword: true, RequireNDA: true, Password: "secret"},
-			wantEmail:    true,
-			wantPassword: true,
-			wantNDA:      true,
-			wantPerm:     "password",
+			name:                  "modern email verification only",
+			req:                   CreateLinkRequest{PermissionType: "public", RequireEmailVerification: true},
+			wantEmailVerification: true,
+			wantLegacy:            false,
+			wantPerm:              "public",
 		},
 		{
-			name:      "nda implies email",
-			req:       CreateLinkRequest{RequireNDA: true},
-			wantEmail: true,
-			wantNDA:   true,
-			wantPerm:  "nda",
+			name:                  "combined email verification + password + nda",
+			req:                   CreateLinkRequest{RequireEmailVerification: true, RequirePassword: true, RequireNDA: true, Password: "secret"},
+			wantEmailVerification: true,
+			wantPassword:          true,
+			wantNDA:               true,
+			wantPerm:              "password",
+		},
+		{
+			name:                  "nda implies email verification",
+			req:                   CreateLinkRequest{RequireNDA: true},
+			wantEmailVerification: true,
+			wantNDA:               true,
+			wantPerm:              "nda",
 		},
 		{
 			name:    "password required but missing",
@@ -83,7 +94,7 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotEmail, gotPassword, gotNDA, _, _, gotPerm, err := normalizeSecurityConfig(tc.req)
+			gotEmailVerification, gotPassword, gotNDA, _, _, gotPerm, gotLegacy, err := normalizeSecurityConfig(tc.req)
 			if tc.wantErr {
 				if err == nil {
 					t.Fatalf("expected error")
@@ -93,9 +104,9 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if gotEmail != tc.wantEmail || gotPassword != tc.wantPassword || gotNDA != tc.wantNDA || gotPerm != tc.wantPerm {
-				t.Fatalf("got email=%v password=%v nda=%v perm=%q, want email=%v password=%v nda=%v perm=%q",
-					gotEmail, gotPassword, gotNDA, gotPerm, tc.wantEmail, tc.wantPassword, tc.wantNDA, tc.wantPerm)
+			if gotEmailVerification != tc.wantEmailVerification || gotPassword != tc.wantPassword || gotNDA != tc.wantNDA || gotPerm != tc.wantPerm || gotLegacy != tc.wantLegacy {
+				t.Fatalf("got emailVerification=%v password=%v nda=%v perm=%q legacy=%v, want emailVerification=%v password=%v nda=%v perm=%q legacy=%v",
+					gotEmailVerification, gotPassword, gotNDA, gotPerm, gotLegacy, tc.wantEmailVerification, tc.wantPassword, tc.wantNDA, tc.wantPerm, tc.wantLegacy)
 			}
 		})
 	}

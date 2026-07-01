@@ -563,6 +563,31 @@ func (q *Queries) CreateChunkWithEmbedding(ctx context.Context, arg CreateChunkW
 	return err
 }
 
+const createContact = `-- name: CreateContact :one
+INSERT INTO contacts (workspace_id, email, name)
+VALUES ($1, $2, NULLIF($3, ''))
+RETURNING id, workspace_id, email, name, created_at
+`
+
+type CreateContactParams struct {
+	WorkspaceID pgtype.UUID
+	Email       pgtype.Text
+	Name        interface{}
+}
+
+func (q *Queries) CreateContact(ctx context.Context, arg CreateContactParams) (Contact, error) {
+	row := q.db.QueryRow(ctx, createContact, arg.WorkspaceID, arg.Email, arg.Name)
+	var i Contact
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createDeal = `-- name: CreateDeal :one
 INSERT INTO deals (workspace_id, contact_id, name, stage, amount, currency, status, close_date)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -891,33 +916,34 @@ INSERT INTO links (
     tenant_id, workspace_id, document_id, public_token, name, permission_type,
     allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
     download_enabled, watermark_enabled, status, created_by,
-    require_email, require_password, require_nda
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+    require_email, require_password, require_nda, require_email_verification
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-          updated_at, require_email, require_password, require_nda
+          updated_at, require_email, require_password, require_nda, require_email_verification
 `
 
 type CreateLinkParams struct {
-	TenantID         pgtype.UUID
-	WorkspaceID      pgtype.UUID
-	DocumentID       pgtype.UUID
-	PublicToken      string
-	Name             pgtype.Text
-	PermissionType   string
-	AllowedEmails    []byte
-	AllowedDomains   []byte
-	PasswordHash     pgtype.Text
-	ExpiresAt        pgtype.Timestamptz
-	MaxAccessCount   pgtype.Int4
-	DownloadEnabled  bool
-	WatermarkEnabled bool
-	Status           string
-	CreatedBy        pgtype.UUID
-	RequireEmail     bool
-	RequirePassword  bool
-	RequireNda       bool
+	TenantID                 pgtype.UUID
+	WorkspaceID              pgtype.UUID
+	DocumentID               pgtype.UUID
+	PublicToken              string
+	Name                     pgtype.Text
+	PermissionType           string
+	AllowedEmails            []byte
+	AllowedDomains           []byte
+	PasswordHash             pgtype.Text
+	ExpiresAt                pgtype.Timestamptz
+	MaxAccessCount           pgtype.Int4
+	DownloadEnabled          bool
+	WatermarkEnabled         bool
+	Status                   string
+	CreatedBy                pgtype.UUID
+	RequireEmail             bool
+	RequirePassword          bool
+	RequireNda               bool
+	RequireEmailVerification bool
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -940,6 +966,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.RequireEmail,
 		arg.RequirePassword,
 		arg.RequireNda,
+		arg.RequireEmailVerification,
 	)
 	var i Link
 	err := row.Scan(
@@ -965,8 +992,25 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.RequireEmail,
 		&i.RequirePassword,
 		&i.RequireNda,
+		&i.RequireEmailVerification,
 	)
 	return i, err
+}
+
+const createLinkContact = `-- name: CreateLinkContact :exec
+INSERT INTO link_contacts (link_id, contact_id, access_code)
+VALUES ($1, $2, $3)
+`
+
+type CreateLinkContactParams struct {
+	LinkID     pgtype.UUID
+	ContactID  pgtype.UUID
+	AccessCode string
+}
+
+func (q *Queries) CreateLinkContact(ctx context.Context, arg CreateLinkContactParams) error {
+	_, err := q.db.Exec(ctx, createLinkContact, arg.LinkID, arg.ContactID, arg.AccessCode)
+	return err
 }
 
 const createLinkNDAAgreement = `-- name: CreateLinkNDAAgreement :one
@@ -2355,7 +2399,7 @@ const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda
+       updated_at, require_email, require_password, require_nda, require_email_verification
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -2392,6 +2436,7 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.RequireEmail,
 		&i.RequirePassword,
 		&i.RequireNda,
+		&i.RequireEmailVerification,
 	)
 	return i, err
 }
@@ -2400,7 +2445,7 @@ const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda
+       updated_at, require_email, require_password, require_nda, require_email_verification
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -2432,8 +2477,148 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.RequireEmail,
 		&i.RequirePassword,
 		&i.RequireNda,
+		&i.RequireEmailVerification,
 	)
 	return i, err
+}
+
+const getLinkContactByCode = `-- name: GetLinkContactByCode :one
+SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       c.email AS contact_email, c.name AS contact_name
+FROM link_contacts lc
+JOIN links l ON l.id = lc.link_id
+JOIN contacts c ON c.id = lc.contact_id
+WHERE l.public_token = $1 AND lc.access_code = $2
+LIMIT 1
+`
+
+type GetLinkContactByCodeParams struct {
+	PublicToken string
+	AccessCode  string
+}
+
+type GetLinkContactByCodeRow struct {
+	ID           pgtype.UUID
+	LinkID       pgtype.UUID
+	ContactID    pgtype.UUID
+	AccessCode   string
+	CodeSentAt   pgtype.Timestamptz
+	UsedAt       pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	ContactEmail pgtype.Text
+	ContactName  pgtype.Text
+}
+
+func (q *Queries) GetLinkContactByCode(ctx context.Context, arg GetLinkContactByCodeParams) (GetLinkContactByCodeRow, error) {
+	row := q.db.QueryRow(ctx, getLinkContactByCode, arg.PublicToken, arg.AccessCode)
+	var i GetLinkContactByCodeRow
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.ContactID,
+		&i.AccessCode,
+		&i.CodeSentAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+		&i.ContactEmail,
+		&i.ContactName,
+	)
+	return i, err
+}
+
+const getLinkContactByEmail = `-- name: GetLinkContactByEmail :one
+SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       c.email AS contact_email, c.name AS contact_name
+FROM link_contacts lc
+JOIN links l ON l.id = lc.link_id
+JOIN contacts c ON c.id = lc.contact_id
+WHERE l.public_token = $1 AND c.email = $2
+LIMIT 1
+`
+
+type GetLinkContactByEmailParams struct {
+	PublicToken string
+	Email       pgtype.Text
+}
+
+type GetLinkContactByEmailRow struct {
+	ID           pgtype.UUID
+	LinkID       pgtype.UUID
+	ContactID    pgtype.UUID
+	AccessCode   string
+	CodeSentAt   pgtype.Timestamptz
+	UsedAt       pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	ContactEmail pgtype.Text
+	ContactName  pgtype.Text
+}
+
+func (q *Queries) GetLinkContactByEmail(ctx context.Context, arg GetLinkContactByEmailParams) (GetLinkContactByEmailRow, error) {
+	row := q.db.QueryRow(ctx, getLinkContactByEmail, arg.PublicToken, arg.Email)
+	var i GetLinkContactByEmailRow
+	err := row.Scan(
+		&i.ID,
+		&i.LinkID,
+		&i.ContactID,
+		&i.AccessCode,
+		&i.CodeSentAt,
+		&i.UsedAt,
+		&i.CreatedAt,
+		&i.ContactEmail,
+		&i.ContactName,
+	)
+	return i, err
+}
+
+const getLinkContactsByPublicToken = `-- name: GetLinkContactsByPublicToken :many
+SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       c.email AS contact_email, c.name AS contact_name
+FROM link_contacts lc
+JOIN links l ON l.id = lc.link_id
+JOIN contacts c ON c.id = lc.contact_id
+WHERE l.public_token = $1
+`
+
+type GetLinkContactsByPublicTokenRow struct {
+	ID           pgtype.UUID
+	LinkID       pgtype.UUID
+	ContactID    pgtype.UUID
+	AccessCode   string
+	CodeSentAt   pgtype.Timestamptz
+	UsedAt       pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	ContactEmail pgtype.Text
+	ContactName  pgtype.Text
+}
+
+func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken string) ([]GetLinkContactsByPublicTokenRow, error) {
+	rows, err := q.db.Query(ctx, getLinkContactsByPublicToken, publicToken)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkContactsByPublicTokenRow
+	for rows.Next() {
+		var i GetLinkContactsByPublicTokenRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.ContactID,
+			&i.AccessCode,
+			&i.CodeSentAt,
+			&i.UsedAt,
+			&i.CreatedAt,
+			&i.ContactEmail,
+			&i.ContactName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLinkPageViewMetrics = `-- name: GetLinkPageViewMetrics :one
@@ -3946,7 +4131,7 @@ const listLinksByDocument = `-- name: ListLinksByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda
+       updated_at, require_email, require_password, require_nda, require_email_verification
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -3989,6 +4174,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.RequireEmail,
 			&i.RequirePassword,
 			&i.RequireNda,
+			&i.RequireEmailVerification,
 		); err != nil {
 			return nil, err
 		}
@@ -4004,7 +4190,7 @@ const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda
+       updated_at, require_email, require_password, require_nda, require_email_verification
 FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -4042,6 +4228,7 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.RequireEmail,
 			&i.RequirePassword,
 			&i.RequireNda,
+			&i.RequireEmailVerification,
 		); err != nil {
 			return nil, err
 		}
@@ -4390,7 +4577,7 @@ const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda
+       updated_at, require_email, require_password, require_nda, require_email_verification
 FROM links
 WHERE workspace_id = $1 AND status != 'deleted'
 ORDER BY created_at DESC
@@ -4434,6 +4621,7 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.RequireEmail,
 			&i.RequirePassword,
 			&i.RequireNda,
+			&i.RequireEmailVerification,
 		); err != nil {
 			return nil, err
 		}
@@ -4564,7 +4752,7 @@ SELECT
     rm.status,
     rm.created_at,
     rm.updated_at,
-    COALESCE(u.name, '')::text AS user_name
+    COALESCE(u.email, '')::text AS user_name
 FROM room_members rm
 LEFT JOIN users u ON u.id = rm.user_id
 WHERE rm.room_id = $1
@@ -5131,6 +5319,17 @@ func (q *Queries) MarkInvitationUsed(ctx context.Context, token pgtype.UUID) err
 	return err
 }
 
+const markLinkContactCodeUsed = `-- name: MarkLinkContactCodeUsed :exec
+UPDATE link_contacts
+SET used_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) MarkLinkContactCodeUsed(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markLinkContactCodeUsed, id)
+	return err
+}
+
 const markNotificationFailed = `-- name: MarkNotificationFailed :exec
 UPDATE notifications
 SET attempts = attempts + 1,
@@ -5606,7 +5805,7 @@ func (q *Queries) UpdateChunkSearchVector(ctx context.Context, id pgtype.UUID) e
 
 const updateDealRoomDocumentFolder = `-- name: UpdateDealRoomDocumentFolder :exec
 UPDATE deal_room_documents
-SET folder_path = $1, updated_at = now()
+SET folder_path = $1
 WHERE id = $2 AND room_id = $3
 `
 
@@ -5623,7 +5822,7 @@ func (q *Queries) UpdateDealRoomDocumentFolder(ctx context.Context, arg UpdateDe
 
 const updateDealRoomDocumentSortOrder = `-- name: UpdateDealRoomDocumentSortOrder :exec
 UPDATE deal_room_documents
-SET sort_order = $1, updated_at = now()
+SET sort_order = $1
 WHERE id = $2 AND room_id = $3
 `
 
@@ -5712,6 +5911,22 @@ func (q *Queries) UpdateIngestionJob(ctx context.Context, arg UpdateIngestionJob
 	return err
 }
 
+const updateLinkContactAccessCode = `-- name: UpdateLinkContactAccessCode :exec
+UPDATE link_contacts
+SET access_code = $2, code_sent_at = now(), used_at = NULL
+WHERE id = $1
+`
+
+type UpdateLinkContactAccessCodeParams struct {
+	ID         pgtype.UUID
+	AccessCode string
+}
+
+func (q *Queries) UpdateLinkContactAccessCode(ctx context.Context, arg UpdateLinkContactAccessCodeParams) error {
+	_, err := q.db.Exec(ctx, updateLinkContactAccessCode, arg.ID, arg.AccessCode)
+	return err
+}
+
 const updateLinkStatus = `-- name: UpdateLinkStatus :one
 UPDATE links
 SET status = $1, updated_at = now()
@@ -5719,7 +5934,7 @@ WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda
+       updated_at, require_email, require_password, require_nda, require_email_verification
 `
 
 type UpdateLinkStatusParams struct {
@@ -5754,6 +5969,7 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.RequireEmail,
 		&i.RequirePassword,
 		&i.RequireNda,
+		&i.RequireEmailVerification,
 	)
 	return i, err
 }

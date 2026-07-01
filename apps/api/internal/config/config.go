@@ -46,6 +46,8 @@ type Config struct {
 	SMTPUser            string
 	SMTPPass            string
 	SMTPFrom            string
+	ResendAPIKey        string
+	ResendFromEmail     string
 	SlackClientID       string
 	SlackClientSecret   string
 	HubSpotClientID     string
@@ -97,12 +99,14 @@ func Load() (*Config, error) {
 		CertProvider:        getEnv("CERT_PROVIDER", "noop"),
 		AppBaseURL:          getEnv("APP_BASE_URL", "http://localhost:8080"),
 		FrontendURL:         getEnv("FRONTEND_URL", "http://localhost:5173"),
-		ViewerBaseURL:       getEnv("VIEWER_BASE_URL", ""),
+		ViewerBaseURL:       getEnv("VIEWER_BASE_URL", getEnv("FRONTEND_URL", "http://localhost:5173")),
 		SMTPHost:            os.Getenv("SMTP_HOST"),
 		SMTPPort:            getEnv("SMTP_PORT", "587"),
 		SMTPUser:            os.Getenv("SMTP_USER"),
 		SMTPPass:            os.Getenv("SMTP_PASS"),
 		SMTPFrom:            os.Getenv("SMTP_FROM"),
+		ResendAPIKey:        os.Getenv("RESEND_API_KEY"),
+		ResendFromEmail:     getEnv("RESEND_FROM_EMAIL", getEnv("SMTP_FROM", "noreply@dealsignal.com")),
 		SlackClientID:       os.Getenv("SLACK_CLIENT_ID"),
 		SlackClientSecret:   os.Getenv("SLACK_CLIENT_SECRET"),
 		HubSpotClientID:     os.Getenv("HUBSPOT_CLIENT_ID"),

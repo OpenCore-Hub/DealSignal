@@ -24,6 +24,20 @@ type mockContactQuerier struct {
 	viewedDocs       []string
 }
 
+func (m *mockContactQuerier) CreateContact(_ context.Context, arg db.CreateContactParams) (db.Contact, error) {
+	var name pgtype.Text
+	if v, ok := arg.Name.(pgtype.Text); ok {
+		name = v
+	}
+	return db.Contact{
+		ID:          pgtype.UUID{Bytes: uuid.New(), Valid: true},
+		WorkspaceID: arg.WorkspaceID,
+		Email:       arg.Email,
+		Name:        name,
+		CreatedAt:   pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}, nil
+}
+
 func (m *mockContactQuerier) FindUnsyncedContactEmails(_ context.Context, _ pgtype.UUID) ([]pgtype.Text, error) {
 	return m.unsyncedEmails, nil
 }

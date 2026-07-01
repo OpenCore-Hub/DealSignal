@@ -41,8 +41,8 @@ export function LinkPreview({
         </div>
         <div className="space-y-2 text-sm">
           <div className="flex items-center gap-2">
-            <Envelope size={16} className={config.requireEmail ? "text-success-500" : "text-muted-foreground"} />
-            <span className={config.requireEmail ? "" : "text-muted-foreground"}>{t("creator.featureEmail")}</span>
+            <Envelope size={16} className={config.requireEmailVerification ? "text-success-500" : "text-muted-foreground"} />
+            <span className={config.requireEmailVerification ? "" : "text-muted-foreground"}>{t("creator.featureEmailVerification")}</span>
           </div>
           <div className="flex items-center gap-2">
             <Lock size={16} className={config.passwordEnabled ? "text-success-500" : "text-muted-foreground"} />
