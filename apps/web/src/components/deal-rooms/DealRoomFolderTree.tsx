@@ -450,7 +450,6 @@ export function DealRoomFolderTree({
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    disabled={uploadingFolder === node.folder.path}
                     onClick={(e) => {
                       e.stopPropagation();
                       startFolderUpload(node.folder.path);

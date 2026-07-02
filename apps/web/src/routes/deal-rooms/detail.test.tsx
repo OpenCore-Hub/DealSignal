@@ -287,5 +287,7 @@ describe("DealRoomDetailPage", () => {
     expect(within(dashboardCard).getByText("Uploaded File.pdf")).toBeInTheDocument();
     expect(within(dashboardCard).getByText("01 Pitch Deck")).toBeInTheDocument();
     expect(within(dashboardCard).getByText("Uploaded")).toBeInTheDocument();
+    // Refetch is triggered so the folder tree will reflect the new document.
+    expect(getDealRoomByIdMock).toHaveBeenCalledTimes(2);
   });
 });

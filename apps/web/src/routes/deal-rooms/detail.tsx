@@ -147,7 +147,7 @@ export function DealRoomDetailPage() {
         prev.map((item) => (item.id === id ? { ...item, status: "done", progress: 100 } : item))
       );
       toast.success(t("documents.uploadedAndAdded", { title: doc.title }));
-      refetch();
+      await refetch();
     } catch (e) {
       clearInterval(interval);
       setUploadItems((prev) =>

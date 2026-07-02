@@ -4,7 +4,7 @@ export interface AsyncDataState<T> {
   data: T | null;
   loading: boolean;
   error: string | null;
-  refetch: () => void;
+  refetch: () => Promise<void>;
 }
 
 /**
@@ -20,8 +20,12 @@ export function useAsyncData<T>(
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const cancelledRef = useRef(false);
+  const loadPromiseRef = useRef<Promise<void> | null>(null);
 
-  const refetch = useCallback(() => setTick((t) => t + 1), []);
+  const refetch = useCallback(() => {
+    setTick((t) => t + 1);
+    return loadPromiseRef.current ?? Promise.resolve();
+  }, []);
 
   useEffect(() => {
     cancelledRef.current = false;
@@ -45,7 +49,8 @@ export function useAsyncData<T>(
       }
     }
 
-    load();
+    const promise = load();
+    loadPromiseRef.current = promise;
 
     return () => {
       cancelledRef.current = true;
