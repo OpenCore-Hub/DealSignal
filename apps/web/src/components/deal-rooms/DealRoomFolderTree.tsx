@@ -609,12 +609,14 @@ export function DealRoomFolderTree({
             <DialogDescription>{movingDoc?.title}</DialogDescription>
           </DialogHeader>
           <Select value={targetFolder} onValueChange={(v) => v && setTargetFolder(v)}>
-            <SelectTrigger>
-              <SelectValue />
+            <SelectTrigger className="w-full min-h-11 px-3 text-base">
+              <SelectValue>
+                {(value: string) => folders.find((f) => f.path === value)?.name ?? value}
+              </SelectValue>
             </SelectTrigger>
-            <SelectContent>
+            <SelectContent className="max-h-[50vh]">
               {folders.map((f) => (
-                <SelectItem key={f.path} value={f.path}>
+                <SelectItem key={f.path} value={f.path} className="py-2.5 text-base">
                   {f.name}
                 </SelectItem>
               ))}
