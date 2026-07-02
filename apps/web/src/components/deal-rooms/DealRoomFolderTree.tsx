@@ -617,6 +617,8 @@ export function DealRoomFolderTree({
             <SelectContent
               side="bottom"
               align="start"
+              sideOffset={4}
+              alignItemWithTrigger={false}
               collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
               className="max-h-[50vh]"
             >
