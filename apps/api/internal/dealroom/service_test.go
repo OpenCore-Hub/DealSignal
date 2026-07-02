@@ -99,11 +99,14 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list folders: %v", err)
 	}
-	if len(folders) != 5 {
-		t.Fatalf("expected 5 template folders, got %d", len(folders))
+	if len(folders) != 6 {
+		t.Fatalf("expected 6 folders (root + 5 template), got %d", len(folders))
 	}
-	if folders[0].Path != "/01-pitch-deck" {
-		t.Fatalf("expected first folder path /01-pitch-deck, got %s", folders[0].Path)
+	if folders[0].Path != "/" {
+		t.Fatalf("expected first folder path /, got %s", folders[0].Path)
+	}
+	if folders[1].Path != "/01-pitch-deck" {
+		t.Fatalf("expected second folder path /01-pitch-deck, got %s", folders[1].Path)
 	}
 }
 
@@ -133,6 +136,59 @@ func TestCreateRoomCustomHasRootFolder(t *testing.T) {
 	}
 	if len(folders) != 1 || folders[0].Path != "/" {
 		t.Fatalf("expected root folder only, got %v", folders)
+	}
+}
+
+func TestTemplateRoomRootDocumentVisible(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil)
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:         "seed-room",
+		Name:         "Seed Room",
+		TemplateType: "tmpl_seed",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "Root Doc",
+		SourceType:  "docx",
+		Status:      "ready",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+
+	docs, err := svc.GetRoomDocuments(context.Background(), roomID, wsID, ownerID)
+	if err != nil {
+		t.Fatalf("get room documents: %v", err)
+	}
+	var rootDocs []RoomDocument
+	for _, fd := range docs {
+		if fd.Folder.Path == "/" {
+			rootDocs = fd.Documents
+		}
+	}
+	if len(rootDocs) != 1 {
+		t.Fatalf("expected 1 document under root, got %d", len(rootDocs))
+	}
+	if rootDocs[0].DocumentID != docID {
+		t.Fatalf("expected root document id %s, got %s", docID, rootDocs[0].DocumentID)
 	}
 }
 
@@ -470,8 +526,8 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get room detail: %v", err)
 	}
-	if len(detail.Folders) != 5 {
-		t.Fatalf("expected 5 folders, got %d", len(detail.Folders))
+	if len(detail.Folders) != 6 {
+		t.Fatalf("expected 6 folders (root + 5 template), got %d", len(detail.Folders))
 	}
 	if len(detail.Members) != 2 {
 		t.Fatalf("expected 2 members, got %d", len(detail.Members))
@@ -1261,5 +1317,90 @@ func TestDeleteFolderHandlerDecodesEncodedPath(t *testing.T) {
 	}
 	if folderExists(folders, "/docs") {
 		t.Fatalf("expected folder /docs to be deleted, got %v", folders)
+	}
+}
+
+func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil)
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "handler-room",
+		Name: "Handler Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "Root Doc",
+		SourceType:  "docx",
+		Status:      "ready",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+
+	h := NewHandler(svc)
+	router := gin.New()
+	ws := router.Group("/workspaces/:workspaceSlug", func(c *gin.Context) {
+		c.Set("userID", ownerID)
+		c.Set("workspaceID", wsID)
+		c.Next()
+	})
+	h.RegisterWorkspaceRoutes(ws)
+
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/test-workspace/deal-rooms/"+roomID+"/documents", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+
+	var payload struct {
+		Data []struct {
+			Folder    interface{} `json:"folder"`
+			Documents []struct {
+				DocumentID string `json:"document_id"`
+			} `json:"documents"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	var found bool
+	for _, fd := range payload.Data {
+		folderStr, ok := fd.Folder.(string)
+		if !ok {
+			t.Fatalf("expected folder to be a string path, got %T: %v", fd.Folder, fd.Folder)
+		}
+		if folderStr == "/" {
+			found = true
+			if len(fd.Documents) != 1 {
+				t.Fatalf("expected 1 document under root, got %d", len(fd.Documents))
+			}
+			if fd.Documents[0].DocumentID != docID {
+				t.Fatalf("expected document id %s, got %s", docID, fd.Documents[0].DocumentID)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("expected root folder docs in response, got %v", payload.Data)
 	}
 }

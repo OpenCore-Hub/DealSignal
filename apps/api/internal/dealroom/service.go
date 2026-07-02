@@ -152,9 +152,8 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	folders := defaultFolders()
 	if req.TemplateType != "" {
 		if tmplFolders := templateFolders(req.TemplateType); len(tmplFolders) > 0 {
-			folders = make([]Folder, len(tmplFolders))
-			for i, f := range tmplFolders {
-				folders[i] = Folder(f)
+			for _, f := range tmplFolders {
+				folders = append(folders, Folder(f))
 			}
 		}
 	}
@@ -1201,6 +1200,10 @@ func (s *Service) loadFolders(room db.DealRoom) ([]Folder, error) {
 	}
 	if len(settings.Folders) == 0 {
 		return defaultFolders(), nil
+	}
+	// Ensure the root folder always exists so documents uploaded to "/" are visible.
+	if !folderExists(settings.Folders, "/") {
+		settings.Folders = append(defaultFolders(), settings.Folders...)
 	}
 	return settings.Folders, nil
 }

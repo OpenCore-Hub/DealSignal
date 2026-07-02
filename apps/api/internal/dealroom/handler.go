@@ -737,7 +737,7 @@ func folderDocsResponse(fd FolderDocs) gin.H {
 		docs[i] = documentMetaResponse(d)
 	}
 	return gin.H{
-		"folder":     folderResponse(fd.Folder),
+		"folder":     fd.Folder.Path,
 		"permission": fd.Permission,
 		"documents":  docs,
 	}
@@ -749,19 +749,6 @@ func folderDocsListResponse(list []FolderDocs) []gin.H {
 		out[i] = folderDocsResponse(fd)
 	}
 	return out
-}
-
-func publicFolderResponse(f Folder, docs []db.DealRoomDocument) gin.H {
-	children := make([]gin.H, 0)
-	for _, d := range docs {
-		if d.FolderPath == f.Path {
-			children = append(children, documentResponse(d))
-		}
-	}
-	return gin.H{
-		"folder":    folderResponse(f),
-		"documents": children,
-	}
 }
 
 func memberDetailResponse(m RoomMemberDetail) gin.H {

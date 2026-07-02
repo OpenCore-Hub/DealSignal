@@ -20,11 +20,13 @@ export function useAsyncData<T>(
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
   const cancelledRef = useRef(false);
-  const loadPromiseRef = useRef<Promise<void> | null>(null);
+  const pendingResolvesRef = useRef<((value: void | PromiseLike<void>) => void)[]>([]);
 
   const refetch = useCallback(() => {
     setTick((t) => t + 1);
-    return loadPromiseRef.current ?? Promise.resolve();
+    return new Promise<void>((resolve) => {
+      pendingResolvesRef.current.push(resolve);
+    });
   }, []);
 
   useEffect(() => {
@@ -46,11 +48,15 @@ export function useAsyncData<T>(
         if (!cancelledRef.current) {
           setLoading(false);
         }
+        const resolves = pendingResolvesRef.current;
+        pendingResolvesRef.current = [];
+        for (const resolve of resolves) {
+          resolve();
+        }
       }
     }
 
-    const promise = load();
-    loadPromiseRef.current = promise;
+    load();
 
     return () => {
       cancelledRef.current = true;
