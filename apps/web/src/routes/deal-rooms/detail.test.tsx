@@ -232,7 +232,7 @@ describe("DealRoomDetailPage", () => {
     // Trigger the hidden file input by clicking the upload icon.
     fireEvent.click(uploadButton);
 
-    const fileInput = document.querySelector("[data-testid='folder-upload-input']") as HTMLInputElement;
+    const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
     expect(fileInput).toBeInTheDocument();
 
     const file = new File(["pdf content"], "Uploaded File.pdf", { type: "application/pdf" });
@@ -271,7 +271,7 @@ describe("DealRoomDetailPage", () => {
     const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
     fireEvent.click(uploadButton);
 
-    const fileInput = document.querySelector("[data-testid='folder-upload-input']") as HTMLInputElement;
+    const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
     const file = new File(["pdf content"], "Uploaded File.pdf", { type: "application/pdf" });
     await act(async () => {
       fireEvent.change(fileInput, { target: { files: [file] } });
