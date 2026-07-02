@@ -614,7 +614,12 @@ export function DealRoomFolderTree({
                 {(value: string) => folders.find((f) => f.path === value)?.name ?? value}
               </SelectValue>
             </SelectTrigger>
-            <SelectContent className="max-h-[50vh]">
+            <SelectContent
+              side="bottom"
+              align="start"
+              collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
+              className="max-h-[50vh]"
+            >
               {folders.map((f) => (
                 <SelectItem key={f.path} value={f.path} className="py-2.5 text-base">
                   {f.name}
