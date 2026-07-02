@@ -6,14 +6,14 @@ import {
   Lock,
   Envelope,
   Folder,
-  Check,
   UploadSimple,
   Plus,
+  Warning,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Checkbox } from "@/components/ui/checkbox";
+import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/common/PageHeader";
 import { BackButton } from "@/components/common/BackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
@@ -47,11 +47,14 @@ function matchesRecommendedFile(documentTitle: string, recommendedName: string):
   return false;
 }
 
-interface RecommendedFile {
-  name: string;
-  matchedDocId?: string;
-  done: boolean;
-  manual: boolean;
+interface UploadProgressItem {
+  id: string;
+  fileName: string;
+  folderPath: string;
+  folderName: string;
+  status: "pending" | "uploading" | "done" | "error";
+  progress: number;
+  error?: string;
 }
 
 export function DealRoomDetailPage() {
@@ -61,6 +64,7 @@ export function DealRoomDetailPage() {
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
+  const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
 
   const fetchRoom = useCallback(async () => {
     if (!roomId) {
@@ -77,67 +81,82 @@ export function DealRoomDetailPage() {
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
 
   const room = data?.room ?? null;
-  const template = useMemo(
-    () => (data?.templates ?? []).find((tmpl) => tmpl.scenario === room?.template),
-    [data?.templates, room]
-  );
 
   const allRoomDocuments = useMemo(
     () => (room?.documents ?? []).flatMap((fd: DealRoomFolderDocs) => fd.documents),
     [room]
   );
 
-  const [manualDone, setManualDone] = useState<Set<string>>(new Set());
+  const folderByPath = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const folder of room?.folders ?? []) {
+      map.set(folder.path, folder.name);
+    }
+    map.set("/", t("folders.rootName", "Root"));
+    return map;
+  }, [room?.folders, t]);
 
-  const recommendedFiles: RecommendedFile[] = useMemo(() => {
-    const list = template?.recommendedFiles ?? [];
-    return list.map((name) => {
-      const matched = allRoomDocuments.find((d) => matchesRecommendedFile(d.title, name));
-      const manual = matched ? false : manualDone.has(name);
-      return {
-        name,
-        matchedDocId: matched?.document_id,
-        done: !!matched || manual,
-        manual,
-      };
-    });
-  }, [template, allRoomDocuments, manualDone]);
-
-  const completion = useMemo(
-    () =>
-      recommendedFiles.length === 0
-        ? 0
-        : Math.round((recommendedFiles.filter((c) => c.done).length / recommendedFiles.length) * 100),
-    [recommendedFiles]
-  );
-
-  const toggleManualDone = (name: string) => {
-    setManualDone((prev) => {
-      const next = new Set(prev);
-      if (next.has(name)) next.delete(name);
-      else next.add(name);
-      return next;
-    });
+  const resolveTargetFolder = (fileName: string): { path: string; name: string } => {
+    const roomFolders = room?.folders ?? [];
+    for (const folder of roomFolders) {
+      if (matchesRecommendedFile(fileName, folder.name)) {
+        return { path: folder.path, name: folder.name };
+      }
+    }
+    return { path: "/", name: folderByPath.get("/") ?? "Root" };
   };
 
-  const handleUpload = async (file: File) => {
+  const uploadFileToFolder = async (file: File, folderPath: string) => {
     if (!roomId) return;
+    const id = Math.random().toString(36).slice(2);
+    const folderName = folderByPath.get(folderPath) ?? folderPath;
+
+    setUploadItems((prev) => [
+      ...prev,
+      {
+        id,
+        fileName: file.name,
+        folderPath,
+        folderName,
+        status: "uploading",
+        progress: 0,
+      },
+    ]);
     setUploading(true);
+
+    const interval = setInterval(() => {
+      setUploadItems((prev) =>
+        prev.map((item) =>
+          item.id === id && item.status === "uploading"
+            ? { ...item, progress: Math.min(item.progress + Math.random() * 15, 95) }
+            : item
+        )
+      );
+    }, 300);
+
     try {
       const doc = await api.uploadDocument(file);
-      // Try to match a recommended folder by file name.
-      let targetFolder = "/";
-      const roomFolders = room?.folders ?? [];
-      for (const folder of roomFolders) {
-        if (matchesRecommendedFile(doc.title, folder.name)) {
-          targetFolder = folder.path;
-          break;
-        }
-      }
-      await api.addDealRoomDocument(roomId, { document_id: doc.id, folder_path: targetFolder });
+      const sortOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+      await api.addDealRoomDocument(roomId, {
+        document_id: doc.id,
+        folder_path: folderPath,
+        sort_order: sortOrder,
+      });
+      clearInterval(interval);
+      setUploadItems((prev) =>
+        prev.map((item) => (item.id === id ? { ...item, status: "done", progress: 100 } : item))
+      );
       toast.success(t("documents.uploadedAndAdded", { title: doc.title }));
       refetch();
     } catch (e) {
+      clearInterval(interval);
+      setUploadItems((prev) =>
+        prev.map((item) =>
+          item.id === id
+            ? { ...item, status: "error", error: e instanceof Error ? e.message : tc("error.saveFailed") }
+            : item
+        )
+      );
       toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
     } finally {
       setUploading(false);
@@ -145,29 +164,27 @@ export function DealRoomDetailPage() {
     }
   };
 
+  const handleUpload = async (file: File) => {
+    const { path } = resolveTargetFolder(file.name);
+    await uploadFileToFolder(file, path);
+  };
+
   const handleFolderUpload = async (file: File, folderPath: string) => {
-    if (!roomId) return;
-    setUploading(true);
-    try {
-      const doc = await api.uploadDocument(file);
-      await api.addDealRoomDocument(roomId, {
-        document_id: doc.id,
-        folder_path: folderPath,
-        sort_order: (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0,
-      });
-      toast.success(t("documents.uploadedAndAdded", { title: doc.title }));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
-    } finally {
-      setUploading(false);
-    }
+    await uploadFileToFolder(file, folderPath);
   };
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) void handleUpload(file);
   };
+
+  const activeUploads = uploadItems.filter((item) => item.status === "uploading");
+  const hasHistory = uploadItems.some((item) => item.status !== "uploading");
+  const showUploadDashboard = activeUploads.length > 0 || hasHistory;
+  const overallProgress =
+    uploadItems.length === 0
+      ? 0
+      : Math.round(uploadItems.reduce((sum, item) => sum + item.progress, 0) / uploadItems.length);
 
   const handleFolderCreate = async (name: string, parentPath?: string) => {
     if (!roomId) return;
@@ -331,99 +348,89 @@ export function DealRoomDetailPage() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-h2 flex items-center gap-2">
-                <Check size={20} />
-                {t("detail.recommendedFiles")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-muted-foreground">{t("detail.completion")}</span>
-                <span className="font-medium">{completion}%</span>
-              </div>
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-success-500 transition-[width]"
-                  style={{ width: `${completion}%` }}
+          {showUploadDashboard && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-h2 flex items-center gap-2">
+                  <UploadSimple size={20} />
+                  {t("detail.uploadProgress")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-muted-foreground">{t("detail.completion")}</span>
+                  <span className="font-medium">{overallProgress}%</span>
+                </div>
+                <Progress value={overallProgress} className="h-2" />
+                <input
+                  type="file"
+                  ref={fileInputRef}
+                  onChange={onFileChange}
+                  className="hidden"
+                  accept=".pdf,.docx,.pptx,.xlsx"
+                  disabled={uploading}
                 />
-              </div>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={onFileChange}
-                className="hidden"
-                accept=".pdf,.docx,.pptx,.xlsx"
-                disabled={uploading}
-              />
-              <ul className="space-y-2">
-                {recommendedFiles.map((item) => (
-                  <li
-                    key={item.name}
-                    className={`flex items-center justify-between rounded-md border border-border p-3 ${
-                      item.done ? "bg-muted/50" : ""
-                    }`}
-                  >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FileText
-                        size={16}
-                        className={item.done ? "text-success-500 shrink-0" : "text-muted-foreground shrink-0"}
-                      />
-                      <span
-                        className={
-                          item.done ? "line-through text-muted-foreground truncate" : "text-sm font-medium truncate"
-                        }
-                      >
-                        {item.name}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      {item.done ? (
-                        <Badge variant="outline" className="border-success-500/20 text-success-500">
-                          {t("detail.uploaded")}
-                        </Badge>
-                      ) : (
-                        <>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            className="gap-1"
-                            onClick={() => fileInputRef.current?.click()}
-                            disabled={uploading}
-                          >
-                            <UploadSimple size={14} />
-                            {t("detail.upload")}
-                          </Button>
-                          {!item.matchedDocId && (
-                            <div className="flex items-center gap-1">
-                              <Checkbox
-                                id={`check-${item.name}`}
-                                checked={item.manual}
-                                onCheckedChange={() => toggleManualDone(item.name)}
-                              />
-                              <label htmlFor={`check-${item.name}`} className="sr-only">
-                                {t("detail.markDone")}
-                              </label>
-                            </div>
+                <ul className="space-y-2">
+                  {uploadItems.map((item) => (
+                    <li
+                      key={item.id}
+                      className="flex flex-col gap-2 rounded-md border border-border p-3"
+                      data-testid={`upload-item-${item.id}`}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <FileText
+                            size={16}
+                            className={item.status === "done" ? "text-success-500 shrink-0" : "text-muted-foreground shrink-0"}
+                          />
+                          <span className="text-sm font-medium truncate">{item.fileName}</span>
+                        </div>
+                        <div className="shrink-0">
+                          {item.status === "uploading" && (
+                            <Badge variant="outline" className="text-muted-foreground">
+                              {t("detail.uploading")}
+                            </Badge>
                           )}
-                        </>
+                          {item.status === "done" && (
+                            <Badge variant="outline" className="border-success-500/20 text-success-500">
+                              {t("detail.uploaded")}
+                            </Badge>
+                          )}
+                          {item.status === "error" && (
+                            <Badge variant="outline" className="border-error/30 text-error-500 gap-1">
+                              <Warning size={12} />
+                              {t("detail.uploadFailed")}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
+                        <span className="truncate">{item.folderName}</span>
+                        {item.status === "uploading" && (
+                          <span>{Math.round(item.progress)}%</span>
+                        )}
+                      </div>
+                      {item.status === "uploading" && (
+                        <Progress value={item.progress} className="h-1" />
                       )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <Button
-                variant="outline"
-                className="w-full gap-1"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={uploading}
-              >
-                <Plus size={16} />
-                {uploading ? t("detail.uploading") : t("detail.uploadAny")}
-              </Button>
-            </CardContent>
-          </Card>
+                      {item.status === "error" && item.error && (
+                        <p className="text-caption text-error-500 truncate">{item.error}</p>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <Button
+                  variant="outline"
+                  className="w-full gap-1"
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={uploading}
+                >
+                  <Plus size={16} />
+                  {uploading ? t("detail.uploading") : t("detail.uploadAny")}
+                </Button>
+              </CardContent>
+            </Card>
+          )}
 
           <MembersCard
             roomId={room.id}

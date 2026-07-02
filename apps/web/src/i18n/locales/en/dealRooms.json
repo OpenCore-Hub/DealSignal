@@ -36,6 +36,8 @@
     "upload": "Upload",
     "uploadAny": "Upload a document",
     "uploading": "Uploading...",
+    "uploadProgress": "Upload progress",
+    "uploadFailed": "Failed",
     "markDone": "Mark as done",
     "noTemplate": "No matching template structure."
   },
@@ -61,6 +63,7 @@
     "folderCount_one": "{{count}} folder"
   },
   "folders": {
+    "rootName": "Root",
     "newRoot": "New folder",
     "newSubfolder": "New subfolder",
     "addFile": "Add file",
