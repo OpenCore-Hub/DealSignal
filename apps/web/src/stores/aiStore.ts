@@ -2,6 +2,14 @@ import { create } from "zustand";
 import { api } from "@/lib/api";
 import type { ChatMessage, Evidence } from "@/types";
 
+// i18n keys stored in the store; the AIAssistant component resolves them via t().
+// The raw server answers (assistantChat) are passed through directly.
+const I18N_KEYS = {
+  searchResults: "ai:search.results",
+  searchNoResults: "ai:search.noResults",
+  searchError: "ai:search.error",
+} as const;
+
 interface ChatContext {
   documentId?: string;
   pageNumber?: number;
@@ -85,13 +93,20 @@ export const useAIStore = create<AIState>((set, get) => ({
         assistantMessage = {
           id: `a_${Date.now()}`,
           role: "assistant",
+          // Store i18n key so the component can resolve it with interpolation.
           content:
             evidences.length > 0
-              ? `Here are the most relevant passages for "${res.query}":`
-              : `No relevant passages found for "${res.query}" in this document.`,
+              ? I18N_KEYS.searchResults
+              : I18N_KEYS.searchNoResults,
           evidences,
           createdAt: new Date().toISOString(),
         };
+        if (evidences.length > 0) {
+          // Embed the query in metadata so the component can interpolate it.
+          (assistantMessage as Record<string, unknown>)._query = res.query ?? content;
+        } else {
+          (assistantMessage as Record<string, unknown>)._query = res.query ?? content;
+        }
       } else {
         const res = await api.assistantChat({
           message: content,
@@ -111,11 +126,11 @@ export const useAIStore = create<AIState>((set, get) => ({
         messages: [...state.messages, assistantMessage],
         pending: false,
       }));
-    } catch (e) {
+    } catch {
       const errorMessage: ChatMessage = {
         id: `a_${Date.now()}`,
         role: "assistant",
-        content: e instanceof Error ? e.message : "Sorry, the search failed. Please try again later.",
+        content: I18N_KEYS.searchError,
         createdAt: new Date().toISOString(),
       };
       set((state) => ({

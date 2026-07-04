@@ -15,10 +15,46 @@ export function RegisterPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes("@")) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
+
+    // Client-side password validation matching backend rules
+    const pw = password;
+    if (pw.length < 8) {
+      setError("Password must be at least 8 characters.");
+      setLoading(false);
+      return;
+    }
+    if (!/[A-Z]/.test(pw)) {
+      setError("Password must include at least one uppercase letter.");
+      setLoading(false);
+      return;
+    }
+    if (!/[a-z]/.test(pw)) {
+      setError("Password must include at least one lowercase letter.");
+      setLoading(false);
+      return;
+    }
+    if (!/[0-9]/.test(pw)) {
+      setError("Password must include at least one number.");
+      setLoading(false);
+      return;
+    }
+    if (!/[^A-Za-z0-9]/.test(pw)) {
+      setError("Password must include at least one special character.");
+      setLoading(false);
+      return;
+    }
+
     try {
-      await api.register(email.trim(), password);
+      await api.register(trimmedEmail, password);
       navigate("/login?registered=true", { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Registration failed");

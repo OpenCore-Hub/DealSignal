@@ -139,7 +139,7 @@ func (h *Handler) List(c *gin.Context) {
 			Category:    category,
 		})
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
 			return
 		}
 		out := make([]gin.H, 0, len(docs))
@@ -167,7 +167,7 @@ func (h *Handler) List(c *gin.Context) {
 	case "recent":
 		docs, err := h.uploadService.queries.ListRecentlyAccessedDocumentsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
 			return
 		}
 		for _, d := range docs {
@@ -188,7 +188,7 @@ func (h *Handler) List(c *gin.Context) {
 	case "popular":
 		docs, err := h.uploadService.queries.ListPopularDocumentsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
 			return
 		}
 		for _, d := range docs {
@@ -209,7 +209,7 @@ func (h *Handler) List(c *gin.Context) {
 	case "unshared":
 		docs, err := h.uploadService.queries.ListUnsharedDocumentsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
 			return
 		}
 		for _, d := range docs {
@@ -230,7 +230,7 @@ func (h *Handler) List(c *gin.Context) {
 	case "archived":
 		docs, err := h.uploadService.queries.ListArchivedDocumentsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
 			return
 		}
 		for _, d := range docs {
@@ -251,7 +251,7 @@ func (h *Handler) List(c *gin.Context) {
 	default:
 		docs, err := h.uploadService.queries.ListDocumentsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
 			return
 		}
 		for _, d := range docs {

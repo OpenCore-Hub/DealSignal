@@ -45,6 +45,10 @@ type Server struct {
 	dbPool      DBPool
 	redisClient *redis.Client
 	workers     []worker
+	// shutdownCtx is cancelled before worker Stop() so workers that check
+	// ctx.Done() can exit their processing loops early.
+	shutdownCtx    context.Context
+	cancelShutdown context.CancelFunc
 }
 
 var (
@@ -80,6 +84,7 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 	logger.Init(cfg.LogLevel)
 
 	s := &Server{cfg: cfg, dbPool: dbPool}
+	s.shutdownCtx, s.cancelShutdown = context.WithCancel(context.Background())
 	if cfg.RedisURL != "" {
 		var err error
 		s.redisClient, err = redis.NewClient(cfg.RedisURL)
@@ -106,6 +111,7 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 		r.Use(middleware.IdempotencyMiddleware(s.redisClient, cfg))
 	}
 	r.Use(corsMiddleware(cfg.CORSAllowedOrigins))
+	r.Use(securityHeadersMiddleware())
 
 	s.engine = r
 	s.registerRoutes()
@@ -156,8 +162,27 @@ func (s *Server) Run() error {
 		return fmt.Errorf("server shutdown: %w", err)
 	}
 
-	for _, w := range s.workers {
-		w.Stop()
+	// Cancel the shared worker context so workers that respect ctx.Done() can
+	// exit their processing loops before Stop() blocks on the current iteration.
+	s.cancelShutdown()
+
+	workerStopCtx, workerCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer workerCancel()
+
+	done := make(chan struct{})
+	go func() {
+		for _, w := range s.workers {
+			w.Stop()
+		}
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-workerStopCtx.Done():
+		logger.ErrorCtx(context.Background(), "worker shutdown timed out", nil,
+			logger.Attr("timeout", "15s"),
+		)
 	}
 	return nil
 }
@@ -237,6 +262,18 @@ func corsMiddleware(allowedOrigins string) gin.HandlerFunc {
 	}
 }
 
+// securityHeadersMiddleware adds best-practice HTTP security headers to every response.
+func securityHeadersMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Writer.Header().Set("X-Content-Type-Options", "nosniff")
+		c.Writer.Header().Set("X-Frame-Options", "DENY")
+		c.Writer.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		c.Writer.Header().Set("X-XSS-Protection", "0") // deprecated but harmless; set to 0 because modern browsers use CSP
+		c.Writer.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+		c.Next()
+	}
+}
+
 func parseOrigins(raw string) []string {
 	if raw == "" {
 		return nil
@@ -265,12 +302,25 @@ func isAllowedOrigin(origin string, allowed []string) bool {
 }
 
 // registerObservabilityRoutes mounts /metrics and /debug/pprof when enabled.
+// debug/pprof endpoints expose sensitive runtime data and must only be accessible
+// from trusted networks in production.
 func (s *Server) registerObservabilityRoutes() {
 	if s.cfg.MetricsEnabled {
 		s.engine.GET("/metrics", gin.WrapH(promhttp.Handler()))
 	}
 	if s.cfg.PprofEnabled {
 		pp := s.engine.Group("/debug/pprof")
+		// Restrict pprof to localhost in production. PprofEnabled is designed to
+		// be left off in production; this is a defense-in-depth measure for when
+		// it is accidentally enabled.
+		pp.Use(func(c *gin.Context) {
+			ip := c.ClientIP()
+			if ip != "::1" && ip != "127.0.0.1" {
+				c.AbortWithStatus(http.StatusForbidden)
+				return
+			}
+			c.Next()
+		})
 		pp.GET("/", gin.WrapF(pprof.Index))
 		pp.GET("/cmdline", gin.WrapF(pprof.Cmdline))
 		pp.GET("/profile", gin.WrapF(pprof.Profile))

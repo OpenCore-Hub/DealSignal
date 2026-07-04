@@ -9,13 +9,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/mail"
 	"net/netip"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
 	"github.com/google/uuid"
@@ -37,11 +37,15 @@ type Service struct {
 	redisClient     *redis.Client
 	mailer          mailer.Mailer
 	viewerBaseURL   string
+	emailSem        chan struct{} // limits concurrent email sends (bounded goroutines)
 }
 
 // NewService creates a link service.
 func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string) *Service {
-	return &Service{queries: q, pool: pool, redisClient: r, mailer: m, viewerBaseURL: viewerBaseURL}
+	return &Service{
+		queries: q, pool: pool, redisClient: r, mailer: m, viewerBaseURL: viewerBaseURL,
+		emailSem: make(chan struct{}, 8), // cap concurrent email goroutines
+	}
 }
 
 var (
@@ -216,16 +220,36 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 
 	// Send verification emails after the transaction commits so the
 	// link_contact records are durable. Run asynchronously so SMTP latency does
-	// not block the create-link response.
+	// not block the create-link response. Bounded by a semaphore to avoid
+	// unbounded goroutine creation when links are created with many contacts.
 	linkURL := publicLinkURL(s.viewerBaseURL, token)
 	for _, ec := range emailCodes {
-		go func(email, code string) {
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, req.Name, linkURL); err != nil {
-				log.Printf("failed to send link access code email to %s: %v", email, err)
-			}
-		}(ec.email, ec.code)
+		email, code := ec.email, ec.code
+		// Try the semaphore; if full, still send without bound (better than
+		// silently dropping the email).
+		select {
+		case s.emailSem <- struct{}{}:
+			go func() {
+				defer func() { <-s.emailSem }()
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, req.Name, linkURL); err != nil {
+					logger.ErrorCtx(ctx, "failed to send link access code email", err,
+						logger.Attr("email_local", localPart(email)),
+					)
+				}
+			}()
+		default:
+			go func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, req.Name, linkURL); err != nil {
+					logger.ErrorCtx(ctx, "failed to send link access code email", err,
+						logger.Attr("email_local", localPart(email)),
+					)
+				}
+			}()
+		}
 	}
 	return link, nil
 }
@@ -346,15 +370,20 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		if ipAddr.IsValid() {
 			ip = &ipAddr
 		}
-		_, _ = s.queries.CreateLinkNDAAgreement(ctx, db.CreateLinkNDAAgreementParams{
-			TenantID:    link.TenantID,
-			WorkspaceID: link.WorkspaceID,
-			LinkID:      link.ID,
-			VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
-			Email:       pgtype.Text{String: emailForRecords, Valid: emailForRecords != ""},
-			Ip:          ip,
-			UserAgent:   pgtype.Text{String: req.UA, Valid: req.UA != ""},
-		})
+		_, ndaErr := s.queries.CreateLinkNDAAgreement(ctx, db.CreateLinkNDAAgreementParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
+		VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		Email:       pgtype.Text{String: emailForRecords, Valid: emailForRecords != ""},
+		Ip:          ip,
+		UserAgent:   pgtype.Text{String: req.UA, Valid: req.UA != ""},
+	})
+	if ndaErr != nil {
+		logger.ErrorCtx(ctx, "create link NDA agreement failed", ndaErr,
+			logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
+		)
+	}
 	}
 
 	if verifiedContact != nil {
@@ -517,7 +546,7 @@ func (s *Service) GetByID(ctx context.Context, linkID, workspaceID string) (db.L
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Link{}, ErrNotFoundInWorkspace
 		}
-		return db.Link{}, err
+		return db.Link{}, fmt.Errorf("get link by id: %w", err)
 	}
 	return link, nil
 }
@@ -557,7 +586,7 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 		if errors.Is(err, pgx.ErrNoRows) {
 			return db.Link{}, ErrNotFoundInWorkspace
 		}
-		return db.Link{}, err
+		return db.Link{}, fmt.Errorf("update link status: %w", err)
 	}
 	return link, nil
 }
@@ -581,7 +610,7 @@ func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error 
 			rows, err = s.queries.HardDeleteLink(ctx, db.HardDeleteLinkParams(params))
 		}
 		if err != nil {
-			return err
+			return fmt.Errorf("delete link: %w", err)
 		}
 	}
 	if rows == 0 {
@@ -601,7 +630,10 @@ func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string
 	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
 		return nil, err
 	}
-	return s.queries.ListAccessLogsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	return s.queries.ListAccessLogsByLink(ctx, db.ListAccessLogsByLinkParams{
+		LinkID: pgtype.UUID{Bytes: id, Valid: true},
+		Limit:  200,
+	})
 }
 
 func normalizePermission(p string) string {
@@ -648,6 +680,16 @@ func normalizeSecurityConfig(req CreateLinkRequest) (requireEmailVerification, r
 	// identity can be checked.
 	if !requireEmailVerification && (len(emails) > 0 || len(domains) > 0 || requireNDA) {
 		requireEmailVerification = true
+	}
+
+	// Validate that allowed email entries have proper email format.
+	for _, e := range emails {
+		if strings.TrimSpace(e) == "" {
+			continue
+		}
+		if _, err := mail.ParseAddress(e); err != nil {
+			return false, false, false, nil, nil, "", false, fmt.Errorf("%w: invalid email in whitelist: %s", ErrInvalidPermission, e)
+		}
 	}
 
 	if requirePassword && req.Password == "" {
@@ -743,6 +785,15 @@ func generateToken() (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(b), nil
+}
+
+// localPart extracts the part before "@" from an email address (for safe logging).
+func localPart(email string) string {
+	idx := strings.Index(email, "@")
+	if idx <= 0 {
+		return email
+	}
+	return email[:idx]
 }
 
 func pgUUID(id string) pgtype.UUID {

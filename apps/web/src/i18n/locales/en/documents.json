@@ -9,7 +9,6 @@
     "dragTitle": "Drag files here",
     "dragDescription": "Or click to select files. Supports PDF / Word / PPT / Excel",
     "selectFiles": "Select files",
-    "processing": "Processing...",
     "removeFile": "Remove file",
     "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx",
     "fileCount": "{{count}} file(s)",
@@ -98,7 +97,6 @@
       "title": "Delete document",
       "description": "Are you sure you want to delete \"{{title}}\"? Associated links will become invalid and this action cannot be undone."
     },
-    "deleting": "Deleting...",
     "deleted": "Document deleted"
   },
   "analytics": {
@@ -159,17 +157,12 @@
     "thumbnailViews": "{{count}} views · {{duration}}",
     "pagePlaceholder": "Page {{pageNumber}}",
     "previewPlaceholder": "Document preview placeholder",
-    "signedUrlNotice": "Real page content will render here once the backend signed URL is loaded.",
     "currentPageStats": "Viewed {{count}} times · avg. time {{duration}}.",
     "loading": "Loading document...",
     "gateTitle": "This document is shared securely",
     "emailLabel": "Email",
     "emailPlaceholder": "Enter your email",
     "emailRequired": "Please enter your email to continue.",
-    "sendCode": "Send access code",
-    "sendingCode": "Sending...",
-    "codeSent": "Access code sent",
-    "sendCodeFailed": "Failed to send access code. Please try again.",
     "codeLabel": "Access code",
     "codePlaceholder": "Enter the 6-digit code",
     "codeRequired": "Please enter the access code to continue.",

@@ -95,8 +95,20 @@ func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocume
 	return db.GetDocumentByIDRow{}, nil
 }
 
+func (m *mockAnalyticsQuerier) GetDocumentsByIDs(_ context.Context, _ db.GetDocumentsByIDsParams) ([]db.GetDocumentsByIDsRow, error) {
+	return nil, nil
+}
+
 func (m *mockAnalyticsQuerier) GetLastAccessLogByLink(_ context.Context, _ pgtype.UUID) (db.AccessLog, error) {
 	return db.AccessLog{}, nil
+}
+
+func (m *mockAnalyticsQuerier) GetLastAccessLogsByLinks(_ context.Context, _ []pgtype.UUID) ([]db.AccessLog, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetLinkPageViewMetricsBatch(_ context.Context, _ []pgtype.UUID) ([]db.GetLinkPageViewMetricsBatchRow, error) {
+	return nil, nil
 }
 
 func (m *mockAnalyticsQuerier) ListLinksByDocument(_ context.Context, _ db.ListLinksByDocumentParams) ([]db.Link, error) {

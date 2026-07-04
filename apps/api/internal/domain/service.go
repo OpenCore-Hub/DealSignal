@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -135,13 +136,15 @@ func (s *Service) Verify(ctx context.Context, tenantID, domainID string) (Domain
 
 	expiresAt, err := s.provider.Issue(ctx, found.Domain)
 	if err != nil {
-		_ = s.queries.UpdateTenantDomainSSL(ctx, db.UpdateTenantDomainSSLParams{
+		if sslErr := s.queries.UpdateTenantDomainSSL(ctx, db.UpdateTenantDomainSSLParams{
 			SslStatus:    SSLError,
 			SslExpiresAt: pgtype.Timestamptz{},
 			VerifiedAt:   pgtype.Timestamptz{},
 			ID:           found.ID,
 			TenantID:     tenantUUID,
-		})
+		}); sslErr != nil {
+			logger.ErrorCtx(ctx, "update domain SSL status failed", sslErr)
+		}
 		return Domain{}, err
 	}
 
@@ -192,13 +195,15 @@ func (s *Service) RenewExpiringCertificates(ctx context.Context, before time.Tim
 	for _, r := range rows {
 		expiresAt, err := s.provider.Issue(ctx, r.Domain)
 		if err != nil {
-			_ = s.queries.UpdateTenantDomainSSL(ctx, db.UpdateTenantDomainSSLParams{
+			if sslErr := s.queries.UpdateTenantDomainSSL(ctx, db.UpdateTenantDomainSSLParams{
 				SslStatus:    SSLError,
 				SslExpiresAt: pgtype.Timestamptz{},
 				VerifiedAt:   pgtype.Timestamptz{},
 				ID:           r.ID,
 				TenantID:     r.TenantID,
-			})
+			}); sslErr != nil {
+				logger.ErrorCtx(ctx, "update domain SSL status failed during renewal", sslErr)
+			}
 			continue
 		}
 

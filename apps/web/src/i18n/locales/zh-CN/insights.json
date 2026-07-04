@@ -30,20 +30,6 @@
   },
   "suggestions": {
     "emptyTitle": "暂无跟进建议",
-    "mock": {
-      "sg_1": {
-        "reason": "Sarah 在过去 24 小时内 2 次查看财务页，累计停留 5 分钟",
-        "action": "建议 24 小时内跟进融资条款与估值讨论"
-      },
-      "sg_2": {
-        "reason": "Marcus 第三次访问，团队页停留时间最长",
-        "action": "发送补充团队背景与创始人经历资料"
-      },
-      "sg_3": {
-        "reason": "Wei 重点关注收入预测与现金流",
-        "action": "安排一次 30 分钟财务模型 walkthrough"
-      }
-    },
     "emptyDescription": "当前没有待办建议，系统会在检测到新的热度信号时自动生成。",
     "viewContact": "查看联系人",
     "writeEmail": "写跟进邮件",

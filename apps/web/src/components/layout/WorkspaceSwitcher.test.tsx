@@ -73,7 +73,6 @@ describe("WorkspaceSwitcher", () => {
         "workspaceSwitcher.switchWorkspace": "Switch workspace",
         "workspaceSwitcher.label": "Workspaces",
         "workspaceSwitcher.createWorkspace": "Create workspace",
-        "workspaceSwitcher.createWorkspaceComingSoon": "Workspace creation requires backend support.",
       },
     });
     return render(

@@ -26,19 +26,19 @@ export function HeatMap({ links }: HeatMapProps) {
   ];
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4" role="list">
       {tiers.map((tier) => {
         const Icon = tier.icon;
         const items = grouped[tier.level];
         const tierLabel = tCommon(`heat.${tier.level}`);
         return (
-          <div key={tier.level}>
+          <div key={tier.level} role="listitem">
             <div className="mb-2 flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Icon size={16} weight="fill" className={tier.color.replace("bg-", "text-")} />
                 <span className="text-sm font-medium">{tierLabel}</span>
               </div>
-              <span className="text-caption text-muted-foreground">{t("heatMap.linkCount", { count: items.length })}</span>
+              <span className="text-caption text-muted-foreground" aria-label={t("heatMap.linkCountAria", { count: items.length, tier: tierLabel })}>{t("heatMap.linkCount", { count: items.length })}</span>
             </div>
             <div className="space-y-2">
               {items.slice(0, 5).map((link) => {
@@ -48,6 +48,7 @@ export function HeatMap({ links }: HeatMapProps) {
                     key={link.id}
                     role="link"
                     tabIndex={0}
+                    aria-label={`${link.documentTitle}: ${t("heatMap.accessCount", { count: link.accessCount })}`}
                     className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-card p-2 transition-colors hover:bg-muted"
                     onClick={handleClick}
                     onKeyDown={(e) => {

@@ -31,20 +31,6 @@
   },
   "suggestions": {
     "emptyTitle": "No suggestions yet",
-    "mock": {
-      "sg_1": {
-        "reason": "Sarah viewed the financial slide twice in the past 24 hours, totaling 5 minutes.",
-        "action": "Follow up on terms and valuation within 24 hours"
-      },
-      "sg_2": {
-        "reason": "Marcus visited for the third time and spent the longest on the team slide.",
-        "action": "Send team background and founder bios"
-      },
-      "sg_3": {
-        "reason": "Wei focused on revenue forecast and cash flow.",
-        "action": "Schedule a 30-minute financial model walkthrough"
-      }
-    },
     "emptyDescription": "No pending suggestions. New ones appear automatically when heat signals are detected.",
     "viewContact": "View contact",
     "writeEmail": "Write follow-up email",

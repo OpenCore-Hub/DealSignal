@@ -7,9 +7,9 @@ import {
   Folder,
   FileText,
   ShieldCheck,
-  LockKeyOpen,
-  Lock,
-  Shield,
+  GlobeHemisphereWest,
+  LockKey,
+  UsersThree,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -26,10 +26,11 @@ import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import type { DealRoomTemplate } from "@/types";
 
-const permissionIcons = {
-  low: LockKeyOpen,
-  medium: Lock,
-  high: Shield,
+const permissionIcons: Record<string, typeof GlobeHemisphereWest> = {
+  public: GlobeHemisphereWest,
+  standard: LockKey,
+  confidential: ShieldCheck,
+  collaborative: UsersThree,
 };
 
 export function NewDealRoomPage() {
@@ -86,11 +87,16 @@ export function NewDealRoomPage() {
 
   const handleCreate = async () => {
     if (!selectedTemplate || !name) return;
+    const slug = slugify(name);
+    if (!slug) {
+      toast.error(tc("error.saveFailed"));
+      return;
+    }
     setCreating(true);
     try {
       const room = await api.createDealRoom({
         name,
-        slug: slugify(name),
+        slug,
         description,
         template: selectedTemplate.scenario,
         ndaEnabled: nda,

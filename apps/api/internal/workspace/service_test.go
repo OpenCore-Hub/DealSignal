@@ -271,6 +271,29 @@ func (r fakeRow) Scan(dest ...interface{}) error {
 	return nil
 }
 
+// fakeTx wraps fakeDB as a pgx.Tx implementation for AcceptInvitation tests.
+type fakeTx struct {
+	*fakeDB
+}
+
+func (ft *fakeTx) Begin(ctx context.Context) (pgx.Tx, error)           { return ft, nil }
+func (ft *fakeTx) Commit(ctx context.Context) error                    { return nil }
+func (ft *fakeTx) Rollback(ctx context.Context) error                  { return nil }
+func (ft *fakeTx) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
+	return 0, nil
+}
+func (ft *fakeTx) SendBatch(ctx context.Context, b *pgx.Batch) pgx.BatchResults { return nil }
+func (ft *fakeTx) LargeObjects() pgx.LargeObjects                               { return pgx.LargeObjects{} }
+func (ft *fakeTx) Prepare(ctx context.Context, name, sql string) (*pgconn.StatementDescription, error) {
+	return nil, nil
+}
+func (ft *fakeTx) Conn() *pgx.Conn { return nil }
+
+// Begin satisfies the Beginner interface for transaction-based tests.
+func (f *fakeDB) Begin(ctx context.Context) (pgx.Tx, error) {
+	return &fakeTx{fakeDB: f}, nil
+}
+
 type fakeRows struct {
 	rows [][]interface{}
 	pos  int
@@ -417,7 +440,7 @@ func TestAcceptInvitationSuccess(t *testing.T) {
 	actorID := uuid.NewString()
 	userID := uuid.NewString()
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
-	svc := NewService(db.New(fake))
+	svc := NewService(db.New(fake), fake)
 
 	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
 	if err != nil {
@@ -436,7 +459,7 @@ func TestAcceptInvitationSuccess(t *testing.T) {
 func TestAcceptInvitationExpired(t *testing.T) {
 	actorID := uuid.NewString()
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
-	svc := NewService(db.New(fake))
+	svc := NewService(db.New(fake), fake)
 
 	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
 	if err != nil {
@@ -453,7 +476,7 @@ func TestAcceptInvitationExpired(t *testing.T) {
 func TestAcceptInvitationAlreadyUsed(t *testing.T) {
 	actorID := uuid.NewString()
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
-	svc := NewService(db.New(fake))
+	svc := NewService(db.New(fake), fake)
 
 	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
 	if err != nil {

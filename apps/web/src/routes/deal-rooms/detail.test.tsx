@@ -91,7 +91,7 @@ const mockTemplates: DealRoomTemplate[] = [
     scenario: "series-a",
     folderStructure: [{ name: "Financials" }],
     recommendedFiles: ["Pitch deck", "Financial model", "Cap table"],
-    defaultPermissionLevel: "medium",
+    defaultPermissionLevel: "standard",
     ndaEnabled: true,
   },
 ];

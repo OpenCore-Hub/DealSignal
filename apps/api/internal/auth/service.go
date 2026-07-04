@@ -162,7 +162,7 @@ func (s *Service) Register(ctx context.Context, email, password string) (User, T
 
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcryptCost)
 	if err != nil {
-		return User{}, TokenPair{}, err
+		return User{}, TokenPair{}, fmt.Errorf("bcrypt hash: %w", err)
 	}
 
 	u, err := s.queries.CreateUser(ctx, db.CreateUserParams{
@@ -173,21 +173,32 @@ func (s *Service) Register(ctx context.Context, email, password string) (User, T
 		if isUniqueViolation(err) {
 			return User{}, TokenPair{}, ErrEmailExists
 		}
-		return User{}, TokenPair{}, err
+		return User{}, TokenPair{}, fmt.Errorf("create user: %w", err)
 	}
 
 	pair, err := GenerateTokenPair(uuidToString(u.ID), accessTokenDuration, refreshTokenDuration)
 	if err != nil {
-		return User{}, TokenPair{}, err
+		return User{}, TokenPair{}, fmt.Errorf("generate token pair: %w", err)
 	}
 	if err := s.tokenStore.StoreRefreshToken(ctx, uuidToString(u.ID), pair.RefreshToken, refreshTokenDuration); err != nil {
-		return User{}, TokenPair{}, err
+		return User{}, TokenPair{}, fmt.Errorf("store refresh token: %w", err)
 	}
 
 	// Send verification email asynchronously — SMTP round-trips (e.g. Mailtrap)
 	// can take several seconds and should not block the registration response.
 	verifyCtx := context.WithoutCancel(ctx)
-	go s.sendVerificationEmail(verifyCtx, uuidToString(u.ID), u.Email)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// The mailer or token store panicked; log and suppress.
+				// Use context.Background() because the original context may
+				// already be cancelled.
+			}
+		}()
+		if err := s.sendVerificationEmail(verifyCtx, uuidToString(u.ID), u.Email); err != nil {
+			// Non-fatal: the user can request a new verification email later.
+		}
+	}()
 
 	return userFromDB(u), pair, nil
 }
@@ -204,10 +215,10 @@ func (s *Service) Login(ctx context.Context, email, password string) (User, Toke
 
 	pair, err := GenerateTokenPair(uuidToString(u.ID), accessTokenDuration, refreshTokenDuration)
 	if err != nil {
-		return User{}, TokenPair{}, err
+		return User{}, TokenPair{}, fmt.Errorf("generate token pair: %w", err)
 	}
 	if err := s.tokenStore.StoreRefreshToken(ctx, uuidToString(u.ID), pair.RefreshToken, refreshTokenDuration); err != nil {
-		return User{}, TokenPair{}, err
+		return User{}, TokenPair{}, fmt.Errorf("store refresh token: %w", err)
 	}
 	return userFromDB(u), pair, nil
 }

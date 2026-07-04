@@ -40,7 +40,7 @@ const mockTemplates: DealRoomTemplate[] = [
     scenario: "seed",
     folderStructure: [{ name: "Pitch", description: "Pitch materials" }],
     recommendedFiles: ["Pitch deck", "Cap table"],
-    defaultPermissionLevel: "low",
+    defaultPermissionLevel: "public",
     ndaEnabled: false,
   },
   {
@@ -50,7 +50,7 @@ const mockTemplates: DealRoomTemplate[] = [
     scenario: "series-a",
     folderStructure: [{ name: "Financials" }],
     recommendedFiles: ["Financial model"],
-    defaultPermissionLevel: "medium",
+    defaultPermissionLevel: "standard",
     ndaEnabled: true,
   },
 ];
@@ -94,9 +94,10 @@ const resources = {
         folderCount_one: "{{count}} folder",
       },
       permission: {
-        low: { label: "Low Friction" },
-        medium: { label: "Medium Strength" },
-        high: { label: "High Strength" },
+        public: { label: "Public Distribution" },
+        standard: { label: "Standard Due Diligence" },
+        confidential: { label: "Confidential Data Room" },
+        collaborative: { label: "Collaborative Review" },
       },
     },
     common: {

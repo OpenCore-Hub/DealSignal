@@ -1,12 +1,15 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Warning, ShieldWarning } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
-import { calculateFrictionScore, calculateSecurityScore, levelConfig } from "./levelConfig";
-import type { PermissionConfig } from "@/types";
-import type { PermissionLevel } from "./types";
+import {
+  calculateFrictionScore,
+  calculateSecurityScore,
+  presetDef,
+} from "./levelConfig";
+import type { PermissionConfig, PermissionPreset } from "@/types";
 
 interface ScoreDisplayProps {
-  level: PermissionLevel;
+  level: PermissionPreset;
   config: PermissionConfig;
 }
 
@@ -14,7 +17,7 @@ export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
   const { t } = useTranslation("links");
   const frictionScore = calculateFrictionScore(config);
   const securityScore = calculateSecurityScore(config);
-  const info = levelConfig[level];
+  const info = presetDef[level];
 
   return (
     <Card>
@@ -31,7 +34,13 @@ export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
             <div
-              className="h-full rounded-full bg-success-500 transition-[width]"
+              className={`h-full rounded-full transition-[width] ${
+                securityScore >= 7
+                  ? "bg-success-500"
+                  : securityScore >= 4
+                    ? "bg-warm-500"
+                    : "bg-hot-500"
+              }`}
               style={{ width: `${securityScore * 10}%` }}
             />
           </div>
@@ -46,13 +55,19 @@ export function ScoreDisplay({ level, config }: ScoreDisplayProps) {
           <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
             <div
               className={`h-full rounded-full transition-[width] ${
-                frictionScore <= 3 ? "bg-success-500" : frictionScore <= 6 ? "bg-warm-500" : "bg-hot-500"
+                frictionScore <= 3
+                  ? "bg-success-500"
+                  : frictionScore <= 6
+                    ? "bg-warm-500"
+                    : "bg-hot-500"
               }`}
               style={{ width: `${frictionScore * 10}%` }}
             />
           </div>
         </div>
-        <p className="text-caption text-muted-foreground">{t(info.friction)}</p>
+        <p className="text-caption text-muted-foreground">
+          {t(info.friction)}
+        </p>
       </CardContent>
     </Card>
   );

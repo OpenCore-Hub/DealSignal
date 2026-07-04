@@ -104,7 +104,7 @@ export function AddToDealRoomDialog({
         folder_path: effectiveFolder,
         sort_order: sortOrder,
       });
-      toast.success(t("documents.added"));
+      toast.success(t("documents.addedSingle"));
       onAdded?.();
       handleOpenChange(false);
     } catch (e) {

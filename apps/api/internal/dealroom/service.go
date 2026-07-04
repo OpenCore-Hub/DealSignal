@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -185,7 +186,7 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	}
 
 	// creator becomes owner
-	_, _ = s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
+	_, addErr := s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
 		TenantID:    tenant,
 		WorkspaceID: workspaceUUID,
 		RoomID:      room.ID,
@@ -195,6 +196,9 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 		NdaStatus:   ndaStatusFor(room.RequiresNda),
 		Status:      "active",
 	})
+	if addErr != nil {
+		return db.DealRoom{}, fmt.Errorf("add room owner: %w", addErr)
+	}
 	return room, nil
 }
 
@@ -214,24 +218,28 @@ func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSumm
 		return nil, err
 	}
 
+	// Single batched query replaces 3N per-room queries.
+	aggregates, err := s.queries.GetDealRoomAggregatesByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return nil, err
+	}
+	aggByRoom := make(map[string]db.GetDealRoomAggregatesByWorkspaceRow, len(aggregates))
+	for _, a := range aggregates {
+		aggByRoom[uuid.UUID(a.RoomID.Bytes).String()] = a
+	}
+
 	out := make([]RoomSummary, len(rooms))
 	for i, room := range rooms {
-		docs, _ := s.queries.ListDealRoomDocuments(ctx, room.ID)
-		members, _ := s.queries.ListRoomMembers(ctx, room.ID)
-		requests, _ := s.queries.ListAccessRequestsByRoom(ctx, room.ID)
-
-		var pending int64
-		for _, r := range requests {
-			if r.Status == "pending" {
-				pending++
-			}
+		roomIDStr := uuid.UUID(room.ID.Bytes).String()
+		agg, ok := aggByRoom[roomIDStr]
+		if !ok {
+			agg = db.GetDealRoomAggregatesByWorkspaceRow{}
 		}
-
 		out[i] = RoomSummary{
 			Room:             room,
-			DocumentCount:    int64(len(docs)),
-			MemberCount:      int64(len(members)),
-			PendingApprovals: pending,
+			DocumentCount:    agg.DocumentCount,
+			MemberCount:      agg.MemberCount,
+			PendingApprovals: agg.PendingCount,
 		}
 	}
 	return out, nil
@@ -260,9 +268,18 @@ func (s *Service) GetRoomSummary(ctx context.Context, roomID, workspaceID string
 		return RoomSummary{}, err
 	}
 
-	docs, _ := s.queries.ListDealRoomDocuments(ctx, room.ID)
-	members, _ := s.queries.ListRoomMembers(ctx, room.ID)
-	requests, _ := s.queries.ListAccessRequestsByRoom(ctx, room.ID)
+	docs, docErr := s.queries.ListDealRoomDocuments(ctx, room.ID)
+	members, memErr := s.queries.ListRoomMembers(ctx, room.ID)
+	requests, reqErr := s.queries.ListAccessRequestsByRoom(ctx, room.ID)
+	if docErr != nil {
+		logger.ErrorCtx(ctx, "list room documents failed", docErr)
+	}
+	if memErr != nil {
+		logger.ErrorCtx(ctx, "list room members failed", memErr)
+	}
+	if reqErr != nil {
+		logger.ErrorCtx(ctx, "list room access requests failed", reqErr)
+	}
 
 	var pending int64
 	for _, r := range requests {
@@ -321,7 +338,11 @@ func (s *Service) GetRoomDetail(ctx context.Context, roomID, workspaceID, userID
 				}
 			}
 		}
-		requests, _ = s.queries.ListAccessRequestsByRoom(ctx, summary.Room.ID)
+		if reqs, reqErr := s.queries.ListAccessRequestsByRoom(ctx, summary.Room.ID); reqErr != nil {
+			logger.ErrorCtx(ctx, "list room access requests failed", reqErr)
+		} else {
+			requests = reqs
+		}
 	}
 
 	return RoomDetail{
@@ -657,10 +678,15 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 	}); err != nil {
 		return fmt.Errorf("record nda: %w", err)
 	}
-	_ = s.queries.UpdateRoomMemberNDA(ctx, db.UpdateRoomMemberNDAParams{
+	if ndaErr := s.queries.UpdateRoomMemberNDA(ctx, db.UpdateRoomMemberNDAParams{
 		RoomID: room.ID,
 		Email:  email,
-	})
+	}); ndaErr != nil {
+		logger.ErrorCtx(ctx, "update room member NDA status failed", ndaErr,
+			logger.Attr("room_id", uuid.UUID(room.ID.Bytes).String()),
+			logger.Attr("email", email),
+		)
+	}
 	return nil
 }
 
@@ -706,6 +732,26 @@ func (s *Service) GetFolderPermission(ctx context.Context, roomID, email, folder
 		return "", err
 	}
 	return perm.Permission, nil
+}
+
+// batchFolderPermissions returns a map of folderPath → permission for all folders
+// accessible by a member in a single query, avoiding N+1 per-folder calls.
+func (s *Service) batchFolderPermissions(ctx context.Context, roomID pgtype.UUID, email string) (map[string]string, error) {
+	perms, err := s.queries.GetFolderPermissionsByRoomAndEmail(ctx, db.GetFolderPermissionsByRoomAndEmailParams{
+		RoomID: roomID,
+		Email:  email,
+	})
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string, len(perms))
+	for _, p := range perms {
+		m[p.FolderPath] = p.Permission
+	}
+	if _, ok := m[""]; !ok {
+		m[""] = "view" // root folder defaults to view
+	}
+	return m, nil
 }
 
 // AddDocument adds a document to a room folder.
@@ -875,9 +921,15 @@ func (s *Service) ListDocuments(ctx context.Context, roomID, workspaceID, email 
 		docsByFolder[r.FolderPath] = append(docsByFolder[r.FolderPath], d)
 	}
 
+	// Single batch query replaces N per-folder GetFolderPermission calls.
+	permMap, err := s.batchFolderPermissions(ctx, room.ID, email)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]FolderDocs, 0, len(folders))
 	for _, f := range folders {
-		perm, _ := s.GetFolderPermission(ctx, roomID, email, f.Path)
+		perm := permMap[f.Path]
 		if perm == "none" {
 			continue
 		}
@@ -956,9 +1008,15 @@ func (s *Service) GetRoomDocuments(ctx context.Context, roomID, workspaceID, use
 		docsByFolder[r.FolderPath] = append(docsByFolder[r.FolderPath], d)
 	}
 
+	// Single batch query replaces N per-folder GetFolderPermission calls.
+	permMap, err := s.batchFolderPermissions(ctx, room.ID, member.Email)
+	if err != nil {
+		return nil, err
+	}
+
 	out := make([]FolderDocs, 0, len(folders))
 	for _, f := range folders {
-		perm, _ := s.GetFolderPermission(ctx, roomID, member.Email, f.Path)
+		perm := permMap[f.Path]
 		if perm == "none" {
 			continue
 		}

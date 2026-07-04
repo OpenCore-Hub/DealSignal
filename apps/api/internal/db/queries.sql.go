@@ -1982,6 +1982,52 @@ func (q *Queries) GetDealByID(ctx context.Context, arg GetDealByIDParams) (Deal,
 	return i, err
 }
 
+const getDealRoomAggregatesByWorkspace = `-- name: GetDealRoomAggregatesByWorkspace :many
+SELECT
+    dr.id AS room_id,
+    COUNT(DISTINCT drd.id) AS document_count,
+    COUNT(DISTINCT rm.id) AS member_count,
+    COUNT(DISTINCT rar.id) FILTER (WHERE rar.status = 'pending') AS pending_count
+FROM deal_rooms dr
+LEFT JOIN deal_room_documents drd ON drd.room_id = dr.id
+LEFT JOIN room_members rm ON rm.room_id = dr.id
+LEFT JOIN room_access_requests rar ON rar.room_id = dr.id
+WHERE dr.workspace_id = $1 AND dr.deleted_at IS NULL
+GROUP BY dr.id
+`
+
+type GetDealRoomAggregatesByWorkspaceRow struct {
+	RoomID        pgtype.UUID
+	DocumentCount int64
+	MemberCount   int64
+	PendingCount  int64
+}
+
+func (q *Queries) GetDealRoomAggregatesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]GetDealRoomAggregatesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, getDealRoomAggregatesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDealRoomAggregatesByWorkspaceRow
+	for rows.Next() {
+		var i GetDealRoomAggregatesByWorkspaceRow
+		if err := rows.Scan(
+			&i.RoomID,
+			&i.DocumentCount,
+			&i.MemberCount,
+			&i.PendingCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDealRoomByID = `-- name: GetDealRoomByID :one
 SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
        requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
@@ -2196,6 +2242,69 @@ func (q *Queries) GetDocumentViewMetrics(ctx context.Context, arg GetDocumentVie
 	return items, nil
 }
 
+const getDocumentsByIDs = `-- name: GetDocumentsByIDs :many
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = ANY($1::uuid[]) AND workspace_id = $2 AND deleted_at IS NULL
+`
+
+type GetDocumentsByIDsParams struct {
+	Column1     []pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetDocumentsByIDsRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetDocumentsByIDs(ctx context.Context, arg GetDocumentsByIDsParams) ([]GetDocumentsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, getDocumentsByIDs, arg.Column1, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDocumentsByIDsRow
+	for rows.Next() {
+		var i GetDocumentsByIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.Category,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getFolderPermission = `-- name: GetFolderPermission :one
 SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
 FROM room_member_folder_permissions
@@ -2224,6 +2333,47 @@ func (q *Queries) GetFolderPermission(ctx context.Context, arg GetFolderPermissi
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const getFolderPermissionsByRoomAndEmail = `-- name: GetFolderPermissionsByRoomAndEmail :many
+SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
+FROM room_member_folder_permissions
+WHERE room_id = $1 AND email = $2
+`
+
+type GetFolderPermissionsByRoomAndEmailParams struct {
+	RoomID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) GetFolderPermissionsByRoomAndEmail(ctx context.Context, arg GetFolderPermissionsByRoomAndEmailParams) ([]RoomMemberFolderPermission, error) {
+	rows, err := q.db.Query(ctx, getFolderPermissionsByRoomAndEmail, arg.RoomID, arg.Email)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []RoomMemberFolderPermission
+	for rows.Next() {
+		var i RoomMemberFolderPermission
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.Email,
+			&i.FolderPath,
+			&i.Permission,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getIngestionJobByDocument = `-- name: GetIngestionJobByDocument :one
@@ -2362,6 +2512,44 @@ func (q *Queries) GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID
 	return i, err
 }
 
+const getLastAccessLogsByLinks = `-- name: GetLastAccessLogsByLinks :many
+SELECT DISTINCT ON (link_id) id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE link_id = ANY($1::uuid[])
+ORDER BY link_id, created_at DESC
+`
+
+func (q *Queries) GetLastAccessLogsByLinks(ctx context.Context, dollar_1 []pgtype.UUID) ([]AccessLog, error) {
+	rows, err := q.db.Query(ctx, getLastAccessLogsByLinks, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AccessLog
+	for rows.Next() {
+		var i AccessLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.EventType,
+			&i.Ip,
+			&i.UserAgent,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLinkAccessMetrics = `-- name: GetLinkAccessMetrics :one
 SELECT
     COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
@@ -2384,6 +2572,49 @@ func (q *Queries) GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) 
 	return i, err
 }
 
+const getLinkAccessMetricsBatch = `-- name: GetLinkAccessMetricsBatch :many
+SELECT
+    link_id,
+    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
+FROM access_logs
+WHERE link_id = ANY($1::uuid[])
+GROUP BY link_id
+`
+
+type GetLinkAccessMetricsBatchRow struct {
+	LinkID         pgtype.UUID
+	Opens          int64
+	UniqueVisitors int64
+	Downloads      int64
+}
+
+func (q *Queries) GetLinkAccessMetricsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkAccessMetricsBatchRow, error) {
+	rows, err := q.db.Query(ctx, getLinkAccessMetricsBatch, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkAccessMetricsBatchRow
+	for rows.Next() {
+		var i GetLinkAccessMetricsBatchRow
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.Opens,
+			&i.UniqueVisitors,
+			&i.Downloads,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLinkBounceCount = `-- name: GetLinkBounceCount :one
 SELECT COUNT(*) AS bounce_count
 FROM access_logs a
@@ -2401,6 +2632,44 @@ func (q *Queries) GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (i
 	var bounce_count int64
 	err := row.Scan(&bounce_count)
 	return bounce_count, err
+}
+
+const getLinkBounceCountsBatch = `-- name: GetLinkBounceCountsBatch :many
+SELECT a.link_id, COUNT(*)::bigint AS bounce_count
+FROM access_logs a
+WHERE a.link_id = ANY($1::uuid[])
+  AND a.event_type = 'link_opened'
+  AND a.visitor_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM page_views p
+      WHERE p.link_id = a.link_id AND p.visitor_id = a.visitor_id
+  )
+GROUP BY a.link_id
+`
+
+type GetLinkBounceCountsBatchRow struct {
+	LinkID      pgtype.UUID
+	BounceCount int64
+}
+
+func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkBounceCountsBatchRow, error) {
+	rows, err := q.db.Query(ctx, getLinkBounceCountsBatch, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkBounceCountsBatchRow
+	for rows.Next() {
+		var i GetLinkBounceCountsBatchRow
+		if err := rows.Scan(&i.LinkID, &i.BounceCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
@@ -2649,6 +2918,49 @@ func (q *Queries) GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID
 	var i GetLinkPageViewMetricsRow
 	err := row.Scan(&i.AvgDurationSeconds, &i.KeyPageViews, &i.TotalPageViews)
 	return i, err
+}
+
+const getLinkPageViewMetricsBatch = `-- name: GetLinkPageViewMetricsBatch :many
+SELECT
+    link_id,
+    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3)::bigint AS key_page_views,
+    COUNT(*)::bigint AS total_page_views
+FROM page_views
+WHERE link_id = ANY($1::uuid[])
+GROUP BY link_id
+`
+
+type GetLinkPageViewMetricsBatchRow struct {
+	LinkID             pgtype.UUID
+	AvgDurationSeconds float64
+	KeyPageViews       int64
+	TotalPageViews     int64
+}
+
+func (q *Queries) GetLinkPageViewMetricsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkPageViewMetricsBatchRow, error) {
+	rows, err := q.db.Query(ctx, getLinkPageViewMetricsBatch, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkPageViewMetricsBatchRow
+	for rows.Next() {
+		var i GetLinkPageViewMetricsBatchRow
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.AvgDurationSeconds,
+			&i.KeyPageViews,
+			&i.TotalPageViews,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getNotificationSettings = `-- name: GetNotificationSettings :one
@@ -3414,7 +3726,13 @@ FROM (
 ) e
 LEFT JOIN visitor_emails ve ON ve.visitor_id = e.visitor_id
 ORDER BY e.created_at DESC
+LIMIT $2
 `
+
+type ListAccessLogsByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
 
 type ListAccessLogsByLinkRow struct {
 	ID              pgtype.UUID
@@ -3431,8 +3749,8 @@ type ListAccessLogsByLinkRow struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
-func (q *Queries) ListAccessLogsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListAccessLogsByLinkRow, error) {
-	rows, err := q.db.Query(ctx, listAccessLogsByLink, linkID)
+func (q *Queries) ListAccessLogsByLink(ctx context.Context, arg ListAccessLogsByLinkParams) ([]ListAccessLogsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAccessLogsByLink, arg.LinkID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3469,10 +3787,16 @@ SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_ty
 FROM access_logs
 WHERE workspace_id = $1
 ORDER BY created_at DESC
+LIMIT $2
 `
 
-func (q *Queries) ListAccessLogsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]AccessLog, error) {
-	rows, err := q.db.Query(ctx, listAccessLogsByWorkspace, workspaceID)
+type ListAccessLogsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+func (q *Queries) ListAccessLogsByWorkspace(ctx context.Context, arg ListAccessLogsByWorkspaceParams) ([]AccessLog, error) {
+	rows, err := q.db.Query(ctx, listAccessLogsByWorkspace, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -4321,10 +4645,16 @@ SELECT id, tenant_id, workspace_id, link_id, visitor_id, page_number, duration_s
 FROM page_views
 WHERE workspace_id = $1
 ORDER BY created_at DESC
+LIMIT $2
 `
 
-func (q *Queries) ListPageViewsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]PageView, error) {
-	rows, err := q.db.Query(ctx, listPageViewsByWorkspace, workspaceID)
+type ListPageViewsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+func (q *Queries) ListPageViewsByWorkspace(ctx context.Context, arg ListPageViewsByWorkspaceParams) ([]PageView, error) {
+	rows, err := q.db.Query(ctx, listPageViewsByWorkspace, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}

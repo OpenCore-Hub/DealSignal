@@ -17,12 +17,25 @@ export function LoginPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !trimmedEmail.includes("@")) {
+      setError("Please enter a valid email address.");
+      return;
+    }
+    if (!password) {
+      setError("Please enter your password.");
+      return;
+    }
+
     setLoading(true);
     setError(null);
     try {
-      await api.login(email.trim(), password);
-      const redirect = searchParams.get("redirect") || "/";
-      navigate(redirect, { replace: true });
+      await api.login(trimmedEmail, password);
+      const redirect = searchParams.get("redirect");
+      // Only allow relative paths to prevent open redirect attacks
+      const safeRedirect = redirect && /^\/[^/]/.test(redirect) ? redirect : "/";
+      navigate(safeRedirect, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
       setLoading(false);

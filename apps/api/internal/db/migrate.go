@@ -77,8 +77,8 @@ func MigrateUpFS(ctx context.Context, conn *pgx.Conn, fsys fs.FS) error {
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}
+		defer r.Close()
 		sql, err := io.ReadAll(r)
-		r.Close()
 		if err != nil {
 			return fmt.Errorf("read migration %s: %w", f, err)
 		}

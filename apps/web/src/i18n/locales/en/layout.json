@@ -19,7 +19,6 @@
   },
   "topNav": {
     "toggleSidebar": "Toggle sidebar",
-    "uploadDocument": "Upload document",
     "notifications": {
       "title": "Notifications",
       "comingSoon": "Notification center coming soon"
@@ -28,8 +27,7 @@
       "menu": "Account menu",
       "settings": "Account settings",
       "settingsComingSoon": "Account settings require backend support",
-      "logout": "Log out",
-      "logoutComingSoon": "Log out requires backend support"
+      "logout": "Log out"
     },
     "workspace": {
       "fallback": "Workspace"
@@ -38,7 +36,6 @@
   "workspaceSwitcher": {
     "switchWorkspace": "Switch workspace",
     "label": "Workspace",
-    "createWorkspace": "Create workspace",
-    "createWorkspaceComingSoon": "Create workspace requires backend support"
+    "createWorkspace": "Create workspace"
   }
 }

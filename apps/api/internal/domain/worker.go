@@ -2,8 +2,9 @@ package domain
 
 import (
 	"context"
-	"fmt"
 	"time"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 )
 
 // RenewalWorker periodically renews SSL certificates that are close to expiry.
@@ -60,13 +61,13 @@ func (w *RenewalWorker) run(ctx context.Context) {
 	threshold := time.Now().Add(w.lookAhead)
 	renewed, err := w.svc.RenewExpiringCertificates(ctx, threshold)
 	if err != nil {
-		fmt.Printf(`{"time":"%s","level":"error","message":"domain renewal failed: %v"}%s`,
-			time.Now().Format(time.RFC3339Nano), err, "\n")
+		logger.ErrorCtx(ctx, "domain renewal check failed", err)
 		return
 	}
 	if renewed > 0 {
-		fmt.Printf(`{"time":"%s","level":"info","message":"renewed %d domain certificate(s)"}%s`,
-			time.Now().Format(time.RFC3339Nano), renewed, "\n")
+		logger.InfoCtx(ctx, "domain certificates renewed",
+			logger.Attr("count", renewed),
+		)
 	}
 }
 

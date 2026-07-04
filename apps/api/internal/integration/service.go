@@ -15,6 +15,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -275,6 +276,21 @@ func (s *Service) SyncHubSpot(ctx context.Context, workspaceID string) error {
 
 	var syncErrs []string
 	for _, c := range contacts {
+		// Check for an existing mapping so we don't re-create the HubSpot
+		// record if a previous sync created it but failed to persist the
+		// mapping (which would cause duplicate contacts on the next sync).
+		existingMapping, mapErr := s.queries.GetIntegrationMapping(ctx, db.GetIntegrationMappingParams{
+			WorkspaceID:     wsUUID,
+			Provider:        "hubspot",
+			LocalRecordType: "contact",
+			LocalID:         c.ID,
+		})
+		if mapErr == nil && existingMapping.ExternalID != "" {
+			// Already synced; skip upsert but still log for observability.
+			s.logSync(ctx, wsUUID, "contact", c.ID, existingMapping.ExternalID, "success", []byte(`{}`), "")
+			continue
+		}
+
 		externalID, err := client.upsertContact(ctx, c)
 		if err != nil {
 			syncErrs = append(syncErrs, fmt.Sprintf("contact %s: %v", c.Email.String, err))
@@ -364,7 +380,7 @@ func (s *Service) logSync(ctx context.Context, workspaceID pgtype.UUID, recordTy
 	if errMsg != "" {
 		errorMsg = pgtype.Text{String: errMsg, Valid: true}
 	}
-	_, _ = s.queries.CreateSyncLogWithError(ctx, db.CreateSyncLogWithErrorParams{
+	if _, syncErr := s.queries.CreateSyncLogWithError(ctx, db.CreateSyncLogWithErrorParams{
 		WorkspaceID:  workspaceID,
 		Provider:     "hubspot",
 		Direction:    "outbound",
@@ -373,7 +389,9 @@ func (s *Service) logSync(ctx context.Context, workspaceID pgtype.UUID, recordTy
 		Status:       status,
 		Payload:      payload,
 		ErrorMessage: errorMsg,
-	})
+	}); syncErr != nil {
+		logger.ErrorCtx(ctx, "create sync log failed", syncErr)
+	}
 }
 
 func (s *Service) ensureHubSpotToken(ctx context.Context, token db.IntegrationToken) (string, error) {
@@ -411,7 +429,7 @@ func (s *Service) refreshHubSpotToken(ctx context.Context, token db.IntegrationT
 		return "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("hubspot refresh returned %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("hubspot refresh returned %d: %s", resp.StatusCode, truncateBody(body, 512))
 	}
 
 	var parsed hubSpotOAuthResponse
@@ -484,10 +502,14 @@ func (s *Service) ProcessHubSpotSyncJob(ctx context.Context, job db.HubspotSyncJ
 
 	workspaceID := uuidToString(job.WorkspaceID)
 	if err := s.SyncHubSpot(ctx, workspaceID); err != nil {
-		_ = s.queries.MarkHubSpotSyncJobFailed(ctx, db.MarkHubSpotSyncJobFailedParams{
+		if failErr := s.queries.MarkHubSpotSyncJobFailed(ctx, db.MarkHubSpotSyncJobFailedParams{
 			ID: job.ID,
 			ErrorMessage: pgtype.Text{String: err.Error(), Valid: true},
-		})
+		}); failErr != nil {
+			logger.ErrorCtx(ctx, "mark hubspot sync job failed", failErr,
+				logger.Attr("job_id", uuid.UUID(job.ID.Bytes).String()),
+			)
+		}
 		return err
 	}
 
@@ -550,7 +572,7 @@ func (s *Service) exchangeSlack(ctx context.Context, code string) (db.UpsertInte
 		return db.UpsertIntegrationTokenParams{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return db.UpsertIntegrationTokenParams{}, fmt.Errorf("slack returned %d: %s", resp.StatusCode, string(body))
+		return db.UpsertIntegrationTokenParams{}, fmt.Errorf("slack returned %d: %s", resp.StatusCode, truncateBody(body, 512))
 	}
 
 	var parsed slackOAuthResponse
@@ -599,7 +621,7 @@ func (s *Service) exchangeHubSpot(ctx context.Context, code string) (db.UpsertIn
 		return db.UpsertIntegrationTokenParams{}, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return db.UpsertIntegrationTokenParams{}, fmt.Errorf("hubspot returned %d: %s", resp.StatusCode, string(body))
+		return db.UpsertIntegrationTokenParams{}, fmt.Errorf("hubspot returned %d: %s", resp.StatusCode, truncateBody(body, 512))
 	}
 
 	var parsed hubSpotOAuthResponse
@@ -644,6 +666,14 @@ func settingsFromRow(r db.NotificationSetting) Settings {
 		s.SlackWebhookURL = r.SlackWebhookUrl.String
 	}
 	return s
+}
+
+// truncateBody truncates a byte slice to maxLen for safe inclusion in error messages.
+func truncateBody(body []byte, maxLen int) string {
+	if len(body) > maxLen {
+		return string(body[:maxLen]) + "..."
+	}
+	return string(body)
 }
 
 func uuidToString(u pgtype.UUID) string {

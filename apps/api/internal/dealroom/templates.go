@@ -26,7 +26,7 @@ var roomTemplates = []Template{
 		Name:                   "Seed Round Due Diligence",
 		Description:            "Standard due diligence room for seed investors, including deck, financial model, team and legal documents.",
 		Scenario:               "seed",
-		DefaultPermissionLevel: "medium",
+		DefaultPermissionLevel: "standard",
 		NDAEnabled:             false,
 		RecommendedFiles:       []string{"Pitch Deck.pdf", "Financial Model.xlsx", "Cap Table"},
 		FolderStructure: []FolderTemplate{
@@ -42,7 +42,7 @@ var roomTemplates = []Template{
 		Name:                   "Series A Data Room",
 		Description:            "In-depth due diligence for Series A firms, emphasizing product data, growth metrics and financial transparency.",
 		Scenario:               "series-a",
-		DefaultPermissionLevel: "high",
+		DefaultPermissionLevel: "confidential",
 		NDAEnabled:             true,
 		RecommendedFiles:       []string{"Investor Deck.pdf", "Metrics Dashboard", "ARR Waterfall"},
 		FolderStructure: []FolderTemplate{
@@ -59,7 +59,7 @@ var roomTemplates = []Template{
 		Name:                   "LP Quarterly Update",
 		Description:            "Quarterly performance, distribution and operations report for LPs, with bulk distribution and access tracking.",
 		Scenario:               "lp-update",
-		DefaultPermissionLevel: "low",
+		DefaultPermissionLevel: "public",
 		NDAEnabled:             false,
 		RecommendedFiles:       []string{"GP Letter.pdf", "LP Report.xlsx"},
 		FolderStructure: []FolderTemplate{
@@ -75,7 +75,7 @@ var roomTemplates = []Template{
 		Name:                   "Enterprise Sales Proposal",
 		Description:            "Proposal data room for enterprise procurement committees, including proposal, case studies, security and implementation plan.",
 		Scenario:               "sales-proposal",
-		DefaultPermissionLevel: "medium",
+		DefaultPermissionLevel: "standard",
 		NDAEnabled:             true,
 		RecommendedFiles:       []string{"Proposal.pdf", "Security Whitepaper", "Implementation Plan"},
 		FolderStructure: []FolderTemplate{

@@ -1,5 +1,4 @@
 {
-  "appName": "DealSignal",
   "loading": "Loading...",
   "retry": "Retry",
   "cancel": "Cancel",
@@ -17,24 +16,11 @@
   "download": "Download",
   "preview": "Preview",
   "edit": "Edit",
-  "configure": "Configure",
-  "connect": "Connect",
   "back": "Back",
-  "open": "Open",
-  "submit": "Submit",
-  "send": "Send",
-  "createLink": "Create link",
-  "addToDealRoom": "Add to Deal Room",
   "archive": "Archive",
-  "unarchive": "Unarchive",
   "copyLink": "Copy link",
-  "linkCopied": "Link copied",
-  "logs": "Logs",
-  "deleting": "Deleting...",
-  "complete": "Complete",
   "reload": "Refresh page",
   "backToHome": "Back to home",
-  "dueDate": "Due",
   "overdue": {
     "days": "{{count}} day overdue",
     "days_plural": "{{count}} days overdue"
@@ -68,29 +54,7 @@
   "heat": {
     "hot": "Hot",
     "warm": "Warm",
-    "cold": "Cold",
-    "risk": "Risk"
-  },
-  "priority": {
-    "high": "High priority",
-    "medium": "Medium priority",
-    "low": "Low priority"
-  },
-  "confidence": {
-    "high": "High confidence",
-    "medium": "Medium confidence",
-    "low": "Low confidence (small sample)"
-  },
-  "impact": {
-    "high": "High impact",
-    "medium": "Medium impact",
-    "low": "Low impact"
-  },
-  "actionType": {
-    "email": "Email",
-    "call": "Call",
-    "share": "Share materials",
-    "review": "Review"
+    "cold": "Cold"
   },
   "fileType": {
     "pdf": "PDF",
@@ -102,19 +66,12 @@
     "en": "English",
     "zh-CN": "简体中文"
   },
-  "selectWorkspace": "Select workspace",
-  "selectWorkspaceDescription": "Choose a workspace to enter",
-  "moreActions": "More actions",
-  "usageAtLimit": "At limit",
-  "trendEmptyTitle": "No trend data yet",
   "theme": {
     "toggle": "Toggle theme",
     "light": "Light",
     "dark": "Dark",
     "system": "System"
   },
-  "start": "Start",
-  "now": "Now",
   "activity": {
     "open": "Opened",
     "pageView": "Viewed page",
@@ -124,15 +81,6 @@
     "emptyTitle": "No activity yet",
     "emptyDescription": "This contact or document has not generated any viewing behavior."
   },
-  "usageNearLimit": "Near limit",
-  "createWorkspace": "Create workspace",
-  "creating": "Creating...",
-  "createWorkspaceDisabled": "Creating workspaces requires backend support",
-  "workspaceName": "Workspace name",
-  "workspaceNamePlaceholder": "Acme Capital",
-  "workspaceSlug": "Workspace slug",
-  "workspaceSlugPlaceholder": "acme-capital",
-  "brandColor": "Brand color",
   "visitor": {
     "unknownOrganization": "Unknown organization",
     "visitCount": "{{count}} visits",
@@ -150,10 +98,11 @@
     "description": "The page you visited does not exist. Return to Dashboard.",
     "backToDashboard": "Back to Dashboard"
   },
-  "mock": {
-    "workspaces": {
-      "acme": { "name": "Acme Capital" },
-      "ventura": { "name": "Ventura Fund" }
-    }
+  "permission": {
+    "public": "Public",
+    "email": "Email",
+    "whitelist": "Whitelist",
+    "password": "Password",
+    "nda": "NDA"
   }
 }

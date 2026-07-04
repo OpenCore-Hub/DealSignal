@@ -39,7 +39,10 @@ type Querier interface {
 	GetPageExitCountsByDocument(ctx context.Context, documentID pgtype.UUID) ([]db.GetPageExitCountsByDocumentRow, error)
 	GetVisitorSummariesByDocument(ctx context.Context, arg db.GetVisitorSummariesByDocumentParams) ([]db.GetVisitorSummariesByDocumentRow, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
+	GetDocumentsByIDs(ctx context.Context, arg db.GetDocumentsByIDsParams) ([]db.GetDocumentsByIDsRow, error)
 	GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (db.AccessLog, error)
+	GetLastAccessLogsByLinks(ctx context.Context, linkIDs []pgtype.UUID) ([]db.AccessLog, error)
+	GetLinkPageViewMetricsBatch(ctx context.Context, linkIDs []pgtype.UUID) ([]db.GetLinkPageViewMetricsBatchRow, error)
 	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
 }
 
@@ -164,15 +167,20 @@ func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID,
 		return heat.Result{}, err
 	}
 
-	access, err := s.queries.GetLinkAccessMetrics(ctx, link.ID)
+	return s.getScoreForLink(ctx, link.ID, circle)
+}
+
+// getScoreForLink computes the heat score without re-fetching the link from DB.
+func (s *Service) getScoreForLink(ctx context.Context, linkID pgtype.UUID, circle heat.Circle) (heat.Result, error) {
+	access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("access metrics: %w", err)
 	}
-	pageViews, err := s.queries.GetLinkPageViewMetrics(ctx, link.ID)
+	pageViews, err := s.queries.GetLinkPageViewMetrics(ctx, linkID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("page view metrics: %w", err)
 	}
-	bounce, err := s.queries.GetLinkBounceCount(ctx, link.ID)
+	bounce, err := s.queries.GetLinkBounceCount(ctx, linkID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("bounce count: %w", err)
 	}
@@ -245,13 +253,14 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 		return stats, fmt.Errorf("links: %w", err)
 	}
 
-	stats.RecentLinks = make([]LinkOverview, 0, len(recentLinks))
-	for _, link := range recentLinks {
-		stats.RecentLinks = append(stats.RecentLinks, s.enrichLink(ctx, link))
-	}
-
+	// Compute scores for all links in one batch pass, caching results for reuse.
+	scoreCache := make(map[string]heat.Result, len(allLinks))
 	for _, link := range allLinks {
-		res, _ := s.GetScore(ctx, link.ID, wsUUID, heat.CircleDefault)
+		res, err := s.getScoreForLink(ctx, link.ID, heat.CircleDefault)
+		if err != nil {
+			res = heat.Result{Level: "cold"}
+		}
+		scoreCache[uuid.UUID(link.ID.Bytes).String()] = res
 		switch res.Level {
 		case "hot":
 			stats.HotCount++
@@ -260,6 +269,73 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 		case "cold":
 			stats.ColdCount++
 		}
+	}
+
+	// Collect link IDs for batch queries.
+	linkIDs := make([]pgtype.UUID, len(recentLinks))
+	for i, link := range recentLinks {
+		linkIDs[i] = link.ID
+	}
+
+	// Batch-fetch document titles and metrics for recent links.
+	docIDs := make([]pgtype.UUID, 0, len(recentLinks))
+	for _, link := range recentLinks {
+		if link.DocumentID.Valid {
+			docIDs = append(docIDs, link.DocumentID)
+		}
+	}
+	docByID := make(map[string]string)
+	if len(docIDs) > 0 {
+		docs, _ := s.queries.GetDocumentsByIDs(ctx, db.GetDocumentsByIDsParams{
+			Column1:     docIDs,
+			WorkspaceID: wsUUID,
+		})
+		for _, d := range docs {
+			docByID[uuid.UUID(d.ID.Bytes).String()] = d.Title
+		}
+	}
+
+	// Batch-fetch last access logs.
+	lastLogByLink := make(map[string]pgtype.Timestamptz)
+	if len(linkIDs) > 0 {
+		logs, _ := s.queries.GetLastAccessLogsByLinks(ctx, linkIDs)
+		for _, l := range logs {
+			lastLogByLink[uuid.UUID(l.LinkID.Bytes).String()] = l.CreatedAt
+		}
+	}
+
+	// Batch-fetch page view metrics for recent links (for avg duration).
+	pvMetricsByLink := make(map[string]db.GetLinkPageViewMetricsBatchRow)
+	if len(linkIDs) > 0 {
+		pvRows, _ := s.queries.GetLinkPageViewMetricsBatch(ctx, linkIDs)
+		for _, pv := range pvRows {
+			pvMetricsByLink[uuid.UUID(pv.LinkID.Bytes).String()] = pv
+		}
+	}
+
+	stats.RecentLinks = make([]LinkOverview, 0, len(recentLinks))
+	for _, link := range recentLinks {
+		linkIDStr := uuid.UUID(link.ID.Bytes).String()
+		res, ok := scoreCache[linkIDStr]
+		if !ok {
+			res = heat.Result{Level: "cold"}
+		}
+		docTitle := ""
+		if link.DocumentID.Valid {
+			docTitle = docByID[uuid.UUID(link.DocumentID.Bytes).String()]
+		}
+		var avgDur float64
+		if pv, ok := pvMetricsByLink[linkIDStr]; ok {
+			avgDur = pv.AvgDurationSeconds
+		}
+		stats.RecentLinks = append(stats.RecentLinks, LinkOverview{
+			Link:               link,
+			DocumentTitle:      docTitle,
+			Score:              res.Score,
+			Level:              res.Level,
+			AvgDurationSeconds: avgDur,
+			LastViewedAt:       lastLogByLink[linkIDStr],
+		})
 	}
 
 	signals, err := s.queries.ListSignalsByWorkspace(ctx, wsUUID)
@@ -278,7 +354,7 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 }
 
 func (s *Service) enrichLink(ctx context.Context, link db.Link) LinkOverview {
-	res, _ := s.GetScore(ctx, link.ID, link.WorkspaceID, heat.CircleDefault)
+	res, _ := s.getScoreForLink(ctx, link.ID, heat.CircleDefault)
 	if res.Level == "" {
 		res.Level = "cold"
 	}
@@ -351,7 +427,7 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 
 	overview.TopLinks = make([]LinkScore, 0, len(links))
 	for _, link := range links {
-		res, _ := s.GetScore(ctx, link.ID, wsUUID, heat.CircleDefault)
+		res, _ := s.getScoreForLink(ctx, link.ID, heat.CircleDefault)
 		if res.Level == "" {
 			res.Level = "cold"
 		}

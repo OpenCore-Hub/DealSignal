@@ -3,7 +3,7 @@ package analytics
 
 import (
 	"errors"
-	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -127,12 +127,7 @@ func (h *Handler) GetPageAnalytics(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	rows, err := h.service.PageAnalytics(c.Request.Context(), c.Param("documentId"), workspaceID)
 	if err != nil {
-		fmt.Printf(`{"time":"%s","level":"error","handler":"GetPageAnalytics","document_id":"%s","workspace_id":"%s","error":"%s"}`+"\n",
-			time.Now().UTC().Format(time.RFC3339),
-			c.Param("documentId"),
-			workspaceID,
-			err.Error(),
-		)
+		slog.Error("GetPageAnalytics failed", "document_id", c.Param("documentId"), "workspace_id", workspaceID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}

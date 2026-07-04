@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate } from "react-router";
 import {
   FileText,
@@ -63,8 +63,20 @@ export function DealRoomDetailPage() {
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const navigate = useNavigate();
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const activeUploadsRef = useRef(0);
+  const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
+
+  // Cleanup all progress intervals on unmount to prevent state updates on
+  // unmounted component.
+  useEffect(() => {
+    return () => {
+      for (const id of activeIntervalsRef.current) {
+        clearInterval(id);
+      }
+    };
+  }, []);
 
   const fetchRoom = useCallback(async () => {
     if (!roomId) {
@@ -122,6 +134,7 @@ export function DealRoomDetailPage() {
         progress: 0,
       },
     ]);
+    activeUploadsRef.current++;
     setUploading(true);
 
     const interval = setInterval(() => {
@@ -134,6 +147,9 @@ export function DealRoomDetailPage() {
       );
     }, 300);
 
+    // Track the interval so we can clear it on unmount.
+    activeIntervalsRef.current.add(interval);
+
     try {
       const doc = await api.uploadDocument(file);
       const sortOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
@@ -143,6 +159,7 @@ export function DealRoomDetailPage() {
         sort_order: sortOrder,
       });
       clearInterval(interval);
+      activeIntervalsRef.current.delete(interval);
       setUploadItems((prev) =>
         prev.map((item) => (item.id === id ? { ...item, status: "done", progress: 100 } : item))
       );
@@ -150,6 +167,7 @@ export function DealRoomDetailPage() {
       await refetch();
     } catch (e) {
       clearInterval(interval);
+      activeIntervalsRef.current.delete(interval);
       setUploadItems((prev) =>
         prev.map((item) =>
           item.id === id
@@ -159,7 +177,10 @@ export function DealRoomDetailPage() {
       );
       toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
     } finally {
-      setUploading(false);
+      activeUploadsRef.current--;
+      if (activeUploadsRef.current <= 0) {
+        setUploading(false);
+      }
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
@@ -188,57 +209,85 @@ export function DealRoomDetailPage() {
 
   const handleFolderCreate = async (name: string, parentPath?: string) => {
     if (!roomId) return;
-    await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
-    toast.success(t("folders.created", { name }));
-    refetch();
+    try {
+      await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
+      toast.success(t("folders.created", { name }));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.createFailed"));
+    }
   };
 
   const handleFolderRename = async (path: string, name: string) => {
     if (!roomId) return;
-    await api.renameDealRoomFolder(roomId, path, { name });
-    toast.success(t("folders.renamed"));
-    refetch();
+    try {
+      await api.renameDealRoomFolder(roomId, path, { name });
+      toast.success(t("folders.renamed"));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
+    }
   };
 
   const handleFolderDelete = async (path: string) => {
     if (!roomId) return;
-    await api.deleteDealRoomFolder(roomId, path);
-    toast.success(t("folders.deleted"));
-    refetch();
+    try {
+      await api.deleteDealRoomFolder(roomId, path);
+      toast.success(t("folders.deleted"));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+    }
   };
 
   const handleDocumentMove = async (docId: string, folderPath: string) => {
     if (!roomId) return;
-    await api.updateDealRoomDocument(roomId, docId, { folder_path: folderPath });
-    toast.success(t("documents.moved"));
-    refetch();
+    try {
+      await api.updateDealRoomDocument(roomId, docId, { folder_path: folderPath });
+      toast.success(t("documents.moved"));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.moveFailed"));
+    }
   };
 
   const handleDocumentReorder = async (docId: string, sortOrder: number) => {
     if (!roomId) return;
-    await api.updateDealRoomDocument(roomId, docId, { sort_order: sortOrder });
-    refetch();
+    try {
+      await api.updateDealRoomDocument(roomId, docId, { sort_order: sortOrder });
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.reorderFailed"));
+    }
   };
 
   const handleDocumentRemove = async (docId: string) => {
     if (!roomId) return;
-    await api.removeDealRoomDocument(roomId, docId);
-    toast.success(t("documents.removed"));
-    refetch();
+    try {
+      await api.removeDealRoomDocument(roomId, docId);
+      toast.success(t("documents.removed"));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
+    }
   };
 
   const handleDocumentsAdd = async (documentIds: string[], folderPath: string) => {
     if (!roomId) return;
-    let lastOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
-    for (const documentId of documentIds) {
-      await api.addDealRoomDocument(roomId, {
-        document_id: documentId,
-        folder_path: folderPath,
-        sort_order: lastOrder++,
-      });
+    try {
+      let lastOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+      for (const documentId of documentIds) {
+        await api.addDealRoomDocument(roomId, {
+          document_id: documentId,
+          folder_path: folderPath,
+          sort_order: lastOrder++,
+        });
+      }
+      toast.success(t("documents.added", { count: documentIds.length }));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.addFailed"));
     }
-    toast.success(t("documents.added", { count: documentIds.length }));
-    refetch();
   };
 
   const handleDocumentOpen = (documentId: string) => {

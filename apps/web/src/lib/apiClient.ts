@@ -150,7 +150,11 @@ function refreshAccessToken(baseUrl: string): Promise<string> {
 function redirectToLogin() {
   if (typeof window !== "undefined") {
     clearTokens();
-    window.location.href = "/login";
+    const returnPath = window.location.pathname + window.location.search;
+    const loginUrl = returnPath !== "/login" && returnPath !== "/"
+      ? `/login?redirect=${encodeURIComponent(returnPath)}`
+      : "/login";
+    window.location.href = loginUrl;
   }
 }
 

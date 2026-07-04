@@ -13,12 +13,9 @@
   "memberCount": "{{count}} 成员",
   "pendingApprovals": "{{count}} 待审批",
   "lastAccessed": "最近访问 {{time}}",
-  "createdAt": "创建于 {{time}}",
-  "ndaEnabled": "NDA 已启用",
-  "noNda": "无需 NDA",
-  "approvalRequired": "需审批",
   "detail": {
     "back": "返回数据室",
+    "notFound": "数据室未找到",
     "invite": "邀请成员",
     "manageDocs": "管理文档",
     "documents": "文档",
@@ -27,15 +24,12 @@
     "security": "安全",
     "folders": "文件夹结构",
     "noFolders": "该数据室尚无文件夹。",
-    "recommendedFiles": "推荐文件清单",
     "completion": "完成度",
     "uploaded": "已上传",
-    "upload": "上传",
     "uploadAny": "上传文档",
     "uploading": "上传中...",
     "uploadProgress": "文件上传进度",
     "uploadFailed": "上传失败",
-    "markDone": "标记完成",
     "noTemplate": "未匹配到模板结构。"
   },
   "new": {
@@ -74,6 +68,7 @@
     "deleted": "文件夹已删除",
     "deleteConfirm": "删除文件夹 '{{name}}'？",
     "deleteNotEmpty": "无法删除包含文档的文件夹，请先移除文档。",
+    "createFailed": "创建文件夹失败",
     "renameFailed": "重命名文件夹失败",
     "deleteFailed": "删除文件夹失败"
   },
@@ -89,7 +84,7 @@
     "alreadyAdded": "该文档已在此数据室中",
     "adding": "添加中...",
     "add": "添加",
-    "added": "已添加到数据室",
+    "addedSingle": "已添加到数据室",
     "folder": "文件夹",
     "addSelected": "添加 {{count}} 个文档",
     "noAvailable": "没有可用的工作区文档。",
@@ -101,10 +96,14 @@
     "moveTitle": "移动文档",
     "move": "移动",
     "moved": "文档已移动",
+    "moveFailed": "移动文档失败",
+    "reorderFailed": "排序文档失败",
     "remove": "从房间移除",
     "removeConfirm": "将 '{{title}}' 从该数据室移除？",
     "removed": "文档已移除",
+    "removeFailed": "移除文档失败",
     "added": "已添加 {{count}} 个文档",
+    "addFailed": "添加文档失败",
     "uploadedAndAdded": "已上传并添加 '{{title}}'"
   },
   "members": {
@@ -158,23 +157,6 @@
       "download": "下载",
       "admin": "管理",
       "none": "无权限"
-    }
-  },
-  "permission": {
-    "low": {
-      "label": "低摩擦",
-      "description": "公开或邮箱验证即可访问",
-      "friction": "接收方无需额外步骤，打开率最高。"
-    },
-    "medium": {
-      "label": "中强度",
-      "description": "白名单或密码保护",
-      "friction": "需要邮箱/密码/白名单验证，适合敏感材料。"
-    },
-    "high": {
-      "label": "高强度",
-      "description": "NDA + 白名单 + 密码组合",
-      "friction": "NDA 签署 + 多重验证，适合机密尽调资料。"
     }
   }
 }

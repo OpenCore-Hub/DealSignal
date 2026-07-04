@@ -48,11 +48,11 @@ function SummaryCards({
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4">
+    <div className="grid grid-cols-2 gap-4" role="region" aria-label={t("summary.title")}>
       {items.map((item) => {
         const Icon = item.icon;
         return (
-          <Card key={item.label}>
+          <Card key={item.label} aria-label={`${item.label}: ${item.count}`}>
             <CardContent className="flex items-center gap-3 p-4">
               <div className={`flex h-10 w-10 items-center justify-center rounded-md ${item.color}`}>
                 <Icon size={20} weight="fill" />
@@ -94,6 +94,7 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
                 key={alert.id}
                 role="link"
                 tabIndex={0}
+                aria-label={`${t(alert.title)}: ${t(alert.description)}`}
                 className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted"
                 onClick={handleClick}
                 onKeyDown={(e) => {

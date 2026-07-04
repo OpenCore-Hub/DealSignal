@@ -4,17 +4,5 @@
     "description": "Manage and track all agreement documents, including investment agreements, NDAs, term sheets, etc.",
     "setAsAgreement": "Mark as Agreement",
     "unsetAsAgreement": "Unmark Agreement"
-  },
-  "table": {
-    "emptyTitle": "No Agreement Documents",
-    "emptyDescription": "Upload documents in the Document Library, then mark them as agreement documents to manage them here.",
-    "searchPlaceholder": "Search agreement documents...",
-    "documentCount": "{{count}} agreement documents",
-    "noMatches": "No matching agreement documents found"
-  },
-  "toast": {
-    "setAgreement": "Marked as agreement document",
-    "unsetAgreement": "Removed agreement mark",
-    "updateFailed": "Failed to update document category"
   }
 }

@@ -1,5 +1,4 @@
 {
-  "appName": "DealSignal",
   "loading": "加载中...",
   "retry": "重试",
   "cancel": "取消",
@@ -17,24 +16,11 @@
   "download": "下载",
   "preview": "预览",
   "edit": "编辑",
-  "configure": "配置",
-  "connect": "连接",
   "back": "返回",
-  "open": "打开",
-  "submit": "提交",
-  "send": "发送",
-  "createLink": "创建链接",
-  "addToDealRoom": "加入数据室",
   "archive": "归档",
-  "unarchive": "取消归档",
   "copyLink": "复制链接",
-  "linkCopied": "链接已复制",
-  "logs": "日志",
-  "deleting": "删除中...",
-  "complete": "完成",
   "reload": "刷新页面",
   "backToHome": "返回首页",
-  "dueDate": "截止",
   "overdue": {
     "days": "已逾期 {{count}} 天"
   },
@@ -67,29 +53,7 @@
   "heat": {
     "hot": "高热度",
     "warm": "中热度",
-    "cold": "低热度",
-    "risk": "风险"
-  },
-  "priority": {
-    "high": "高优先级",
-    "medium": "中优先级",
-    "low": "低优先级"
-  },
-  "confidence": {
-    "high": "高置信度",
-    "medium": "中置信度",
-    "low": "低置信度（样本较少）"
-  },
-  "impact": {
-    "high": "高影响",
-    "medium": "中影响",
-    "low": "低影响"
-  },
-  "actionType": {
-    "email": "发邮件",
-    "call": "电话",
-    "share": "分享资料",
-    "review": "审查"
+    "cold": "低热度"
   },
   "fileType": {
     "pdf": "PDF",
@@ -101,19 +65,12 @@
     "en": "English",
     "zh-CN": "简体中文"
   },
-  "selectWorkspace": "选择工作区",
-  "selectWorkspaceDescription": "请选择要进入的工作区",
-  "moreActions": "更多操作",
-  "usageAtLimit": "已达上限",
-  "trendEmptyTitle": "暂无趋势数据",
   "theme": {
     "toggle": "切换主题",
     "light": "浅色",
     "dark": "深色",
     "system": "跟随系统"
   },
-  "start": "开始",
-  "now": "现在",
   "activity": {
     "open": "打开",
     "pageView": "查看页面",
@@ -123,15 +80,6 @@
     "emptyTitle": "暂无活动",
     "emptyDescription": "该联系人或文档尚未产生浏览行为。"
   },
-  "usageNearLimit": "接近上限",
-  "createWorkspace": "创建工作区",
-  "creating": "创建中...",
-  "createWorkspaceDisabled": "创建工作区需后端支持",
-  "workspaceName": "工作区名称",
-  "workspaceNamePlaceholder": "Acme Capital",
-  "workspaceSlug": "工作区标识",
-  "workspaceSlugPlaceholder": "acme-capital",
-  "brandColor": "品牌色",
   "visitor": {
     "unknownOrganization": "未知机构",
     "visitCount": "{{count}} 次访问",
@@ -148,10 +96,11 @@
     "description": "你访问的页面不存在，请返回 Dashboard。",
     "backToDashboard": "返回 Dashboard"
   },
-  "mock": {
-    "workspaces": {
-      "acme": { "name": "Acme 资本" },
-      "ventura": { "name": "Ventura 基金" }
-    }
+  "permission": {
+    "public": "公开",
+    "email": "邮箱验证",
+    "whitelist": "白名单",
+    "password": "密码保护",
+    "nda": "NDA 保护"
   }
 }

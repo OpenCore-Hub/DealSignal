@@ -478,7 +478,8 @@ FROM (
     WHERE access_logs.link_id = $1
 ) e
 LEFT JOIN visitor_emails ve ON ve.visitor_id = e.visitor_id
-ORDER BY e.created_at DESC;
+ORDER BY e.created_at DESC
+LIMIT $2;
 
 -- name: GetVisitorSummariesByDocument :many
 WITH visitor_emails AS (
@@ -510,17 +511,62 @@ WHERE link_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: GetDocumentsByIDs :many
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = ANY($1::uuid[]) AND workspace_id = $2 AND deleted_at IS NULL;
+
+-- name: GetLinkAccessMetricsBatch :many
+SELECT
+    link_id,
+    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
+FROM access_logs
+WHERE link_id = ANY($1::uuid[])
+GROUP BY link_id;
+
+-- name: GetLinkPageViewMetricsBatch :many
+SELECT
+    link_id,
+    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3)::bigint AS key_page_views,
+    COUNT(*)::bigint AS total_page_views
+FROM page_views
+WHERE link_id = ANY($1::uuid[])
+GROUP BY link_id;
+
+-- name: GetLinkBounceCountsBatch :many
+SELECT a.link_id, COUNT(*)::bigint AS bounce_count
+FROM access_logs a
+WHERE a.link_id = ANY($1::uuid[])
+  AND a.event_type = 'link_opened'
+  AND a.visitor_id IS NOT NULL
+  AND NOT EXISTS (
+      SELECT 1 FROM page_views p
+      WHERE p.link_id = a.link_id AND p.visitor_id = a.visitor_id
+  )
+GROUP BY a.link_id;
+
+-- name: GetLastAccessLogsByLinks :many
+SELECT DISTINCT ON (link_id) id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
+FROM access_logs
+WHERE link_id = ANY($1::uuid[])
+ORDER BY link_id, created_at DESC;
+
 -- name: ListAccessLogsByWorkspace :many
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
 FROM access_logs
 WHERE workspace_id = $1
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT $2;
 
 -- name: ListPageViewsByWorkspace :many
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth, created_at
 FROM page_views
 WHERE workspace_id = $1
-ORDER BY created_at DESC;
+ORDER BY created_at DESC
+LIMIT $2;
 
 -- name: GetPageAnalyticsByDocument :many
 SELECT
@@ -746,6 +792,19 @@ FROM deal_room_documents
 WHERE room_id = $1
 ORDER BY folder_path, sort_order;
 
+-- name: GetDealRoomAggregatesByWorkspace :many
+SELECT
+    dr.id AS room_id,
+    COUNT(DISTINCT drd.id) AS document_count,
+    COUNT(DISTINCT rm.id) AS member_count,
+    COUNT(DISTINCT rar.id) FILTER (WHERE rar.status = 'pending') AS pending_count
+FROM deal_rooms dr
+LEFT JOIN deal_room_documents drd ON drd.room_id = dr.id
+LEFT JOIN room_members rm ON rm.room_id = dr.id
+LEFT JOIN room_access_requests rar ON rar.room_id = dr.id
+WHERE dr.workspace_id = $1 AND dr.deleted_at IS NULL
+GROUP BY dr.id;
+
 -- name: SetFolderPermission :one
 INSERT INTO room_member_folder_permissions (tenant_id, workspace_id, room_id, email, folder_path, permission)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -757,6 +816,11 @@ SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, cre
 FROM room_member_folder_permissions
 WHERE room_id = $1 AND email = $2 AND folder_path = $3
 LIMIT 1;
+
+-- name: GetFolderPermissionsByRoomAndEmail :many
+SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
+FROM room_member_folder_permissions
+WHERE room_id = $1 AND email = $2;
 
 -- name: CreateNDAAgreement :exec
 INSERT INTO room_nda_agreements (room_id, email, ip, user_agent)

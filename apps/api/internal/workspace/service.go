@@ -3,12 +3,14 @@ package workspace
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -84,14 +86,25 @@ func invitationFromDB(i db.WorkspaceInvitation) Invitation {
 	}
 }
 
+// Beginner starts a database transaction.
+type Beginner interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 // Service handles workspace operations.
 type Service struct {
 	queries *db.Queries
+	dbPool  Beginner
 }
 
-// NewService creates a workspace service.
-func NewService(q *db.Queries) *Service {
-	return &Service{queries: q}
+// NewService creates a workspace service. An optional Beginner (db pool) enables
+// transactional operations like AcceptInvitation.
+func NewService(q *db.Queries, dbPool ...Beginner) *Service {
+	var pool Beginner
+	if len(dbPool) > 0 {
+		pool = dbPool[0]
+	}
+	return &Service{queries: q, dbPool: pool}
 }
 
 func workspaceFromDB(w db.ListWorkspacesByUserRow) Workspace {
@@ -358,12 +371,26 @@ func (s *Service) CreateInvitation(ctx context.Context, actorID, workspaceID, te
 }
 
 // AcceptInvitation uses a token to add a user to a workspace.
+// Runs inside a transaction to prevent TOCTOU races on invitation usage.
 func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (Member, error) {
 	tokenUUID, err := pgUUID(token)
 	if err != nil {
 		return Member{}, ErrInvitationNotFound
 	}
-	inv, err := s.queries.GetInvitationByToken(ctx, tokenUUID)
+
+	if s.dbPool == nil {
+		return Member{}, errors.New("accept invitation requires a database pool")
+	}
+
+	tx, err := s.dbPool.Begin(ctx)
+	if err != nil {
+		return Member{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+
+	qtx := s.queries.WithTx(tx)
+
+	inv, err := qtx.GetInvitationByToken(ctx, tokenUUID)
 	if err != nil {
 		return Member{}, ErrInvitationNotFound
 	}
@@ -379,16 +406,21 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (M
 	uUUID, _ := pgUUID(userID)
 
 	// Idempotent: if already a member, mark invitation used and return existing membership.
-	existing, err := s.queries.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
+	existing, err := qtx.GetWorkspaceMember(ctx, db.GetWorkspaceMemberParams{
 		WorkspaceID: wsUUID,
 		UserID:      uUUID,
 	})
 	if err == nil {
-		_ = s.queries.MarkInvitationUsed(ctx, tokenUUID)
+		if err := qtx.MarkInvitationUsed(ctx, tokenUUID); err != nil {
+			return Member{}, fmt.Errorf("mark invitation used: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return Member{}, fmt.Errorf("commit tx: %w", err)
+		}
 		return memberFromDB(existing), nil
 	}
 
-	m, err := s.queries.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+	m, err := qtx.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
 		WorkspaceID: wsUUID,
 		UserID:      uUUID,
 		Role:        inv.Role,
@@ -397,8 +429,12 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (M
 		return Member{}, err
 	}
 
-	if err := s.queries.MarkInvitationUsed(ctx, tokenUUID); err != nil {
-		return Member{}, err
+	if err := qtx.MarkInvitationUsed(ctx, tokenUUID); err != nil {
+		return Member{}, fmt.Errorf("mark invitation used: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return Member{}, fmt.Errorf("commit tx: %w", err)
 	}
 	return memberFromDB(m), nil
 }
@@ -461,4 +497,13 @@ func (s *Service) requireMember(ctx context.Context, userID, workspaceID string)
 		return db.WorkspaceMember{}, ErrNotMember
 	}
 	return m, nil
+}
+
+// IsManager returns true if the user is an owner or admin of the workspace.
+func (s *Service) IsManager(ctx context.Context, userID, workspaceID string) bool {
+	m, err := s.requireMember(ctx, userID, workspaceID)
+	if err != nil {
+		return false
+	}
+	return validManagerRole(m.Role)
 }

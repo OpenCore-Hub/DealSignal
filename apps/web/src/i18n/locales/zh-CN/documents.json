@@ -9,7 +9,6 @@
     "dragTitle": "拖拽文件到这里",
     "dragDescription": "或点击选择文件，支持 PDF / Word / PPT / Excel",
     "selectFiles": "选择文件",
-    "processing": "解析中...",
     "removeFile": "移除文件",
     "supportedTypes": ".pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx",
     "fileCount": "{{count}} 个文件",
@@ -94,7 +93,6 @@
       "title": "删除文档",
       "description": "确定要删除「{{title}}」吗？关联链接将一并失效，此操作不可撤销。"
     },
-    "deleting": "删除中...",
     "deleted": "文档已删除"
   },
   "analytics": {
@@ -155,17 +153,12 @@
     "thumbnailViews": "{{count}} 次访问 · {{duration}}",
     "pagePlaceholder": "第 {{pageNumber}} 页",
     "previewPlaceholder": "文档预览占位",
-    "signedUrlNotice": "后端签名 URL 加载后将在此渲染真实页面内容。",
     "currentPageStats": "当前页浏览 {{count}} 次，平均停留 {{duration}}。",
     "loading": "加载文档中...",
     "gateTitle": "该文档已安全共享",
     "emailLabel": "邮箱",
     "emailPlaceholder": "输入您的邮箱",
     "emailRequired": "请输入邮箱以继续查看文档。",
-    "sendCode": "发送查看码",
-    "sendingCode": "发送中...",
-    "codeSent": "查看码已发送",
-    "sendCodeFailed": "发送查看码失败，请重试。",
     "codeLabel": "查看码",
     "codePlaceholder": "输入 6 位查看码",
     "codeRequired": "请输入查看码以继续查看文档。",

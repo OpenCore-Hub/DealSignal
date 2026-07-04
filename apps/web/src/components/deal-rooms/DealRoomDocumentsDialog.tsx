@@ -43,38 +43,62 @@ export function DealRoomDocumentsDialog({
   const allRoomDocuments = folderDocs.flatMap((fd) => fd.documents);
 
   const handleFolderCreate = async (name: string, parentPath?: string) => {
-    await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
-    toast.success(t("folders.created", { name }));
-    onChanged();
+    try {
+      await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
+      toast.success(t("folders.created", { name }));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.createFailed"));
+    }
   };
 
   const handleFolderRename = async (path: string, name: string) => {
-    await api.renameDealRoomFolder(roomId, path, { name });
-    toast.success(t("folders.renamed"));
-    onChanged();
+    try {
+      await api.renameDealRoomFolder(roomId, path, { name });
+      toast.success(t("folders.renamed"));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
+    }
   };
 
   const handleFolderDelete = async (path: string) => {
-    await api.deleteDealRoomFolder(roomId, path);
-    toast.success(t("folders.deleted"));
-    onChanged();
+    try {
+      await api.deleteDealRoomFolder(roomId, path);
+      toast.success(t("folders.deleted"));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+    }
   };
 
   const handleDocumentMove = async (docId: string, folderPath: string) => {
-    await api.updateDealRoomDocument(roomId, docId, { folder_path: folderPath });
-    toast.success(t("documents.moved"));
-    onChanged();
+    try {
+      await api.updateDealRoomDocument(roomId, docId, { folder_path: folderPath });
+      toast.success(t("documents.moved"));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.moveFailed"));
+    }
   };
 
   const handleDocumentReorder = async (docId: string, sortOrder: number) => {
-    await api.updateDealRoomDocument(roomId, docId, { sort_order: sortOrder });
-    onChanged();
+    try {
+      await api.updateDealRoomDocument(roomId, docId, { sort_order: sortOrder });
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.reorderFailed"));
+    }
   };
 
   const handleDocumentRemove = async (docId: string) => {
-    await api.removeDealRoomDocument(roomId, docId);
-    toast.success(t("documents.removed"));
-    onChanged();
+    try {
+      await api.removeDealRoomDocument(roomId, docId);
+      toast.success(t("documents.removed"));
+      onChanged();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
+    }
   };
 
   const handleAddDocuments = async (documentIds: string[], folderPath: string) => {

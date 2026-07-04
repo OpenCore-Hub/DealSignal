@@ -9,9 +9,9 @@ import (
 	"image"
 	"io"
 	"os"
-	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -159,8 +159,9 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			if len(texts) > 0 {
 				embeddings, embedErr = s.embedder.EmbedBatch(ctx, texts)
 				if embedErr != nil {
-					fmt.Printf(`{"time":"%s","level":"warn","document_id":"%s","message":"embedding failed, continuing without vectors: %s"}`+"\n",
-						time.Now().UTC().Format(time.RFC3339), docID, embedErr.Error())
+					logger.ErrorCtx(ctx, "embedding failed, continuing without vectors", embedErr,
+						logger.Attr("document_id", docID),
+					)
 				}
 			}
 

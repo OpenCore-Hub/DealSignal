@@ -702,7 +702,7 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
       { name: "05 Legal", description: "Incorporation, shareholder agreement and option plan" },
     ],
     recommendedFiles: ["Pitch Deck.pdf", "Financial Model.xlsx", "Cap Table"],
-    defaultPermissionLevel: "medium",
+    defaultPermissionLevel: "standard",
     ndaEnabled: false,
   },
   {
@@ -719,7 +719,7 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
       { name: "06 Legal & Compliance" },
     ],
     recommendedFiles: ["Investor Deck.pdf", "Metrics Dashboard", "ARR Waterfall"],
-    defaultPermissionLevel: "high",
+    defaultPermissionLevel: "confidential",
     ndaEnabled: true,
   },
   {
@@ -735,7 +735,7 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
       { name: "05 Governance & AML/KYC" },
     ],
     recommendedFiles: ["GP Letter.pdf", "LP Report.xlsx"],
-    defaultPermissionLevel: "low",
+    defaultPermissionLevel: "public",
     ndaEnabled: false,
   },
   {
@@ -751,7 +751,7 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
       { name: "05 Implementation Plan" },
     ],
     recommendedFiles: ["Proposal.pdf", "Security Whitepaper", "Implementation Plan"],
-    defaultPermissionLevel: "medium",
+    defaultPermissionLevel: "standard",
     ndaEnabled: true,
   },
 ];

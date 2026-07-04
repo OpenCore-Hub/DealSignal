@@ -1,4 +1,4 @@
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useState, useCallback } from "react";
 import { useLocation, useNavigate } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
@@ -22,7 +22,7 @@ import {
 
 import { useAIStore } from "@/stores/aiStore";
 import { useTranslation } from "react-i18next";
-import type { Evidence } from "@/types";
+import type { Evidence, ChatMessage } from "@/types";
 
 function EvidenceCard({ evidence, documentId }: { evidence: Evidence; documentId?: string }) {
   const { t } = useTranslation("ai");
@@ -73,6 +73,26 @@ export function AIAssistant() {
 
   const documentIdMatch = location.pathname.match(/\/(?:documents|viewer)\/([^/]+)/);
   const documentId = documentIdMatch?.[1];
+
+  // Resolve a message's content: i18n keys (stored by the store) are resolved
+  // via t(); server answers and user messages pass through as-is.
+  const resolveContent = useCallback(
+    (msg: ChatMessage): string => {
+      // Welcome message uses the full key path "ai:welcomeMessage"
+      if (msg.id === "welcome") return t(msg.content);
+      // i18n keys from the store use "namespace:key" format
+      if (typeof msg.content === "string" && msg.content.startsWith("ai:")) {
+        const key = msg.content.slice(3); // strip "ai:" prefix
+        const meta = msg as ChatMessage & { _query?: string };
+        if (meta._query) {
+          return t(key, { query: meta._query });
+        }
+        return t(key);
+      }
+      return msg.content;
+    },
+    [t],
+  );
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -146,7 +166,7 @@ export function AIAssistant() {
                 </div>
               )}
               {messages.map((msg) => {
-                const content = msg.id === "welcome" ? t(msg.content) : msg.content;
+                const content = resolveContent(msg);
                 return (
                   <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
                     <div

@@ -39,12 +39,8 @@ type registerRequest struct {
 }
 
 func tenantIDFromRequest(c *gin.Context) string {
-	if id := c.Query("tenant_id"); id != "" {
-		return id
-	}
-	if id := c.GetHeader("X-Tenant-ID"); id != "" {
-		return id
-	}
+	// Only trust tenantID from middleware context, not from client-controlled query/header.
+	// The auth/workspace middleware already validates and sets tenantID in context.
 	return middleware.TenantIDFrom(c)
 }
 

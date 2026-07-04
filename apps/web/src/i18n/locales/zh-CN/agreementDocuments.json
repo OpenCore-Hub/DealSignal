@@ -4,17 +4,5 @@
     "description": "管理与跟踪所有协议类文档，包括投资协议、保密协议、条款清单等。",
     "setAsAgreement": "设为协议文档",
     "unsetAsAgreement": "取消协议标记"
-  },
-  "table": {
-    "emptyTitle": "暂无协议文档",
-    "emptyDescription": "在文档库中上传文档后，可将其标记为协议文档，在此集中管理。",
-    "searchPlaceholder": "搜索协议文档...",
-    "documentCount": "{{count}} 份协议文档",
-    "noMatches": "没有找到匹配的协议文档"
-  },
-  "toast": {
-    "setAgreement": "已标记为协议文档",
-    "unsetAgreement": "已取消协议标记",
-    "updateFailed": "更新文档分类失败"
   }
 }

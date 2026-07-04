@@ -23,12 +23,41 @@ type verificationEntry struct {
 	exp    time.Time
 }
 
-// NewMemoryTokenStore creates a new in-memory token store.
+// NewMemoryTokenStore creates a new in-memory token store. A background goroutine
+// periodically evicts expired entries to prevent unbounded memory growth.
 func NewMemoryTokenStore() *MemoryTokenStore {
-	return &MemoryTokenStore{
+	s := &MemoryTokenStore{
 		blocklist:          make(map[string]time.Time),
 		refreshTokens:      make(map[string]time.Time),
 		verificationTokens: make(map[string]verificationEntry),
+	}
+	go s.cleanupExpired()
+	return s
+}
+
+// cleanupExpired evicts expired entries from all maps every 5 minutes.
+func (m *MemoryTokenStore) cleanupExpired() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		m.mu.Lock()
+		now := time.Now()
+		for k, exp := range m.blocklist {
+			if now.After(exp) {
+				delete(m.blocklist, k)
+			}
+		}
+		for k, exp := range m.refreshTokens {
+			if now.After(exp) {
+				delete(m.refreshTokens, k)
+			}
+		}
+		for k, e := range m.verificationTokens {
+			if now.After(e.exp) {
+				delete(m.verificationTokens, k)
+			}
+		}
+		m.mu.Unlock()
 	}
 }
 

@@ -4,7 +4,8 @@ import type { PermissionConfig } from "@/types";
 
 describe("toCreateLinkPayload", () => {
   const baseConfig: PermissionConfig = {
-    level: "low",
+    level: "public",
+    isCustomized: false,
     requireEmailVerification: false,
     whitelistEnabled: false,
     whitelist: [],
@@ -25,45 +26,85 @@ describe("toCreateLinkPayload", () => {
     vi.useRealTimers();
   });
 
-  it("maps permission levels correctly", () => {
-    expect(toCreateLinkPayload("doc-1", { ...baseConfig, level: "low" }).permission_type).toBe("public");
-    expect(
-      toCreateLinkPayload("doc-1", { ...baseConfig, level: "medium", requireEmailVerification: true, contactId: "contact-1" }).permission_type
-    ).toBe("public");
-    expect(
-      toCreateLinkPayload("doc-1", { ...baseConfig, level: "high", whitelistEnabled: true, whitelist: ["a@example.test"] }).permission_type
-    ).toBe("whitelist");
+  it("maps public preset to public permission type", () => {
+    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, level: "public" });
+    expect(payload.permission_type).toBe("public");
   });
 
-  it("maps email verification to public permission type with the boolean flag", () => {
-    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, level: "medium", requireEmailVerification: true, contactId: "contact-1" });
+  it("maps standard preset with email verification to public permission type with boolean flag", () => {
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      level: "standard",
+      isCustomized: false,
+      requireEmailVerification: true,
+      contactId: "contact-1",
+    });
     expect(payload.permission_type).toBe("public");
     expect(payload.require_email_verification).toBe(true);
     expect(payload.contact_ids).toEqual(["contact-1"]);
   });
 
-  it("maps high + password to password permission type", () => {
-    const config: PermissionConfig = { ...baseConfig, level: "high", passwordEnabled: true, password: "secret" };
+  it("maps confidential preset to nda permission type", () => {
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      level: "confidential",
+      isCustomized: false,
+      whitelistEnabled: true,
+      whitelist: ["a@example.test"],
+      ndaEnabled: true,
+      passwordEnabled: true,
+      password: "secret",
+    });
+    expect(payload.permission_type).toBe("nda");
+    expect(payload.require_nda).toBe(true);
+    expect(payload.require_password).toBe(true);
+    expect(payload.allowed_emails).toEqual(["a@example.test"]);
+  });
+
+  it("maps password to password permission type", () => {
+    const config: PermissionConfig = {
+      ...baseConfig,
+      level: "confidential",
+      isCustomized: false,
+      passwordEnabled: true,
+      password: "secret",
+    };
     expect(toCreateLinkPayload("doc-1", config).permission_type).toBe("password");
   });
 
-  it("includes whitelist emails when enabled", () => {
-    const config: PermissionConfig = { ...baseConfig, level: "high", whitelistEnabled: true, whitelist: ["a@example.test"] };
+  it("maps whitelist to whitelist permission type", () => {
+    const config: PermissionConfig = {
+      ...baseConfig,
+      level: "standard",
+      isCustomized: false,
+      whitelistEnabled: true,
+      whitelist: ["a@example.test"],
+    };
     const payload = toCreateLinkPayload("doc-1", config);
+    expect(payload.permission_type).toBe("whitelist");
     expect(payload.allowed_emails).toEqual(["a@example.test"]);
   });
 
   it("omits whitelist emails when disabled", () => {
-    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, whitelist: ["a@example.test"] });
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      whitelist: ["a@example.test"],
+    });
     expect(payload.allowed_emails).toBeUndefined();
   });
 
   it("splits whitelist emails and domains into separate fields", () => {
     const config: PermissionConfig = {
       ...baseConfig,
-      level: "high",
+      level: "standard",
+      isCustomized: false,
       whitelistEnabled: true,
-      whitelist: ["a@example.test", "example.org", " @example.io ", "b@example.test"],
+      whitelist: [
+        "a@example.test",
+        "example.org",
+        " @example.io ",
+        "b@example.test",
+      ],
     };
     const payload = toCreateLinkPayload("doc-1", config);
     expect(payload.allowed_emails).toEqual(["a@example.test", "b@example.test"]);
@@ -71,22 +112,36 @@ describe("toCreateLinkPayload", () => {
   });
 
   it("includes password when enabled", () => {
-    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, passwordEnabled: true, password: "secret" });
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      passwordEnabled: true,
+      password: "secret",
+    });
     expect(payload.password).toBe("secret");
   });
 
   it("sets expiration from expiryDays", () => {
-    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, expiryDays: 7 });
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      expiryDays: 7,
+    });
     expect(payload.expires_at).toBe("2026-06-28T12:00:00.000Z");
   });
 
   it("sets max access count from maxViews", () => {
-    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, maxViews: 10 });
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      maxViews: 10,
+    });
     expect(payload.max_access_count).toBe(10);
   });
 
   it("sends require_password when password is enabled", () => {
-    const payload = toCreateLinkPayload("doc-1", { ...baseConfig, passwordEnabled: true, password: "secret" });
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      passwordEnabled: true,
+      password: "secret",
+    });
     expect(payload.require_password).toBe(true);
     expect(payload.require_email_verification).toBe(false);
   });
@@ -100,6 +155,22 @@ describe("toCreateLinkPayload", () => {
     });
     expect(payload.require_email_verification).toBe(true);
     expect(payload.require_nda).toBe(true);
+  });
+
+  it("maps collaborative preset to public with download and watermark", () => {
+    const payload = toCreateLinkPayload("doc-1", {
+      ...baseConfig,
+      level: "collaborative",
+      isCustomized: false,
+      requireEmailVerification: true,
+      contactId: "contact-1",
+      allowDownload: true,
+      watermarkEnabled: true,
+    });
+    expect(payload.permission_type).toBe("public");
+    expect(payload.require_email_verification).toBe(true);
+    expect(payload.download_enabled).toBe(true);
+    expect(payload.watermark_enabled).toBe(true);
   });
 });
 

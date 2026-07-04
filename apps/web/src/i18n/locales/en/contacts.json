@@ -15,6 +15,7 @@
   },
   "detail": {
     "back": "Back to contacts",
+    "notFound": "Contact not found",
     "writeEmail": "Write email",
     "totalVisits": "Total visits",
     "totalDuration": "Total duration",
@@ -38,14 +39,6 @@
     },
     "view": "View",
     "notesHint": "No notes yet. Click Write email to capture conversation highlights."
-  },
-  "mock": {
-    "activities": {
-      "act_1": { "description": "Spent 3 minutes on the financial slide" },
-      "act_2": { "description": "Opened the financial model" },
-      "act_3": { "description": "Returned to the pitch deck" },
-      "act_4": { "description": "Viewed the revenue forecast page" }
-    }
   },
   "activity": {
     "open": "opened the document",

@@ -254,6 +254,8 @@ export function DealRoomFolderTree({
     try {
       await onDocumentMove(movingDoc.id, targetFolder);
       setMovingDoc(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.moveFailed"));
     } finally {
       setActingDocId(null);
     }
@@ -263,6 +265,8 @@ export function DealRoomFolderTree({
     setActingDocId(doc.id);
     try {
       await onDocumentReorder(doc.id, doc.sort_order + direction);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.reorderFailed"));
     } finally {
       setActingDocId(null);
     }
@@ -273,6 +277,8 @@ export function DealRoomFolderTree({
     setActingDocId(doc.id);
     try {
       await onDocumentRemove(doc.id);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
     } finally {
       setActingDocId(null);
     }

@@ -17,16 +17,13 @@ export interface CreateLinkPayload {
   watermark_enabled?: boolean;
 }
 
-function mapPermissionLevel(config: PermissionConfig): string {
-  if (config.passwordEnabled && config.password) {
-    return "password";
-  }
-  if (config.ndaEnabled) {
-    return "nda";
-  }
-  if (config.whitelistEnabled && config.whitelist.length > 0) {
-    return "whitelist";
-  }
+function mapConfigToPermissionType(
+  config: PermissionConfig,
+): string {
+  // Derive the closest legacy permission_type for backward compatibility.
+  if (config.ndaEnabled) return "nda";
+  if (config.passwordEnabled) return "password";
+  if (config.whitelistEnabled && config.whitelist.length > 0) return "whitelist";
   // Modern email verification is controlled by the independent boolean flag,
   // not by the legacy permission_type, so it should remain "public".
   return "public";
@@ -35,25 +32,37 @@ function mapPermissionLevel(config: PermissionConfig): string {
 export function toCreateLinkPayload(
   documentId: string,
   config: PermissionConfig,
-  name?: string
+  name?: string,
 ): CreateLinkPayload {
   const whitelist = (config.whitelistEnabled ? config.whitelist : [])
     .map((s) => s.trim())
     .filter(Boolean);
-  const allowedEmails = whitelist.filter((s) => s.includes("@") && !s.startsWith("@"));
-  const allowedDomains = whitelist.filter((s) => !s.includes("@") || s.startsWith("@"));
+  const allowedEmails = whitelist.filter(
+    (s) => s.includes("@") && !s.startsWith("@"),
+  );
+  const allowedDomains = whitelist.filter(
+    (s) => !s.includes("@") || s.startsWith("@"),
+  );
 
   const payload: CreateLinkPayload = {
     document_id: documentId,
     name,
-    permission_type: mapPermissionLevel(config),
-    require_email_verification: config.requireEmailVerification || config.whitelistEnabled || config.ndaEnabled,
+    permission_type: mapConfigToPermissionType(config),
+    require_email_verification:
+      config.requireEmailVerification ||
+      config.whitelistEnabled ||
+      config.ndaEnabled,
     require_password: config.passwordEnabled,
     require_nda: config.ndaEnabled,
-    allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
-    allowed_domains: allowedDomains.length > 0 ? allowedDomains : undefined,
+    allowed_emails:
+      allowedEmails.length > 0 ? allowedEmails : undefined,
+    allowed_domains:
+      allowedDomains.length > 0 ? allowedDomains : undefined,
     password: config.passwordEnabled ? config.password : undefined,
-    contact_ids: config.requireEmailVerification && config.contactId ? [config.contactId] : undefined,
+    contact_ids:
+      config.requireEmailVerification && config.contactId
+        ? [config.contactId]
+        : undefined,
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,
   };
@@ -88,7 +97,7 @@ export function toCreateDealRoomPayload(
     template?: string;
     ndaEnabled?: boolean;
     requiresApproval?: boolean;
-  }
+  },
 ): CreateDealRoomPayload {
   return {
     name: input.name,

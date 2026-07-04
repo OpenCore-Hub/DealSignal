@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { UploadSimple, File, X, Check, Warning } from "@phosphor-icons/react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,6 +24,19 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
+  const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
+  // Track file keys for deduplication without depending on `files` state,
+  // which would cause a stale closure in the drag/drop handler.
+  const existingKeysRef = useRef<Set<string>>(new Set());
+
+  // Cleanup all progress intervals on unmount.
+  useEffect(() => {
+    return () => {
+      for (const id of activeIntervalsRef.current) {
+        clearInterval(id);
+      }
+    };
+  }, []);
 
   // Track which files are actively being uploaded to prevent double-upload
   const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
@@ -32,19 +45,16 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
     inputRef.current?.click();
   }, []);
 
-  // Add files to queue with deduplication (by name + size)
+  // Add files to queue with deduplication (by name + size). Uses a ref instead
+  // of `files` state to avoid stale closure when rapid sequential drops occur.
   const handleFiles = useCallback((selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
-
-    const existingNames = new Map(
-      files.map((f) => [`${f.file.name}|${f.file.size}`, true] as [string, boolean])
-    );
 
     const deduped: UploadFile[] = [];
     for (const file of Array.from(selectedFiles)) {
       const key = `${file.name}|${file.size}`;
-      if (existingNames.has(key)) continue; // skip duplicate
-      existingNames.set(key, true);
+      if (existingKeysRef.current.has(key)) continue; // skip duplicate
+      existingKeysRef.current.add(key);
       deduped.push({
         id: Math.random().toString(36).slice(2),
         file,
@@ -56,11 +66,17 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
     if (deduped.length > 0) {
       setFiles((prev) => [...prev, ...deduped]);
     }
-  }, [files]);
+  }, []);
 
   // Remove a file from the queue
   const removeFile = useCallback((id: string) => {
-    setFiles((prev) => prev.filter((f) => f.id !== id));
+    setFiles((prev) => {
+      const removed = prev.find((f) => f.id === id);
+      if (removed) {
+        existingKeysRef.current.delete(`${removed.file.name}|${removed.file.size}`);
+      }
+      return prev.filter((f) => f.id !== id);
+    });
   }, []);
 
   // Upload a single file to the server
@@ -82,6 +98,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
             if (f.id !== uploadFile.id) return f;
             if (f.status !== "uploading") {
               clearInterval(interval);
+              activeIntervalsRef.current.delete(interval);
               return f;
             }
             return {
@@ -91,11 +108,13 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
           })
         );
       }, 300);
+      activeIntervalsRef.current.add(interval);
 
       return api
         .uploadDocument(uploadFile.file, category)
         .then(() => {
           clearInterval(interval);
+          activeIntervalsRef.current.delete(interval);
           setUploadingIds((prev) => {
             const next = new Set(prev);
             next.delete(uploadFile.id);
@@ -112,6 +131,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
         })
         .catch((err: Error) => {
           clearInterval(interval);
+          activeIntervalsRef.current.delete(interval);
           setUploadingIds((prev) => {
             const next = new Set(prev);
             next.delete(uploadFile.id);
@@ -142,7 +162,14 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
 
   // Clear completed/error files
   const clearCompleted = useCallback(() => {
-    setFiles((prev) => prev.filter((f) => f.status === "pending" || f.status === "uploading"));
+    setFiles((prev) => {
+      const toKeep = prev.filter((f) => f.status === "pending" || f.status === "uploading");
+      // Rebuild the dedup ref from the remaining files.
+      existingKeysRef.current = new Set(
+        toKeep.map((f) => `${f.file.name}|${f.file.size}`),
+      );
+      return toKeep;
+    });
   }, []);
 
   const onDragOver = (e: React.DragEvent) => {
@@ -194,8 +221,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
           data-testid="file-upload"
           multiple
           tabIndex={-1}
-          aria-hidden
-          className="absolute opacity-0 overflow-hidden w-[1px] h-[1px] p-0 m-[-1px] border-none"
+          className="sr-only"
           onChange={(e) => {
             handleFiles(e.target.files);
             e.target.value = "";

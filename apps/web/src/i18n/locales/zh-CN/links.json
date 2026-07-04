@@ -13,7 +13,6 @@
     "document": "文档",
     "accessCount": "访问次数",
     "accessCountValue": "{{count}} 次访问",
-    "accessCountValue_one": "{{count}} 次访问",
     "avgDuration": "平均时长",
     "lastViewed": "最近访问",
     "heat": "热度",
@@ -84,7 +83,7 @@
   "creator": {
     "backToLinks": "返回链接列表",
     "title": "智能链接创建器",
-    "subtitle": "选择文档并配置权限强度，系统会实时评估接收方摩擦与安全等级。",
+    "subtitle": "选择文档并选择安全组合方案，系统实时评估安全强度与接收方摩擦。",
     "securityTitle": "权限与安全",
     "loadDocsFailed": "加载文档失败",
     "createSuccess": "链接已生成",
@@ -93,7 +92,7 @@
     "selectDocument": "选择文档",
     "noDocuments": "暂无可用文档，请先上传。",
     "selectPlaceholder": "选择要分享的文档",
-    "permissionStrength": "权限强度",
+    "permissionStrength": "安全组合方案",
     "securityOptions": "安全选项",
     "requireEmailVerification": "需要邮箱验证码",
     "contactLabel": "收件人联系人",
@@ -110,8 +109,10 @@
     "contactRequired": "请选择要发送验证码的联系人。",
     "whitelist": "白名单邮箱/域名",
     "whitelistPlaceholder": "输入邮箱或域名，用逗号分隔",
+    "whitelistInvalidEmail": "以下邮箱格式无效：{{emails}}",
     "password": "访问密码",
     "passwordPlaceholder": "设置密码",
+    "passwordEmpty": "启用密码保护时必须设置密码",
     "nda": "需要签署 NDA",
     "allowDownload": "允许下载",
     "watermark": "动态水印",
@@ -134,34 +135,42 @@
     "scoreTitle": "安全 vs 摩擦",
     "securityScore": "安全强度",
     "frictionScore": "接收方摩擦",
-    "previewTitle": "预览",
+    "previewTitle": "安全预览",
     "previewDocumentLabel": "文档",
     "noDocumentSelected": "未选择",
-    "featureEmail": "邮箱填写",
     "featureEmailVerification": "邮箱验证码",
     "featurePassword": "访问密码",
+    "featureWhitelist": "白名单",
+    "featureNDA": "NDA 签署",
     "featureWatermark": "动态水印",
     "featureNoDownload": "禁止下载",
+    "featureDownload": "允许下载",
     "generatedLabel": "已生成链接",
     "creating": "创建中...",
     "recreate": "再次创建",
     "createLink": "创建链接"
   },
-  "level": {
-    "low": {
-      "label": "低摩擦",
-      "description": "公开或邮箱验证即可访问",
-      "friction": "接收方无需额外步骤，打开率最高。"
+  "preset": {
+    "customized": "自定义",
+    "public": {
+      "label": "公开分发",
+      "description": "无验证门槛，最大化打开率",
+      "usage": "适合路演材料、白皮书、对外宣传等公开分发场景。链接可被任意访客打开，仅通过水印实现基础溯源。"
     },
-    "medium": {
-      "label": "中强度",
-      "description": "白名单或密码保护",
-      "friction": "需要邮箱/密码/白名单验证，适合敏感材料。"
+    "standard": {
+      "label": "标准尽调",
+      "description": "邮箱验证 + 白名单 + 水印 + 禁下载",
+      "usage": "适合融资尽调、项目介绍等需要确认访问者身份但无需极端保密的场景。推荐作为默认方案。"
     },
-    "high": {
-      "label": "高强度",
-      "description": "NDA + 白名单 + 密码组合",
-      "friction": "NDA 签署 + 多重验证，适合机密尽调资料。"
+    "confidential": {
+      "label": "机密数据室",
+      "description": "全部验证门控 + NDA + 禁下载",
+      "usage": "适合敏感交易文件、法务合同、商业机密等最高安全级别场景。访客需通过全部验证门控并签署 NDA 才能访问。"
+    },
+    "collaborative": {
+      "label": "协作评审",
+      "description": "邮箱验证 + 允许下载 + 水印",
+      "usage": "适合内部团队协作评审、联合编辑场景。允许下载但通过水印和日志实现行为追溯。"
     }
   }
 }

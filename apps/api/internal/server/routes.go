@@ -74,7 +74,7 @@ func (s *Server) registerRoutes() {
 		authHandler := auth.NewHandler(authSvc)
 		authHandler.RegisterRoutes(api)
 
-		workspaceSvc := workspace.NewService(queries)
+		workspaceSvc := workspace.NewService(queries, s.dbPool)
 		workspaceHandler := workspace.NewHandler(workspaceSvc, authSvc)
 		workspaceHandler.RegisterRoutes(api)
 
@@ -118,7 +118,7 @@ func (s *Server) registerRoutes() {
 
 			ingestionWorker := ingestion.NewWorker(ingestionSvc, 1*time.Second)
 			s.registerWorker(ingestionWorker)
-			ingestionWorker.Start(context.Background())
+			ingestionWorker.Start(s.shutdownCtx)
 
 			searchSvc := search.NewService(queries, searchEmbedder)
 			searchHandler := search.NewHandler(searchSvc)
@@ -159,11 +159,11 @@ func (s *Server) registerRoutes() {
 
 			notificationWorker := notification.NewWorker(notificationSvc, 30*time.Second)
 			s.registerWorker(notificationWorker)
-			notificationWorker.Start(context.Background())
+			notificationWorker.Start(s.shutdownCtx)
 
 			renewalWorker := domain.NewRenewalWorker(domainSvc, 1*time.Hour, 7*24*time.Hour)
 			s.registerWorker(renewalWorker)
-			renewalWorker.Start(context.Background())
+			renewalWorker.Start(s.shutdownCtx)
 
 			integrationSvc := integration.NewService(queries, s.cfg)
 			integrationHandler := integration.NewHandler(integrationSvc)
@@ -171,7 +171,7 @@ func (s *Server) registerRoutes() {
 
 			hubSpotWorker := integration.NewWorker(integrationSvc, 30*time.Second)
 			s.registerWorker(hubSpotWorker)
-			hubSpotWorker.Start(context.Background())
+			hubSpotWorker.Start(s.shutdownCtx)
 
 			public := s.engine.Group("/api/v1/public")
 			integrationHandler.RegisterOAuthRoutes(public)

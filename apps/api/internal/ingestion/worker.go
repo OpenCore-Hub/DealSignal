@@ -2,10 +2,10 @@ package ingestion
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 )
 
 // Worker polls ingestion_jobs and drives document processing.
@@ -59,8 +59,7 @@ func (w *Worker) run(ctx context.Context) {
 func (w *Worker) process(ctx context.Context) {
 	jobs, err := w.service.queries.ListPendingIngestionJobs(ctx, w.limit)
 	if err != nil {
-		fmt.Printf(`{"time":"%s","level":"error","message":"list ingestion jobs: %s"}`+"\n",
-			time.Now().UTC().Format(time.RFC3339), err.Error())
+		logger.ErrorCtx(ctx, "list pending ingestion jobs", err)
 		return
 	}
 
@@ -70,14 +69,16 @@ func (w *Worker) process(ctx context.Context) {
 			WorkspaceID: job.WorkspaceID,
 		})
 		if err != nil {
-			fmt.Printf(`{"time":"%s","level":"error","document_id":"%s","message":"load document for ingestion: %s"}`+"\n",
-				time.Now().UTC().Format(time.RFC3339), uuidToString(job.DocumentID), err.Error())
+			logger.ErrorCtx(ctx, "load document for ingestion", err,
+				logger.Attr("document_id", uuidToString(job.DocumentID)),
+			)
 			continue
 		}
 
 		if err := w.service.ProcessDocument(ctx, doc); err != nil {
-			fmt.Printf(`{"time":"%s","level":"error","document_id":"%s","message":"ingestion failed: %s"}`+"\n",
-				time.Now().UTC().Format(time.RFC3339), uuidToString(doc.ID), err.Error())
+			logger.ErrorCtx(ctx, "ingestion failed", err,
+				logger.Attr("document_id", uuidToString(doc.ID)),
+			)
 		}
 	}
 }

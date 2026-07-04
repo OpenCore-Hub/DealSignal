@@ -223,14 +223,19 @@ func (h *Handler) GetSettings(c *gin.Context) {
 	c.JSON(http.StatusOK, settings)
 }
 
-// UpdateSettings updates workspace general settings.
+// UpdateSettings updates workspace general settings. Requires owner or admin role.
 func (h *Handler) UpdateSettings(c *gin.Context) {
 	var req updateSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
+	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can update workspace settings"})
+		return
+	}
 	settings, err := h.service.UpdateSettings(c.Request.Context(), workspaceID, req.Name, req.BrandColor)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update settings"})
@@ -250,14 +255,19 @@ func (h *Handler) GetSecurity(c *gin.Context) {
 	c.JSON(http.StatusOK, settings)
 }
 
-// UpdateSecurity updates workspace security settings.
+// UpdateSecurity updates workspace security settings. Requires owner or admin role.
 func (h *Handler) UpdateSecurity(c *gin.Context) {
 	var req updateSecurityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
+	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	if !h.service.IsManager(c.Request.Context(), userID, workspaceID) {
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can update security settings"})
+		return
+	}
 	settings, err := h.service.UpdateSecurity(c.Request.Context(), workspaceID, SecuritySettings(req))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update security settings"})

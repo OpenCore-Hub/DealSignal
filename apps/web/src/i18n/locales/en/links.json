@@ -13,7 +13,6 @@
     "document": "Document",
     "accessCount": "Visits",
     "accessCountValue": "{{count}} visits",
-    "accessCountValue_one": "{{count}} view",
     "avgDuration": "Avg. time",
     "lastViewed": "Last Viewed",
     "heat": "Heat",
@@ -84,7 +83,7 @@
   "creator": {
     "backToLinks": "Back to Links",
     "title": "Smart Link Creator",
-    "subtitle": "Select a document and configure permission strength; the system scores recipient friction and security in real time.",
+    "subtitle": "Select a document and choose a security preset; the system scores security strength and recipient friction in real time.",
     "securityTitle": "Permissions & Security",
     "loadDocsFailed": "Failed to load documents",
     "createSuccess": "Link generated",
@@ -93,7 +92,7 @@
     "selectDocument": "Select Document",
     "noDocuments": "No available documents; please upload first.",
     "selectPlaceholder": "Select a document to share",
-    "permissionStrength": "Permission level",
+    "permissionStrength": "Security Preset",
     "securityOptions": "Security Options",
     "requireEmailVerification": "Require email verification code",
     "contactLabel": "Recipient contact",
@@ -110,8 +109,10 @@
     "contactRequired": "Please select a contact to send the verification code to.",
     "whitelist": "Whitelist emails/domains",
     "whitelistPlaceholder": "Enter emails or domains separated by commas",
+    "whitelistInvalidEmail": "Invalid email format: {{emails}}",
     "password": "Access password",
     "passwordPlaceholder": "Set password",
+    "passwordEmpty": "Password is required when password protection is enabled",
     "nda": "Require NDA agreement",
     "allowDownload": "Allow download",
     "watermark": "Dynamic watermark",
@@ -134,34 +135,42 @@
     "scoreTitle": "Security vs Friction",
     "securityScore": "Security Strength",
     "frictionScore": "Recipient Friction",
-    "previewTitle": "Preview",
+    "previewTitle": "Security Preview",
     "previewDocumentLabel": "Document",
     "noDocumentSelected": "Not selected",
-    "featureEmail": "Email gate",
     "featureEmailVerification": "Email verification code",
     "featurePassword": "Access password",
+    "featureWhitelist": "Whitelist",
+    "featureNDA": "NDA signing",
     "featureWatermark": "Dynamic watermark",
     "featureNoDownload": "Download disabled",
+    "featureDownload": "Download enabled",
     "generatedLabel": "Generated link",
     "creating": "Creating...",
     "recreate": "Create Again",
     "createLink": "Create Link"
   },
-  "level": {
-    "low": {
-      "label": "Low Friction",
-      "description": "Public or email verification required",
-      "friction": "No extra steps for recipients; highest open rate."
+  "preset": {
+    "customized": "Customized",
+    "public": {
+      "label": "Public Distribution",
+      "description": "No verification gates; maximize open rate",
+      "usage": "For roadshow decks, white papers, press releases and public-facing materials. Links are accessible by anyone, with basic watermark traceability."
     },
-    "medium": {
-      "label": "Medium Strength",
-      "description": "Whitelist or password protection",
-      "friction": "Requires email/password/whitelist verification; suitable for sensitive materials."
+    "standard": {
+      "label": "Standard DD",
+      "description": "Email verification + whitelist + watermark + download disabled",
+      "usage": "For fundraising due diligence, pitch decks and materials requiring identity verification without extreme confidentiality. Recommended default preset."
     },
-    "high": {
-      "label": "High Strength",
-      "description": "NDA + whitelist + password combined",
-      "friction": "NDA signing + multi-step verification; suitable for confidential due-diligence materials."
+    "confidential": {
+      "label": "Confidential Data Room",
+      "description": "All verification gates + NDA + download disabled",
+      "usage": "For sensitive deal documents, legal contracts and trade secrets requiring highest security. Visitors must pass all gates and sign NDA before access."
+    },
+    "collaborative": {
+      "label": "Collaborative Review",
+      "description": "Email verification + download enabled + watermark",
+      "usage": "For internal team review, joint editing and collaborative workflows. Downloads are enabled with watermark and access log traceability."
     }
   }
 }

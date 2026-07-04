@@ -12,7 +12,7 @@ import type { Contact } from "@/types";
 interface ContactSelectorProps {
   workspaceSlug: string;
   value?: string;
-  onChange: (contactId: string) => void;
+  onChange: (contactId: string | undefined) => void;
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -76,7 +76,7 @@ export function ContactSelector({ workspaceSlug, value, onChange }: ContactSelec
 
       <Combobox.Root
         value={value ?? null}
-        onValueChange={(next) => onChange(next ?? "")}
+        onValueChange={(next) => onChange(next ?? undefined)}
         onInputValueChange={setQuery}
         onOpenChange={(open) => {
           if (!open) setQuery("");
@@ -109,16 +109,16 @@ export function ContactSelector({ workspaceSlug, value, onChange }: ContactSelec
           {selected ? (
             <span
               role="button"
-              tabIndex={0}
+              tabIndex={-1}
               onClick={(e) => {
                 e.stopPropagation();
-                onChange("");
+                onChange(undefined);
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
                   e.stopPropagation();
-                  onChange("");
+                  onChange(undefined);
                 }
               }}
               className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"

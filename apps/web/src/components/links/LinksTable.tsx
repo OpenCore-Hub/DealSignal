@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import {
   useReactTable,
@@ -57,14 +57,10 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
       : await api.getLinks();
     return res.data;
   }, [documentId, isFiltered]);
-  const [data, setData] = useState<Link[]>([]);
+  const data = fetchedData ?? [];
   const [sorting, setSorting] = useState<SortingState>([]);
   const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-
-  useEffect(() => {
-    if (fetchedData) setData(fetchedData);
-  }, [fetchedData]);
 
   const columns = useMemo<ColumnDef<Link>[]>(
     () => [

@@ -2,6 +2,7 @@
   "title": "交易雷达",
   "subtitle": "今日需要关注什么：热度信号、待办行动、风险提醒，一站聚合。",
   "summary": {
+    "title": "仪表盘摘要",
     "hotSignals": "高热度信号数",
     "pendingActions": "待办行动数"
   },
@@ -55,54 +56,11 @@
   },
   "heatMap": {
     "linkCount": "{{count}} 个链接",
+    "linkCountAria": "{{tier}} {{count}} 个链接",
     "accessCount": "{{count}} 次访问",
     "noLinks": "暂无 {{tier}} 链接"
   },
   "document": {
     "pageCount": "{{count}} 页"
-  },
-  "mock": {
-    "signals": {
-      "sig_1": {
-        "title": "Sarah Chen 热度飙升",
-        "description": "Horizon VC 合伙人在过去 24 小时内 3 次访问 Pitch Deck，并在财务页累计停留 5 分钟。",
-        "explanation": "多次回访 + 关键页停留时长 = 高购买/投资意图。",
-        "suggestion": "24 小时内发送融资条款摘要并提议 30 分钟电话沟通。"
-      },
-      "sig_2": {
-        "title": "Marcus 再次访问团队页",
-        "description": "Boldstart Principal 第三次打开 Pitch Deck，团队页停留 3 分钟。",
-        "explanation": "团队是早期投资关键决策页，反复查看说明正在做 deep dive。",
-        "suggestion": "发送创始人深度背景与推荐信。"
-      },
-      "sig_3": {
-        "title": "Wei Li 关注收入预测",
-        "description": "Future Fund LP 查看财务模型收入预测页超过 2 分钟。",
-        "explanation": "LP 通常关注现金流与回报，说明进入评估阶段。",
-        "suggestion": "安排一次财务模型 walkthrough。"
-      },
-      "sig_4": {
-        "title": "公开链接被异常访问",
-        "description": "一个未识别邮箱通过公开链接下载了 Pitch Deck。",
-        "explanation": "公开链接存在外泄风险，建议收紧权限。",
-        "suggestion": "将该链接设为邮件验证，并启用下载水印。"
-      }
-    },
-    "actions": {
-      "act_1": { "title": "跟进 Sarah Chen" },
-      "act_2": { "title": "发送团队补充资料给 Marcus" },
-      "act_3": { "title": "安排 Wei Li 财务模型 walkthrough" },
-      "act_4": { "title": "审查公开链接安全设置" }
-    },
-    "risks": {
-      "risk_1": {
-        "title": "未识别邮箱下载了 Pitch Deck",
-        "description": "公开链接被 alex@unknown.com 下载，存在外泄风险。"
-      },
-      "risk_2": {
-        "title": "一个链接已过期",
-        "description": "Financial Model 链接已于 2026-06-17 过期，建议续期或通知接收方。"
-      }
-    }
   }
 }

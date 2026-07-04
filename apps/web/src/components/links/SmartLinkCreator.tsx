@@ -15,21 +15,34 @@ import { PermissionPanel } from "./smart-link/PermissionPanel";
 import { SecurityOptions } from "./smart-link/SecurityOptions";
 import { ScoreDisplay } from "./smart-link/ScoreDisplay";
 import { LinkPreview } from "./smart-link/LinkPreview";
-import type { PermissionConfig } from "@/types";
-import type { PermissionLevel } from "./smart-link/types";
+import {
+  PRESET_TEMPLATES,
+  classifyPresetFromConfig,
+} from "./smart-link/levelConfig";
+import type { PermissionConfig, PermissionPreset } from "@/types";
 
-const DEFAULT_CONFIG: PermissionConfig = {
-  level: "low",
-  requireEmailVerification: false,
-  whitelistEnabled: false,
-  whitelist: [],
-  passwordEnabled: false,
-  ndaEnabled: false,
-  allowDownload: false,
-  watermarkEnabled: false,
-  expiryDays: 7,
-  maxViews: "unlimited",
-};
+const DEFAULT_PRESET: PermissionPreset = "standard";
+
+function buildConfigFromPreset(
+  preset: PermissionPreset,
+  overrides?: Partial<PermissionConfig>,
+): PermissionConfig {
+  const template = PRESET_TEMPLATES[preset];
+  return {
+    level: preset,
+    isCustomized: false,
+    requireEmailVerification: template.requireEmailVerification,
+    whitelistEnabled: template.whitelistEnabled,
+    whitelist: template.whitelist,
+    passwordEnabled: template.passwordEnabled,
+    ndaEnabled: template.ndaEnabled,
+    allowDownload: template.allowDownload,
+    watermarkEnabled: template.watermarkEnabled,
+    expiryDays: template.expiryDays,
+    maxViews: template.maxViews,
+    ...overrides,
+  };
+}
 
 export function SmartLinkCreator() {
   const navigate = useNavigate();
@@ -38,19 +51,25 @@ export function SmartLinkCreator() {
   const [searchParams] = useSearchParams();
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("links");
-  const [documents, setDocuments] = useState<import("@/types").Document[]>([]);
+  const [documents, setDocuments] = useState<
+    import("@/types").Document[]
+  >([]);
   const [loadingDocs, setLoadingDocs] = useState(true);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string>("");
-  const [level, setLevel] = useState<PermissionLevel>(() => {
-    const newContactId = (location.state as { newContactId?: string } | null)?.newContactId;
-    return newContactId ? "medium" : "low";
-  });
+
   const [config, setConfig] = useState<PermissionConfig>(() => {
-    const newContactId = (location.state as { newContactId?: string } | null)?.newContactId;
-    return newContactId
-      ? { ...DEFAULT_CONFIG, level: "medium", requireEmailVerification: true, contactId: newContactId }
-      : DEFAULT_CONFIG;
+    const newContactId = (
+      location.state as { newContactId?: string } | null
+    )?.newContactId;
+    if (newContactId) {
+      return buildConfigFromPreset(DEFAULT_PRESET, {
+        requireEmailVerification: true,
+        contactId: newContactId,
+      });
+    }
+    return buildConfigFromPreset(DEFAULT_PRESET);
   });
+
   const [generatedLink, setGeneratedLink] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -63,11 +82,17 @@ export function SmartLinkCreator() {
         if (cancelled) return;
         setDocuments(res.data);
         const queryDocId = searchParams.get("documentId");
-        const initialId = queryDocId && res.data.some((d) => d.id === queryDocId) ? queryDocId : res.data[0]?.id;
+        const initialId =
+          queryDocId && res.data.some((d) => d.id === queryDocId)
+            ? queryDocId
+            : res.data[0]?.id;
         if (initialId) setSelectedDocumentId(initialId);
       })
       .catch((e) => {
-        if (!cancelled) toast.error(e instanceof Error ? e.message : t("creator.loadDocsFailed"));
+        if (!cancelled)
+          toast.error(
+            e instanceof Error ? e.message : t("creator.loadDocsFailed"),
+          );
       })
       .finally(() => {
         if (!cancelled) setLoadingDocs(false);
@@ -79,39 +104,35 @@ export function SmartLinkCreator() {
 
   const selectedDocument = useMemo(
     () => documents.find((d) => d.id === selectedDocumentId),
-    [documents, selectedDocumentId]
+    [documents, selectedDocumentId],
   );
 
-  const handleLevelChange = (newLevel: PermissionLevel) => {
-    setLevel(newLevel);
-    setConfig((prev) => ({
-      ...prev,
-      level: newLevel,
-      requireEmailVerification: newLevel !== "low" || prev.requireEmailVerification,
-      whitelistEnabled: newLevel === "high" || (newLevel === "medium" && prev.whitelistEnabled),
-      passwordEnabled: newLevel === "high" || (newLevel === "medium" && prev.passwordEnabled),
-      ndaEnabled: newLevel === "high" || prev.ndaEnabled,
-      watermarkEnabled: newLevel === "high" || prev.watermarkEnabled,
-    }));
+  // Switching preset: reset config to the preset template, preserving contactId
+  // only when the new preset requires email verification.
+  const handleLevelChange = (newPreset: PermissionPreset) => {
+    const template = PRESET_TEMPLATES[newPreset];
+    setConfig((prev) =>
+      buildConfigFromPreset(newPreset, {
+        contactId: template.requireEmailVerification ? prev.contactId : undefined,
+      }),
+    );
   };
 
-  const deriveLevelFromConfig = (next: PermissionConfig): PermissionLevel => {
-    if (next.passwordEnabled || next.whitelistEnabled || next.ndaEnabled) return "high";
-    if (next.requireEmailVerification) return "medium";
-    return "low";
-  };
-
+  // Manual option toggle: apply and re-classify.
   const handleConfigChange = (next: PermissionConfig) => {
-    const nextLevel = deriveLevelFromConfig(next);
-    setLevel(nextLevel);
-    setConfig({ ...next, level: nextLevel });
+    const { level, isCustomized } = classifyPresetFromConfig(next);
+    setConfig({ ...next, level, isCustomized });
   };
 
   useEffect(() => {
-    const newContactId = (location.state as { newContactId?: string } | null)?.newContactId;
+    const newContactId = (
+      location.state as { newContactId?: string } | null
+    )?.newContactId;
     if (newContactId) {
-      // Clear the state so a refresh does not re-select it.
-      navigate(location.pathname + location.search, { replace: true, state: {} });
+      navigate(location.pathname + location.search, {
+        replace: true,
+        state: {},
+      });
     }
   }, [location.state, location.pathname, location.search, navigate]);
 
@@ -121,13 +142,22 @@ export function SmartLinkCreator() {
       toast.error(t("creator.contactRequired"));
       return;
     }
+    if (
+      config.passwordEnabled &&
+      (!config.password || config.password.trim() === "")
+    ) {
+      toast.error(t("creator.passwordEmpty"));
+      return;
+    }
     setCreating(true);
     try {
       const link = await api.createLink(selectedDocumentId, config);
       setGeneratedLink(link.shortUrl);
       toast.success(t("creator.createSuccess"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("creator.createFailed"));
+      toast.error(
+        e instanceof Error ? e.message : t("creator.createFailed"),
+      );
     } finally {
       setCreating(false);
     }
@@ -148,7 +178,11 @@ export function SmartLinkCreator() {
       className="mx-auto max-w-4xl space-y-6"
     >
       <div className="flex items-center gap-2">
-        <Button variant="ghost" size="sm" onClick={() => navigate(`/${workspaceSlug}/links`)}>
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => navigate(`/${workspaceSlug}/links`)}
+        >
           <CaretLeft size={16} className="mr-1" />
           {t("creator.backToLinks")}
         </Button>
@@ -168,7 +202,9 @@ export function SmartLinkCreator() {
             loading={loadingDocs}
             selectedId={selectedDocumentId}
             onSelect={setSelectedDocumentId}
-            onUpload={() => navigate(`/${workspaceSlug}/documents/upload`)}
+            onUpload={() =>
+              navigate(`/${workspaceSlug}/documents/upload`)
+            }
           />
 
           <Card>
@@ -179,14 +215,21 @@ export function SmartLinkCreator() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-6">
-              <PermissionPanel level={level} onLevelChange={handleLevelChange} />
-              <SecurityOptions config={config} onChange={handleConfigChange} />
+              <PermissionPanel
+                level={config.level}
+                isCustomized={config.isCustomized}
+                onLevelChange={handleLevelChange}
+              />
+              <SecurityOptions
+                config={config}
+                onChange={handleConfigChange}
+              />
             </CardContent>
           </Card>
         </div>
 
         <div className="space-y-6">
-          <ScoreDisplay level={level} config={config} />
+          <ScoreDisplay level={config.level} config={config} />
           <LinkPreview
             selectedDocument={selectedDocument}
             config={config}

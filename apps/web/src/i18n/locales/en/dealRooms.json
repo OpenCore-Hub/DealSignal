@@ -16,12 +16,9 @@
   "pendingApprovals": "{{count}} pending",
   "pendingApprovals_one": "{{count}} pending",
   "lastAccessed": "Last accessed {{time}}",
-  "createdAt": "Created {{time}}",
-  "ndaEnabled": "NDA enabled",
-  "noNda": "No NDA required",
-  "approvalRequired": "Approval required",
   "detail": {
     "back": "Back to deal rooms",
+    "notFound": "Deal room not found",
     "invite": "Invite members",
     "manageDocs": "Manage documents",
     "documents": "Documents",
@@ -30,15 +27,12 @@
     "security": "Security",
     "folders": "Folder structure",
     "noFolders": "No folders in this deal room yet.",
-    "recommendedFiles": "Recommended files",
     "completion": "Progress",
     "uploaded": "Uploaded",
-    "upload": "Upload",
     "uploadAny": "Upload a document",
     "uploading": "Uploading...",
     "uploadProgress": "Upload progress",
     "uploadFailed": "Failed",
-    "markDone": "Mark as done",
     "noTemplate": "No matching template structure."
   },
   "new": {
@@ -78,6 +72,7 @@
     "deleted": "Folder deleted",
     "deleteConfirm": "Delete folder '{{name}}'?",
     "deleteNotEmpty": "Cannot delete a folder that contains documents. Remove documents first.",
+    "createFailed": "Failed to create folder",
     "renameFailed": "Failed to rename folder",
     "deleteFailed": "Failed to delete folder"
   },
@@ -93,7 +88,7 @@
     "alreadyAdded": "This document is already in this deal room",
     "adding": "Adding...",
     "add": "Add",
-    "added": "Added to deal room",
+    "addedSingle": "Added to deal room",
     "folder": "Folder",
     "addSelected": "Add {{count}} document",
     "addSelected_plural": "Add {{count}} documents",
@@ -106,11 +101,15 @@
     "moveTitle": "Move document",
     "move": "Move",
     "moved": "Document moved",
+    "moveFailed": "Failed to move document",
+    "reorderFailed": "Failed to reorder document",
     "remove": "Remove from room",
     "removeConfirm": "Remove '{{title}}' from this deal room?",
     "removed": "Document removed",
+    "removeFailed": "Failed to remove document",
     "added": "Added {{count}} document",
     "added_plural": "Added {{count}} documents",
+    "addFailed": "Failed to add documents",
     "uploadedAndAdded": "Uploaded and added '{{title}}'"
   },
   "members": {
@@ -164,23 +163,6 @@
       "download": "Download",
       "admin": "Admin",
       "none": "No access"
-    }
-  },
-  "permission": {
-    "low": {
-      "label": "Low Friction",
-      "description": "Public or email verification required",
-      "friction": "No extra steps for recipients; highest open rate."
-    },
-    "medium": {
-      "label": "Medium Strength",
-      "description": "Whitelist or password protection",
-      "friction": "Requires email/password/whitelist verification; suitable for sensitive materials."
-    },
-    "high": {
-      "label": "High Strength",
-      "description": "NDA + whitelist + password combined",
-      "friction": "NDA signing + multi-step verification; suitable for confidential due-diligence materials."
     }
   }
 }

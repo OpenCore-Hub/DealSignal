@@ -55,7 +55,7 @@ export interface Link {
   isActive?: boolean;
   avgDurationSeconds?: number;
   lastViewedAt?: string;
-  permissionType?: "public" | "email" | "password" | "nda";
+  permissionType?: "public" | "email" | "password" | "nda" | "whitelist";
 }
 
 export interface HeatAlert {
@@ -69,10 +69,10 @@ export interface HeatAlert {
   suggestion: string;
 }
 
-export interface PermissionConfig {
-  level: "low" | "medium" | "high";
+export type PermissionPreset = "public" | "standard" | "confidential" | "collaborative";
+
+export interface PermissionFields {
   requireEmailVerification: boolean;
-  contactId?: string;
   whitelistEnabled: boolean;
   whitelist: string[];
   passwordEnabled: boolean;
@@ -82,6 +82,12 @@ export interface PermissionConfig {
   watermarkEnabled: boolean;
   expiryDays: number | "custom";
   maxViews: number | "unlimited";
+}
+
+export interface PermissionConfig extends PermissionFields {
+  level: PermissionPreset;
+  isCustomized: boolean;
+  contactId?: string;
 }
 
 export interface ChatMessage {
@@ -391,7 +397,7 @@ export interface DealRoomTemplate {
   scenario: DealRoomTemplateScenario;
   folderStructure: { name: string; description?: string }[];
   recommendedFiles: string[];
-  defaultPermissionLevel: "low" | "medium" | "high";
+  defaultPermissionLevel: PermissionPreset;
   ndaEnabled: boolean;
 }
 
