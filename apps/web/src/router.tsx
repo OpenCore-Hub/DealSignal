@@ -8,6 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const DashboardPage = lazy(() => import("@/routes/dashboard").then((m) => ({ default: m.DashboardPage })));
 const DocumentsPage = lazy(() => import("@/routes/documents").then((m) => ({ default: m.DocumentsPage })));
+const AgreementDocumentsPage = lazy(() => import("@/routes/agreement-documents").then((m) => ({ default: m.AgreementDocumentsPage })));
 const DocumentDetailPage = lazy(() => import("@/routes/documents/detail").then((m) => ({ default: m.DocumentDetailPage })));
 const UploadPage = lazy(() => import("@/routes/upload").then((m) => ({ default: m.UploadPage })));
 const LinksPage = lazy(() => import("@/routes/links").then((m) => ({ default: m.LinksPage })));
@@ -152,6 +153,7 @@ export const router = createBrowserRouter([
       { path: "documents", element: <DocumentsPage /> },
       { path: "documents/upload", element: <UploadPage /> },
       { path: "documents/:documentId", element: <DocumentDetailPage /> },
+      { path: "agreement-documents", element: <AgreementDocumentsPage /> },
       { path: "links", element: <LinksPage /> },
       { path: "links/new", element: <NewLinkPage /> },
       { path: "links/:linkId", element: <LinkDetailPage /> },

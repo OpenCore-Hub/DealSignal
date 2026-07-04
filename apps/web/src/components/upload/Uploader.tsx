@@ -16,9 +16,10 @@ interface UploadFile {
 
 interface UploaderProps {
   onUploadComplete?: () => void;
+  category?: string;
 }
 
-export function Uploader({ onUploadComplete }: UploaderProps) {
+export function Uploader({ onUploadComplete, category }: UploaderProps) {
   const { t } = useTranslation("documents");
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
@@ -92,7 +93,7 @@ export function Uploader({ onUploadComplete }: UploaderProps) {
       }, 300);
 
       return api
-        .uploadDocument(uploadFile.file)
+        .uploadDocument(uploadFile.file, category)
         .then(() => {
           clearInterval(interval);
           setUploadingIds((prev) => {

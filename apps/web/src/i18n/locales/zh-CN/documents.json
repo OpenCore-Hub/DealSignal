@@ -29,6 +29,11 @@
     "emptyTitle": "文档库为空",
     "emptyDescription": "上传第一份文档，即可创建安全分享链接并追踪投资人/客户的阅读热度。",
     "upload": "上传文档",
+    "downloadTemplate": "下载模版",
+    "templates": {
+      "ndaCN": "NDA-中文",
+      "ndaEN": "NDA-EN"
+    },
     "searchPlaceholder": "搜索文档...",
     "documentCount": "{{count}} 个文档",
     "documentCountFiltered": "{{count}} 个文档 · 筛选后 {{filtered}} 个",

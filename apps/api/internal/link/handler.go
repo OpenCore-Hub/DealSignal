@@ -728,9 +728,11 @@ func linkSecurityFlags(link db.Link) (requiresEmail, requiresEmailVerification, 
 	requiresNda = link.RequireNda || link.PermissionType == "nda"
 	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
 	// Modern email-verification links store RequireEmail=false, so the visitor
-	// only enters the access code. Whitelist and NDA still need an explicit email
-	// for domain checks and agreement records.
-	requiresEmail = link.RequireEmail || hasWhitelist || requiresNda
+	// only enters the access code. Whitelist and legacy RequireEmail=true gates
+	// still need an explicit email. NDA combined with modern email verification
+	// uses the verified contact email, so it does not add an email field.
+	modernEmailVerification := link.RequireEmailVerification && !link.RequireEmail
+	requiresEmail = link.RequireEmail || hasWhitelist || (requiresNda && !modernEmailVerification)
 	return
 }
 

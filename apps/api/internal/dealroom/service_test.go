@@ -1064,7 +1064,7 @@ func roomDocRow(d db.DealRoomDocument) []interface{} {
 func documentRow(d db.Document) []interface{} {
 	return []interface{}{
 		d.ID, d.TenantID, d.WorkspaceID, d.CreatedBy, d.Title, d.SourceType,
-		d.Status, d.StorageKey, d.FileSize, d.PageCount, d.CreatedAt, d.UpdatedAt, d.DeletedAt,
+		d.Status, d.StorageKey, d.FileSize, d.Category, d.PageCount, d.CreatedAt, d.UpdatedAt, d.DeletedAt,
 	}
 }
 

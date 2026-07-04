@@ -45,8 +45,6 @@ export function PublicViewerPage() {
   });
   const [gateError, setGateError] = useState<string | null>(null);
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
-  const [codeSent, setCodeSent] = useState(false);
-  const [sendCodeLoading, setSendCodeLoading] = useState(false);
   const accessingRef = useRef(false);
 
   const tryAccess = useCallback(async (gateParams?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean }) => {
@@ -108,25 +106,6 @@ export function PublicViewerPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void tryAccess();
   }, [token, tryAccess]);
-
-  const handleSendCode = async () => {
-    const targetEmail = prefilledEmail || email;
-    if (!token || !targetEmail.trim()) {
-      setGateError(t("viewer.emailRequired"));
-      return;
-    }
-    setSendCodeLoading(true);
-    setGateError(null);
-    try {
-      await api.sendEmailVerificationCode(token, targetEmail.trim());
-      setCodeSent(true);
-    } catch (e) {
-      const err = e as ApiError;
-      setGateError(err.message ?? t("viewer.sendCodeFailed"));
-    } finally {
-      setSendCodeLoading(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -193,17 +172,6 @@ export function PublicViewerPage() {
             )}
             {security.emailVerification && (
               <div className="space-y-2">
-                {(prefilledEmail || (security.email && email.trim())) && (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="w-full"
-                    disabled={sendCodeLoading || codeSent}
-                    onClick={handleSendCode}
-                  >
-                    {codeSent ? t("viewer.codeSent") : sendCodeLoading ? t("viewer.sendingCode") : t("viewer.sendCode")}
-                  </Button>
-                )}
                 <Label htmlFor="email-code">{t("viewer.codeLabel")}</Label>
                 <Input
                   id="email-code"

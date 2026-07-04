@@ -187,11 +187,16 @@ export const api = {
   getDashboardStats: () =>
     request<DashboardStats>(getWorkspaceSlug(), "/dashboard/stats"),
 
-  getDocuments: (filter?: DocumentFilter) =>
-    request<{ data: Document[] }>(
+  getDocuments: (filter?: DocumentFilter, category?: string) => {
+    const params = new URLSearchParams();
+    if (filter && filter !== "all") params.set("filter", filter);
+    if (category) params.set("category", category);
+    const qs = params.toString();
+    return request<{ data: Document[] }>(
       getWorkspaceSlug(),
-      filter && filter !== "all" ? `/documents?filter=${encodeURIComponent(filter)}` : "/documents"
-    ),
+      qs ? `/documents?${qs}` : "/documents"
+    );
+  },
   getDocumentById: (id: string) =>
     request<Document>(getWorkspaceSlug(), `/documents/${id}`),
   deleteDocument: (id: string) =>
@@ -200,6 +205,11 @@ export const api = {
     request<Document>(getWorkspaceSlug(), `/documents/${id}/archive`, { method: "POST" }),
   unarchiveDocument: (id: string) =>
     request<Document>(getWorkspaceSlug(), `/documents/${id}/unarchive`, { method: "POST" }),
+  updateDocumentCategory: (id: string, category: string) =>
+    request<Document>(getWorkspaceSlug(), `/documents/${id}/category`, {
+      method: "PATCH",
+      body: JSON.stringify({ category }),
+    }),
 
   getDocumentPages: async (id: string) => {
     const res = await request<{
@@ -329,9 +339,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  uploadDocument: (file: File) => {
+  uploadDocument: (file: File, category?: string) => {
     const formData = new FormData();
     formData.append("file", file);
+    if (category) formData.append("category", category);
     return request<Document>(getWorkspaceSlug(), "/documents", {
       method: "POST",
       body: formData,

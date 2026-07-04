@@ -107,17 +107,25 @@ export function ContactSelector({ workspaceSlug, value, onChange }: ContactSelec
           )}
 
           {selected ? (
-            <button
-              type="button"
+            <span
+              role="button"
+              tabIndex={0}
               onClick={(e) => {
                 e.stopPropagation();
                 onChange("");
               }}
-              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onChange("");
+                }
+              }}
+              className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground cursor-pointer"
               aria-label={t("creator.clearContact")}
             >
               <X size={14} />
-            </button>
+            </span>
           ) : (
             <Combobox.Icon
               render={<CaretDown size={16} className="shrink-0 text-muted-foreground" />}

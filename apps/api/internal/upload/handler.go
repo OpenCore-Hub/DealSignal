@@ -41,6 +41,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/:id/download-url", h.DownloadURL)
 	g.GET("/:id/pages", h.ListPages)
 	g.POST("/:id/pages/signed-url", h.SignedURL)
+	g.PATCH("/:id/category", h.UpdateCategory)
 }
 
 // Create handles document upload.
@@ -55,7 +56,8 @@ func (h *Handler) Create(c *gin.Context) {
 	tenantID := middleware.TenantIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
-	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, fileHeader)
+	category := c.PostForm("category")
+	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader)
 	if err != nil {
 		switch err {
 		case ErrFileTooLarge:
@@ -89,6 +91,7 @@ func (h *Handler) Create(c *gin.Context) {
 		StorageKey: dbDoc.StorageKey,
 		Status:     dbDoc.Status,
 		FileSize:   dbDoc.FileSize.Int64,
+		Category:   dbDoc.Category,
 		PageCount:  dbDoc.PageCount,
 		CreatedAt:  dbDoc.CreatedAt,
 		UpdatedAt:  dbDoc.UpdatedAt,
@@ -115,7 +118,7 @@ func (h *Handler) GetStatus(c *gin.Context) {
 	c.JSON(http.StatusOK, documentResponse(doc, job))
 }
 
-// List returns documents in the workspace, optionally filtered by a view.
+// List returns documents in the workspace, optionally filtered by a view and category.
 func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	wsUUID, err := uuid.Parse(workspaceID)
@@ -127,6 +130,37 @@ func (h *Handler) List(c *gin.Context) {
 	ctx := c.Request.Context()
 	wsPgUUID := pgtype.UUID{Bytes: wsUUID, Valid: true}
 	filter := strings.ToLower(c.Query("filter"))
+	category := strings.ToLower(c.Query("category"))
+
+	// When category filter is specified, use the category query
+	if category != "" {
+		docs, err := h.uploadService.queries.ListDocumentsByCategory(ctx, db.ListDocumentsByCategoryParams{
+			WorkspaceID: wsPgUUID,
+			Category:    category,
+		})
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		out := make([]gin.H, 0, len(docs))
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = append(out, documentResponse(docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job))
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+		return
+	}
 
 	out := make([]gin.H, 0)
 	switch filter {
@@ -145,6 +179,7 @@ func (h *Handler) List(c *gin.Context) {
 				StorageKey: d.StorageKey,
 				Status:     d.Status,
 				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
@@ -165,6 +200,7 @@ func (h *Handler) List(c *gin.Context) {
 				StorageKey: d.StorageKey,
 				Status:     d.Status,
 				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
@@ -185,6 +221,7 @@ func (h *Handler) List(c *gin.Context) {
 				StorageKey: d.StorageKey,
 				Status:     d.Status,
 				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
@@ -205,6 +242,7 @@ func (h *Handler) List(c *gin.Context) {
 				StorageKey: d.StorageKey,
 				Status:     d.Status,
 				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
@@ -225,6 +263,7 @@ func (h *Handler) List(c *gin.Context) {
 				StorageKey: d.StorageKey,
 				Status:     d.Status,
 				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
@@ -472,10 +511,47 @@ func (h *Handler) getDocumentAndJob(c *gin.Context) (docInfo, db.IngestionJob, e
 		StorageKey: row.StorageKey,
 		Status:     row.Status,
 		FileSize:   row.FileSize.Int64,
+		Category:   row.Category,
 		PageCount:  row.PageCount,
 		CreatedAt:  row.CreatedAt,
 		UpdatedAt:  row.UpdatedAt,
 	}, job, nil
+}
+
+// UpdateCategory updates the category of a document.
+func (h *Handler) UpdateCategory(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	docID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
+		return
+	}
+
+	var req struct {
+		Category string `json:"category" binding:"required,oneof=general agreement"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	err = h.uploadService.queries.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
+		Category:    req.Category,
+		ID:          pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: pgUUID(workspaceID),
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	doc, job, err := h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, documentResponse(doc, job))
 }
 
 func (h *Handler) handleDocError(c *gin.Context, err error) {
@@ -494,6 +570,7 @@ type docInfo struct {
 	StorageKey string
 	Status     string
 	FileSize   int64
+	Category   string
 	PageCount  pgtype.Int4
 	CreatedAt  pgtype.Timestamptz
 	UpdatedAt  pgtype.Timestamptz
@@ -507,6 +584,7 @@ func documentResponse(doc docInfo, job db.IngestionJob) gin.H {
 		"fileType":   documentFileType(doc.SourceType),
 		"fileName":   documentFileNameDI(doc),
 		"fileSize":   doc.FileSize,
+		"category":   doc.Category,
 		"status":     documentStatusDI(doc, job),
 		"progress":   documentProgress(job.Status),
 		"createdAt":  doc.CreatedAt.Time.Format(time.RFC3339),

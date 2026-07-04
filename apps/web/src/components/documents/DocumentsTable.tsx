@@ -8,7 +8,7 @@ import {
   flexRender,
   type SortingState,
 } from "@tanstack/react-table";
-import { Link as LinkIcon, MagnifyingGlass, Plus } from "@phosphor-icons/react";
+import { Link as LinkIcon, MagnifyingGlass, Plus, Download } from "@phosphor-icons/react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DocumentFilter } from "@/types";
 import { useTranslation } from "react-i18next";
@@ -22,6 +22,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -30,7 +36,11 @@ import { buildDocumentRows, useDocumentColumns } from "./DocumentsColumns";
 import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
 import type { DocumentRow } from "./DocumentsColumns";
 
-export function DocumentsTable() {
+interface DocumentsTableProps {
+  category?: string;
+}
+
+export function DocumentsTable({ category }: DocumentsTableProps) {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
@@ -47,9 +57,9 @@ export function DocumentsTable() {
     error,
     refetch,
   } = useAsyncData(async () => {
-    const [docsRes, linksRes] = await Promise.all([api.getDocuments(filter), api.getLinks()]);
+    const [docsRes, linksRes] = await Promise.all([api.getDocuments(filter, category), api.getLinks()]);
     return buildDocumentRows(docsRes.data, linksRes.data);
-  }, [filter]);
+  }, [filter, category]);
 
   // Poll for status updates while any document is still being processed.
   useEffect(() => {
@@ -99,16 +109,18 @@ export function DocumentsTable() {
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <Tabs value={filter} onValueChange={(value) => setFilter(value as DocumentFilter)}>
-          <TabsList variant="line" className="w-full overflow-x-auto">
-            {filters.map((f) => (
-              <TabsTrigger key={f} value={f}>
-                {t(`documents:filters.${f}`)}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-        </Tabs>
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        {category !== "agreement" && (
+          <Tabs value={filter} onValueChange={(value) => setFilter(value as DocumentFilter)}>
+            <TabsList variant="line" className="w-full overflow-x-auto">
+              {filters.map((f) => (
+                <TabsTrigger key={f} value={f}>
+                  {t(`documents:filters.${f}`)}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
+        <div className={`flex flex-col gap-3 sm:flex-row sm:items-center${category === "agreement" ? " lg:ml-auto" : ""}`}>
           <div className="relative max-w-sm flex-1">
             <MagnifyingGlass
               size={18}
@@ -121,10 +133,38 @@ export function DocumentsTable() {
               className="pl-9"
             />
           </div>
-          <Button onClick={() => navigate(`/${workspaceSlug}/documents/upload`)} className="gap-1.5">
+          <Button
+            onClick={() =>
+              navigate(
+                `/${workspaceSlug}/documents/upload` +
+                  (category ? `?category=${encodeURIComponent(category)}` : "")
+              )
+            }
+            className="gap-1.5"
+          >
             <Plus size={16} weight="bold" />
             {t("documents:table.upload")}
           </Button>
+          {category === "agreement" && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button variant="outline" className="gap-1.5">
+                    <Download size={16} weight="bold" />
+                    {t("documents:table.downloadTemplate")}
+                  </Button>
+                }
+              />
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => window.open("/templates/nda-cn.txt", "_blank")}>
+                  {t("documents:table.templates.ndaCN")}
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => window.open("/templates/nda-en.txt", "_blank")}>
+                  {t("documents:table.templates.ndaEN")}
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       </div>
 
@@ -143,7 +183,11 @@ export function DocumentsTable() {
             description={t("documents:table.emptyDescription")}
             action={{
               label: t("documents:table.upload"),
-              onClick: () => navigate(`/${workspaceSlug}/documents/upload`),
+              onClick: () =>
+                navigate(
+                  `/${workspaceSlug}/documents/upload` +
+                    (category ? `?category=${encodeURIComponent(category)}` : "")
+                ),
             }}
           />
         )

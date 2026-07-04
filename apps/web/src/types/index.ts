@@ -21,6 +21,8 @@ export interface IngestionJob {
   errorMessage?: string | null;
 }
 
+export type DocumentCategory = "general" | "agreement";
+
 export type DocumentStatus = "uploading" | "processing" | "ready" | "failed" | "archived";
 
 export type DocumentFilter = "all" | "recent" | "popular" | "unshared" | "archived";
@@ -34,6 +36,7 @@ export interface Document {
   fileSize: number;
   pageCount: number;
   status: DocumentStatus;
+  category?: DocumentCategory;
   progress?: number;
   createdAt: string;
   updatedAt: string;

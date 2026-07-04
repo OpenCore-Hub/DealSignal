@@ -2,6 +2,7 @@ import { NavLink, useParams } from "react-router";
 import {
   ChartPie,
   FileText,
+  Scales,
   Link as LinkIcon,
   FolderOpen,
   Users,
@@ -35,6 +36,7 @@ export function Sidebar() {
     { to: "deal-rooms", labelKey: "sidebar.nav.dealRooms", icon: FolderOpen },
     { to: "contacts", labelKey: "sidebar.nav.contacts", icon: Users },
     { to: "insights", labelKey: "sidebar.nav.insights", icon: ChartLineUp },
+    { to: "agreement-documents", labelKey: "sidebar.nav.agreementDocuments", icon: Scales },
     { to: "settings", labelKey: "sidebar.nav.settings", icon: Gear },
   ] as const;
 

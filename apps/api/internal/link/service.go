@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/mail"
 	"net/netip"
 	"strings"
@@ -168,6 +169,11 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		return db.Link{}, fmt.Errorf("create link: %w", err)
 	}
 
+	var emailCodes []struct {
+		email string
+		code  string
+	}
+
 	if requireEmailVerification {
 		contacts, err := qtx.ListContactsByWorkspace(ctx, workspaceUUID)
 		if err != nil {
@@ -197,17 +203,29 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 			}); err != nil {
 				return db.Link{}, fmt.Errorf("create link contact: %w", err)
 			}
-			// Send code outside the transaction so an email failure doesn't roll back the link.
-			go func(email, code, linkName, linkURL string) {
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				_ = s.mailer.SendLinkAccessCodeEmail(ctx, email, code, linkName, linkURL)
-			}(contact.Email.String, code, req.Name, publicLinkURL(s.viewerBaseURL, token))
+			emailCodes = append(emailCodes, struct {
+				email string
+				code  string
+			}{email: contact.Email.String, code: code})
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
 		return db.Link{}, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// Send verification emails after the transaction commits so the
+	// link_contact records are durable. Run asynchronously so SMTP latency does
+	// not block the create-link response.
+	linkURL := publicLinkURL(s.viewerBaseURL, token)
+	for _, ec := range emailCodes {
+		go func(email, code string) {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, req.Name, linkURL); err != nil {
+				log.Printf("failed to send link access code email to %s: %v", email, err)
+			}
+		}(ec.email, ec.code)
 	}
 	return link, nil
 }
@@ -259,10 +277,12 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
 
 	// Modern email-verification links (RequireEmailVerification=true, RequireEmail=false)
-	// identify the recipient by the access code alone. Legacy gates and combined
-	// gates (whitelist/NDA) keep RequireEmail=true and still require explicit email.
+	// identify the recipient by the access code alone. Legacy gates and whitelist
+	// checks still require an explicit email. NDA combined with modern email
+	// verification uses the verified contact email for agreement records, so the
+	// visitor does not need to re-enter it.
 	modernEmailVerification := link.RequireEmailVerification && !link.RequireEmail
-	requiresEmail := link.RequireEmail || hasWhitelist || requiresNDA
+	requiresEmail := link.RequireEmail || hasWhitelist || (requiresNDA && !modernEmailVerification)
 	if requiresEmail {
 		if strings.TrimSpace(req.Email) == "" {
 			return AccessResult{}, ErrRequiresEmail

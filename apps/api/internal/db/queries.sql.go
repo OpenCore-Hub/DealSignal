@@ -693,9 +693,9 @@ func (q *Queries) CreateDealRoom(ctx context.Context, arg CreateDealRoomParams) 
 
 const createDocument = `-- name: CreateDocument :one
 INSERT INTO documents (
-    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, file_size
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, file_size, category
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 `
 
 type CreateDocumentParams struct {
@@ -708,6 +708,7 @@ type CreateDocumentParams struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 }
 
 type CreateDocumentRow struct {
@@ -720,6 +721,7 @@ type CreateDocumentRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -737,6 +739,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		arg.Status,
 		arg.StorageKey,
 		arg.FileSize,
+		arg.Category,
 	)
 	var i CreateDocumentRow
 	err := row.Scan(
@@ -749,6 +752,7 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		&i.Status,
 		&i.StorageKey,
 		&i.FileSize,
+		&i.Category,
 		&i.PageCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2046,7 +2050,7 @@ func (q *Queries) GetDealRoomBySlug(ctx context.Context, slug string) (DealRoom,
 }
 
 const getDocumentByID = `-- name: GetDocumentByID :one
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1
@@ -2067,6 +2071,7 @@ type GetDocumentByIDRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -2086,6 +2091,7 @@ func (q *Queries) GetDocumentByID(ctx context.Context, arg GetDocumentByIDParams
 		&i.Status,
 		&i.StorageKey,
 		&i.FileSize,
+		&i.Category,
 		&i.PageCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2095,7 +2101,7 @@ func (q *Queries) GetDocumentByID(ctx context.Context, arg GetDocumentByIDParams
 }
 
 const getDocumentByIDAndTenant = `-- name: GetDocumentByIDAndTenant :one
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL
 LIMIT 1
@@ -2117,6 +2123,7 @@ type GetDocumentByIDAndTenantRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -2136,6 +2143,7 @@ func (q *Queries) GetDocumentByIDAndTenant(ctx context.Context, arg GetDocumentB
 		&i.Status,
 		&i.StorageKey,
 		&i.FileSize,
+		&i.Category,
 		&i.PageCount,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -3612,7 +3620,7 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 }
 
 const listArchivedDocumentsByWorkspace = `-- name: ListArchivedDocumentsByWorkspace :many
-SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
 FROM documents d
 WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status = 'archived'
 ORDER BY d.created_at DESC
@@ -3628,6 +3636,7 @@ type ListArchivedDocumentsByWorkspaceRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -3653,6 +3662,7 @@ func (q *Queries) ListArchivedDocumentsByWorkspace(ctx context.Context, workspac
 			&i.Status,
 			&i.StorageKey,
 			&i.FileSize,
+			&i.Category,
 			&i.PageCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4070,8 +4080,72 @@ func (q *Queries) ListDealsByWorkspace(ctx context.Context, workspaceID pgtype.U
 	return items, nil
 }
 
+const listDocumentsByCategory = `-- name: ListDocumentsByCategory :many
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND category = $2 AND deleted_at IS NULL
+ORDER BY created_at DESC
+`
+
+type ListDocumentsByCategoryParams struct {
+	WorkspaceID pgtype.UUID
+	Category    string
+}
+
+type ListDocumentsByCategoryRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListDocumentsByCategory(ctx context.Context, arg ListDocumentsByCategoryParams) ([]ListDocumentsByCategoryRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentsByCategory, arg.WorkspaceID, arg.Category)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentsByCategoryRow
+	for rows.Next() {
+		var i ListDocumentsByCategoryRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.Category,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocumentsByWorkspace = `-- name: ListDocumentsByWorkspace :many
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -4087,6 +4161,7 @@ type ListDocumentsByWorkspaceRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -4112,6 +4187,7 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 			&i.Status,
 			&i.StorageKey,
 			&i.FileSize,
+			&i.Category,
 			&i.PageCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4448,7 +4524,7 @@ func (q *Queries) ListPendingNotifications(ctx context.Context) ([]Notification,
 
 const listPopularDocumentsByWorkspace = `-- name: ListPopularDocumentsByWorkspace :many
 SELECT
-    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
     COALESCE(SUM(l.access_count), 0)::bigint as total_views
 FROM documents d
 LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
@@ -4468,6 +4544,7 @@ type ListPopularDocumentsByWorkspaceRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -4494,6 +4571,7 @@ func (q *Queries) ListPopularDocumentsByWorkspace(ctx context.Context, workspace
 			&i.Status,
 			&i.StorageKey,
 			&i.FileSize,
+			&i.Category,
 			&i.PageCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4511,7 +4589,7 @@ func (q *Queries) ListPopularDocumentsByWorkspace(ctx context.Context, workspace
 }
 
 const listRecentDocumentsByWorkspace = `-- name: ListRecentDocumentsByWorkspace :many
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -4533,6 +4611,7 @@ type ListRecentDocumentsByWorkspaceRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -4558,6 +4637,7 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 			&i.Status,
 			&i.StorageKey,
 			&i.FileSize,
+			&i.Category,
 			&i.PageCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4635,7 +4715,7 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 
 const listRecentlyAccessedDocumentsByWorkspace = `-- name: ListRecentlyAccessedDocumentsByWorkspace :many
 SELECT
-    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
     COALESCE(MAX(al.created_at), d.created_at) as last_accessed_at
 FROM documents d
 LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
@@ -4656,6 +4736,7 @@ type ListRecentlyAccessedDocumentsByWorkspaceRow struct {
 	Status         string
 	StorageKey     string
 	FileSize       pgtype.Int8
+	Category       string
 	PageCount      pgtype.Int4
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
@@ -4682,6 +4763,7 @@ func (q *Queries) ListRecentlyAccessedDocumentsByWorkspace(ctx context.Context, 
 			&i.Status,
 			&i.StorageKey,
 			&i.FileSize,
+			&i.Category,
 			&i.PageCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -5054,7 +5136,7 @@ func (q *Queries) ListTenantDomainsExpiringBefore(ctx context.Context, sslExpire
 }
 
 const listUnsharedDocumentsByWorkspace = `-- name: ListUnsharedDocumentsByWorkspace :many
-SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
 FROM documents d
 WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
   AND NOT EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
@@ -5071,6 +5153,7 @@ type ListUnsharedDocumentsByWorkspaceRow struct {
 	Status      string
 	StorageKey  string
 	FileSize    pgtype.Int8
+	Category    string
 	PageCount   pgtype.Int4
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
@@ -5096,6 +5179,7 @@ func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspac
 			&i.Status,
 			&i.StorageKey,
 			&i.FileSize,
+			&i.Category,
 			&i.PageCount,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -5868,6 +5952,23 @@ type UpdateDealRoomSettingsParams struct {
 
 func (q *Queries) UpdateDealRoomSettings(ctx context.Context, arg UpdateDealRoomSettingsParams) error {
 	_, err := q.db.Exec(ctx, updateDealRoomSettings, arg.Column1, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const updateDocumentCategory = `-- name: UpdateDocumentCategory :exec
+UPDATE documents
+SET category = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+`
+
+type UpdateDocumentCategoryParams struct {
+	Category    string
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateDocumentCategory(ctx context.Context, arg UpdateDocumentCategoryParams) error {
+	_, err := q.db.Exec(ctx, updateDocumentCategory, arg.Category, arg.ID, arg.WorkspaceID)
 	return err
 }
 

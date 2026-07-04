@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { Buildings, Eye, Link as LinkIcon } from "@phosphor-icons/react";
+import { Buildings, Eye, Link as LinkIcon, Scales } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -30,8 +30,9 @@ interface DocumentDetailData {
 export function DocumentDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
-  const { t } = useTranslation(["documents", "common"]);
+  const { t } = useTranslation(["documents", "common", "agreementDocuments"]);
   const [addToRoomOpen, setAddToRoomOpen] = useState(false);
+  const [togglingCategory, setTogglingCategory] = useState(false);
 
   const loadDetail = useCallback(async (): Promise<DocumentDetailData> => {
     if (!documentId) {
@@ -66,6 +67,20 @@ export function DocumentDetail() {
 
   const { doc, links, analytics, visitors } = data;
 
+  const isAgreement = doc.category === "agreement";
+
+  const handleToggleCategory = async () => {
+    if (!doc || !documentId) return;
+    setTogglingCategory(true);
+    try {
+      const newCategory = isAgreement ? "general" : "agreement";
+      await api.updateDocumentCategory(documentId, newCategory);
+      refetch();
+    } finally {
+      setTogglingCategory(false);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <BackButton to={`/${workspaceSlug}/documents`} label={t("documents:detail.back")} />
@@ -95,6 +110,17 @@ export function DocumentDetail() {
         >
           <Buildings size={16} />
           {t("common:addToDealRoom")}
+        </Button>
+        <Button
+          variant={isAgreement ? "default" : "outline"}
+          className="gap-1.5"
+          onClick={handleToggleCategory}
+          disabled={togglingCategory}
+        >
+          <Scales size={16} />
+          {isAgreement
+            ? t("agreementDocuments:page.unsetAsAgreement")
+            : t("agreementDocuments:page.setAsAgreement")}
         </Button>
       </PageHeader>
 

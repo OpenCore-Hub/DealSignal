@@ -113,3 +113,32 @@ func TestLinkSecurityFlagsNdaRequiresEmail(t *testing.T) {
 		t.Error("NDA link should require NDA")
 	}
 }
+
+func TestLinkSecurityFlagsModernNdaDoesNotRequireEmail(t *testing.T) {
+	// Modern NDA links created by the new UI have permission_type "nda" but
+	// RequireEmail=false because the visitor is identified by the access code.
+	// The email for NDA records is derived from the verified contact.
+	link := db.Link{
+		PermissionType:           "nda",
+		RequireEmail:             false,
+		RequireEmailVerification: true,
+		RequirePassword:          false,
+		RequireNda:               true,
+		AllowedEmails:            []byte("[]"),
+		AllowedDomains:           []byte("[]"),
+	}
+
+	requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
+	if requiresEmail {
+		t.Error("modern NDA with email verification should not require email input")
+	}
+	if !requiresEmailVerification {
+		t.Error("expected email verification requirement")
+	}
+	if requiresPassword {
+		t.Error("unexpected password requirement")
+	}
+	if !requiresNda {
+		t.Error("expected NDA requirement")
+	}
+}

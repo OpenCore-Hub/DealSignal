@@ -76,25 +76,25 @@ ORDER BY wm.joined_at DESC;
 
 -- name: CreateDocument :one
 INSERT INTO documents (
-    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, file_size
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at;
+    id, tenant_id, workspace_id, created_by, title, source_type, status, storage_key, file_size, category
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at;
 
 -- name: GetDocumentByID :one
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: ListDocumentsByWorkspace :many
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
 
 -- name: ListRecentlyAccessedDocumentsByWorkspace :many
 SELECT
-    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
     COALESCE(MAX(al.created_at), d.created_at) as last_accessed_at
 FROM documents d
 LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
@@ -106,7 +106,7 @@ ORDER BY last_accessed_at DESC, d.created_at DESC;
 
 -- name: ListPopularDocumentsByWorkspace :many
 SELECT
-    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at,
+    d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
     COALESCE(SUM(l.access_count), 0)::bigint as total_views
 FROM documents d
 LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
@@ -116,20 +116,20 @@ HAVING COALESCE(SUM(l.access_count), 0) >= 30
 ORDER BY total_views DESC, d.created_at DESC;
 
 -- name: ListUnsharedDocumentsByWorkspace :many
-SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
 FROM documents d
 WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
   AND NOT EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
 ORDER BY d.created_at DESC;
 
 -- name: ListArchivedDocumentsByWorkspace :many
-SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.page_count, d.created_at, d.updated_at, d.deleted_at
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
 FROM documents d
 WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status = 'archived'
 ORDER BY d.created_at DESC;
 
 -- name: ListRecentDocumentsByWorkspace :many
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -1058,10 +1058,21 @@ ORDER BY p.page_number
 LIMIT $2;
 
 -- name: GetDocumentByIDAndTenant :one
-SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, page_count, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL
 LIMIT 1;
+
+-- name: ListDocumentsByCategory :many
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND category = $2 AND deleted_at IS NULL
+ORDER BY created_at DESC;
+
+-- name: UpdateDocumentCategory :exec
+UPDATE documents
+SET category = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3;
 
 -- name: CreateSignal :one
 INSERT INTO signals (

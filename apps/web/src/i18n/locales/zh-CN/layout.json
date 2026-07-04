@@ -9,7 +9,8 @@
     "nav": {
       "dashboard": "交易雷达",
       "documents": "文档库",
-      "links": "链接",
+      "agreementDocuments": "协议",
+      "links": "分享",
       "dealRooms": "数据室",
       "contacts": "联系人",
       "insights": "洞察",

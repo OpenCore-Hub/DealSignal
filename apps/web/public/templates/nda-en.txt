@@ -1,0 +1,39 @@
+NON-DISCLOSURE AGREEMENT (NDA)
+
+This Non-Disclosure Agreement (the "Agreement") is entered into as of ____________ (the "Effective Date") by and between:
+
+Disclosing Party:
+Name: ________________________
+Address: ______________________
+
+Receiving Party:
+Name: ________________________
+Address: ______________________
+
+1. Definition of Confidential Information
+"Confidential Information" means any and all non-public, confidential, or proprietary information disclosed by the Disclosing Party to the Receiving Party, whether in writing, orally, or by any other means.
+
+2. Obligations of Receiving Party
+The Receiving Party agrees to:
+(a) hold all Confidential Information in strict confidence;
+(b) not disclose any Confidential Information to any third parties without prior written consent;
+(c) use the Confidential Information solely for the purpose of ____________.
+
+3. Exclusions
+Confidential Information does not include information that:
+(a) is or becomes publicly available through no breach of this Agreement;
+(b) was already known to the Receiving Party prior to disclosure;
+(c) is independently developed by the Receiving Party without use of the Confidential Information.
+
+4. Term
+This Agreement shall remain in effect for a period of ____ years from the Effective Date.
+
+5. Governing Law
+This Agreement shall be governed by the laws of ____________.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.
+
+Disclosing Party:                    Receiving Party:
+________________________            ________________________
+Signature                           Signature
+Date                                Date

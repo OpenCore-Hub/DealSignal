@@ -29,6 +29,11 @@
     "emptyTitle": "Document library is empty",
     "emptyDescription": "Upload your first document to create secure share links and track investor and buyer engagement.",
     "upload": "Upload Document",
+    "downloadTemplate": "Download Template",
+    "templates": {
+      "ndaCN": "NDA-ZH",
+      "ndaEN": "NDA-EN"
+    },
     "searchPlaceholder": "Search documents...",
     "documentCount": "{{count}} documents",
     "documentCount_one": "{{count}} document",

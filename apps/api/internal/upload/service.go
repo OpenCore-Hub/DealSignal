@@ -63,7 +63,7 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 }
 
 // CreateDocument validates, stores the file and creates the document record.
-func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID string, fileHeader *multipart.FileHeader) (Document, error) {
+func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {
 		return Document{}, err
@@ -90,6 +90,11 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	workspaceUUID := pgUUID(workspaceID)
 	userUUID := pgUUID(userID)
 
+	docCategory := "general"
+	if category == "agreement" {
+		docCategory = "agreement"
+	}
+
 	d, err := s.queries.CreateDocument(ctx, db.CreateDocumentParams{
 		ID:          pgUUID(docID.String()),
 		TenantID:    tenantUUID,
@@ -100,6 +105,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		Status:      "uploaded",
 		StorageKey:  storageKey,
 		FileSize:    pgtype.Int8{Int64: fileHeader.Size, Valid: true},
+		Category:    docCategory,
 	})
 	if err != nil {
 		return Document{}, fmt.Errorf("create document record: %w", err)

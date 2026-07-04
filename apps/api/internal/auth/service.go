@@ -183,9 +183,12 @@ func (s *Service) Register(ctx context.Context, email, password string) (User, T
 	if err := s.tokenStore.StoreRefreshToken(ctx, uuidToString(u.ID), pair.RefreshToken, refreshTokenDuration); err != nil {
 		return User{}, TokenPair{}, err
 	}
-	if err := s.sendVerificationEmail(ctx, uuidToString(u.ID), u.Email); err != nil {
-		return User{}, TokenPair{}, err
-	}
+
+	// Send verification email asynchronously — SMTP round-trips (e.g. Mailtrap)
+	// can take several seconds and should not block the registration response.
+	verifyCtx := context.WithoutCancel(ctx)
+	go s.sendVerificationEmail(verifyCtx, uuidToString(u.ID), u.Email)
+
 	return userFromDB(u), pair, nil
 }
 

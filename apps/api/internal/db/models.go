@@ -153,6 +153,7 @@ type Document struct {
 	UpdatedAt   pgtype.Timestamptz
 	DeletedAt   pgtype.Timestamptz
 	FileSize    pgtype.Int8
+	Category    string
 }
 
 type HubspotSyncJob struct {
