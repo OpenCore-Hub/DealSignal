@@ -96,7 +96,7 @@ describe("useViewerDocument", () => {
 
     expect(result.current.doc).toEqual(mockDocument);
     expect(result.current.pages).toHaveLength(3);
-    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined);
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined, expect.anything());
   });
 
   it("exposes error state when loading fails", async () => {
@@ -136,5 +136,27 @@ describe("useViewerDocument", () => {
     await waitFor(() =>
       expect(apiMock.getPageSignedUrl).toHaveBeenCalledWith("doc-001", 2)
     );
+  });
+
+  it("does not reload public pages when credentials rotate", async () => {
+    const { result, rerender } = renderHook(
+      ({ creds }) => useViewerDocument({ publicToken: "token-123", publicDocument: mockDocument, publicAccessCredentials: creds }),
+      {
+        initialProps: { creds: { sessionToken: "session-1" } },
+        wrapper: wrapper("/viewer/doc-001"),
+      }
+    );
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledTimes(1);
+
+    // Simulate a sliding-session refresh: credentials object changes but
+    // nothing else does. The hook should not trigger another document load.
+    rerender({ creds: { sessionToken: "session-2" } });
+
+    // Yield to effects so any accidental re-load would have time to fire.
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledTimes(1);
   });
 });

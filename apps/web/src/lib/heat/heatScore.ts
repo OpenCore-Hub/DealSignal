@@ -8,7 +8,7 @@ import type {
   PageAnalytics,
 } from "@/types";
 
-export const CIRCLE_CONFIGS: Record<Circle, HeatScoreConfig> = {
+const CIRCLE_CONFIGS: Record<Circle, HeatScoreConfig> = {
   founder: {
     name: "founder",
     weights: {

@@ -35,9 +35,9 @@ import { request } from "@/lib/apiClient";
 import {
   toCreateDealRoomPayload,
   toCreateLinkPayload,
+  type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
 import { useUIStore } from "@/stores/uiStore";
-import i18next from "i18next";
 
 export interface DashboardStats {
   hotCount: number;
@@ -124,7 +124,7 @@ function setTokens(accessToken: string, refreshToken: string) {
   localStorage.setItem("refresh_token", refreshToken);
 }
 
-export function clearTokens() {
+function clearTokens() {
   localStorage.removeItem("access_token");
   localStorage.removeItem("refresh_token");
 }
@@ -239,10 +239,10 @@ export const api = {
       `/documents/${id}/download-url`
     ),
 
-  accessPublicLink: (token: string, opts?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean }) =>
+  accessPublicLink: (token: string, opts?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean; sessionToken?: string }) =>
     request<{
-      link: { id: string; name?: string; documentId: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean };
-      document: { id: string; title: string; pageCount: number; status: string; sourceType: string; fileSize: number };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; isBundle: boolean };
+      documents: { id: string; title: string; pageCount: number; sourceType: string }[];
       visitorId: string;
       requiresEmail: boolean;
       requiresEmailVerification: boolean;
@@ -258,6 +258,7 @@ export const api = {
         password: opts?.password,
         nda_agreed: opts?.ndaAgreed ?? false,
       }),
+      headers: opts?.sessionToken ? { "X-Link-Session": opts.sessionToken } : undefined,
     }),
 
   sendEmailVerificationCode: (token: string, email: string) =>
@@ -267,22 +268,22 @@ export const api = {
       body: JSON.stringify({ email }),
     }),
 
-  getPublicDocumentPages: (documentId: string, token: string, creds?: PublicLinkCredentials) =>
+  getPublicDocumentPages: (documentId: string, token: string, creds?: PublicLinkCredentials, signal?: AbortSignal) =>
     request<{ documentId: string; pages: { pageNumber: number; width: number; height: number }[]; total: number }>(
       undefined,
       `/v1/public/documents/${documentId}/pages?token=${encodeURIComponent(token)}`,
-      { skipAuth: true, headers: publicAccessHeaders(creds) }
+      { skipAuth: true, headers: publicAccessHeaders(creds), signal }
     ).then((res) => ({
       documentId: res.documentId,
       pages: res.pages.map((p) => ({ pageNumber: p.pageNumber, width: p.width, height: p.height })),
       total: res.total,
     })),
 
-  getPublicPageSignedUrl: (documentId: string, token: string, pageNumber: number, creds?: PublicLinkCredentials) =>
+  getPublicPageSignedUrl: (documentId: string, token: string, pageNumber: number, creds?: PublicLinkCredentials, signal?: AbortSignal) =>
     request<{ pageNumber: number; imageUrl: string; expiresAt: string; width: number; height: number }>(
       undefined,
       `/v1/public/documents/${documentId}/pages/signed-url?token=${encodeURIComponent(token)}&page_number=${pageNumber}`,
-      { method: "GET", skipAuth: true, headers: publicAccessHeaders(creds) }
+      { method: "GET", skipAuth: true, headers: publicAccessHeaders(creds), signal }
     ).then((res) => ({
       page_number: res.pageNumber,
       image_url: res.imageUrl,
@@ -349,10 +350,16 @@ export const api = {
     });
   },
 
-  createLink: (documentId: string, config: PermissionConfig) =>
+  createLink: (documentIds: string[], config: PermissionConfig) =>
     request<Link>(getWorkspaceSlug(), "/links", {
       method: "POST",
-      body: JSON.stringify(toCreateLinkPayload(documentId, config)),
+      body: JSON.stringify(toCreateLinkPayload(documentIds, config)),
+    }),
+
+  updateLinkFull: (id: string, payload: UpdateLinkPayload) =>
+    request<Link>(getWorkspaceSlug(), `/links/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(payload),
     }),
 
   getLinks: () =>
@@ -608,6 +615,3 @@ export const api = {
     request<{ data: DealRoomTemplate[] }>(getWorkspaceSlug(), "/deal-room-templates"),
 };
 
-export function heatLabel(level: HeatLevel): string {
-  return i18next.t(`common:heat.${level}`);
-}

@@ -7,12 +7,17 @@ export interface AsyncDataState<T> {
   refetch: () => Promise<void>;
 }
 
+function isAbortError(e: unknown): boolean {
+  return e instanceof Error && e.name === "AbortError";
+}
+
 /**
  * 统一异步数据加载 hook。
  * 自动管理 loading / error / data / cancel / refetch，替代组件内重复的 useEffect fetch 样板。
+ * fetcher 可接收 AbortSignal，在依赖变化或组件卸载时自动 abort，避免幽灵请求和竞态。
  */
 export function useAsyncData<T>(
-  fetcher: () => Promise<T>,
+  fetcher: (signal?: AbortSignal) => Promise<T>,
   deps: React.DependencyList = []
 ): AsyncDataState<T> {
   const [data, setData] = useState<T | null>(null);
@@ -30,22 +35,24 @@ export function useAsyncData<T>(
   }, []);
 
   useEffect(() => {
+    const controller = new AbortController();
     cancelledRef.current = false;
 
     async function load() {
       setLoading(true);
       setError(null);
       try {
-        const result = await fetcher();
-        if (!cancelledRef.current) {
+        const result = await fetcher(controller.signal);
+        if (!cancelledRef.current && !controller.signal.aborted) {
           setData(result);
         }
       } catch (e) {
-        if (!cancelledRef.current) {
-          setError(e instanceof Error ? e.message : "Failed to load");
+        if (cancelledRef.current || controller.signal.aborted || isAbortError(e)) {
+          return;
         }
+        setError(e instanceof Error ? e.message : "Failed to load");
       } finally {
-        if (!cancelledRef.current) {
+        if (!cancelledRef.current && !controller.signal.aborted) {
           setLoading(false);
         }
         const resolves = pendingResolvesRef.current;
@@ -60,6 +67,7 @@ export function useAsyncData<T>(
 
     return () => {
       cancelledRef.current = true;
+      controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tick, ...deps]);

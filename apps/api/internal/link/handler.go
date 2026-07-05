@@ -16,6 +16,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
@@ -46,6 +47,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("", h.List)
 	g.GET("/:id", h.Get)
 	g.PATCH("/:id", h.Update)
+	g.PUT("/:id", h.UpdateFull)
 	g.DELETE("/:id", h.Delete)
 	g.GET("/:id/access-logs", h.AccessLogs)
 }
@@ -87,6 +89,7 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
 		return
 	}
+	h.writeSessionRefreshHeader(c, res)
 
 	visitorID := req.VisitorID
 	if visitorID == "" {
@@ -140,7 +143,8 @@ func langFromContext(c *gin.Context) string {
 
 // CreateRequest is the JSON body for creating a link.
 type CreateRequest struct {
-	DocumentID               string   `json:"document_id" binding:"required"`
+	DocumentID               string   `json:"document_id,omitempty"`
+	DocumentIDs              []string `json:"document_ids,omitempty"`
 	Name                     string   `json:"name,omitempty"`
 	PermissionType           string   `json:"permission_type,omitempty"`
 	RequireEmail             bool     `json:"require_email,omitempty"`
@@ -154,6 +158,27 @@ type CreateRequest struct {
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
+	ContactIDs               []string `json:"contact_ids,omitempty"`
+}
+
+// UpdateRequest is the JSON body for updating a link.
+type UpdateRequest struct {
+	DocumentIDs              []string `json:"document_ids,omitempty"`
+	Name                     string   `json:"name,omitempty"`
+	PermissionType           string   `json:"permission_type,omitempty"`
+	RequireEmail             bool     `json:"require_email,omitempty"`
+	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
+	RequirePassword          bool     `json:"require_password,omitempty"`
+	RequireNDA               bool     `json:"require_nda,omitempty"`
+	AllowedEmails            []string `json:"allowed_emails,omitempty"`
+	AllowedDomains           []string `json:"allowed_domains,omitempty"`
+	Password                 string   `json:"password,omitempty"`
+	ExpiresAt                *string  `json:"expires_at,omitempty"`
+	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
+	DownloadEnabled          *bool    `json:"download_enabled,omitempty"`
+	WatermarkEnabled         *bool    `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled         *bool    `json:"ai_copilot_enabled,omitempty"`
 	ContactIDs               []string `json:"contact_ids,omitempty"`
 }
 
@@ -248,14 +273,95 @@ func (h *Handler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, item)
 }
 
-// Delete soft-deletes a link within a workspace.
-func (h *Handler) Delete(c *gin.Context) {
+// UpdateFull fully replaces a link's document set and security configuration.
+func (h *Handler) UpdateFull(c *gin.Context) {
+	var req UpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	if len(req.DocumentIDs) == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "document_ids is required and must contain at least one document"})
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
+			return
+		}
+		expiresAt = &t
+	}
+
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	if err := h.service.Delete(c.Request.Context(), c.Param("id"), workspaceID); err != nil {
+
+	downloadEnabled := true
+	if req.DownloadEnabled != nil {
+		downloadEnabled = *req.DownloadEnabled
+	}
+	watermarkEnabled := true
+	if req.WatermarkEnabled != nil {
+		watermarkEnabled = *req.WatermarkEnabled
+	}
+	aiCopilotEnabled := false
+	if req.AICopilotEnabled != nil {
+		aiCopilotEnabled = *req.AICopilotEnabled
+	}
+
+	link, err := h.service.UpdateLink(c.Request.Context(), c.Param("id"), workspaceID, UpdateLinkRequest{
+		DocumentIDs:              req.DocumentIDs,
+		Name:                     req.Name,
+		PermissionType:           req.PermissionType,
+		RequireEmailVerification: req.RequireEmailVerification,
+		RequirePassword:          req.RequirePassword,
+		RequireNDA:               req.RequireNDA,
+		AllowedEmails:            req.AllowedEmails,
+		AllowedDomains:           req.AllowedDomains,
+		Password:                 req.Password,
+		ExpiresAt:                expiresAt,
+		MaxAccessCount:           req.MaxAccessCount,
+		DownloadEnabled:          downloadEnabled,
+		WatermarkEnabled:         watermarkEnabled,
+		AICopilotEnabled:         aiCopilotEnabled,
+		ContactIDs:               req.ContactIDs,
+	})
+	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 			return
 		}
+		if errors.Is(err, ErrDocumentNotReady) {
+			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	item, err := h.linkResponse(c, link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, item)
+}
+
+// Delete soft-deletes a link within a workspace.
+func (h *Handler) Delete(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
+	if err := h.service.Delete(c.Request.Context(), linkID, workspaceID); err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+			return
+		}
+		logger.ErrorCtx(c.Request.Context(), "delete link failed", err,
+			logger.Attr("link_id", linkID),
+			logger.Attr("workspace_id", workspaceID),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to delete link"})
 		return
 	}
@@ -300,6 +406,7 @@ func (h *Handler) Create(c *gin.Context) {
 
 	link, err := h.service.CreateLink(c.Request.Context(), userID, workspaceID, CreateLinkRequest{
 		DocumentID:               req.DocumentID,
+		DocumentIDs:              req.DocumentIDs,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
 		RequireEmailVerification: req.RequireEmailVerification,
@@ -312,6 +419,7 @@ func (h *Handler) Create(c *gin.Context) {
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
+		AICopilotEnabled:         req.AICopilotEnabled,
 		ContactIDs:               req.ContactIDs,
 	})
 	if err != nil {
@@ -337,6 +445,48 @@ func (h *Handler) Create(c *gin.Context) {
 // Access handles public link access.
 func (h *Handler) Access(c *gin.Context) {
 	token := c.Param("publicToken")
+
+	// If the visitor already has a valid session, reuse it so they don't need
+	// to re-enter credentials on refresh or revisit within the session lifetime.
+	if sessionToken := c.GetHeader("X-Link-Session"); sessionToken != "" {
+		session, ok := verifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
+		if ok && session.PublicToken == token {
+			link, err := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token)
+			if err == nil {
+				// Invalidate session if link security config changed since session was issued.
+				configChanged := session.LinkUpdatedAt > 0 &&
+					link.UpdatedAt.Valid &&
+					link.UpdatedAt.Time.Unix() > session.LinkUpdatedAt
+			if !configChanged {
+				switch link.Status {
+				case "deleted":
+					c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": ErrLinkNotFound.Error()})
+					return
+				case "disabled", "revoked":
+					c.JSON(http.StatusForbidden, gin.H{"code": "link_disabled", "message": ErrLinkDisabled.Error()})
+					return
+				}
+				if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+					c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": ErrLinkExpired.Error()})
+					return
+				}
+				// Explicit security-gate check: if the link now requires NDA
+				// or email verification that the session does not prove, force
+				// re-authentication. The timestamp check above catches most
+				// config changes, but sub-second churn (remove+readd NDA) can
+				// land on the same timestamp.
+securityChanged := (link.RequireNda && !session.NDAAgreed) ||
+						(link.RequireEmailVerification && !session.EmailVerified && session.Email == "")
+				if !securityChanged {
+					h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified)
+					return
+				}
+			}
+			}
+		}
+		// Session invalid, expired, or link config changed: fall through to normal access flow.
+	}
+
 	var body struct {
 		Email     string `json:"email"`
 		EmailCode string `json:"email_code"`
@@ -345,6 +495,18 @@ func (h *Handler) Access(c *gin.Context) {
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	// Rate-limit access attempts to prevent brute-force attacks on
+	// verification codes and passwords. Each IP+token pair is limited
+	// to 10 attempts per minute (all attempts, success or failure).
+	// Session-reuse requests skip this check entirely.
+	if err := h.service.checkAccessAttemptRateLimit(c.Request.Context(), token, c.ClientIP()); err != nil {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    "too_many_attempts",
+			"message": "Too many access attempts. Please try again later.",
+		})
 		return
 	}
 
@@ -367,12 +529,12 @@ func (h *Handler) Access(c *gin.Context) {
 					status = http.StatusUnauthorized
 				}
 				c.JSON(status, gin.H{
-					"code":                     accessErrorCode(err),
-					"message":                  err.Error(),
-					"requiresEmail":            requiresEmail,
+					"code":                      accessErrorCode(err),
+					"message":                   err.Error(),
+					"requiresEmail":             requiresEmail,
 					"requiresEmailVerification": requiresEmailVerification,
-					"requiresPassword":         requiresPassword,
-					"requiresNda":              requiresNda,
+					"requiresPassword":          requiresPassword,
+					"requiresNda":               requiresNda,
 				})
 				return
 			}
@@ -387,22 +549,63 @@ func (h *Handler) Access(c *gin.Context) {
 	}
 	h.triggerSuggestions(c.Request.Context(), result.Link, langFromContext(c))
 
-	link := result.Link
-	doc, err := h.service.queries.GetDocumentByID(c.Request.Context(), db.GetDocumentByIDParams{
-		ID:          link.DocumentID,
-		WorkspaceID: link.WorkspaceID,
-	})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
-		return
+	h.respondAccessSuccess(c, result.Link, token, result.Email, body.NDAAgreed, result.VisitorID, result.EmailVerified)
+}
+
+// respondAccessSuccess builds the access response payload (documents, security
+// flags, session token) and writes it as JSON. It is shared by the normal
+// Access flow and the session-reuse fast path.
+//
+// Password is intentionally NOT stored in the session — the HMAC-signed
+// session token is sufficient proof of authentication. LinkUpdatedAt is
+// stored so sessions are invalidated when link security config changes.
+func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool) {
+	// Fetch all documents for the link bundle.
+	linkDocs, linkDocsErr := h.service.queries.ListLinkDocumentsByPublicToken(c.Request.Context(), token)
+	if linkDocsErr != nil {
+		logger.ErrorCtx(c.Request.Context(), "list link documents for access response failed", linkDocsErr,
+			logger.Attr("token", token),
+		)
+	}
+	documents := make([]gin.H, 0, len(linkDocs))
+	for _, ld := range linkDocs {
+		documents = append(documents, gin.H{
+			"id":         uuidToString(ld.DocumentID),
+			"title":      ld.Title,
+			"sourceType": ld.SourceType,
+			"pageCount":  ld.PageCount,
+		})
+	}
+	// Fallback: single-document legacy links.
+	if len(documents) == 0 {
+		doc, err := h.service.queries.GetDocumentByID(c.Request.Context(), db.GetDocumentByIDParams{
+			ID:          link.DocumentID,
+			WorkspaceID: link.WorkspaceID,
+		})
+		if err == nil {
+			documents = append(documents, gin.H{
+				"id":         uuidToString(doc.ID),
+				"title":      doc.Title,
+				"pageCount":  doc.PageCount.Int32,
+				"status":     doc.Status,
+				"sourceType": doc.SourceType,
+				"fileSize":   0,
+			})
+		}
+	}
+
+	var linkUpdatedAt int64
+	if link.UpdatedAt.Valid {
+		linkUpdatedAt = link.UpdatedAt.Time.Unix()
 	}
 
 	session, err := signLinkSession(LinkSession{
-		PublicToken: token,
-		Email:       result.Email,
-		Password:    body.Password,
-		NDAAgreed:   body.NDAAgreed,
-		VisitorID:   result.VisitorID,
+		PublicToken:   token,
+		Email:         email,
+		EmailVerified: emailVerified,
+		NDAAgreed:     ndaAgreed,
+		VisitorID:     visitorID,
+		LinkUpdatedAt: linkUpdatedAt,
 	}, h.cfg.LinkSessionSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to create session"})
@@ -414,20 +617,14 @@ func (h *Handler) Access(c *gin.Context) {
 		"link": gin.H{
 			"id":               uuidToString(link.ID),
 			"name":             textOrNil(link.Name),
-			"documentId":       uuidToString(link.DocumentID),
 			"permissionType":   link.PermissionType,
 			"downloadEnabled":  link.DownloadEnabled,
 			"watermarkEnabled": link.WatermarkEnabled,
+			"aiCopilotEnabled":  link.AiCopilotEnabled,
+			"isBundle":         len(documents) > 1,
 		},
-		"document": gin.H{
-			"id":         uuidToString(doc.ID),
-			"title":      doc.Title,
-			"pageCount":  doc.PageCount.Int32,
-			"status":     doc.Status,
-			"sourceType": doc.SourceType,
-			"fileSize":   0,
-		},
-		"visitorId":                 result.VisitorID,
+		"documents":                 documents,
+		"visitorId":                 visitorID,
 		"requiresEmail":             requiresEmail,
 		"requiresPassword":          requiresPassword,
 		"requiresNda":               requiresNda,
@@ -462,6 +659,23 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+// verifyLinkDocumentAccess checks whether docID belongs to the link
+// (either as the primary document or in the link_documents table).
+func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, docID uuid.UUID) bool {
+	if uuid.UUID(link.DocumentID.Bytes) == docID {
+		return true
+	}
+	// Check link_documents table for bundle documents.
+	exists, err := h.service.queries.HasLinkDocument(ctx, db.HasLinkDocumentParams{
+		LinkID:     pgtype.UUID{Bytes: link.ID.Bytes, Valid: true},
+		DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
+	})
+	if err != nil {
+		return false
+	}
+	return exists
+}
+
 // PublicSignedURL returns a presigned image URL for a public link visitor.
 func (h *Handler) PublicSignedURL(c *gin.Context) {
 	ctx := c.Request.Context()
@@ -470,13 +684,14 @@ func (h *Handler) PublicSignedURL(c *gin.Context) {
 		mapAccessError(c, err)
 		return
 	}
+	h.writeSessionRefreshHeader(c, result)
 
 	docID, err := uuid.Parse(c.Param("documentId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
 		return
 	}
-	if uuid.UUID(result.Link.DocumentID.Bytes) != docID {
+	if !h.verifyLinkDocumentAccess(ctx, result.Link, docID) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
 		return
 	}
@@ -487,8 +702,9 @@ func (h *Handler) PublicSignedURL(c *gin.Context) {
 		return
 	}
 
+	var docIDPG = pgtype.UUID{Bytes: docID, Valid: true}
 	page, err := h.service.queries.GetPageByDocumentAndNumber(ctx, db.GetPageByDocumentAndNumberParams{
-		DocumentID: result.Link.DocumentID,
+		DocumentID: docIDPG,
 		PageNumber: int32(pageNum),
 	})
 	if err != nil {
@@ -519,13 +735,14 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		mapAccessError(c, err)
 		return
 	}
+	h.writeSessionRefreshHeader(c, result)
 
 	docID, err := uuid.Parse(c.Param("documentId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
 		return
 	}
-	if uuid.UUID(result.Link.DocumentID.Bytes) != docID {
+	if !h.verifyLinkDocumentAccess(ctx, result.Link, docID) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
 		return
 	}
@@ -534,8 +751,9 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		return
 	}
 
+	docIDPG := pgtype.UUID{Bytes: docID, Valid: true}
 	doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-		ID:          result.Link.DocumentID,
+		ID:          docIDPG,
 		WorkspaceID: result.Link.WorkspaceID,
 	})
 	if err != nil {
@@ -577,18 +795,20 @@ func (h *Handler) PublicDocumentPages(c *gin.Context) {
 		mapAccessError(c, err)
 		return
 	}
+	h.writeSessionRefreshHeader(c, result)
 
 	docID, err := uuid.Parse(c.Param("documentId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
 		return
 	}
-	if uuid.UUID(result.Link.DocumentID.Bytes) != docID {
+	if !h.verifyLinkDocumentAccess(ctx, result.Link, docID) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
 		return
 	}
 
-	rows, err := h.service.queries.ListPagesByDocument(ctx, result.Link.DocumentID)
+	docIDPG := pgtype.UUID{Bytes: docID, Valid: true}
+	rows, err := h.service.queries.ListPagesByDocument(ctx, docIDPG)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
@@ -602,13 +822,23 @@ func (h *Handler) PublicDocumentPages(c *gin.Context) {
 			"height":     p.Height.Int32,
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"documentId": uuidToString(result.Link.DocumentID), "pages": pages, "total": len(pages)})
+	c.JSON(http.StatusOK, gin.H{"documentId": docID.String(), "pages": pages, "total": len(pages)})
 }
 
 // resolvePublicAccess validates a public token either by reusing a valid
 // X-Link-Session token or by running the full Access service flow. Asset and
 // event endpoints share this path so that session-based requests do not
 // re-consume max_access_count or re-run gate prompts.
+//
+// Sessions are invalidated when the link's security configuration has changed
+// since the session was issued (checked via LinkUpdatedAt).
+//
+// Sliding session (idle timeout): on successful session reuse, a fresh
+// session token is signed and returned in AccessResult.SessionToken. The
+// caller MUST write it to the X-Link-Session-Refresh response header via
+// writeSessionRefreshHeader. This allows the visitor to stay authenticated
+// as long as they are actively viewing pages — only 15 minutes of
+// inactivity triggers re-authentication.
 func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResult, error) {
 	if token == "" {
 		return AccessResult{}, ErrLinkNotFound
@@ -626,18 +856,54 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				}
 				return AccessResult{}, fmt.Errorf("get link: %w", err)
 			}
-			if link.Status == "revoked" {
-				return AccessResult{}, ErrLinkRevoked
+			// Invalidate session if link config changed since session was issued.
+			configChanged := session.LinkUpdatedAt > 0 &&
+				link.UpdatedAt.Valid &&
+				link.UpdatedAt.Time.Unix() > session.LinkUpdatedAt
+			if !configChanged {
+				switch link.Status {
+				case "deleted":
+					return AccessResult{}, ErrLinkNotFound
+				case "disabled", "revoked":
+					return AccessResult{}, ErrLinkDisabled
+				}
+				if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+					return AccessResult{}, ErrLinkExpired
+				}
+				// Explicit security-gate check: if the link now requires NDA
+				// or email verification that the session does not prove, force
+				// re-authentication. The timestamp check above catches most
+				// config changes, but sub-second churn (remove+readd NDA) can
+				// land on the same timestamp.
+				securityChanged := (link.RequireNda && !session.NDAAgreed) ||
+					(link.RequireEmailVerification && session.Email == "")
+				if !securityChanged {
+					// Sliding session: re-sign with fresh ExpiresAt so the idle
+					// timeout resets on every request.
+					refreshed, err := refreshLinkSession(session, h.cfg.LinkSessionSecret)
+					if err != nil {
+						// If refresh fails (unlikely), return the result without
+						// a refresh token — the existing session will still work
+						// until its original expiry.
+						return AccessResult{Link: link, VisitorID: session.VisitorID, Email: session.Email}, nil
+					}
+					return AccessResult{Link: link, VisitorID: session.VisitorID, Email: session.Email, SessionToken: refreshed}, nil
+				}
 			}
-			if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
-				return AccessResult{}, ErrLinkExpired
-			}
-			return AccessResult{Link: link, VisitorID: session.VisitorID, Email: session.Email}, nil
 		}
 	}
 
 	req := publicAccessRequestFromContext(c)
 	return h.service.Access(c.Request.Context(), token, req)
+}
+
+// writeSessionRefreshHeader sets the X-Link-Session-Refresh response header
+// when a sliding session refresh is available. Call this in every endpoint
+// that uses resolvePublicAccess to keep the session alive during active use.
+func (h *Handler) writeSessionRefreshHeader(c *gin.Context, result AccessResult) {
+	if result.SessionToken != "" {
+		c.Header("X-Link-Session-Refresh", result.SessionToken)
+	}
 }
 
 func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
@@ -719,20 +985,16 @@ func mapAccessError(c *gin.Context, err error) {
 	}
 }
 
-// linkSecurityFlags returns the active gate requirements for a link, taking
-// both the modern boolean flags and legacy permission_type values into account.
-// requiresEmail is kept for backward compatibility and mirrors email verification.
+// linkSecurityFlags returns the active gate requirements for a link based on
+// the modern boolean flags. Email is required only when whitelist is active
+// (identity must be checked against the allowed list). For email-verification-only
+// links, the visitor identifies via access code without entering their email.
 func linkSecurityFlags(link db.Link) (requiresEmail, requiresEmailVerification, requiresPassword, requiresNda bool) {
-	requiresEmailVerification = link.RequireEmailVerification || link.PermissionType == "email_required" || link.PermissionType == "whitelist" || link.PermissionType == "nda"
-	requiresPassword = link.RequirePassword || link.PermissionType == "password"
-	requiresNda = link.RequireNda || link.PermissionType == "nda"
+	requiresEmailVerification = link.RequireEmailVerification
+	requiresPassword = link.RequirePassword
+	requiresNda = link.RequireNda
 	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
-	// Modern email-verification links store RequireEmail=false, so the visitor
-	// only enters the access code. Whitelist and legacy RequireEmail=true gates
-	// still need an explicit email. NDA combined with modern email verification
-	// uses the verified contact email, so it does not add an email field.
-	modernEmailVerification := link.RequireEmailVerification && !link.RequireEmail
-	requiresEmail = link.RequireEmail || hasWhitelist || (requiresNda && !modernEmailVerification)
+	requiresEmail = hasWhitelist
 	return
 }
 
@@ -801,30 +1063,113 @@ func uuidToString(u pgtype.UUID) string {
 func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	ctx := c.Request.Context()
 
-	doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-		ID:          link.DocumentID,
-		WorkspaceID: link.WorkspaceID,
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return nil, err
+	// Get all linked documents.
+	linkDocs, linkDocsErr := h.service.queries.ListLinkDocumentsByLink(ctx, link.ID)
+	if linkDocsErr != nil {
+		logger.ErrorCtx(ctx, "list link documents for link response failed", linkDocsErr,
+			logger.Attr("link_id", uuidToString(link.ID)),
+		)
 	}
-	documentTitle := doc.Title
+	documents := make([]gin.H, 0, len(linkDocs))
+	documentTitle := ""
+	for _, ld := range linkDocs {
+		documents = append(documents, gin.H{
+			"id":         uuidToString(ld.DocumentID),
+			"title":      ld.Title,
+			"sourceType": ld.SourceType,
+			"pageCount":  ld.PageCount,
+			"sortOrder":  ld.SortOrder,
+			"fileSize":   ld.FileSize,
+			"status":     ld.Status,
+		})
+		if documentTitle == "" {
+			documentTitle = ld.Title
+		}
+	}
+	// Fallback: if link_documents has no entries (legacy links), use the primary document.
+	if len(documents) == 0 {
+		doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+			ID:          link.DocumentID,
+			WorkspaceID: link.WorkspaceID,
+		})
+		if err == nil {
+			documentTitle = doc.Title
+			documents = append(documents, gin.H{
+				"id":         uuidToString(doc.ID),
+				"title":      doc.Title,
+				"sourceType": doc.SourceType,
+				"pageCount":  doc.PageCount.Int32,
+				"sortOrder":  0,
+				"fileSize":   doc.FileSize.Int64,
+				"status":     doc.Status,
+			})
+		}
+	}
 
-	metrics, _ := h.service.queries.GetLinkPageViewMetrics(ctx, link.ID)
-	lastLog, _ := h.service.queries.GetLastAccessLogByLink(ctx, link.ID)
+	// Parse allowed emails/domains from link record for edit-mode reconstruction.
+	var allowedEmails []string
+	if jsonArrayNotEmpty(link.AllowedEmails) {
+		if err := json.Unmarshal(link.AllowedEmails, &allowedEmails); err != nil {
+			logger.ErrorCtx(ctx, "unmarshal allowed_emails failed", err,
+				logger.Attr("link_id", uuidToString(link.ID)),
+			)
+		}
+	}
+	var allowedDomains []string
+	if jsonArrayNotEmpty(link.AllowedDomains) {
+		if err := json.Unmarshal(link.AllowedDomains, &allowedDomains); err != nil {
+			logger.ErrorCtx(ctx, "unmarshal allowed_domains failed", err,
+				logger.Attr("link_id", uuidToString(link.ID)),
+			)
+		}
+	}
 
-	score, _ := h.analytics.GetScore(ctx, link.ID, link.WorkspaceID, heat.CircleDefault)
+	// Fetch link contacts to return contact IDs for edit-mode reconstruction.
+	var contactIDs []string
+	linkContacts, linkContactsErr := h.service.queries.GetLinkContactsByPublicToken(ctx, link.PublicToken)
+	if linkContactsErr != nil {
+		logger.ErrorCtx(ctx, "get link contacts for link response failed", linkContactsErr,
+			logger.Attr("link_id", uuidToString(link.ID)),
+		)
+	}
+	for _, lc := range linkContacts {
+		contactIDs = append(contactIDs, uuidToString(lc.ContactID))
+	}
+
+	metrics, metricsErr := h.service.queries.GetLinkPageViewMetrics(ctx, link.ID)
+	if metricsErr != nil {
+		logger.ErrorCtx(ctx, "get link page view metrics failed", metricsErr,
+			logger.Attr("link_id", uuidToString(link.ID)),
+		)
+	}
+	lastLog, lastLogErr := h.service.queries.GetLastAccessLogByLink(ctx, link.ID)
+	if lastLogErr != nil {
+		logger.ErrorCtx(ctx, "get last access log failed", lastLogErr,
+			logger.Attr("link_id", uuidToString(link.ID)),
+		)
+	}
+
+	score, scoreErr := h.analytics.GetScore(ctx, link.ID, link.WorkspaceID, heat.CircleDefault)
+	if scoreErr != nil {
+		logger.ErrorCtx(ctx, "get analytics score failed", scoreErr,
+			logger.Attr("link_id", uuidToString(link.ID)),
+		)
+	}
 	if score.Level == "" {
 		score.Level = "cold"
 	}
 
 	now := time.Now()
 	isActive := link.Status == "active" && (!link.ExpiresAt.Valid || link.ExpiresAt.Time.After(now))
+	isBundle := len(documents) > 1
 
 	item := gin.H{
 		"id":                 uuidToString(link.ID),
 		"documentId":         uuidToString(link.DocumentID),
 		"documentTitle":      documentTitle,
+		"documentIds":        linkDocumentIDs(linkDocs, link),
+		"documents":          documents,
+		"isBundle":           isBundle,
 		"name":               textOrNil(link.Name),
 		"shortUrl":           publicURL(c, h.cfg, link.PublicToken),
 		"accessCount":        link.AccessCount,
@@ -832,19 +1177,39 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"status":             link.Status,
 		"createdAt":          link.CreatedAt.Time.Format(time.RFC3339),
 		"isActive":           isActive,
-		"permissionType":           mapPermissionType(link.PermissionType),
-		"downloadEnabled":          link.DownloadEnabled,
-		"watermarkEnabled":         link.WatermarkEnabled,
+		"permissionType":     mapPermissionType(link.PermissionType),
+		"requireNda":         link.RequireNda,
+		"requirePassword":    link.RequirePassword,
+		"downloadEnabled":    link.DownloadEnabled,
+		"watermarkEnabled":   link.WatermarkEnabled,
+		"aiCopilotEnabled":    link.AiCopilotEnabled,
 		"requireEmailVerification": link.RequireEmailVerification,
-		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
+		"avgDurationSeconds": int(metrics.AvgDurationSeconds),
+		"allowedEmails":      allowedEmails,
+		"allowedDomains":     allowedDomains,
+		"contactIds":         contactIDs,
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)
+	}
+	if link.MaxAccessCount.Valid {
+		item["maxAccessCount"] = link.MaxAccessCount.Int32
 	}
 	if lastLog.CreatedAt.Valid {
 		item["lastViewedAt"] = lastLog.CreatedAt.Time.Format(time.RFC3339)
 	}
 	return item, nil
+}
+
+func linkDocumentIDs(linkDocs []db.ListLinkDocumentsByLinkRow, link db.Link) []string {
+	if len(linkDocs) > 0 {
+		ids := make([]string, 0, len(linkDocs))
+		for _, ld := range linkDocs {
+			ids = append(ids, uuidToString(ld.DocumentID))
+		}
+		return ids
+	}
+	return []string{uuidToString(link.DocumentID)}
 }
 
 func mapPermissionType(t string) string {

@@ -188,7 +188,7 @@ describe("CanvasViewer", () => {
     const highlight = screen.getByTitle("Revenue grew 3x.");
     expect(highlight).toBeInTheDocument();
 
-    expect(screen.getAllByText(/visitor@example\.test · 203\.0\.113\.1/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/visitor@example\.test · \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/).length).toBeGreaterThan(0);
   });
 
   it("does not render highlight when evidence is empty", async () => {
@@ -234,7 +234,7 @@ describe("CanvasViewer", () => {
     );
 
     expect(await screen.findByText("Q3 Pitch")).toBeInTheDocument();
-    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined);
+    expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined, expect.anything());
   });
 
   it("navigates pages and zoom with keyboard shortcuts", async () => {

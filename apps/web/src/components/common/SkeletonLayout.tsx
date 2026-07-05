@@ -34,15 +34,3 @@ export function SkeletonDetail() {
   );
 }
 
-export function SkeletonGrid({ items = 6 }: { items?: number }) {
-  return (
-    <div className="space-y-4" aria-busy="true">
-      <Skeleton className="h-8 w-48" />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        {Array.from({ length: items }).map((_, i) => (
-          <Skeleton key={i} className="h-40" />
-        ))}
-      </div>
-    </div>
-  );
-}

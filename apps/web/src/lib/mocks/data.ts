@@ -2,7 +2,6 @@ import type {
   AccessLog,
   ActionItem,
   Activity,
-  AuditLog,
   Contact,
   DealRoom,
   DealRoomAccessRequest,
@@ -400,14 +399,14 @@ export const mockSuggestions: Suggestion[] = [
   },
 ];
 
-export const mockDealRoomFolders: DealRoomFolder[] = [
+const mockDealRoomFolders: DealRoomFolder[] = [
   { path: "/", name: "Root", sort_order: 0 },
   { path: "/pitch", name: "01 Pitch Deck", description: "Latest fundraising deck", sort_order: 1 },
   { path: "/financials", name: "02 Financials", description: "Historical financials and projections", sort_order: 2 },
   { path: "/team", name: "03 Team", description: "Founder resumes and org chart", sort_order: 3 },
 ];
 
-export const mockDealRoomFolderDocs: DealRoomFolderDocs[] = [
+const mockDealRoomFolderDocs: DealRoomFolderDocs[] = [
   {
     folder: "/pitch",
     permission: "view",
@@ -446,7 +445,7 @@ export const mockDealRoomFolderDocs: DealRoomFolderDocs[] = [
   },
 ];
 
-export const mockDealRoomMembers: DealRoomMember[] = [
+const mockDealRoomMembers: DealRoomMember[] = [
   {
     id: "rm_1",
     email: "john@acme.capital",
@@ -467,7 +466,7 @@ export const mockDealRoomMembers: DealRoomMember[] = [
   },
 ];
 
-export const mockDealRoomAccessRequests: DealRoomAccessRequest[] = [
+const mockDealRoomAccessRequests: DealRoomAccessRequest[] = [
   {
     id: "ra_1",
     email: "marcus@boldstart.vc",
@@ -667,7 +666,7 @@ export const mockActionItems: ActionItem[] = [
   },
 ];
 
-export const mockRiskAlerts: RiskAlert[] = [
+const mockRiskAlerts: RiskAlert[] = [
   {
     id: "risk_1",
     type: "download",
@@ -753,31 +752,6 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
     recommendedFiles: ["Proposal.pdf", "Security Whitepaper", "Implementation Plan"],
     defaultPermissionLevel: "standard",
     ndaEnabled: true,
-  },
-];
-
-export const mockAuditLogs: AuditLog[] = [
-  {
-    id: "log_1",
-    actor: "john@acme.capital",
-    action: "upload",
-    target: "Acme Seed Round Pitch Deck.pdf",
-    timestamp: "2026-06-18T09:30:00Z",
-    ip: "203.0.113.1",
-  },
-  {
-    id: "log_2",
-    actor: "jane@acme.capital",
-    action: "permission_change",
-    target: "Link #A1b2C3",
-    timestamp: "2026-06-18T10:05:00Z",
-  },
-  {
-    id: "log_3",
-    actor: "john@acme.capital",
-    action: "member_invite",
-    target: "lisa@external.com",
-    timestamp: "2026-06-15T16:00:00Z",
   },
 ];
 

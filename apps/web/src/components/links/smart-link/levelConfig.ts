@@ -1,17 +1,19 @@
 import {
-  GlobeHemisphereWest,
-  LockKey,
-  ShieldCheck,
-  UsersThree,
+  GlobeHemisphereWestIcon,
+  LockKeyIcon,
+  ShieldCheckIcon,
+  SlidersIcon,
+  UsersThreeIcon,
 } from "@phosphor-icons/react";
 import type { PermissionConfig, PermissionPreset } from "@/types";
 import type { PresetConfigTemplate, PresetDef } from "./types";
 
-export const PRESET_ORDER: PermissionPreset[] = [
+const PRESET_ORDER: PermissionPreset[] = [
   "public",
   "standard",
   "confidential",
   "collaborative",
+  "customized",
 ];
 
 // ---------------------------------------------------------------------------
@@ -29,6 +31,7 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
+    aiCopilotEnabled: false,
     expiryDays: 30,
     maxViews: "unlimited",
   },
@@ -40,6 +43,7 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
+    aiCopilotEnabled: false,
     expiryDays: 30,
     maxViews: "unlimited",
   },
@@ -51,6 +55,7 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: true,
     allowDownload: false,
     watermarkEnabled: true,
+    aiCopilotEnabled: false,
     expiryDays: 30,
     maxViews: "unlimited",
   },
@@ -62,6 +67,19 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: true,
     watermarkEnabled: true,
+    aiCopilotEnabled: false,
+    expiryDays: 30,
+    maxViews: "unlimited",
+  },
+  customized: {
+    requireEmailVerification: false,
+    whitelistEnabled: false,
+    whitelist: [],
+    passwordEnabled: false,
+    ndaEnabled: false,
+    allowDownload: false,
+    watermarkEnabled: true,
+    aiCopilotEnabled: false,
     expiryDays: 30,
     maxViews: "unlimited",
   },
@@ -71,7 +89,7 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
   public: {
     label: "preset.public.label",
     description: "preset.public.description",
-    icon: GlobeHemisphereWest,
+    icon: GlobeHemisphereWestIcon,
     color:
       "text-success-600 bg-success-50 border-success-200 dark:bg-success-950 dark:border-success-800",
     friction: "preset.public.friction",
@@ -81,7 +99,7 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
   standard: {
     label: "preset.standard.label",
     description: "preset.standard.description",
-    icon: LockKey,
+    icon: LockKeyIcon,
     color:
       "text-warm-600 bg-warm-50 border-warm-200 dark:bg-warm-950 dark:border-warm-800",
     friction: "preset.standard.friction",
@@ -96,7 +114,7 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
   confidential: {
     label: "preset.confidential.label",
     description: "preset.confidential.description",
-    icon: ShieldCheck,
+    icon: ShieldCheckIcon,
     color:
       "text-hot-600 bg-hot-50 border-hot-200 dark:bg-hot-950 dark:border-hot-800",
     friction: "preset.confidential.friction",
@@ -113,7 +131,7 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
   collaborative: {
     label: "preset.collaborative.label",
     description: "preset.collaborative.description",
-    icon: UsersThree,
+    icon: UsersThreeIcon,
     color:
       "text-primary-600 bg-primary-50 border-primary-200 dark:bg-primary-950 dark:border-primary-800",
     friction: "preset.collaborative.friction",
@@ -124,21 +142,67 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
       "featureWatermark",
     ],
   },
+  customized: {
+    label: "preset.customized.label",
+    description: "preset.customized.description",
+    icon: SlidersIcon,
+    color:
+      "text-muted-foreground bg-muted border-border dark:bg-muted/20 dark:border-border",
+    friction: "preset.customized.friction",
+    usage: "preset.customized.usage",
+    gates: [],
+  },
 };
 
 // ---------------------------------------------------------------------------
-// Derive which preset a config most closely matches. Returns the preset
-// PLUS a boolean indicating whether the config is a clean match (isCustomized=false)
-// or has been manually tweaked (isCustomized=true).
+// Derive which named preset a config matches exactly. If it does not match
+// any named preset, treat it as a customized configuration.
 // ---------------------------------------------------------------------------
+
+const NAMED_PRESETS: PermissionPreset[] = PRESET_ORDER.filter(
+  (p) => p !== "customized",
+);
+
+/**
+ * List of checked dimensions in presetMatchScore. Must stay in sync
+ * with the score counter inside that function. Changing these will
+ * automatically re-derive MAX_SCORE and PERFECT_MATCH_THRESHOLD.
+ *
+ *   - 7 boolean flags
+ *   - 2 mixed-value fields (expiryDays, maxViews)
+ *   - 1 derived: whitelist content match
+ *   - 1 derived: password content match
+ *
+ * Total = 11 (computed as MAX_SCORE below — do NOT hardcode elsewhere).
+ */
+const SCORED_DIMENSION_NAMES = [
+  "requireEmailVerification",
+  "whitelistEnabled",
+  "passwordEnabled",
+  "ndaEnabled",
+  "allowDownload",
+  "watermarkEnabled",
+  "aiCopilotEnabled",
+  "expiryDays",
+  "maxViews",
+  // derived dimensions (not direct field comparisons)
+  "_whitelistContentMatch",
+  "_passwordContentMatch",
+] as const;
+
+/** Maximum possible score for presetMatchScore — computed from scored dimensions. */
+const MAX_SCORE = SCORED_DIMENSION_NAMES.length;
 
 export function classifyPresetFromConfig(
   config: Omit<PermissionConfig, "level" | "isCustomized">,
 ): { level: PermissionPreset; isCustomized: boolean } {
+  // bestMatch is only valid when bestScore === MAX_SCORE (perfect match).
+  // The initial "public" value is never returned because any non-perfect
+  // match goes to "customized" regardless of bestMatch.
   let bestMatch: PermissionPreset = "public";
   let bestScore = -1;
 
-  for (const level of PRESET_ORDER) {
+  for (const level of NAMED_PRESETS) {
     const template = PRESET_TEMPLATES[level];
     const score = presetMatchScore(config, template);
     if (score > bestScore) {
@@ -147,10 +211,11 @@ export function classifyPresetFromConfig(
     }
   }
 
-  return {
-    level: bestMatch,
-    isCustomized: bestScore < 10, // 10 = perfect match (6 booleans + expiryDays + maxViews + whitelist present + password present)
-  };
+  if (bestScore === MAX_SCORE) {
+    return { level: bestMatch, isCustomized: false };
+  }
+
+  return { level: "customized", isCustomized: true };
 }
 
 function presetMatchScore(
@@ -158,23 +223,26 @@ function presetMatchScore(
   template: PresetConfigTemplate,
 ): number {
   let score = 0;
+  // These 9 lines correspond to the first 9 entries in SCORED_DIMENSION_NAMES.
+  // When adding/removing a field here, update SCORED_DIMENSION_NAMES above.
   if (config.requireEmailVerification === template.requireEmailVerification) score++;
   if (config.whitelistEnabled === template.whitelistEnabled) score++;
   if (config.passwordEnabled === template.passwordEnabled) score++;
   if (config.ndaEnabled === template.ndaEnabled) score++;
   if (config.allowDownload === template.allowDownload) score++;
   if (config.watermarkEnabled === template.watermarkEnabled) score++;
+  if (config.aiCopilotEnabled === template.aiCopilotEnabled) score++;
   if (config.expiryDays === template.expiryDays) score++;
   if (config.maxViews === template.maxViews) score++;
 
-  // Whitelist contents must match (empty or not)
+  // Whitelist contents must match (empty or not) — _whitelistContentMatch
   const configHasWhitelist =
     config.whitelistEnabled && config.whitelist.length > 0;
   const templateHasWhitelist =
     template.whitelistEnabled && template.whitelist.length > 0;
   if (configHasWhitelist === templateHasWhitelist) score++;
 
-  // Password presence must match
+  // Password presence must match — _passwordContentMatch
   const configHasPassword = config.passwordEnabled && !!config.password;
   const templateHasPassword = template.passwordEnabled && !!template.password;
   if (configHasPassword === templateHasPassword) score++;
@@ -185,6 +253,11 @@ function presetMatchScore(
 // ---------------------------------------------------------------------------
 // Cross-option constraints – when a "parent" option is toggled, dependent
 // options are automatically adjusted. Classification is left to the caller.
+//
+// NOTE: These constraints are additive only (turn ON dependencies). They
+// never turn OFF options that were manually enabled. This is intentional
+// to avoid silent security degradation. There is no "reset" mechanism —
+// users must manually disable derivative options.
 // ---------------------------------------------------------------------------
 
 export function enforceCrossOptionConstraints(
@@ -205,6 +278,10 @@ export function enforceCrossOptionConstraints(
 
 // ---------------------------------------------------------------------------
 // Scoring functions – unchanged logic, adjusted weights for new preset system.
+//
+// NOTE: Scores are clamped at 100 for display. Raw scores vary from 0
+// (public) to ~14 (confidential), providing granular differentiation across
+// all preset tiers without artificial capping.
 // ---------------------------------------------------------------------------
 
 export function calculateFrictionScore(
@@ -225,7 +302,7 @@ export function calculateFrictionScore(
     score += 1;
   if (config.maxViews !== "unlimited" && typeof config.maxViews === "number")
     score += 2;
-  return Math.min(10, score);
+  return Math.min(100, score);
 }
 
 export function calculateSecurityScore(
@@ -246,5 +323,5 @@ export function calculateSecurityScore(
     config.expiryDays <= 30
   )
     score += 1;
-  return Math.min(10, score);
+  return Math.min(100, score);
 }

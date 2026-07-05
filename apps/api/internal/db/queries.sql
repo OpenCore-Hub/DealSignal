@@ -272,18 +272,21 @@ INSERT INTO links (
     tenant_id, workspace_id, document_id, public_token, name, permission_type,
     allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
     download_enabled, watermark_enabled, status, created_by,
-    require_email, require_password, require_nda, require_email_verification
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    require_email, require_password, require_nda, require_email_verification,
+    ai_copilot_enabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-          updated_at, require_email, require_password, require_nda, require_email_verification;
+          updated_at, require_email, require_password, require_nda, require_email_verification,
+          ai_copilot_enabled;
 
 -- name: GetLinkByIDAndWorkspace :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
@@ -292,7 +295,8 @@ LIMIT 1;
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
 WHERE public_token = $1
 LIMIT 1;
@@ -306,18 +310,20 @@ WHERE id = $1;
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
-WHERE workspace_id = $1 AND status != 'deleted'
+WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
 
 -- name: ListRecentLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
-WHERE workspace_id = $1 AND status != 'deleted'
+WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 LIMIT $2;
 
@@ -325,9 +331,10 @@ LIMIT $2;
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
-WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
+WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
 
 -- name: UpdateLinkStatus :one
@@ -337,7 +344,33 @@ WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification;
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled;
+
+-- name: UpdateLinkFull :one
+UPDATE links SET
+    name = $1,
+    document_id = $2,
+    permission_type = $3,
+    allowed_emails = $4,
+    allowed_domains = $5,
+    password_hash = $6,
+    expires_at = $7,
+    max_access_count = $8,
+    download_enabled = $9,
+    watermark_enabled = $10,
+    require_email = $11,
+    require_email_verification = $12,
+    require_password = $13,
+    require_nda = $14,
+    ai_copilot_enabled = $15,
+    updated_at = now()
+WHERE id = $16 AND workspace_id = $17
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled;
 
 -- name: DeleteLink :execrows
 UPDATE links
@@ -373,7 +406,7 @@ VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
 -- name: RecordLinkOpened :execrows
 WITH inc AS (
     UPDATE links
-    SET access_count = access_count + 1, updated_at = now()
+    SET access_count = access_count + 1
     WHERE links.id = $1
       AND links.status = 'active'
       AND (links.max_access_count IS NULL OR links.access_count < links.max_access_count)
@@ -1347,6 +1380,10 @@ RETURNING id, workspace_id, email, name, created_at;
 INSERT INTO link_contacts (link_id, contact_id, access_code)
 VALUES ($1, $2, $3);
 
+-- name: DeleteLinkContactsByLink :exec
+DELETE FROM link_contacts
+WHERE link_id = $1;
+
 -- name: GetLinkContactsByPublicToken :many
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
        c.email AS contact_email, c.name AS contact_name
@@ -1373,12 +1410,51 @@ JOIN contacts c ON c.id = lc.contact_id
 WHERE l.public_token = $1 AND lc.access_code = $2
 LIMIT 1;
 
--- name: MarkLinkContactCodeUsed :exec
-UPDATE link_contacts
-SET used_at = now()
-WHERE id = $1;
-
 -- name: UpdateLinkContactAccessCode :exec
 UPDATE link_contacts
 SET access_code = $2, code_sent_at = now(), used_at = NULL
 WHERE id = $1;
+
+-- name: CreateLinkDocument :exec
+INSERT INTO link_documents (link_id, document_id, sort_order)
+VALUES ($1, $2, $3);
+
+-- name: ListLinkDocumentsByLink :many
+SELECT ld.id, ld.link_id, ld.document_id, ld.sort_order, ld.created_at,
+       COALESCE(d.title, ''::text) AS title,
+       COALESCE(d.source_type, ''::text) AS source_type,
+       COALESCE(d.page_count, 0)::int AS page_count,
+       d.status,
+       COALESCE(d.file_size, 0)::bigint AS file_size
+FROM link_documents ld
+JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+WHERE ld.link_id = $1
+ORDER BY ld.sort_order ASC, ld.created_at ASC;
+
+-- name: ListLinkDocumentsByPublicToken :many
+SELECT ld.id, ld.link_id, ld.document_id, ld.sort_order, ld.created_at,
+       COALESCE(d.title, ''::text) AS title,
+       COALESCE(d.source_type, ''::text) AS source_type,
+       COALESCE(d.page_count, 0)::int AS page_count,
+       d.status,
+       COALESCE(d.file_size, 0)::bigint AS file_size
+FROM link_documents ld
+JOIN links l ON l.id = ld.link_id
+JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+WHERE l.public_token = $1
+ORDER BY ld.sort_order ASC, ld.created_at ASC;
+
+-- name: DeleteLinkDocumentsByLink :exec
+DELETE FROM link_documents
+WHERE link_id = $1;
+
+-- name: HasLinkDocument :one
+SELECT EXISTS(
+  SELECT 1 FROM link_documents
+  WHERE link_id = $1 AND document_id = $2
+) AS exists;
+
+-- name: GetDocumentByIDForLink :one
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = $1 AND workspace_id = $2 LIMIT 1;

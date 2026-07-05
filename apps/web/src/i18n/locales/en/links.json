@@ -23,6 +23,7 @@
   },
   "actions": {
     "viewLog": "View Log",
+    "editLink": "Edit Link",
     "exportData": "Export Access Data",
     "downloadOnly": "Download Only",
     "exportProTooltip": "Export requires backend support",
@@ -81,18 +82,11 @@
     }
   },
   "creator": {
-    "backToLinks": "Back to Links",
-    "title": "Smart Link Creator",
-    "subtitle": "Select a document and choose a security preset; the system scores security strength and recipient friction in real time.",
-    "securityTitle": "Permissions & Security",
     "loadDocsFailed": "Failed to load documents",
-    "createSuccess": "Link generated",
+    "draftDocsUnavailable": "{{restored}} of {{expected}} document(s) from the saved draft are no longer available and have been removed.",
     "createFailed": "Failed to create link",
     "copySuccess": "Link copied",
-    "selectDocument": "Select Document",
     "noDocuments": "No available documents; please upload first.",
-    "selectPlaceholder": "Select a document to share",
-    "permissionStrength": "Security Preset",
     "securityOptions": "Security Options",
     "requireEmailVerification": "Require email verification code",
     "contactLabel": "Recipient contact",
@@ -103,6 +97,7 @@
     "contactPlaceholder": "Choose a contact",
     "contactSearchPlaceholder": "Search contacts by name or email",
     "contactLoading": "Loading contacts...",
+    "contactAddMore": "Add contacts...",
     "contactEmpty": "No contacts yet.",
     "contactNoResults": "No contacts match your search.",
     "createContactFromSearch": "Create \"{{email}}\" as contact",
@@ -110,12 +105,19 @@
     "whitelist": "Whitelist emails/domains",
     "whitelistPlaceholder": "Enter emails or domains separated by commas",
     "whitelistInvalidEmail": "Invalid email format: {{emails}}",
+    "whitelistDesc": "Only allow specified emails or domains to access the link",
     "password": "Access password",
     "passwordPlaceholder": "Set password",
     "passwordEmpty": "Password is required when password protection is enabled",
+    "passwordEditHint": "Saved password is not displayed for security. Enter a new password to change it.",
+    "whitelistEmpty": "At least one email or domain is required when whitelist is enabled",
+    "passwordDesc": "Viewers must enter a predefined password to access",
     "nda": "Require NDA agreement",
+    "ndaDesc": "Viewers must sign an NDA online before accessing",
     "allowDownload": "Allow download",
+    "allowDownloadDesc": "Allow viewers to download the original document",
     "watermark": "Dynamic watermark",
+    "watermarkDesc": "Overlay viewer identity info on pages to prevent screenshot leaks",
     "expiry": "Expiration",
     "expiryPlaceholder": "Select validity",
     "expiryDays": {
@@ -132,45 +134,111 @@
       "50": "50 views",
       "100": "100 views"
     },
-    "scoreTitle": "Security vs Friction",
     "securityScore": "Security Strength",
     "frictionScore": "Recipient Friction",
-    "previewTitle": "Security Preview",
+    "requireEmailDesc": "Viewers must verify their email to confirm identity",
+    "sectionAccessControl": "Access Control",
+    "sectionContentProtection": "Content Protection",
+    "sectionAdvanced": "Advanced Settings",
+    "aiCopilot": "AI Copilot",
+    "aiCopilotDescription": "Allow recipients to use AI assistant for intelligent Q&A and document analysis",
+    "aiCopilotDesc": "Allow viewers to use AI assistant for document analysis",
+    "aiCopilotSection": "AI Assistant",
     "previewDocumentLabel": "Document",
-    "noDocumentSelected": "Not selected",
     "featureEmailVerification": "Email verification code",
     "featurePassword": "Access password",
     "featureWhitelist": "Whitelist",
     "featureNDA": "NDA signing",
     "featureWatermark": "Dynamic watermark",
+    "featureAICopilot": "AI Copilot",
     "featureNoDownload": "Download disabled",
     "featureDownload": "Download enabled",
-    "generatedLabel": "Generated link",
-    "creating": "Creating...",
-    "recreate": "Create Again",
-    "createLink": "Create Link"
+    "generatedLabel": "Generated link"
   },
   "preset": {
-    "customized": "Customized",
+    "customized": {
+      "label": "Custom",
+      "description": "Freely combine email verification, whitelist, password, NDA, and more",
+      "usage": "For scenarios with unique security requirements. Toggle individual access controls and content protection options as needed.",
+      "friction": "Flexible: adjust security strength and recipient friction to match your exact needs."
+    },
     "public": {
       "label": "Public Distribution",
       "description": "No verification gates; maximize open rate",
-      "usage": "For roadshow decks, white papers, press releases and public-facing materials. Links are accessible by anyone, with basic watermark traceability."
+      "usage": "For roadshow decks, white papers, press releases and public-facing materials. Links are accessible by anyone, with basic watermark traceability.",
+      "friction": "Low friction: anyone with the link can view, ideal for maximizing reach."
     },
     "standard": {
       "label": "Standard DD",
       "description": "Email verification + whitelist + watermark + download disabled",
-      "usage": "For fundraising due diligence, pitch decks and materials requiring identity verification without extreme confidentiality. Recommended default preset."
+      "usage": "For fundraising due diligence, pitch decks and materials requiring identity verification without extreme confidentiality. Recommended default preset.",
+      "friction": "Balanced: verifies identity and restricts domains while keeping open rates high."
     },
     "confidential": {
       "label": "Confidential Data Room",
       "description": "All verification gates + NDA + download disabled",
-      "usage": "For sensitive deal documents, legal contracts and trade secrets requiring highest security. Visitors must pass all gates and sign NDA before access."
+      "usage": "For sensitive deal documents, legal contracts and trade secrets requiring highest security. Visitors must pass all gates and sign NDA before access.",
+      "friction": "High security: multiple gates plus NDA for the most sensitive materials."
     },
     "collaborative": {
       "label": "Collaborative Review",
       "description": "Email verification + download enabled + watermark",
-      "usage": "For internal team review, joint editing and collaborative workflows. Downloads are enabled with watermark and access log traceability."
+      "usage": "For internal team review, joint editing and collaborative workflows. Downloads are enabled with watermark and access log traceability.",
+      "friction": "Collaboration-friendly: team members can download and review with traceability."
+    }
+  },
+  "bundle": {
+    "titleCreate": "Create Link Bundle",
+    "titleEdit": "Edit Link Bundle",
+    "subtitle": "Select multiple documents, configure security once, generate one share link.",
+    "stepDocuments": "Documents",
+    "stepSecurity": "Security",
+    "stepReview": "Review",
+    "nextStep": "Next",
+    "prevStep": "Back",
+    "cancel": "Cancel",
+    "saveChanges": "Save Changes",
+    "unsavedConfirmTitle": "Discard changes?",
+    "unsavedConfirmDesc": "You have unsaved changes. Are you sure you want to leave?",
+    "editingLink": "Editing link",
+    "documents": {
+      "label": "Documents",
+      "availableLabel": "Available documents",
+      "searchPlaceholder": "Search documents...",
+      "selectedCount": "{{count}} selected",
+      "dragToReorder": "Drag to reorder",
+      "empty": "No documents selected",
+      "minRequired": "Select at least one document",
+      "selectPrompt": "Select documents to include in this link bundle",
+      "selectAll": "Select all",
+      "clearAll": "Clear",
+      "emptySelected": "No documents selected yet",
+      "emptyHint": "Choose documents from the left to include in this bundle",
+      "moreDocuments": "+{{count}} more",
+      "sourceTypePDF": "PDF",
+      "sourceTypeDOCX": "DOCX",
+      "sourceTypePPTX": "PPTX",
+      "sourceTypeXLSX": "XLSX",
+      "moveUp": "Move up",
+      "moveDown": "Move down",
+      "remove": "Remove"
+    },
+    "review": {
+      "titleCreate": "Review & Create",
+      "titleEdit": "Review & Save Changes",
+      "subtitle": "Review before saving",
+      "documentsSection": "Link Bundle Contents",
+      "securitySection": "Security Configuration",
+      "createButton": "Create Link Bundle",
+      "saveButton": "Save Changes",
+      "submitting": "Saving...",
+      "successCreate": "Link bundle created!",
+      "successUpdate": "Link updated! Recipients will see the latest changes on refresh.",
+      "viewLink": "View Link",
+      "sendViaEmail": "Send via Email",
+      "createAnother": "Create Another Bundle",
+      "backToList": "Back to Links",
+      "cancelButton": "Cancel"
     }
   }
 }

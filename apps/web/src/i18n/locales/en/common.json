@@ -56,6 +56,18 @@
     "warm": "Warm",
     "cold": "Cold"
   },
+  "priority": {
+    "high": "High",
+    "medium": "Medium",
+    "low": "Low"
+  },
+  "impact": {
+    "high": "High impact",
+    "medium": "Medium impact",
+    "low": "Low impact"
+  },
+  "complete": "Complete",
+  "dueDate": "Due",
   "fileType": {
     "pdf": "PDF",
     "docx": "Word",

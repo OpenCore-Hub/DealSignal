@@ -4,6 +4,7 @@ import {
   MagnifyingGlassMinus,
   CaretLeft,
   CaretRight,
+  SidebarSimple,
 } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -20,6 +21,8 @@ interface ViewerToolbarProps {
   onPreviousPage: () => void;
   onNextPage: () => void;
   onDownload: () => void;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
 }
 
 export function ViewerToolbar({
@@ -32,6 +35,8 @@ export function ViewerToolbar({
   onPreviousPage,
   onNextPage,
   onDownload,
+  sidebarOpen = false,
+  onToggleSidebar,
 }: ViewerToolbarProps) {
   const { t } = useTranslation(["documents", "common"]);
 
@@ -103,6 +108,17 @@ export function ViewerToolbar({
         >
           <Download size={16} />
         </Button>
+        {onToggleSidebar && (
+          <Button
+            size="icon-sm"
+            variant={sidebarOpen ? "default" : "ghost"}
+            onClick={onToggleSidebar}
+            aria-label={sidebarOpen ? t("documents:viewer.sidebarClose") : t("documents:viewer.sidebarOpen")}
+            title={sidebarOpen ? t("documents:viewer.sidebarClose") : t("documents:viewer.sidebarOpen")}
+          >
+            <SidebarSimple size={16} />
+          </Button>
+        )}
       </div>
     </header>
   );

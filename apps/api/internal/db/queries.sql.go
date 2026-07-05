@@ -920,12 +920,14 @@ INSERT INTO links (
     tenant_id, workspace_id, document_id, public_token, name, permission_type,
     allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
     download_enabled, watermark_enabled, status, created_by,
-    require_email, require_password, require_nda, require_email_verification
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+    require_email, require_password, require_nda, require_email_verification,
+    ai_copilot_enabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-          updated_at, require_email, require_password, require_nda, require_email_verification
+          updated_at, require_email, require_password, require_nda, require_email_verification,
+          ai_copilot_enabled
 `
 
 type CreateLinkParams struct {
@@ -948,6 +950,7 @@ type CreateLinkParams struct {
 	RequirePassword          bool
 	RequireNda               bool
 	RequireEmailVerification bool
+	AiCopilotEnabled         bool
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -971,6 +974,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.RequirePassword,
 		arg.RequireNda,
 		arg.RequireEmailVerification,
+		arg.AiCopilotEnabled,
 	)
 	var i Link
 	err := row.Scan(
@@ -997,6 +1001,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
 	)
 	return i, err
 }
@@ -1014,6 +1019,22 @@ type CreateLinkContactParams struct {
 
 func (q *Queries) CreateLinkContact(ctx context.Context, arg CreateLinkContactParams) error {
 	_, err := q.db.Exec(ctx, createLinkContact, arg.LinkID, arg.ContactID, arg.AccessCode)
+	return err
+}
+
+const createLinkDocument = `-- name: CreateLinkDocument :exec
+INSERT INTO link_documents (link_id, document_id, sort_order)
+VALUES ($1, $2, $3)
+`
+
+type CreateLinkDocumentParams struct {
+	LinkID     pgtype.UUID
+	DocumentID pgtype.UUID
+	SortOrder  int32
+}
+
+func (q *Queries) CreateLinkDocument(ctx context.Context, arg CreateLinkDocumentParams) error {
+	_, err := q.db.Exec(ctx, createLinkDocument, arg.LinkID, arg.DocumentID, arg.SortOrder)
 	return err
 }
 
@@ -1600,6 +1621,26 @@ func (q *Queries) DeleteLink(ctx context.Context, arg DeleteLinkParams) (int64, 
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteLinkContactsByLink = `-- name: DeleteLinkContactsByLink :exec
+DELETE FROM link_contacts
+WHERE link_id = $1
+`
+
+func (q *Queries) DeleteLinkContactsByLink(ctx context.Context, linkID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteLinkContactsByLink, linkID)
+	return err
+}
+
+const deleteLinkDocumentsByLink = `-- name: DeleteLinkDocumentsByLink :exec
+DELETE FROM link_documents
+WHERE link_id = $1
+`
+
+func (q *Queries) DeleteLinkDocumentsByLink(ctx context.Context, linkID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteLinkDocumentsByLink, linkID)
+	return err
 }
 
 const deleteOAuthState = `-- name: DeleteOAuthState :exec
@@ -2198,6 +2239,56 @@ func (q *Queries) GetDocumentByIDAndTenant(ctx context.Context, arg GetDocumentB
 	return i, err
 }
 
+const getDocumentByIDForLink = `-- name: GetDocumentByIDForLink :one
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE id = $1 AND workspace_id = $2 LIMIT 1
+`
+
+type GetDocumentByIDForLinkParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetDocumentByIDForLinkRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetDocumentByIDForLink(ctx context.Context, arg GetDocumentByIDForLinkParams) (GetDocumentByIDForLinkRow, error) {
+	row := q.db.QueryRow(ctx, getDocumentByIDForLink, arg.ID, arg.WorkspaceID)
+	var i GetDocumentByIDForLinkRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.Category,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getDocumentViewMetrics = `-- name: GetDocumentViewMetrics :many
 SELECT
     d.id,
@@ -2676,7 +2767,8 @@ const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -2714,6 +2806,7 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
 	)
 	return i, err
 }
@@ -2722,7 +2815,8 @@ const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -2755,6 +2849,7 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
 	)
 	return i, err
 }
@@ -3643,6 +3738,25 @@ func (q *Queries) HardDeleteLink(ctx context.Context, arg HardDeleteLinkParams) 
 	return result.RowsAffected(), nil
 }
 
+const hasLinkDocument = `-- name: HasLinkDocument :one
+SELECT EXISTS(
+  SELECT 1 FROM link_documents
+  WHERE link_id = $1 AND document_id = $2
+) AS exists
+`
+
+type HasLinkDocumentParams struct {
+	LinkID     pgtype.UUID
+	DocumentID pgtype.UUID
+}
+
+func (q *Queries) HasLinkDocument(ctx context.Context, arg HasLinkDocumentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasLinkDocument, arg.LinkID, arg.DocumentID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const hasNDAAgreement = `-- name: HasNDAAgreement :one
 SELECT EXISTS (
     SELECT 1 FROM room_nda_agreements
@@ -4527,13 +4641,129 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listLinkDocumentsByLink = `-- name: ListLinkDocumentsByLink :many
+SELECT ld.id, ld.link_id, ld.document_id, ld.sort_order, ld.created_at,
+       COALESCE(d.title, ''::text) AS title,
+       COALESCE(d.source_type, ''::text) AS source_type,
+       COALESCE(d.page_count, 0)::int AS page_count,
+       d.status,
+       COALESCE(d.file_size, 0)::bigint AS file_size
+FROM link_documents ld
+JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+WHERE ld.link_id = $1
+ORDER BY ld.sort_order ASC, ld.created_at ASC
+`
+
+type ListLinkDocumentsByLinkRow struct {
+	ID         pgtype.UUID
+	LinkID     pgtype.UUID
+	DocumentID pgtype.UUID
+	SortOrder  int32
+	CreatedAt  pgtype.Timestamptz
+	Title      string
+	SourceType string
+	PageCount  int32
+	Status     string
+	FileSize   int64
+}
+
+func (q *Queries) ListLinkDocumentsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListLinkDocumentsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listLinkDocumentsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLinkDocumentsByLinkRow
+	for rows.Next() {
+		var i ListLinkDocumentsByLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.Title,
+			&i.SourceType,
+			&i.PageCount,
+			&i.Status,
+			&i.FileSize,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinkDocumentsByPublicToken = `-- name: ListLinkDocumentsByPublicToken :many
+SELECT ld.id, ld.link_id, ld.document_id, ld.sort_order, ld.created_at,
+       COALESCE(d.title, ''::text) AS title,
+       COALESCE(d.source_type, ''::text) AS source_type,
+       COALESCE(d.page_count, 0)::int AS page_count,
+       d.status,
+       COALESCE(d.file_size, 0)::bigint AS file_size
+FROM link_documents ld
+JOIN links l ON l.id = ld.link_id
+JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+WHERE l.public_token = $1
+ORDER BY ld.sort_order ASC, ld.created_at ASC
+`
+
+type ListLinkDocumentsByPublicTokenRow struct {
+	ID         pgtype.UUID
+	LinkID     pgtype.UUID
+	DocumentID pgtype.UUID
+	SortOrder  int32
+	CreatedAt  pgtype.Timestamptz
+	Title      string
+	SourceType string
+	PageCount  int32
+	Status     string
+	FileSize   int64
+}
+
+func (q *Queries) ListLinkDocumentsByPublicToken(ctx context.Context, publicToken string) ([]ListLinkDocumentsByPublicTokenRow, error) {
+	rows, err := q.db.Query(ctx, listLinkDocumentsByPublicToken, publicToken)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLinkDocumentsByPublicTokenRow
+	for rows.Next() {
+		var i ListLinkDocumentsByPublicTokenRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.SortOrder,
+			&i.CreatedAt,
+			&i.Title,
+			&i.SourceType,
+			&i.PageCount,
+			&i.Status,
+			&i.FileSize,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLinksByDocument = `-- name: ListLinksByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
-WHERE workspace_id = $1 AND document_id = $2 AND status != 'deleted'
+WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 `
 
@@ -4575,6 +4805,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.RequirePassword,
 			&i.RequireNda,
 			&i.RequireEmailVerification,
+			&i.AiCopilotEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -4590,9 +4821,10 @@ const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
-WHERE workspace_id = $1 AND status != 'deleted'
+WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 `
 
@@ -4629,6 +4861,7 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.RequirePassword,
 			&i.RequireNda,
 			&i.RequireEmailVerification,
+			&i.AiCopilotEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -4987,9 +5220,10 @@ const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
        allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 FROM links
-WHERE workspace_id = $1 AND status != 'deleted'
+WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 LIMIT $2
 `
@@ -5032,6 +5266,7 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.RequirePassword,
 			&i.RequireNda,
 			&i.RequireEmailVerification,
+			&i.AiCopilotEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -5733,17 +5968,6 @@ func (q *Queries) MarkInvitationUsed(ctx context.Context, token pgtype.UUID) err
 	return err
 }
 
-const markLinkContactCodeUsed = `-- name: MarkLinkContactCodeUsed :exec
-UPDATE link_contacts
-SET used_at = now()
-WHERE id = $1
-`
-
-func (q *Queries) MarkLinkContactCodeUsed(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markLinkContactCodeUsed, id)
-	return err
-}
-
 const markNotificationFailed = `-- name: MarkNotificationFailed :exec
 UPDATE notifications
 SET attempts = attempts + 1,
@@ -5777,7 +6001,7 @@ func (q *Queries) MarkNotificationSent(ctx context.Context, id pgtype.UUID) erro
 const recordLinkOpened = `-- name: RecordLinkOpened :execrows
 WITH inc AS (
     UPDATE links
-    SET access_count = access_count + 1, updated_at = now()
+    SET access_count = access_count + 1
     WHERE links.id = $1
       AND links.status = 'active'
       AND (links.max_access_count IS NULL OR links.access_count < links.max_access_count)
@@ -6365,7 +6589,8 @@ WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
           allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
 `
 
 type UpdateLinkStatusParams struct {
@@ -6401,6 +6626,103 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
+	)
+	return i, err
+}
+
+const updateLinkFull = `-- name: UpdateLinkFull :one
+UPDATE links SET
+    name = $1,
+    document_id = $2,
+    permission_type = $3,
+    allowed_emails = $4,
+    allowed_domains = $5,
+    password_hash = $6,
+    expires_at = $7,
+    max_access_count = $8,
+    download_enabled = $9,
+    watermark_enabled = $10,
+    require_email = $11,
+    require_email_verification = $12,
+    require_password = $13,
+    require_nda = $14,
+    ai_copilot_enabled = $15,
+    updated_at = now()
+WHERE id = $16 AND workspace_id = $17
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
+`
+
+type UpdateLinkFullParams struct {
+	Name                     pgtype.Text
+	DocumentID               pgtype.UUID
+	PermissionType           string
+	AllowedEmails            []byte
+	AllowedDomains           []byte
+	PasswordHash             pgtype.Text
+	ExpiresAt                pgtype.Timestamptz
+	MaxAccessCount           pgtype.Int4
+	DownloadEnabled          bool
+	WatermarkEnabled         bool
+	RequireEmail             bool
+	RequireEmailVerification bool
+	RequirePassword          bool
+	RequireNda               bool
+	AiCopilotEnabled         bool
+	ID                       pgtype.UUID
+	WorkspaceID              pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) (Link, error) {
+	row := q.db.QueryRow(ctx, updateLinkFull,
+		arg.Name,
+		arg.DocumentID,
+		arg.PermissionType,
+		arg.AllowedEmails,
+		arg.AllowedDomains,
+		arg.PasswordHash,
+		arg.ExpiresAt,
+		arg.MaxAccessCount,
+		arg.DownloadEnabled,
+		arg.WatermarkEnabled,
+		arg.RequireEmail,
+		arg.RequireEmailVerification,
+		arg.RequirePassword,
+		arg.RequireNda,
+		arg.AiCopilotEnabled,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i Link
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PublicToken,
+		&i.Name,
+		&i.PermissionType,
+		&i.AllowedEmails,
+		&i.AllowedDomains,
+		&i.PasswordHash,
+		&i.ExpiresAt,
+		&i.MaxAccessCount,
+		&i.AccessCount,
+		&i.DownloadEnabled,
+		&i.WatermarkEnabled,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequirePassword,
+		&i.RequireNda,
+		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
 	)
 	return i, err
 }

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -8,13 +8,21 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { api, type PublicLinkCredentials } from "@/lib/api";
-import { ApiError } from "@/lib/apiClient";
+import { ApiError, setLinkSessionRefreshHandler } from "@/lib/apiClient";
 import { CanvasViewer } from "./CanvasViewer";
+import { RightSidebar } from "./RightSidebar";
 import type { Document } from "@/types";
 
+interface PublicDocumentSummary {
+  id: string;
+  title: string;
+  pageCount: number;
+  sourceType: string;
+}
+
 interface AccessResult {
-  link: { id: string; name?: string; documentId: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean };
-  document: { id: string; title: string; pageCount: number; status: string; sourceType: string; fileSize: number };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; isBundle: boolean };
+  documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
   requiresEmailVerification: boolean;
@@ -45,9 +53,16 @@ export function PublicViewerPage() {
   });
   const [gateError, setGateError] = useState<string | null>(null);
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
+  const [selectedDocIndex, setSelectedDocIndex] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const accessingRef = useRef(false);
+  const sessionCheckedRef = useRef(false);
 
-  const tryAccess = useCallback(async (gateParams?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean }) => {
+  // Persisted session: on successful access, the sessionToken is stored so
+  // that re-visits within the session lifetime skip the credential prompt.
+  const sessionKey = token ? `link-session:${token}` : null;
+
+  const tryAccess = useCallback(async (gateParams?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean; sessionToken?: string }) => {
     if (!token || accessingRef.current) return;
     accessingRef.current = true;
     setLoading(true);
@@ -64,6 +79,12 @@ export function PublicViewerPage() {
         ndaAgreed: gateParams?.ndaAgreed,
         sessionToken: res.sessionToken,
       });
+      // Persist session for re-visits within the session lifetime.
+      if (sessionKey) {
+        try {
+          sessionStorage.setItem(sessionKey, res.sessionToken);
+        } catch { /* ignore quota errors */ }
+      }
       // The backend always returns the link's configured security gates.
       // Persist them so the UI does not flip between sequential prompts.
       setSecurity({
@@ -74,6 +95,13 @@ export function PublicViewerPage() {
       });
     } catch (e) {
       const err = e as ApiError;
+      // On session expiry or invalidity, clear stored token so the next
+      // revisit falls through to the credential gate.
+      if (gateParams?.sessionToken && sessionKey) {
+        try {
+          sessionStorage.removeItem(sessionKey);
+        } catch { /* ignore */ }
+      }
       // The backend enriches gate errors with the link's full security config.
       // Render every configured control on the first response.
       setSecurity({
@@ -100,12 +128,72 @@ export function PublicViewerPage() {
       accessingRef.current = false;
       setLoading(false);
     }
-  }, [token, t]);
+  }, [token, t, sessionKey]);
 
   useEffect(() => {
+    // On mount, try the persisted session first (skip credentials on re-visit).
+    // If the session is valid, the backend returns access immediately.
+    // If it expired or was revoked, the error path clears the stored token
+    // and we fall through to the empty tryAccess call below.
+    if (sessionKey && !sessionCheckedRef.current) {
+      sessionCheckedRef.current = true;
+      let storedSession: string | null = null;
+      try {
+        storedSession = sessionStorage.getItem(sessionKey);
+      } catch { /* ignore */ }
+      if (storedSession) {
+        void tryAccess({ sessionToken: storedSession });
+        return;
+      }
+    }
     // eslint-disable-next-line react-hooks/set-state-in-effect
     void tryAccess();
-  }, [token, tryAccess]);
+  }, [token, tryAccess, sessionKey]);
+
+  // Reset selected document index when the document list changes (e.g. re-access).
+  useEffect(() => {
+    setSelectedDocIndex(0);
+  }, [access?.documents]);
+
+  // Sliding session: when the backend returns X-Link-Session-Refresh on any
+  // API response (page signed-URL, download-URL, etc.), update sessionStorage
+  // and accessCredentials so the 15-min idle timeout keeps resetting while
+  // the visitor is actively viewing pages.
+  useEffect(() => {
+    if (!sessionKey) return;
+    setLinkSessionRefreshHandler((refreshedToken: string) => {
+      try { sessionStorage.setItem(sessionKey, refreshedToken); } catch { /* ignore */ }
+      setAccessCredentials(prev => prev ? { ...prev, sessionToken: refreshedToken } : prev);
+    });
+    return () => { setLinkSessionRefreshHandler(null); };
+  }, [sessionKey]);
+
+  const selectedDoc = useMemo(() => {
+    return access?.documents[selectedDocIndex] ?? access?.documents[0];
+  }, [access, selectedDocIndex]);
+
+  const doc: Document = useMemo(() => {
+    if (!selectedDoc) {
+      return {
+        id: "", title: "", sourceType: "pdf", fileName: "", fileType: "pdf",
+        fileSize: 0, pageCount: 0, status: "ready", createdAt: "", updatedAt: "",
+      } as Document;
+    }
+    return {
+      id: selectedDoc.id,
+      title: selectedDoc.title,
+      sourceType: selectedDoc.sourceType.toLowerCase() as Document["sourceType"],
+      fileName: selectedDoc.title,
+      fileType: selectedDoc.sourceType.toLowerCase() as Document["fileType"],
+      fileSize: 0,
+      pageCount: selectedDoc.pageCount,
+      status: "ready" as Document["status"],
+      createdAt: "",
+      updatedAt: "",
+    };
+  }, [selectedDoc]);
+
+  const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
 
   if (loading) {
     return (
@@ -245,19 +333,6 @@ export function PublicViewerPage() {
     );
   }
 
-  const doc: Document = {
-    id: access.document.id,
-    title: access.document.title,
-    sourceType: access.document.sourceType.toLowerCase() as Document["sourceType"],
-    fileName: access.document.title,
-    fileType: access.document.sourceType.toLowerCase() as Document["fileType"],
-    fileSize: access.document.fileSize,
-    pageCount: access.document.pageCount,
-    status: access.document.status as Document["status"],
-    createdAt: "",
-    updatedAt: "",
-  };
-
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden">
       <CanvasViewer
@@ -267,6 +342,18 @@ export function PublicViewerPage() {
         publicVisitorId={access.visitorId}
         publicAccessCredentials={accessCredentials}
         watermark={access.link.watermarkEnabled ? { email: accessCredentials.email || email || access.visitorId } : null}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={toggleSidebar}
+        sidebar={
+          <RightSidebar
+            open={sidebarOpen}
+            onClose={() => setSidebarOpen(false)}
+            documents={access.documents}
+            selectedDocIndex={selectedDocIndex}
+            onSelectDoc={setSelectedDocIndex}
+            activeDocumentId={selectedDoc?.id}
+          />
+        }
       />
     </div>
   );

@@ -13,13 +13,23 @@ import (
 // access gates for a given public link. It allows subsequent asset requests
 // (pages, signed-url, download-url) to skip re-running Access and avoid
 // consuming the link's max_access_count on every image request.
+//
+// Password is intentionally NOT stored in the session. The session token
+// itself (HMAC-signed) proves the visitor passed all credential gates.
+// Storing credentials in the session would expose them if the token leaks.
+//
+// LinkUpdatedAt detects when a link's security configuration has changed
+// since the session was issued—if the link was updated (e.g. new password
+// or NDA added), the old session is invalidated and the visitor must
+// re-verify.
 type LinkSession struct {
-	PublicToken string `json:"public_token"`
-	Email       string `json:"email"`
-	Password    string `json:"password"`
-	NDAAgreed   bool   `json:"nda_agreed"`
-	VisitorID   string `json:"visitor_id"`
-	ExpiresAt   int64  `json:"expires_at"` // unix seconds
+	PublicToken   string `json:"public_token"`
+	Email         string `json:"email"`
+	EmailVerified bool   `json:"email_verified"`
+	NDAAgreed     bool   `json:"nda_agreed"`
+	VisitorID     string `json:"visitor_id"`
+	LinkUpdatedAt int64  `json:"link_updated_at"` // unix seconds, 0 means backward-compat (no check)
+	ExpiresAt     int64  `json:"expires_at"`        // unix seconds
 }
 
 const linkSessionLifetime = 15 * time.Minute
@@ -27,6 +37,25 @@ const linkSessionLifetime = 15 * time.Minute
 // signLinkSession returns "signature.base64payload".
 func signLinkSession(s LinkSession, secret string) (string, error) {
 	s.ExpiresAt = time.Now().Add(linkSessionLifetime).Unix()
+	return encodeSession(s, secret)
+}
+
+// refreshLinkSession takes an existing valid session and re-signs it with a
+// fresh ExpiresAt, implementing sliding session (idle timeout). As long as
+// the visitor is actively requesting pages, the session stays alive. After
+// 15 minutes of inactivity, the session expires and re-authentication is
+// required.
+//
+// Only the ExpiresAt field is updated; all identity fields (Email,
+// VisitorID, NDAAgreed, LinkUpdatedAt) are preserved from the original
+// session.
+func refreshLinkSession(s LinkSession, secret string) (string, error) {
+	s.ExpiresAt = time.Now().Add(linkSessionLifetime).Unix()
+	return encodeSession(s, secret)
+}
+
+// encodeSession serializes and HMAC-signs a LinkSession.
+func encodeSession(s LinkSession, secret string) (string, error) {
 	payload, err := json.Marshal(s)
 	if err != nil {
 		return "", err

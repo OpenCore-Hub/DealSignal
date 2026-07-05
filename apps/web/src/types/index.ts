@@ -43,19 +43,51 @@ export interface Document {
   ingestionJob?: IngestionJob;
 }
 
+export interface DocumentSummary {
+  id: string;
+  title: string;
+  sourceType: Document["sourceType"];
+  pageCount: number;
+  status: DocumentStatus;
+  /** File size in bytes (available from v2.5+ backend). */
+  fileSize?: number;
+  /** Sort order in the link bundle. */
+  sortOrder?: number;
+}
+
 export interface Link {
   id: string;
   documentId: string;
+  documentIds: string[];
   documentTitle: string;
+  name?: string;
   shortUrl: string;
   accessCount: number;
   heatLevel: HeatLevel;
+  status?: string;
   createdAt: string;
   expiresAt?: string;
   isActive?: boolean;
   avgDurationSeconds?: number;
   lastViewedAt?: string;
   permissionType?: "public" | "email" | "password" | "nda" | "whitelist";
+  isBundle: boolean;
+  documents: DocumentSummary[];
+  downloadEnabled?: boolean;
+  watermarkEnabled?: boolean;
+  aiCopilotEnabled?: boolean;
+  requireEmailVerification?: boolean;
+  maxAccessCount?: number;
+  /** Allowed emails for whitelist (available from v2.5+ backend). */
+  allowedEmails?: string[];
+  /** Allowed domains for whitelist (available from v2.5+ backend). */
+  allowedDomains?: string[];
+  /** Contact IDs attached to this link for email verification (available from v2.5+ backend). */
+  contactIds?: string[];
+  /** Explicit NDA requirement flag (available from v2.6+ backend). */
+  requireNda?: boolean;
+  /** Explicit password requirement flag (available from v2.6+ backend). */
+  requirePassword?: boolean;
 }
 
 export interface HeatAlert {
@@ -69,7 +101,12 @@ export interface HeatAlert {
   suggestion: string;
 }
 
-export type PermissionPreset = "public" | "standard" | "confidential" | "collaborative";
+export type PermissionPreset =
+  | "public"
+  | "standard"
+  | "confidential"
+  | "collaborative"
+  | "customized";
 
 export interface PermissionFields {
   requireEmailVerification: boolean;
@@ -80,6 +117,7 @@ export interface PermissionFields {
   ndaEnabled: boolean;
   allowDownload: boolean;
   watermarkEnabled: boolean;
+  aiCopilotEnabled: boolean;
   expiryDays: number | "custom";
   maxViews: number | "unlimited";
 }
@@ -87,7 +125,12 @@ export interface PermissionFields {
 export interface PermissionConfig extends PermissionFields {
   level: PermissionPreset;
   isCustomized: boolean;
-  contactId?: string;
+  /** Contact IDs attached to this link for email verification (supports multi-contact). */
+  contactIds: string[];
+  /** Pre-computed expiresAt (ISO 8601). Set by edit-mode reconstruction to prevent
+   * round-trip drift from expiryDays → expiresAt → expiryDays conversion.
+   * Cleared whenever expiryDays is changed by the user. */
+  _editExpiresAt?: string;
 }
 
 export interface ChatMessage {

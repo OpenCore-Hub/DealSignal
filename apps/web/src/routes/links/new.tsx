@@ -1,5 +1,5 @@
-import { SmartLinkCreator } from "@/components/links/SmartLinkCreator";
+import { BundlePipelinePage } from "@/components/links/link-bundle/BundlePipelinePage";
 
 export function NewLinkPage() {
-  return <SmartLinkCreator />;
+  return <BundlePipelinePage />;
 }

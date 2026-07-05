@@ -55,6 +55,18 @@
     "warm": "中热度",
     "cold": "低热度"
   },
+  "priority": {
+    "high": "高",
+    "medium": "中",
+    "low": "低"
+  },
+  "impact": {
+    "high": "高影响",
+    "medium": "中影响",
+    "low": "低影响"
+  },
+  "complete": "完成",
+  "dueDate": "截止日期",
   "fileType": {
     "pdf": "PDF",
     "docx": "Word",

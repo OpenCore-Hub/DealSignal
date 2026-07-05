@@ -28,6 +28,7 @@ interface ViewerCanvasProps {
   evidence?: Evidence[];
   watermark?: WatermarkInfo | null;
   onSelectPage: (page: number) => void;
+  sidebar?: React.ReactNode;
 }
 
 export function ViewerCanvas({
@@ -40,6 +41,7 @@ export function ViewerCanvas({
   evidence,
   watermark,
   onSelectPage,
+  sidebar,
 }: ViewerCanvasProps) {
   const { t } = useTranslation("documents");
   const { highlightedEvidence } = useAIStore();
@@ -155,6 +157,8 @@ export function ViewerCanvas({
           </p>
         )}
       </div>
+
+      {sidebar}
     </div>
   );
 }

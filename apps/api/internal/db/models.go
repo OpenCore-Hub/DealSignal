@@ -244,6 +244,7 @@ type Link struct {
 	RequirePassword          bool
 	RequireNda               bool
 	RequireEmailVerification bool
+	AiCopilotEnabled         bool
 }
 
 type LinkContact struct {
@@ -253,6 +254,14 @@ type LinkContact struct {
 	AccessCode string
 	CodeSentAt pgtype.Timestamptz
 	UsedAt     pgtype.Timestamptz
+	CreatedAt  pgtype.Timestamptz
+}
+
+type LinkDocument struct {
+	ID         pgtype.UUID
+	LinkID     pgtype.UUID
+	DocumentID pgtype.UUID
+	SortOrder  int32
 	CreatedAt  pgtype.Timestamptz
 }
 

@@ -1,7 +1,5 @@
 import type { ComponentType } from "react";
-import type { PermissionFields, PermissionPreset } from "@/types";
-
-export type PermissionLevel = PermissionPreset;
+import type { PermissionFields } from "@/types";
 
 export interface PresetDef {
   label: string;

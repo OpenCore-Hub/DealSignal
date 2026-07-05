@@ -273,7 +273,7 @@ describe("apiClient", () => {
     localStorage.setItem("access_token", "old-token");
     localStorage.setItem("refresh_token", "refresh-1");
 
-    const locationSpy = { href: "" };
+    const locationSpy = { href: "", pathname: "/", search: "" };
     vi.stubGlobal("location", locationSpy);
 
     server.use(

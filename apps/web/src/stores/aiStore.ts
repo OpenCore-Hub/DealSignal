@@ -103,9 +103,9 @@ export const useAIStore = create<AIState>((set, get) => ({
         };
         if (evidences.length > 0) {
           // Embed the query in metadata so the component can interpolate it.
-          (assistantMessage as Record<string, unknown>)._query = res.query ?? content;
-        } else {
-          (assistantMessage as Record<string, unknown>)._query = res.query ?? content;
+        (assistantMessage as unknown as Record<string, unknown>)._query = res.query ?? content;
+      } else {
+        (assistantMessage as unknown as Record<string, unknown>)._query = res.query ?? content;
         }
       } else {
         const res = await api.assistantChat({

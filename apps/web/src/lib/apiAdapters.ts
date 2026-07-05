@@ -1,7 +1,7 @@
 import type { PermissionConfig } from "@/types";
 
 export interface CreateLinkPayload {
-  document_id: string;
+  document_ids: string[];
   name?: string;
   permission_type?: string;
   require_email_verification?: boolean;
@@ -15,14 +15,22 @@ export interface CreateLinkPayload {
   max_access_count?: number;
   download_enabled?: boolean;
   watermark_enabled?: boolean;
+  ai_copilot_enabled?: boolean;
 }
+
+export type UpdateLinkPayload = CreateLinkPayload;
+
+// Note: document sort_order is implicit — the backend stores the array index
+// position (i=0,1,2…) of each document_id in the `document_ids` field as the
+// `link_documents.sort_order`. Frontend array order IS the display order.
 
 function mapConfigToPermissionType(
   config: PermissionConfig,
 ): string {
   // Derive the closest legacy permission_type for backward compatibility.
-  if (config.ndaEnabled) return "nda";
+  // Priority must match backend normalizeSecurityConfig: password > nda > whitelist > public.
   if (config.passwordEnabled) return "password";
+  if (config.ndaEnabled) return "nda";
   if (config.whitelistEnabled && config.whitelist.length > 0) return "whitelist";
   // Modern email verification is controlled by the independent boolean flag,
   // not by the legacy permission_type, so it should remain "public".
@@ -30,7 +38,7 @@ function mapConfigToPermissionType(
 }
 
 export function toCreateLinkPayload(
-  documentId: string,
+  documentIds: string[],
   config: PermissionConfig,
   name?: string,
 ): CreateLinkPayload {
@@ -44,14 +52,17 @@ export function toCreateLinkPayload(
     (s) => !s.includes("@") || s.startsWith("@"),
   );
 
+  // Derived: email verification is required when any of the source flags is on.
+  const requireEmailVerification =
+    config.requireEmailVerification ||
+    config.whitelistEnabled ||
+    config.ndaEnabled;
+
   const payload: CreateLinkPayload = {
-    document_id: documentId,
+    document_ids: documentIds,
     name,
     permission_type: mapConfigToPermissionType(config),
-    require_email_verification:
-      config.requireEmailVerification ||
-      config.whitelistEnabled ||
-      config.ndaEnabled,
+    require_email_verification: requireEmailVerification,
     require_password: config.passwordEnabled,
     require_nda: config.ndaEnabled,
     allowed_emails:
@@ -60,14 +71,35 @@ export function toCreateLinkPayload(
       allowedDomains.length > 0 ? allowedDomains : undefined,
     password: config.passwordEnabled ? config.password : undefined,
     contact_ids:
-      config.requireEmailVerification && config.contactId
-        ? [config.contactId]
+      requireEmailVerification && config.contactIds.length > 0
+        ? config.contactIds
         : undefined,
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,
+    ai_copilot_enabled: config.aiCopilotEnabled,
   };
 
-  if (typeof config.expiryDays === "number") {
+  // Prefer exact expiresAt from edit-mode reconstruction to avoid round-trip
+  // drift (config.expiryDays → Date setDate → expiryDays each round-trip
+  // shifts by ±1 day due to time component truncation).
+  // If expiryDays was changed by the user, _editExpiresAt is expected to have
+  // been cleared by the reducer. However, as a defense-in-depth measure, compute
+  // the expiry from expiryDays and only use _editExpiresAt when the two agree
+  // within 25 hours (covering timezone edge cases).
+  if (config._editExpiresAt && typeof config.expiryDays === "number") {
+    const fromExpiryDays = new Date();
+    fromExpiryDays.setDate(fromExpiryDays.getDate() + config.expiryDays);
+    const diffMs = Math.abs(new Date(config._editExpiresAt).getTime() - fromExpiryDays.getTime());
+    // Allow ±25 hours to cover timezone + clock drift; beyond that, user
+    // intentionally changed expiry — discard the stale _editExpiresAt.
+    if (diffMs < 25 * 60 * 60 * 1000) {
+      payload.expires_at = config._editExpiresAt;
+    } else {
+      payload.expires_at = fromExpiryDays.toISOString();
+    }
+  } else if (config._editExpiresAt) {
+    payload.expires_at = config._editExpiresAt;
+  } else if (typeof config.expiryDays === "number") {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + config.expiryDays);
     payload.expires_at = expiresAt.toISOString();

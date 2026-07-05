@@ -72,6 +72,13 @@ export interface RequestOptions extends RequestInit {
   token?: string;
   idempotencyKey?: string;
   skipAuth?: boolean;
+  /** Called when backend returns X-Link-Session-Refresh — the
+   *  frontend should store the refreshed session token so the
+   *  idle timeout keeps sliding during document viewing. */
+  onSessionRefresh?: (token: string) => void;
+  /** AbortSignal forwarded to the underlying fetch call so callers
+   *  can cancel in-flight requests on unmount or dependency churn. */
+  signal?: AbortSignal;
 }
 
 function getBaseUrl(): string {
@@ -150,8 +157,10 @@ function refreshAccessToken(baseUrl: string): Promise<string> {
 function redirectToLogin() {
   if (typeof window !== "undefined") {
     clearTokens();
-    const returnPath = window.location.pathname + window.location.search;
-    const loginUrl = returnPath !== "/login" && returnPath !== "/"
+    const pathname = window.location.pathname ?? "";
+    const search = window.location.search ?? "";
+    const returnPath = pathname + search;
+    const loginUrl = returnPath !== "" && returnPath !== "/login" && returnPath !== "/"
       ? `/login?redirect=${encodeURIComponent(returnPath)}`
       : "/login";
     window.location.href = loginUrl;
@@ -171,7 +180,7 @@ function getBrowserLanguage(): string {
   return navigator.language || "en";
 }
 
-export function generateRequestId(): string {
+function generateRequestId(): string {
   return crypto.randomUUID();
 }
 
@@ -272,12 +281,36 @@ export async function request<T>(
   }
 
   if (response.status === 204) {
+    handleSessionRefresh(response, options);
     return undefined as T;
   }
 
   const payload: unknown = await response.json();
+  handleSessionRefresh(response, options);
   if (isBaseResponse<T>(payload)) {
     return payload.data as T;
   }
   return payload as T;
+}
+
+function handleSessionRefresh(response: Response, options: RequestOptions) {
+  // Per-request callback takes priority.
+  const refreshed = response.headers.get("X-Link-Session-Refresh");
+  if (refreshed) {
+    if (options.onSessionRefresh) {
+      options.onSessionRefresh(refreshed);
+    } else if (linkSessionRefreshHandler) {
+      linkSessionRefreshHandler(refreshed);
+    }
+  }
+}
+
+// linkSessionRefreshHandler is a module-level callback set by the viewer
+// page so that every API call (including image signed-URL fetches) can
+// automatically update the stored session token when the backend returns
+// a refreshed one.
+let linkSessionRefreshHandler: ((token: string) => void) | null = null;
+
+export function setLinkSessionRefreshHandler(handler: ((token: string) => void) | null) {
+  linkSessionRefreshHandler = handler;
 }

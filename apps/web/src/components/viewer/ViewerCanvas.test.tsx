@@ -124,7 +124,7 @@ describe("ViewerCanvas", () => {
 
   it("renders watermark overlay", async () => {
     await renderCanvas({ watermark: demoWatermark });
-    expect(screen.getAllByText(/visitor@example\.test · 203\.0\.113\.1/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/visitor@example\.test · \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/).length).toBeGreaterThan(0);
   });
 
   it("displays current page analytics", async () => {

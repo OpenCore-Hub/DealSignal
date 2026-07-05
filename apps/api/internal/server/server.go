@@ -54,14 +54,14 @@ type Server struct {
 var (
 	httpRequestsTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "http_requests_total",
+			Name: "dealsignal_http_requests_total",
 			Help: "Total number of HTTP requests by method, path, and status.",
 		},
 		[]string{"method", "path", "status"},
 	)
 	httpRequestDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
-			Name:    "http_request_duration_seconds",
+			Name:    "dealsignal_http_request_duration_seconds",
 			Help:    "HTTP request latencies in seconds by method and path.",
 			Buckets: prometheus.DefBuckets,
 		},
@@ -103,6 +103,7 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 
 	r := gin.New()
 	r.Use(gin.Recovery())
+	r.Use(corsMiddleware(cfg.CORSAllowedOrigins))
 	r.Use(requestIDMiddleware())
 	r.Use(requestLogger())
 	r.Use(metricsMiddleware())
@@ -110,7 +111,6 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 		r.Use(middleware.RateLimitMiddleware(s.redisClient, cfg))
 		r.Use(middleware.IdempotencyMiddleware(s.redisClient, cfg))
 	}
-	r.Use(corsMiddleware(cfg.CORSAllowedOrigins))
 	r.Use(securityHeadersMiddleware())
 
 	s.engine = r
@@ -253,7 +253,7 @@ func corsMiddleware(allowedOrigins string) gin.HandlerFunc {
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
 		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, Accept-Language, Idempotency-Key, X-Link-Access, X-Link-Session")
-		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Idempotency-Key")
+		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Idempotency-Key, X-Link-Session-Refresh")
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
 			return
@@ -313,9 +313,20 @@ func (s *Server) registerObservabilityRoutes() {
 		// Restrict pprof to localhost in production. PprofEnabled is designed to
 		// be left off in production; this is a defense-in-depth measure for when
 		// it is accidentally enabled.
+		//
+		// We use Request.RemoteAddr (the TCP peer address) instead of
+		// ClientIP() which trusts X-Forwarded-For. This prevents IP spoofing
+		// through untrusted reverse-proxy headers.
 		pp.Use(func(c *gin.Context) {
-			ip := c.ClientIP()
-			if ip != "::1" && ip != "127.0.0.1" {
+			remoteIP := c.Request.RemoteAddr
+			// Strip port if present (RemoteAddr is "ip:port").
+			if idx := strings.LastIndex(remoteIP, ":"); idx != -1 {
+				remoteIP = remoteIP[:idx]
+			}
+			// Remove brackets from IPv6 addresses.
+			remoteIP = strings.TrimPrefix(remoteIP, "[")
+			remoteIP = strings.TrimSuffix(remoteIP, "]")
+			if remoteIP != "::1" && remoteIP != "127.0.0.1" {
 				c.AbortWithStatus(http.StatusForbidden)
 				return
 			}

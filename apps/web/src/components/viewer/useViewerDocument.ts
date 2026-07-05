@@ -63,14 +63,21 @@ export function useViewerDocument({
   const { highlightedPage } = useAIStore();
   const publicAccessCredentialsRef = useRef(publicAccessCredentials);
 
-  const loadDocument = useCallback(async (): Promise<ViewerDocumentData> => {
+  // Keep the latest credentials in a ref so that credential rotations
+  // (e.g. X-Link-Session-Refresh sliding sessions) do not recreate the
+  // document loader / signed-URL fetcher and trigger an infinite loop.
+  useEffect(() => {
+    publicAccessCredentialsRef.current = publicAccessCredentials;
+  }, [publicAccessCredentials]);
+
+  const loadDocument = useCallback(async (signal?: AbortSignal): Promise<ViewerDocumentData> => {
     const id = documentId;
     if (!id) {
       return { doc: null, pages: [], analytics: [] };
     }
     if (publicDocument) {
       if (publicDocument.status === "ready" && publicToken) {
-        const pagesRes = await api.getPublicDocumentPages(id, publicToken, publicAccessCredentials);
+        const pagesRes = await api.getPublicDocumentPages(id, publicToken, publicAccessCredentialsRef.current, signal);
         return { doc: publicDocument, pages: pagesRes.pages, analytics: [] };
       }
       return { doc: publicDocument, pages: [], analytics: [] };
@@ -84,7 +91,7 @@ export function useViewerDocument({
       return { doc: d, pages: pagesRes.pages, analytics: a.data };
     }
     return { doc: d, pages: [], analytics: a.data };
-  }, [documentId, publicDocument, publicToken, publicAccessCredentials]);
+  }, [documentId, publicDocument, publicToken]);
 
   const { data, loading, error, refetch } = useAsyncData(loadDocument, [loadDocument]);
 
@@ -112,32 +119,27 @@ export function useViewerDocument({
 
   // Fetch a signed URL for the current page.
   useEffect(() => {
-    let cancelled = false;
+    const controller = new AbortController();
     const id = documentId;
     if (!id || pages.length === 0) return;
 
     async function loadSignedUrl() {
       try {
         const res = publicToken
-          ? await api.getPublicPageSignedUrl(id!, publicToken, page, publicAccessCredentials)
+          ? await api.getPublicPageSignedUrl(id!, publicToken, page, publicAccessCredentialsRef.current, controller.signal)
           : await api.getPageSignedUrl(id!, page);
-        if (!cancelled) setImageUrl(res.image_url);
-      } catch {
-        if (!cancelled) setImageUrl(null);
+        if (!controller.signal.aborted) setImageUrl(res.image_url);
+      } catch (e) {
+        if (e instanceof Error && e.name === "AbortError") return;
+        if (!controller.signal.aborted) setImageUrl(null);
       }
     }
 
     loadSignedUrl();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
-  }, [documentId, page, pages.length, publicToken, publicAccessCredentials]);
-
-  // Keep the latest credentials available to the page-view cleanup without
-  // re-triggering the duration effect when they change.
-  useEffect(() => {
-    publicAccessCredentialsRef.current = publicAccessCredentials;
-  }, [publicAccessCredentials]);
+  }, [documentId, page, pages.length, publicToken]);
 
   // Report public viewer page view duration.
   const pageStartRef = useRef<number>(0);

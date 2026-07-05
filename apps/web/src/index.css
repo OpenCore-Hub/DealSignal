@@ -266,3 +266,36 @@
     scroll-behavior: auto !important;
   }
 }
+
+/* Pulse ring animation for CTA buttons */
+@keyframes pulse-ring {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 0 rgba(100, 116, 139, 0.3),
+      0 0 0 8px rgba(100, 116, 139, 0);
+  }
+  50% {
+    box-shadow:
+      0 0 0 6px rgba(100, 116, 139, 0),
+      0 0 0 14px rgba(100, 116, 139, 0.1);
+  }
+}
+
+.animate-pulse-ring {
+  animation: pulse-ring 2s ease-in-out infinite;
+}
+
+/* Shimmer sweep animation for CTA buttons */
+@keyframes shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.animate-shimmer {
+  animation: shimmer 2.5s linear infinite;
+}

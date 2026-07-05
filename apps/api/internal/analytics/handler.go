@@ -169,7 +169,7 @@ func (h *Handler) RecordViewerEvent(c *gin.Context) {
 	err := h.service.RecordAuthenticatedEvent(c.Request.Context(), workspaceID, req.DocumentID, visitorID, "", ip, ua, req.EventType, req.PageNumber, req.DurationSeconds, req.ScrollDepth)
 	if err != nil {
 		if errors.Is(err, ErrNoLinkForDocument) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "no_link_for_document", "message": err.Error()})
+			c.Status(http.StatusNoContent)
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
@@ -295,9 +295,9 @@ func contactScoreList(contacts []ContactScore) []gin.H {
 	out := make([]gin.H, len(contacts))
 	for i, c := range contacts {
 		item := gin.H{
-			"id":    c.Email,
-			"email": c.Email,
-			"score": c.Score,
+			"id":        c.Email,
+			"email":     c.Email,
+			"score":     c.Score,
 			"heatLevel": c.Level,
 		}
 		if c.LastSeenAt.Valid {
@@ -360,11 +360,11 @@ func heatAlertList(signals []db.Signal) []gin.H {
 			continue
 		}
 		item := gin.H{
-			"id":          uuidToString(s.ID),
-			"heatLevel":   s.Type,
-			"score":       0,
-			"suggestion":  s.Suggestion,
-			"lastSeenAt":  s.CreatedAt.Time.Format(time.RFC3339),
+			"id":            uuidToString(s.ID),
+			"heatLevel":     s.Type,
+			"score":         0,
+			"suggestion":    s.Suggestion,
+			"lastSeenAt":    s.CreatedAt.Time.Format(time.RFC3339),
 			"documentTitle": "",
 			"visitorEmail":  "",
 		}

@@ -14,6 +14,7 @@ const UploadPage = lazy(() => import("@/routes/upload").then((m) => ({ default: 
 const LinksPage = lazy(() => import("@/routes/links").then((m) => ({ default: m.LinksPage })));
 const LinkDetailPage = lazy(() => import("@/routes/links/detail").then((m) => ({ default: m.LinkDetailPage })));
 const NewLinkPage = lazy(() => import("@/routes/links/new").then((m) => ({ default: m.NewLinkPage })));
+const EditLinkPage = lazy(() => import("@/routes/links/edit").then((m) => ({ default: m.EditLinkPage })));
 const DealRoomsPage = lazy(() => import("@/routes/deal-rooms").then((m) => ({ default: m.DealRoomsPage })));
 const DealRoomDetailPage = lazy(() => import("@/routes/deal-rooms/detail").then((m) => ({ default: m.DealRoomDetailPage })));
 const NewDealRoomPage = lazy(() => import("@/routes/deal-rooms/new").then((m) => ({ default: m.NewDealRoomPage })));
@@ -156,6 +157,7 @@ export const router = createBrowserRouter([
       { path: "agreement-documents", element: <AgreementDocumentsPage /> },
       { path: "links", element: <LinksPage /> },
       { path: "links/new", element: <NewLinkPage /> },
+      { path: "links/:id/edit", element: <EditLinkPage /> },
       { path: "links/:linkId", element: <LinkDetailPage /> },
       { path: "deal-rooms", element: <DealRoomsPage /> },
       { path: "deal-rooms/new", element: <NewDealRoomPage /> },

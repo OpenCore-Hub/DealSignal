@@ -9,7 +9,7 @@ export async function resetMockState(page: Page) {
   );
 }
 
-export async function authenticate(page: Page) {
+async function authenticate(page: Page) {
   await page.evaluate(() => {
     localStorage.setItem("access_token", "mock_e2e_token");
   });

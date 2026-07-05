@@ -8,7 +8,7 @@ import {
   type ColumnDef,
   type SortingState,
 } from "@tanstack/react-table";
-import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon, X } from "@phosphor-icons/react";
+import { Copy, Export, DownloadSimple, Trash, ArrowRight, Link as LinkIcon, X, PencilSimple } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -146,6 +146,11 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
                   label: t("actions.viewLog"),
                   icon: <ArrowRight size={16} />,
                   onClick: () => navigate(`/${workspaceSlug}/links/${link.id}`),
+                },
+                {
+                  label: t("actions.editLink"),
+                  icon: <PencilSimple size={16} />,
+                  onClick: () => navigate(`/${workspaceSlug}/links/${link.id}/edit`),
                 },
                 {
                   label: t("actions.exportData"),
@@ -308,9 +313,9 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
                 setIsDeleting(true);
                 try {
                   await api.deleteLink(linkToDelete.id);
-                  setData((prev) => prev.filter((l) => l.id !== linkToDelete.id));
                   toast.success(t("delete.success"));
                   setLinkToDelete(null);
+                  void refetch();
                 } catch (e) {
                   toast.error(e instanceof Error ? e.message : tc("error.deleteFailed"));
                 } finally {

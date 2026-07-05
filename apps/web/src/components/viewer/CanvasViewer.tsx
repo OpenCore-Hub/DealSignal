@@ -19,6 +19,9 @@ interface CanvasViewerProps {
   publicDocument?: Document;
   publicVisitorId?: string;
   publicAccessCredentials?: PublicLinkCredentials;
+  sidebarOpen?: boolean;
+  onToggleSidebar?: () => void;
+  sidebar?: React.ReactNode;
 }
 
 export function CanvasViewer({
@@ -29,6 +32,9 @@ export function CanvasViewer({
   publicDocument,
   publicVisitorId,
   publicAccessCredentials,
+  sidebarOpen = false,
+  onToggleSidebar,
+  sidebar,
 }: CanvasViewerProps = {}) {
   const { t } = useTranslation(["documents", "common"]);
   const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
@@ -219,6 +225,8 @@ export function CanvasViewer({
         onPreviousPage={goToPreviousPage}
         onNextPage={goToNextPage}
         onDownload={handleDownload}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={onToggleSidebar}
       />
       <ViewerCanvas
         doc={doc}
@@ -230,6 +238,7 @@ export function CanvasViewer({
         evidence={evidence}
         watermark={watermark}
         onSelectPage={setPage}
+        sidebar={sidebar}
       />
     </div>
   );

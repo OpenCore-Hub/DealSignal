@@ -1,3 +1,4 @@
+import { useRef } from "react";
 import { cn } from "@/lib/utils";
 
 export interface WatermarkInfo {
@@ -12,10 +13,23 @@ interface WatermarkOverlayProps {
   className?: string;
 }
 
+function formatTimestamp(date: Date): string {
+  const y = date.getFullYear();
+  const mo = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  const h = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  const s = String(date.getSeconds()).padStart(2, "0");
+  return `${y}-${mo}-${d} ${h}:${mi}:${s}`;
+}
+
 export function WatermarkOverlay({ watermark, tiled = true, className }: WatermarkOverlayProps) {
+  // Capture the mount-time timestamp once (ms precision) and never update.
+  const mountedAt = useRef(formatTimestamp(new Date()));
+
   if (!watermark) return null;
 
-  const text = [watermark.email, watermark.ip, watermark.viewedAt].filter(Boolean).join(" · ") || "CONFIDENTIAL";
+  const text = [watermark.email, mountedAt.current].filter(Boolean).join(" · ") || "CONFIDENTIAL";
 
   if (tiled) {
     return (

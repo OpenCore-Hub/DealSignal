@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import { mergeProps } from "@base-ui/react/merge-props"
 import { useRender } from "@base-ui/react/use-render"
 import { cva, type VariantProps } from "class-variance-authority"
@@ -51,4 +50,4 @@ function Badge({
   })
 }
 
-export { Badge, badgeVariants }
+export { Badge }

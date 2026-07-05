@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Copy, PencilSimple, ToggleRight } from "@phosphor-icons/react";
+import { Copy, PencilSimple, ToggleRight, FileText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -47,6 +47,7 @@ function buildPageDurationData(
 }
 
 export function LinkDetail() {
+  const navigate = useNavigate();
   const { workspaceSlug, linkId } = useParams<{ workspaceSlug: string; linkId: string }>();
   const { t } = useTranslation("links");
   const { t: tc } = useTranslation("common");
@@ -135,7 +136,11 @@ export function LinkDetail() {
         title={(link.shortUrl || link.id).split("/").pop() || link.id}
         description={t("detail.headerDescription", { doc: link.documentTitle, date: formatDate(link.createdAt) })}
       >
-        <Button variant="outline" className="gap-1.5" disabled title={t("detail.editProTooltip")} onClick={() => {}}>
+        <Button
+          variant="outline"
+          className="gap-1.5"
+          onClick={() => navigate(`/${workspaceSlug}/links/${link.id}/edit`)}
+        >
           <PencilSimple size={16} />
           {tc("edit")}
         </Button>
@@ -161,6 +166,31 @@ export function LinkDetail() {
           {link.isActive ? tc("status.disabled") : tc("status.enabled")}
         </Button>
       </PageHeader>
+
+      {link.isBundle && link.documents.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-h3 flex items-center gap-2">
+              <FileText size={20} />
+              {t("bundle.documents.label")} ({link.documents.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="divide-y divide-border rounded-md border border-border">
+              {link.documents.map((doc, i) => (
+                <div key={doc.id} className="flex items-center gap-3 px-3 py-2.5">
+                  <span className="text-sm text-muted-foreground w-5 text-right">{i + 1}.</span>
+                  <FileText size={18} className="shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate text-sm font-medium">{doc.title}</span>
+                  <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-caption text-muted-foreground">
+                    {doc.sourceType.toUpperCase()}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       <DetailLayout
         sidebar={
