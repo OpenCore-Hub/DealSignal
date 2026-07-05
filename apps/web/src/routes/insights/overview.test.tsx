@@ -40,7 +40,18 @@ const mockOverview: InsightsOverview = {
 };
 
 const mockLinks: Link[] = [
-  { id: "link-1", documentId: "doc-1", documentTitle: "Q3 Pitch", shortUrl: "http://localhost:8080/l/abc", accessCount: 12, heatLevel: "warm", createdAt: "2026-06-20T00:00:00Z" },
+  {
+    id: "link-1",
+    documentId: "doc-1",
+    documentIds: ["doc-1"],
+    documentTitle: "Q3 Pitch",
+    shortUrl: "http://localhost:8080/l/abc",
+    accessCount: 12,
+    heatLevel: "warm",
+    createdAt: "2026-06-20T00:00:00Z",
+    isBundle: false,
+    documents: [],
+  },
 ];
 
 const today = new Date().toISOString();

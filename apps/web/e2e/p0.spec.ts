@@ -26,14 +26,23 @@ test.describe("P0 user flow", () => {
     await setupAuthenticatedPage(page);
 
     await page.goto(`/${WORKSPACE_SLUG}/links/new`);
-    await expect(page.getByRole("heading", { name: "Smart Link Creator" })).toBeVisible();
 
-    await expect(page.getByTestId("selected-document")).not.toHaveText("Not selected");
+    // Bundle pipeline Step 1: select a document.
+    await expect(page.locator('[data-testid="bundle-doc-checkbox-doc_1"]')).toBeVisible({ timeout: 5000 });
+    await page.locator('[data-testid="bundle-doc-checkbox-doc_1"]').click();
 
-    await page.getByTestId("create-link-button").click();
-    await expect(page.getByTestId("generated-link")).toBeVisible();
+    // Step 2: Security (leave defaults).
+    await page.locator('[data-testid="pipeline-nav-forward"]').click();
+    await expect(page.getByText("Security Options")).toBeVisible();
 
-    const generatedLink = await page.getByTestId("generated-link").textContent();
+    // Step 3: Review & create.
+    await page.locator('[data-testid="pipeline-nav-forward"]').click();
+    await expect(page.locator('[data-testid="review-submit-button"]')).toBeVisible();
+
+    await page.locator('[data-testid="review-submit-button"]').click();
+    await expect(page.locator('[data-testid="generated-link"]')).toBeVisible({ timeout: 10000 });
+
+    const generatedLink = await page.locator('[data-testid="generated-link"]').textContent();
     expect(generatedLink).toContain("http");
 
     await page.goto(`/${WORKSPACE_SLUG}/links`);

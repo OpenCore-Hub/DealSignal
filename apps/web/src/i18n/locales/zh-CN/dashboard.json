@@ -9,6 +9,18 @@
   "riskAlerts": {
     "title": "风险提醒"
   },
+  "mock": {
+    "risks": {
+      "risk_1": {
+        "title": "未知邮箱下载了 Pitch Deck",
+        "description": "一名未在预期收件人列表中的访客下载了该文档。"
+      },
+      "risk_2": {
+        "title": "Financial Model 链接已过期",
+        "description": "该分享链接已超过有效期，无法再访问。"
+      }
+    }
+  },
   "sections": {
     "signals": "信号流",
     "recentDocuments": "最近文档",

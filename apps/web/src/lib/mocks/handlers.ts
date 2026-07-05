@@ -370,6 +370,60 @@ export const handlers = [
     return HttpResponse.json(link);
   }),
 
+  http.put("*/api/workspaces/:workspaceSlug/links/:id", async ({ request, params }) => {
+    const link = mockLinks.find((l) => l.id === params.id);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    const payload = (await request.json()) as {
+      document_ids?: string[];
+      name?: string;
+      permission_type?: string;
+      require_email_verification?: boolean;
+      require_password?: boolean;
+      require_nda?: boolean;
+      allowed_emails?: string[];
+      allowed_domains?: string[];
+      password?: string;
+      contact_ids?: string[];
+      expires_at?: string;
+      max_access_count?: number;
+      download_enabled?: boolean;
+      watermark_enabled?: boolean;
+      ai_copilot_enabled?: boolean;
+    };
+    // Update the in-memory link to reflect the edited values so subsequent reads
+    // (including tests) see the new state.
+    if (payload.document_ids && payload.document_ids.length > 0) {
+      link.documentIds = payload.document_ids;
+      link.documentId = payload.document_ids[0];
+      const selectedDocs = payload.document_ids
+        .map((id) => mockDocuments.find((d) => d.id === id))
+        .filter(Boolean) as typeof mockDocuments;
+      link.documents = selectedDocs.map((d) => ({
+        id: d.id,
+        title: d.title,
+        sourceType: d.sourceType,
+        pageCount: d.pageCount,
+        status: d.status,
+        fileSize: d.fileSize,
+      }));
+      link.documentTitle = selectedDocs.map((d) => d.title).join(", ") || link.documentTitle;
+      link.isBundle = payload.document_ids.length > 1;
+    }
+    if (payload.permission_type) link.permissionType = payload.permission_type as Link["permissionType"];
+    if (typeof payload.require_email_verification === "boolean") link.requireEmailVerification = payload.require_email_verification;
+    if (typeof payload.require_password === "boolean") link.requirePassword = payload.require_password;
+    if (typeof payload.require_nda === "boolean") link.requireNda = payload.require_nda;
+    if (payload.allowed_emails) link.allowedEmails = payload.allowed_emails;
+    if (payload.allowed_domains) link.allowedDomains = payload.allowed_domains;
+    if (payload.expires_at) link.expiresAt = payload.expires_at;
+    if (typeof payload.max_access_count === "number") link.maxAccessCount = payload.max_access_count;
+    if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
+    if (typeof payload.watermark_enabled === "boolean") link.watermarkEnabled = payload.watermark_enabled;
+    if (typeof payload.ai_copilot_enabled === "boolean") link.aiCopilotEnabled = payload.ai_copilot_enabled;
+    if (payload.contact_ids) link.contactIds = payload.contact_ids;
+    return HttpResponse.json(link);
+  }),
+
   http.patch("*/api/workspaces/:workspaceSlug/links/:id", async ({ request, params }) => {
     const link = mockLinks.find((l) => l.id === params.id);
     if (!link) return new HttpResponse(null, { status: 404 });
@@ -1169,6 +1223,14 @@ export const handlers = [
     }
 
     const doc = mockDocuments.find((d) => d.id === link.documentId) ?? mockDocuments[0];
+    const publicDocument = {
+      id: doc.id,
+      title: doc.title,
+      pageCount: doc.pageCount,
+      status: doc.status,
+      sourceType: doc.fileType,
+      fileSize: doc.fileSize,
+    };
     return HttpResponse.json({
       link: {
         id: link.id,
@@ -1178,14 +1240,8 @@ export const handlers = [
         downloadEnabled: true,
         watermarkEnabled: false,
       },
-      document: {
-        id: doc.id,
-        title: doc.title,
-        pageCount: doc.pageCount,
-        status: doc.status,
-        sourceType: doc.fileType,
-        fileSize: doc.fileSize,
-      },
+      document: publicDocument,
+      documents: [publicDocument],
       visitorId: generateId("visitor"),
       requiresEmail,
       requiresEmailVerification,

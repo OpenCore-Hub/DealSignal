@@ -108,6 +108,15 @@
     "description": "你访问的页面不存在，请返回 Dashboard。",
     "backToDashboard": "返回 Dashboard"
   },
+  "selectWorkspace": "选择工作区",
+  "selectWorkspaceDescription": "选择一个工作区以继续。",
+  "createWorkspace": "创建工作区",
+  "creating": "创建中...",
+  "workspaceName": "工作区名称",
+  "workspaceNamePlaceholder": "我的工作区",
+  "workspaceSlug": "工作区标识",
+  "workspaceSlugPlaceholder": "my-workspace",
+  "brandColor": "品牌色",
   "permission": {
     "public": "公开",
     "email": "邮箱验证",

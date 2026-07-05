@@ -90,6 +90,7 @@ export const mockLinks: Link[] = [
   {
     id: "link_1",
     documentId: "doc_1",
+    documentIds: ["doc_1"],
     documentTitle: "Acme Seed Round Pitch Deck",
     shortUrl: "https://invest.acme.capital/d/A1b2C3",
     accessCount: 47,
@@ -100,10 +101,22 @@ export const mockLinks: Link[] = [
     avgDurationSeconds: 186,
     lastViewedAt: "2026-06-20T18:42:00Z",
     permissionType: "email",
+    isBundle: false,
+    documents: [
+      {
+        id: "doc_1",
+        title: "Acme Seed Round Pitch Deck",
+        sourceType: "pdf",
+        pageCount: 18,
+        status: "ready",
+        fileSize: 4_200_000,
+      },
+    ],
   },
   {
     id: "link_2",
     documentId: "doc_2",
+    documentIds: ["doc_2"],
     documentTitle: "Financial Model 2026-2028",
     shortUrl: "https://invest.acme.capital/d/X7y8Z9",
     accessCount: 12,
@@ -114,10 +127,22 @@ export const mockLinks: Link[] = [
     avgDurationSeconds: 92,
     lastViewedAt: "2026-06-19T20:30:00Z",
     permissionType: "password",
+    isBundle: false,
+    documents: [
+      {
+        id: "doc_2",
+        title: "Financial Model 2026-2028",
+        sourceType: "xlsx",
+        pageCount: 12,
+        status: "ready",
+        fileSize: 1_800_000,
+      },
+    ],
   },
   {
     id: "link_3",
     documentId: "doc_1",
+    documentIds: ["doc_1"],
     documentTitle: "Acme Seed Round Pitch Deck",
     shortUrl: "https://invest.acme.capital/d/M4n5P6",
     accessCount: 3,
@@ -126,6 +151,17 @@ export const mockLinks: Link[] = [
     isActive: false,
     avgDurationSeconds: 0,
     permissionType: "public",
+    isBundle: false,
+    documents: [
+      {
+        id: "doc_1",
+        title: "Acme Seed Round Pitch Deck",
+        sourceType: "pdf",
+        pageCount: 18,
+        status: "ready",
+        fileSize: 4_200_000,
+      },
+    ],
   },
 ];
 
@@ -631,7 +667,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_1",
     signalId: "sig_1",
-    title: "mock.actions.act_1.title",
+    title: "Follow up with Sarah Chen",
     impact: "high",
     dueAt: "2026-06-21T18:00:00Z",
     status: "pending",
@@ -640,7 +676,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_2",
     signalId: "sig_2",
-    title: "mock.actions.act_2.title",
+    title: "Share model with Horizon VC",
     impact: "high",
     dueAt: "2026-06-21T12:00:00Z",
     status: "pending",
@@ -649,7 +685,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_3",
     signalId: "sig_3",
-    title: "mock.actions.act_3.title",
+    title: "Call Wei at FutureFund",
     impact: "medium",
     dueAt: "2026-06-23T10:00:00Z",
     status: "pending",
@@ -658,7 +694,7 @@ export const mockActionItems: ActionItem[] = [
   {
     id: "act_4",
     signalId: "sig_4",
-    title: "mock.actions.act_4.title",
+    title: "Review visitor spike on Pitch Deck",
     impact: "medium",
     dueAt: "2026-06-21T09:00:00Z",
     status: "pending",

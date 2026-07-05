@@ -234,6 +234,8 @@
       "submitting": "Saving...",
       "successCreate": "Link bundle created!",
       "successUpdate": "Link updated! Recipients will see the latest changes on refresh.",
+      "saveConfirmTitle": "Confirm save?",
+      "saveConfirmDesc": "Once saved, the distributed link will be updated immediately. Recipients will see the latest content after refreshing their browser. Are you sure you want to save?",
       "viewLink": "View Link",
       "sendViaEmail": "Send via Email",
       "createAnother": "Create Another Bundle",

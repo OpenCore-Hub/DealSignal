@@ -234,6 +234,8 @@
       "submitting": "保存中...",
       "successCreate": "链接包已创建！",
       "successUpdate": "链接已更新！收件人刷新页面即可看到最新内容。",
+      "saveConfirmTitle": "确认保存修改？",
+      "saveConfirmDesc": "保存后，已分发的链接将立即生效，客户刷新浏览器即可看到更新。是否确认保存？",
       "viewLink": "查看链接",
       "sendViaEmail": "通过邮件发送",
       "createAnother": "创建新的链接包",

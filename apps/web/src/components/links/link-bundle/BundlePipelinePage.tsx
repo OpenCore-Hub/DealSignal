@@ -1,6 +1,5 @@
 import { useEffect, useCallback } from "react";
 import { useParams } from "react-router";
-import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import {
@@ -28,7 +27,6 @@ function BundlePipelineInner() {
   const { state, dispatch } = useBundlePipeline();
   const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
-  const { t } = useTranslation("links");
   const isEdit = !!id;
   const canProceedNav = state.selectedDocuments.length >= 1;
 
@@ -179,22 +177,20 @@ function BundlePipelineInner() {
   const step = state.step;
 
   const handleNavBack = useCallback(() => {
-    if (isEdit && state.isDirty && !window.confirm(t("bundle.unsavedConfirmDesc"))) {
-      return;
-    }
+    // In edit mode we intentionally allow free navigation between steps:
+    // the user is iterating on documents/security settings and should not be
+    // interrupted by a confirmation dialog on every step change. Unsaved edits
+    // are still protected by the beforeunload handler when leaving the page.
     if (step > 1) {
       dispatch({ type: "GO_STEP", step: (step - 1 as 1 | 2 | 3) });
     }
-  }, [step, dispatch, isEdit, state.isDirty, t]);
+  }, [step, dispatch]);
 
   const handleNavForward = useCallback(() => {
-    if (isEdit && state.isDirty && !window.confirm(t("bundle.unsavedConfirmDesc"))) {
-      return;
-    }
     if (step < 3 && canProceedNav) {
       dispatch({ type: "GO_STEP", step: (step + 1 as 1 | 2 | 3) });
     }
-  }, [step, canProceedNav, dispatch, isEdit, state.isDirty, t]);
+  }, [step, canProceedNav, dispatch]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

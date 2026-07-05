@@ -2,19 +2,21 @@ import { test, expect } from "@playwright/test";
 
 test.describe("public link viewer", () => {
   test("accesses a public document with email verification code", async ({ page }) => {
-    await page.goto("http://localhost:5173/l/a226e1cb94e31c6da159b92cde57fe15");
+    // Use the MSW mock public link token for link_1 (legacy email gate).
+    await page.goto("/l/A1b2C3");
 
     // Should land on the access gate.
     await expect(page.locator("text=This document is shared securely")).toBeVisible({ timeout: 5000 });
     await expect(page.locator("text=Access code")).toBeVisible();
 
-    // Fill the known verification code for yqx-401@126.com.
-    await page.locator('input[inputMode="numeric"]').fill("741131");
+    // Legacy email gate requires both email and code.
+    await page.locator('input#email').fill("visitor@example.com");
+    await page.locator('input[inputMode="numeric"]').fill("123456");
     await page.locator('button:has-text("Continue")').click();
 
     // Viewer should load the document title and page metadata.
-    await expect(page.locator("text=02_架构设计文档.docx")).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("text=6 pages")).toBeVisible();
-    await expect(page.locator("text=1 / 6")).toBeVisible();
+    await expect(page.locator("text=Acme Seed Round Pitch Deck")).toBeVisible({ timeout: 10000 });
+    await expect(page.locator("text=18 pages")).toBeVisible();
+    await expect(page.locator("text=1 / 18")).toBeVisible();
   });
 });

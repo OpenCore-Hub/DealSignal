@@ -110,6 +110,15 @@
     "description": "The page you visited does not exist. Return to Dashboard.",
     "backToDashboard": "Back to Dashboard"
   },
+  "selectWorkspace": "Select workspace",
+  "selectWorkspaceDescription": "Choose a workspace to continue.",
+  "createWorkspace": "Create workspace",
+  "creating": "Creating...",
+  "workspaceName": "Workspace name",
+  "workspaceNamePlaceholder": "My workspace",
+  "workspaceSlug": "Workspace slug",
+  "workspaceSlugPlaceholder": "my-workspace",
+  "brandColor": "Brand color",
   "permission": {
     "public": "Public",
     "email": "Email",

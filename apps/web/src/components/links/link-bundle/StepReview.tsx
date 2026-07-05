@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
@@ -17,6 +17,14 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useBundlePipeline, clearPipelineDraft } from "./BundlePipelineContext";
 import { PipelineProgress } from "./PipelineProgress";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -72,8 +80,33 @@ export function StepReview() {
 
   const isEdit = state.mode === "edit";
   const isSuccess = state.generatedLink !== null;
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
-  const handleSubmit = useCallback(async () => {
+  const doSave = useCallback(async () => {
+    dispatch({ type: "SET_SUBMITTING", isSubmitting: true });
+    try {
+      const documentIds = selectedDocuments.map((d) => d.id);
+      const payload = toCreateLinkPayload(documentIds, config);
+
+      if (isEdit && state.editingLinkId) {
+        await api.updateLinkFull(state.editingLinkId, payload);
+        toast.success(t("bundle.review.successUpdate"));
+        dispatch({ type: "SET_DIRTY", isDirty: false });
+        navigate(`/${workspaceSlug}/links`);
+      } else {
+        const link = await api.createLink(documentIds, config);
+        dispatch({ type: "SET_GENERATED_LINK", link: link.shortUrl });
+        clearPipelineDraft();
+        toast.success(t("bundle.review.successCreate"));
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("creator.createFailed"));
+    } finally {
+      dispatch({ type: "SET_SUBMITTING", isSubmitting: false });
+    }
+  }, [selectedDocuments, config, isEdit, state.editingLinkId, dispatch, t, navigate, workspaceSlug]);
+
+  const handleSubmit = useCallback(() => {
     // Client-side guard: email verification requires at least one contact.
     if (config.requireEmailVerification && config.contactIds.length === 0) {
       toast.error(t("creator.contactRequired"));
@@ -101,28 +134,16 @@ export function StepReview() {
       toast.error(t("creator.whitelistEmpty"));
       return;
     }
-    dispatch({ type: "SET_SUBMITTING", isSubmitting: true });
-    try {
-      const documentIds = selectedDocuments.map((d) => d.id);
-      const payload = toCreateLinkPayload(documentIds, config);
 
-      if (isEdit && state.editingLinkId) {
-        await api.updateLinkFull(state.editingLinkId, payload);
-        toast.success(t("bundle.review.successUpdate"));
-        dispatch({ type: "SET_DIRTY", isDirty: false });
-        navigate(`/${workspaceSlug}/links`);
-      } else {
-        const link = await api.createLink(documentIds, config);
-        dispatch({ type: "SET_GENERATED_LINK", link: link.shortUrl });
-        clearPipelineDraft();
-        toast.success(t("bundle.review.successCreate"));
-      }
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("creator.createFailed"));
-    } finally {
-      dispatch({ type: "SET_SUBMITTING", isSubmitting: false });
+    // In edit mode, show a confirmation dialog on the review step so the user
+    // understands that the already-distributed link will be updated immediately.
+    if (isEdit) {
+      setShowSaveConfirm(true);
+      return;
     }
-  }, [selectedDocuments, config, isEdit, state.editingLinkId, dispatch, t, navigate, workspaceSlug]);
+
+    void doSave();
+  }, [config, isEdit, doSave, t]);
 
   const handleCopy = async () => {
     if (!state.generatedLink) return;
@@ -161,7 +182,7 @@ export function StepReview() {
               <span className="font-semibold">{t("creator.generatedLabel")}</span>
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-border bg-background p-3">
-              <code className="flex-1 truncate text-sm">{state.generatedLink}</code>
+              <code data-testid="generated-link" className="flex-1 truncate text-sm">{state.generatedLink}</code>
               <Button size="sm" variant="ghost" onClick={handleCopy} className="gap-1">
                 {state.copied ? <CheckIcon size={14} className="text-success-500" /> : <CopyIcon size={14} />}
                 {state.copied ? tc("copied") : tc("copy")}
@@ -339,6 +360,30 @@ export function StepReview() {
           </Button>
         </div>
       )}
+
+      {/* Edit-mode save confirmation */}
+      <Dialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{t("bundle.review.saveConfirmTitle")}</DialogTitle>
+            <DialogDescription>{t("bundle.review.saveConfirmDesc")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveConfirm(false)}>
+              {t("common:cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                setShowSaveConfirm(false);
+                void doSave();
+              }}
+              disabled={state.isSubmitting}
+            >
+              {state.isSubmitting ? t("bundle.review.submitting") : t("bundle.review.saveButton")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

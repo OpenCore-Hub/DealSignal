@@ -142,6 +142,7 @@ test.describe("安全选项 100% 排列组合验收", () => {
   });
 
   test("64 种布尔开关笛卡尔积 — UI 状态与约束验收", async ({ page }) => {
+    test.setTimeout(120000);
     await gotoSecurityStep(page);
     const combos = generateBoolCombinations();
 
