@@ -111,6 +111,7 @@
     "passwordEmpty": "Password is required when password protection is enabled",
     "passwordEditHint": "Saved password is not displayed for security. Enter a new password to change it.",
     "whitelistEmpty": "At least one email or domain is required when whitelist is enabled",
+    "whitelistContactMismatch": "Whitelist must include all selected contact emails. Missing: {{emails}}",
     "passwordDesc": "Viewers must enter a predefined password to access",
     "nda": "Require NDA agreement",
     "ndaDesc": "Viewers must sign an NDA online before accessing",

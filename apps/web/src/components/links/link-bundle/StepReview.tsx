@@ -1,6 +1,7 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
+import type { Contact } from "@/types";
 import {
   CopyIcon,
   CheckIcon,
@@ -64,7 +65,11 @@ function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"][
   };
 }
 
-export function StepReview() {
+interface StepReviewProps {
+  contacts?: Contact[];
+}
+
+export function StepReview({ contacts = [] }: StepReviewProps) {
   const { state, dispatch } = useBundlePipeline();
   const { t } = useTranslation(["links", "common"]);
   const { t: tc } = useTranslation("common");
@@ -133,6 +138,25 @@ export function StepReview() {
     ) {
       toast.error(t("creator.whitelistEmpty"));
       return;
+    }
+
+    // Client-side guard: when both whitelist and email verification are enabled,
+    // every selected contact's email must appear in the whitelist. Otherwise the
+    // recipient would receive a code at an address that cannot pass the whitelist.
+    if (config.requireEmailVerification && config.whitelistEnabled && config.contactIds.length > 0) {
+      const whitelist = new Set(config.whitelist.map((e) => e.trim().toLowerCase()));
+      const missing = contacts
+        .filter((c) => config.contactIds.includes(c.id))
+        .map((c) => c.email.trim().toLowerCase())
+        .filter((email) => !whitelist.has(email));
+      if (missing.length > 0) {
+        toast.error(
+          t("creator.whitelistContactMismatch", {
+            emails: missing.join(", "),
+          }),
+        );
+        return;
+      }
     }
 
     // In edit mode, show a confirmation dialog on the review step so the user

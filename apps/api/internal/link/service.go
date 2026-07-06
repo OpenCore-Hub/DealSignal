@@ -580,16 +580,15 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	// Use the shared linkSecurityFlags helper (defined in handler.go, same package)
 	// to compute gate requirements identically with the handler's response formatting.
-	requiresEmail, requiresEmailVerification, requiresPassword, requiresNDA := linkSecurityFlags(link)
+	_, requiresEmailVerification, requiresPassword, requiresNDA := linkSecurityFlags(link)
 	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
-	if requiresEmail {
+
+	// Email is required only when a whitelist is active and we are not using
+	// email-verification codes to identify the visitor. When email verification
+	// is enabled, the access code itself resolves to the contact email.
+	if hasWhitelist && !requiresEmailVerification {
 		if strings.TrimSpace(req.Email) == "" {
 			return AccessResult{}, ErrRequiresEmail
-		}
-	}
-	if hasWhitelist {
-		if !isAllowed(req.Email, link.AllowedEmails, link.AllowedDomains) {
-			return AccessResult{}, ErrWhitelistDenied
 		}
 	}
 	if requiresEmailVerification {
@@ -609,12 +608,14 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	}
 
 	// Verify credentials only after all required gates are present.
-	// Code-only verification: the visitor provides the access code and we
-	// look up their contact email from the database. When an email is
-	// explicitly provided (whitelist gate), use email+code matching.
+	// When email verification is enabled, always resolve the contact by access
+	// code; the code is the credential, and the associated contact email is the
+	// verified identity. This keeps whitelist and contact email independent:
+	// the whitelist restricts which contacts may access, while the contact email
+	// is the one the code was sent to.
 	var verifiedEmail string
 	if requiresEmailVerification {
-		lc, err := s.verifyLinkContactCode(ctx, token, req.Email, req.EmailCode, req.Email == "")
+		lc, err := s.verifyLinkContactCode(ctx, token, "", req.EmailCode, true)
 		if err != nil {
 			if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresEmailCode) {
 				return AccessResult{}, err
@@ -624,11 +625,17 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		verifiedEmail = strings.TrimSpace(lc.ContactEmail.String)
 	}
 
-	// For modern code-only verification, use the contact email from the database
-	// for visitor identity and NDA records.
-	emailForRecords := req.Email
-	if emailForRecords == "" && verifiedEmail != "" {
+	// When email verification is enabled, the verified contact email is the
+	// authoritative identity; ignore any email supplied by the visitor. The
+	// whitelist (if any) is checked against this verified email.
+	var emailForRecords string
+	if requiresEmailVerification {
 		emailForRecords = verifiedEmail
+	} else {
+		emailForRecords = req.Email
+	}
+	if hasWhitelist && !isAllowed(emailForRecords, link.AllowedEmails, link.AllowedDomains) {
+		return AccessResult{}, ErrWhitelistDenied
 	}
 	if requiresPassword {
 		if err := bcrypt.CompareHashAndPassword([]byte(link.PasswordHash.String), []byte(req.Password)); err != nil {

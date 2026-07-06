@@ -111,6 +111,7 @@
     "passwordEmpty": "启用密码保护时必须设置密码",
     "passwordEditHint": "出于安全考虑，已保存的密码不会回填。如需修改密码，请在此输入新密码。",
     "whitelistEmpty": "启用白名单时必须添加至少一个邮箱或域名",
+    "whitelistContactMismatch": "白名单必须包含所有所选联系人的邮箱，缺少：{{emails}}",
     "passwordDesc": "访问者需要输入预设密码才能查看",
     "nda": "需要签署 NDA",
     "ndaDesc": "访问前须在线签署保密协议",

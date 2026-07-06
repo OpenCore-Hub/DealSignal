@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useState } from "react";
 import { useParams } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
@@ -13,11 +13,12 @@ import { StepReview } from "./StepReview";
 import {
   classifyPresetFromConfig,
 } from "../smart-link/levelConfig";
-import type { Document, PermissionConfig } from "@/types";
+import type { Contact, Document, PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
 // Inner component (inside provider)
@@ -27,8 +28,29 @@ function BundlePipelineInner() {
   const { state, dispatch } = useBundlePipeline();
   const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
+  const { t } = useTranslation("links");
   const isEdit = !!id;
   const canProceedNav = state.selectedDocuments.length >= 1;
+
+  const [contacts, setContacts] = useState<Contact[]>([]);
+
+  // Load workspace contacts once. They are needed by the security step to
+  // auto-fill selected contact emails into the whitelist, and by navigation
+  // validation to ensure whitelist/contact consistency before proceeding.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getContacts()
+      .then((res) => {
+        if (!cancelled) setContacts(res.data);
+      })
+      .catch(() => {
+        if (!cancelled) setContacts([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // beforeunload protection for edit mode dirty state
   useEffect(() => {
@@ -187,10 +209,29 @@ function BundlePipelineInner() {
   }, [step, dispatch]);
 
   const handleNavForward = useCallback(() => {
+    if (step === 2) {
+      // Validate whitelist/contact consistency before entering the review step.
+      const cfg = state.config;
+      if (cfg.requireEmailVerification && cfg.whitelistEnabled && cfg.contactIds.length > 0) {
+        const whitelist = new Set(cfg.whitelist.map((e) => e.trim().toLowerCase()));
+        const missing = contacts
+          .filter((c) => cfg.contactIds.includes(c.id))
+          .map((c) => c.email.trim().toLowerCase())
+          .filter((email) => !whitelist.has(email));
+        if (missing.length > 0) {
+          toast.error(
+            t("creator.whitelistContactMismatch", {
+              emails: missing.join(", "),
+            }),
+          );
+          return;
+        }
+      }
+    }
     if (step < 3 && canProceedNav) {
       dispatch({ type: "GO_STEP", step: (step + 1 as 1 | 2 | 3) });
     }
-  }, [step, canProceedNav, dispatch]);
+  }, [step, canProceedNav, dispatch, state.config, contacts]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -233,8 +274,8 @@ function BundlePipelineInner() {
         transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       >
         {step === 1 && <StepDocuments />}
-        {step === 2 && <StepSecurity />}
-        {step === 3 && <StepReview />}
+        {step === 2 && <StepSecurity contacts={contacts} />}
+        {step === 3 && <StepReview contacts={contacts} />}
       </motion.div>
     </div>
     </div>

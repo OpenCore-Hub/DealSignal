@@ -13,6 +13,8 @@ interface ContactSelectorProps {
   workspaceSlug: string;
   value: string[];
   onChange: (contactIds: string[]) => void;
+  /** Optional pre-loaded contacts. When provided, the selector will not fetch. */
+  contacts?: Contact[];
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -21,11 +23,11 @@ function isValidEmail(value: string) {
   return EMAIL_RE.test(value.trim());
 }
 
-export function ContactSelector({ workspaceSlug, value, onChange }: ContactSelectorProps) {
+export function ContactSelector({ workspaceSlug, value, onChange, contacts: contactsProp }: ContactSelectorProps) {
   const { t } = useTranslation("links");
   const navigate = useNavigate();
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [fetchedContacts, setFetchedContacts] = useState<Contact[]>([]);
+  const [loading, setLoading] = useState(!contactsProp);
   const [comboboxValue, setComboboxValue] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   // Track which contact we're adding so we can clear combobox after add.
@@ -38,15 +40,18 @@ export function ContactSelector({ workspaceSlug, value, onChange }: ContactSelec
     };
   }, []);
 
+  const contacts = contactsProp ?? fetchedContacts;
+
   useEffect(() => {
+    if (contactsProp) return;
     let cancelled = false;
     api
       .getContacts()
       .then((res) => {
-        if (!cancelled) setContacts(res.data);
+        if (!cancelled) setFetchedContacts(res.data);
       })
       .catch(() => {
-        if (!cancelled) setContacts([]);
+        if (!cancelled) setFetchedContacts([]);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -54,7 +59,7 @@ export function ContactSelector({ workspaceSlug, value, onChange }: ContactSelec
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [contactsProp]);
 
   const selectedContacts = useMemo(
     () => contacts.filter((c) => value.includes(c.id)),
