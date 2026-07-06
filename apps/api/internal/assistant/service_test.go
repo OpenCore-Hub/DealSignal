@@ -10,14 +10,18 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 type mockQuerier struct {
-	session     db.AssistantSession
-	sessionID   pgtype.UUID
-	messages    []db.AssistantMessage
-	createdMsgs []db.AssistantMessage
+	session          db.AssistantSession
+	sessionID        pgtype.UUID
+	publicSession    db.AssistantSession
+	publicSessionID  pgtype.UUID
+	messages         []db.AssistantMessage
+	createdMsgs      []db.AssistantMessage
+	linkDocs         []db.ListLinkDocumentsByLinkRow
 }
 
 func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error) {
@@ -25,6 +29,9 @@ func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAss
 		ID:          m.sessionID,
 		WorkspaceID: arg.WorkspaceID,
 		UserID:      arg.UserID,
+		LinkID:      arg.LinkID,
+		DocumentID:  arg.DocumentID,
+		VisitorID:   arg.VisitorID,
 		Title:       arg.Title,
 	}
 	return m.session, nil
@@ -35,6 +42,24 @@ func (m *mockQuerier) GetAssistantSession(_ context.Context, arg db.GetAssistant
 		return m.session, nil
 	}
 	return db.AssistantSession{}, nil
+}
+
+func (m *mockQuerier) GetAssistantSessionByLinkAndVisitor(_ context.Context, _ db.GetAssistantSessionByLinkAndVisitorParams) (db.AssistantSession, error) {
+	if m.publicSessionID.Valid {
+		return m.publicSession, nil
+	}
+	return db.AssistantSession{}, errors.New("not found")
+}
+
+func (m *mockQuerier) GetAssistantSessionByIDForPublic(_ context.Context, arg db.GetAssistantSessionByIDForPublicParams) (db.AssistantSession, error) {
+	if arg.ID == m.publicSessionID {
+		return m.publicSession, nil
+	}
+	return db.AssistantSession{}, errors.New("not found")
+}
+
+func (m *mockQuerier) ListLinkDocumentsByLink(_ context.Context, _ pgtype.UUID) ([]db.ListLinkDocumentsByLinkRow, error) {
+	return m.linkDocs, nil
 }
 
 func (m *mockQuerier) CreateAssistantMessage(_ context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error) {
@@ -60,11 +85,18 @@ func (m *mockQuerier) ListAssistantMessagesBySession(_ context.Context, arg db.L
 }
 
 type mockSearcher struct {
-	evidence []search.Evidence
+	evidence            []search.Evidence
+	inDocumentsEvidence []search.Evidence
+	inDocumentsCalled   bool
 }
 
 func (m *mockSearcher) Search(_ context.Context, _ pgtype.UUID, _ string, _ int) ([]search.Evidence, error) {
 	return m.evidence, nil
+}
+
+func (m *mockSearcher) SearchInDocuments(_ context.Context, _ pgtype.UUID, _ []uuid.UUID, _ string, _ int) ([]search.Evidence, error) {
+	m.inDocumentsCalled = true
+	return m.inDocumentsEvidence, nil
 }
 
 type mockLLM struct {
@@ -176,6 +208,97 @@ func TestChatKeepsMultiTurnContext(t *testing.T) {
 func TestChatInvalidSessionID(t *testing.T) {
 	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
 	_, err := svc.Chat(context.Background(), "user-1", "ws-1", ChatRequest{SessionID: "not-a-uuid", Message: "hi"})
+	if !errors.Is(err, ErrInvalidSession) {
+		t.Fatalf("expected ErrInvalidSession, got %v", err)
+	}
+}
+
+func TestPublicChatDisabled(t *testing.T) {
+	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	link := db.Link{AiCopilotEnabled: false}
+	_, err := svc.PublicChat(context.Background(), link, "v1", ChatRequest{Message: "hi"})
+	if !errors.Is(err, ErrAICopilotDisabled) {
+		t.Fatalf("expected ErrAICopilotDisabled, got %v", err)
+	}
+}
+
+func TestPublicChatEmptyMessage(t *testing.T) {
+	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	link := db.Link{AiCopilotEnabled: true}
+	_, err := svc.PublicChat(context.Background(), link, "v1", ChatRequest{Message: "   "})
+	if !errors.Is(err, ErrMessageRequired) {
+		t.Fatalf("expected ErrMessageRequired, got %v", err)
+	}
+}
+
+func TestPublicChatCreatesSessionAndUsesDocumentSearch(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{4}, Valid: true}
+	docID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkDocID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		linkDocs: []db.ListLinkDocumentsByLinkRow{
+			{DocumentID: pgtype.UUID{Bytes: linkDocID, Valid: true}},
+		},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "chunk-public", PageNumber: 2, Quote: "Public quote."},
+	}}
+	l := &mockLLM{answer: "Public answer."}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", ChatRequest{Message: "What is this?"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.Answer != l.answer {
+		t.Fatalf("expected answer %q, got %q", l.answer, resp.Answer)
+	}
+	if !s.inDocumentsCalled {
+		t.Fatal("expected SearchInDocuments to be called")
+	}
+	if len(q.createdMsgs) != 2 {
+		t.Fatalf("expected 2 messages saved, got %d", len(q.createdMsgs))
+	}
+}
+
+func TestPublicChatReusesExistingSession(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{5}, Valid: true}
+	docID := uuid.MustParse("33333333-3333-3333-3333-333333333333")
+
+	q := &mockQuerier{
+		publicSessionID: sessionID,
+		publicSession: db.AssistantSession{
+			ID:         sessionID,
+			DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
+		},
+	}
+	s := &mockSearcher{}
+	l := &mockLLM{answer: "ok"}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	link := db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}}
+	resp, err := svc.PublicChat(ctx, link, "v1", ChatRequest{Message: "follow up"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.SessionID != sessionID.String() {
+		t.Fatalf("expected existing session id, got %q", resp.SessionID)
+	}
+}
+
+func TestPublicChatInvalidSessionID(t *testing.T) {
+	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	link := db.Link{AiCopilotEnabled: true}
+	_, err := svc.PublicChat(context.Background(), link, "v1", ChatRequest{SessionID: "bad", Message: "hi"})
 	if !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("expected ErrInvalidSession, got %v", err)
 	}
