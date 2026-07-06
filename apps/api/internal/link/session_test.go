@@ -23,7 +23,7 @@ func TestLinkSessionRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign failed: %v", err)
 	}
-	got, ok := verifyLinkSession(token, secret)
+	got, ok := VerifyLinkSession(token, secret)
 	if !ok {
 		t.Fatal("verify failed")
 	}
@@ -41,14 +41,14 @@ func TestLinkSessionRoundTrip(t *testing.T) {
 func TestLinkSessionTampered(t *testing.T) {
 	secret := "test-secret"
 	token, _ := signLinkSession(LinkSession{PublicToken: "tok"}, secret)
-	if _, ok := verifyLinkSession(token+"x", secret); ok {
+	if _, ok := VerifyLinkSession(token+"x", secret); ok {
 		t.Error("tampered token should fail verification")
 	}
 }
 
 func TestLinkSessionWrongSecret(t *testing.T) {
 	token, _ := signLinkSession(LinkSession{PublicToken: "tok"}, "secret-a")
-	if _, ok := verifyLinkSession(token, "secret-b"); ok {
+	if _, ok := VerifyLinkSession(token, "secret-b"); ok {
 		t.Error("wrong secret should fail verification")
 	}
 }
@@ -69,7 +69,7 @@ func TestLinkSessionExpired(t *testing.T) {
 	sig := base64.URLEncoding.EncodeToString(mac.Sum(nil))
 	expiredToken := sig + "." + enc
 
-	if _, ok := verifyLinkSession(expiredToken, secret); ok {
+	if _, ok := VerifyLinkSession(expiredToken, secret); ok {
 		t.Error("expired token should fail verification")
 	}
 }
@@ -85,7 +85,7 @@ func TestLinkSessionWrongPublicToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign failed: %v", err)
 	}
-	got, ok := verifyLinkSession(token, secret)
+	got, ok := VerifyLinkSession(token, secret)
 	if !ok {
 		t.Fatal("verify failed for valid token")
 	}
@@ -106,7 +106,7 @@ func TestLinkSessionEmptyFields(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign failed: %v", err)
 	}
-	got, ok := verifyLinkSession(token, secret)
+	got, ok := VerifyLinkSession(token, secret)
 	if !ok {
 		t.Fatal("session with minimal fields should verify")
 	}
@@ -128,7 +128,7 @@ func TestLinkSessionMalformedToken(t *testing.T) {
 		base64.URLEncoding.EncodeToString([]byte("sig")) + ".!!bad!", // invalid base64 in payload
 	}
 	for _, tok := range malformed {
-		if _, ok := verifyLinkSession(tok, secret); ok {
+		if _, ok := VerifyLinkSession(tok, secret); ok {
 			t.Errorf("malformed token should fail: %q", tok)
 		}
 	}
@@ -153,7 +153,7 @@ func TestLinkSessionPasswordNotStored(t *testing.T) {
 	if err != nil {
 		t.Fatalf("sign failed: %v", err)
 	}
-	got, ok := verifyLinkSession(token, secret)
+	got, ok := VerifyLinkSession(token, secret)
 	if !ok {
 		t.Fatal("verify failed")
 	}
@@ -271,7 +271,7 @@ func TestRefreshLinkSessionSlidingExpiry(t *testing.T) {
 	}
 
 	// Verify it's valid.
-	s1, ok := verifyLinkSession(tok1, secret)
+	s1, ok := VerifyLinkSession(tok1, secret)
 	if !ok {
 		t.Fatal("original session should be valid")
 	}
@@ -289,7 +289,7 @@ func TestRefreshLinkSessionSlidingExpiry(t *testing.T) {
 	}
 
 	// Verify refreshed session.
-	s2, ok := verifyLinkSession(tok2, secret)
+	s2, ok := VerifyLinkSession(tok2, secret)
 	if !ok {
 		t.Fatal("refreshed session should be valid")
 	}
@@ -367,7 +367,7 @@ func TestSlidingSessionEndToEnd(t *testing.T) {
 	currentToken := token
 	for i := 0; i < 5; i++ {
 		// Verify current session.
-		session, ok := verifyLinkSession(currentToken, secret)
+		session, ok := VerifyLinkSession(currentToken, secret)
 		if !ok {
 			t.Fatalf("iteration %d: session should be valid", i)
 		}
@@ -386,12 +386,12 @@ func TestSlidingSessionEndToEnd(t *testing.T) {
 	}
 
 	// 3. Original token should still be valid (it hasn't expired yet).
-	s1, ok := verifyLinkSession(token, secret)
+	s1, ok := VerifyLinkSession(token, secret)
 	if !ok {
 		t.Error("original token should still be valid until its own expiry")
 	}
 	// 4. Refreshed token's expiry should NOT be earlier than original.
-	s2, ok := verifyLinkSession(currentToken, secret)
+	s2, ok := VerifyLinkSession(currentToken, secret)
 	if !ok {
 		t.Fatal("refreshed token should be valid")
 	}
@@ -400,7 +400,7 @@ func TestSlidingSessionEndToEnd(t *testing.T) {
 	}
 
 	// 5. Verify the refreshed token is valid.
-	s3, ok := verifyLinkSession(currentToken, secret)
+	s3, ok := VerifyLinkSession(currentToken, secret)
 	if !ok {
 		t.Fatal("final token should be valid")
 	}

@@ -35,6 +35,11 @@ type Handler struct {
 	cfg         *config.Config
 }
 
+const (
+	securityEventAnomalyWindow    = 5 * time.Minute
+	securityEventAnomalyThreshold = 5
+)
+
 // NewHandler creates a link handler.
 func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service, st *storage.Client, cfg *config.Config) *Handler {
 	return &Handler{service: s, analytics: a, suggestions: sg, storage: st, cfg: cfg}
@@ -449,7 +454,7 @@ func (h *Handler) Access(c *gin.Context) {
 	// If the visitor already has a valid session, reuse it so they don't need
 	// to re-enter credentials on refresh or revisit within the session lifetime.
 	if sessionToken := c.GetHeader("X-Link-Session"); sessionToken != "" {
-		session, ok := verifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
+		session, ok := VerifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
 		if ok && session.PublicToken == token {
 			link, err := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token)
 			if err == nil {
@@ -457,31 +462,36 @@ func (h *Handler) Access(c *gin.Context) {
 				configChanged := session.LinkUpdatedAt > 0 &&
 					link.UpdatedAt.Valid &&
 					link.UpdatedAt.Time.Unix() > session.LinkUpdatedAt
-			if !configChanged {
-				switch link.Status {
-				case "deleted":
-					c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": ErrLinkNotFound.Error()})
-					return
-				case "disabled", "revoked":
-					c.JSON(http.StatusForbidden, gin.H{"code": "link_disabled", "message": ErrLinkDisabled.Error()})
-					return
-				}
-				if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
-					c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": ErrLinkExpired.Error()})
-					return
-				}
-				// Explicit security-gate check: if the link now requires NDA
-				// or email verification that the session does not prove, force
-				// re-authentication. The timestamp check above catches most
-				// config changes, but sub-second churn (remove+readd NDA) can
-				// land on the same timestamp.
-securityChanged := (link.RequireNda && !session.NDAAgreed) ||
+				if !configChanged {
+					switch link.Status {
+					case "deleted":
+						c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": ErrLinkNotFound.Error()})
+						return
+					case "disabled", "revoked":
+						h.recordSecurityEventFromAccessError(c.Request.Context(), link, ErrLinkDisabled, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
+						c.JSON(http.StatusForbidden, gin.H{"code": "link_disabled", "message": ErrLinkDisabled.Error()})
+						return
+					}
+					if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+						h.recordSecurityEventFromAccessError(c.Request.Context(), link, ErrLinkExpired, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
+						c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": ErrLinkExpired.Error()})
+						return
+					}
+					// Explicit security-gate check: if the link now requires NDA
+					// or email verification that the session does not prove, force
+					// re-authentication. The timestamp check above catches most
+					// config changes, but sub-second churn (remove+readd NDA) can
+					// land on the same timestamp.
+					securityChanged := (link.RequireNda && !session.NDAAgreed) ||
 						(link.RequireEmailVerification && !session.EmailVerified && session.Email == "")
-				if !securityChanged {
-					h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified)
-					return
+					if securityChanged {
+						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+					}
+					if !securityChanged {
+						h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified)
+						return
+					}
 				}
-			}
 			}
 		}
 		// Session invalid, expired, or link config changed: fall through to normal access flow.
@@ -510,6 +520,8 @@ securityChanged := (link.RequireNda && !session.NDAAgreed) ||
 		return
 	}
 
+	visitorID := makeVisitorID(body.Email, c.Request.UserAgent())
+
 	result, err := h.service.Access(c.Request.Context(), token, AccessRequest{
 		Email:     body.Email,
 		EmailCode: body.EmailCode,
@@ -519,10 +531,13 @@ securityChanged := (link.RequireNda && !session.NDAAgreed) ||
 		UA:        c.Request.UserAgent(),
 	})
 	if err != nil {
-		// For credential-gate errors, include the link's security flags so the
-		// UI can render all required fields on the first attempt.
-		if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrWhitelistDenied) {
-			if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
+		// Record security audit event for access failures.
+		if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
+			h.recordSecurityEventFromAccessError(c.Request.Context(), link, err, visitorID, body.Email, c.ClientIP(), c.Request.UserAgent())
+
+			// For credential-gate errors, include the link's security flags so the
+			// UI can render all required fields on the first attempt.
+			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrWhitelistDenied) {
 				requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
 				if errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrInvalidEmailCode) {
@@ -620,7 +635,7 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 			"permissionType":   link.PermissionType,
 			"downloadEnabled":  link.DownloadEnabled,
 			"watermarkEnabled": link.WatermarkEnabled,
-			"aiCopilotEnabled":  link.AiCopilotEnabled,
+			"aiCopilotEnabled": link.AiCopilotEnabled,
 			"isBundle":         len(documents) > 1,
 		},
 		"documents":                 documents,
@@ -847,7 +862,7 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 	// If the visitor already has a valid session from a previous Access call,
 	// reuse it so asset/event requests don't consume max_access_count.
 	if sessionToken := c.GetHeader("X-Link-Session"); sessionToken != "" {
-		session, ok := verifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
+		session, ok := VerifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
 		if ok && session.PublicToken == token {
 			link, err := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token)
 			if err != nil {
@@ -865,9 +880,11 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				case "deleted":
 					return AccessResult{}, ErrLinkNotFound
 				case "disabled", "revoked":
+					h.recordSecurityEventFromAccessError(c.Request.Context(), link, ErrLinkDisabled, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
 					return AccessResult{}, ErrLinkDisabled
 				}
 				if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+					h.recordSecurityEventFromAccessError(c.Request.Context(), link, ErrLinkExpired, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
 					return AccessResult{}, ErrLinkExpired
 				}
 				// Explicit security-gate check: if the link now requires NDA
@@ -877,6 +894,9 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				// land on the same timestamp.
 				securityChanged := (link.RequireNda && !session.NDAAgreed) ||
 					(link.RequireEmailVerification && session.Email == "")
+				if securityChanged {
+					_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+				}
 				if !securityChanged {
 					// Sliding session: re-sign with fresh ExpiresAt so the idle
 					// timeout resets on every request.
@@ -894,7 +914,17 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 	}
 
 	req := publicAccessRequestFromContext(c)
-	return h.service.Access(c.Request.Context(), token, req)
+	result, err := h.service.Access(c.Request.Context(), token, req)
+	if err != nil {
+		// Record security audit event for access failures from asset/event endpoints
+		// that share this helper.
+		if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
+			visitorID := makeVisitorID(req.Email, req.UA)
+			h.recordSecurityEventFromAccessError(c.Request.Context(), link, err, visitorID, req.Email, req.IP, req.UA)
+		}
+		return AccessResult{}, err
+	}
+	return result, nil
 }
 
 // writeSessionRefreshHeader sets the X-Link-Session-Refresh response header
@@ -983,6 +1013,60 @@ func mapAccessError(c *gin.Context, err error) {
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 	}
+}
+
+// securityEventFromError maps an access error to a security event type and reason.
+// The third return value indicates whether the event represents a security gate
+// failure that should contribute to abnormal-access-pattern detection.
+func securityEventFromError(err error) (eventType, reason string, gateFailure bool) {
+	switch {
+	case errors.Is(err, ErrLinkExpired):
+		return "expired_link_accessed", "", false
+	case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
+		return "revoked_link_accessed", "", false
+	case errors.Is(err, ErrLinkMaxAccessReached):
+		return "max_access_reached", "", false
+	case errors.Is(err, ErrInvalidPassword):
+		return "security_gate_failed", "invalid_password", true
+	case errors.Is(err, ErrInvalidEmailCode):
+		return "security_gate_failed", "invalid_email_code", true
+	case errors.Is(err, ErrRequiresEmail):
+		return "security_gate_failed", "email_required", true
+	case errors.Is(err, ErrRequiresEmailCode):
+		return "security_gate_failed", "email_code_required", true
+	case errors.Is(err, ErrRequiresPassword):
+		return "security_gate_failed", "password_required", true
+	case errors.Is(err, ErrWhitelistDenied):
+		return "security_gate_failed", "whitelist_denied", true
+	case errors.Is(err, ErrRequiresNDA):
+		return "security_gate_failed", "nda_required", true
+	default:
+		return "", "", false
+	}
+}
+
+// recordSecurityEventFromAccessError writes a security audit event based on an access error.
+// It is best-effort: failures are logged but never block the error response.
+func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link db.Link, err error, visitorID, email, ip, ua string) {
+	eventType, reason, gateFailure := securityEventFromError(err)
+	if eventType == "" {
+		return
+	}
+	_ = h.analytics.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
+	if gateFailure {
+		h.checkAndRecordAbnormalAccessPattern(ctx, link, visitorID, email, ip, ua)
+	}
+}
+
+// checkAndRecordAbnormalAccessPattern records an abnormal_access_pattern event when
+// the same IP generates too many security_gate_failed events within the window.
+func (h *Handler) checkAndRecordAbnormalAccessPattern(ctx context.Context, link db.Link, visitorID, email, ip, ua string) {
+	res, aerr := h.analytics.CheckAnomaly(ctx, ip, "security_gate_failed", securityEventAnomalyWindow, securityEventAnomalyThreshold)
+	if aerr != nil || !res.Triggered {
+		return
+	}
+	reason := fmt.Sprintf("%d+ security_gate_failed events from IP in %v", res.Count, res.Window)
+	_ = h.analytics.RecordSecurityEvent(ctx, link, "abnormal_access_pattern", visitorID, email, ip, ua, reason)
 }
 
 // linkSecurityFlags returns the active gate requirements for a link based on
@@ -1164,30 +1248,30 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	isBundle := len(documents) > 1
 
 	item := gin.H{
-		"id":                 uuidToString(link.ID),
-		"documentId":         uuidToString(link.DocumentID),
-		"documentTitle":      documentTitle,
-		"documentIds":        linkDocumentIDs(linkDocs, link),
-		"documents":          documents,
-		"isBundle":           isBundle,
-		"name":               textOrNil(link.Name),
-		"shortUrl":           publicURL(c, h.cfg, link.PublicToken),
-		"accessCount":        link.AccessCount,
-		"heatLevel":          score.Level,
-		"status":             link.Status,
-		"createdAt":          link.CreatedAt.Time.Format(time.RFC3339),
-		"isActive":           isActive,
-		"permissionType":     mapPermissionType(link.PermissionType),
-		"requireNda":         link.RequireNda,
-		"requirePassword":    link.RequirePassword,
-		"downloadEnabled":    link.DownloadEnabled,
-		"watermarkEnabled":   link.WatermarkEnabled,
-		"aiCopilotEnabled":    link.AiCopilotEnabled,
+		"id":                       uuidToString(link.ID),
+		"documentId":               uuidToString(link.DocumentID),
+		"documentTitle":            documentTitle,
+		"documentIds":              linkDocumentIDs(linkDocs, link),
+		"documents":                documents,
+		"isBundle":                 isBundle,
+		"name":                     textOrNil(link.Name),
+		"shortUrl":                 publicURL(c, h.cfg, link.PublicToken),
+		"accessCount":              link.AccessCount,
+		"heatLevel":                score.Level,
+		"status":                   link.Status,
+		"createdAt":                link.CreatedAt.Time.Format(time.RFC3339),
+		"isActive":                 isActive,
+		"permissionType":           mapPermissionType(link.PermissionType),
+		"requireNda":               link.RequireNda,
+		"requirePassword":          link.RequirePassword,
+		"downloadEnabled":          link.DownloadEnabled,
+		"watermarkEnabled":         link.WatermarkEnabled,
+		"aiCopilotEnabled":         link.AiCopilotEnabled,
 		"requireEmailVerification": link.RequireEmailVerification,
-		"avgDurationSeconds": int(metrics.AvgDurationSeconds),
-		"allowedEmails":      allowedEmails,
-		"allowedDomains":     allowedDomains,
-		"contactIds":         contactIDs,
+		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
+		"allowedEmails":            allowedEmails,
+		"allowedDomains":           allowedDomains,
+		"contactIds":               contactIDs,
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)

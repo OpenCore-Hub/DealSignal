@@ -3,6 +3,7 @@ package link
 import (
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -557,6 +558,44 @@ func TestAccessRateLimitFailOpenBoundary(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if err := svc.checkAccessAttemptRateLimit(t.Context(), "tok", tc.ip); err != nil {
 				t.Errorf("nil redisClient should never block, got: %v", err)
+			}
+		})
+	}
+}
+
+func TestSecurityEventFromErrorMapping(t *testing.T) {
+	cases := []struct {
+		name            string
+		err             error
+		wantType        string
+		wantReason      string
+		wantGateFailure bool
+	}{
+		{"expired", ErrLinkExpired, "expired_link_accessed", "", false},
+		{"revoked", ErrLinkRevoked, "revoked_link_accessed", "", false},
+		{"disabled", ErrLinkDisabled, "revoked_link_accessed", "", false},
+		{"max access", ErrLinkMaxAccessReached, "max_access_reached", "", false},
+		{"invalid password", ErrInvalidPassword, "security_gate_failed", "invalid_password", true},
+		{"invalid email code", ErrInvalidEmailCode, "security_gate_failed", "invalid_email_code", true},
+		{"email required", ErrRequiresEmail, "security_gate_failed", "email_required", true},
+		{"email code required", ErrRequiresEmailCode, "security_gate_failed", "email_code_required", true},
+		{"password required", ErrRequiresPassword, "security_gate_failed", "password_required", true},
+		{"whitelist denied", ErrWhitelistDenied, "security_gate_failed", "whitelist_denied", true},
+		{"nda required", ErrRequiresNDA, "security_gate_failed", "nda_required", true},
+		{"unmapped", errors.New("something else"), "", "", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotType, gotReason, gotGate := securityEventFromError(tc.err)
+			if gotType != tc.wantType {
+				t.Errorf("event type = %q, want %q", gotType, tc.wantType)
+			}
+			if gotReason != tc.wantReason {
+				t.Errorf("reason = %q, want %q", gotReason, tc.wantReason)
+			}
+			if gotGate != tc.wantGateFailure {
+				t.Errorf("gateFailure = %v, want %v", gotGate, tc.wantGateFailure)
 			}
 		})
 	}

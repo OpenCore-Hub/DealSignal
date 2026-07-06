@@ -72,6 +72,32 @@ var (
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
 )
 
+// ResolvePublicLink validates a public token and returns the active link.
+// It checks status, expiry, and max access limits. It is intended for
+// public features (e.g. AI Copilot) that already hold a valid link session.
+func (s *Service) ResolvePublicLink(ctx context.Context, publicToken string) (db.Link, error) {
+	link, err := s.queries.GetLinkByPublicToken(ctx, publicToken)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Link{}, ErrLinkNotFound
+		}
+		return db.Link{}, err
+	}
+	if link.Status == "deleted" {
+		return db.Link{}, ErrLinkNotFound
+	}
+	if link.Status == "disabled" || link.Status == "revoked" {
+		return db.Link{}, ErrLinkDisabled
+	}
+	if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
+		return db.Link{}, ErrLinkExpired
+	}
+	if link.MaxAccessCount.Valid && int32(link.AccessCount) >= link.MaxAccessCount.Int32 {
+		return db.Link{}, ErrLinkMaxAccessReached
+	}
+	return link, nil
+}
+
 // CreateLinkRequest is the input for creating a link.
 type CreateLinkRequest struct {
 	DocumentID               string
@@ -281,7 +307,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	// not block the create-link response. Bounded by a semaphore to avoid
 	// unbounded goroutine creation when links are created with many contacts.
 	linkURL := publicLinkURL(s.viewerBaseURL, token)
-	s.sendAccessCodeEmails(emailCodes, req.Name, linkURL)
+	s.sendAccessCodeEmails(ctx, emailCodes, req.Name, linkURL)
 	return link, nil
 }
 
@@ -500,7 +526,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	// Send verification emails after commit for updated contacts.
 	linkURL := publicLinkURL(s.viewerBaseURL, existing.PublicToken)
-	s.sendAccessCodeEmails(emailCodes, req.Name, linkURL)
+	s.sendAccessCodeEmails(ctx, emailCodes, req.Name, linkURL)
 
 	// Re-fetch to get the updated record.
 	return s.GetByID(ctx, linkID, workspaceID)
@@ -683,7 +709,7 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 	}
 
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken)
-	if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
+	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
 		return fmt.Errorf("send email: %w", err)
 	}
 	return nil
@@ -1020,21 +1046,76 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// sendAccessCodeEmails sends verification emails for the given contacts
-// asynchronously, bounded by the email semaphore (max 8 concurrent goroutines).
-// When the semaphore is full, the caller blocks until a slot opens. This
-// prevents unbounded goroutine creation under burst load while guaranteeing
-// delivery for all contacts.
-func (s *Service) sendAccessCodeEmails(emailCodes []emailCode, linkName, linkURL string) {
+// sendAccessCodeEmails sends verification emails for the given contacts.
+// When the underlying mailer supports batching and there are multiple
+// recipients, it sends them in one provider batch to reduce round-trips.
+// Otherwise it falls back to asynchronous per-email sends bounded by the
+// email semaphore.
+func (s *Service) sendAccessCodeEmails(ctx context.Context, emailCodes []emailCode, linkName, linkURL string) {
+	if len(emailCodes) == 0 {
+		return
+	}
+
+	name := linkName
+	if name == "" {
+		name = "A shared document"
+	}
+
+	// Try batch path first if the mailer supports it.
+	if bm, ok := s.mailer.(mailer.BatchSender); ok && len(emailCodes) > 1 {
+		batchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+		defer cancel()
+		jobs := make([]mailer.EmailJob, 0, len(emailCodes))
+		for _, ec := range emailCodes {
+			jobs = append(jobs, mailer.EmailJob{
+				EmailType: mailer.EmailTypeAccessCode,
+				Recipient: ec.email,
+				Code:      ec.code,
+				LinkName:  name,
+				LinkURL:   linkURL,
+				TemplateVariables: map[string]string{
+					"Code":     ec.code,
+					"LinkName": name,
+					"LinkURL":  linkURL,
+				},
+			})
+		}
+		result, err := bm.SendBatch(batchCtx, jobs)
+		if err == nil && result.AllSucceeded() {
+			return
+		}
+		if err != nil {
+			logger.ErrorCtx(batchCtx, "batch send access code emails failed, falling back to individual sends", err)
+		} else {
+			logger.ErrorCtx(batchCtx, "batch send access code emails had partial failures, falling back to individual sends", nil,
+				logger.Attr("failed_count", len(result.Failed)),
+			)
+		}
+		// Fall through to individual sends for any failed jobs.
+		failedSet := make(map[int]struct{}, len(result.Failed))
+		for _, f := range result.Failed {
+			if f.Index >= 0 && f.Index < len(emailCodes) {
+				failedSet[f.Index] = struct{}{}
+			}
+		}
+		retryCodes := make([]emailCode, 0, len(failedSet))
+		for i, ec := range emailCodes {
+			if _, failed := failedSet[i]; failed {
+				retryCodes = append(retryCodes, ec)
+			}
+		}
+		emailCodes = retryCodes
+	}
+
 	for _, ec := range emailCodes {
 		email, code := ec.email, ec.code
 		s.emailSem <- struct{}{} // blocks until a slot is available
 		go func() {
 			defer func() { <-s.emailSem }()
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			sendCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			defer cancel()
-			if err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, linkName, linkURL); err != nil {
-				logger.ErrorCtx(ctx, "failed to send link access code email", err,
+			if _, err := s.mailer.SendLinkAccessCodeEmail(sendCtx, email, code, name, linkURL); err != nil {
+				logger.ErrorCtx(sendCtx, "failed to send link access code email", err,
 					logger.Attr("email_local", localPart(email)),
 				)
 			}

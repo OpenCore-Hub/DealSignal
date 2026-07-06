@@ -67,8 +67,8 @@ func encodeSession(s LinkSession, secret string) (string, error) {
 	return sig + "." + enc, nil
 }
 
-// verifyLinkSession validates the HMAC and expiry.
-func verifyLinkSession(token, secret string) (LinkSession, bool) {
+// VerifyLinkSession validates the HMAC and expiry.
+func VerifyLinkSession(token, secret string) (LinkSession, bool) {
 	parts := strings.SplitN(token, ".", 2)
 	if len(parts) != 2 {
 		return LinkSession{}, false
