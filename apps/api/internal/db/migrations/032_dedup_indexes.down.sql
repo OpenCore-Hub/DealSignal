@@ -1,0 +1,2 @@
+DROP INDEX IF EXISTS idx_access_logs_link_visitor_created;
+DROP INDEX IF EXISTS idx_page_views_link_visitor_page_created;

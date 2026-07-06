@@ -157,6 +157,38 @@ func (q *Queries) CountDocumentsInFolder(ctx context.Context, arg CountDocuments
 	return count, err
 }
 
+const countEmailEventsByLogID = `-- name: CountEmailEventsByLogID :many
+SELECT event_type, COUNT(*) AS count
+FROM email_events
+WHERE email_log_id = $1
+GROUP BY event_type
+`
+
+type CountEmailEventsByLogIDRow struct {
+	EventType string
+	Count     int64
+}
+
+func (q *Queries) CountEmailEventsByLogID(ctx context.Context, emailLogID pgtype.UUID) ([]CountEmailEventsByLogIDRow, error) {
+	rows, err := q.db.Query(ctx, countEmailEventsByLogID, emailLogID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountEmailEventsByLogIDRow
+	for rows.Next() {
+		var i CountEmailEventsByLogIDRow
+		if err := rows.Scan(&i.EventType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
 SELECT COUNT(*) AS count
 FROM suggestions
@@ -171,6 +203,27 @@ type CountRecentSuggestionsByLinkAndTypeParams struct {
 
 func (q *Queries) CountRecentSuggestionsByLinkAndType(ctx context.Context, arg CountRecentSuggestionsByLinkAndTypeParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countRecentSuggestionsByLinkAndType, arg.LinkID, arg.WorkspaceID, arg.Type)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countSecurityEventsByIPAndWindow = `-- name: CountSecurityEventsByIPAndWindow :one
+SELECT COUNT(*) AS count
+FROM security_events
+WHERE ip = $1
+  AND event_type = $2
+  AND created_at > now() - ($3)::interval
+`
+
+type CountSecurityEventsByIPAndWindowParams struct {
+	Ip        *netip.Addr
+	EventType string
+	Column3   pgtype.Interval
+}
+
+func (q *Queries) CountSecurityEventsByIPAndWindow(ctx context.Context, arg CountSecurityEventsByIPAndWindowParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countSecurityEventsByIPAndWindow, arg.Ip, arg.EventType, arg.Column3)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -326,19 +379,29 @@ func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistan
 }
 
 const createAssistantSession = `-- name: CreateAssistantSession :one
-INSERT INTO assistant_sessions (workspace_id, user_id, title)
-VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at
+INSERT INTO assistant_sessions (workspace_id, user_id, link_id, document_id, visitor_id, title)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at, visitor_id
 `
 
 type CreateAssistantSessionParams struct {
 	WorkspaceID pgtype.UUID
 	UserID      pgtype.UUID
+	LinkID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	VisitorID   pgtype.Text
 	Title       pgtype.Text
 }
 
 func (q *Queries) CreateAssistantSession(ctx context.Context, arg CreateAssistantSessionParams) (AssistantSession, error) {
-	row := q.db.QueryRow(ctx, createAssistantSession, arg.WorkspaceID, arg.UserID, arg.Title)
+	row := q.db.QueryRow(ctx, createAssistantSession,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.LinkID,
+		arg.DocumentID,
+		arg.VisitorID,
+		arg.Title,
+	)
 	var i AssistantSession
 	err := row.Scan(
 		&i.ID,
@@ -349,6 +412,7 @@ func (q *Queries) CreateAssistantSession(ctx context.Context, arg CreateAssistan
 		&i.Title,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.VisitorID,
 	)
 	return i, err
 }
@@ -757,6 +821,72 @@ func (q *Queries) CreateDocument(ctx context.Context, arg CreateDocumentParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const createEmailEvent = `-- name: CreateEmailEvent :exec
+INSERT INTO email_events (email_log_id, event_type, user_agent, ip_address, link_url)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING
+`
+
+type CreateEmailEventParams struct {
+	EmailLogID pgtype.UUID
+	EventType  string
+	UserAgent  pgtype.Text
+	IpAddress  pgtype.Text
+	LinkUrl    pgtype.Text
+}
+
+func (q *Queries) CreateEmailEvent(ctx context.Context, arg CreateEmailEventParams) error {
+	_, err := q.db.Exec(ctx, createEmailEvent,
+		arg.EmailLogID,
+		arg.EventType,
+		arg.UserAgent,
+		arg.IpAddress,
+		arg.LinkUrl,
+	)
+	return err
+}
+
+const createEmailLog = `-- name: CreateEmailLog :one
+INSERT INTO email_logs (recipient, email_type, provider, status, subject, workspace_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, recipient, email_type, provider, provider_message_id, status, subject, error_message, created_at, updated_at, workspace_id
+`
+
+type CreateEmailLogParams struct {
+	Recipient   string
+	EmailType   string
+	Provider    string
+	Status      string
+	Subject     string
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) CreateEmailLog(ctx context.Context, arg CreateEmailLogParams) (EmailLog, error) {
+	row := q.db.QueryRow(ctx, createEmailLog,
+		arg.Recipient,
+		arg.EmailType,
+		arg.Provider,
+		arg.Status,
+		arg.Subject,
+		arg.WorkspaceID,
+	)
+	var i EmailLog
+	err := row.Scan(
+		&i.ID,
+		&i.Recipient,
+		&i.EmailType,
+		&i.Provider,
+		&i.ProviderMessageID,
+		&i.Status,
+		&i.Subject,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WorkspaceID,
 	)
 	return i, err
 }
@@ -1246,6 +1376,34 @@ func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) 
 		arg.PageNumber,
 		arg.DurationSeconds,
 		arg.ScrollDepth,
+	)
+	return err
+}
+
+const createSecurityEvent = `-- name: CreateSecurityEvent :exec
+INSERT INTO security_events (link_id, event_type, visitor_id, email, ip, user_agent, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+`
+
+type CreateSecurityEventParams struct {
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        *netip.Addr
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+}
+
+func (q *Queries) CreateSecurityEvent(ctx context.Context, arg CreateSecurityEventParams) error {
+	_, err := q.db.Exec(ctx, createSecurityEvent,
+		arg.LinkID,
+		arg.EventType,
+		arg.VisitorID,
+		arg.Email,
+		arg.Ip,
+		arg.UserAgent,
+		arg.Reason,
 	)
 	return err
 }
@@ -1831,7 +1989,7 @@ func (q *Queries) GetActionItemByID(ctx context.Context, arg GetActionItemByIDPa
 }
 
 const getAssistantSession = `-- name: GetAssistantSession :one
-SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at, visitor_id
 FROM assistant_sessions
 WHERE id = $1 AND workspace_id = $2 AND user_id = $3
 LIMIT 1
@@ -1855,6 +2013,67 @@ func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessi
 		&i.Title,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.VisitorID,
+	)
+	return i, err
+}
+
+const getAssistantSessionByIDForPublic = `-- name: GetAssistantSessionByIDForPublic :one
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at, visitor_id
+FROM assistant_sessions
+WHERE id = $1 AND link_id = $2 AND visitor_id = $3
+LIMIT 1
+`
+
+type GetAssistantSessionByIDForPublicParams struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) GetAssistantSessionByIDForPublic(ctx context.Context, arg GetAssistantSessionByIDForPublicParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, getAssistantSessionByIDForPublic, arg.ID, arg.LinkID, arg.VisitorID)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VisitorID,
+	)
+	return i, err
+}
+
+const getAssistantSessionByLinkAndVisitor = `-- name: GetAssistantSessionByLinkAndVisitor :one
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at, visitor_id
+FROM assistant_sessions
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY updated_at DESC
+LIMIT 1
+`
+
+type GetAssistantSessionByLinkAndVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) GetAssistantSessionByLinkAndVisitor(ctx context.Context, arg GetAssistantSessionByLinkAndVisitorParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, getAssistantSessionByLinkAndVisitor, arg.LinkID, arg.VisitorID)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VisitorID,
 	)
 	return i, err
 }
@@ -2396,6 +2615,52 @@ func (q *Queries) GetDocumentsByIDs(ctx context.Context, arg GetDocumentsByIDsPa
 	return items, nil
 }
 
+const getEmailLogByID = `-- name: GetEmailLogByID :one
+SELECT id, recipient, email_type, provider, provider_message_id, status, subject, error_message, created_at, updated_at, workspace_id FROM email_logs WHERE id = $1 LIMIT 1
+`
+
+func (q *Queries) GetEmailLogByID(ctx context.Context, id pgtype.UUID) (EmailLog, error) {
+	row := q.db.QueryRow(ctx, getEmailLogByID, id)
+	var i EmailLog
+	err := row.Scan(
+		&i.ID,
+		&i.Recipient,
+		&i.EmailType,
+		&i.Provider,
+		&i.ProviderMessageID,
+		&i.Status,
+		&i.Subject,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WorkspaceID,
+	)
+	return i, err
+}
+
+const getEmailLogByProviderMessageID = `-- name: GetEmailLogByProviderMessageID :one
+SELECT id, recipient, email_type, provider, provider_message_id, status, subject, error_message, created_at, updated_at, workspace_id FROM email_logs WHERE provider_message_id = $1 LIMIT 1
+`
+
+func (q *Queries) GetEmailLogByProviderMessageID(ctx context.Context, providerMessageID pgtype.Text) (EmailLog, error) {
+	row := q.db.QueryRow(ctx, getEmailLogByProviderMessageID, providerMessageID)
+	var i EmailLog
+	err := row.Scan(
+		&i.ID,
+		&i.Recipient,
+		&i.EmailType,
+		&i.Provider,
+		&i.ProviderMessageID,
+		&i.Status,
+		&i.Subject,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.WorkspaceID,
+	)
+	return i, err
+}
+
 const getFolderPermission = `-- name: GetFolderPermission :one
 SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
 FROM room_member_folder_permissions
@@ -2639,6 +2904,51 @@ func (q *Queries) GetLastAccessLogsByLinks(ctx context.Context, dollar_1 []pgtyp
 		return nil, err
 	}
 	return items, nil
+}
+
+const getLastLinkOpenByVisitor = `-- name: GetLastLinkOpenByVisitor :one
+SELECT created_at
+FROM access_logs
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND event_type = 'link_opened'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLastLinkOpenByVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) GetLastLinkOpenByVisitor(ctx context.Context, arg GetLastLinkOpenByVisitorParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLastLinkOpenByVisitor, arg.LinkID, arg.VisitorID)
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
+}
+
+const getLastPageViewByVisitorPage = `-- name: GetLastPageViewByVisitorPage :one
+SELECT created_at
+FROM page_views
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND page_number = $3
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetLastPageViewByVisitorPageParams struct {
+	LinkID     pgtype.UUID
+	VisitorID  pgtype.Text
+	PageNumber int32
+}
+
+func (q *Queries) GetLastPageViewByVisitorPage(ctx context.Context, arg GetLastPageViewByVisitorPageParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLastPageViewByVisitorPage, arg.LinkID, arg.VisitorID, arg.PageNumber)
+	var created_at pgtype.Timestamptz
+	err := row.Scan(&created_at)
+	return created_at, err
 }
 
 const getLinkAccessMetrics = `-- name: GetLinkAccessMetrics :one
@@ -2996,22 +3306,31 @@ func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken 
 const getLinkPageViewMetrics = `-- name: GetLinkPageViewMetrics :one
 SELECT
     COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
-    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS key_page_views,
-    COUNT(*) AS total_page_views
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_page_views,
+    COUNT(*) AS total_page_views,
+    COALESCE(MAX(documents.title), '')::text AS document_title
 FROM page_views
-WHERE link_id = $1
+JOIN links ON links.id = page_views.link_id
+LEFT JOIN documents ON documents.id = links.document_id
+WHERE page_views.link_id = $1
 `
 
 type GetLinkPageViewMetricsRow struct {
 	AvgDurationSeconds float64
-	KeyPageViews       int64
+	EngagedPageViews   int64
 	TotalPageViews     int64
+	DocumentTitle      string
 }
 
 func (q *Queries) GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID) (GetLinkPageViewMetricsRow, error) {
 	row := q.db.QueryRow(ctx, getLinkPageViewMetrics, linkID)
 	var i GetLinkPageViewMetricsRow
-	err := row.Scan(&i.AvgDurationSeconds, &i.KeyPageViews, &i.TotalPageViews)
+	err := row.Scan(
+		&i.AvgDurationSeconds,
+		&i.EngagedPageViews,
+		&i.TotalPageViews,
+		&i.DocumentTitle,
+	)
 	return i, err
 }
 
@@ -5456,6 +5775,50 @@ func (q *Queries) ListRoomMembersWithUser(ctx context.Context, roomID pgtype.UUI
 	return items, nil
 }
 
+const listSecurityEventsByLink = `-- name: ListSecurityEventsByLink :many
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListSecurityEventsByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+	Offset int32
+}
+
+func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurityEventsByLinkParams) ([]SecurityEvent, error) {
+	rows, err := q.db.Query(ctx, listSecurityEventsByLink, arg.LinkID, arg.Limit, arg.Offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SecurityEvent
+	for rows.Next() {
+		var i SecurityEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Ip,
+			&i.UserAgent,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSignalsByWorkspace = `-- name: ListSignalsByWorkspace :many
 SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
        document_id, contact_id, link_id, priority, created_at, updated_at
@@ -6098,6 +6461,71 @@ func (q *Queries) SearchChunksByText(ctx context.Context, arg SearchChunksByText
 	return items, nil
 }
 
+const searchChunksByTextInDocuments = `-- name: SearchChunksByTextInDocuments :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    ts_rank(c.search_vector, plainto_tsquery('english', $3)) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND p.document_id = ANY($4::uuid[])
+  AND c.search_vector @@ plainto_tsquery('english', $3)
+ORDER BY rank DESC
+LIMIT $2
+`
+
+type SearchChunksByTextInDocumentsParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Query       string
+	DocumentIds []pgtype.UUID
+}
+
+type SearchChunksByTextInDocumentsRow struct {
+	ID         pgtype.UUID
+	Text       string
+	Bbox       []byte
+	PageNumber int32
+	DocumentID pgtype.UUID
+	Rank       float32
+}
+
+func (q *Queries) SearchChunksByTextInDocuments(ctx context.Context, arg SearchChunksByTextInDocumentsParams) ([]SearchChunksByTextInDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByTextInDocuments,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.Query,
+		arg.DocumentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByTextInDocumentsRow
+	for rows.Next() {
+		var i SearchChunksByTextInDocumentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Rank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchChunksByTrigram = `-- name: SearchChunksByTrigram :many
 SELECT
     c.id,
@@ -6161,6 +6589,76 @@ func (q *Queries) SearchChunksByTrigram(ctx context.Context, arg SearchChunksByT
 	return items, nil
 }
 
+const searchChunksByTrigramInDocuments = `-- name: SearchChunksByTrigramInDocuments :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    c.normalized_text,
+    p.page_number,
+    p.document_id,
+    similarity(c.normalized_text, $3) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND p.document_id = ANY($4::uuid[])
+  AND c.normalized_text IS NOT NULL
+  AND c.normalized_text <> ''
+  AND similarity(c.normalized_text, $3) > 0.1
+ORDER BY rank DESC
+LIMIT $2
+`
+
+type SearchChunksByTrigramInDocumentsParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Query       string
+	DocumentIds []pgtype.UUID
+}
+
+type SearchChunksByTrigramInDocumentsRow struct {
+	ID             pgtype.UUID
+	Text           string
+	Bbox           []byte
+	NormalizedText pgtype.Text
+	PageNumber     int32
+	DocumentID     pgtype.UUID
+	Rank           float32
+}
+
+func (q *Queries) SearchChunksByTrigramInDocuments(ctx context.Context, arg SearchChunksByTrigramInDocumentsParams) ([]SearchChunksByTrigramInDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByTrigramInDocuments,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.Query,
+		arg.DocumentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByTrigramInDocumentsRow
+	for rows.Next() {
+		var i SearchChunksByTrigramInDocumentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.NormalizedText,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Rank,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const searchChunksByVector = `-- name: SearchChunksByVector :many
 SELECT
     c.id,
@@ -6201,6 +6699,71 @@ func (q *Queries) SearchChunksByVector(ctx context.Context, arg SearchChunksByVe
 	var items []SearchChunksByVectorRow
 	for rows.Next() {
 		var i SearchChunksByVectorRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.Bbox,
+			&i.PageNumber,
+			&i.DocumentID,
+			&i.Distance,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const searchChunksByVectorInDocuments = `-- name: SearchChunksByVectorInDocuments :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    (c.embedding <=> $3::vector)::float8 AS distance
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND p.document_id = ANY($4::uuid[])
+  AND c.embedding IS NOT NULL
+ORDER BY c.embedding <=> $3::vector
+LIMIT $2
+`
+
+type SearchChunksByVectorInDocumentsParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Embedding   pgvector.Vector
+	DocumentIds []pgtype.UUID
+}
+
+type SearchChunksByVectorInDocumentsRow struct {
+	ID         pgtype.UUID
+	Text       string
+	Bbox       []byte
+	PageNumber int32
+	DocumentID pgtype.UUID
+	Distance   float64
+}
+
+func (q *Queries) SearchChunksByVectorInDocuments(ctx context.Context, arg SearchChunksByVectorInDocumentsParams) ([]SearchChunksByVectorInDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, searchChunksByVectorInDocuments,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.Embedding,
+		arg.DocumentIds,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchChunksByVectorInDocumentsRow
+	for rows.Next() {
+		var i SearchChunksByVectorInDocumentsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Text,
@@ -6543,6 +7106,45 @@ func (q *Queries) UpdateDocumentStatus(ctx context.Context, arg UpdateDocumentSt
 	return err
 }
 
+const updateEmailLogStatus = `-- name: UpdateEmailLogStatus :exec
+UPDATE email_logs
+SET status = $2, provider_message_id = $3, error_message = $4, updated_at = NOW()
+WHERE id = $1
+`
+
+type UpdateEmailLogStatusParams struct {
+	ID                pgtype.UUID
+	Status            string
+	ProviderMessageID pgtype.Text
+	ErrorMessage      pgtype.Text
+}
+
+func (q *Queries) UpdateEmailLogStatus(ctx context.Context, arg UpdateEmailLogStatusParams) error {
+	_, err := q.db.Exec(ctx, updateEmailLogStatus,
+		arg.ID,
+		arg.Status,
+		arg.ProviderMessageID,
+		arg.ErrorMessage,
+	)
+	return err
+}
+
+const updateEmailLogStatusByProviderMessageID = `-- name: UpdateEmailLogStatusByProviderMessageID :exec
+UPDATE email_logs
+SET status = $2, updated_at = NOW()
+WHERE provider_message_id = $1
+`
+
+type UpdateEmailLogStatusByProviderMessageIDParams struct {
+	ProviderMessageID pgtype.Text
+	Status            string
+}
+
+func (q *Queries) UpdateEmailLogStatusByProviderMessageID(ctx context.Context, arg UpdateEmailLogStatusByProviderMessageIDParams) error {
+	_, err := q.db.Exec(ctx, updateEmailLogStatusByProviderMessageID, arg.ProviderMessageID, arg.Status)
+	return err
+}
+
 const updateIngestionJob = `-- name: UpdateIngestionJob :exec
 UPDATE ingestion_jobs
 SET status = $1, attempts = $2, error_message = $3, updated_at = now()
@@ -6580,55 +7182,6 @@ type UpdateLinkContactAccessCodeParams struct {
 func (q *Queries) UpdateLinkContactAccessCode(ctx context.Context, arg UpdateLinkContactAccessCodeParams) error {
 	_, err := q.db.Exec(ctx, updateLinkContactAccessCode, arg.ID, arg.AccessCode)
 	return err
-}
-
-const updateLinkStatus = `-- name: UpdateLinkStatus :one
-UPDATE links
-SET status = $1, updated_at = now()
-WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
-       ai_copilot_enabled
-`
-
-type UpdateLinkStatusParams struct {
-	Status      string
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-}
-
-func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusParams) (Link, error) {
-	row := q.db.QueryRow(ctx, updateLinkStatus, arg.Status, arg.ID, arg.WorkspaceID)
-	var i Link
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.WorkspaceID,
-		&i.DocumentID,
-		&i.PublicToken,
-		&i.Name,
-		&i.PermissionType,
-		&i.AllowedEmails,
-		&i.AllowedDomains,
-		&i.PasswordHash,
-		&i.ExpiresAt,
-		&i.MaxAccessCount,
-		&i.AccessCount,
-		&i.DownloadEnabled,
-		&i.WatermarkEnabled,
-		&i.Status,
-		&i.CreatedBy,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.RequireEmail,
-		&i.RequirePassword,
-		&i.RequireNda,
-		&i.RequireEmailVerification,
-		&i.AiCopilotEnabled,
-	)
-	return i, err
 }
 
 const updateLinkFull = `-- name: UpdateLinkFull :one
@@ -6697,6 +7250,55 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		arg.ID,
 		arg.WorkspaceID,
 	)
+	var i Link
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PublicToken,
+		&i.Name,
+		&i.PermissionType,
+		&i.AllowedEmails,
+		&i.AllowedDomains,
+		&i.PasswordHash,
+		&i.ExpiresAt,
+		&i.MaxAccessCount,
+		&i.AccessCount,
+		&i.DownloadEnabled,
+		&i.WatermarkEnabled,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequirePassword,
+		&i.RequireNda,
+		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
+	)
+	return i, err
+}
+
+const updateLinkStatus = `-- name: UpdateLinkStatus :one
+UPDATE links
+SET status = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
+          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
+       updated_at, require_email, require_password, require_nda, require_email_verification,
+       ai_copilot_enabled
+`
+
+type UpdateLinkStatusParams struct {
+	Status      string
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusParams) (Link, error) {
+	row := q.db.QueryRow(ctx, updateLinkStatus, arg.Status, arg.ID, arg.WorkspaceID)
 	var i Link
 	err := row.Scan(
 		&i.ID,

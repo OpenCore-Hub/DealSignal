@@ -56,6 +56,7 @@ type AssistantSession struct {
 	Title       pgtype.Text
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	VisitorID   pgtype.Text
 }
 
 type Chunk struct {
@@ -154,6 +155,30 @@ type Document struct {
 	DeletedAt   pgtype.Timestamptz
 	FileSize    pgtype.Int8
 	Category    string
+}
+
+type EmailEvent struct {
+	ID         pgtype.UUID
+	EmailLogID pgtype.UUID
+	EventType  string
+	UserAgent  pgtype.Text
+	IpAddress  pgtype.Text
+	LinkUrl    pgtype.Text
+	CreatedAt  pgtype.Timestamptz
+}
+
+type EmailLog struct {
+	ID                pgtype.UUID
+	Recipient         string
+	EmailType         string
+	Provider          string
+	ProviderMessageID pgtype.Text
+	Status            string
+	Subject           string
+	ErrorMessage      pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	WorkspaceID       pgtype.UUID
 }
 
 type HubspotSyncJob struct {
@@ -382,6 +407,18 @@ type RoomNdaAgreement struct {
 	Ip        *netip.Addr
 	UserAgent pgtype.Text
 	AgreedAt  pgtype.Timestamptz
+}
+
+type SecurityEvent struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        *netip.Addr
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
 }
 
 type Signal struct {

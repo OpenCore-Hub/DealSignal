@@ -241,14 +241,27 @@ ORDER BY rank DESC
 LIMIT $2;
 
 -- name: CreateAssistantSession :one
-INSERT INTO assistant_sessions (workspace_id, user_id, title)
-VALUES ($1, $2, $3)
-RETURNING id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at;
+INSERT INTO assistant_sessions (workspace_id, user_id, link_id, document_id, visitor_id, title)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
 
 -- name: GetAssistantSession :one
-SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at
+SELECT *
 FROM assistant_sessions
 WHERE id = $1 AND workspace_id = $2 AND user_id = $3
+LIMIT 1;
+
+-- name: GetAssistantSessionByLinkAndVisitor :one
+SELECT *
+FROM assistant_sessions
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY updated_at DESC
+LIMIT 1;
+
+-- name: GetAssistantSessionByIDForPublic :one
+SELECT *
+FROM assistant_sessions
+WHERE id = $1 AND link_id = $2 AND visitor_id = $3
 LIMIT 1;
 
 -- name: UpdateAssistantSessionTitle :exec
@@ -431,10 +444,13 @@ WHERE link_id = $1;
 -- name: GetLinkPageViewMetrics :one
 SELECT
     COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
-    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS key_page_views,
-    COUNT(*) AS total_page_views
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_page_views,
+    COUNT(*) AS total_page_views,
+    COALESCE(MAX(documents.title), '')::text AS document_title
 FROM page_views
-WHERE link_id = $1;
+JOIN links ON links.id = page_views.link_id
+LEFT JOIN documents ON documents.id = links.document_id
+WHERE page_views.link_id = $1;
 
 -- name: GetWorkspaceStorageUsage :one
 SELECT (
@@ -541,6 +557,24 @@ LIMIT $3;
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
 FROM access_logs
 WHERE link_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetLastLinkOpenByVisitor :one
+SELECT created_at
+FROM access_logs
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND event_type = 'link_opened'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: GetLastPageViewByVisitorPage :one
+SELECT created_at
+FROM page_views
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND page_number = $3
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -1132,6 +1166,57 @@ WHERE c.workspace_id = $1
 ORDER BY rank DESC
 LIMIT $2;
 
+-- name: SearchChunksByVectorInDocuments :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    (c.embedding <=> sqlc.arg(embedding)::vector)::float8 AS distance
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
+  AND c.embedding IS NOT NULL
+ORDER BY c.embedding <=> sqlc.arg(embedding)::vector
+LIMIT $2;
+
+-- name: SearchChunksByTextInDocuments :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    p.page_number,
+    p.document_id,
+    ts_rank(c.search_vector, plainto_tsquery('english', sqlc.arg(query))) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
+  AND c.search_vector @@ plainto_tsquery('english', sqlc.arg(query))
+ORDER BY rank DESC
+LIMIT $2;
+
+-- name: SearchChunksByTrigramInDocuments :many
+SELECT
+    c.id,
+    c.text,
+    c.bbox,
+    c.normalized_text,
+    p.page_number,
+    p.document_id,
+    similarity(c.normalized_text, sqlc.arg(query)) AS rank
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE c.workspace_id = $1
+  AND p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
+  AND c.normalized_text IS NOT NULL
+  AND c.normalized_text <> ''
+  AND similarity(c.normalized_text, sqlc.arg(query)) > 0.1
+ORDER BY rank DESC
+LIMIT $2;
+
 -- name: SearchHybridWithBBox :many
 SELECT
     c.id,
@@ -1458,3 +1543,53 @@ SELECT EXISTS(
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
 WHERE id = $1 AND workspace_id = $2 LIMIT 1;
+
+-- name: CreateSecurityEvent :exec
+INSERT INTO security_events (link_id, event_type, visitor_id, email, ip, user_agent, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
+
+-- name: CountSecurityEventsByIPAndWindow :one
+SELECT COUNT(*) AS count
+FROM security_events
+WHERE ip = $1
+  AND event_type = $2
+  AND created_at > now() - ($3)::interval;
+
+-- name: ListSecurityEventsByLink :many
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3;
+
+-- name: CreateEmailLog :one
+INSERT INTO email_logs (recipient, email_type, provider, status, subject, workspace_id)
+VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: UpdateEmailLogStatus :exec
+UPDATE email_logs
+SET status = $2, provider_message_id = $3, error_message = $4, updated_at = NOW()
+WHERE id = $1;
+
+-- name: UpdateEmailLogStatusByProviderMessageID :exec
+UPDATE email_logs
+SET status = $2, updated_at = NOW()
+WHERE provider_message_id = $1;
+
+-- name: GetEmailLogByID :one
+SELECT * FROM email_logs WHERE id = $1 LIMIT 1;
+
+-- name: GetEmailLogByProviderMessageID :one
+SELECT * FROM email_logs WHERE provider_message_id = $1 LIMIT 1;
+
+-- name: CreateEmailEvent :exec
+INSERT INTO email_events (email_log_id, event_type, user_agent, ip_address, link_url)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING;
+
+-- name: CountEmailEventsByLogID :many
+SELECT event_type, COUNT(*) AS count
+FROM email_events
+WHERE email_log_id = $1
+GROUP BY event_type;
