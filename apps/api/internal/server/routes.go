@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"net"
 	"net/http"
 	"strings"
 	"time"
@@ -9,6 +10,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/contact"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
@@ -19,6 +21,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/marketing"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
@@ -35,6 +38,15 @@ type notificationAdapter struct {
 	svc *notification.Service
 }
 
+// closerWorker releases mailer-held resources (e.g. SMTP connection pool) on
+// server shutdown. It does no background work between Start and Stop.
+type closerWorker struct {
+	closer mailer.Closer
+}
+
+func (c *closerWorker) Start(_ context.Context) {}
+func (c *closerWorker) Stop()                   { _ = c.closer.Close() }
+
 func (a *notificationAdapter) Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) error {
 	_, err := a.svc.Enqueue(ctx, workspaceID, userID, channel, subject, body)
 	return err
@@ -48,14 +60,13 @@ type ErrorResponse struct {
 
 // HealthResponse is returned by the health check endpoint.
 type HealthResponse struct {
-	Status  string `json:"status"`
-	Version string `json:"version"`
+	Status  string            `json:"status"`
+	Version string            `json:"version"`
+	Checks  map[string]string `json:"checks,omitempty"`
 }
 
 func (s *Server) registerRoutes() {
-	s.engine.GET("/healthz", func(c *gin.Context) {
-		c.JSON(http.StatusOK, HealthResponse{Status: "ok", Version: s.cfg.Version})
-	})
+	s.engine.GET("/healthz", s.handleHealthz)
 
 	api := s.engine.Group("/api")
 
@@ -67,14 +78,42 @@ func (s *Server) registerRoutes() {
 		} else {
 			tokenStore = auth.NewMemoryTokenStore()
 		}
+
+		actualMailer := mailer.New(s.cfg)
+		if c, ok := actualMailer.(mailer.Closer); ok {
+			s.registerWorker(&closerWorker{closer: c})
+		}
+		var appMailer mailer.Mailer = actualMailer
+		if s.cfg.EmailQueueEnabled && s.redisClient != nil {
+			queue := mailer.NewRedisQueue(s.redisClient.RDB(), s.cfg.EmailQueueStream)
+			appMailer = mailer.NewQueuedMailer(queue, queries, mailer.ProviderForConfig(s.cfg), s.cfg.EmailQueueMaxAttempts, s.cfg.DefaultBrandName, s.cfg.VerificationTokenTTLHours, mailer.DefaultTemplates())
+			emailWorker := mailer.NewWorker(queue, actualMailer, queries, mailer.ProviderForConfig(s.cfg), s.cfg.EmailWorkerCount, s.cfg.EmailWorkerBatchSize, s.cfg.EmailWorkerInterval, s.cfg.RetryBackoffBase, s.cfg.RetryBackoffMax)
+			s.registerWorker(emailWorker)
+			emailWorker.Start(s.shutdownCtx)
+
+			scheduler := mailer.NewScheduler(s.redisClient.RDB(), s.cfg.EmailQueueStream, s.cfg.EmailWorkerInterval)
+			s.registerWorker(scheduler)
+			scheduler.Start(s.shutdownCtx)
+		}
+
+		if s.cfg.ResendAPIKey != "" && s.cfg.ResendWebhookSecret != "" {
+			webhookHandler := mailer.NewResendWebhookHandler(queries, s.cfg.ResendWebhookSecret)
+			webhookHandler.RegisterRoutes(api)
+		}
+
 		authSvc := auth.NewService(queries, tokenStore,
-			auth.WithMailer(mailer.New(s.cfg)),
+			auth.WithMailer(appMailer),
 			auth.WithAppBaseURL(s.cfg.FrontendURL),
+			auth.WithVerificationTokenTTL(time.Duration(s.cfg.VerificationTokenTTLHours)*time.Hour),
 		)
 		authHandler := auth.NewHandler(authSvc)
 		authHandler.RegisterRoutes(api)
 
-		workspaceSvc := workspace.NewService(queries, s.dbPool)
+		workspaceSvc := workspace.NewService(queries,
+			workspace.WithDBPool(s.dbPool),
+			workspace.WithMailer(appMailer),
+			workspace.WithFrontendURL(s.cfg.FrontendURL),
+		)
 		workspaceHandler := workspace.NewHandler(workspaceSvc, authSvc)
 		workspaceHandler.RegisterRoutes(api)
 
@@ -83,6 +122,10 @@ func (s *Server) registerRoutes() {
 		domainHandler.RegisterRoutes(api)
 
 		s.engine.Use(middleware.HostMiddleware(s.cfg.BaseDomain, hostLookup(domainSvc, s.cfg.BaseDomain)))
+
+		public := s.engine.Group("/api/v1/public")
+		tracker := mailer.NewTracker(queries, s.cfg.AppBaseURL, s.cfg.EmailTrackingSecret, s.cfg.EmailTrackingTTL, mailer.WithRedis(s.redisClient))
+		tracker.RegisterRoutes(public)
 
 		if s.cfg.S3Bucket != "" {
 			storageClient, err := storage.NewS3Client(s.cfg)
@@ -127,12 +170,19 @@ func (s *Server) registerRoutes() {
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, mailer.New(s.cfg), s.cfg.ViewerBaseURL)
-			analyticsSvc := analytics.NewService(queries)
-			notificationSvc := notification.NewService(queries, s.cfg)
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL)
+			var dedupChecker analytics.DedupChecker
+			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
+				dedupChecker = analytics.NewFailoverDedupChecker(s.redisClient, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
+			} else {
+				dedupChecker = analytics.NewFailoverDedupChecker(nil, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
+			}
+			analyticsSvc := analytics.NewService(queries, dedupChecker)
+			notificationSvc := notification.NewService(queries, appMailer, s.cfg)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
+			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
 
 			dealroomSvc := dealroom.NewService(queries, s.dbPool)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
@@ -143,6 +193,9 @@ func (s *Server) registerRoutes() {
 
 			contactSvc := contact.NewService(queries)
 			contactHandler := contact.NewHandler(contactSvc)
+
+			marketingSvc := marketing.NewService(queries, appMailer, mailer.ProviderForConfig(s.cfg))
+			marketingHandler := marketing.NewHandler(marketingSvc)
 
 			ws := api.Group("/workspaces/:workspaceSlug")
 			ws.Use(middleware.Auth(authSvc))
@@ -156,6 +209,7 @@ func (s *Server) registerRoutes() {
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)
 			contactHandler.RegisterRoutes(ws)
+			marketingHandler.RegisterRoutes(ws)
 
 			notificationWorker := notification.NewWorker(notificationSvc, 30*time.Second)
 			s.registerWorker(notificationWorker)
@@ -173,10 +227,10 @@ func (s *Server) registerRoutes() {
 			s.registerWorker(hubSpotWorker)
 			hubSpotWorker.Start(s.shutdownCtx)
 
-			public := s.engine.Group("/api/v1/public")
 			integrationHandler.RegisterOAuthRoutes(public)
 			linkHandler.RegisterPublicRoutes(public)
 			dealroomHandler.RegisterPublicRoutes(public)
+			assistantPublicHandler.RegisterPublicRoutes(public)
 		}
 	}
 
@@ -207,4 +261,75 @@ func certProvider(name string) domain.CertificateProvider {
 		return domain.SelfSignedProvider{}
 	}
 	return domain.NoopProvider{}
+}
+
+func (s *Server) handleHealthz(c *gin.Context) {
+	checks := make(map[string]string)
+	ctx, cancel := context.WithTimeout(c.Request.Context(), 5*time.Second)
+	defer cancel()
+
+	status := "ok"
+	if s.dbPool != nil {
+		if err := s.dbPool.Ping(ctx); err != nil {
+			checks["database"] = "error: " + err.Error()
+			status = "degraded"
+		} else {
+			checks["database"] = "ok"
+		}
+	}
+	if s.redisClient != nil {
+		if err := s.redisClient.RDB().Ping(ctx).Err(); err != nil {
+			checks["redis"] = "error: " + err.Error()
+			status = "degraded"
+		} else {
+			checks["redis"] = "ok"
+		}
+	}
+	if s.cfg.ResendAPIKey != "" {
+		if err := checkResend(ctx, s.cfg); err != nil {
+			checks["resend"] = "error: " + err.Error()
+			status = "degraded"
+		} else {
+			checks["resend"] = "ok"
+		}
+	}
+	if s.cfg.SMTPHost != "" {
+		if err := checkSMTP(ctx, s.cfg); err != nil {
+			checks["smtp"] = "error: " + err.Error()
+			status = "degraded"
+		} else {
+			checks["smtp"] = "ok"
+		}
+	}
+
+	code := http.StatusOK
+	if status != "ok" {
+		code = http.StatusServiceUnavailable
+	}
+	c.JSON(code, HealthResponse{Status: status, Version: s.cfg.Version, Checks: checks})
+}
+
+func checkResend(ctx context.Context, cfg *config.Config) error {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.resend.com/emails", nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+cfg.ResendAPIKey)
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	return nil
+}
+
+func checkSMTP(ctx context.Context, cfg *config.Config) error {
+	addr := net.JoinHostPort(cfg.SMTPHost, cfg.SMTPPort)
+	d := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := d.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	return conn.Close()
 }

@@ -30,6 +30,7 @@ type DBPool interface {
 	Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error)
 	QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row
 	Begin(ctx context.Context) (pgx.Tx, error)
+	Ping(ctx context.Context) error
 }
 
 // worker is a background process that must be started and stopped with the server.
@@ -107,6 +108,7 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 	r.Use(requestIDMiddleware())
 	r.Use(requestLogger())
 	r.Use(metricsMiddleware())
+	r.Use(middleware.Locale())
 	if s.redisClient != nil {
 		r.Use(middleware.RateLimitMiddleware(s.redisClient, cfg))
 		r.Use(middleware.IdempotencyMiddleware(s.redisClient, cfg))
