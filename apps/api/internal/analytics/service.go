@@ -44,20 +44,34 @@ type Querier interface {
 	GetLastAccessLogsByLinks(ctx context.Context, linkIDs []pgtype.UUID) ([]db.AccessLog, error)
 	GetLinkPageViewMetricsBatch(ctx context.Context, linkIDs []pgtype.UUID) ([]db.GetLinkPageViewMetricsBatchRow, error)
 	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
+	CreateSecurityEvent(ctx context.Context, arg db.CreateSecurityEventParams) error
+	CountSecurityEventsByIPAndWindow(ctx context.Context, arg db.CountSecurityEventsByIPAndWindowParams) (int64, error)
 }
 
 // Service records events and computes heat scores.
 type Service struct {
 	queries Querier
+	dedup   DedupChecker
 }
 
 // NewService creates an analytics service.
-func NewService(q Querier) *Service {
-	return &Service{queries: q}
+func NewService(q Querier, dedup DedupChecker) *Service {
+	if dedup == nil {
+		dedup = NoopDedupChecker{}
+	}
+	return &Service{queries: q, dedup: dedup}
 }
 
 // RecordLinkOpened atomically increments the link access counter and records the event.
 func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID, email, ip, ua string) error {
+	shouldRecord, err := s.dedup.MarkOpen(ctx, linkIDString(link.ID), visitorID)
+	if err != nil {
+		return fmt.Errorf("dedup open: %w", err)
+	}
+	if !shouldRecord {
+		return nil
+	}
+
 	rows, err := s.queries.RecordLinkOpened(ctx, db.RecordLinkOpenedParams{
 		ID:           link.ID,
 		TenantID:     link.TenantID,
@@ -79,6 +93,14 @@ func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID,
 
 // RecordPageView records a page-view event.
 func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID string, pageNumber int32, durationSeconds int32, scrollDepth float64) error {
+	shouldRecord, err := s.dedup.MarkPageView(ctx, linkIDString(link.ID), visitorID, pageNumber)
+	if err != nil {
+		return fmt.Errorf("dedup page view: %w", err)
+	}
+	if !shouldRecord {
+		return nil
+	}
+
 	var depth pgtype.Numeric
 	if scrollDepth >= 0 && scrollDepth <= 1 {
 		depth.Valid = true
@@ -107,6 +129,48 @@ func (s *Service) RecordDownload(ctx context.Context, link db.Link, visitorID, e
 		Ip:           parseIP(ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
+}
+
+// RecordSecurityEvent records a security-related access event.
+func (s *Service) RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error {
+	return s.queries.CreateSecurityEvent(ctx, db.CreateSecurityEventParams{
+		LinkID:    link.ID,
+		EventType: eventType,
+		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		Email:     pgtype.Text{String: email, Valid: email != ""},
+		Ip:        parseIP(ip),
+		UserAgent: pgtype.Text{String: ua, Valid: ua != ""},
+		Reason:    pgtype.Text{String: reason, Valid: reason != ""},
+	})
+}
+
+// AnomalyCheckResult describes the outcome of an anomaly check.
+type AnomalyCheckResult struct {
+	Triggered bool
+	Count     int64
+	Window    time.Duration
+}
+
+// CheckAnomaly counts recent security events of the same type from the same IP
+// and returns true if the count exceeds the configured threshold.
+func (s *Service) CheckAnomaly(ctx context.Context, ip, eventType string, window time.Duration, threshold int64) (AnomalyCheckResult, error) {
+	if ip == "" {
+		return AnomalyCheckResult{Triggered: false}, nil
+	}
+	interval := pgtype.Interval{Microseconds: window.Microseconds(), Valid: true}
+	count, err := s.queries.CountSecurityEventsByIPAndWindow(ctx, db.CountSecurityEventsByIPAndWindowParams{
+		Ip:        parseIP(ip),
+		EventType: eventType,
+		Column3:   interval,
+	})
+	if err != nil {
+		return AnomalyCheckResult{}, err
+	}
+	return AnomalyCheckResult{
+		Triggered: count >= threshold,
+		Count:     count,
+		Window:    window,
+	}, nil
 }
 
 // ErrNoLinkForDocument is returned when an authenticated event cannot be attributed to a link.
@@ -190,11 +254,16 @@ func (s *Service) getScoreForLink(ctx context.Context, linkID pgtype.UUID, circl
 		revisits = 0
 	}
 
+	keyPageViews := 0
+	if heat.IsKeyPage(pageViews.DocumentTitle, circle) {
+		keyPageViews = int(pageViews.TotalPageViews)
+	}
+
 	input := heat.Input{
 		Opens:              int(access.Opens),
 		Revisits:           revisits,
 		AvgDurationMinutes: pageViews.AvgDurationSeconds / 60.0,
-		KeyPageViews:       int(pageViews.KeyPageViews),
+		KeyPageViews:       keyPageViews,
 		ForwardSignals:     int(access.UniqueVisitors),
 		Downloads:          int(access.Downloads),
 		BouncePenalty:      int(bounce),
