@@ -193,6 +193,7 @@
     "subtitle": "Select multiple documents, configure security once, generate one share link.",
     "stepDocuments": "Documents",
     "stepSecurity": "Security",
+    "stepReview": "Review",
     "nextStep": "Next",
     "prevStep": "Back",
     "cancel": "Cancel",

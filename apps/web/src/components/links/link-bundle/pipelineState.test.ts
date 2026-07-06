@@ -71,12 +71,17 @@ describe("BundlePipelineState transitions", () => {
       state = pipelineReducer(state, { type: "GO_STEP", step: 2 });
       expect(state.step).toBe(2);
 
+      state = pipelineReducer(state, { type: "GO_STEP", step: 3 });
+      expect(state.step).toBe(3);
+
       state = pipelineReducer(state, { type: "GO_STEP", step: 1 });
       expect(state.step).toBe(1);
     });
 
     it("GO_STEP rejects forward navigation without selected documents", () => {
       state = pipelineReducer(state, { type: "GO_STEP", step: 2 });
+      expect(state.step).toBe(1);
+      state = pipelineReducer(state, { type: "GO_STEP", step: 3 });
       expect(state.step).toBe(1);
     });
   });
@@ -191,7 +196,7 @@ describe("BundlePipelineState transitions", () => {
 
   describe("RESET action", () => {
     it("resets step, dirty, link, copied, and submitting", () => {
-      state.step = 2;
+      state.step = 3;
       state.isDirty = true;
       state.generatedLink = "https://example.com/l/abc";
       state.copied = true;

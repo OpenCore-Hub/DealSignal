@@ -18,7 +18,7 @@ import {
 import type { PermissionConfig, PermissionPreset } from "@/types";
 
 // ---------------------------------------------------------------------------
-// Helper: guard function matching pipeline submission logic
+// Helper: guard function matching StepReview logic
 // ---------------------------------------------------------------------------
 
 interface GuardResult {
