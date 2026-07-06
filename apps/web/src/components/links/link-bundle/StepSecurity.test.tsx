@@ -64,7 +64,6 @@ async function setupI18n() {
           "preset.customized.description": "Customized",
           "bundle.stepDocuments": "Documents",
           "bundle.stepSecurity": "Security",
-          "bundle.stepReview": "Review",
         },
       },
     },

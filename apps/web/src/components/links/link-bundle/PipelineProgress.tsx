@@ -6,7 +6,6 @@ import { CheckIcon } from "@phosphor-icons/react";
 const STEPS: { step: BundlePipelineState["step"]; key: string }[] = [
   { step: 1, key: "bundle.stepDocuments" },
   { step: 2, key: "bundle.stepSecurity" },
-  { step: 3, key: "bundle.stepReview" },
 ];
 
 interface PipelineProgressProps {

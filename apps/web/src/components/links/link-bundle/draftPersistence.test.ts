@@ -100,12 +100,12 @@ describe("draft persistence", () => {
     });
 
     it("returns parsed draft when one exists", () => {
-      const state = makeState({ step: 3 });
+      const state = makeState({ step: 2 });
       saveDraft(state);
 
       const draft = loadDraft();
       expect(draft).not.toBeNull();
-      expect(draft!.step).toBe(3);
+      expect(draft!.step).toBe(2);
       expect(draft!.selectedDocumentIds).toEqual(["doc-1"]);
       expect(draft!.searchQuery).toBe("investor");
       expect(draft!.config.level).toBe("confidential");

@@ -228,7 +228,7 @@ function accessGate(store: StoreResult, req: AccessRequest): GateResult {
 }
 
 // ============================================================================
-// 客户端 Guard (StepReview.handleSubmit 精确复刻)
+// 客户端 Guard (pipeline submission guard 精确复刻)
 // ============================================================================
 
 interface GuardResult {

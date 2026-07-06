@@ -20,7 +20,6 @@ async function setupI18n() {
         links: {
           "bundle.stepDocuments": "Documents",
           "bundle.stepSecurity": "Security",
-          "bundle.stepReview": "Review",
         },
       },
     },
@@ -29,7 +28,7 @@ async function setupI18n() {
   return i18n;
 }
 
-async function renderProgress(step: 1 | 2 | 3) {
+async function renderProgress(step: 1 | 2) {
   const i18n = await setupI18n();
   const initialState = createInitialState({ step });
   return render(
@@ -42,28 +41,25 @@ async function renderProgress(step: 1 | 2 | 3) {
 }
 
 describe("PipelineProgress", () => {
-  it("renders all three step labels", async () => {
+  it("renders both step labels", async () => {
     await renderProgress(1);
     expect(screen.getByText("Documents")).toBeInTheDocument();
     expect(screen.getByText("Security")).toBeInTheDocument();
-    expect(screen.getByText("Review")).toBeInTheDocument();
   });
 
-  it("shows step 1 as current and steps 2-3 as future", async () => {
+  it("shows step 1 as current and step 2 as future", async () => {
     await renderProgress(1);
     const buttons = screen.getAllByRole("button");
     // Only past steps are clickable; current and future steps are disabled
     expect(buttons[0]).toBeDisabled(); // step 1 current
     expect(buttons[1]).toBeDisabled(); // step 2 future
-    expect(buttons[2]).toBeDisabled(); // step 3 future
   });
 
   it("shows checkmark for completed steps", async () => {
-    await renderProgress(3);
-    // Steps 1 and 2 should show checkmarks (past) as enabled buttons
+    await renderProgress(2);
+    // Step 1 should show checkmark (past) as enabled button
     const buttons = screen.getAllByRole("button");
     expect(buttons[0]).not.toBeDisabled();
-    expect(buttons[1]).not.toBeDisabled();
   });
 
   it("allows clicking on past steps", async () => {
@@ -71,6 +67,5 @@ describe("PipelineProgress", () => {
     // Step 1 is past, should be clickable
     const buttons = screen.getAllByRole("button");
     expect(buttons[0]).not.toBeDisabled(); // Step 1 (past)
-    expect(buttons[2]).toBeDisabled(); // Step 3 (future)
   });
 });

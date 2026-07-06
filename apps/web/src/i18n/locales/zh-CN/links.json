@@ -193,7 +193,6 @@
     "subtitle": "选择多篇文档，统一配置安全策略，生成一个分享链接。",
     "stepDocuments": "选文档",
     "stepSecurity": "设安全",
-    "stepReview": "确认",
     "nextStep": "下一步",
     "prevStep": "上一步",
     "cancel": "取消",

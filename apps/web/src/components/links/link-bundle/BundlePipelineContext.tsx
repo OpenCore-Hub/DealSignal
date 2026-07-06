@@ -83,7 +83,7 @@ export function clearPipelineDraft(): void {
 // ---------------------------------------------------------------------------
 
 export interface BundlePipelineState {
-  step: 1 | 2 | 3;
+  step: 1 | 2;
   mode: "create" | "edit";
   editingLinkId: string | null;
   linkToken: string | null;
@@ -98,7 +98,7 @@ export interface BundlePipelineState {
   // Step 2 — security
   config: PermissionConfig;
 
-  // Step 3 — submission
+  // Submission state
   isSubmitting: boolean;
   generatedLink: string | null;
   copied: boolean;
@@ -110,7 +110,7 @@ export interface BundlePipelineState {
 // ---------------------------------------------------------------------------
 
 export type BundlePipelineAction =
-  | { type: "GO_STEP"; step: 1 | 2 | 3 }
+  | { type: "GO_STEP"; step: 1 | 2 }
   | { type: "INIT_FOR_EDIT"; payload: { linkId: string; token: string; documents: Document[]; selectedDocuments: Document[]; config: PermissionConfig } }
   | { type: "SET_DOCUMENTS"; documents: Document[] }
   | { type: "TOGGLE_DOCUMENT"; document: Document }

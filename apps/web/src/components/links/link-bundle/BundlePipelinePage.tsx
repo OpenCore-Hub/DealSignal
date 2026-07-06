@@ -1,23 +1,33 @@
-import { useEffect, useCallback } from "react";
-import { useParams } from "react-router";
+import { useEffect, useCallback, useState } from "react";
+import { useNavigate, useParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import {
   BundlePipelineProvider,
+  clearPipelineDraft,
   createInitialState,
   useBundlePipeline,
 } from "./BundlePipelineContext";
 import { StepDocuments } from "./StepDocuments";
 import { StepSecurity } from "./StepSecurity";
-import { StepReview } from "./StepReview";
 import {
   classifyPresetFromConfig,
 } from "../smart-link/levelConfig";
 import type { Document, PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
+import { toCreateLinkPayload } from "@/lib/apiAdapters";
 import { toast } from "sonner";
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // ---------------------------------------------------------------------------
 // Inner component (inside provider)
@@ -27,8 +37,13 @@ function BundlePipelineInner() {
   const { state, dispatch } = useBundlePipeline();
   const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const { t } = useTranslation(["links", "common"]);
   const isEdit = !!id;
   const canProceedNav = state.selectedDocuments.length >= 1;
+
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false);
 
   // beforeunload protection for edit mode dirty state
   useEffect(() => {
@@ -175,6 +190,70 @@ function BundlePipelineInner() {
   }, [isEdit, id, dispatch]);
 
   const step = state.step;
+  const { config, selectedDocuments } = state;
+
+  const doSave = useCallback(async () => {
+    dispatch({ type: "SET_SUBMITTING", isSubmitting: true });
+    try {
+      const documentIds = selectedDocuments.map((d) => d.id);
+      const payload = toCreateLinkPayload(documentIds, config);
+
+      if (isEdit && state.editingLinkId) {
+        await api.updateLinkFull(state.editingLinkId, payload);
+        toast.success(t("links:bundle.review.successUpdate"));
+        dispatch({ type: "SET_DIRTY", isDirty: false });
+        navigate(`/${workspaceSlug}/links`);
+      } else {
+        await api.createLink(documentIds, config);
+        clearPipelineDraft();
+        toast.success(t("links:bundle.review.successCreate"));
+        navigate(`/${workspaceSlug}/links`);
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("links:creator.createFailed"));
+    } finally {
+      dispatch({ type: "SET_SUBMITTING", isSubmitting: false });
+    }
+  }, [selectedDocuments, config, isEdit, state.editingLinkId, dispatch, navigate, workspaceSlug]);
+
+  const handleSubmit = useCallback(() => {
+    // Client-side guard: email verification requires at least one contact.
+    if (config.requireEmailVerification && config.contactIds.length === 0) {
+      toast.error(t("links:creator.contactRequired"));
+      return;
+    }
+    // Client-side guard: password cannot be empty.
+    // In edit mode, an empty password means "keep the existing password" —
+    // the backend preserves the old hash. Only block empty passwords in create mode.
+    if (
+      config.passwordEnabled &&
+      (!config.password || config.password.trim() === "") &&
+      !isEdit
+    ) {
+      toast.error(t("links:creator.passwordEmpty"));
+      return;
+    }
+
+    // Client-side guard: whitelist enabled but no entries — the adapter
+    // will silently drop the whitelist and fall back to public access, which
+    // can surprise users who think whitelist gating is active.
+    if (
+      config.whitelistEnabled &&
+      config.whitelist.filter((s) => s.trim().length > 0).length === 0
+    ) {
+      toast.error(t("links:creator.whitelistEmpty"));
+      return;
+    }
+
+    // In edit mode, show a confirmation dialog so the user understands that
+    // the already-distributed link will be updated immediately.
+    if (isEdit) {
+      setShowSaveConfirm(true);
+      return;
+    }
+
+    void doSave();
+  }, [config, isEdit, doSave]);
 
   const handleNavBack = useCallback(() => {
     // In edit mode we intentionally allow free navigation between steps:
@@ -182,15 +261,26 @@ function BundlePipelineInner() {
     // interrupted by a confirmation dialog on every step change. Unsaved edits
     // are still protected by the beforeunload handler when leaving the page.
     if (step > 1) {
-      dispatch({ type: "GO_STEP", step: (step - 1 as 1 | 2 | 3) });
+      dispatch({ type: "GO_STEP", step: (step - 1 as 1 | 2) });
     }
   }, [step, dispatch]);
 
   const handleNavForward = useCallback(() => {
-    if (step < 3 && canProceedNav) {
-      dispatch({ type: "GO_STEP", step: (step + 1 as 1 | 2 | 3) });
+    if (step === 1 && canProceedNav) {
+      dispatch({ type: "GO_STEP", step: 2 });
+      return;
     }
-  }, [step, canProceedNav, dispatch]);
+    if (step === 2) {
+      handleSubmit();
+    }
+  }, [step, canProceedNav, dispatch, handleSubmit]);
+
+  const handleCancel = () => {
+    if (isEdit && state.isDirty) {
+      if (!window.confirm(t("links:bundle.unsavedConfirmDesc"))) return;
+    }
+    navigate(`/${workspaceSlug}/links`);
+  };
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -216,13 +306,13 @@ function BundlePipelineInner() {
         size="icon"
         data-testid="pipeline-nav-forward"
         onClick={handleNavForward}
-        disabled={!canProceedNav}
+        disabled={!canProceedNav || state.isSubmitting}
         className={`absolute right-[-4.25rem] top-1/2 z-50 h-12 w-12 -translate-y-1/2 rounded-full text-muted-foreground hover:bg-muted hover:text-foreground border ${
-          canProceedNav
+          canProceedNav && !state.isSubmitting
             ? "animate-pulse-ring bg-muted text-foreground shadow-lg shadow-muted-foreground/15"
             : ""
         }`}
-        aria-label={step < 3 ? "Next step" : ""}
+        aria-label={step === 1 ? "Next step" : "Create link"}
       >
         <CaretRightIcon size={28} weight="bold" />
       </Button>
@@ -234,9 +324,60 @@ function BundlePipelineInner() {
       >
         {step === 1 && <StepDocuments />}
         {step === 2 && <StepSecurity />}
-        {step === 3 && <StepReview />}
       </motion.div>
+
+      {/* Bottom action buttons on the security step */}
+      {step === 2 && (
+        <div className="flex items-center justify-center gap-3 pt-6">
+          <Button variant="outline" onClick={handleCancel} className="w-28">
+            {t("common:cancel")}
+          </Button>
+          <Button
+            data-testid="pipeline-submit-button"
+            onClick={handleSubmit}
+            disabled={state.isSubmitting}
+            className="relative w-28 overflow-hidden bg-slate-700 text-white hover:bg-slate-600 animate-pulse-ring"
+          >
+            {!state.isSubmitting && (
+              <span className="pointer-events-none absolute inset-0 animate-shimmer bg-[linear-gradient(110deg,transparent_25%,rgba(255,255,255,0.2)_50%,transparent_75%)] bg-[length:200%_100%]" />
+            )}
+            <span className="relative z-10">
+              {state.isSubmitting
+                ? t("links:bundle.review.submitting")
+                : isEdit
+                  ? t("common:save")
+                  : t("common:create")}
+            </span>
+          </Button>
+        </div>
+      )}
     </div>
+
+      {/* Edit-mode save confirmation */}
+      <Dialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
+        <DialogContent showCloseButton={false}>
+          <DialogHeader>
+            <DialogTitle>{t("links:bundle.review.saveConfirmTitle")}</DialogTitle>
+            <DialogDescription>
+              {t("links:bundle.review.saveConfirmDesc")}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowSaveConfirm(false)}>
+              {t("common:cancel")}
+            </Button>
+            <Button
+              onClick={() => {
+                setShowSaveConfirm(false);
+                void doSave();
+              }}
+              disabled={state.isSubmitting}
+            >
+              {state.isSubmitting ? t("links:bundle.review.submitting") : t("links:bundle.review.saveButton")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
