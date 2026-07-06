@@ -14,15 +14,23 @@ type recordingMailer struct {
 	lastLink string
 }
 
-func (m *recordingMailer) SendVerificationEmail(ctx context.Context, to, verificationLink string) error {
+func (m *recordingMailer) SendVerificationEmail(ctx context.Context, to, verificationLink string) (string, error) {
 	m.lastTo = to
 	m.lastLink = verificationLink
-	return nil
+	return "", nil
 }
 
-func (m *recordingMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) error {
+func (m *recordingMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) (string, error) {
 	m.lastTo = to
-	return nil
+	return "", nil
+}
+
+func (m *recordingMailer) SendEmail(ctx context.Context, job mailer.EmailJob) (string, error) {
+	m.lastTo = job.Recipient
+	if job.VerificationLink != "" {
+		m.lastLink = job.VerificationLink
+	}
+	return "", nil
 }
 
 func TestVerifyEmailByTokenInvalid(t *testing.T) {
@@ -85,7 +93,7 @@ func TestVerificationTokenStoreExpires(t *testing.T) {
 
 func TestNoopMailer(t *testing.T) {
 	var m mailer.Mailer = &noopMailer{}
-	if err := m.SendVerificationEmail(context.Background(), "to@example.com", "link"); err != nil {
+	if _, err := m.SendVerificationEmail(context.Background(), "to@example.com", "link"); err != nil {
 		t.Fatalf("noop mailer should never error: %v", err)
 	}
 }

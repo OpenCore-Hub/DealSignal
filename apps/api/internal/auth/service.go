@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	bcryptCost           = 12
-	accessTokenDuration  = 15 * time.Minute
-	refreshTokenDuration = 7 * 24 * time.Hour
-	verificationTokenTTL = 24 * time.Hour
+	bcryptCost                  = 12
+	accessTokenDuration         = 15 * time.Minute
+	refreshTokenDuration        = 7 * 24 * time.Hour
+	defaultVerificationTokenTTL = 24 * time.Hour
 )
 
 var (
@@ -61,11 +61,13 @@ type User struct {
 
 // Service handles user authentication.
 type Service struct {
-	queries     *db.Queries
-	tokenStore  TokenStore
-	verifyStore verificationTokenStore
-	mailer      mailer.Mailer
-	appBaseURL  string
+	queries              *db.Queries
+	tokenStore           TokenStore
+	verifyStore          verificationTokenStore
+	mailer               mailer.Mailer
+	appBaseURL           string
+	verificationTokenTTL time.Duration
+	sendTimeout          time.Duration
 }
 
 // ServiceOption configures the auth service.
@@ -81,13 +83,27 @@ func WithAppBaseURL(url string) ServiceOption {
 	return func(s *Service) { s.appBaseURL = url }
 }
 
+// WithVerificationTokenTTL sets the lifetime of email verification tokens.
+func WithVerificationTokenTTL(ttl time.Duration) ServiceOption {
+	return func(s *Service) { s.verificationTokenTTL = ttl }
+}
+
+// WithSendTimeout caps how long the registration path waits for the
+// verification email to be accepted by the mailer. This prevents a slow or
+// misconfigured provider from blocking user registration.
+func WithSendTimeout(timeout time.Duration) ServiceOption {
+	return func(s *Service) { s.sendTimeout = timeout }
+}
+
 // NewService creates an auth service.
 func NewService(q *db.Queries, store TokenStore, opts ...ServiceOption) *Service {
 	s := &Service{
-		queries:    q,
-		tokenStore: store,
-		mailer:     &noopMailer{},
-		appBaseURL: "http://localhost:8080",
+		queries:              q,
+		tokenStore:           store,
+		mailer:               &noopMailer{},
+		appBaseURL:           "http://localhost:8080",
+		verificationTokenTTL: defaultVerificationTokenTTL,
+		sendTimeout:          30 * time.Second,
 	}
 	if vs, ok := store.(verificationTokenStore); ok {
 		s.verifyStore = vs
@@ -101,12 +117,16 @@ func NewService(q *db.Queries, store TokenStore, opts ...ServiceOption) *Service
 // noopMailer drops verification emails. It is the default when no mailer is configured.
 type noopMailer struct{}
 
-func (n *noopMailer) SendVerificationEmail(ctx context.Context, to, verificationLink string) error {
-	return nil
+func (n *noopMailer) SendVerificationEmail(ctx context.Context, to, verificationLink string) (string, error) {
+	return "", nil
 }
 
-func (n *noopMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) error {
-	return nil
+func (n *noopMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) (string, error) {
+	return "", nil
+}
+
+func (n *noopMailer) SendEmail(ctx context.Context, job mailer.EmailJob) (string, error) {
+	return "", nil
 }
 
 func userFromDB(u db.User) User {
@@ -184,21 +204,10 @@ func (s *Service) Register(ctx context.Context, email, password string) (User, T
 		return User{}, TokenPair{}, fmt.Errorf("store refresh token: %w", err)
 	}
 
-	// Send verification email asynchronously — SMTP round-trips (e.g. Mailtrap)
-	// can take several seconds and should not block the registration response.
-	verifyCtx := context.WithoutCancel(ctx)
-	go func() {
-		defer func() {
-			if r := recover(); r != nil {
-				// The mailer or token store panicked; log and suppress.
-				// Use context.Background() because the original context may
-				// already be cancelled.
-			}
-		}()
-		if err := s.sendVerificationEmail(verifyCtx, uuidToString(u.ID), u.Email); err != nil {
-			// Non-fatal: the user can request a new verification email later.
-		}
-	}()
+	// Send verification email. The configured mailer may be synchronous or
+	// queued; either way a failure here is non-fatal because the user has
+	// already been created and can request a new verification email later.
+	_ = s.sendVerificationEmail(ctx, uuidToString(u.ID), u.Email)
 
 	return userFromDB(u), pair, nil
 }
@@ -311,12 +320,15 @@ func (s *Service) sendVerificationEmail(ctx context.Context, userID, email strin
 	if s.verifyStore == nil || s.mailer == nil {
 		return nil
 	}
-	token, err := s.verifyStore.CreateVerificationToken(ctx, userID, verificationTokenTTL)
+	token, err := s.verifyStore.CreateVerificationToken(ctx, userID, s.verificationTokenTTL)
 	if err != nil {
 		return err
 	}
 	link := fmt.Sprintf("%s/verify-email/%s", strings.TrimRight(s.appBaseURL, "/"), token)
-	return s.mailer.SendVerificationEmail(ctx, email, link)
+	sendCtx, cancel := context.WithTimeout(ctx, s.sendTimeout)
+	defer cancel()
+	_, err = s.mailer.SendVerificationEmail(sendCtx, email, link)
+	return err
 }
 
 // isUniqueViolation is a simple pgx unique-violation check.
