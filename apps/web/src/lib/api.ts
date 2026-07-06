@@ -33,8 +33,11 @@ import type {
 } from "@/types";
 import { request } from "@/lib/apiClient";
 import {
+  toBackendIntegrationStatus,
   toCreateDealRoomPayload,
   toCreateLinkPayload,
+  toIntegrationStatus,
+  type BackendIntegrationStatus,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
 import { useUIStore } from "@/stores/uiStore";
@@ -88,6 +91,26 @@ export interface PublicDealRoomView {
   } | null;
   folders: DealRoomFolder[];
   documents: DealRoomFolderDocs[];
+}
+
+export interface SendMarketingBatchRequest {
+  recipients: string[];
+  subject: string;
+  body?: string;
+  headline?: string;
+  cta_text?: string;
+  cta_url?: string;
+  preview_text?: string;
+  template_variables?: Record<string, string>;
+  track_opens?: boolean;
+  track_clicks?: boolean;
+}
+
+export interface SendMarketingBatchResult {
+  sent: number;
+  failed: number;
+  log_ids: string[];
+  failed_recipients: { email: string; message: string }[];
 }
 
 function publicAccessHeaders(creds?: PublicLinkCredentials): Record<string, string> | undefined {
@@ -241,7 +264,7 @@ export const api = {
 
   accessPublicLink: (token: string, opts?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean; sessionToken?: string }) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; isBundle: boolean };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean };
       documents: { id: string; title: string; pageCount: number; sourceType: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -526,6 +549,18 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  publicAssistantChat: (payload: { message: string; session_id?: string }, sessionToken: string) =>
+    request<{
+      session_id: string;
+      answer: string;
+      evidence?: Evidence[];
+    }>(undefined, "/v1/public/assistant/chat", {
+      method: "POST",
+      body: JSON.stringify(payload),
+      skipAuth: true,
+      headers: { "X-Link-Session": sessionToken },
+    }),
+
   searchDocument: (payload: {
     query: string;
     document_id?: string;
@@ -547,6 +582,12 @@ export const api = {
     request<{ data: WorkspaceInvitation }>(getWorkspaceSlug(), "/invitations", {
       method: "POST",
       body: JSON.stringify({ email, role }),
+    }),
+
+  sendMarketingBatch: (payload: SendMarketingBatchRequest) =>
+    request<{ data: SendMarketingBatchResult }>(getWorkspaceSlug(), "/marketing/send", {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   getWorkspaceSettings: () => request<WorkspaceSettings>(getWorkspaceSlug(), "/settings"),
@@ -571,12 +612,24 @@ export const api = {
 
   getBillingInfo: () => request<BillingInfo>(getWorkspaceSlug(), "/billing"),
 
-  getIntegrations: () => request<IntegrationStatus>(getWorkspaceSlug(), "/integrations/settings"),
-  updateIntegrations: (status: IntegrationStatus) =>
-    request<IntegrationStatus>(getWorkspaceSlug(), "/integrations/settings", {
-      method: "PUT",
-      body: JSON.stringify(status),
-    }),
+  getIntegrations: async () => {
+    const backend = await request<BackendIntegrationStatus>(
+      getWorkspaceSlug(),
+      "/integrations/settings",
+    );
+    return toIntegrationStatus(backend);
+  },
+  updateIntegrations: async (status: IntegrationStatus) => {
+    const backend = await request<BackendIntegrationStatus>(
+      getWorkspaceSlug(),
+      "/integrations/settings",
+      {
+        method: "PUT",
+        body: JSON.stringify(toBackendIntegrationStatus(status)),
+      },
+    );
+    return toIntegrationStatus(backend);
+  },
 
   connectSlack: () =>
     request<{ url: string }>(getWorkspaceSlug(), "/integrations/slack/connect", {

@@ -61,5 +61,20 @@
     "created": "联系人已创建。",
     "createFailed": "创建联系人失败。",
     "create": "创建联系人"
+  },
+  "marketingBatch": {
+    "trigger": "批量发邮件",
+    "title": "批量营销邮件",
+    "description": "向当前 {{count}} 位联系人发送营销邮件。",
+    "subject": "邮件主题",
+    "subjectPlaceholder": "输入主题",
+    "body": "邮件正文",
+    "bodyPlaceholder": "输入邮件正文（支持 HTML 或纯文本）",
+    "trackOpens": "追踪打开",
+    "trackClicks": "追踪点击",
+    "send": "发送",
+    "sending": "发送中...",
+    "result": "已发送 {{sent}} 封，失败 {{failed}} 封",
+    "error": "发送失败，请重试。"
   }
 }

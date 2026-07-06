@@ -339,6 +339,7 @@ export interface BillingInfo {
 }
 
 export interface IntegrationStatus {
+  emailEnabled: boolean;
   slack: boolean;
   hubspot: boolean;
   zapier: boolean;

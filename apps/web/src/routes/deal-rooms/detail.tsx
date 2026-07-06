@@ -71,8 +71,9 @@ export function DealRoomDetailPage() {
   // Cleanup all progress intervals on unmount to prevent state updates on
   // unmounted component.
   useEffect(() => {
+    const intervals = activeIntervalsRef.current;
     return () => {
-      for (const id of activeIntervalsRef.current) {
+      for (const id of intervals) {
         clearInterval(id);
       }
     };

@@ -9,7 +9,8 @@ export function buildConfigFromPreset(
   // Strip level/isCustomized from overrides to prevent callers from accidentally
   // reverting a preset's identity (e.g., passing { level: "public" } would break
   // the preset classifier).
-  const { level: _, isCustomized: __, ...safeOverrides } = overrides ?? {};
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { level, isCustomized, ...safeOverrides } = overrides ?? {};
   return {
     level: preset,
     isCustomized: preset === "customized",

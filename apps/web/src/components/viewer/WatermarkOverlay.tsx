@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 export interface WatermarkInfo {
@@ -25,11 +25,11 @@ function formatTimestamp(date: Date): string {
 
 export function WatermarkOverlay({ watermark, tiled = true, className }: WatermarkOverlayProps) {
   // Capture the mount-time timestamp once (ms precision) and never update.
-  const mountedAt = useRef(formatTimestamp(new Date()));
+  const [mountedAt] = useState(() => formatTimestamp(new Date()));
 
   if (!watermark) return null;
 
-  const text = [watermark.email, mountedAt.current].filter(Boolean).join(" · ") || "CONFIDENTIAL";
+  const text = [watermark.email, mountedAt].filter(Boolean).join(" · ") || "CONFIDENTIAL";
 
   if (tiled) {
     return (

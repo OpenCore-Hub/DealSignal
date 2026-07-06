@@ -1,4 +1,4 @@
-import type { PermissionConfig } from "@/types";
+import type { IntegrationStatus, PermissionConfig } from "@/types";
 
 export interface CreateLinkPayload {
   document_ids: string[];
@@ -140,5 +140,39 @@ export function toCreateDealRoomPayload(
       : undefined,
     requires_nda: input.ndaEnabled,
     requires_approval: input.requiresApproval,
+  };
+}
+
+// Backend integration settings shape (snake_case, *_connected flags).
+export interface BackendIntegrationStatus {
+  workspace_id?: string;
+  email_enabled?: boolean;
+  slack_webhook_url?: string;
+  slack_connected?: boolean;
+  hubspot_connected?: boolean;
+  salesforce_connected?: boolean;
+  updated_at?: string;
+}
+
+export function toIntegrationStatus(
+  backend: BackendIntegrationStatus,
+): IntegrationStatus {
+  return {
+    emailEnabled: backend.email_enabled ?? true,
+    slack: backend.slack_connected ?? false,
+    hubspot: backend.hubspot_connected ?? false,
+    // Zapier is not yet supported by the backend; keep it as a UI placeholder.
+    zapier: false,
+  };
+}
+
+export function toBackendIntegrationStatus(
+  status: IntegrationStatus,
+): BackendIntegrationStatus {
+  return {
+    email_enabled: status.emailEnabled,
+    slack_connected: status.slack,
+    hubspot_connected: status.hubspot,
+    // Zapier state is local-only until backend support is added.
   };
 }

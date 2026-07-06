@@ -68,7 +68,11 @@
     "comingSoon": "This integration is coming soon",
     "slackDescription": "Push heat alerts to a Slack channel",
     "hubspotDescription": "Sync contacts and access events to CRM",
-    "zapierDescription": "Trigger automated workflows"
+    "zapierDescription": "Trigger automated workflows",
+    "emailNotifications": "Email notifications",
+    "emailNotificationsDescription": "Receive email alerts when your shared links show high intent",
+    "emailNotificationsSaved": "Email notification preference saved",
+    "emailNotificationsSaveFailed": "Failed to save email notification preference"
   },
   "billing": {
     "title": "Subscription & Usage",

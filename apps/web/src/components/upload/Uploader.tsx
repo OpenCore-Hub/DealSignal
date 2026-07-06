@@ -31,8 +31,9 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
 
   // Cleanup all progress intervals on unmount.
   useEffect(() => {
+    const intervals = activeIntervalsRef.current;
     return () => {
-      for (const id of activeIntervalsRef.current) {
+      for (const id of intervals) {
         clearInterval(id);
       }
     };
@@ -146,7 +147,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
           );
         });
     },
-    [uploadingIds, onUploadComplete]
+    [uploadingIds, onUploadComplete, category]
   );
 
   // Upload all pending files

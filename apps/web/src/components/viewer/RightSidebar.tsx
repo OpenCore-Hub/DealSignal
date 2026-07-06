@@ -17,6 +17,8 @@ interface RightSidebarProps {
   selectedDocIndex?: number;
   onSelectDoc?: (index: number) => void;
   activeDocumentId?: string;
+  aiCopilotEnabled?: boolean;
+  publicSessionToken?: string;
 }
 
 export function RightSidebar({
@@ -26,9 +28,12 @@ export function RightSidebar({
   selectedDocIndex = 0,
   onSelectDoc,
   activeDocumentId,
+  aiCopilotEnabled,
+  publicSessionToken,
 }: RightSidebarProps) {
   const { t } = useTranslation(["documents", "ai"]);
   const [activeTab, setActiveTab] = useState<"documents" | "ai">("documents");
+  const showDocuments = activeTab === "documents" || !aiCopilotEnabled;
 
   return (
     <AnimatePresence>
@@ -55,18 +60,20 @@ export function RightSidebar({
               <FileText size={14} />
               {t("documents:viewer.sidebarDocuments")}
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("ai")}
-              className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
-                activeTab === "ai"
-                  ? "border-primary text-primary"
-                  : "border-transparent text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Robot size={14} />
-              {t("documents:viewer.sidebarAI")}
-            </button>
+            {aiCopilotEnabled && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("ai")}
+                className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
+                  activeTab === "ai"
+                    ? "border-primary text-primary"
+                    : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                <Robot size={14} />
+                {t("documents:viewer.sidebarAI")}
+              </button>
+            )}
             <button
               type="button"
               onClick={onClose}
@@ -79,7 +86,7 @@ export function RightSidebar({
 
           {/* Content */}
           <div className="flex-1 overflow-hidden">
-            {activeTab === "documents" ? (
+            {showDocuments ? (
               <div className="h-full overflow-y-auto py-1">
                 {(!documents || documents.length === 0) ? (
                   <p className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -120,7 +127,7 @@ export function RightSidebar({
                 )}
               </div>
             ) : (
-              <SidebarAIChat documentId={activeDocumentId} />
+              <SidebarAIChat documentId={activeDocumentId} publicSessionToken={publicSessionToken} />
             )}
           </div>
         </motion.aside>

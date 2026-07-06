@@ -12,8 +12,9 @@ import { toast } from "sonner";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getIntegrationsMock, connectSlackMock, disconnectHubSpotMock } = vi.hoisted(() => ({
+const { getIntegrationsMock, updateIntegrationsMock, connectSlackMock, disconnectHubSpotMock } = vi.hoisted(() => ({
   getIntegrationsMock: vi.fn(),
+  updateIntegrationsMock: vi.fn(),
   connectSlackMock: vi.fn(),
   disconnectHubSpotMock: vi.fn(),
 }));
@@ -21,6 +22,7 @@ const { getIntegrationsMock, connectSlackMock, disconnectHubSpotMock } = vi.hois
 vi.mock("@/lib/api", () => ({
   api: {
     getIntegrations: getIntegrationsMock,
+    updateIntegrations: updateIntegrationsMock,
     connectSlack: connectSlackMock,
     connectHubSpot: vi.fn(),
     disconnectSlack: vi.fn(),
@@ -37,6 +39,7 @@ vi.mock("sonner", () => ({
 }));
 
 const mockStatus = {
+  emailEnabled: true,
   slack: false,
   hubspot: true,
   zapier: false,
@@ -78,6 +81,7 @@ async function renderPage(initialEntry = "/acme/settings/integrations") {
 describe("SettingsIntegrationsPage", () => {
   beforeEach(() => {
     getIntegrationsMock.mockReset();
+    updateIntegrationsMock.mockReset();
     connectSlackMock.mockReset();
     disconnectHubSpotMock.mockReset();
     vi.mocked(toast.success).mockClear();
@@ -143,5 +147,34 @@ describe("SettingsIntegrationsPage", () => {
       expect(toast.success).toHaveBeenCalled();
     });
     expect(getIntegrationsMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("renders email notification toggle", async () => {
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Email notifications")).toBeInTheDocument();
+    });
+  });
+
+  it("toggles email notifications and saves preference", async () => {
+    updateIntegrationsMock.mockResolvedValue({ ...mockStatus, emailEnabled: false });
+
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Email notifications")).toBeInTheDocument();
+    });
+
+    const toggle = screen.getByRole("switch", { name: /email notifications/i });
+    fireEvent.click(toggle);
+
+    await waitFor(() => {
+      expect(updateIntegrationsMock).toHaveBeenCalledWith({
+        ...mockStatus,
+        emailEnabled: false,
+      });
+    });
+    expect(toast.success).toHaveBeenCalledWith("Email notification preference saved");
   });
 });

@@ -248,7 +248,7 @@ describe("Preset round-trip consistency", () => {
 import { createInitialState, type BundlePipelineState, type BundlePipelineAction } from "./BundlePipelineContext";
 
 function applyReducer(initial: BundlePipelineState, action: BundlePipelineAction): BundlePipelineState {
-  let state = { ...initial };
+  const state = { ...initial };
   switch (action.type) {
     case "INIT_FOR_EDIT": {
       const { linkId, token, documents, selectedDocuments, config } = action.payload;

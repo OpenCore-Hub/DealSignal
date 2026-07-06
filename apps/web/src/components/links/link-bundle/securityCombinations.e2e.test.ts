@@ -80,10 +80,10 @@ function normalizeAndStoreConfig(
 ): StoreResult {
   // --- 复刻 normalizeSecurityConfig ---
   let requireEmail = payload.require_email_verification ?? false;
-  let requirePwd = payload.require_password ?? false;
-  let requireNda = payload.require_nda ?? false;
-  let emails = payload.allowed_emails ?? [];
-  let domains = payload.allowed_domains ?? [];
+  const requirePwd = payload.require_password ?? false;
+  const requireNda = payload.require_nda ?? false;
+  const emails = payload.allowed_emails ?? [];
+  const domains = payload.allowed_domains ?? [];
 
   // Whitelist 和 NDA 强制开启 email verification
   if (!requireEmail && (emails.length > 0 || domains.length > 0 || requireNda)) {

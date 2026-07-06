@@ -62,5 +62,20 @@
     "created": "Contact created.",
     "createFailed": "Failed to create contact.",
     "create": "Create Contact"
+  },
+  "marketingBatch": {
+    "trigger": "Bulk email",
+    "title": "Bulk marketing email",
+    "description": "Send a marketing email to {{count}} contacts.",
+    "subject": "Subject",
+    "subjectPlaceholder": "Enter subject",
+    "body": "Body",
+    "bodyPlaceholder": "Enter email body (HTML or plain text)",
+    "trackOpens": "Track opens",
+    "trackClicks": "Track clicks",
+    "send": "Send",
+    "sending": "Sending...",
+    "result": "Sent {{sent}}, failed {{failed}}",
+    "error": "Failed to send, please try again."
   }
 }

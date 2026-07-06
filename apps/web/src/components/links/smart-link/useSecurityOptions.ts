@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import type { PermissionConfig } from "@/types";
 import { enforceCrossOptionConstraints } from "./levelConfig";
 
@@ -24,10 +24,12 @@ export function useSecurityOptions(
   onChange: (config: PermissionConfig) => void,
 ) {
   const configRef = useRef(config);
-  configRef.current = config;
-
   const onChangeRef = useRef(onChange);
-  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    configRef.current = config;
+    onChangeRef.current = onChange;
+  }, [config, onChange]);
 
   const invalidWhitelistEmails = useMemo(() => {
     return config.whitelist.filter((entry) => !isValidEmail(entry));

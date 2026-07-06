@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { toCreateLinkPayload } from "@/lib/apiAdapters";
+import {
+  toCreateLinkPayload,
+  toIntegrationStatus,
+  toBackendIntegrationStatus,
+} from "@/lib/apiAdapters";
 import { buildConfigFromPreset } from "@/components/links/link-bundle/pipelineUtils";
 import type { PermissionConfig } from "@/types";
 
@@ -146,5 +150,49 @@ describe("toCreateLinkPayload", () => {
     };
     const payload = toCreateLinkPayload(["doc-1"], config);
     expect(payload.require_email_verification).toBe(true);
+  });
+});
+
+
+
+describe("integration status adapters", () => {
+  it("maps backend integration status to frontend shape", () => {
+    const backend = {
+      workspace_id: "ws-1",
+      email_enabled: false,
+      slack_connected: true,
+      hubspot_connected: false,
+      salesforce_connected: true,
+      updated_at: "2026-07-05T00:00:00Z",
+    };
+    expect(toIntegrationStatus(backend)).toEqual({
+      emailEnabled: false,
+      slack: true,
+      hubspot: false,
+      zapier: false,
+    });
+  });
+
+  it("defaults emailEnabled to true when backend field is missing", () => {
+    expect(toIntegrationStatus({})).toEqual({
+      emailEnabled: true,
+      slack: false,
+      hubspot: false,
+      zapier: false,
+    });
+  });
+
+  it("maps frontend integration status to backend shape", () => {
+    const frontend = {
+      emailEnabled: true,
+      slack: false,
+      hubspot: true,
+      zapier: false,
+    };
+    expect(toBackendIntegrationStatus(frontend)).toEqual({
+      email_enabled: true,
+      slack_connected: false,
+      hubspot_connected: true,
+    });
   });
 });

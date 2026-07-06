@@ -21,7 +21,7 @@ interface PublicDocumentSummary {
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; isBundle: boolean };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -72,6 +72,7 @@ export function PublicViewerPage() {
     try {
       const res = await api.accessPublicLink(token, gateParams);
       setAccess(res);
+      setSelectedDocIndex(0);
       setAccessCredentials({
         email: gateParams?.email,
         emailCode: gateParams?.emailCode,
@@ -146,14 +147,9 @@ export function PublicViewerPage() {
         return;
       }
     }
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+     
     void tryAccess();
   }, [token, tryAccess, sessionKey]);
-
-  // Reset selected document index when the document list changes (e.g. re-access).
-  useEffect(() => {
-    setSelectedDocIndex(0);
-  }, [access?.documents]);
 
   // Sliding session: when the backend returns X-Link-Session-Refresh on any
   // API response (page signed-URL, download-URL, etc.), update sessionStorage
@@ -352,6 +348,8 @@ export function PublicViewerPage() {
             selectedDocIndex={selectedDocIndex}
             onSelectDoc={setSelectedDocIndex}
             activeDocumentId={selectedDoc?.id}
+            aiCopilotEnabled={access.link.aiCopilotEnabled}
+            publicSessionToken={accessCredentials.sessionToken}
           />
         }
       />

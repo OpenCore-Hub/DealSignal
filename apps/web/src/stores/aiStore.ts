@@ -13,6 +13,7 @@ const I18N_KEYS = {
 interface ChatContext {
   documentId?: string;
   pageNumber?: number;
+  publicSessionToken?: string;
 }
 
 interface AIState {
@@ -82,7 +83,20 @@ export const useAIStore = create<AIState>((set, get) => ({
     try {
       let assistantMessage: ChatMessage;
 
-      if (context?.documentId) {
+      if (context?.publicSessionToken) {
+        const res = await api.publicAssistantChat(
+          { message: content, session_id: get().sessionId ?? undefined },
+          context.publicSessionToken
+        );
+        assistantMessage = {
+          id: `a_${Date.now()}`,
+          role: "assistant",
+          content: res.answer,
+          evidences: res.evidence,
+          createdAt: new Date().toISOString(),
+        };
+        set({ sessionId: res.session_id });
+      } else if (context?.documentId) {
         const res = await api.searchDocument({
           query: content,
           document_id: context.documentId,

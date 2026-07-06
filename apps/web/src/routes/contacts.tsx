@@ -13,6 +13,7 @@ import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useTranslation } from "react-i18next";
 import type { Contact } from "@/types";
+import { MarketingBatchDialog } from "@/components/marketing/MarketingBatchDialog";
 
 export type { Contact };
 
@@ -43,7 +44,10 @@ export function ContactsPage() {
 
   return (
     <div className="space-y-6">
-      <PageHeader title={t("page.title")} description={t("page.description")} />
+      <div className="flex items-start justify-between gap-4">
+        <PageHeader title={t("page.title")} description={t("page.description")} />
+        <MarketingBatchDialog contacts={contacts ?? []} />
+      </div>
 
       <div className="relative max-w-sm">
         <MagnifyingGlass

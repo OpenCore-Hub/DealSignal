@@ -25,9 +25,10 @@ function EvidenceCard({ evidence }: { evidence: Evidence }) {
 
 interface SidebarAIChatProps {
   documentId?: string;
+  publicSessionToken?: string;
 }
 
-export function SidebarAIChat({ documentId }: SidebarAIChatProps) {
+export function SidebarAIChat({ documentId, publicSessionToken }: SidebarAIChatProps) {
   const { t } = useTranslation("ai");
   const { messages, pending, sendMessage } = useAIStore();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -44,7 +45,7 @@ export function SidebarAIChat({ documentId }: SidebarAIChatProps) {
     const formData = new FormData(form);
     const content = String(formData.get("message") || "").trim();
     if (!content || pending) return;
-    sendMessage(content, { documentId });
+    sendMessage(content, { documentId, publicSessionToken });
     form.reset();
   };
 

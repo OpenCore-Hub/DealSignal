@@ -68,7 +68,11 @@
     "comingSoon": "该集成即将上线",
     "slackDescription": "热度提醒推送到 Slack 频道",
     "hubspotDescription": "同步联系人、访问事件到 CRM",
-    "zapierDescription": "自动化工作流触发"
+    "zapierDescription": "自动化工作流触发",
+    "emailNotifications": "邮件通知",
+    "emailNotificationsDescription": "当分享的链接出现高意图行为时接收邮件提醒",
+    "emailNotificationsSaved": "邮件通知偏好已保存",
+    "emailNotificationsSaveFailed": "保存邮件通知偏好失败"
   },
   "billing": {
     "title": "订阅与用量",

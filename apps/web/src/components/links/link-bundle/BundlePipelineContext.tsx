@@ -35,6 +35,7 @@ interface PipelineDraft {
   config: PermissionConfig;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function saveDraft(state: BundlePipelineState): void {
   try {
     const draft: PipelineDraft = {
@@ -47,6 +48,7 @@ export function saveDraft(state: BundlePipelineState): void {
   } catch { /* ignore quota errors */ }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function loadDraft(): PipelineDraft | null {
   try {
     const raw = localStorage.getItem(DRAFT_KEY);
@@ -69,6 +71,7 @@ function saveEditDraft(linkId: string, state: BundlePipelineState): void {
   } catch { /* ignore */ }
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function clearPipelineDraft(): void {
   try {
     localStorage.removeItem(DRAFT_KEY);
@@ -133,6 +136,7 @@ function markDirty(state: BundlePipelineState): Pick<BundlePipelineState, "isDir
   return { isDirty: state.mode === "edit" ? true : state.isDirty };
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function pipelineReducer(state: BundlePipelineState, action: BundlePipelineAction): BundlePipelineState {
   switch (action.type) {
     case "GO_STEP":

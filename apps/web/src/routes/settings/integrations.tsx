@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
-import { Plug, CloudArrowUp, Database } from "@phosphor-icons/react";
+import { Plug, CloudArrowUp, Database, Envelope } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Switch } from "@/components/ui/switch";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
@@ -22,8 +23,23 @@ export function SettingsIntegrationsPage() {
     { id: "zapier" as const, name: "Zapier", description: t("integrations.zapierDescription"), icon: Plug },
   ];
 
+  const toggleEmailNotifications = async () => {
+    if (!status) return;
+    setSavingEmail(true);
+    try {
+      await api.updateIntegrations({ ...status, emailEnabled: !status.emailEnabled });
+      toast.success(t("integrations.emailNotificationsSaved"));
+      refetch();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("integrations.emailNotificationsSaveFailed"));
+    } finally {
+      setSavingEmail(false);
+    }
+  };
+
   const { data: status, loading, error, refetch } = useAsyncData(() => api.getIntegrations(), []);
   const [connecting, setConnecting] = useState<Provider | null>(null);
+  const [savingEmail, setSavingEmail] = useState(false);
 
   useEffect(() => {
     const provider = searchParams.get("provider") as Provider | null;
@@ -110,6 +126,23 @@ export function SettingsIntegrationsPage() {
         </CardHeader>
         <CardContent>
           <ul className="divide-y divide-border">
+            <li className="flex items-center justify-between py-4">
+              <div className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-md bg-muted">
+                  <Envelope size={20} className="text-muted-foreground" />
+                </div>
+                <div>
+                  <p className="text-sm font-medium">{t("integrations.emailNotifications")}</p>
+                  <p className="text-caption text-muted-foreground">{t("integrations.emailNotificationsDescription")}</p>
+                </div>
+              </div>
+              <Switch
+                checked={status?.emailEnabled ?? true}
+                disabled={savingEmail || loading}
+                onCheckedChange={toggleEmailNotifications}
+                aria-label={t("integrations.emailNotifications")}
+              />
+            </li>
             {integrationsConfig.map((integration) => {
               const connected = status[integration.id];
               return (
