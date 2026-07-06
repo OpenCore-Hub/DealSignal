@@ -39,14 +39,14 @@ type SecuritySettings struct {
 
 // Billing is the public view of workspace billing usage.
 type Billing struct {
-	Plan        string `json:"plan"`
-	Period      string `json:"period"`
-	StorageUsed int64  `json:"storage_used"`
-	StorageLimit int64 `json:"storage_limit"`
-	LinksUsed   int64  `json:"links_used"`
-	LinksLimit  int64  `json:"links_limit"`
-	RoomsUsed   int64  `json:"rooms_used"`
-	RoomsLimit  int64  `json:"rooms_limit"`
+	Plan         string `json:"plan"`
+	Period       string `json:"period"`
+	StorageUsed  int64  `json:"storage_used"`
+	StorageLimit int64  `json:"storage_limit"`
+	LinksUsed    int64  `json:"links_used"`
+	LinksLimit   int64  `json:"links_limit"`
+	RoomsUsed    int64  `json:"rooms_used"`
+	RoomsLimit   int64  `json:"rooms_limit"`
 }
 
 // ListMembers returns workspace members with basic profile info.

@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -60,6 +61,14 @@ func (c *Client) Close() error {
 // RDB exposes the underlying go-redis client for advanced usage.
 func (c *Client) RDB() *redis.Client {
 	return c.rdb
+}
+
+// SetNX sets a key only if it does not exist, with a TTL.
+func (c *Client) SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {
+	if c == nil || c.rdb == nil {
+		return false, errors.New("redis client not available")
+	}
+	return c.rdb.SetNX(ctx, key, value, ttl).Result()
 }
 
 // BlocklistToken stores a token hash with its remaining TTL.

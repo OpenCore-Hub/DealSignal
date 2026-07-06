@@ -9,6 +9,7 @@ import (
 	"sort"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pgvector/pgvector-go"
 )
@@ -84,6 +85,40 @@ func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query str
 	return rrfFuse(topK, vectorResults, textResults, trigramResults), nil
 }
 
+// SearchInDocuments retrieves evidence restricted to a specific set of documents.
+// It is used by public AI Copilot so that anonymous users cannot access chunks
+// outside the link they were invited to view.
+func (s *Service) SearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []uuid.UUID, query string, topK int) ([]Evidence, error) {
+	if topK <= 0 {
+		topK = defaultTopK
+	}
+	if topK > maxTopK {
+		topK = maxTopK
+	}
+
+	pgDocIDs := make([]pgtype.UUID, 0, len(documentIDs))
+	for _, id := range documentIDs {
+		pgDocIDs = append(pgDocIDs, pgtype.UUID{Bytes: id, Valid: true})
+	}
+
+	vectorResults, err := s.vectorSearchInDocuments(ctx, workspaceID, pgDocIDs, query, topK)
+	if err != nil {
+		return nil, fmt.Errorf("vector search: %w", err)
+	}
+
+	textResults, err := s.textSearchInDocuments(ctx, workspaceID, pgDocIDs, query, topK)
+	if err != nil {
+		return nil, fmt.Errorf("full-text search: %w", err)
+	}
+
+	trigramResults, err := s.trigramSearchInDocuments(ctx, workspaceID, pgDocIDs, query, topK)
+	if err != nil {
+		return nil, fmt.Errorf("trigram search: %w", err)
+	}
+
+	return rrfFuse(topK, vectorResults, textResults, trigramResults), nil
+}
+
 // rankedEvidence holds an evidence item and its rank within a single strategy.
 type rankedEvidence struct {
 	evidence Evidence
@@ -119,11 +154,61 @@ func (s *Service) vectorSearch(ctx context.Context, workspaceID pgtype.UUID, que
 	return out, nil
 }
 
+func (s *Service) vectorSearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
+	if s.embedder == nil {
+		return nil, nil
+	}
+
+	vec, err := s.embedder.Embed(ctx, query)
+	if err != nil {
+		log.Printf(`{"level":"warn","component":"search","message":"vector embed failed, skipping vector search: %s"}`, err.Error())
+		return nil, nil
+	}
+
+	rows, err := s.queries.SearchChunksByVectorInDocuments(ctx, db.SearchChunksByVectorInDocumentsParams{
+		WorkspaceID: workspaceID,
+		Limit:       int32(topK),
+		Embedding:   pgvector.NewVector(vec),
+		DocumentIds: documentIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]rankedEvidence, 0, len(rows))
+	for i, r := range rows {
+		ev := rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox)
+		ev.MatchType = "vector"
+		out = append(out, rankedEvidence{evidence: ev, rank: i + 1})
+	}
+	return out, nil
+}
+
 func (s *Service) textSearch(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
 	rows, err := s.queries.SearchChunksByText(ctx, db.SearchChunksByTextParams{
 		WorkspaceID: workspaceID,
 		Limit:       int32(topK),
 		Query:       query,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]rankedEvidence, 0, len(rows))
+	for i, r := range rows {
+		ev := rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox)
+		ev.MatchType = "fulltext"
+		out = append(out, rankedEvidence{evidence: ev, rank: i + 1})
+	}
+	return out, nil
+}
+
+func (s *Service) textSearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
+	rows, err := s.queries.SearchChunksByTextInDocuments(ctx, db.SearchChunksByTextInDocumentsParams{
+		WorkspaceID: workspaceID,
+		Limit:       int32(topK),
+		Query:       query,
+		DocumentIds: documentIDs,
 	})
 	if err != nil {
 		return nil, err
@@ -148,6 +233,31 @@ func (s *Service) trigramSearch(ctx context.Context, workspaceID pgtype.UUID, qu
 		WorkspaceID: workspaceID,
 		Limit:       int32(topK),
 		Query:       normalizedQuery,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]rankedEvidence, 0, len(rows))
+	for i, r := range rows {
+		ev := rowToEvidence(r.ID, r.DocumentID, r.PageNumber, r.Text, r.Bbox)
+		ev.MatchType = "exact"
+		out = append(out, rankedEvidence{evidence: ev, rank: i + 1})
+	}
+	return out, nil
+}
+
+func (s *Service) trigramSearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []pgtype.UUID, query string, topK int) ([]rankedEvidence, error) {
+	normalizedQuery := normalizeQuery(query)
+	if normalizedQuery == "" {
+		return nil, nil
+	}
+
+	rows, err := s.queries.SearchChunksByTrigramInDocuments(ctx, db.SearchChunksByTrigramInDocumentsParams{
+		WorkspaceID: workspaceID,
+		Limit:       int32(topK),
+		Query:       normalizedQuery,
+		DocumentIds: documentIDs,
 	})
 	if err != nil {
 		return nil, err

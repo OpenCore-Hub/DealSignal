@@ -6,41 +6,59 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/smtp"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Notification is the public view of a queued notification.
 type Notification struct {
-	ID        string `json:"id"`
+	ID          string `json:"id"`
 	WorkspaceID string `json:"workspace_id"`
-	UserID    string `json:"user_id,omitempty"`
-	Channel   string `json:"channel"`
-	Subject   string `json:"subject"`
-	Body      string `json:"body"`
-	Status    string `json:"status"`
-	Attempts  int32  `json:"attempts"`
-	CreatedAt string `json:"created_at"`
+	UserID      string `json:"user_id,omitempty"`
+	Channel     string `json:"channel"`
+	Subject     string `json:"subject"`
+	Body        string `json:"body"`
+	Status      string `json:"status"`
+	Attempts    int32  `json:"attempts"`
+	CreatedAt   string `json:"created_at"`
+}
+
+// Querier is the set of database operations required by the notification service.
+type Querier interface {
+	CreateNotification(ctx context.Context, arg db.CreateNotificationParams) (db.Notification, error)
+	ListPendingNotifications(ctx context.Context) ([]db.Notification, error)
+	MarkNotificationFailed(ctx context.Context, arg db.MarkNotificationFailedParams) error
+	MarkNotificationSent(ctx context.Context, id pgtype.UUID) error
+	GetNotificationSettings(ctx context.Context, workspaceID pgtype.UUID) (db.NotificationSetting, error)
+	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
 }
 
 // Service enqueues and sends notifications.
 type Service struct {
-	queries *db.Queries
+	queries Querier
+	mailer  mailer.Mailer
 	cfg     *config.Config
 }
 
 // NewService creates a notification service.
-func NewService(q *db.Queries, cfg *config.Config) *Service {
-	return &Service{queries: q, cfg: cfg}
+func NewService(q Querier, m mailer.Mailer, cfg *config.Config) *Service {
+	return &Service{queries: q, mailer: m, cfg: cfg}
 }
 
 // Enqueue creates a pending notification.
+//
+// Email notifications are sent immediately through the shared mailer abstraction
+// so they participate in email_logs, retries, and dead-letter handling. Slack
+// notifications are persisted to the notifications table and processed by the
+// notification worker.
 func (s *Service) Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) (Notification, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
@@ -53,6 +71,21 @@ func (s *Service) Enqueue(ctx context.Context, workspaceID, userID, channel, sub
 			return Notification{}, err
 		}
 	}
+
+	if channel == "email" {
+		if err := s.sendEmail(ctx, wsUUID, userUUID, subject, body); err != nil {
+			return Notification{}, err
+		}
+		return Notification{
+			WorkspaceID: workspaceID,
+			UserID:      userID,
+			Channel:     channel,
+			Subject:     subject,
+			Body:        body,
+			Status:      "sent",
+		}, nil
+	}
+
 	row, err := s.queries.CreateNotification(ctx, db.CreateNotificationParams{
 		WorkspaceID: wsUUID,
 		UserID:      userUUID,
@@ -87,8 +120,6 @@ func (s *Service) SendPending(ctx context.Context) error {
 
 func (s *Service) sendOne(ctx context.Context, n db.Notification) error {
 	switch n.Channel {
-	case "email":
-		return s.sendEmail(ctx, n)
 	case "slack":
 		return s.sendSlack(ctx, n)
 	default:
@@ -96,21 +127,46 @@ func (s *Service) sendOne(ctx context.Context, n db.Notification) error {
 	}
 }
 
-func (s *Service) sendEmail(_ context.Context, n db.Notification) error {
-	if s.cfg.SMTPHost == "" || s.cfg.SMTPUser == "" || s.cfg.SMTPPass == "" {
-		return errors.New("email provider not configured")
+func (s *Service) sendEmail(ctx context.Context, workspaceID, userID pgtype.UUID, subject, body string) error {
+	// Respect workspace email notification preference. Default to enabled when
+	// settings have not been explicitly configured.
+	settings, err := s.queries.GetNotificationSettings(ctx, workspaceID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return fmt.Errorf("failed to load notification settings: %w", err)
 	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		settings.EmailEnabled = true
+	}
+	if !settings.EmailEnabled {
+		return errors.New("email notifications disabled for workspace")
+	}
+
+	// Resolve recipient: prefer the link creator's user email.
 	to := s.cfg.SMTPUser
-	if n.UserID.Valid {
-		// In production this would lookup the user's email.
-		to = s.cfg.SMTPUser
+	if userID.Valid {
+		user, err := s.queries.GetUserByID(ctx, userID)
+		if err != nil {
+			return fmt.Errorf("failed to resolve notification recipient: %w", err)
+		}
+		if user.Email != "" {
+			to = user.Email
+		}
 	}
-	msg := []byte("To: " + to + "\r\n" +
-		"Subject: " + n.Subject + "\r\n" +
-		"\r\n" + n.Body + "\r\n")
-	addr := s.cfg.SMTPHost + ":" + s.cfg.SMTPPort
-	auth := smtp.PlainAuth("", s.cfg.SMTPUser, s.cfg.SMTPPass, s.cfg.SMTPHost)
-	return smtp.SendMail(addr, auth, s.cfg.SMTPFrom, []string{to}, msg)
+
+	wsID := ""
+	if workspaceID.Valid {
+		wsID = uuid.UUID(workspaceID.Bytes).String()
+	}
+	_, err = s.mailer.SendEmail(ctx, mailer.EmailJob{
+		EmailType:    mailer.EmailTypeCustom,
+		Recipient:    to,
+		Subject:      subject,
+		Body:         body,
+		TemplateName: "raw",
+		WorkspaceID:  wsID,
+		Locale:       locale.Normalize(locale.FromContext(ctx)),
+	})
+	return err
 }
 
 func (s *Service) sendSlack(ctx context.Context, n db.Notification) error {

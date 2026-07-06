@@ -120,6 +120,7 @@ type fakeDB struct {
 	t           *testing.T
 	memberRole  string
 	actorUserID string
+	actorEmail  string
 	listRows    []db.ListWorkspacesByUserRow
 
 	tenant       db.Tenant
@@ -240,6 +241,19 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 
 	case strings.Contains(sqlLower, "sum(d.file_size)"):
 		return fakeRow{values: []interface{}{f.storageUsage}}
+
+	case strings.Contains(sqlLower, "from users") && strings.Contains(sqlLower, "where id = $1 limit"):
+		email := f.actorEmail
+		if email == "" {
+			email = "actor@example.test"
+		}
+		return fakeRow{values: []interface{}{db.User{
+			ID:            argUUID(args, 0),
+			Email:         email,
+			PasswordHash:  "",
+			CreatedAt:     now,
+			EmailVerified: true,
+		}}}
 	}
 
 	return fakeRow{err: errors.New("unexpected query")}
@@ -276,9 +290,9 @@ type fakeTx struct {
 	*fakeDB
 }
 
-func (ft *fakeTx) Begin(ctx context.Context) (pgx.Tx, error)           { return ft, nil }
-func (ft *fakeTx) Commit(ctx context.Context) error                    { return nil }
-func (ft *fakeTx) Rollback(ctx context.Context) error                  { return nil }
+func (ft *fakeTx) Begin(ctx context.Context) (pgx.Tx, error) { return ft, nil }
+func (ft *fakeTx) Commit(ctx context.Context) error          { return nil }
+func (ft *fakeTx) Rollback(ctx context.Context) error        { return nil }
 func (ft *fakeTx) CopyFrom(ctx context.Context, tableName pgx.Identifier, columnNames []string, rowSrc pgx.CopyFromSource) (int64, error) {
 	return 0, nil
 }
@@ -299,10 +313,10 @@ type fakeRows struct {
 	pos  int
 }
 
-func (r *fakeRows) Next() bool { return r.pos < len(r.rows) }
-func (r *fakeRows) Err() error { return nil }
-func (r *fakeRows) Close()     {}
-func (r *fakeRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+func (r *fakeRows) Next() bool                                   { return r.pos < len(r.rows) }
+func (r *fakeRows) Err() error                                   { return nil }
+func (r *fakeRows) Close()                                       {}
+func (r *fakeRows) CommandTag() pgconn.CommandTag                { return pgconn.CommandTag{} }
 func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription { return nil }
 func (r *fakeRows) Values() ([]any, error)                       { return nil, nil }
 func (r *fakeRows) RawValues() [][]byte                          { return nil }
@@ -440,7 +454,7 @@ func TestAcceptInvitationSuccess(t *testing.T) {
 	actorID := uuid.NewString()
 	userID := uuid.NewString()
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
-	svc := NewService(db.New(fake), fake)
+	svc := NewService(db.New(fake), WithDBPool(fake))
 
 	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
 	if err != nil {
@@ -459,7 +473,7 @@ func TestAcceptInvitationSuccess(t *testing.T) {
 func TestAcceptInvitationExpired(t *testing.T) {
 	actorID := uuid.NewString()
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
-	svc := NewService(db.New(fake), fake)
+	svc := NewService(db.New(fake), WithDBPool(fake))
 
 	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
 	if err != nil {
@@ -476,7 +490,7 @@ func TestAcceptInvitationExpired(t *testing.T) {
 func TestAcceptInvitationAlreadyUsed(t *testing.T) {
 	actorID := uuid.NewString()
 	fake := &fakeDB{t: t, memberRole: RoleOwner, actorUserID: actorID}
-	svc := NewService(db.New(fake), fake)
+	svc := NewService(db.New(fake), WithDBPool(fake))
 
 	inv, err := svc.CreateInvitation(context.Background(), actorID, uuid.NewString(), "", "guest@example.test", RoleGuest, 7)
 	if err != nil {
@@ -489,7 +503,6 @@ func TestAcceptInvitationAlreadyUsed(t *testing.T) {
 		t.Fatalf("expected ErrInvitationUsed, got %v", err)
 	}
 }
-
 
 func TestGetBillingUsesRealStorageUsage(t *testing.T) {
 	actorID := uuid.NewString()

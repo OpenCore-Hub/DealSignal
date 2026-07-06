@@ -5,26 +5,29 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var (
-	ErrInvalidSlug       = errors.New("slug must be lowercase alphanumeric with hyphens")
-	ErrSlugExists        = errors.New("workspace slug already exists")
-	ErrNotMember         = errors.New("user is not a member of this workspace")
-	ErrAlreadyMember     = errors.New("user is already a member")
-	ErrInvalidRole       = errors.New("invalid role")
-	ErrNotManager        = errors.New("only owner or admin can manage members")
+	ErrInvalidSlug        = errors.New("slug must be lowercase alphanumeric with hyphens")
+	ErrSlugExists         = errors.New("workspace slug already exists")
+	ErrNotMember          = errors.New("user is not a member of this workspace")
+	ErrAlreadyMember      = errors.New("user is already a member")
+	ErrInvalidRole        = errors.New("invalid role")
+	ErrNotManager         = errors.New("only owner or admin can manage members")
 	ErrInvitationNotFound = errors.New("invitation not found")
 	ErrInvitationExpired  = errors.New("invitation expired")
 	ErrInvitationUsed     = errors.New("invitation already used")
-	slugRegex            = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
+	slugRegex             = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 )
 
 const (
@@ -59,20 +62,20 @@ type Workspace struct {
 
 // Member is the public view of a db.WorkspaceMember.
 type Member struct {
-	UserID    string `json:"user_id"`
-	Role      string `json:"role"`
-	JoinedAt  string `json:"joined_at"`
+	UserID   string `json:"user_id"`
+	Role     string `json:"role"`
+	JoinedAt string `json:"joined_at"`
 }
 
 // Invitation is the public view of a db.WorkspaceInvitation.
 type Invitation struct {
-	Token     string `json:"token"`
+	Token       string `json:"token"`
 	WorkspaceID string `json:"workspace_id"`
-	Email     string `json:"email"`
-	Role      string `json:"role"`
-	ExpiresAt string `json:"expires_at"`
-	UsedAt    string `json:"used_at,omitempty"`
-	CreatedAt string `json:"created_at"`
+	Email       string `json:"email"`
+	Role        string `json:"role"`
+	ExpiresAt   string `json:"expires_at"`
+	UsedAt      string `json:"used_at,omitempty"`
+	CreatedAt   string `json:"created_at"`
 }
 
 func invitationFromDB(i db.WorkspaceInvitation) Invitation {
@@ -93,18 +96,37 @@ type Beginner interface {
 
 // Service handles workspace operations.
 type Service struct {
-	queries *db.Queries
-	dbPool  Beginner
+	queries     *db.Queries
+	dbPool      Beginner
+	mailer      mailer.Mailer
+	frontendURL string
 }
 
-// NewService creates a workspace service. An optional Beginner (db pool) enables
-// transactional operations like AcceptInvitation.
-func NewService(q *db.Queries, dbPool ...Beginner) *Service {
-	var pool Beginner
-	if len(dbPool) > 0 {
-		pool = dbPool[0]
+// ServiceOption configures the workspace service.
+type ServiceOption func(*Service)
+
+// WithDBPool enables transactional operations like AcceptInvitation.
+func WithDBPool(pool Beginner) ServiceOption {
+	return func(s *Service) { s.dbPool = pool }
+}
+
+// WithMailer sets the transactional mailer used for invitation emails.
+func WithMailer(m mailer.Mailer) ServiceOption {
+	return func(s *Service) { s.mailer = m }
+}
+
+// WithFrontendURL sets the public frontend URL used in invitation links.
+func WithFrontendURL(url string) ServiceOption {
+	return func(s *Service) { s.frontendURL = url }
+}
+
+// NewService creates a workspace service.
+func NewService(q *db.Queries, opts ...ServiceOption) *Service {
+	s := &Service{queries: q}
+	for _, opt := range opts {
+		opt(s)
 	}
-	return &Service{queries: q, dbPool: pool}
+	return s
 }
 
 func workspaceFromDB(w db.ListWorkspacesByUserRow) Workspace {
@@ -121,12 +143,12 @@ func workspaceFromDB(w db.ListWorkspacesByUserRow) Workspace {
 
 func workspaceFromRow(w db.Workspace) Workspace {
 	return Workspace{
-		ID:        uuidToString(w.ID),
-		TenantID:  uuidToString(w.TenantID),
-		Name:      w.Name,
-		Slug:      w.Slug,
+		ID:         uuidToString(w.ID),
+		TenantID:   uuidToString(w.TenantID),
+		Name:       w.Name,
+		Slug:       w.Slug,
 		BrandColor: w.BrandColor.String,
-		CreatedAt: w.CreatedAt.Time.Format(time.RFC3339),
+		CreatedAt:  w.CreatedAt.Time.Format(time.RFC3339),
 	}
 }
 
@@ -367,7 +389,44 @@ func (s *Service) CreateInvitation(ctx context.Context, actorID, workspaceID, te
 	if err != nil {
 		return Invitation{}, err
 	}
-	return invitationFromDB(i), nil
+
+	inv := invitationFromDB(i)
+	s.sendInvitationEmail(ctx, inv, actorID, expiresDays)
+	return inv, nil
+}
+
+// sendInvitationEmail sends the workspace invitation email. Failures are logged
+// and suppressed; the invitation token has already been created.
+func (s *Service) sendInvitationEmail(ctx context.Context, inv Invitation, actorID string, expiresDays int) {
+	if s.mailer == nil || s.frontendURL == "" {
+		return
+	}
+
+	vars := map[string]string{
+		"BrandName":      "DealSignal",
+		"WorkspaceName":  "",
+		"InviterEmail":   "",
+		"Role":           inv.Role,
+		"InvitationLink": fmt.Sprintf("%s/invitations/%s/accept", strings.TrimRight(s.frontendURL, "/"), inv.Token),
+		"ExpiryDays":     strconv.Itoa(expiresDays),
+	}
+
+	if ws, err := s.getWorkspaceByID(ctx, inv.WorkspaceID, ""); err == nil {
+		vars["WorkspaceName"] = ws.Name
+	}
+	if actorUUID, err := pgUUID(actorID); err == nil {
+		if user, err := s.queries.GetUserByID(ctx, actorUUID); err == nil {
+			vars["InviterEmail"] = user.Email
+		}
+	}
+
+	_, _ = s.mailer.SendEmail(ctx, mailer.EmailJob{
+		EmailType:         mailer.EmailTypeInvitation,
+		Recipient:         inv.Email,
+		WorkspaceID:       inv.WorkspaceID,
+		Locale:            locale.Normalize(locale.FromContext(ctx)),
+		TemplateVariables: vars,
+	})
 }
 
 // AcceptInvitation uses a token to add a user to a workspace.

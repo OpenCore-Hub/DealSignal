@@ -19,20 +19,20 @@ var (
 
 // Suggestion is the public view of a generated suggestion.
 type Suggestion struct {
-	ID         string `json:"id"`
-	TenantID   string `json:"tenant_id"`
+	ID          string `json:"id"`
+	TenantID    string `json:"tenant_id"`
 	WorkspaceID string `json:"workspace_id"`
-	ContactID  string `json:"contact_id,omitempty"`
-	LinkID     string `json:"link_id"`
-	DocumentID string `json:"document_id,omitempty"`
-	Type       string `json:"type"`
-	Priority   string `json:"priority"`
-	Title      string `json:"title"`
-	Reason     string `json:"reason"`
-	Action     string `json:"action"`
-	Dismissed  bool   `json:"dismissed"`
-	CreatedAt  string `json:"created_at"`
-	UpdatedAt  string `json:"updated_at"`
+	ContactID   string `json:"contact_id,omitempty"`
+	LinkID      string `json:"link_id"`
+	DocumentID  string `json:"document_id,omitempty"`
+	Type        string `json:"type"`
+	Priority    string `json:"priority"`
+	Title       string `json:"title"`
+	Reason      string `json:"reason"`
+	Action      string `json:"action"`
+	Dismissed   bool   `json:"dismissed"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
 }
 
 // Notifier enqueues notifications for high-intent signals.
@@ -42,8 +42,8 @@ type Notifier interface {
 
 // Service generates follow-up suggestions from link analytics.
 type Service struct {
-	queries   *db.Queries
-	notifier  Notifier
+	queries  *db.Queries
+	notifier Notifier
 }
 
 // NewService creates a suggestion service.
@@ -227,11 +227,15 @@ func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.R
 	if revisits < 0 {
 		revisits = 0
 	}
+	keyPageViews := 0
+	if heat.IsKeyPage(pageViews.DocumentTitle, heat.CircleDefault) {
+		keyPageViews = int(pageViews.TotalPageViews)
+	}
 	return heat.Compute(heat.CircleDefault, heat.Input{
 		Opens:              int(access.Opens),
 		Revisits:           revisits,
 		AvgDurationMinutes: pageViews.AvgDurationSeconds / 60.0,
-		KeyPageViews:       int(pageViews.KeyPageViews),
+		KeyPageViews:       keyPageViews,
 		ForwardSignals:     int(access.UniqueVisitors),
 		Downloads:          int(access.Downloads),
 		BouncePenalty:      int(bounce),
@@ -282,7 +286,9 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID) (suggestionMe
 		return m, err
 	}
 	m.avgDurationMinutes = pv.AvgDurationSeconds / 60.0
-	m.keyPageViews = int(pv.KeyPageViews)
+	if heat.IsKeyPage(pv.DocumentTitle, heat.CircleDefault) {
+		m.keyPageViews = int(pv.TotalPageViews)
+	}
 	m.totalPageViews = int(pv.TotalPageViews)
 
 	bounceCount, err := s.queries.GetLinkBounceCount(ctx, linkID)
