@@ -13,6 +13,30 @@
   "memberCount": "{{count}} 成员",
   "pendingApprovals": "{{count}} 待审批",
   "lastAccessed": "最近访问 {{time}}",
+  "search": {
+    "placeholder": "搜索数据室..."
+  },
+  "tags": {
+    "label": "标签",
+    "all": "全部标签"
+  },
+  "filter": {
+    "noResults": "没有匹配的数据室。",
+    "clear": "清除筛选"
+  },
+  "status": {
+    "active": "活跃",
+    "inactive": "未激活"
+  },
+  "stats": {
+    "documents": "文档",
+    "views": "浏览量",
+    "activeLinks": "活跃链接"
+  },
+  "card": {
+    "addDocuments": "添加文档",
+    "noViewsYet": "暂无浏览"
+  },
   "detail": {
     "back": "返回数据室",
     "notFound": "数据室未找到",

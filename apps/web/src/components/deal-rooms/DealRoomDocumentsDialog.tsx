@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { FileText } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +23,10 @@ interface DealRoomDocumentsDialogProps {
   isAdmin?: boolean;
   onChanged: () => void;
   children?: React.ReactNode;
+  /** Controlled open state. If omitted, the dialog manages its own state. */
+  open?: boolean;
+  /** Controlled open change callback. */
+  onOpenChange?: (open: boolean) => void;
 }
 
 export function DealRoomDocumentsDialog({
@@ -34,10 +37,19 @@ export function DealRoomDocumentsDialog({
   isAdmin = true,
   onChanged,
   children,
+  open: openProp,
+  onOpenChange: onOpenChangeProp,
 }: DealRoomDocumentsDialogProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
+  const open = openProp !== undefined ? openProp : internalOpen;
+  const setOpen = (value: boolean) => {
+    if (openProp === undefined) {
+      setInternalOpen(value);
+    }
+    onOpenChangeProp?.(value);
+  };
   const [adding, setAdding] = useState(false);
 
   const allRoomDocuments = folderDocs.flatMap((fd) => fd.documents);
@@ -128,12 +140,7 @@ export function DealRoomDocumentsDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={children ? (children as React.ReactElement) : (
-        <Button className="gap-1.5">
-          <FileText size={16} />
-          {t("detail.manageDocs")}
-        </Button>
-      )} />
+      {children && <DialogTrigger render={children as React.ReactElement} />}
       <DialogContent className="max-h-[90vh] max-w-3xl overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

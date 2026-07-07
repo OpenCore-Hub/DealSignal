@@ -16,6 +16,30 @@
   "pendingApprovals": "{{count}} pending",
   "pendingApprovals_one": "{{count}} pending",
   "lastAccessed": "Last accessed {{time}}",
+  "search": {
+    "placeholder": "Search datarooms..."
+  },
+  "tags": {
+    "label": "Tags",
+    "all": "All tags"
+  },
+  "filter": {
+    "noResults": "No datarooms match your filters.",
+    "clear": "Clear filters"
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive"
+  },
+  "stats": {
+    "documents": "Documents",
+    "views": "Views",
+    "activeLinks": "Active Links"
+  },
+  "card": {
+    "addDocuments": "Add Documents",
+    "noViewsYet": "No views yet"
+  },
   "detail": {
     "back": "Back to deal rooms",
     "notFound": "Deal room not found",

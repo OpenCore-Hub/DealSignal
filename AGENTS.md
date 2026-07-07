@@ -56,6 +56,20 @@ pnpm test:e2e          # MSW mocks
 - `apps/api/.env.example` and `apps/api/docker-compose.yml` should default to the current release version.
 - `internal/config/config.go` default version should match the release tag.
 
+## i18n / Internationalization (Mandatory)
+
+All user-facing strings in `apps/web` MUST be internationalized through `apps/web/src/i18n`. Do NOT hard-code English, Chinese, or any other language directly into UI components, page titles, toasts, error messages, placeholders, labels, or empty states.
+
+### Rules
+
+- **MUST use `t('key')` / `Trans` / project i18n hooks** instead of literal strings.
+- **MUST provide translations in both supported locales** (`en` and `zh-CN`) under `apps/web/src/i18n/locales/`.
+- **MUST keep locale files in sync**: adding a key to one locale requires adding it to the other.
+- **MUST NOT use user-entered data (e.g., deal room names, descriptions) as a substitute for UI labels** — the screenshot shows Chinese hard-coded text in an otherwise English page; that is not acceptable.
+- **MUST run frontend checks** (`pnpm lint`, `pnpm typecheck`, `pnpm test`) after adding or changing i18n keys.
+
+If you find existing hard-coded strings, convert them to i18n keys and update both locale files as part of the same change.
+
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useParams, useNavigate, useSearchParams } from "react-router";
 import {
   FileText,
   Users,
@@ -61,6 +61,9 @@ export function DealRoomDetailPage() {
   const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const shouldOpenDocuments = searchParams.get("addDocuments") === "1";
+  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(shouldOpenDocuments);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const activeUploadsRef = useRef(0);
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
@@ -334,6 +337,15 @@ export function DealRoomDetailPage() {
           folderDocs={room.documents ?? []}
           workspaceDocuments={data?.workspaceDocs ?? []}
           onChanged={refetch}
+          open={documentsDialogOpen}
+          onOpenChange={(open) => {
+            setDocumentsDialogOpen(open);
+            if (!open && searchParams.has("addDocuments")) {
+              const next = new URLSearchParams(searchParams);
+              next.delete("addDocuments");
+              setSearchParams(next, { replace: true });
+            }
+          }}
         >
           <Button className="gap-1.5">
             <FileText size={16} />

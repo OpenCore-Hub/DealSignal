@@ -300,6 +300,12 @@ export interface DealRoom {
   documents?: DealRoomFolderDocs[];
   members?: DealRoomMember[];
   accessRequests?: DealRoomAccessRequest[];
+  /** Total views across all public/share links for this deal room. */
+  viewCount?: number;
+  /** Number of currently active share links for this deal room. */
+  activeLinkCount?: number;
+  /** User-defined tags for filtering and organizing deal rooms. */
+  tags?: string[];
 }
 
 export interface WorkspaceMember {

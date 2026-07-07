@@ -142,6 +142,10 @@ function updateRoomDerivedFields(room: DealRoom) {
   room.documentCount = docs.reduce((sum, fd) => sum + fd.documents.length, 0);
   room.memberCount = room.members?.length ?? 0;
   room.pendingApprovals = room.accessRequests?.filter((r) => r.status === "pending").length ?? 0;
+  // Keep viewCount / activeLinkCount in sync with sensible mock defaults when not explicitly set.
+  if (room.viewCount === undefined) room.viewCount = 0;
+  if (room.activeLinkCount === undefined) room.activeLinkCount = 0;
+  if (room.tags === undefined) room.tags = [];
 }
 
 export const handlers = [
