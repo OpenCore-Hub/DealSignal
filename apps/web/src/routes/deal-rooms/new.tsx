@@ -192,7 +192,7 @@ export function NewDealRoomPage() {
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
-                      selectTemplate(template);
+                      selectTemplate(template, true);
                     }
                   }}
                 >
