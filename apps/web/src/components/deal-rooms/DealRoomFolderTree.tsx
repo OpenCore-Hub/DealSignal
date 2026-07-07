@@ -65,34 +65,33 @@ function parentPath(path: string): string | null {
   return path.slice(0, idx);
 }
 
-function buildTree(folders: DealRoomFolder[], docsByFolder: Map<string, DealRoomDocumentItem[]>): TreeNode {
-  const rootFolder = folders.find((f) => f.path === "/") ?? {
-    path: "/",
-    name: "Root",
-    sort_order: 0,
-  };
-  const map = new Map<string, TreeNode>();
-  map.set("/", { folder: rootFolder, children: [], documents: docsByFolder.get("/") ?? [] });
-
+function buildTree(folders: DealRoomFolder[], docsByFolder: Map<string, DealRoomDocumentItem[]>): TreeNode[] {
   const sorted = [...folders]
     .filter((f) => f.path !== "/")
     .sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
 
+  const map = new Map<string, TreeNode>();
   for (const folder of sorted) {
     map.set(folder.path, { folder, children: [], documents: docsByFolder.get(folder.path) ?? [] });
   }
 
+  const roots: TreeNode[] = [];
   for (const folder of sorted) {
     const node = map.get(folder.path)!;
-    const parent = map.get(parentPath(folder.path) ?? "/");
-    if (parent) {
-      parent.children.push(node);
+    const pp = parentPath(folder.path);
+    if (pp === "/" || pp === null) {
+      roots.push(node);
     } else {
-      map.get("/")!.children.push(node);
+      const parent = map.get(pp);
+      if (parent) {
+        parent.children.push(node);
+      } else {
+        roots.push(node);
+      }
     }
   }
 
-  return map.get("/")!;
+  return roots;
 }
 
 function ContextMenu({
@@ -173,9 +172,9 @@ export function DealRoomFolderTree({
     return map;
   }, [folderDocs, folders]);
 
-  const root = useMemo(() => buildTree(folders, docsByFolder), [folders, docsByFolder]);
+  const roots = useMemo(() => buildTree(folders, docsByFolder), [folders, docsByFolder]);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(["/", ...folders.map((f) => f.path)]));
+  const [expanded, setExpanded] = useState<Set<string>>(new Set(folders.map((f) => f.path)));
   const [creatingParent, setCreatingParent] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -183,7 +182,7 @@ export function DealRoomFolderTree({
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
   const [movingDoc, setMovingDoc] = useState<DealRoomDocumentItem | null>(null);
-  const [targetFolder, setTargetFolder] = useState<string>("/");
+  const [targetFolder, setTargetFolder] = useState<string>(folders[0]?.path ?? "");
   const [actingDocId, setActingDocId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folder: DealRoomFolder } | null>(null);
   const [addToFolder, setAddToFolder] = useState<string | null>(null);
@@ -522,18 +521,11 @@ export function DealRoomFolderTree({
 
   return (
     <div className="space-y-2">
-      {isAdmin && (
-        <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="gap-1" onClick={() => setCreatingParent("/")}>
-            <Plus size={14} />
-            {t("folders.newRoot")}
-          </Button>
-        </div>
+      {folders.length === 0 && (
+        <p className="text-sm text-muted-foreground">{t("folders.empty")}</p>
       )}
 
-      {creatingParent === "/" && renderCreateRow("/", 0)}
-
-      <div className="space-y-0.5">{renderFolder(root, 0)}</div>
+      <div className="space-y-0.5">{roots.map((root) => renderFolder(root, 0))}</div>
 
       {contextMenu && (
         <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)}>

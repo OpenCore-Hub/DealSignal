@@ -99,18 +99,18 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list folders: %v", err)
 	}
-	if len(folders) != 8 {
-		t.Fatalf("expected 8 folders (root + 7 template), got %d", len(folders))
+	if len(folders) != 7 {
+		t.Fatalf("expected 7 template folders, got %d", len(folders))
 	}
-	if folders[0].Path != "/" {
-		t.Fatalf("expected first folder path /, got %s", folders[0].Path)
+	if folders[0].Path != "/01-corporate-or-investment-memo" {
+		t.Fatalf("expected first folder path /01-corporate-or-investment-memo, got %s", folders[0].Path)
 	}
-	if folders[1].Path != "/01-corporate-or-investment-memo" {
+	if folders[1].Path != "/02-corporate-documents" {
 		t.Fatalf("expected second folder path /01-corporate-or-investment-memo, got %s", folders[1].Path)
 	}
 }
 
-func TestCreateRoomCustomHasRootFolder(t *testing.T) {
+func TestCreateRoomCustomHasGeneralFolder(t *testing.T) {
 	fake := newFakeDB(t)
 	svc := NewService(db.New(fake), nil)
 	ownerID := uuid.NewString()
@@ -134,8 +134,8 @@ func TestCreateRoomCustomHasRootFolder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list folders: %v", err)
 	}
-	if len(folders) != 1 || folders[0].Path != "/" {
-		t.Fatalf("expected root folder only, got %v", folders)
+	if len(folders) != 1 || folders[0].Path != "/general" {
+		t.Fatalf("expected general folder only, got %v", folders)
 	}
 }
 
@@ -166,11 +166,11 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 		ID:          pgUUID(docID),
 		WorkspaceID: pgUUID(wsID),
 		TenantID:    fake.workspace.TenantID,
-		Title:       "Root Doc",
+		Title:       "Memo Doc",
 		SourceType:  "docx",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-corporate-or-investment-memo", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 
@@ -178,17 +178,17 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get room documents: %v", err)
 	}
-	var rootDocs []RoomDocument
+	var memoDocs []RoomDocument
 	for _, fd := range docs {
-		if fd.Folder.Path == "/" {
-			rootDocs = fd.Documents
+		if fd.Folder.Path == "/01-corporate-or-investment-memo" {
+			memoDocs = fd.Documents
 		}
 	}
-	if len(rootDocs) != 1 {
-		t.Fatalf("expected 1 document under root, got %d", len(rootDocs))
+	if len(memoDocs) != 1 {
+		t.Fatalf("expected 1 document under memo folder, got %d", len(memoDocs))
 	}
-	if rootDocs[0].DocumentID != docID {
-		t.Fatalf("expected root document id %s, got %s", docID, rootDocs[0].DocumentID)
+	if memoDocs[0].DocumentID != docID {
+		t.Fatalf("expected memo document id %s, got %s", docID, memoDocs[0].DocumentID)
 	}
 }
 
@@ -385,7 +385,7 @@ func TestDocumentMoveRemoveReorder(t *testing.T) {
 		TenantID:    fake.workspace.TenantID,
 		Title:       "Test Doc",
 	})
-	doc, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/", 0)
+	doc, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0)
 	if err != nil {
 		t.Fatalf("add document: %v", err)
 	}
@@ -526,8 +526,8 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get room detail: %v", err)
 	}
-	if len(detail.Folders) != 8 {
-		t.Fatalf("expected 8 folders (root + 7 template), got %d", len(detail.Folders))
+	if len(detail.Folders) != 7 {
+		t.Fatalf("expected 7 template folders, got %d", len(detail.Folders))
 	}
 	if len(detail.Members) != 2 {
 		t.Fatalf("expected 2 members, got %d", len(detail.Members))
@@ -809,6 +809,17 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 					r.ID, r.TenantID, r.WorkspaceID, r.RoomID, r.Email, r.Reason,
 					r.Status, r.ReviewedBy, r.ReviewedAt, r.CreatedAt, r.UpdatedAt,
 				})
+			}
+		}
+		return &fakeRows{rows: rows}, nil
+
+	case strings.Contains(sqlLower, "from room_member_folder_permissions") && strings.Contains(sqlLower, "where room_id = $1 and email"):
+		roomID := argUUID(args, 0)
+		email := argString(args, 1)
+		rows := make([][]interface{}, 0)
+		for _, p := range f.perms {
+			if p.RoomID == roomID && p.Email == email {
+				rows = append(rows, permRow(p))
 			}
 		}
 		return &fakeRows{rows: rows}, nil
@@ -1347,11 +1358,11 @@ func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
 		ID:          pgUUID(docID),
 		WorkspaceID: pgUUID(wsID),
 		TenantID:    fake.workspace.TenantID,
-		Title:       "Root Doc",
+		Title:       "General Doc",
 		SourceType:  "docx",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 
@@ -1390,10 +1401,10 @@ func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected folder to be a string path, got %T: %v", fd.Folder, fd.Folder)
 		}
-		if folderStr == "/" {
+		if folderStr == "/general" {
 			found = true
 			if len(fd.Documents) != 1 {
-				t.Fatalf("expected 1 document under root, got %d", len(fd.Documents))
+				t.Fatalf("expected 1 document under general folder, got %d", len(fd.Documents))
 			}
 			if fd.Documents[0].DocumentID != docID {
 				t.Fatalf("expected document id %s, got %s", docID, fd.Documents[0].DocumentID)
@@ -1401,6 +1412,6 @@ func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("expected root folder docs in response, got %v", payload.Data)
+		t.Fatalf("expected general folder docs in response, got %v", payload.Data)
 	}
 }

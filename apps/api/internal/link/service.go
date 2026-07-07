@@ -98,6 +98,7 @@ type CreateLinkRequest struct {
 	DocumentIDs              []string // Multi-document bundle (takes precedence when non-empty)
 	Name                     string
 	PermissionType           string
+	RequireEmail             bool
 	RequireEmailVerification bool
 	RequireNDA               bool
 	ExpiresAt                *time.Time
@@ -113,6 +114,7 @@ type UpdateLinkRequest struct {
 	DocumentIDs              []string
 	Name                     string
 	PermissionType           string
+	RequireEmail             bool
 	RequireEmailVerification bool
 	RequireNDA               bool
 	ExpiresAt                *time.Time
@@ -162,7 +164,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		}
 	}
 
-	requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(req)
+	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(req)
 	if err != nil {
 		return db.Link{}, err
 	}
@@ -214,7 +216,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AiCopilotEnabled:         req.AICopilotEnabled,
-		RequireEmail:             false,
+		RequireEmail:             requireEmail,
 		RequireEmailVerification: requireEmailVerification,
 		RequireNda:               requireNDA,
 		Status:                   "active",
@@ -331,6 +333,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		DocumentIDs:              req.DocumentIDs,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
+		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
 		ExpiresAt:                req.ExpiresAt,
@@ -341,7 +344,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		ContactIDs:               req.ContactIDs,
 	}
 
-	requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
+	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
 	if err != nil {
 		return db.Link{}, err
 	}
@@ -384,7 +387,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		MaxAccessCount:           maxAccess,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		RequireEmail:             false,
+		RequireEmail:             requireEmail,
 		RequireEmailVerification: requireEmailVerification,
 		RequireNda:               requireNDA,
 		AiCopilotEnabled:         req.AICopilotEnabled,
@@ -530,8 +533,13 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	// Use the shared linkSecurityFlags helper (defined in handler.go, same package)
 	// to compute gate requirements identically with the handler's response formatting.
-	_, requiresEmailVerification, requiresNDA := linkSecurityFlags(link)
+	requiresEmail, requiresEmailVerification, requiresNDA := linkSecurityFlags(link)
 
+	if requiresEmail {
+		if strings.TrimSpace(req.Email) == "" {
+			return AccessResult{}, ErrRequiresEmail
+		}
+	}
 	if requiresEmailVerification {
 		if strings.TrimSpace(req.EmailCode) == "" {
 			return AccessResult{}, ErrRequiresEmailCode
@@ -859,15 +867,40 @@ func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string
 }
 
 // normalizeSecurityConfig resolves the security configuration from the modern
-// boolean flags. The legacy permission_type field is no longer used as input;
-// instead it is derived from the boolean flags for display backward-compatibility.
-func normalizeSecurityConfig(req CreateLinkRequest) (requireEmailVerification, requireNDA bool, perm string, err error) {
+// boolean flags, with backward compatibility for the legacy permission_type field.
+// When explicit boolean flags are absent, permission_type drives the flags.
+func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requireEmailVerification, requireNDA bool, perm string, err error) {
+	requireEmail = req.RequireEmail
 	requireEmailVerification = req.RequireEmailVerification
 	requireNDA = req.RequireNDA
+
+	// Backward compatibility: legacy permission_type drives flags when explicit
+	// boolean flags are not set.
+	switch req.PermissionType {
+	case "email", "email_required":
+		if !requireEmail {
+			requireEmail = true
+		}
+	case "nda":
+		if !requireNDA {
+			requireNDA = true
+		}
+		if !requireEmail {
+			requireEmail = true
+		}
+	}
+
+	// Email verification implies email collection.
+	if !requireEmail && requireEmailVerification {
+		requireEmail = true
+	}
 
 	// NDA always requires email verification for identity check.
 	if !requireEmailVerification && requireNDA {
 		requireEmailVerification = true
+	}
+	if !requireEmail && requireNDA {
+		requireEmail = true
 	}
 
 	// Derive display permission_type from boolean flags (priority order).
@@ -875,11 +908,13 @@ func normalizeSecurityConfig(req CreateLinkRequest) (requireEmailVerification, r
 		perm = "nda"
 	} else if requireEmailVerification {
 		perm = "email_required"
+	} else if requireEmail {
+		perm = "email_required"
 	} else {
 		perm = "public"
 	}
 
-	return requireEmailVerification, requireNDA, perm, nil
+	return requireEmail, requireEmailVerification, requireNDA, perm, nil
 }
 
 func makeVisitorID(email, ua string) string {

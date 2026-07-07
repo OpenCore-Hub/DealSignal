@@ -105,9 +105,8 @@ export function DealRoomDetailPage() {
     for (const folder of room?.folders ?? []) {
       map.set(folder.path, folder.name);
     }
-    map.set("/", t("folders.rootName", "Root"));
     return map;
-  }, [room?.folders, t]);
+  }, [room?.folders]);
 
   const resolveTargetFolder = (fileName: string): { path: string; name: string } => {
     const roomFolders = room?.folders ?? [];
@@ -116,7 +115,11 @@ export function DealRoomDetailPage() {
         return { path: folder.path, name: folder.name };
       }
     }
-    return { path: "/", name: folderByPath.get("/") ?? "Root" };
+    const fallback = roomFolders[0];
+    if (fallback) {
+      return { path: fallback.path, name: fallback.name };
+    }
+    return { path: "/general", name: "General" };
   };
 
   const uploadFileToFolder = async (file: File, folderPath: string) => {

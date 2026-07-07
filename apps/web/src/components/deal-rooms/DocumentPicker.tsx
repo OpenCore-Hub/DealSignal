@@ -36,7 +36,7 @@ export function DocumentPicker({
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const [search, setSearch] = useState("");
-  const [selectedFolder, setSelectedFolder] = useState<string>(initialFolderPath ?? folders[0]?.path ?? "/");
+  const [selectedFolder, setSelectedFolder] = useState<string>(initialFolderPath ?? folders[0]?.path ?? "");
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const roomDocumentIds = useMemo(() => new Set(roomDocuments.map((d) => d.document_id)), [roomDocuments]);

@@ -39,7 +39,7 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			gotEmailVerification, gotNDA, gotPerm, err := normalizeSecurityConfig(tc.req)
+			_, gotEmailVerification, gotNDA, gotPerm, err := normalizeSecurityConfig(tc.req)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -131,7 +131,7 @@ func TestUpdateLinkRequestToCreateRequest(t *testing.T) {
 				WatermarkEnabled:         tc.update.WatermarkEnabled,
 				ContactIDs:               tc.update.ContactIDs,
 			}
-			gotEV, gotNDA, gotPerm, err := normalizeSecurityConfig(createReq)
+			_, gotEV, gotNDA, gotPerm, err := normalizeSecurityConfig(createReq)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
@@ -219,7 +219,7 @@ func TestNormalizeSecurityConfigModernEmailOnly(t *testing.T) {
 		RequireEmailVerification: true,
 		// No NDA
 	}
-	ev, nda, perm, err := normalizeSecurityConfig(req)
+	_, ev, nda, perm, err := normalizeSecurityConfig(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -243,7 +243,7 @@ func TestNormalizeSecurityConfigExplicitFlagsWin(t *testing.T) {
 		PermissionType:           "public", // legacy says public
 		RequireEmailVerification: true,     // but explicit flag says email
 	}
-	ev, nda, perm, err := normalizeSecurityConfig(req)
+	_, ev, nda, perm, err := normalizeSecurityConfig(req)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

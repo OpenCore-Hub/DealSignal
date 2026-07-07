@@ -312,6 +312,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		DocumentIDs:              req.DocumentIDs,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
+		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
 		ExpiresAt:                expiresAt,
@@ -402,6 +403,7 @@ func (h *Handler) Create(c *gin.Context) {
 		DocumentIDs:              req.DocumentIDs,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
+		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
 		ExpiresAt:                expiresAt,
@@ -1034,6 +1036,7 @@ func (h *Handler) checkAndRecordAbnormalAccessPattern(ctx context.Context, link 
 // the modern boolean flags. For email-verification-only links, the visitor
 // identifies via access code without entering their email.
 func linkSecurityFlags(link db.Link) (requiresEmail, requiresEmailVerification, requiresNda bool) {
+	requiresEmail = link.RequireEmail
 	requiresEmailVerification = link.RequireEmailVerification
 	requiresNda = link.RequireNda
 	return

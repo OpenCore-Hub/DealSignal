@@ -74,7 +74,7 @@ export function AddToDealRoomDialog({
   const folderDocs = useMemo(() => details?.docs ?? [], [details?.docs]);
 
   const defaultFolder = useMemo(() => {
-    return folders.find((f) => f.path === "/")?.path ?? folders[0]?.path ?? "";
+    return folders[0]?.path ?? "";
   }, [folders]);
 
   const effectiveFolder =

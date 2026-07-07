@@ -116,7 +116,11 @@ function findRoom(roomId: string): DealRoom | undefined {
 }
 
 function getRoomFolders(room: DealRoom): DealRoomFolder[] {
-  return room.folders ?? [{ path: "/", name: "Root", sort_order: 0 }];
+  const folders = room.folders ?? [];
+  if (folders.length === 0) {
+    return [{ path: "/general", name: "General", sort_order: 0 }];
+  }
+  return folders.filter((f) => f.path !== "/");
 }
 
 function getRoomFolderDocs(room: DealRoom): DealRoomFolderDocs[] {
@@ -127,7 +131,7 @@ function nextSortOrder(arr: { sort_order: number }[]): number {
   return arr.length === 0 ? 0 : Math.max(...arr.map((x) => x.sort_order)) + 1;
 }
 
-function sanitizeFolderPath(name: string, parentPath = "/"): string {
+function sanitizeFolderPath(name: string, parentPath = "/general"): string {
   const slug = name.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   if (parentPath === "/") return `/${slug}`;
   return `${parentPath}/${slug}`;
@@ -573,7 +577,7 @@ export const handlers = [
           description: f.description,
           sort_order: i,
         }))
-      : [{ path: "/", name: "Root", sort_order: 0 }];
+      : [{ path: "/general", name: "General", sort_order: 0 }];
     const newRoom: DealRoom = {
       id: generateId("dr"),
       name: body.name,
@@ -613,7 +617,7 @@ export const handlers = [
     if (!room) return new HttpResponse(null, { status: 404 });
     const body = (await request.json()) as { name: string; parent_path?: string };
     const folders = getRoomFolders(room);
-    const path = sanitizeFolderPath(body.name, body.parent_path ?? "/");
+    const path = sanitizeFolderPath(body.name, body.parent_path ?? folders[0]?.path ?? "/general");
     if (folders.some((f) => f.path === path)) {
       return HttpResponse.json({ code: "folder_exists", message: "folder already exists" }, { status: 409 });
     }
@@ -683,8 +687,8 @@ export const handlers = [
     };
     const doc = mockDocuments.find((d) => d.id === body.document_id);
     if (!doc) return new HttpResponse(null, { status: 404 });
-    const folderPath = body.folder_path ?? "/";
     const folders = getRoomFolders(room);
+    const folderPath = body.folder_path ?? folders[0]?.path ?? "/general";
     if (!folders.some((f) => f.path === folderPath)) {
       return HttpResponse.json({ code: "folder_not_found", message: "folder not found" }, { status: 404 });
     }

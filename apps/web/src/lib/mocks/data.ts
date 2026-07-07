@@ -436,10 +436,9 @@ export const mockSuggestions: Suggestion[] = [
 ];
 
 const mockDealRoomFolders: DealRoomFolder[] = [
-  { path: "/", name: "Root", sort_order: 0 },
-  { path: "/pitch", name: "01 Pitch Deck", description: "Latest fundraising deck", sort_order: 1 },
-  { path: "/financials", name: "02 Financials", description: "Historical financials and projections", sort_order: 2 },
-  { path: "/team", name: "03 Team", description: "Founder resumes and org chart", sort_order: 3 },
+  { path: "/pitch", name: "01 Pitch Deck", description: "Latest fundraising deck", sort_order: 0 },
+  { path: "/financials", name: "02 Financials", description: "Historical financials and projections", sort_order: 1 },
+  { path: "/team", name: "03 Team", description: "Founder resumes and org chart", sort_order: 2 },
 ];
 
 const mockDealRoomFolderDocs: DealRoomFolderDocs[] = [
@@ -544,7 +543,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-06-15T09:00:00Z",
     lastAccessedAt: "2026-06-19T16:30:00Z",
     status: "active",
-    folders: [{ path: "/", name: "Root", sort_order: 0 }],
+    folders: [{ path: "/general", name: "General", sort_order: 0 }],
     documents: [],
     members: [],
     accessRequests: [],
@@ -562,7 +561,7 @@ export const mockDealRooms: DealRoom[] = [
     createdAt: "2026-06-12T11:00:00Z",
     lastAccessedAt: "2026-06-18T10:15:00Z",
     status: "active",
-    folders: [{ path: "/", name: "Root", sort_order: 0 }],
+    folders: [{ path: "/general", name: "General", sort_order: 0 }],
     documents: [],
     members: [],
     accessRequests: [

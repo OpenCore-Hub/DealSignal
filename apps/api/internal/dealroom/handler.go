@@ -295,8 +295,17 @@ func (h *Handler) AddDocument(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	if req.FolderPath == "" {
-		req.FolderPath = "/"
+	if req.FolderPath == "" || req.FolderPath == "/" {
+		folders, ferr := h.service.ListFolders(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
+		if ferr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": ferr.Error()})
+			return
+		}
+		if len(folders) == 0 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "no target folder available"})
+			return
+		}
+		req.FolderPath = folders[0].Path
 	}
 	doc, err := h.service.AddDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.DocumentID, req.FolderPath, req.SortOrder)
 	if err != nil {
@@ -479,6 +488,10 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 		return
 	}
 	if req.FolderPath != "" {
+		if req.FolderPath == "/" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "folder_path cannot be root"})
+			return
+		}
 		if err := h.service.MoveDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId"), req.FolderPath, req.SortOrder); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):

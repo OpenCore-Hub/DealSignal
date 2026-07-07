@@ -434,7 +434,7 @@ api_call BODY STATUS GET "$BASE_URL/api/v1/public/documents/$DOC_ID/download-url
 assert_status "GET /public/documents/:id/download-url" 200 "$STATUS"
 
 # =============================================================================
-# 10g. Link Security Gates — email / whitelist / password / NDA / combined
+# 10g. Link Security Gates — email / NDA / combined
 # =============================================================================
 section "10g. Link Security Gates"
 
@@ -467,10 +467,6 @@ api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/contacts" '{"email":"gat
 assert_status "create contact for email gate" 201 "$STATUS"
 GATE_CONTACT_ID=$(echo "$BODY" | jq -r '.id')
 
-api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/contacts" '{"email":"alice@example.com","name":"Alice"}' "$TOKEN"
-assert_status "create contact for whitelist gate" 201 "$STATUS"
-ALICE_CONTACT_ID=$(echo "$BODY" | jq -r '.id')
-
 api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/contacts" '{"email":"nda@example.com","name":"NDA User"}' "$TOKEN"
 assert_status "create contact for NDA gate" 201 "$STATUS"
 NDA_CONTACT_ID=$(echo "$BODY" | jq -r '.id')
@@ -479,67 +475,19 @@ api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/contacts" '{"email":"com
 assert_status "create contact for combined gate" 201 "$STATUS"
 COMBINED_CONTACT_ID=$(echo "$BODY" | jq -r '.id')
 
-# email_required gate
-EMAIL_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"email_required\",\"contact_ids\":[\"$GATE_CONTACT_ID\"],\"download_enabled\":true}")
+# email_required gate — legacy permission_type collects email only (no verification code)
+EMAIL_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"email_required\",\"download_enabled\":true}")
 EMAIL_GATE_CODE=${EMAIL_GATE%%|*}
 EMAIL_GATE_BODY=${EMAIL_GATE#*|}
 assert_status "create email_required link" 201 "$EMAIL_GATE_CODE"
 EMAIL_TOKEN=$(echo "$EMAIL_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
-EMAIL_LINK_ID=$(echo "$EMAIL_GATE_BODY" | jq -r '.id')
-EMAIL_CODE=$(get_link_code "$EMAIL_LINK_ID")
 
 api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EMAIL_TOKEN" "{}" ""
 assert_status "email gate rejects missing email" 403 "$STATUS"
 assert_json_field "email gate error code" '.code' "requires_email" "$BODY"
 
 api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EMAIL_TOKEN" '{"email":"gate@example.com"}' ""
-assert_status "email gate rejects missing code" 403 "$STATUS"
-assert_json_field "email gate missing code error code" '.code' "requires_email_code" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EMAIL_TOKEN" '{"email":"gate@example.com","email_code":"000000"}' ""
-assert_status "email gate rejects invalid code" 401 "$STATUS"
-assert_json_field "email gate invalid code error code" '.code' "invalid_email_code" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$EMAIL_TOKEN" "{\"email\":\"gate@example.com\",\"email_code\":\"$EMAIL_CODE\"}" ""
-assert_status "email gate allows valid email and code" 200 "$STATUS"
-
-# password gate
-PWD_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"password\",\"password\":\"Secret123!\",\"download_enabled\":true}")
-PWD_GATE_CODE=${PWD_GATE%%|*}
-PWD_GATE_BODY=${PWD_GATE#*|}
-assert_status "create password link" 201 "$PWD_GATE_CODE"
-PWD_TOKEN=$(echo "$PWD_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PWD_TOKEN" "{}" ""
-assert_status "password gate rejects missing password" 403 "$STATUS"
-assert_json_field "password gate error code" '.code' "requires_password" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PWD_TOKEN" '{"password":"wrong"}' ""
-assert_status "password gate rejects wrong password" 401 "$STATUS"
-assert_json_field "invalid password error code" '.code' "invalid_password" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$PWD_TOKEN" '{"password":"Secret123!"}' ""
-assert_status "password gate allows correct password" 200 "$STATUS"
-
-# whitelist gate
-WL_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"permission_type\":\"whitelist\",\"allowed_emails\":[\"alice@example.com\"],\"contact_ids\":[\"$ALICE_CONTACT_ID\"],\"download_enabled\":true}")
-WL_GATE_CODE=${WL_GATE%%|*}
-WL_GATE_BODY=${WL_GATE#*|}
-assert_status "create whitelist link" 201 "$WL_GATE_CODE"
-WL_TOKEN=$(echo "$WL_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||')
-WL_LINK_ID=$(echo "$WL_GATE_BODY" | jq -r '.id')
-WL_CODE=$(get_link_code "$WL_LINK_ID")
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$WL_TOKEN" '{"email":"bob@example.com"}' ""
-assert_status "whitelist gate rejects non-listed email" 403 "$STATUS"
-assert_json_field "whitelist denied error code" '.code' "whitelist_denied" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$WL_TOKEN" '{"email":"alice@example.com"}' ""
-assert_status "whitelist gate rejects missing code" 403 "$STATUS"
-assert_json_field "whitelist gate missing code error code" '.code' "requires_email_code" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$WL_TOKEN" "{\"email\":\"alice@example.com\",\"email_code\":\"$WL_CODE\"}" ""
-assert_status "whitelist gate allows listed email and code" 200 "$STATUS"
+assert_status "email gate allows email" 200 "$STATUS"
 
 # NDA gate
 NDA_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email_verification\":true,\"require_nda\":true,\"contact_ids\":[\"$NDA_CONTACT_ID\"],\"download_enabled\":true}")
@@ -561,8 +509,8 @@ assert_json_field "NDA error code" '.code' "nda_required" "$BODY"
 api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$NDA_TOKEN" "{\"email\":\"nda@example.com\",\"email_code\":\"$NDA_CODE\",\"nda_agreed\":true}" ""
 assert_status "NDA gate allows agreement" 200 "$STATUS"
 
-# Combined gate: email verification + password + NDA
-COMBINED_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email_verification\":true,\"require_password\":true,\"require_nda\":true,\"password\":\"Secret123!\",\"contact_ids\":[\"$COMBINED_CONTACT_ID\"],\"download_enabled\":true}")
+# Combined gate: email verification + NDA
+COMBINED_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email_verification\":true,\"require_nda\":true,\"contact_ids\":[\"$COMBINED_CONTACT_ID\"],\"download_enabled\":true}")
 COMBINED_GATE_CODE=${COMBINED_GATE%%|*}
 COMBINED_GATE_BODY=${COMBINED_GATE#*|}
 assert_status "create combined gate link" 201 "$COMBINED_GATE_CODE"
@@ -575,14 +523,10 @@ assert_status "combined gate asks for code after email" 403 "$STATUS"
 assert_json_field "combined gate code error code" '.code' "requires_email_code" "$BODY"
 
 api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" "{\"email\":\"combined@example.com\",\"email_code\":\"$COMBINED_CODE\"}" ""
-assert_status "combined gate asks for password after code" 403 "$STATUS"
-assert_json_field "combined gate password code" '.code' "requires_password" "$BODY"
-
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" "{\"email\":\"combined@example.com\",\"email_code\":\"$COMBINED_CODE\",\"password\":\"Secret123!\"}" ""
-assert_status "combined gate asks for NDA after password" 403 "$STATUS"
+assert_status "combined gate asks for NDA after code" 403 "$STATUS"
 assert_json_field "combined gate NDA code" '.code' "nda_required" "$BODY"
 
-api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" "{\"email\":\"combined@example.com\",\"email_code\":\"$COMBINED_CODE\",\"password\":\"Secret123!\",\"nda_agreed\":true}" ""
+api_call BODY STATUS POST "$BASE_URL/api/v1/public/links/$COMBINED_TOKEN" "{\"email\":\"combined@example.com\",\"email_code\":\"$COMBINED_CODE\",\"nda_agreed\":true}" ""
 assert_status "combined gate grants access" 200 "$STATUS"
 
 # Session token + X-Link-Access header for subsequent public asset requests.
@@ -595,7 +539,7 @@ assert_status "public pages with X-Link-Session header" 200 "$HL_STATUS"
 
 # Backward compatibility: raw credentials via X-Link-Access header.
 # Codes are single-use, so create a second identical combined link for this test.
-COMBINED2_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email_verification\":true,\"require_password\":true,\"require_nda\":true,\"password\":\"Secret123!\",\"contact_ids\":[\"$COMBINED_CONTACT_ID\"],\"download_enabled\":true}")
+COMBINED2_GATE=$(create_gate_link "{\"document_id\":\"$DOC_ID\",\"require_email_verification\":true,\"require_nda\":true,\"contact_ids\":[\"$COMBINED_CONTACT_ID\"],\"download_enabled\":true}")
 COMBINED2_GATE_CODE=${COMBINED2_GATE%%|*}
 COMBINED2_GATE_BODY=${COMBINED2_GATE#*|}
 assert_status "create combined gate link 2" 201 "$COMBINED2_GATE_CODE"
@@ -603,7 +547,7 @@ COMBINED2_TOKEN=$(echo "$COMBINED2_GATE_BODY" | jq -r '.shortUrl' | sed 's|.*/||
 COMBINED2_LINK_ID=$(echo "$COMBINED2_GATE_BODY" | jq -r '.id')
 COMBINED2_CODE=$(get_link_code "$COMBINED2_LINK_ID")
 
-ACCESS_HEADER=$(printf '{"email":"combined@example.com","email_code":"%s","password":"Secret123!","nda_agreed":true}' "$COMBINED2_CODE" | base64 | tr -d '\n')
+ACCESS_HEADER=$(printf '{"email":"combined@example.com","email_code":"%s","nda_agreed":true}' "$COMBINED2_CODE" | base64 | tr -d '\n')
 HL_STATUS=$(curl -sS -o /dev/null -w "%{http_code}" "$BASE_URL/api/v1/public/documents/$DOC_ID/pages?token=$COMBINED2_TOKEN" -H "X-Link-Access: $ACCESS_HEADER")
 assert_status "public pages with X-Link-Access header" 200 "$HL_STATUS"
 
@@ -755,7 +699,7 @@ assert_status "POST /deal-rooms/:id/members" 201 "$STATUS"
 
 # 14g. Set folder permission
 api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/folder-permissions" \
-  '{"email":"room-member@example.com","folder_path":"/folder1","permission":"view"}' "$TOKEN"
+  '{"email":"room-member@example.com","folder_path":"/general","permission":"view"}' "$TOKEN"
 assert_status "POST /deal-rooms/:id/folder-permissions" 200 "$STATUS"
 
 # 14h. Record NDA first (room requires_nda=true)
@@ -789,9 +733,9 @@ assert_json_not_empty "detail documents" '.documents' "$BODY"
 assert_json_not_empty "detail members" '.members' "$BODY"
 assert_json_not_empty "detail accessRequests" '.accessRequests' "$BODY"
 
-# 14l. Create folder
+# 14l. Create folder (top-level)
 api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/folders" \
-  '{"name":"E2E Folder"}' "$TOKEN"
+  '{"name":"E2E Folder","parent_path":"/"}' "$TOKEN"
 assert_status "POST /deal-rooms/:id/folders" 201 "$STATUS"
 
 # 14m. Rename folder
@@ -821,10 +765,10 @@ api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/acce
   '{}' "$TOKEN"
 assert_status "POST /deal-rooms/:id/access-requests/:requestId/reject" 200 "$STATUS"
 
-# 14s. Move document back to root, then delete folder
+# 14s. Move document back to general folder, then delete folder
 api_call BODY STATUS PATCH "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/documents/$ROOM_DOC_ID" \
-  '{"folder_path":"/"}' "$TOKEN"
-assert_status "PATCH /deal-rooms/:id/documents/:docId (move to root)" 204 "$STATUS"
+  '{"folder_path":"/general"}' "$TOKEN"
+assert_status "PATCH /deal-rooms/:id/documents/:docId (move to general)" 204 "$STATUS"
 
 api_call BODY STATUS DELETE "$BASE_URL/api/workspaces/$WS/deal-rooms/$ROOM_ID/folders/renamed-folder" "" "$TOKEN"
 assert_status "DELETE /deal-rooms/:id/folders/:path" 200 "$STATUS"

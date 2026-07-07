@@ -93,8 +93,7 @@
     }
   },
   "folders": {
-    "rootName": "根目录",
-    "newRoot": "新建文件夹",
+    "empty": "该数据室没有文件夹。",
     "newSubfolder": "新建子文件夹",
     "addFile": "添加文件",
     "readOnly": "只读",

@@ -158,6 +158,9 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 			}
 		}
 	}
+	if len(folders) == 0 {
+		folders = []Folder{generalFolder()}
+	}
 	settings["folders"] = folders
 
 	settingsBytes, err := json.Marshal(settings)
@@ -748,9 +751,6 @@ func (s *Service) batchFolderPermissions(ctx context.Context, roomID pgtype.UUID
 	for _, p := range perms {
 		m[p.FolderPath] = p.Permission
 	}
-	if _, ok := m[""]; !ok {
-		m[""] = "view" // root folder defaults to view
-	}
 	return m, nil
 }
 
@@ -762,6 +762,17 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	}
 	if err := s.requireRoomAdmin(ctx, room.ID, adminUserID); err != nil {
 		return db.DealRoomDocument{}, err
+	}
+	folders, err := s.loadFolders(room)
+	if err != nil {
+		return db.DealRoomDocument{}, err
+	}
+	folderPath = normalizeFolderPath(folderPath)
+	if folderPath == "/" || folderPath == "" {
+		return db.DealRoomDocument{}, errors.New("folder path is required")
+	}
+	if !folderExists(folders, folderPath) {
+		return db.DealRoomDocument{}, ErrFolderNotFound
 	}
 	docID, err := uuid.Parse(documentID)
 	if err != nil {
@@ -926,6 +937,12 @@ func (s *Service) ListDocuments(ctx context.Context, roomID, workspaceID, email 
 	if err != nil {
 		return nil, err
 	}
+	// Default all real folders to view when no explicit permission is set.
+	for _, f := range folders {
+		if _, ok := permMap[f.Path]; !ok {
+			permMap[f.Path] = "view"
+		}
+	}
 
 	out := make([]FolderDocs, 0, len(folders))
 	for _, f := range folders {
@@ -1013,6 +1030,12 @@ func (s *Service) GetRoomDocuments(ctx context.Context, roomID, workspaceID, use
 	if err != nil {
 		return nil, err
 	}
+	// Default all real folders to view when no explicit permission is set.
+	for _, f := range folders {
+		if _, ok := permMap[f.Path]; !ok {
+			permMap[f.Path] = "view"
+		}
+	}
 
 	out := make([]FolderDocs, 0, len(folders))
 	for _, f := range folders {
@@ -1067,15 +1090,19 @@ func (s *Service) CreateFolder(ctx context.Context, roomID, workspaceID, userID,
 	if slug := slugify(name); slug == "" {
 		return nil, errors.New("folder name must contain valid characters")
 	}
-	if parentPath == "" {
-		parentPath = "/"
-	}
-	parentPath = normalizeFolderPath(parentPath)
-
 	folders, err := s.loadFolders(room)
 	if err != nil {
 		return nil, err
 	}
+	if parentPath == "" {
+		if len(folders) > 0 {
+			parentPath = folders[0].Path
+		} else {
+			parentPath = generalFolder().Path
+		}
+	}
+	parentPath = normalizeFolderPath(parentPath)
+	// parentPath == "/" means creating a top-level folder; "/" itself is not a folder.
 	if parentPath != "/" && !folderExists(folders, parentPath) {
 		return nil, ErrFolderNotFound
 	}
@@ -1115,7 +1142,7 @@ func (s *Service) RenameFolder(ctx context.Context, roomID, workspaceID, userID,
 	}
 	oldPath = normalizeFolderPath(oldPath)
 	if oldPath == "/" {
-		return nil, errors.New("cannot rename root folder")
+		return nil, errors.New("folder not found")
 	}
 	newName = strings.TrimSpace(newName)
 	if newName == "" {
@@ -1202,7 +1229,7 @@ func (s *Service) DeleteFolder(ctx context.Context, roomID, workspaceID, userID,
 	}
 	path = normalizeFolderPath(path)
 	if path == "/" {
-		return nil, errors.New("cannot delete root folder")
+		return nil, errors.New("folder not found")
 	}
 
 	folders, err := s.loadFolders(room)
@@ -1247,23 +1274,28 @@ func (s *Service) DeleteFolder(ctx context.Context, roomID, workspaceID, userID,
 }
 
 func (s *Service) loadFolders(room db.DealRoom) ([]Folder, error) {
-	if len(room.Settings) == 0 || string(room.Settings) == "{}" {
-		return defaultFolders(), nil
+	var loaded []Folder
+	if len(room.Settings) > 0 && string(room.Settings) != "{}" {
+		var settings struct {
+			Folders []Folder `json:"folders"`
+		}
+		if err := json.Unmarshal(room.Settings, &settings); err != nil {
+			return nil, fmt.Errorf("parse room settings: %w", err)
+		}
+		loaded = settings.Folders
 	}
-	var settings struct {
-		Folders []Folder `json:"folders"`
+	// Remove legacy root folder and fall back to a general folder when none remain.
+	filtered := make([]Folder, 0, len(loaded))
+	for _, f := range loaded {
+		if f.Path == "/" {
+			continue
+		}
+		filtered = append(filtered, f)
 	}
-	if err := json.Unmarshal(room.Settings, &settings); err != nil {
-		return nil, fmt.Errorf("parse room settings: %w", err)
+	if len(filtered) == 0 {
+		return []Folder{generalFolder()}, nil
 	}
-	if len(settings.Folders) == 0 {
-		return defaultFolders(), nil
-	}
-	// Ensure the root folder always exists so documents uploaded to "/" are visible.
-	if !folderExists(settings.Folders, "/") {
-		settings.Folders = append(defaultFolders(), settings.Folders...)
-	}
-	return settings.Folders, nil
+	return filtered, nil
 }
 
 func (s *Service) saveFolders(ctx context.Context, room db.DealRoom, folders []Folder) error {
@@ -1332,7 +1364,11 @@ func (s *Service) getTenantForWorkspace(ctx context.Context, workspaceID pgtype.
 }
 
 func defaultFolders() []Folder {
-	return []Folder{{Path: "/", Name: "Root", SortOrder: 0}}
+	return []Folder{}
+}
+
+func generalFolder() Folder {
+	return Folder{Path: "/general", Name: "General", SortOrder: 0}
 }
 
 func folderExists(folders []Folder, path string) bool {
@@ -1378,7 +1414,7 @@ func parentFolder(path string) string {
 func folderName(path string) string {
 	path = normalizeFolderPath(path)
 	if path == "/" {
-		return "Root"
+		return ""
 	}
 	idx := strings.LastIndex(path, "/")
 	if idx < 0 {

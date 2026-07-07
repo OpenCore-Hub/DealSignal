@@ -97,8 +97,7 @@
     }
   },
   "folders": {
-    "rootName": "Root",
-    "newRoot": "New folder",
+    "empty": "No folders in this room.",
     "newSubfolder": "New subfolder",
     "addFile": "Add file",
     "readOnly": "Read-only",
