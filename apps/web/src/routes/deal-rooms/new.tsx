@@ -167,7 +167,7 @@ export function NewDealRoomPage() {
             type="button"
             variant="outline"
             size="icon"
-            className="absolute -left-10 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
+            className="absolute -left-14 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
             onClick={() => scroll("left")}
             aria-label={t("new.previousTemplate")}
           >
@@ -227,7 +227,7 @@ export function NewDealRoomPage() {
             type="button"
             variant="outline"
             size="icon"
-            className="absolute -right-10 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
+            className="absolute -right-14 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-md"
             onClick={() => scroll("right")}
             aria-label={t("new.nextTemplate")}
           >
