@@ -12,12 +12,13 @@ import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, Deal
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, uploadDocumentMock, addDealRoomDocumentMock } = vi.hoisted(() => ({
+const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
   uploadDocumentMock: vi.fn(),
   addDealRoomDocumentMock: vi.fn(),
+  createDealRoomFolderMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -27,6 +28,7 @@ vi.mock("@/lib/api", () => ({
     getDocuments: getDocumentsMock,
     uploadDocument: uploadDocumentMock,
     addDealRoomDocument: addDealRoomDocumentMock,
+    createDealRoomFolder: createDealRoomFolderMock,
   },
 }));
 
@@ -163,6 +165,7 @@ describe("DealRoomDetailPage", () => {
     getDocumentsMock.mockReset();
     uploadDocumentMock.mockReset();
     addDealRoomDocumentMock.mockReset();
+    createDealRoomFolderMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
   });
@@ -187,6 +190,7 @@ describe("DealRoomDetailPage", () => {
     expect(screen.getByText("john@acme.capital")).toBeInTheDocument();
     expect(screen.getByText("sarah@horizon.vc")).toBeInTheDocument();
     expect(screen.queryByText("Upload progress")).not.toBeInTheDocument();
+    expect(screen.queryByText("Folder structure")).not.toBeInTheDocument();
   });
 
   it("shows error and retries on failure", async () => {
@@ -248,6 +252,29 @@ describe("DealRoomDetailPage", () => {
       document_id: "doc_new",
       folder_path: "/pitch",
       sort_order: 1,
+    });
+  });
+
+  it("expands a folder when starting to create a subfolder", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    createDealRoomFolderMock.mockResolvedValue({});
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+    });
+
+    const folderRow = screen.getByText("02 Financials").closest("[role='button']") as HTMLElement;
+    expect(folderRow).toBeInTheDocument();
+
+    fireEvent.contextMenu(folderRow);
+    const newSubfolderButton = screen.getByText(/new subfolder/i);
+    expect(newSubfolderButton).toBeInTheDocument();
+
+    fireEvent.click(newSubfolderButton);
+
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText(/folder name/i)).toBeInTheDocument();
     });
   });
 

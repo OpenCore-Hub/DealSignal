@@ -198,6 +198,16 @@ export function DealRoomFolderTree({
     });
   };
 
+  const startCreate = (parentPath: string) => {
+    setCreatingParent(parentPath);
+    setExpanded((prev) => {
+      if (prev.has(parentPath)) return prev;
+      const next = new Set(prev);
+      next.add(parentPath);
+      return next;
+    });
+  };
+
   const handleCreate = async () => {
     if (!newFolderName.trim()) return;
     setCreating(true);
@@ -440,7 +450,7 @@ export function DealRoomFolderTree({
                   size="icon-sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setCreatingParent(node.folder.path);
+                    startCreate(node.folder.path);
                   }}
                   aria-label={t("folders.newSubfolder")}
                 >
@@ -534,7 +544,7 @@ export function DealRoomFolderTree({
               <button
                 className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground"
                 onClick={() => {
-                  setCreatingParent(contextMenu.folder.path);
+                  startCreate(contextMenu.folder.path);
                   setContextMenu(null);
                 }}
               >

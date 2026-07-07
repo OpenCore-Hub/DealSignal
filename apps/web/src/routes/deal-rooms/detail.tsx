@@ -5,7 +5,6 @@ import {
   Users,
   Lock,
   Envelope,
-  Folder,
   UploadSimple,
   Plus,
   Warning,
@@ -374,13 +373,7 @@ export function DealRoomDetailPage() {
       >
         <div className="space-y-6">
           <Card>
-            <CardHeader>
-              <CardTitle className="text-h2 flex items-center gap-2">
-                <Folder size={20} />
-                {t("detail.folders")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
+            <CardContent className="pt-6">
               <DealRoomFolderTree
                 roomId={room.id}
                 folders={room.folders ?? []}
