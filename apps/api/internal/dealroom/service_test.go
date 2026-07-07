@@ -89,7 +89,7 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
 		Slug:         "seed-room",
 		Name:         "Seed Room",
-		TemplateType: "tmpl_seed",
+		TemplateType: "tmpl_startup_fundraising",
 	})
 	if err != nil {
 		t.Fatalf("create room: %v", err)
@@ -99,14 +99,14 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list folders: %v", err)
 	}
-	if len(folders) != 6 {
-		t.Fatalf("expected 6 folders (root + 5 template), got %d", len(folders))
+	if len(folders) != 8 {
+		t.Fatalf("expected 8 folders (root + 7 template), got %d", len(folders))
 	}
 	if folders[0].Path != "/" {
 		t.Fatalf("expected first folder path /, got %s", folders[0].Path)
 	}
-	if folders[1].Path != "/01-pitch-deck" {
-		t.Fatalf("expected second folder path /01-pitch-deck, got %s", folders[1].Path)
+	if folders[1].Path != "/01-corporate-or-investment-memo" {
+		t.Fatalf("expected second folder path /01-corporate-or-investment-memo, got %s", folders[1].Path)
 	}
 }
 
@@ -154,7 +154,7 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
 		Slug:         "seed-room",
 		Name:         "Seed Room",
-		TemplateType: "tmpl_seed",
+		TemplateType: "tmpl_startup_fundraising",
 	})
 	if err != nil {
 		t.Fatalf("create room: %v", err)
@@ -496,7 +496,7 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
 		Slug:         "detail-room",
 		Name:         "Detail Room",
-		TemplateType: "tmpl_seed",
+		TemplateType: "tmpl_startup_fundraising",
 	})
 	if err != nil {
 		t.Fatalf("create room: %v", err)
@@ -518,7 +518,7 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 		SourceType:  "pdf",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-pitch-deck", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-corporate-or-investment-memo", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 
@@ -526,8 +526,8 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get room detail: %v", err)
 	}
-	if len(detail.Folders) != 6 {
-		t.Fatalf("expected 6 folders (root + 5 template), got %d", len(detail.Folders))
+	if len(detail.Folders) != 8 {
+		t.Fatalf("expected 8 folders (root + 7 template), got %d", len(detail.Folders))
 	}
 	if len(detail.Members) != 2 {
 		t.Fatalf("expected 2 members, got %d", len(detail.Members))

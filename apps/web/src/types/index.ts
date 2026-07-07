@@ -222,12 +222,15 @@ export interface Suggestion {
 }
 
 export type DealRoomTemplateScenario =
-  | "seed"
-  | "series-a"
-  | "series-b"
-  | "lp-update"
-  | "sales-proposal"
-  | "ma"
+  | "startup-fundraising"
+  | "raising-first-fund"
+  | "ma-acquisition"
+  | "series-a-plus"
+  | "real-estate-transaction"
+  | "fund-management"
+  | "portfolio-management"
+  | "project-management"
+  | "sales-dataroom"
   | "custom";
 
 export interface DealRoomFolder {
