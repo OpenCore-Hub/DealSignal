@@ -28,10 +28,10 @@ function mapConfigToPermissionType(
   config: PermissionConfig,
 ): string {
   // Derive the closest legacy permission_type for backward compatibility.
-  // Priority must match backend normalizeSecurityConfig: password > nda > whitelist > public.
-  if (config.passwordEnabled) return "password";
+  // Priority must match backend normalizeSecurityConfig: nda > public.
+  // Whitelist and password have been removed from the UI, so they are never
+  // emitted even if an old local draft still contains them.
   if (config.ndaEnabled) return "nda";
-  if (config.whitelistEnabled && config.whitelist.length > 0) return "whitelist";
   // Modern email verification is controlled by the independent boolean flag,
   // not by the legacy permission_type, so it should remain "public".
   return "public";
@@ -42,20 +42,9 @@ export function toCreateLinkPayload(
   config: PermissionConfig,
   name?: string,
 ): CreateLinkPayload {
-  const whitelist = (config.whitelistEnabled ? config.whitelist : [])
-    .map((s) => s.trim())
-    .filter(Boolean);
-  const allowedEmails = whitelist.filter(
-    (s) => s.includes("@") && !s.startsWith("@"),
-  );
-  const allowedDomains = whitelist.filter(
-    (s) => !s.includes("@") || s.startsWith("@"),
-  );
-
   // Derived: email verification is required when any of the source flags is on.
   const requireEmailVerification =
     config.requireEmailVerification ||
-    config.whitelistEnabled ||
     config.ndaEnabled;
 
   const payload: CreateLinkPayload = {
@@ -63,13 +52,11 @@ export function toCreateLinkPayload(
     name,
     permission_type: mapConfigToPermissionType(config),
     require_email_verification: requireEmailVerification,
-    require_password: config.passwordEnabled,
+    require_password: false,
     require_nda: config.ndaEnabled,
-    allowed_emails:
-      allowedEmails.length > 0 ? allowedEmails : undefined,
-    allowed_domains:
-      allowedDomains.length > 0 ? allowedDomains : undefined,
-    password: config.passwordEnabled ? config.password : undefined,
+    allowed_emails: undefined,
+    allowed_domains: undefined,
+    password: undefined,
     contact_ids:
       requireEmailVerification && config.contactIds.length > 0
         ? config.contactIds

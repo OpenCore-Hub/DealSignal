@@ -24,28 +24,17 @@ describe("toCreateLinkPayload", () => {
     const config = buildConfigFromPreset("standard");
     const payload = toCreateLinkPayload(["doc-1", "doc-2", "doc-3"], config);
     expect(payload.document_ids).toEqual(["doc-1", "doc-2", "doc-3"]);
-    // Standard preset has whitelistEnabled but empty whitelist → maps to "public"
+    // Standard preset uses email verification only, so permission_type stays "public"
     expect(payload.permission_type).toBe("public");
     expect(payload.require_email_verification).toBe(true);
   });
 
-  it("maps password config correctly", () => {
-    const config = buildConfigFromPreset("confidential");
-    const payload = toCreateLinkPayload(["doc-1"], {
-      ...config,
-      password: "secret123",
-    });
-    expect(payload.require_password).toBe(true);
-    expect(payload.password).toBe("secret123");
-    expect(payload.require_nda).toBe(true);
-  });
-
-  it("maps confidential config (password + NDA) to password as highest-priority gate", () => {
+  it("maps confidential config (NDA) correctly", () => {
     const config = buildConfigFromPreset("confidential");
     const payload = toCreateLinkPayload(["doc-1"], config);
     expect(payload.require_nda).toBe(true);
-    // password has higher priority than nda (matches backend normalizeSecurityConfig)
-    expect(payload.permission_type).toBe("password");
+    expect(payload.require_email_verification).toBe(true);
+    expect(payload.permission_type).toBe("nda");
   });
 
   it("includes contact_ids when email verification is enabled", () => {
@@ -105,51 +94,20 @@ describe("toCreateLinkPayload", () => {
     expect(payload.name).toBe("My Bundle");
   });
 
-  it("filters empty whitelist entries", () => {
+  it("always sends password and whitelist fields as disabled/undefined", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("standard"),
-      requireEmailVerification: true,
-      whitelistEnabled: true,
-      whitelist: ["user@test.com", "  ", "", "@example.com"],
-    };
-    const payload = toCreateLinkPayload(["doc-1"], config);
-    expect(payload.allowed_emails).toEqual(["user@test.com"]);
-    // @example.com is kept as-is (domains are de-duplicated and stripped on backend)
-    expect(payload.allowed_domains).toEqual(["@example.com"]);
-  });
-
-  it("splits whitelist into emails and domains", () => {
-    const config: PermissionConfig = {
-      ...buildConfigFromPreset("standard"),
-      requireEmailVerification: true,
-      whitelistEnabled: true,
-      whitelist: ["a@b.com", "@domain.io", "c@d.co"],
-    };
-    const payload = toCreateLinkPayload(["doc-1"], config);
-    expect(payload.allowed_emails).toEqual(["a@b.com", "c@d.co"]);
-    expect(payload.allowed_domains).toEqual(["@domain.io"]);
-  });
-
-  it("maps permission_type to whitelist when whitelist has entries", () => {
-    const config: PermissionConfig = {
-      ...buildConfigFromPreset("standard"),
-      requireEmailVerification: true,
       whitelistEnabled: true,
       whitelist: ["user@company.com", "@company.io"],
+      passwordEnabled: true,
+      password: "secret123",
     };
     const payload = toCreateLinkPayload(["doc-1"], config);
-    expect(payload.permission_type).toBe("whitelist");
-  });
-
-  it("requires email verification when whitelist is enabled", () => {
-    const config: PermissionConfig = {
-      ...buildConfigFromPreset("standard"),
-      requireEmailVerification: false, // This should be overridden
-      whitelistEnabled: true,
-      whitelist: ["test@example.com"],
-    };
-    const payload = toCreateLinkPayload(["doc-1"], config);
-    expect(payload.require_email_verification).toBe(true);
+    expect(payload.require_password).toBe(false);
+    expect(payload.password).toBeUndefined();
+    expect(payload.allowed_emails).toBeUndefined();
+    expect(payload.allowed_domains).toBeUndefined();
+    expect(payload.permission_type).toBe("public");
   });
 });
 

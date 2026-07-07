@@ -253,9 +253,6 @@ type Link struct {
 	PublicToken              string
 	Name                     pgtype.Text
 	PermissionType           string
-	AllowedEmails            []byte
-	AllowedDomains           []byte
-	PasswordHash             pgtype.Text
 	ExpiresAt                pgtype.Timestamptz
 	MaxAccessCount           pgtype.Int4
 	AccessCount              int32
@@ -266,7 +263,6 @@ type Link struct {
 	CreatedAt                pgtype.Timestamptz
 	UpdatedAt                pgtype.Timestamptz
 	RequireEmail             bool
-	RequirePassword          bool
 	RequireNda               bool
 	RequireEmailVerification bool
 	AiCopilotEnabled         bool

@@ -154,11 +154,7 @@ type CreateRequest struct {
 	PermissionType           string   `json:"permission_type,omitempty"`
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
-	AllowedEmails            []string `json:"allowed_emails,omitempty"`
-	AllowedDomains           []string `json:"allowed_domains,omitempty"`
-	Password                 string   `json:"password,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
@@ -174,11 +170,7 @@ type UpdateRequest struct {
 	PermissionType           string   `json:"permission_type,omitempty"`
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
-	AllowedEmails            []string `json:"allowed_emails,omitempty"`
-	AllowedDomains           []string `json:"allowed_domains,omitempty"`
-	Password                 string   `json:"password,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          *bool    `json:"download_enabled,omitempty"`
@@ -321,11 +313,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
 		RequireEmailVerification: req.RequireEmailVerification,
-		RequirePassword:          req.RequirePassword,
 		RequireNDA:               req.RequireNDA,
-		AllowedEmails:            req.AllowedEmails,
-		AllowedDomains:           req.AllowedDomains,
-		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          downloadEnabled,
@@ -415,11 +403,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
 		RequireEmailVerification: req.RequireEmailVerification,
-		RequirePassword:          req.RequirePassword,
 		RequireNDA:               req.RequireNDA,
-		AllowedEmails:            req.AllowedEmails,
-		AllowedDomains:           req.AllowedDomains,
-		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
@@ -525,7 +509,6 @@ func (h *Handler) Access(c *gin.Context) {
 	result, err := h.service.Access(c.Request.Context(), token, AccessRequest{
 		Email:     body.Email,
 		EmailCode: body.EmailCode,
-		Password:  body.Password,
 		NDAAgreed: body.NDAAgreed,
 		IP:        c.ClientIP(),
 		UA:        c.Request.UserAgent(),
@@ -537,10 +520,10 @@ func (h *Handler) Access(c *gin.Context) {
 
 			// For credential-gate errors, include the link's security flags so the
 			// UI can render all required fields on the first attempt.
-			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrWhitelistDenied) {
-				requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
+			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) {
+				requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
-				if errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrInvalidEmailCode) {
+				if errors.Is(err, ErrInvalidEmailCode) {
 					status = http.StatusUnauthorized
 				}
 				c.JSON(status, gin.H{
@@ -548,7 +531,6 @@ func (h *Handler) Access(c *gin.Context) {
 					"message":                   err.Error(),
 					"requiresEmail":             requiresEmail,
 					"requiresEmailVerification": requiresEmailVerification,
-					"requiresPassword":          requiresPassword,
 					"requiresNda":               requiresNda,
 				})
 				return
@@ -571,9 +553,8 @@ func (h *Handler) Access(c *gin.Context) {
 // flags, session token) and writes it as JSON. It is shared by the normal
 // Access flow and the session-reuse fast path.
 //
-// Password is intentionally NOT stored in the session — the HMAC-signed
-// session token is sufficient proof of authentication. LinkUpdatedAt is
-// stored so sessions are invalidated when link security config changes.
+// LinkUpdatedAt is stored so sessions are invalidated when link security
+// config changes.
 func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool) {
 	// Fetch all documents for the link bundle.
 	linkDocs, linkDocsErr := h.service.queries.ListLinkDocumentsByPublicToken(c.Request.Context(), token)
@@ -627,7 +608,7 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		return
 	}
 
-	requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
+	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 	c.JSON(http.StatusOK, gin.H{
 		"link": gin.H{
 			"id":               uuidToString(link.ID),
@@ -641,7 +622,6 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"documents":                 documents,
 		"visitorId":                 visitorID,
 		"requiresEmail":             requiresEmail,
-		"requiresPassword":          requiresPassword,
 		"requiresNda":               requiresNda,
 		"requiresEmailVerification": requiresEmailVerification,
 		"sessionToken":              session,
@@ -942,19 +922,16 @@ func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
 
 // publicAccessRequestFromContext reads link access credentials from the
 // X-Link-Access header (preferred) and falls back to query parameters for
-// backward compatibility. The header value is base64-encoded JSON so the
-// password is not exposed in URLs.
+// backward compatibility.
 func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 	email := c.Query("email")
 	emailCode := c.Query("email_code")
-	password := c.Query("password")
 	ndaAgreed := c.Query("nda_agreed") == "true"
 
 	if header := c.GetHeader("X-Link-Access"); header != "" {
 		var decoded struct {
 			Email     string `json:"email"`
 			EmailCode string `json:"email_code"`
-			Password  string `json:"password"`
 			NDAAgreed bool   `json:"nda_agreed"`
 		}
 		if b, err := base64.URLEncoding.DecodeString(header); err == nil {
@@ -965,9 +942,6 @@ func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 			if decoded.EmailCode != "" {
 				emailCode = decoded.EmailCode
 			}
-			if decoded.Password != "" {
-				password = decoded.Password
-			}
 			if decoded.NDAAgreed {
 				ndaAgreed = decoded.NDAAgreed
 			}
@@ -977,7 +951,6 @@ func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 	return AccessRequest{
 		Email:     email,
 		EmailCode: emailCode,
-		Password:  password,
 		NDAAgreed: ndaAgreed,
 		IP:        c.ClientIP(),
 		UA:        c.Request.UserAgent(),
@@ -998,16 +971,10 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": err.Error()})
 	case errors.Is(err, ErrRequiresEmail):
 		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email", "message": err.Error()})
-	case errors.Is(err, ErrWhitelistDenied):
-		c.JSON(http.StatusForbidden, gin.H{"code": "whitelist_denied", "message": err.Error()})
 	case errors.Is(err, ErrRequiresEmailCode):
 		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email_code", "message": err.Error()})
 	case errors.Is(err, ErrInvalidEmailCode):
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_email_code", "message": err.Error()})
-	case errors.Is(err, ErrRequiresPassword):
-		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": err.Error()})
-	case errors.Is(err, ErrInvalidPassword):
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_password", "message": err.Error()})
 	case errors.Is(err, ErrRequiresNDA):
 		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
 	default:
@@ -1026,18 +993,12 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "revoked_link_accessed", "", false
 	case errors.Is(err, ErrLinkMaxAccessReached):
 		return "max_access_reached", "", false
-	case errors.Is(err, ErrInvalidPassword):
-		return "security_gate_failed", "invalid_password", true
 	case errors.Is(err, ErrInvalidEmailCode):
 		return "security_gate_failed", "invalid_email_code", true
 	case errors.Is(err, ErrRequiresEmail):
 		return "security_gate_failed", "email_required", true
 	case errors.Is(err, ErrRequiresEmailCode):
 		return "security_gate_failed", "email_code_required", true
-	case errors.Is(err, ErrRequiresPassword):
-		return "security_gate_failed", "password_required", true
-	case errors.Is(err, ErrWhitelistDenied):
-		return "security_gate_failed", "whitelist_denied", true
 	case errors.Is(err, ErrRequiresNDA):
 		return "security_gate_failed", "nda_required", true
 	default:
@@ -1070,15 +1031,11 @@ func (h *Handler) checkAndRecordAbnormalAccessPattern(ctx context.Context, link 
 }
 
 // linkSecurityFlags returns the active gate requirements for a link based on
-// the modern boolean flags. Email is required only when whitelist is active
-// (identity must be checked against the allowed list). For email-verification-only
-// links, the visitor identifies via access code without entering their email.
-func linkSecurityFlags(link db.Link) (requiresEmail, requiresEmailVerification, requiresPassword, requiresNda bool) {
+// the modern boolean flags. For email-verification-only links, the visitor
+// identifies via access code without entering their email.
+func linkSecurityFlags(link db.Link) (requiresEmail, requiresEmailVerification, requiresNda bool) {
 	requiresEmailVerification = link.RequireEmailVerification
-	requiresPassword = link.RequirePassword
 	requiresNda = link.RequireNda
-	hasWhitelist := jsonArrayNotEmpty(link.AllowedEmails) || jsonArrayNotEmpty(link.AllowedDomains)
-	requiresEmail = hasWhitelist
 	return
 }
 
@@ -1097,16 +1054,10 @@ func accessErrorCode(err error) string {
 		return "link_max_access_reached"
 	case errors.Is(err, ErrRequiresEmail):
 		return "requires_email"
-	case errors.Is(err, ErrWhitelistDenied):
-		return "whitelist_denied"
 	case errors.Is(err, ErrRequiresEmailCode):
 		return "requires_email_code"
 	case errors.Is(err, ErrInvalidEmailCode):
 		return "invalid_email_code"
-	case errors.Is(err, ErrRequiresPassword):
-		return "requires_password"
-	case errors.Is(err, ErrInvalidPassword):
-		return "invalid_password"
 	case errors.Is(err, ErrRequiresNDA):
 		return "nda_required"
 	default:
@@ -1190,24 +1141,6 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		}
 	}
 
-	// Parse allowed emails/domains from link record for edit-mode reconstruction.
-	var allowedEmails []string
-	if jsonArrayNotEmpty(link.AllowedEmails) {
-		if err := json.Unmarshal(link.AllowedEmails, &allowedEmails); err != nil {
-			logger.ErrorCtx(ctx, "unmarshal allowed_emails failed", err,
-				logger.Attr("link_id", uuidToString(link.ID)),
-			)
-		}
-	}
-	var allowedDomains []string
-	if jsonArrayNotEmpty(link.AllowedDomains) {
-		if err := json.Unmarshal(link.AllowedDomains, &allowedDomains); err != nil {
-			logger.ErrorCtx(ctx, "unmarshal allowed_domains failed", err,
-				logger.Attr("link_id", uuidToString(link.ID)),
-			)
-		}
-	}
-
 	// Fetch link contacts to return contact IDs for edit-mode reconstruction.
 	var contactIDs []string
 	linkContacts, linkContactsErr := h.service.queries.GetLinkContactsByPublicToken(ctx, link.PublicToken)
@@ -1263,14 +1196,11 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"isActive":                 isActive,
 		"permissionType":           mapPermissionType(link.PermissionType),
 		"requireNda":               link.RequireNda,
-		"requirePassword":          link.RequirePassword,
 		"downloadEnabled":          link.DownloadEnabled,
 		"watermarkEnabled":         link.WatermarkEnabled,
 		"aiCopilotEnabled":         link.AiCopilotEnabled,
 		"requireEmailVerification": link.RequireEmailVerification,
 		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
-		"allowedEmails":            allowedEmails,
-		"allowedDomains":           allowedDomains,
 		"contactIds":               contactIDs,
 	}
 	if link.ExpiresAt.Valid {

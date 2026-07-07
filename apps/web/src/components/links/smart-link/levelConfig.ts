@@ -37,7 +37,7 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
   },
   standard: {
     requireEmailVerification: true,
-    whitelistEnabled: true,
+    whitelistEnabled: false,
     whitelist: [],
     passwordEnabled: false,
     ndaEnabled: false,
@@ -49,9 +49,9 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
   },
   confidential: {
     requireEmailVerification: true,
-    whitelistEnabled: true,
+    whitelistEnabled: false,
     whitelist: [],
-    passwordEnabled: true,
+    passwordEnabled: false,
     ndaEnabled: true,
     allowDownload: false,
     watermarkEnabled: true,
@@ -106,7 +106,6 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
     usage: "preset.standard.usage",
     gates: [
       "featureEmailVerification",
-      "featureWhitelist",
       "featureWatermark",
       "featureNoDownload",
     ],
@@ -121,8 +120,6 @@ export const presetDef: Record<PermissionPreset, PresetDef> = {
     usage: "preset.confidential.usage",
     gates: [
       "featureEmailVerification",
-      "featureWhitelist",
-      "featurePassword",
       "featureNDA",
       "featureWatermark",
       "featureNoDownload",
@@ -168,26 +165,19 @@ const NAMED_PRESETS: PermissionPreset[] = PRESET_ORDER.filter(
  * with the score counter inside that function. Changing these will
  * automatically re-derive MAX_SCORE and PERFECT_MATCH_THRESHOLD.
  *
- *   - 7 boolean flags
+ *   - 5 boolean flags
  *   - 2 mixed-value fields (expiryDays, maxViews)
- *   - 1 derived: whitelist content match
- *   - 1 derived: password content match
  *
- * Total = 11 (computed as MAX_SCORE below — do NOT hardcode elsewhere).
+ * Total = 7 (computed as MAX_SCORE below — do NOT hardcode elsewhere).
  */
 const SCORED_DIMENSION_NAMES = [
   "requireEmailVerification",
-  "whitelistEnabled",
-  "passwordEnabled",
   "ndaEnabled",
   "allowDownload",
   "watermarkEnabled",
   "aiCopilotEnabled",
   "expiryDays",
   "maxViews",
-  // derived dimensions (not direct field comparisons)
-  "_whitelistContentMatch",
-  "_passwordContentMatch",
 ] as const;
 
 /** Maximum possible score for presetMatchScore — computed from scored dimensions. */
@@ -223,29 +213,15 @@ function presetMatchScore(
   template: PresetConfigTemplate,
 ): number {
   let score = 0;
-  // These 9 lines correspond to the first 9 entries in SCORED_DIMENSION_NAMES.
+  // These 7 lines correspond to the first 7 entries in SCORED_DIMENSION_NAMES.
   // When adding/removing a field here, update SCORED_DIMENSION_NAMES above.
   if (config.requireEmailVerification === template.requireEmailVerification) score++;
-  if (config.whitelistEnabled === template.whitelistEnabled) score++;
-  if (config.passwordEnabled === template.passwordEnabled) score++;
   if (config.ndaEnabled === template.ndaEnabled) score++;
   if (config.allowDownload === template.allowDownload) score++;
   if (config.watermarkEnabled === template.watermarkEnabled) score++;
   if (config.aiCopilotEnabled === template.aiCopilotEnabled) score++;
   if (config.expiryDays === template.expiryDays) score++;
   if (config.maxViews === template.maxViews) score++;
-
-  // Whitelist contents must match (empty or not) — _whitelistContentMatch
-  const configHasWhitelist =
-    config.whitelistEnabled && config.whitelist.length > 0;
-  const templateHasWhitelist =
-    template.whitelistEnabled && template.whitelist.length > 0;
-  if (configHasWhitelist === templateHasWhitelist) score++;
-
-  // Password presence must match — _passwordContentMatch
-  const configHasPassword = config.passwordEnabled && !!config.password;
-  const templateHasPassword = template.passwordEnabled && !!template.password;
-  if (configHasPassword === templateHasPassword) score++;
 
   return score;
 }
@@ -263,11 +239,6 @@ function presetMatchScore(
 export function enforceCrossOptionConstraints(
   next: PermissionConfig,
 ): PermissionConfig {
-  // Whitelist requires email verification to identify the visitor.
-  if (next.whitelistEnabled && !next.requireEmailVerification) {
-    return { ...next, requireEmailVerification: true };
-  }
-
   // NDA requires email verification so the signer identity is recorded.
   if (next.ndaEnabled && !next.requireEmailVerification) {
     return { ...next, requireEmailVerification: true };
@@ -289,8 +260,6 @@ export function calculateFrictionScore(
 ): number {
   let score = 0;
   if (config.requireEmailVerification) score += 1;
-  if (config.whitelistEnabled) score += 3;
-  if (config.passwordEnabled) score += 3;
   if (config.ndaEnabled) score += 2;
   if (config.watermarkEnabled) score += 1;
   if (!config.allowDownload) score += 1;
@@ -310,8 +279,6 @@ export function calculateSecurityScore(
 ): number {
   let score = 0;
   if (config.requireEmailVerification) score += 2;
-  if (config.whitelistEnabled) score += 3;
-  if (config.passwordEnabled) score += 3;
   if (config.ndaEnabled) score += 2;
   if (config.watermarkEnabled) score += 2;
   if (!config.allowDownload) score += 1;

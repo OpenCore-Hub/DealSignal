@@ -2,8 +2,6 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   EnvelopeIcon,
-  ListChecksIcon,
-  LockKeyIcon,
   ScrollIcon,
   DownloadIcon,
   DropIcon,
@@ -12,7 +10,6 @@ import {
   CaretDownIcon,
 } from "@phosphor-icons/react";
 import { Switch } from "@/components/ui/switch";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -78,7 +75,7 @@ export function BundleSecurityOptions({
   const { t } = useTranslation("links");
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
-  const { invalidWhitelistEmails, update } = useSecurityOptions(config, onChange);
+  const { update } = useSecurityOptions(config, onChange);
 
   return (
     <div className="space-y-6">
@@ -93,7 +90,7 @@ export function BundleSecurityOptions({
             label={t("creator.requireEmailVerification")}
             description={t("creator.requireEmailDesc")}
             checked={config.requireEmailVerification}
-            disabled={config.whitelistEnabled || config.ndaEnabled}
+            disabled={config.ndaEnabled}
             onCheckedChange={(checked) =>
               update({
                 requireEmailVerification: checked,
@@ -103,63 +100,6 @@ export function BundleSecurityOptions({
             data-testid="security-switch-requireEmailVerification"
           />
           {config.requireEmailVerification && contactSelector}
-
-          <OptionRow
-            icon={ListChecksIcon}
-            label={t("creator.whitelist")}
-            description={t("creator.whitelistDesc")}
-            checked={config.whitelistEnabled}
-            onCheckedChange={(checked) =>
-              update({ whitelistEnabled: checked })
-            }
-            data-testid="security-switch-whitelistEnabled"
-          />
-          {config.whitelistEnabled && (
-            <div className="px-3 pb-3 pl-[4.5rem]">
-              <Input
-                data-testid="security-whitelist-input"
-                placeholder={t("creator.whitelistPlaceholder")}
-                value={config.whitelist.join(", ")}
-                onChange={(e) =>
-                  update({
-                    whitelist: e.target.value
-                      .split(",")
-                      .map((s) => s.trim())
-                      .filter(Boolean),
-                  })
-                }
-              />
-              {invalidWhitelistEmails.length > 0 && (
-                <p className="mt-1 text-xs text-destructive">
-                  {t("creator.whitelistInvalidEmail", {
-                    emails: invalidWhitelistEmails.join(", "),
-                  })}
-                </p>
-              )}
-            </div>
-          )}
-
-          <OptionRow
-            icon={LockKeyIcon}
-            label={t("creator.password")}
-            description={t("creator.passwordDesc")}
-            checked={config.passwordEnabled}
-            onCheckedChange={(checked) =>
-              update({ passwordEnabled: checked })
-            }
-            data-testid="security-switch-passwordEnabled"
-          />
-          {config.passwordEnabled && (
-            <div className="px-3 pb-3 pl-[4.5rem]">
-              <Input
-                data-testid="security-password-input"
-                type="password"
-                placeholder={t("creator.passwordPlaceholder")}
-                value={config.password ?? ""}
-                onChange={(e) => update({ password: e.target.value })}
-              />
-            </div>
-          )}
         </div>
       </section>
 

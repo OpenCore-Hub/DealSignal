@@ -27,10 +27,6 @@ async function setupI18n() {
           "creator.sectionAccessControl": "Access Control",
           "creator.requireEmailVerification": "Require email verification",
           "creator.requireEmailDesc": "Visitor must verify email",
-          "creator.whitelist": "Whitelist",
-          "creator.whitelistDesc": "Only allow specified emails",
-          "creator.password": "Password",
-          "creator.passwordDesc": "Require password",
           "creator.sectionContentProtection": "Content Protection",
           "creator.nda": "NDA",
           "creator.ndaDesc": "Require NDA",
@@ -51,7 +47,7 @@ async function setupI18n() {
           "creator.maxViewsOptions.10": "10",
           "creator.maxViewsOptions.50": "50",
           "creator.maxViewsOptions.100": "100",
-          "creator.whitelistPlaceholder": "Emails/domains",
+
           "preset.public.label": "Public",
           "preset.public.description": "Public",
           "preset.standard.label": "Standard",
@@ -107,23 +103,22 @@ describe("StepSecurity integration", () => {
   it("toggles allow download switch", async () => {
     await renderStepSecurity();
     const switches = screen.getAllByRole("switch");
-    // Order: email, whitelist, password, nda, download, watermark
-    fireEvent.click(switches[4]);
+    // Order: email verification, NDA, allow download, watermark
+    fireEvent.click(switches[2]);
     // Re-query after state-driven re-render to avoid stale DOM references
     // (the old switches array may contain detached nodes after React re-renders).
     await waitFor(() => {
       const updated = screen.getAllByRole("switch");
-      expect(updated[4]).toHaveAttribute("aria-checked", "true");
+      expect(updated[2]).toHaveAttribute("aria-checked", "true");
     });
   });
 
-  it("keeps custom options visible when toggling whitelist on from customized", async () => {
+  it("keeps custom options visible when toggling NDA on from customized", async () => {
     await renderStepSecurity();
     const switches = screen.getAllByRole("switch");
-    fireEvent.click(switches[1]); // whitelist
-    // After toggling whitelist from customized, the config exactly matches the
-    // standard preset. The custom options panel should remain visible so the
-    // user can continue editing.
+    fireEvent.click(switches[1]); // NDA
+    // Toggling NDA from customized does not match any named preset, so the
+    // custom options panel should remain visible so the user can continue editing.
     expect(screen.getByText("Security Options")).toBeInTheDocument();
   });
 });

@@ -1047,16 +1047,14 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 
 const createLink = `-- name: CreateLink :one
 INSERT INTO links (
-    tenant_id, workspace_id, document_id, public_token, name, permission_type,
-    allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+    tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
     download_enabled, watermark_enabled, status, created_by,
-    require_email, require_password, require_nda, require_email_verification,
+    require_email, require_nda, require_email_verification,
     ai_copilot_enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-          updated_at, require_email, require_password, require_nda, require_email_verification,
+          updated_at, require_email, require_nda, require_email_verification,
           ai_copilot_enabled
 `
 
@@ -1067,9 +1065,6 @@ type CreateLinkParams struct {
 	PublicToken              string
 	Name                     pgtype.Text
 	PermissionType           string
-	AllowedEmails            []byte
-	AllowedDomains           []byte
-	PasswordHash             pgtype.Text
 	ExpiresAt                pgtype.Timestamptz
 	MaxAccessCount           pgtype.Int4
 	DownloadEnabled          bool
@@ -1077,7 +1072,6 @@ type CreateLinkParams struct {
 	Status                   string
 	CreatedBy                pgtype.UUID
 	RequireEmail             bool
-	RequirePassword          bool
 	RequireNda               bool
 	RequireEmailVerification bool
 	AiCopilotEnabled         bool
@@ -1091,9 +1085,6 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.PublicToken,
 		arg.Name,
 		arg.PermissionType,
-		arg.AllowedEmails,
-		arg.AllowedDomains,
-		arg.PasswordHash,
 		arg.ExpiresAt,
 		arg.MaxAccessCount,
 		arg.DownloadEnabled,
@@ -1101,7 +1092,6 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.Status,
 		arg.CreatedBy,
 		arg.RequireEmail,
-		arg.RequirePassword,
 		arg.RequireNda,
 		arg.RequireEmailVerification,
 		arg.AiCopilotEnabled,
@@ -1115,9 +1105,6 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.PublicToken,
 		&i.Name,
 		&i.PermissionType,
-		&i.AllowedEmails,
-		&i.AllowedDomains,
-		&i.PasswordHash,
 		&i.ExpiresAt,
 		&i.MaxAccessCount,
 		&i.AccessCount,
@@ -1128,7 +1115,6 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RequireEmail,
-		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
 		&i.AiCopilotEnabled,
@@ -3074,10 +3060,9 @@ func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtyp
 }
 
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE id = $1 AND workspace_id = $2
@@ -3100,9 +3085,6 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.PublicToken,
 		&i.Name,
 		&i.PermissionType,
-		&i.AllowedEmails,
-		&i.AllowedDomains,
-		&i.PasswordHash,
 		&i.ExpiresAt,
 		&i.MaxAccessCount,
 		&i.AccessCount,
@@ -3113,7 +3095,6 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RequireEmail,
-		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
 		&i.AiCopilotEnabled,
@@ -3122,10 +3103,9 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 }
 
 const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE public_token = $1
@@ -3143,9 +3123,6 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.PublicToken,
 		&i.Name,
 		&i.PermissionType,
-		&i.AllowedEmails,
-		&i.AllowedDomains,
-		&i.PasswordHash,
 		&i.ExpiresAt,
 		&i.MaxAccessCount,
 		&i.AccessCount,
@@ -3156,7 +3133,6 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RequireEmail,
-		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
 		&i.AiCopilotEnabled,
@@ -5076,10 +5052,9 @@ func (q *Queries) ListLinkDocumentsByPublicToken(ctx context.Context, publicToke
 }
 
 const listLinksByDocument = `-- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
@@ -5108,9 +5083,6 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.PublicToken,
 			&i.Name,
 			&i.PermissionType,
-			&i.AllowedEmails,
-			&i.AllowedDomains,
-			&i.PasswordHash,
 			&i.ExpiresAt,
 			&i.MaxAccessCount,
 			&i.AccessCount,
@@ -5121,7 +5093,6 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RequireEmail,
-			&i.RequirePassword,
 			&i.RequireNda,
 			&i.RequireEmailVerification,
 			&i.AiCopilotEnabled,
@@ -5137,10 +5108,9 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 }
 
 const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
@@ -5164,9 +5134,6 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.PublicToken,
 			&i.Name,
 			&i.PermissionType,
-			&i.AllowedEmails,
-			&i.AllowedDomains,
-			&i.PasswordHash,
 			&i.ExpiresAt,
 			&i.MaxAccessCount,
 			&i.AccessCount,
@@ -5177,7 +5144,6 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RequireEmail,
-			&i.RequirePassword,
 			&i.RequireNda,
 			&i.RequireEmailVerification,
 			&i.AiCopilotEnabled,
@@ -5536,10 +5502,9 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 }
 
 const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
@@ -5569,9 +5534,6 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.PublicToken,
 			&i.Name,
 			&i.PermissionType,
-			&i.AllowedEmails,
-			&i.AllowedDomains,
-			&i.PasswordHash,
 			&i.ExpiresAt,
 			&i.MaxAccessCount,
 			&i.AccessCount,
@@ -5582,7 +5544,6 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.RequireEmail,
-			&i.RequirePassword,
 			&i.RequireNda,
 			&i.RequireEmailVerification,
 			&i.AiCopilotEnabled,
@@ -7189,24 +7150,19 @@ UPDATE links SET
     name = $1,
     document_id = $2,
     permission_type = $3,
-    allowed_emails = $4,
-    allowed_domains = $5,
-    password_hash = $6,
-    expires_at = $7,
-    max_access_count = $8,
-    download_enabled = $9,
-    watermark_enabled = $10,
-    require_email = $11,
-    require_email_verification = $12,
-    require_password = $13,
-    require_nda = $14,
-    ai_copilot_enabled = $15,
+    expires_at = $4,
+    max_access_count = $5,
+    download_enabled = $6,
+    watermark_enabled = $7,
+    require_email = $8,
+    require_email_verification = $9,
+    require_nda = $10,
+    ai_copilot_enabled = $11,
     updated_at = now()
-WHERE id = $16 AND workspace_id = $17
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+WHERE id = $12 AND workspace_id = $13
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 `
 
@@ -7214,16 +7170,12 @@ type UpdateLinkFullParams struct {
 	Name                     pgtype.Text
 	DocumentID               pgtype.UUID
 	PermissionType           string
-	AllowedEmails            []byte
-	AllowedDomains           []byte
-	PasswordHash             pgtype.Text
 	ExpiresAt                pgtype.Timestamptz
 	MaxAccessCount           pgtype.Int4
 	DownloadEnabled          bool
 	WatermarkEnabled         bool
 	RequireEmail             bool
 	RequireEmailVerification bool
-	RequirePassword          bool
 	RequireNda               bool
 	AiCopilotEnabled         bool
 	ID                       pgtype.UUID
@@ -7235,16 +7187,12 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		arg.Name,
 		arg.DocumentID,
 		arg.PermissionType,
-		arg.AllowedEmails,
-		arg.AllowedDomains,
-		arg.PasswordHash,
 		arg.ExpiresAt,
 		arg.MaxAccessCount,
 		arg.DownloadEnabled,
 		arg.WatermarkEnabled,
 		arg.RequireEmail,
 		arg.RequireEmailVerification,
-		arg.RequirePassword,
 		arg.RequireNda,
 		arg.AiCopilotEnabled,
 		arg.ID,
@@ -7259,9 +7207,6 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		&i.PublicToken,
 		&i.Name,
 		&i.PermissionType,
-		&i.AllowedEmails,
-		&i.AllowedDomains,
-		&i.PasswordHash,
 		&i.ExpiresAt,
 		&i.MaxAccessCount,
 		&i.AccessCount,
@@ -7272,7 +7217,6 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RequireEmail,
-		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
 		&i.AiCopilotEnabled,
@@ -7284,10 +7228,9 @@ const updateLinkStatus = `-- name: UpdateLinkStatus :one
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 `
 
@@ -7308,9 +7251,6 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.PublicToken,
 		&i.Name,
 		&i.PermissionType,
-		&i.AllowedEmails,
-		&i.AllowedDomains,
-		&i.PasswordHash,
 		&i.ExpiresAt,
 		&i.MaxAccessCount,
 		&i.AccessCount,
@@ -7321,7 +7261,6 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.RequireEmail,
-		&i.RequirePassword,
 		&i.RequireNda,
 		&i.RequireEmailVerification,
 		&i.AiCopilotEnabled,

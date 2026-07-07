@@ -282,33 +282,29 @@ ORDER BY created_at ASC
 LIMIT $2;
 -- name: CreateLink :one
 INSERT INTO links (
-    tenant_id, workspace_id, document_id, public_token, name, permission_type,
-    allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+    tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
     download_enabled, watermark_enabled, status, created_by,
-    require_email, require_password, require_nda, require_email_verification,
+    require_email, require_nda, require_email_verification,
     ai_copilot_enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-          updated_at, require_email, require_password, require_nda, require_email_verification,
+          updated_at, require_email, require_nda, require_email_verification,
           ai_copilot_enabled;
 
 -- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
 
 -- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE public_token = $1
@@ -320,20 +316,18 @@ SET access_count = access_count + 1, updated_at = now()
 WHERE id = $1;
 
 -- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
 
 -- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
@@ -341,10 +335,9 @@ ORDER BY created_at DESC
 LIMIT $2;
 
 -- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-       allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
        access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
@@ -354,10 +347,9 @@ ORDER BY created_at DESC;
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled;
 
 -- name: UpdateLinkFull :one
@@ -365,24 +357,19 @@ UPDATE links SET
     name = $1,
     document_id = $2,
     permission_type = $3,
-    allowed_emails = $4,
-    allowed_domains = $5,
-    password_hash = $6,
-    expires_at = $7,
-    max_access_count = $8,
-    download_enabled = $9,
-    watermark_enabled = $10,
-    require_email = $11,
-    require_email_verification = $12,
-    require_password = $13,
-    require_nda = $14,
-    ai_copilot_enabled = $15,
+    expires_at = $4,
+    max_access_count = $5,
+    download_enabled = $6,
+    watermark_enabled = $7,
+    require_email = $8,
+    require_email_verification = $9,
+    require_nda = $10,
+    ai_copilot_enabled = $11,
     updated_at = now()
-WHERE id = $16 AND workspace_id = $17
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type,
-          allowed_emails, allowed_domains, password_hash, expires_at, max_access_count,
+WHERE id = $12 AND workspace_id = $13
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
           access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_password, require_nda, require_email_verification,
+       updated_at, require_email, require_nda, require_email_verification,
        ai_copilot_enabled;
 
 -- name: DeleteLink :execrows

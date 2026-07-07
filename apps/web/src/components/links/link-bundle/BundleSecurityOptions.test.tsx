@@ -18,10 +18,6 @@ async function setupI18n() {
           "creator.sectionAccessControl": "Access Control",
           "creator.requireEmailVerification": "Require email verification",
           "creator.requireEmailDesc": "Visitor must verify email",
-          "creator.whitelist": "Whitelist",
-          "creator.whitelistDesc": "Only allow specified emails",
-          "creator.password": "Password",
-          "creator.passwordDesc": "Require password",
           "creator.sectionContentProtection": "Content Protection",
           "creator.nda": "NDA",
           "creator.ndaDesc": "Require NDA",
@@ -42,7 +38,7 @@ async function setupI18n() {
           "creator.maxViewsOptions.10": "10",
           "creator.maxViewsOptions.50": "50",
           "creator.maxViewsOptions.100": "100",
-          "creator.whitelistPlaceholder": "Emails/domains",
+
         },
       },
     },
@@ -70,8 +66,8 @@ describe("BundleSecurityOptions switch interaction", () => {
     await renderSecurityOptions(config, onChange);
 
     const switches = screen.getAllByRole("switch");
-    // Order: email, whitelist, password, nda, download, watermark
-    expect(switches.length).toBe(6);
+    // Order: email verification, NDA, allow download, watermark
+    expect(switches.length).toBe(4);
 
     fireEvent.click(switches[0]);
     expect(onChange).toHaveBeenCalledOnce();
@@ -85,7 +81,7 @@ describe("BundleSecurityOptions switch interaction", () => {
     await renderSecurityOptions(config, onChange);
 
     const switches = screen.getAllByRole("switch");
-    fireEvent.click(switches[4]); // allow download
+    fireEvent.click(switches[2]); // allow download
     expect(onChange).toHaveBeenCalledOnce();
     const next = onChange.mock.calls[0][0] as PermissionConfig;
     expect(next.allowDownload).toBe(true);
@@ -98,7 +94,7 @@ describe("BundleSecurityOptions switch interaction", () => {
     await renderSecurityOptions(config, onChange);
 
     const switches = screen.getAllByRole("switch");
-    fireEvent.click(switches[5]); // watermark
+    fireEvent.click(switches[3]); // watermark
     expect(onChange).toHaveBeenCalledOnce();
     const next = onChange.mock.calls[0][0] as PermissionConfig;
     expect(next.watermarkEnabled).toBe(false);

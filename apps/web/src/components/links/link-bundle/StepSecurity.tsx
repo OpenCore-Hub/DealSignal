@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -38,39 +38,6 @@ export function StepSecurity({ contacts = [] }: StepSecurityProps) {
     },
     [dispatch],
   );
-
-  // Auto-fill selected contact emails into the whitelist when both email
-  // verification and whitelist are enabled. Keep the two lists in sync so
-  // recipients can use the code sent to their contact email to access the link.
-  const selectedContactEmails = useMemo(() => {
-    const selectedIds = new Set(state.config.contactIds);
-    return contacts
-      .filter((c) => selectedIds.has(c.id))
-      .map((c) => c.email.trim().toLowerCase());
-  }, [contacts, state.config.contactIds]);
-
-  useEffect(() => {
-    if (!state.config.requireEmailVerification || !state.config.whitelistEnabled) {
-      return;
-    }
-    if (selectedContactEmails.length === 0) {
-      return;
-    }
-
-    const currentWhitelist = state.config.whitelist.map((e) => e.trim().toLowerCase());
-    const emailsToAdd = selectedContactEmails.filter((e) => !currentWhitelist.includes(e));
-    if (emailsToAdd.length === 0) {
-      return;
-    }
-
-    dispatch({
-      type: "SET_CONFIG",
-      config: {
-        ...state.config,
-        whitelist: [...state.config.whitelist, ...emailsToAdd],
-      },
-    });
-  }, [selectedContactEmails, state.config.requireEmailVerification, state.config.whitelistEnabled, state.config, dispatch]);
 
   return (
     <div className="space-y-5">
@@ -124,13 +91,6 @@ export function StepSecurity({ contacts = [] }: StepSecurityProps) {
               ) : null
             }
           />
-
-          {/* Edit mode password hint */}
-          {state.mode === "edit" && state.config.passwordEnabled && (
-            <p className="mt-4 rounded-lg bg-muted/50 p-3 text-xs text-muted-foreground">
-              {t("creator.passwordEditHint")}
-            </p>
-          )}
         </CardContent>
       </Card>
     </div>

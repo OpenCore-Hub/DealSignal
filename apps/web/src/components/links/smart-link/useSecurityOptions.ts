@@ -1,18 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { PermissionConfig } from "@/types";
 import { enforceCrossOptionConstraints } from "./levelConfig";
-
-const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-
-function isValidEmail(value: string) {
-  return EMAIL_RE.test(value.trim());
-}
 
 /**
  * Shared hook for security options toggle logic.
  *
  * Bundles:
- *  - invalidWhitelistEmails (derived validation)
  *  - update (patch + cross-option constraint enforcement)
  *
  * Uses a ref for config to avoid stale closures when rapid toggles occur.
@@ -31,10 +24,6 @@ export function useSecurityOptions(
     onChangeRef.current = onChange;
   }, [config, onChange]);
 
-  const invalidWhitelistEmails = useMemo(() => {
-    return config.whitelist.filter((entry) => !isValidEmail(entry));
-  }, [config.whitelist]);
-
   const update = useCallback(
     (patch: Partial<PermissionConfig>) => {
       const merged = { ...configRef.current, ...patch };
@@ -44,5 +33,5 @@ export function useSecurityOptions(
     [], // stable: reads latest values from refs
   );
 
-  return { invalidWhitelistEmails, update } as const;
+  return { update } as const;
 }

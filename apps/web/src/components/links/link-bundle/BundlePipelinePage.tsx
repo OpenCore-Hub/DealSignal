@@ -18,7 +18,6 @@ import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { useTranslation } from "react-i18next";
 
 // ---------------------------------------------------------------------------
 // Inner component (inside provider)
@@ -28,15 +27,13 @@ function BundlePipelineInner() {
   const { state, dispatch } = useBundlePipeline();
   const reducedMotion = useReducedMotion();
   const { id } = useParams<{ id: string }>();
-  const { t } = useTranslation("links");
   const isEdit = !!id;
   const canProceedNav = state.selectedDocuments.length >= 1;
 
   const [contacts, setContacts] = useState<Contact[]>([]);
 
   // Load workspace contacts once. They are needed by the security step to
-  // auto-fill selected contact emails into the whitelist, and by navigation
-  // validation to ensure whitelist/contact consistency before proceeding.
+  // let users pick contacts for email verification.
   useEffect(() => {
     let cancelled = false;
     api
@@ -122,9 +119,6 @@ function BundlePipelineInner() {
           || link.permissionType === "nda"
           || link.permissionType === "whitelist";
 
-        // Reconstruct whitelist from backend allowedEmails.
-        const whitelist: string[] = [...(link.allowedEmails ?? [])];
-
         // Reconstruct all contact IDs (multi-contact support).
         const contactIds = link.contactIds ?? [];
 
@@ -146,11 +140,14 @@ function BundlePipelineInner() {
 
         const securityConfig: Omit<PermissionConfig, "level" | "isCustomized"> = {
           requireEmailVerification: hasEmailVerification,
-          whitelistEnabled: link.permissionType === "whitelist" || whitelist.length > 0,
-          whitelist,
-          // Use explicit boolean flags when available (v2.6+), fall back to permissionType.
-          passwordEnabled: link.requirePassword === true || link.permissionType === "password",
+          // Whitelist and password have been removed from the UI. Editing an
+          // existing link automatically disables them so users are not surprised
+          // by invisible gates.
+          whitelistEnabled: false,
+          whitelist: [],
+          passwordEnabled: false,
           password: undefined,
+          // Use explicit boolean flags when available (v2.6+), fall back to permissionType.
           ndaEnabled: link.requireNda === true || link.permissionType === "nda",
           allowDownload: link.downloadEnabled ?? true,
           watermarkEnabled: link.watermarkEnabled ?? true,
@@ -209,29 +206,10 @@ function BundlePipelineInner() {
   }, [step, dispatch]);
 
   const handleNavForward = useCallback(() => {
-    if (step === 2) {
-      // Validate whitelist/contact consistency before entering the review step.
-      const cfg = state.config;
-      if (cfg.requireEmailVerification && cfg.whitelistEnabled && cfg.contactIds.length > 0) {
-        const whitelist = new Set(cfg.whitelist.map((e) => e.trim().toLowerCase()));
-        const missing = contacts
-          .filter((c) => cfg.contactIds.includes(c.id))
-          .map((c) => c.email.trim().toLowerCase())
-          .filter((email) => !whitelist.has(email));
-        if (missing.length > 0) {
-          toast.error(
-            t("creator.whitelistContactMismatch", {
-              emails: missing.join(", "),
-            }),
-          );
-          return;
-        }
-      }
-    }
     if (step < 3 && canProceedNav) {
       dispatch({ type: "GO_STEP", step: (step + 1 as 1 | 2 | 3) });
     }
-  }, [step, canProceedNav, dispatch, state.config, contacts]);
+  }, [step, canProceedNav, dispatch]);
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">
@@ -275,7 +253,7 @@ function BundlePipelineInner() {
       >
         {step === 1 && <StepDocuments />}
         {step === 2 && <StepSecurity contacts={contacts} />}
-        {step === 3 && <StepReview contacts={contacts} />}
+        {step === 3 && <StepReview />}
       </motion.div>
     </div>
     </div>

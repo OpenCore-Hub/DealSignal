@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import type { Contact } from "@/types";
+
 import {
   CopyIcon,
   CheckIcon,
@@ -9,8 +9,6 @@ import {
   PackageIcon,
   ShieldCheckIcon,
   WarningIcon,
-  LockIcon,
-  GlobeIcon,
   FileTextIcon,
   DownloadIcon,
   RobotIcon,
@@ -46,8 +44,6 @@ const FEATURE_META: {
   activeClass?: string;
 }[] = [
   { key: "email", icon: EnvelopeIcon, labelKey: "creator.featureEmailVerification" },
-  { key: "whitelist", icon: GlobeIcon, labelKey: "creator.featureWhitelist" },
-  { key: "password", icon: LockIcon, labelKey: "creator.featurePassword" },
   { key: "nda", icon: FileTextIcon, labelKey: "creator.featureNDA" },
   { key: "watermark", icon: CopyIcon, labelKey: "creator.featureWatermark" },
   { key: "aiCopilot", icon: RobotIcon, labelKey: "creator.featureAICopilot", activeClass: "bg-primary/10 border-primary/20 text-primary" },
@@ -56,8 +52,6 @@ const FEATURE_META: {
 function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"]["config"]) {
   return {
     email: config.requireEmailVerification,
-    whitelist: config.whitelistEnabled,
-    password: config.passwordEnabled,
     nda: config.ndaEnabled,
     watermark: config.watermarkEnabled,
     aiCopilot: config.aiCopilotEnabled,
@@ -65,11 +59,7 @@ function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"][
   };
 }
 
-interface StepReviewProps {
-  contacts?: Contact[];
-}
-
-export function StepReview({ contacts = [] }: StepReviewProps) {
+export function StepReview() {
   const { state, dispatch } = useBundlePipeline();
   const { t } = useTranslation(["links", "common"]);
   const { t: tc } = useTranslation("common");
@@ -117,48 +107,6 @@ export function StepReview({ contacts = [] }: StepReviewProps) {
       toast.error(t("creator.contactRequired"));
       return;
     }
-    // Client-side guard: password cannot be empty.
-    // In edit mode, an empty password means "keep the existing password" —
-    // the backend preserves the old hash. Only block empty passwords in create mode.
-    if (
-      config.passwordEnabled &&
-      (!config.password || config.password.trim() === "") &&
-      !isEdit
-    ) {
-      toast.error(t("creator.passwordEmpty"));
-      return;
-    }
-
-    // Client-side guard: whitelist enabled but no entries — the adapter
-    // will silently drop the whitelist and fall back to public access, which
-    // can surprise users who think whitelist gating is active.
-    if (
-      config.whitelistEnabled &&
-      config.whitelist.filter((s) => s.trim().length > 0).length === 0
-    ) {
-      toast.error(t("creator.whitelistEmpty"));
-      return;
-    }
-
-    // Client-side guard: when both whitelist and email verification are enabled,
-    // every selected contact's email must appear in the whitelist. Otherwise the
-    // recipient would receive a code at an address that cannot pass the whitelist.
-    if (config.requireEmailVerification && config.whitelistEnabled && config.contactIds.length > 0) {
-      const whitelist = new Set(config.whitelist.map((e) => e.trim().toLowerCase()));
-      const missing = contacts
-        .filter((c) => config.contactIds.includes(c.id))
-        .map((c) => c.email.trim().toLowerCase())
-        .filter((email) => !whitelist.has(email));
-      if (missing.length > 0) {
-        toast.error(
-          t("creator.whitelistContactMismatch", {
-            emails: missing.join(", "),
-          }),
-        );
-        return;
-      }
-    }
-
     // In edit mode, show a confirmation dialog on the review step so the user
     // understands that the already-distributed link will be updated immediately.
     if (isEdit) {

@@ -102,17 +102,6 @@
     "contactNoResults": "没有匹配的联系人。",
     "createContactFromSearch": "将 \"{{email}}\" 创建为联系人",
     "contactRequired": "请选择要发送验证码的联系人。",
-    "whitelist": "白名单邮箱",
-    "whitelistPlaceholder": "输入邮箱地址，用逗号分隔",
-    "whitelistInvalidEmail": "以下邮箱格式无效：{{emails}}",
-    "whitelistDesc": "仅允许指定邮箱访问链接",
-    "password": "访问密码",
-    "passwordPlaceholder": "设置密码",
-    "passwordEmpty": "启用密码保护时必须设置密码",
-    "passwordEditHint": "出于安全考虑，已保存的密码不会回填。如需修改密码，请在此输入新密码。",
-    "whitelistEmpty": "启用白名单时必须添加至少一个邮箱或域名",
-    "whitelistContactMismatch": "白名单必须包含所有所选联系人的邮箱，缺少：{{emails}}",
-    "passwordDesc": "访问者需要输入预设密码才能查看",
     "nda": "需要签署 NDA",
     "ndaDesc": "访问前须在线签署保密协议",
     "allowDownload": "允许下载",
@@ -147,8 +136,6 @@
     "aiCopilotSection": "AI 助手",
     "previewDocumentLabel": "文档",
     "featureEmailVerification": "邮箱验证码",
-    "featurePassword": "访问密码",
-    "featureWhitelist": "白名单",
     "featureNDA": "NDA 签署",
     "featureWatermark": "动态水印",
     "featureAICopilot": "AI Copilot",
@@ -159,7 +146,7 @@
   "preset": {
     "customized": {
       "label": "自定义",
-      "description": "自由组合邮箱验证、白名单、密码、NDA 等安全选项",
+      "description": "自由组合邮箱验证、NDA、水印等安全选项",
       "usage": "适合有个性化安全需求的场景，可逐项开启或关闭访问控制与内容保护功能。",
       "friction": "灵活配置：根据实际需求自由调整安全强度与接收方摩擦。"
     },
@@ -171,15 +158,15 @@
     },
     "standard": {
       "label": "标准尽调",
-      "description": "邮箱验证 + 白名单 + 水印 + 禁下载",
+      "description": "邮箱验证 + 水印 + 禁下载",
       "usage": "适合融资尽调、项目介绍等需要确认访问者身份但无需极端保密的场景。推荐作为默认方案。",
-      "friction": "平衡方案：验证访问者身份并限制域名，兼顾安全性与打开率。"
+      "friction": "平衡方案：验证访问者身份，兼顾安全性与打开率。"
     },
     "confidential": {
       "label": "机密数据室",
-      "description": "全部验证门控 + NDA + 禁下载",
-      "usage": "适合敏感交易文件、法务合同、商业机密等最高安全级别场景。访客需通过全部验证门控并签署 NDA 才能访问。",
-      "friction": "高安全高摩擦：多重验证 + NDA，适合最敏感资料的受控分发。"
+      "description": "邮箱验证 + NDA + 水印 + 禁下载",
+      "usage": "适合敏感交易文件、法务合同、商业机密等最高安全级别场景。访客需验证邮箱并签署 NDA 才能访问。",
+      "friction": "高安全高摩擦：邮箱验证 + NDA，适合最敏感资料的受控分发。"
     },
     "collaborative": {
       "label": "内部协作",

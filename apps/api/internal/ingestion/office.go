@@ -61,6 +61,31 @@ func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey str
 		"url":        publicURL,
 		"key":        cacheKey,
 	}
+
+	// OnlyOffice only converts the active sheet unless spreadsheetLayout is
+	// provided. The layout below triggers all sheets while keeping each sheet
+	// readable: fit to 1 page wide, auto-paginate vertically, A4 landscape.
+	if isSpreadsheet(sourceType) {
+		payload["spreadsheetLayout"] = map[string]interface{}{
+			"ignorePrintArea": true,
+			"orientation":     "landscape",
+			"fitToWidth":      1,
+			"fitToHeight":     0,
+			"scale":           100,
+			"headings":        false,
+			"gridLines":       false,
+			"pageSize": map[string]string{
+				"width":  "297mm",
+				"height": "210mm",
+			},
+			"margins": map[string]string{
+				"left":   "10mm",
+				"right":  "10mm",
+				"top":    "10mm",
+				"bottom": "10mm",
+			},
+		}
+	}
 	body, _ := json.Marshal(payload)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/converter", bytes.NewReader(body))
@@ -98,6 +123,15 @@ func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey str
 	}
 
 	return c.downloadToTemp(result.FileURL)
+}
+
+func isSpreadsheet(sourceType string) bool {
+	switch sourceType {
+	case "xlsx", "xls", "ods", "csv":
+		return true
+	default:
+		return false
+	}
 }
 
 func signConverterRequest(body []byte, secret []byte) string {

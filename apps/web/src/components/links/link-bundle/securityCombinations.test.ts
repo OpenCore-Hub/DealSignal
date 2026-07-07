@@ -4,8 +4,8 @@
  * Verifies:
  *  1. Preset templates correctly map to CreateLinkPayload (apiAdapters)
  *  2. Contact ID presence is correct for each preset (the bug fix)
- *  3. Client-side guard conditions (email requires contact, password non-empty)
- *  4. Cross-option constraints (whitelist/NDA → email verification)
+ *  3. Client-side guard conditions (email requires contact)
+ *  4. Cross-option constraints (NDA → email verification)
  */
 
 import { describe, it, expect } from "vitest";
@@ -23,15 +23,12 @@ import type { PermissionConfig, PermissionPreset } from "@/types";
 
 interface GuardResult {
   blocked: boolean;
-  reason?: "contactRequired" | "passwordEmpty";
+  reason?: "contactRequired";
 }
 
 function clientGuard(config: PermissionConfig): GuardResult {
   if (config.requireEmailVerification && config.contactIds.length === 0) {
     return { blocked: true, reason: "contactRequired" };
-  }
-  if (config.passwordEnabled && (!config.password || config.password.trim() === "")) {
-    return { blocked: true, reason: "passwordEmpty" };
   }
   return { blocked: false };
 }
@@ -89,51 +86,42 @@ describe("Preset → CreateLinkPayload mapping", () => {
       const result = clientGuard(withContact("standard", "contact-456"));
       expect(result.blocked).toBe(false);
     });
+
+    it("never sends password or whitelist fields", () => {
+      const payload = toCreateLinkPayload(["doc-1"], buildConfigFromPreset("standard"));
+      expect(payload.require_password).toBe(false);
+      expect(payload.password).toBeUndefined();
+      expect(payload.allowed_emails).toBeUndefined();
+      expect(payload.allowed_domains).toBeUndefined();
+    });
   });
 
   describe("confidential preset", () => {
-    it("requires email, password, NDA", () => {
-      const config = { ...buildConfigFromPreset("confidential"), password: "s3cret!1" };
-      const payload = toCreateLinkPayload(["doc-1"], config);
+    it("requires email verification and NDA", () => {
+      const payload = toCreateLinkPayload(["doc-1"], buildConfigFromPreset("confidential"));
       expect(payload.require_email_verification).toBe(true);
-      expect(payload.require_password).toBe(true);
       expect(payload.require_nda).toBe(true);
-      expect(payload.permission_type).toBe("password");
+      expect(payload.permission_type).toBe("nda");
     });
 
     it("BLOCKS without contact", () => {
-      const config = { ...buildConfigFromPreset("confidential"), password: "s3cret!1" };
-      const result = clientGuard(config);
+      const result = clientGuard(buildConfigFromPreset("confidential"));
       expect(result.blocked).toBe(true);
       expect(result.reason).toBe("contactRequired");
     });
 
-    it("BLOCKS with empty password", () => {
+    it("passes with contact", () => {
       const config = withContact("confidential", "contact-789");
-      // passwordEnabled=true but no password set
-      const result = clientGuard(config);
-      expect(result.blocked).toBe(true);
-      expect(result.reason).toBe("passwordEmpty");
-    });
-
-    it("passes with contact + password", () => {
-      const config: PermissionConfig = {
-        ...buildConfigFromPreset("confidential"),
-        contactIds: ["contact-789"],
-        password: "s3cret!1",
-      };
       expect(clientGuard(config).blocked).toBe(false);
       const payload = toCreateLinkPayload(["doc-1"], config);
       expect(payload.contact_ids).toEqual(["contact-789"]);
-      expect(payload.password).toBe("s3cret!1");
     });
   });
 
   describe("collaborative preset", () => {
-    it("requires email verification but NOT password/NDA/whitelist", () => {
+    it("requires email verification and download", () => {
       const payload = toCreateLinkPayload(["doc-1"], buildConfigFromPreset("collaborative"));
       expect(payload.require_email_verification).toBe(true);
-      expect(payload.require_password).toBe(false);
       expect(payload.require_nda).toBe(false);
       expect(payload.download_enabled).toBe(true);
     });
@@ -179,39 +167,6 @@ describe("Preset → CreateLinkPayload mapping", () => {
       expect(payload.contact_ids).toEqual(["contact-xyz"]);
     });
 
-    it("with password enabled but empty → BLOCKED", () => {
-      const config: PermissionConfig = {
-        ...buildConfigFromPreset("customized"),
-        passwordEnabled: true,
-      };
-      const result = clientGuard(config);
-      expect(result.blocked).toBe(true);
-      expect(result.reason).toBe("passwordEmpty");
-    });
-
-    it("with password set → passes", () => {
-      const config: PermissionConfig = {
-        ...buildConfigFromPreset("customized"),
-        passwordEnabled: true,
-        password: "p@ssword",
-      };
-      expect(clientGuard(config).blocked).toBe(false);
-    });
-
-    it("with whitelist enabled → email verification auto-on", () => {
-      const config: PermissionConfig = {
-        ...buildConfigFromPreset("customized"),
-        requireEmailVerification: false,
-        whitelistEnabled: true,
-        whitelist: ["test@example.com"],
-        contactIds: ["contact-wl"],
-      };
-      expect(clientGuard(config).blocked).toBe(false);
-      const payload = toCreateLinkPayload(["doc-1"], config);
-      expect(payload.require_email_verification).toBe(true);
-      expect(payload.contact_ids).toEqual(["contact-wl"]);
-    });
-
     it("with NDA enabled → email verification auto-on", () => {
       const config: PermissionConfig = {
         ...buildConfigFromPreset("customized"),
@@ -226,51 +181,21 @@ describe("Preset → CreateLinkPayload mapping", () => {
       expect(payload.contact_ids).toEqual(["contact-nda"]);
     });
 
-    it("full locked-down combo: email + whitelist + password + NDA + no download", () => {
+    it("with download and watermark enabled → public permission_type", () => {
       const config: PermissionConfig = {
         ...buildConfigFromPreset("customized"),
-        requireEmailVerification: true,
-        whitelistEnabled: true,
-        whitelist: ["vip@corp.com", "@partner.io"],
-        passwordEnabled: true,
-        password: "ultra-secure-p@ss",
-        ndaEnabled: true,
-        allowDownload: false,
+        allowDownload: true,
         watermarkEnabled: true,
-        aiCopilotEnabled: false,
-        expiryDays: 7,
-        maxViews: 10,
-        contactIds: ["contact-full"],
       };
-      expect(clientGuard(config).blocked).toBe(false);
-
       const payload = toCreateLinkPayload(["doc-1"], config);
-      expect(payload.require_email_verification).toBe(true);
-      expect(payload.require_password).toBe(true);
-      expect(payload.require_nda).toBe(true);
-      expect(payload.allowed_emails).toEqual(["vip@corp.com"]);
-      expect(payload.allowed_domains).toEqual(["@partner.io"]);
-      expect(payload.password).toBe("ultra-secure-p@ss");
-      expect(payload.download_enabled).toBe(false);
+      expect(payload.download_enabled).toBe(true);
       expect(payload.watermark_enabled).toBe(true);
-      expect(payload.ai_copilot_enabled).toBe(false);
-      expect(payload.contact_ids).toEqual(["contact-full"]);
-      expect(payload.permission_type).toBe("password");
-      expect(payload.max_access_count).toBe(10);
+      expect(payload.permission_type).toBe("public");
     });
   });
 });
 
 describe("Cross-option constraints", () => {
-  it("whitelist toggle automatically enables email verification", () => {
-    const base = buildConfigFromPreset("customized");
-    const constrained = enforceCrossOptionConstraints({
-      ...base,
-      whitelistEnabled: true,
-    });
-    expect(constrained.requireEmailVerification).toBe(true);
-  });
-
   it("NDA toggle automatically enables email verification", () => {
     const base = buildConfigFromPreset("customized");
     const constrained = enforceCrossOptionConstraints({
@@ -280,10 +205,10 @@ describe("Cross-option constraints", () => {
     expect(constrained.requireEmailVerification).toBe(true);
   });
 
-  it("does not disable email verification when toggling whitelist off", () => {
+  it("does not disable email verification when toggling unrelated options", () => {
     const constrained = enforceCrossOptionConstraints({
       ...buildConfigFromPreset("standard"),
-      whitelistEnabled: false,
+      allowDownload: true,
     });
     // Only adds constraints, never removes
     expect(constrained.requireEmailVerification).toBe(true);

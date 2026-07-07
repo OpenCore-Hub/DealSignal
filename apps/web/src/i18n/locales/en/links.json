@@ -102,17 +102,6 @@
     "contactNoResults": "No contacts match your search.",
     "createContactFromSearch": "Create \"{{email}}\" as contact",
     "contactRequired": "Please select a contact to send the verification code to.",
-    "whitelist": "Whitelist emails/domains",
-    "whitelistPlaceholder": "Enter emails or domains separated by commas",
-    "whitelistInvalidEmail": "Invalid email format: {{emails}}",
-    "whitelistDesc": "Only allow specified emails or domains to access the link",
-    "password": "Access password",
-    "passwordPlaceholder": "Set password",
-    "passwordEmpty": "Password is required when password protection is enabled",
-    "passwordEditHint": "Saved password is not displayed for security. Enter a new password to change it.",
-    "whitelistEmpty": "At least one email or domain is required when whitelist is enabled",
-    "whitelistContactMismatch": "Whitelist must include all selected contact emails. Missing: {{emails}}",
-    "passwordDesc": "Viewers must enter a predefined password to access",
     "nda": "Require NDA agreement",
     "ndaDesc": "Viewers must sign an NDA online before accessing",
     "allowDownload": "Allow download",
@@ -147,8 +136,6 @@
     "aiCopilotSection": "AI Assistant",
     "previewDocumentLabel": "Document",
     "featureEmailVerification": "Email verification code",
-    "featurePassword": "Access password",
-    "featureWhitelist": "Whitelist",
     "featureNDA": "NDA signing",
     "featureWatermark": "Dynamic watermark",
     "featureAICopilot": "AI Copilot",
@@ -159,7 +146,7 @@
   "preset": {
     "customized": {
       "label": "Custom",
-      "description": "Freely combine email verification, whitelist, password, NDA, and more",
+      "description": "Freely combine email verification, NDA, watermark, and more",
       "usage": "For scenarios with unique security requirements. Toggle individual access controls and content protection options as needed.",
       "friction": "Flexible: adjust security strength and recipient friction to match your exact needs."
     },
@@ -171,13 +158,13 @@
     },
     "standard": {
       "label": "Standard DD",
-      "description": "Email verification + whitelist + watermark + download disabled",
+      "description": "Email verification + watermark + download disabled",
       "usage": "For fundraising due diligence, pitch decks and materials requiring identity verification without extreme confidentiality. Recommended default preset.",
       "friction": "Balanced: verifies identity and restricts domains while keeping open rates high."
     },
     "confidential": {
       "label": "Confidential Data Room",
-      "description": "All verification gates + NDA + download disabled",
+      "description": "Email verification + NDA + watermark + download disabled",
       "usage": "For sensitive deal documents, legal contracts and trade secrets requiring highest security. Visitors must pass all gates and sign NDA before access.",
       "friction": "High security: multiple gates plus NDA for the most sensitive materials."
     },

@@ -22,7 +22,7 @@ describe("buildConfigFromPreset", () => {
     const config = buildConfigFromPreset("standard");
     expect(config.level).toBe("standard");
     expect(config.requireEmailVerification).toBe(true);
-    expect(config.whitelistEnabled).toBe(true);
+    expect(config.whitelistEnabled).toBe(false);
     expect(config.passwordEnabled).toBe(false);
     expect(config.ndaEnabled).toBe(false);
     expect(config.allowDownload).toBe(false);
@@ -33,7 +33,7 @@ describe("buildConfigFromPreset", () => {
     const config = buildConfigFromPreset("confidential");
     expect(config.level).toBe("confidential");
     expect(config.requireEmailVerification).toBe(true);
-    expect(config.passwordEnabled).toBe(true);
+    expect(config.passwordEnabled).toBe(false);
     expect(config.ndaEnabled).toBe(true);
   });
 

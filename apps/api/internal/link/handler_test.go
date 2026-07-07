@@ -22,21 +22,15 @@ func TestLinkSecurityFlagsModernEmailVerification(t *testing.T) {
 		PermissionType:           "public",
 		RequireEmail:             false,
 		RequireEmailVerification: true,
-		RequirePassword:          false,
 		RequireNda:               false,
-		AllowedEmails:            []byte("[]"),
-		AllowedDomains:           []byte("[]"),
 	}
 
-	requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
+	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 	if requiresEmail {
 		t.Errorf("modern email verification should not require email field, got requiresEmail=true")
 	}
 	if !requiresEmailVerification {
 		t.Errorf("modern email verification should require email verification, got requiresEmailVerification=false")
-	}
-	if requiresPassword {
-		t.Error("unexpected password requirement")
 	}
 	if requiresNda {
 		t.Error("unexpected NDA requirement")
@@ -45,81 +39,37 @@ func TestLinkSecurityFlagsModernEmailVerification(t *testing.T) {
 
 func TestLinkSecurityFlagsLegacyEmailRequired(t *testing.T) {
 	// Email-verification-only links (formerly "email_required") require only
-	// the access code, not email input. Email is only required when a whitelist
-	// is active for domain/email matching.
+	// the access code, not email input.
 	link := db.Link{
 		PermissionType:           "email_required",
 		RequireEmail:             false,
 		RequireEmailVerification: true,
-		RequirePassword:          false,
 		RequireNda:               false,
 	}
 
-	requiresEmail, requiresEmailVerification, _, _ := linkSecurityFlags(link)
+	requiresEmail, requiresEmailVerification, _ := linkSecurityFlags(link)
 	if requiresEmail {
-		t.Errorf("email_required without whitelist should NOT require email input, got requiresEmail=true")
+		t.Errorf("email_required should NOT require email input, got requiresEmail=true")
 	}
 	if !requiresEmailVerification {
 		t.Errorf("email_required should require email verification, got requiresEmailVerification=false")
 	}
 }
 
-func TestLinkSecurityFlagsWhitelistRequiresEmail(t *testing.T) {
-	link := db.Link{
-		PermissionType:           "whitelist",
-		RequireEmail:             false,
-		RequireEmailVerification: true,
-		RequirePassword:          false,
-		RequireNda:               false,
-		AllowedEmails:            []byte(`["alice@example.com"]`),
-		AllowedDomains:           []byte("[]"),
-	}
-
-	requiresEmail, _, _, _ := linkSecurityFlags(link)
-	if !requiresEmail {
-		t.Errorf("whitelist should require email field for domain/email matching, got requiresEmail=false")
-	}
-}
-
-func TestLinkSecurityFlagsPasswordOnly(t *testing.T) {
-	link := db.Link{
-		PermissionType:           "password",
-		RequireEmail:             false,
-		RequireEmailVerification: false,
-		RequirePassword:          true,
-		RequireNda:               false,
-	}
-
-	requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
-	if requiresEmail {
-		t.Error("password-only link should not require email")
-	}
-	if requiresEmailVerification {
-		t.Error("password-only link should not require email verification")
-	}
-	if !requiresPassword {
-		t.Error("password-only link should require password")
-	}
-	if requiresNda {
-		t.Error("password-only link should not require NDA")
-	}
-}
-
 func TestLinkSecurityFlagsNdaRequiresEmail(t *testing.T) {
 	// NDA links with email verification use code-only verification. The
 	// contact email is derived from the access-code lookup, not from an
-	// explicit email field. Email is only required when a whitelist is active.
+	// explicit email field.
 	link := db.Link{
 		PermissionType:           "nda",
 		RequireEmail:             false,
 		RequireEmailVerification: true,
-		RequirePassword:          false,
 		RequireNda:               true,
 	}
 
-	requiresEmail, _, _, requiresNda := linkSecurityFlags(link)
+	requiresEmail, _, requiresNda := linkSecurityFlags(link)
 	if requiresEmail {
-		t.Error("NDA without whitelist should not require email input field")
+		t.Error("NDA should not require email input field")
 	}
 	if !requiresNda {
 		t.Error("NDA link should require NDA")
@@ -134,21 +84,15 @@ func TestLinkSecurityFlagsModernNdaDoesNotRequireEmail(t *testing.T) {
 		PermissionType:           "nda",
 		RequireEmail:             false,
 		RequireEmailVerification: true,
-		RequirePassword:          false,
 		RequireNda:               true,
-		AllowedEmails:            []byte("[]"),
-		AllowedDomains:           []byte("[]"),
 	}
 
-	requiresEmail, requiresEmailVerification, requiresPassword, requiresNda := linkSecurityFlags(link)
+	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 	if requiresEmail {
 		t.Error("modern NDA with email verification should not require email input")
 	}
 	if !requiresEmailVerification {
 		t.Error("expected email verification requirement")
-	}
-	if requiresPassword {
-		t.Error("unexpected password requirement")
 	}
 	if !requiresNda {
 		t.Error("expected NDA requirement")
@@ -163,7 +107,6 @@ func TestPublicAccessRequestFromContextXLinkAccessHeader(t *testing.T) {
 	body := map[string]interface{}{
 		"email":      "alice@example.com",
 		"email_code": "123456",
-		"password":   "secret",
 		"nda_agreed": true,
 	}
 	payload, _ := json.Marshal(body)
@@ -182,9 +125,6 @@ func TestPublicAccessRequestFromContextXLinkAccessHeader(t *testing.T) {
 	if req.EmailCode != "123456" {
 		t.Errorf("emailCode = %q, want 123456", req.EmailCode)
 	}
-	if req.Password != "secret" {
-		t.Errorf("password = %q, want secret", req.Password)
-	}
 	if !req.NDAAgreed {
 		t.Error("ndaAgreed should be true")
 	}
@@ -197,7 +137,7 @@ func TestPublicAccessRequestFromContextQueryFallback(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(
 		"GET",
-		"/?token=tok&email=alice@example.com&email_code=654321&password=pass&nda_agreed=true",
+		"/?token=tok&email=alice@example.com&email_code=654321&nda_agreed=true",
 		nil,
 	)
 
@@ -208,9 +148,6 @@ func TestPublicAccessRequestFromContextQueryFallback(t *testing.T) {
 	}
 	if req.EmailCode != "654321" {
 		t.Errorf("emailCode = %q, want 654321", req.EmailCode)
-	}
-	if req.Password != "pass" {
-		t.Errorf("password = %q, want pass", req.Password)
 	}
 	if !req.NDAAgreed {
 		t.Error("ndaAgreed should be true from query param")
@@ -223,7 +160,6 @@ func TestPublicAccessRequestFromContextHeaderWins(t *testing.T) {
 	body := map[string]interface{}{
 		"email":      "header@example.com",
 		"email_code": "111111",
-		"password":   "",
 		"nda_agreed": false,
 	}
 	payload, _ := json.Marshal(body)
@@ -233,7 +169,7 @@ func TestPublicAccessRequestFromContextHeaderWins(t *testing.T) {
 	c, _ := gin.CreateTestContext(w)
 	c.Request = httptest.NewRequest(
 		"GET",
-		"/?token=tok&email=query@example.com&email_code=222222&password=querypass&nda_agreed=true",
+		"/?token=tok&email=query@example.com&email_code=222222&nda_agreed=true",
 		nil,
 	)
 	c.Request.Header.Set("X-Link-Access", headerValue)
@@ -247,10 +183,6 @@ func TestPublicAccessRequestFromContextHeaderWins(t *testing.T) {
 	// Header email_code takes precedence.
 	if req.EmailCode != "111111" {
 		t.Errorf("emailCode = %q, want 111111 (header should win)", req.EmailCode)
-	}
-	// Header password is empty, so query param is used.
-	if req.Password != "querypass" {
-		t.Errorf("password = %q, want querypass (header empty, query should win)", req.Password)
 	}
 	// Header ndaAgreed is false, but false is indistinguishable from "not set".
 	// The implementation ignores false NDAAgreed from the header.
@@ -408,12 +340,9 @@ func TestAccessErrorCodeMapping(t *testing.T) {
 		code string
 	}{
 		{ErrInvalidEmailCode, "invalid_email_code"},
-		{ErrInvalidPassword, "invalid_password"},
 		{ErrRequiresEmail, "requires_email"},
 		{ErrRequiresEmailCode, "requires_email_code"},
-		{ErrRequiresPassword, "requires_password"},
 		{ErrRequiresNDA, "nda_required"},
-		{ErrWhitelistDenied, "whitelist_denied"},
 		{ErrLinkExpired, "link_expired"},
 	}
 
@@ -575,12 +504,9 @@ func TestSecurityEventFromErrorMapping(t *testing.T) {
 		{"revoked", ErrLinkRevoked, "revoked_link_accessed", "", false},
 		{"disabled", ErrLinkDisabled, "revoked_link_accessed", "", false},
 		{"max access", ErrLinkMaxAccessReached, "max_access_reached", "", false},
-		{"invalid password", ErrInvalidPassword, "security_gate_failed", "invalid_password", true},
 		{"invalid email code", ErrInvalidEmailCode, "security_gate_failed", "invalid_email_code", true},
 		{"email required", ErrRequiresEmail, "security_gate_failed", "email_required", true},
 		{"email code required", ErrRequiresEmailCode, "security_gate_failed", "email_code_required", true},
-		{"password required", ErrRequiresPassword, "security_gate_failed", "password_required", true},
-		{"whitelist denied", ErrWhitelistDenied, "security_gate_failed", "whitelist_denied", true},
 		{"nda required", ErrRequiresNDA, "security_gate_failed", "nda_required", true},
 		{"unmapped", errors.New("something else"), "", "", false},
 	}
