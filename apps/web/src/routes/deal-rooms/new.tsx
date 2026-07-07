@@ -188,7 +188,7 @@ export function NewDealRoomPage() {
                   className={`w-72 shrink-0 cursor-pointer transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
                     selected ? "ring-2 ring-primary" : ""
                   }`}
-                  onClick={() => selectTemplate(template)}
+                  onClick={() => selectTemplate(template, true)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {
                       e.preventDefault();
