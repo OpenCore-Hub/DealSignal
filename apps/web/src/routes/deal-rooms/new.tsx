@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import {
@@ -10,6 +10,8 @@ import {
   GlobeHemisphereWest,
   LockKey,
   UsersThree,
+  CaretLeft,
+  CaretRight,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -44,6 +46,7 @@ export function NewDealRoomPage() {
   const [description, setDescription] = useState("");
   const [nda, setNda] = useState(true);
   const [creating, setCreating] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   const {
     data: templates,
@@ -55,22 +58,43 @@ export function NewDealRoomPage() {
     return res.data;
   }, [tc]);
 
+  const getTemplateDisplay = useCallback(
+    (template: DealRoomTemplate) => ({
+      name: t(`templates.${template.scenario}.name`, { defaultValue: template.name }),
+      description: t(`templates.${template.scenario}.description`, {
+        defaultValue: template.description,
+      }),
+    }),
+    [t]
+  );
+
   useEffect(() => {
     if (templates && templates.length > 0 && !selectedTemplateId) {
       const first = templates[0];
+      const display = getTemplateDisplay(first);
       // eslint-disable-next-line react-hooks/set-state-in-effect -- derive initial form state from fetched templates
       setSelectedTemplateId(first.id);
       setNda(first.ndaEnabled);
-      setName(first.name);
-      setDescription(first.description);
+      setName(display.name);
+      setDescription(display.description);
     }
-  }, [templates, selectedTemplateId]);
+  }, [templates, selectedTemplateId, getTemplateDisplay]);
 
   const selectTemplate = (template: DealRoomTemplate, fillFields = false) => {
+    const display = getTemplateDisplay(template);
     setSelectedTemplateId(template.id);
     setNda(template.ndaEnabled);
-    if (fillFields || !name) setName(template.name);
-    if (fillFields || !description) setDescription(template.description);
+    if (fillFields || !name) setName(display.name);
+    if (fillFields || !description) setDescription(display.description);
+  };
+
+  const scroll = (direction: "left" | "right") => {
+    const container = scrollRef.current;
+    if (!container) return;
+    const cardWidth = 288;
+    const gap = 16;
+    const scrollAmount = direction === "left" ? -(cardWidth + gap) : cardWidth + gap;
+    container.scrollBy({ left: scrollAmount, behavior: "smooth" });
   };
 
   const selectedTemplate = useMemo(
@@ -132,57 +156,83 @@ export function NewDealRoomPage() {
           <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
       ) : loading ? (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="flex gap-4 overflow-x-auto pb-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-40" />
+            <Skeleton key={i} className="h-40 w-72 shrink-0" />
           ))}
         </div>
       ) : (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {templates?.map((template) => {
-            const selected = selectedTemplateId === template.id;
-            return (
-              <Card
-                key={template.id}
-                role="button"
-                tabIndex={0}
-                className={`cursor-pointer transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
-                  selected ? "ring-2 ring-primary" : ""
-                }`}
-                onClick={() => selectTemplate(template)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" || e.key === " ") {
-                    e.preventDefault();
-                    selectTemplate(template);
-                  }
-                }}
-              >
-                <CardContent>
-                  <div className="flex items-start justify-between">
-                    <p className="text-h3">{template.name}</p>
-                    {selected && (
-                      <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
-                        <Check size={12} weight="bold" />
-                      </div>
-                    )}
-                  </div>
-                  <p className="text-caption mt-2 text-muted-foreground line-clamp-3">
-                    {template.description}
-                  </p>
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    <Badge variant="outline" className="text-caption">
-                      {t("new.folderCount", { count: template.folderStructure.length })}
-                    </Badge>
-                    {template.ndaEnabled && (
-                      <Badge variant="secondary" className="text-caption">
-                        NDA
+        <div className="relative">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-sm"
+            onClick={() => scroll("left")}
+            aria-label={t("new.previousTemplate")}
+          >
+            <CaretLeft size={20} />
+          </Button>
+          <div
+            ref={scrollRef}
+            className="flex gap-4 overflow-x-auto pb-4 scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          >
+            {templates?.map((template) => {
+              const selected = selectedTemplateId === template.id;
+              const display = getTemplateDisplay(template);
+              return (
+                <Card
+                  key={template.id}
+                  role="button"
+                  tabIndex={0}
+                  className={`w-72 shrink-0 cursor-pointer transition-colors hover:bg-muted/50 hover:border-muted-foreground/20 ${
+                    selected ? "ring-2 ring-primary" : ""
+                  }`}
+                  onClick={() => selectTemplate(template)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      selectTemplate(template);
+                    }
+                  }}
+                >
+                  <CardContent>
+                    <div className="flex items-start justify-between">
+                      <p className="text-h3">{display.name}</p>
+                      {selected && (
+                        <div className="flex h-5 w-5 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                          <Check size={12} weight="bold" />
+                        </div>
+                      )}
+                    </div>
+                    <p className="text-caption mt-2 text-muted-foreground line-clamp-3">
+                      {display.description}
+                    </p>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      <Badge variant="outline" className="text-caption">
+                        {t("new.folderCount", { count: template.folderStructure.length })}
                       </Badge>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
+                      {template.ndaEnabled && (
+                        <Badge variant="secondary" className="text-caption">
+                          NDA
+                        </Badge>
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })}
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="icon"
+            className="absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-full shadow-sm"
+            onClick={() => scroll("right")}
+            aria-label={t("new.nextTemplate")}
+          >
+            <CaretRight size={20} />
+          </Button>
         </div>
       )}
 

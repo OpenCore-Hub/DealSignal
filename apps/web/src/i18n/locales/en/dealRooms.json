@@ -40,7 +40,7 @@
     "subtitle": "Choose a scenario template and the system will generate folder structure and a recommended file list.",
     "basicInfo": "Basic info",
     "name": "Name",
-    "namePlaceholder": "e.g. Seed Round Due Diligence",
+    "namePlaceholder": "e.g. Startup Fundraising",
     "description": "Description",
     "descriptionPlaceholder": "Describe the purpose and target audience",
     "enableNda": "Enable NDA",
@@ -54,7 +54,47 @@
     "created": "Deal room created",
     "createFailed": "Failed to create deal room",
     "folderCount": "{{count}} folders",
-    "folderCount_one": "{{count}} folder"
+    "folderCount_one": "{{count}} folder",
+    "previousTemplate": "Previous template",
+    "nextTemplate": "Next template"
+  },
+  "templates": {
+    "startup-fundraising": {
+      "name": "Startup Fundraising",
+      "description": "Data room for startup fundraising, covering corporate memo, financials, legal, GTM, product roadmap and pitch deck."
+    },
+    "raising-first-fund": {
+      "name": "Raising First Fund",
+      "description": "Data room for first-time fund managers, covering team, track record, fund model, legal and portfolio."
+    },
+    "ma-acquisition": {
+      "name": "M&A Acquisition",
+      "description": "Due diligence data room for mergers and acquisitions, covering corporate, financial, legal, IP, contracts, HR, tax, assets and insurance."
+    },
+    "series-a-plus": {
+      "name": "Series A+",
+      "description": "Growth-stage due diligence data room for Series A and beyond, covering investment memo, financials, cap table, product, market, team, legal and competitive analysis."
+    },
+    "real-estate-transaction": {
+      "name": "Real Estate Transaction",
+      "description": "Data room for real estate transactions, covering property info, title, legal, financials, leases, surveys, environmental, inspections, management and insurance."
+    },
+    "fund-management": {
+      "name": "Fund Management",
+      "description": "Data room for ongoing fund management, covering fund documents, LP relations, reporting, compliance, investments, monitoring, operations and communications."
+    },
+    "portfolio-management": {
+      "name": "Portfolio Management",
+      "description": "Data room for portfolio company management, covering overview, companies, performance, governance, support, deals, exits and monitoring."
+    },
+    "project-management": {
+      "name": "Project Management",
+      "description": "Data room for project management, covering overview, requirements, planning, team, execution, communication, risk, quality, documentation and closure."
+    },
+    "sales-dataroom": {
+      "name": "Sales Data Room",
+      "description": "Data room for enterprise sales, covering sales materials, proposals, contracts, product info, customer references and security compliance."
+    }
   },
   "folders": {
     "rootName": "Root",

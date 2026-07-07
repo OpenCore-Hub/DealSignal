@@ -37,7 +37,7 @@
     "subtitle": "选择场景模板，系统会自动生成文件夹结构与推荐文件清单。",
     "basicInfo": "基本信息",
     "name": "名称",
-    "namePlaceholder": "例如：Seed Round Due Diligence",
+    "namePlaceholder": "例如：创业融资数据室",
     "description": "描述",
     "descriptionPlaceholder": "说明数据室用途与目标受众",
     "enableNda": "启用 NDA",
@@ -50,7 +50,47 @@
     "creating": "创建中...",
     "created": "数据室已创建",
     "createFailed": "创建数据室失败",
-    "folderCount": "{{count}} 个文件夹"
+    "folderCount": "{{count}} 个文件夹",
+    "previousTemplate": "上一个模板",
+    "nextTemplate": "下一个模板"
+  },
+  "templates": {
+    "startup-fundraising": {
+      "name": "创业融资",
+      "description": "用于创业融资的数据室，包含公司备忘、财务预测与实际数据、法律税务文件、市场进入与营销策略、产品路线图和路演材料。"
+    },
+    "raising-first-fund": {
+      "name": "募集首支基金",
+      "description": "用于首次基金管理人的数据室，包含基金介绍、团队背景、投资业绩、基金模型、法律文件和投资组合。"
+    },
+    "ma-acquisition": {
+      "name": "并购收购",
+      "description": "用于并购交易尽职调查的数据室，包含公司架构、财务信息、法律合规、知识产权、合同协议、人力资源、税务文件、资产负债和保险。"
+    },
+    "series-a-plus": {
+      "name": "A 轮及以后",
+      "description": "用于 A 轮及以后增长阶段尽职调查的数据室，包含投资备忘录、财务信息、公司文件、股权表与 term sheet、产品与技术、市场与牵引力、团队与组织、法律与知识产权、竞争分析和资金用途。"
+    },
+    "real-estate-transaction": {
+      "name": "房地产交易",
+      "description": "用于房地产交易的数据室，包含物业信息、产权与所有权、法律文件、财务信息、租赁与租约、物业测绘与平面图、环境报告、建筑检查、物业管理和保险与保修。"
+    },
+    "fund-management": {
+      "name": "基金管理",
+      "description": "用于持续基金管理的数据室，包含基金文件、LP 关系、财务报告、合规与法律、投资活动、投资组合监控、运营管理和投资者沟通。"
+    },
+    "portfolio-management": {
+      "name": "投资组合管理",
+      "description": "用于被投企业管理的数据室，包含投资组合概览、被投公司、财务表现、董事会与治理、运营支持、交易文件、追加投资与退出、投资组合监控。"
+    },
+    "project-management": {
+      "name": "项目管理",
+      "description": "用于项目管理的数据室，包含项目概览、需求与规格、项目计划、团队与利益相关方、项目执行、沟通、风险与问题、质量与测试、文档和项目收尾。"
+    },
+    "sales-dataroom": {
+      "name": "销售数据室",
+      "description": "用于企业销售的数据室，包含销售材料、提案与报价、合同协议、产品信息、客户参考和安全合规。"
+    }
   },
   "folders": {
     "rootName": "根目录",

@@ -514,8 +514,8 @@ const mockDealRoomAccessRequests: DealRoomAccessRequest[] = [
 export const mockDealRooms: DealRoom[] = [
   {
     id: "room_1",
-    name: "Seed Round Due Diligence",
-    description: "Due diligence room for Seed-round investors",
+    name: "Startup Fundraising",
+    description: "Startup fundraising data room",
     slug: "seed-round-due-diligence",
     template: "startup-fundraising",
     documentCount: mockDealRoomFolderDocs.reduce((sum, fd) => sum + fd.documents.length, 0),
@@ -533,8 +533,8 @@ export const mockDealRooms: DealRoom[] = [
   },
   {
     id: "room_2",
-    name: "Q2 LP Report",
-    description: "Q2 2026 LP update report",
+    name: "Fund Management Update",
+    description: "Q2 2026 fund management update report",
     slug: "q2-lp-report",
     template: "fund-management",
     documentCount: 8,
@@ -551,8 +551,8 @@ export const mockDealRooms: DealRoom[] = [
   },
   {
     id: "room_3",
-    name: "Enterprise Proposal - Acme Corp",
-    description: "Acme Corp enterprise proposal data room",
+    name: "Sales Data Room - Acme Corp",
+    description: "Acme Corp enterprise sales data room",
     slug: "enterprise-proposal-acme-corp",
     template: "sales-dataroom",
     documentCount: 6,
