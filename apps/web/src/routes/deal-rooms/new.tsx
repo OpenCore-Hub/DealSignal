@@ -111,7 +111,7 @@ export function NewDealRoomPage() {
 
   const handleCreate = async () => {
     if (!selectedTemplate || !name) return;
-    const slug = slugify(name);
+    const slug = slugify(name) || selectedTemplate.scenario;
     if (!slug) {
       toast.error(tc("error.saveFailed"));
       return;

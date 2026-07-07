@@ -122,9 +122,7 @@ export function toCreateDealRoomPayload(
     name: input.name,
     slug: input.slug,
     description: input.description,
-    template_type: input.template
-      ? input.template.replace(/-/g, "_")
-      : undefined,
+    template_type: input.template,
     requires_nda: input.ndaEnabled,
     requires_approval: input.requiresApproval,
   };
