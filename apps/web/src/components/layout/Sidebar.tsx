@@ -16,7 +16,7 @@ import { cn } from "@/lib/utils";
 import { useUIStore } from "@/stores/uiStore";
 import { WorkspaceSwitcher } from "./WorkspaceSwitcher";
 import { useMediaQuery } from "@/hooks/useMediaQuery";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "@/lib/api";
 import type { WorkspaceSettings } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -28,6 +28,7 @@ export function Sidebar() {
   const isMobile = useMediaQuery("(max-width: 767px)");
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const navRef = useRef<HTMLElement>(null);
 
   const navItems = [
     { to: "dashboard", labelKey: "sidebar.nav.dashboard", icon: ChartPie },
@@ -47,6 +48,15 @@ export function Sidebar() {
       setSidebarOpen(true);
     }
   }, [isMobile, setSidebarOpen]);
+
+  // Reset the navigation scroll position whenever the sidebar opens or the
+  // route changes. This prevents the browser's scroll restoration or prior
+  // user scrolling from hiding the top navigation items behind the fold.
+  useEffect(() => {
+    if (sidebarOpen && navRef.current) {
+      navRef.current.scrollTop = 0;
+    }
+  }, [sidebarOpen, workspaceSlug]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -76,7 +86,7 @@ export function Sidebar() {
 
       <aside
         className={cn(
-          "fixed left-0 top-0 z-50 flex h-[100dvh] flex-col border-r border-border bg-card transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] md:relative",
+          "fixed left-0 top-0 z-50 flex h-[100dvh] flex-col border-r border-border bg-card transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)]",
           sidebarOpen ? "w-64 translate-x-0" : "w-0 -translate-x-full md:w-20 md:translate-x-0"
         )}
       >
@@ -113,7 +123,7 @@ export function Sidebar() {
         </div>
 
         {/* Navigation */}
-        <nav className="flex-1 overflow-y-auto p-3" aria-label={t("sidebar.mainNavigation")}>
+        <nav ref={navRef} className="flex-1 overflow-y-auto p-3" aria-label={t("sidebar.mainNavigation")}>
           <ul className="space-y-1">
             {navItems.map((item) => {
               const Icon = item.icon;

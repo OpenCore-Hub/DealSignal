@@ -9,7 +9,6 @@ import {
   Trash,
   CaretRight,
   CaretDown,
-  ArrowsLeftRight,
   X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -22,13 +21,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { DocumentPicker } from "./DocumentPicker";
@@ -41,12 +33,15 @@ interface DealRoomFolderTreeProps {
   workspaceDocuments?: Document[];
   roomDocuments?: DealRoomDocumentItem[];
   isAdmin?: boolean;
+  /** When provided, the tree works as a pure folder navigator without inline documents. */
+  selectedFolderPath?: string | null;
+  onSelectFolder?: (path: string | null) => void;
   onFolderCreate: (name: string, parentPath?: string) => Promise<void>;
   onFolderRename: (path: string, name: string) => Promise<void>;
   onFolderDelete: (path: string) => Promise<void>;
-  onDocumentMove: (docId: string, folderPath: string) => Promise<void>;
-  onDocumentReorder: (docId: string, sortOrder: number) => Promise<void>;
-  onDocumentRemove: (docId: string) => Promise<void>;
+  onDocumentMove?: (docId: string, folderPath: string) => Promise<void>;
+  onDocumentReorder?: (docId: string, sortOrder: number) => Promise<void>;
+  onDocumentRemove?: (docId: string) => Promise<void>;
   onDocumentsAdd?: (documentIds: string[], folderPath: string) => Promise<void>;
   onDocumentOpen?: (docId: string) => void;
   onFolderUpload?: (file: File, folderPath: string) => Promise<void>;
@@ -146,19 +141,19 @@ export function DealRoomFolderTree({
   workspaceDocuments,
   roomDocuments,
   isAdmin = true,
+  selectedFolderPath,
+  onSelectFolder,
   onFolderCreate,
   onFolderRename,
   onFolderDelete,
-  onDocumentMove,
-  onDocumentReorder,
-  onDocumentRemove,
   onDocumentsAdd,
-  onDocumentOpen,
   onFolderUpload,
 }: DealRoomFolderTreeProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { t: td } = useTranslation("documents");
+
+  const isNavigator = typeof onSelectFolder === "function";
 
   const docsByFolder = useMemo(() => {
     const map = new Map<string, DealRoomDocumentItem[]>();
@@ -174,20 +169,19 @@ export function DealRoomFolderTree({
 
   const roots = useMemo(() => buildTree(folders, docsByFolder), [folders, docsByFolder]);
 
-  const [expanded, setExpanded] = useState<Set<string>>(new Set(folders.map((f) => f.path)));
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(folders.map((f) => f.path)));
   const [creatingParent, setCreatingParent] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creating, setCreating] = useState(false);
   const [renamingFolder, setRenamingFolder] = useState<DealRoomFolder | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renaming, setRenaming] = useState(false);
-  const [movingDoc, setMovingDoc] = useState<DealRoomDocumentItem | null>(null);
-  const [targetFolder, setTargetFolder] = useState<string>(folders[0]?.path ?? "");
-  const [actingDocId, setActingDocId] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folder: DealRoomFolder } | null>(null);
   const [addToFolder, setAddToFolder] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+
+
 
   const toggleFolder = (path: string) => {
     setExpanded((prev) => {
@@ -257,48 +251,6 @@ export function DealRoomFolderTree({
     }
   };
 
-  const handleMove = async () => {
-    if (!movingDoc) return;
-    setActingDocId(movingDoc.id);
-    try {
-      await onDocumentMove(movingDoc.id, targetFolder);
-      setMovingDoc(null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.moveFailed"));
-    } finally {
-      setActingDocId(null);
-    }
-  };
-
-  const handleReorder = async (doc: DealRoomDocumentItem, direction: -1 | 1) => {
-    setActingDocId(doc.id);
-    try {
-      await onDocumentReorder(doc.id, doc.sort_order + direction);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.reorderFailed"));
-    } finally {
-      setActingDocId(null);
-    }
-  };
-
-  const handleRemove = async (doc: DealRoomDocumentItem) => {
-    if (!confirm(t("documents.removeConfirm", { title: doc.title }))) return;
-    setActingDocId(doc.id);
-    try {
-      await onDocumentRemove(doc.id);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
-    } finally {
-      setActingDocId(null);
-    }
-  };
-
-  const handleContextMenu = (e: React.MouseEvent, folder: DealRoomFolder) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY, folder });
-  };
-
   const handleAddDocuments = async (documentIds: string[], folderPath: string) => {
     if (!onDocumentsAdd) return;
     setAdding(true);
@@ -321,6 +273,18 @@ export function DealRoomFolderTree({
     } finally {
       e.target.value = "";
     }
+  };
+
+  const handleFolderClick = (path: string) => {
+    if (isNavigator) {
+      onSelectFolder?.(path);
+    } else {
+      toggleFolder(path);
+    }
+  };
+
+  const handleAllDocumentsClick = () => {
+    onSelectFolder?.(null);
   };
 
   const renderCreateRow = (parentPath: string, depth: number) => (
@@ -350,108 +314,64 @@ export function DealRoomFolderTree({
     </div>
   );
 
-  const renderDocument = (doc: DealRoomDocumentItem, idx: number, listLength: number, depth: number) => (
-    <li
-      key={doc.id}
-      className="group flex items-center justify-between gap-2 rounded-md p-2 hover:bg-muted/30"
-      style={{ marginLeft: `${depth * 16 + 24}px` }}
-      onDoubleClick={() => onDocumentOpen?.(doc.document_id)}
-      title={t("documents.doubleClickToOpen")}
-    >
-      <div className="flex items-center gap-2 min-w-0">
-        <FileText size={16} className="text-muted-foreground shrink-0" />
-        <span className="cursor-pointer truncate text-sm hover:text-primary">{doc.title}</span>
-      </div>
-      {isAdmin && (
-        <div className="flex items-center gap-1 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled={idx === 0 || actingDocId === doc.id}
-            onClick={() => void handleReorder(doc, -1)}
-            aria-label={t("documents.moveUp")}
-          >
-            <CaretRight className="rotate-[-90deg]" size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled={idx === listLength - 1 || actingDocId === doc.id}
-            onClick={() => void handleReorder(doc, 1)}
-            aria-label={t("documents.moveDown")}
-          >
-            <CaretRight className="rotate-90" size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled={actingDocId === doc.id}
-            onClick={() => setMovingDoc(doc)}
-            aria-label={t("documents.moveTo")}
-          >
-            <ArrowsLeftRight size={14} />
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            disabled={actingDocId === doc.id}
-            onClick={() => void handleRemove(doc)}
-            aria-label={t("documents.remove")}
-          >
-            <Trash size={14} />
-          </Button>
-        </div>
-      )}
-    </li>
-  );
-
   const renderFolder = (node: TreeNode, depth: number) => {
     const isExpanded = expanded.has(node.folder.path);
     const docs = node.documents;
+    const isSelected = isNavigator && selectedFolderPath === node.folder.path;
+
     return (
       <div key={node.folder.path} className="select-none">
         <div
           role="button"
           tabIndex={0}
           aria-expanded={isExpanded}
-          onClick={() => toggleFolder(node.folder.path)}
+          onClick={() => handleFolderClick(node.folder.path)}
           onContextMenu={(e) => handleContextMenu(e, node.folder)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
-              toggleFolder(node.folder.path);
+              handleFolderClick(node.folder.path);
             }
           }}
-          className="group flex w-full items-center justify-between gap-2 rounded-md p-2 text-left hover:bg-muted/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background outline-none"
+          className={`
+            group flex w-full items-center justify-between gap-2 rounded-md p-2 text-left outline-none
+            focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
+            ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50"}
+          `}
           style={{ paddingLeft: `${depth * 16 + 8}px` }}
         >
-          <div className="flex items-center gap-2 min-w-0">
-            {isExpanded ? (
+          <div className="flex min-w-0 items-center gap-2">
+            {isNavigator ? (
+              isSelected ? (
+                <FolderOpen size={18} className="text-primary shrink-0" />
+              ) : (
+                <Folder size={18} className="text-muted-foreground shrink-0" />
+              )
+            ) : isExpanded ? (
               <CaretDown size={16} className="text-muted-foreground shrink-0" />
             ) : (
               <CaretRight size={16} className="text-muted-foreground shrink-0" />
             )}
-            {isExpanded ? (
+            {!isNavigator && isExpanded ? (
               <FolderOpen size={18} className="text-primary shrink-0" />
-            ) : (
+            ) : !isNavigator ? (
               <Folder size={18} className="text-muted-foreground shrink-0" />
-            )}
+            ) : null}
             <span className="truncate text-sm font-medium">{node.folder.name}</span>
             {node.folder.description && (
               <span className="hidden text-caption text-muted-foreground sm:inline">{node.folder.description}</span>
             )}
           </div>
-          <div className="flex items-center gap-2 shrink-0">
-            <span className="text-caption text-muted-foreground">{docs.length}</span>
+          <div className="flex shrink-0 items-center gap-2">
             {isAdmin && (
-              <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div
+                className="flex items-center gap-0.5"
+                onClick={(e) => e.stopPropagation()}
+              >
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startCreate(node.folder.path);
-                  }}
+                  onClick={() => startCreate(node.folder.path)}
                   aria-label={t("folders.newSubfolder")}
                 >
                   <Plus size={14} />
@@ -473,10 +393,7 @@ export function DealRoomFolderTree({
                     <Button
                       variant="ghost"
                       size="icon-sm"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        fileInputRefs.current.get(node.folder.path)?.click();
-                      }}
+                      onClick={() => fileInputRefs.current.get(node.folder.path)?.click()}
                       aria-label={t("folders.addFile")}
                     >
                       <UploadSimple size={14} />
@@ -486,10 +403,7 @@ export function DealRoomFolderTree({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    startRename(node.folder);
-                  }}
+                  onClick={() => startRename(node.folder)}
                   aria-label={t("folders.rename")}
                 >
                   <PencilSimple size={14} />
@@ -497,10 +411,7 @@ export function DealRoomFolderTree({
                 <Button
                   variant="ghost"
                   size="icon-sm"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void handleDelete(node.folder);
-                  }}
+                  onClick={() => void handleDelete(node.folder)}
                   aria-label={tc("delete")}
                 >
                   <Trash size={14} />
@@ -510,7 +421,7 @@ export function DealRoomFolderTree({
           </div>
         </div>
 
-        {isExpanded && (
+        {!isNavigator && isExpanded && (
           <div className="py-1">
             {creatingParent === node.folder.path && renderCreateRow(node.folder.path, depth + 1)}
             {docs.length === 0 && creatingParent !== node.folder.path ? (
@@ -519,9 +430,29 @@ export function DealRoomFolderTree({
               </p>
             ) : (
               <ul className="space-y-0.5">
-                {docs.map((doc, idx) => renderDocument(doc, idx, docs.length, depth + 1))}
+                {docs.map((doc) => (
+                  <li
+                    key={doc.id}
+                    className="group flex items-center justify-between gap-2 rounded-md p-2 hover:bg-muted/30"
+                    style={{ marginLeft: `${depth * 16 + 24}px` }}
+                    onDoubleClick={() => {}}
+                    title={t("documents.doubleClickToOpen")}
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <FileText size={16} className="text-muted-foreground shrink-0" />
+                      <span className="cursor-pointer truncate text-sm hover:text-primary">{doc.title}</span>
+                    </div>
+                  </li>
+                ))}
               </ul>
             )}
+            {node.children.map((child) => renderFolder(child, depth + 1))}
+          </div>
+        )}
+
+        {isNavigator && isExpanded && (
+          <div className="py-1">
+            {creatingParent === node.folder.path && renderCreateRow(node.folder.path, depth + 1)}
             {node.children.map((child) => renderFolder(child, depth + 1))}
           </div>
         )}
@@ -529,10 +460,29 @@ export function DealRoomFolderTree({
     );
   };
 
+  const handleContextMenu = (e: React.MouseEvent, folder: DealRoomFolder) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setContextMenu({ x: e.clientX, y: e.clientY, folder });
+  };
+
   return (
     <div className="space-y-2">
-      {folders.length === 0 && (
-        <p className="text-sm text-muted-foreground">{t("folders.empty")}</p>
+      {folders.length === 0 && <p className="text-sm text-muted-foreground">{t("folders.empty")}</p>}
+
+      {isNavigator && (
+        <button
+          type="button"
+          onClick={handleAllDocumentsClick}
+          className={`
+            flex w-full items-center gap-2 rounded-md p-2 text-left text-sm font-medium outline-none
+            focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
+            ${selectedFolderPath === null ? "bg-primary/10 text-primary" : "hover:bg-muted/50"}
+          `}
+        >
+          <FileText size={18} className={selectedFolderPath === null ? "text-primary" : "text-muted-foreground"} />
+          {t("documentList.allDocuments")}
+        </button>
       )}
 
       <div className="space-y-0.5">{roots.map((root) => renderFolder(root, 0))}</div>
@@ -542,7 +492,7 @@ export function DealRoomFolderTree({
           {isAdmin && (
             <>
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                 onClick={() => {
                   startCreate(contextMenu.folder.path);
                   setContextMenu(null);
@@ -551,9 +501,9 @@ export function DealRoomFolderTree({
                 <Plus size={14} />
                 {t("folders.newSubfolder")}
               </button>
-              {onDocumentsAdd && workspaceDocuments && workspaceDocuments.length > 0 && (
+              {onDocumentsAdd && workspaceDocuments && workspaceDocuments.length > 0 && !isNavigator && (
                 <button
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground"
+                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                   onClick={() => {
                     setAddToFolder(contextMenu.folder.path);
                     setContextMenu(null);
@@ -564,7 +514,7 @@ export function DealRoomFolderTree({
                 </button>
               )}
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left hover:bg-accent hover:text-accent-foreground"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
                 onClick={() => startRename(contextMenu.folder)}
               >
                 <PencilSimple size={14} />
@@ -572,7 +522,7 @@ export function DealRoomFolderTree({
               </button>
               <div className="my-1 h-px bg-border" />
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-sm text-left text-destructive hover:bg-destructive/10"
+                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-destructive hover:bg-destructive/10"
                 onClick={() => void handleDelete(contextMenu.folder)}
               >
                 <Trash size={14} />
@@ -580,9 +530,7 @@ export function DealRoomFolderTree({
               </button>
             </>
           )}
-          {!isAdmin && (
-            <p className="px-2 py-1 text-sm text-muted-foreground">{t("folders.readOnly")}</p>
-          )}
+          {!isAdmin && <p className="px-2 py-1 text-sm text-muted-foreground">{t("folders.readOnly")}</p>}
         </ContextMenu>
       )}
 
@@ -605,44 +553,6 @@ export function DealRoomFolderTree({
             </Button>
             <Button onClick={() => void handleRename()} disabled={!renameValue.trim() || renaming}>
               {tc("save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={!!movingDoc} onOpenChange={(open) => !open && setMovingDoc(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("documents.moveTitle")}</DialogTitle>
-            <DialogDescription>{movingDoc?.title}</DialogDescription>
-          </DialogHeader>
-          <Select value={targetFolder} onValueChange={(v) => v && setTargetFolder(v)}>
-            <SelectTrigger className="w-full min-h-11 px-3 text-base">
-              <SelectValue>
-                {(value: string) => folders.find((f) => f.path === value)?.name ?? value}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectContent
-              side="bottom"
-              align="start"
-              sideOffset={4}
-              alignItemWithTrigger={false}
-              collisionAvoidance={{ side: "shift", align: "shift", fallbackAxisSide: "none" }}
-              className="max-h-[50vh]"
-            >
-              {folders.map((f) => (
-                <SelectItem key={f.path} value={f.path} className="py-2.5 text-base">
-                  {f.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setMovingDoc(null)}>
-              {tc("cancel")}
-            </Button>
-            <Button onClick={() => void handleMove()} disabled={actingDocId === movingDoc?.id}>
-              {t("documents.move")}
             </Button>
           </DialogFooter>
         </DialogContent>

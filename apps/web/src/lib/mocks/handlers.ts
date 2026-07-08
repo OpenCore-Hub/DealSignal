@@ -217,6 +217,12 @@ export const handlers = [
 
   http.post("*/api/workspaces", async ({ request }) => {
     const body = (await request.json()) as { name: string; slug: string; brand_color?: string };
+    if (mockWorkspaces.some((w) => w.slug === body.slug)) {
+      return HttpResponse.json(
+        { code: "slug_conflict", message: "a workspace with this URL already exists" },
+        { status: 409 }
+      );
+    }
     const newWorkspace = {
       id: generateId("ws"),
       name: body.name,
@@ -572,6 +578,12 @@ export const handlers = [
       requires_nda?: boolean;
       requires_approval?: boolean;
     };
+    if (mockDealRooms.some((r) => r.slug === body.slug)) {
+      return HttpResponse.json(
+        { code: "duplicate_slug", message: "a deal room with this URL already exists" },
+        { status: 409 }
+      );
+    }
     const scenario = body.template_type?.replace(/_/g, "-") ?? "custom";
     const template = mockDealRoomTemplates.find((t) => t.scenario === scenario);
     const folders: DealRoomFolder[] = template

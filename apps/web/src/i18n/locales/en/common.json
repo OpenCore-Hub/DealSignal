@@ -33,7 +33,9 @@
     "loadFailed": "Failed to load",
     "saveFailed": "Failed to save",
     "deleteFailed": "Failed to delete",
-    "copyFailed": "Copy failed, please copy manually"
+    "copyFailed": "Copy failed, please copy manually",
+    "duplicateSlug": "This URL is already taken. Please choose a different name.",
+    "invalidSlug": "The URL can only contain lowercase letters, numbers, and hyphens."
   },
   "empty": {
     "title": "No data",

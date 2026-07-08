@@ -21,6 +21,7 @@ import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { BackButton } from "@/components/common/BackButton";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -128,7 +129,19 @@ export function NewDealRoomPage() {
       toast.success(t("new.created"));
       navigate(`/${workspaceSlug}/deal-rooms/${room.id}`);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("new.createFailed"));
+      let message = t("new.createFailed");
+      if (e instanceof ApiError) {
+        if (e.code === "duplicate_slug") {
+          message = tc("error.duplicateSlug");
+        } else if (e.code === "invalid_slug") {
+          message = tc("error.invalidSlug");
+        } else if (e.message) {
+          message = e.message;
+        }
+      } else if (e instanceof Error && e.message) {
+        message = e.message;
+      }
+      toast.error(message);
     } finally {
       setCreating(false);
     }

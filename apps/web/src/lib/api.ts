@@ -494,6 +494,17 @@ export const api = {
   // Deal room access requests
   getDealRoomAccessRequests: (roomId: string) =>
     request<{ data: DealRoomAccessRequest[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/access-requests`),
+
+  // Deal room folder permissions
+  setDealRoomFolderPermission: (
+    roomId: string,
+    payload: { email: string; folder_path: string; permission: DealRoomFolderDocs["permission"] }
+  ) =>
+    request<{ data: { id: string; email: string; folder_path: string; permission: string } }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/folder-permissions`,
+      { method: "POST", body: JSON.stringify(payload) }
+    ),
   approveDealRoomAccessRequest: (roomId: string, requestId: string) =>
     request<DealRoomAccessRequest>(getWorkspaceSlug(), `/deal-rooms/${roomId}/access-requests/${requestId}/approve`, {
       method: "POST",

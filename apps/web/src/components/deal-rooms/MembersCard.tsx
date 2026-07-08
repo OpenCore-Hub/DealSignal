@@ -27,6 +27,8 @@ export function MembersCard({ roomId, members, isAdmin = true, onChanged }: Memb
   const { t: tc } = useTranslation("common");
   const [removingId, setRemovingId] = useState<string | null>(null);
 
+  const invitees = members.filter((m) => m.role !== "owner");
+
   const handleRemove = async (member: DealRoomMember) => {
     if (!confirm(t("members.removeConfirm", { email: member.email }))) return;
     setRemovingId(member.id);
@@ -46,15 +48,15 @@ export function MembersCard({ roomId, members, isAdmin = true, onChanged }: Memb
       <CardHeader>
         <CardTitle className="text-h2 flex items-center gap-2">
           <Users size={20} />
-          {t("detail.members")}
+          {t("detail.invitees")}
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {members.length === 0 ? (
+        {invitees.length === 0 ? (
           <p className="text-body text-muted-foreground">{t("members.empty")}</p>
         ) : (
           <ul className="space-y-2">
-            {members.map((member) => {
+            {invitees.map((member) => {
               const RoleIcon = roleIcons[member.role];
               return (
                 <li

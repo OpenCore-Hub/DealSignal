@@ -47,7 +47,7 @@
     "manageDocs": "Manage documents",
     "documents": "Documents",
     "members": "Members",
-    "accessRequests": "Access requests",
+    "invitees": "Invitees",
     "security": "Security",
     "folders": "Folder structure",
     "noFolders": "No folders in this deal room yet.",
@@ -58,6 +58,128 @@
     "uploadProgress": "Upload progress",
     "uploadFailed": "Failed",
     "noTemplate": "No matching template structure."
+  },
+  "tabs": {
+    "documents": "Documents",
+    "permissions": "Permissions",
+    "analytics": "Analytics",
+    "qa": "Q&A"
+  },
+  "share": {
+    "title": "Share deal room",
+    "copyLink": "Copy link",
+    "copied": "Link copied",
+    "publicLink": "Public link"
+  },
+  "toolbar": {
+    "addDocument": "Add document",
+    "addFromWorkspace": "Add from workspace",
+    "addFolder": "Add folder",
+    "reorder": "Reorder",
+    "download": "Download",
+    "share": "Share"
+  },
+  "documentList": {
+    "title": "Documents",
+    "emptyTitle": "No documents yet",
+    "emptyDescription": "Add documents from your workspace or upload new files to get started.",
+    "open": "Open",
+    "preview": "Preview",
+    "move": "Move",
+    "remove": "Remove",
+    "allDocuments": "All documents",
+    "documentsInFolder": "Documents in {{name}}",
+    "selected": "{{count}} selected"
+  },
+  "activity": {
+    "documents": "Documents",
+    "noVisitors": "No visitors yet"
+  },
+  "permissions": {
+    "title": "Permissions",
+    "members": "Members",
+    "folderPermissions": "Folder permissions",
+    "description": "Manage access levels for each folder in this deal room.",
+    "configureAccess": "Configure access",
+    "configureAccessComingSoon": "Folder permission configuration is coming soon.",
+    "table": {
+      "name": "Name",
+      "link": "Link",
+      "views": "Views",
+      "lastViewed": "Last Viewed",
+      "active": "Active"
+    },
+    "emptyLinksTitle": "No links found for this dataroom",
+    "createLink": "Create link to share",
+    "createLinkSheet": {
+      "title": "Create a new link",
+      "linkName": "Link Name",
+      "linkNamePlaceholder": "Recipient's Organization",
+      "domain": "Domain",
+      "linkPreset": "Link Preset",
+      "manage": "Manage",
+      "selectPreset": "Select a preset",
+      "presetHint": "Apply a preset to quickly configure link settings",
+      "presets": {
+        "public": "Public",
+        "standard": "Standard",
+        "confidential": "Confidential"
+      },
+      "linkOptions": "Link Options",
+      "receiveEmailNotification": "Receive email notification",
+      "requireEmailToView": "Require email to view",
+      "requireEmailVerification": "Require email verification",
+      "allowDownloading": "Allow downloading",
+      "allowSpecifiedViewers": "Allow specified viewers",
+      "blockSpecifiedViewers": "Block specified viewers",
+      "securityControls": "Security Controls",
+      "requirePassword": "Require password to view",
+      "expirationDate": "Expiration Date",
+      "enableScreenshotProtection": "Enable screenshot protection",
+      "applyWatermark": "Apply Watermark",
+      "requireNda": "Require NDA to view",
+      "customFormFields": "Custom Form Fields",
+      "advancedControls": "Advanced Controls",
+      "aiAgents": "AI Agents",
+      "enableFileRequests": "Enable file requests",
+      "enableIndexFileGeneration": "Enable index file generation",
+      "enableQaConversations": "Enable Q&A Conversations",
+      "tags": "Tags",
+      "selectTags": "Select tags...",
+      "preview": "Preview",
+      "saveLink": "Save Link",
+      "manageFilePermissions": "Manage File Permissions"
+    },
+    "emptyTitle": "No folders yet",
+    "emptyDescription": "Folders added to this deal room will appear here.",
+    "folder": "Folder",
+    "level": "Access level",
+    "levels": {
+      "none": "No access",
+      "view": "View",
+      "download": "Download",
+      "admin": "Admin"
+    }
+  },
+  "analytics": {
+    "title": "Analytics",
+    "comingSoon": "Detailed analytics are coming soon.",
+    "views": "Views",
+    "activeLinks": "Active links",
+    "recentVisitors": "Recent visitors",
+    "trend": "View trend",
+    "topDocuments": "Top documents"
+  },
+  "qa": {
+    "title": "Q&A",
+    "askQuestion": "Ask a question",
+    "placeholder": "Ask something about this deal room...",
+    "comingSoon": "Q&A will be available soon. Your question has been noted.",
+    "emptyTitle": "No questions yet",
+    "emptyDescription": "Questions and answers about this deal room will appear here.",
+    "submitted": "Question submitted",
+    "answeredBy": "Answered by {{name}}",
+    "askedAt": "Asked {{time}}"
   },
   "new": {
     "title": "New Deal Room",
@@ -194,15 +316,6 @@
     "removed": "Removed {{email}}",
     "ndaSigned": "NDA signed",
     "empty": "No members in this deal room yet."
-  },
-  "access": {
-    "pending": "Pending",
-    "approve": "Approve",
-    "reject": "Reject",
-    "approved": "Approved {{email}}",
-    "rejected": "Rejected {{email}}",
-    "rejectConfirm": "Reject access request from {{email}}?",
-    "empty": "No pending access requests."
   },
   "public": {
     "title": "Deal Room",

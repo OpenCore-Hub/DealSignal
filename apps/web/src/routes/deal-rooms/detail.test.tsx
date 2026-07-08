@@ -8,7 +8,7 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { DealRoomDetailPage } from "./detail";
-import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, DealRoomAccessRequest, DealRoomTemplate, Document } from "@/types";
+import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, DealRoomTemplate, Document } from "@/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -31,6 +31,14 @@ vi.mock("@/lib/api", () => ({
     createDealRoomFolder: createDealRoomFolderMock,
   },
 }));
+
+vi.mock("@/lib/formatters", async () => {
+  const actual = await vi.importActual<typeof import("@/lib/formatters")>("@/lib/formatters");
+  return {
+    ...actual,
+    formatFileSize: vi.fn(() => "4.2 MB"),
+  };
+});
 
 const mockFolders: DealRoomFolder[] = [
   { path: "/pitch", name: "01 Pitch Deck", description: "Latest fundraising deck", sort_order: 0 },
@@ -59,11 +67,8 @@ const mockFolderDocs: DealRoomFolderDocs[] = [
 ];
 
 const mockMembers: DealRoomMember[] = [
-  { id: "rm_1", email: "john@acme.capital", role: "owner", nda_status: "signed", status: "active", name: "John Doe" },
-];
-
-const mockAccessRequests: DealRoomAccessRequest[] = [
-  { id: "ra_1", email: "sarah@horizon.vc", status: "pending", reason: "Would like to review deck" },
+  { id: "rm_1", email: "john@acme.capital", role: "admin", nda_status: "signed", status: "active", name: "John Doe" },
+  { id: "rm_2", email: "owner@acme.capital", role: "owner", nda_status: "signed", status: "active", name: "Owner" },
 ];
 
 const mockRoom: DealRoom = {
@@ -82,7 +87,6 @@ const mockRoom: DealRoom = {
   folders: mockFolders,
   documents: mockFolderDocs,
   members: mockMembers,
-  accessRequests: mockAccessRequests,
 };
 
 const mockTemplates: DealRoomTemplate[] = [
@@ -158,6 +162,20 @@ async function renderPage() {
   return result;
 }
 
+Object.defineProperty(window, "matchMedia", {
+  writable: true,
+  value: vi.fn().mockImplementation((query: string) => ({
+    matches: false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  })),
+});
+
 describe("DealRoomDetailPage", () => {
   beforeEach(() => {
     getDealRoomByIdMock.mockReset();
@@ -185,12 +203,30 @@ describe("DealRoomDetailPage", () => {
     });
 
     expect(screen.getByText("Due diligence materials")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /documents/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /permissions/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /analytics/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /q&a/i })).toBeInTheDocument();
     expect(screen.getByText("01 Pitch Deck")).toBeInTheDocument();
     expect(screen.getByText("02 Financials")).toBeInTheDocument();
-    expect(screen.getByText("john@acme.capital")).toBeInTheDocument();
-    expect(screen.getByText("sarah@horizon.vc")).toBeInTheDocument();
-    expect(screen.queryByText("Upload progress")).not.toBeInTheDocument();
     expect(screen.queryByText("Folder structure")).not.toBeInTheDocument();
+    expect(screen.queryByText("Upload progress")).not.toBeInTheDocument();
+  });
+
+  it("switches to permissions tab and shows invitees", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: /permissions/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("john@acme.capital")).toBeInTheDocument();
+    });
+    expect(screen.queryByText("owner@acme.capital")).not.toBeInTheDocument();
   });
 
   it("shows error and retries on failure", async () => {

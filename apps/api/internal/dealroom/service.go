@@ -23,8 +23,8 @@ var (
 	slugRegex = regexp.MustCompile(`^[a-z0-9]+(?:-[a-z0-9]+)*$`)
 
 	ErrRoomNotFound       = errors.New("room not found")
-	ErrInvalidSlug        = errors.New("slug must be lowercase alphanumeric with hyphens")
-	ErrDuplicateSlug      = errors.New("slug already exists")
+	ErrInvalidSlug        = errors.New("the deal room URL can only contain lowercase letters, numbers, and hyphens")
+	ErrDuplicateSlug      = errors.New("a deal room with this URL already exists. please choose a different name")
 	ErrNotRoomAdmin       = errors.New("not a room admin")
 	ErrMemberNotFound     = errors.New("member not found")
 	ErrRequestNotFound    = errors.New("access request not found")

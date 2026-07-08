@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router";
+import { useParams, useSearchParams } from "react-router";
+import { motion, AnimatePresence } from "motion/react";
 import {
   FileText,
-  Users,
-  Lock,
   Envelope,
   UploadSimple,
   Plus,
@@ -15,19 +14,22 @@ import { Badge } from "@/components/ui/badge";
 import { Progress } from "@/components/ui/progress";
 import { PageHeader } from "@/components/common/PageHeader";
 import { BackButton } from "@/components/common/BackButton";
-import { DetailLayout } from "@/components/common/DetailLayout";
-import { StatCard } from "@/components/common/StatCard";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
-import { formatRelativeTime } from "@/lib/formatters";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
 import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
 import { MembersCard } from "@/components/deal-rooms/MembersCard";
-import { AccessRequestsCard } from "@/components/deal-rooms/AccessRequestsCard";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
+import { DealRoomTabs } from "@/components/deal-rooms/DealRoomTabs";
+import { useDealRoomTab } from "@/hooks/useDealRoomTab";
+import { DealRoomShareButton } from "@/components/deal-rooms/DealRoomShareButton";
+import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissionsSection";
+import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsTab";
+import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
 import type { DealRoomFolderDocs } from "@/types";
 
 function normalizeText(value: string): string {
@@ -56,11 +58,23 @@ interface UploadProgressItem {
   error?: string;
 }
 
+const tabTransition = {
+  initial: { opacity: 0, x: 8 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -8 },
+  transition: { duration: 0.25, ease: [0.16, 1, 0.3, 1] as const },
+};
+
+const pageTransition = {
+  initial: { opacity: 0, y: 12 },
+  animate: { opacity: 1, y: 0 },
+  transition: { duration: 0.4, ease: [0.16, 1, 0.3, 1] as const },
+};
+
 export function DealRoomDetailPage() {
-  const { t, i18n } = useTranslation("dealRooms");
+  const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
-  const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldOpenDocuments = searchParams.get("addDocuments") === "1";
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(shouldOpenDocuments);
@@ -69,6 +83,8 @@ export function DealRoomDetailPage() {
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const [uploading, setUploading] = useState(false);
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
+  const { tab } = useDealRoomTab();
+  const reducedMotion = useReducedMotion();
 
   // Cleanup all progress intervals on unmount to prevent state updates on
   // unmounted component.
@@ -80,6 +96,27 @@ export function DealRoomDetailPage() {
       }
     };
   }, []);
+
+  // Hide the main scrollbar on the deal room detail page.
+  useEffect(() => {
+    const main = document.querySelector("main");
+    if (main) {
+      main.classList.add("scrollbar-hide");
+      return () => {
+        main.classList.remove("scrollbar-hide");
+      };
+    }
+  }, []);
+
+  // Auto-open documents dialog from query param and reset selected folder when tab changes.
+  useEffect(() => {
+    if (shouldOpenDocuments) {
+      setDocumentsDialogOpen(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete("addDocuments");
+      setSearchParams(next, { replace: true });
+    }
+  }, [shouldOpenDocuments, searchParams, setSearchParams]);
 
   const fetchRoom = useCallback(async () => {
     if (!roomId) {
@@ -109,6 +146,9 @@ export function DealRoomDetailPage() {
     }
     return map;
   }, [room?.folders]);
+
+  // Default target folder for move dialog.
+
 
   const resolveTargetFolder = (fileName: string): { path: string; name: string } => {
     const roomFolders = room?.folders ?? [];
@@ -153,7 +193,6 @@ export function DealRoomDetailPage() {
       );
     }, 300);
 
-    // Track the interval so we can clear it on unmount.
     activeIntervalsRef.current.add(interval);
 
     try {
@@ -194,10 +233,6 @@ export function DealRoomDetailPage() {
   const handleUpload = async (file: File) => {
     const { path } = resolveTargetFolder(file.name);
     await uploadFileToFolder(file, path);
-  };
-
-  const handleFolderUpload = async (file: File, folderPath: string) => {
-    await uploadFileToFolder(file, folderPath);
   };
 
   const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -246,38 +281,6 @@ export function DealRoomDetailPage() {
     }
   };
 
-  const handleDocumentMove = async (docId: string, folderPath: string) => {
-    if (!roomId) return;
-    try {
-      await api.updateDealRoomDocument(roomId, docId, { folder_path: folderPath });
-      toast.success(t("documents.moved"));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.moveFailed"));
-    }
-  };
-
-  const handleDocumentReorder = async (docId: string, sortOrder: number) => {
-    if (!roomId) return;
-    try {
-      await api.updateDealRoomDocument(roomId, docId, { sort_order: sortOrder });
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.reorderFailed"));
-    }
-  };
-
-  const handleDocumentRemove = async (docId: string) => {
-    if (!roomId) return;
-    try {
-      await api.removeDealRoomDocument(roomId, docId);
-      toast.success(t("documents.removed"));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
-    }
-  };
-
   const handleDocumentsAdd = async (documentIds: string[], folderPath: string) => {
     if (!roomId) return;
     try {
@@ -296,14 +299,6 @@ export function DealRoomDetailPage() {
     }
   };
 
-  const handleDocumentOpen = (documentId: string) => {
-    if (workspaceSlug) {
-      navigate(`/${workspaceSlug}/documents/${documentId}`);
-    } else {
-      window.open(`/viewer/${documentId}`, "_blank", "noopener,noreferrer");
-    }
-  };
-
   if (error) {
     return (
       <div className="space-y-6">
@@ -319,190 +314,172 @@ export function DealRoomDetailPage() {
   if (loading || !room) {
     return <SkeletonDetail />;
   }
-
   return (
-    <div className="space-y-6">
+    <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
       <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
 
       <PageHeader title={room.name} description={room.description}>
-        <InviteMemberDialog roomId={room.id} onInvited={refetch}>
-          <Button variant="outline" className="gap-1.5">
-            <Envelope size={16} />
-            {t("detail.invite")}
-          </Button>
-        </InviteMemberDialog>
-        <DealRoomDocumentsDialog
-          roomId={room.id}
-          folders={room.folders ?? []}
-          folderDocs={room.documents ?? []}
-          workspaceDocuments={data?.workspaceDocs ?? []}
-          onChanged={refetch}
-          open={documentsDialogOpen}
-          onOpenChange={(open) => {
-            setDocumentsDialogOpen(open);
-            if (!open && searchParams.has("addDocuments")) {
-              const next = new URLSearchParams(searchParams);
-              next.delete("addDocuments");
-              setSearchParams(next, { replace: true });
-            }
-          }}
-        >
-          <Button className="gap-1.5">
-            <FileText size={16} />
-            {t("detail.manageDocs")}
-          </Button>
-        </DealRoomDocumentsDialog>
+        <div className="flex flex-wrap items-center gap-2">
+          <DealRoomShareButton slug={room.slug} />
+          <InviteMemberDialog roomId={room.id} onInvited={refetch}>
+            <Button variant="outline" className="gap-1.5">
+              <Envelope size={16} />
+              {t("detail.invite")}
+            </Button>
+          </InviteMemberDialog>
+        </div>
       </PageHeader>
 
-      <DetailLayout
-        sidebar={
-          <div className="space-y-4">
-            <StatCard label={t("detail.documents")} value={room.documentCount} icon={<FileText size={18} />} />
-            <StatCard label={t("detail.members")} value={room.memberCount} icon={<Users size={18} />} />
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-h3">{t("detail.security")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="flex flex-wrap gap-2">
-                  {room.ndaEnabled ? (
-                    <Badge variant="destructive" className="gap-1">
-                      <Lock size={12} />
-                      {t("ndaEnabled")}
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary">{t("noNda")}</Badge>
-                  )}
-                  {room.requiresApproval && <Badge variant="secondary">{t("approvalRequired")}</Badge>}
-                </div>
-                <p className="mt-3 text-caption text-muted-foreground">
-                  {t("createdAt", { time: formatRelativeTime(room.createdAt, i18n.language) })}
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        }
-      >
-        <div className="space-y-6">
-          <Card>
-            <CardContent className="pt-6">
-              <DealRoomFolderTree
-                roomId={room.id}
-                folders={room.folders ?? []}
-                folderDocs={room.documents ?? []}
-                workspaceDocuments={data?.workspaceDocs ?? []}
-                roomDocuments={allRoomDocuments}
-                isAdmin={true}
-                onFolderCreate={handleFolderCreate}
-                onFolderRename={handleFolderRename}
-                onFolderDelete={handleFolderDelete}
-                onDocumentMove={handleDocumentMove}
-                onDocumentReorder={handleDocumentReorder}
-                onDocumentRemove={handleDocumentRemove}
-                onDocumentsAdd={handleDocumentsAdd}
-                onDocumentOpen={handleDocumentOpen}
-                onFolderUpload={handleFolderUpload}
-              />
-            </CardContent>
-          </Card>
+      <DealRoomTabs />
 
-          {showUploadDashboard && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-h2 flex items-center gap-2">
-                  <UploadSimple size={20} />
-                  {t("detail.uploadProgress")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-muted-foreground">{t("detail.completion")}</span>
-                  <span className="font-medium">{overallProgress}%</span>
-                </div>
-                <Progress value={overallProgress} className="h-2" />
-                <input
-                  type="file"
-                  ref={fileInputRef}
-                  onChange={onFileChange}
-                  className="hidden"
-                  accept=".pdf,.docx,.pptx,.xlsx"
-                  disabled={uploading}
-                />
-                <ul className="space-y-2">
-                  {uploadItems.map((item) => (
-                    <li
-                      key={item.id}
-                      className="flex flex-col gap-2 rounded-md border border-border p-3"
-                      data-testid={`upload-item-${item.id}`}
+      <AnimatePresence mode="wait">
+        <motion.div
+          key={tab}
+          {...(reducedMotion ? {} : tabTransition)}
+        >
+          {tab === "documents" && (
+            <div className="space-y-4">
+              <Card>
+                <CardContent className="pt-6">
+                  <DealRoomFolderTree
+                    roomId={room.id}
+                    folders={room.folders ?? []}
+                    folderDocs={room.documents ?? []}
+                    workspaceDocuments={data?.workspaceDocs ?? []}
+                    roomDocuments={allRoomDocuments}
+                    isAdmin={true}
+                    onFolderCreate={handleFolderCreate}
+                    onFolderRename={handleFolderRename}
+                    onFolderDelete={handleFolderDelete}
+                    onDocumentsAdd={handleDocumentsAdd}
+                    onFolderUpload={uploadFileToFolder}
+                  />
+                </CardContent>
+              </Card>
+
+              {showUploadDashboard && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-h2 flex items-center gap-2">
+                      <UploadSimple size={20} />
+                      {t("detail.uploadProgress")}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{t("detail.completion")}</span>
+                      <span className="font-medium">{overallProgress}%</span>
+                    </div>
+                    <Progress value={overallProgress} className="h-2" />
+                    <input
+                      type="file"
+                      ref={fileInputRef}
+                      onChange={onFileChange}
+                      className="hidden"
+                      accept=".pdf,.docx,.pptx,.xlsx"
+                      disabled={uploading}
+                    />
+                    <ul className="space-y-2">
+                      {uploadItems.map((item) => (
+                        <li
+                          key={item.id}
+                          className="flex flex-col gap-2 rounded-md border border-border p-3"
+                          data-testid={`upload-item-${item.id}`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="flex min-w-0 items-center gap-2">
+                              <FileText
+                                size={16}
+                                className={item.status === "done" ? "text-success-500 shrink-0" : "text-muted-foreground shrink-0"}
+                              />
+                              <span className="truncate text-sm font-medium">{item.fileName}</span>
+                            </div>
+                            <div className="shrink-0">
+                              {item.status === "uploading" && (
+                                <Badge variant="outline" className="text-muted-foreground">
+                                  {t("detail.uploading")}
+                                </Badge>
+                              )}
+                              {item.status === "done" && (
+                                <Badge variant="outline" className="border-success-500/20 text-success-500">
+                                  {t("detail.uploaded")}
+                                </Badge>
+                              )}
+                              {item.status === "error" && (
+                                <Badge variant="outline" className="border-error/30 gap-1 text-error-500">
+                                  <Warning size={12} />
+                                  {t("detail.uploadFailed")}
+                                </Badge>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
+                            <span className="truncate">{item.folderName}</span>
+                            {item.status === "uploading" && <span>{Math.round(item.progress)}%</span>}
+                          </div>
+                          {item.status === "uploading" && <Progress value={item.progress} className="h-1" />}
+                          {item.status === "error" && item.error && (
+                            <p className="text-caption text-error-500 truncate">{item.error}</p>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                    <Button
+                      variant="outline"
+                      className="w-full gap-1"
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={uploading}
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <FileText
-                            size={16}
-                            className={item.status === "done" ? "text-success-500 shrink-0" : "text-muted-foreground shrink-0"}
-                          />
-                          <span className="text-sm font-medium truncate">{item.fileName}</span>
-                        </div>
-                        <div className="shrink-0">
-                          {item.status === "uploading" && (
-                            <Badge variant="outline" className="text-muted-foreground">
-                              {t("detail.uploading")}
-                            </Badge>
-                          )}
-                          {item.status === "done" && (
-                            <Badge variant="outline" className="border-success-500/20 text-success-500">
-                              {t("detail.uploaded")}
-                            </Badge>
-                          )}
-                          {item.status === "error" && (
-                            <Badge variant="outline" className="border-error/30 text-error-500 gap-1">
-                              <Warning size={12} />
-                              {t("detail.uploadFailed")}
-                            </Badge>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
-                        <span className="truncate">{item.folderName}</span>
-                        {item.status === "uploading" && (
-                          <span>{Math.round(item.progress)}%</span>
-                        )}
-                      </div>
-                      {item.status === "uploading" && (
-                        <Progress value={item.progress} className="h-1" />
-                      )}
-                      {item.status === "error" && item.error && (
-                        <p className="text-caption text-error-500 truncate">{item.error}</p>
-                      )}
-                    </li>
-                  ))}
-                </ul>
-                <Button
-                  variant="outline"
-                  className="w-full gap-1"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={uploading}
-                >
-                  <Plus size={16} />
-                  {uploading ? t("detail.uploading") : t("detail.uploadAny")}
-                </Button>
-              </CardContent>
-            </Card>
+                      <Plus size={16} />
+                      {uploading ? t("detail.uploading") : t("detail.uploadAny")}
+                    </Button>
+                  </CardContent>
+                </Card>
+              )}
+            </div>
           )}
 
-          <MembersCard
-            roomId={room.id}
-            members={room.members ?? []}
-            onChanged={refetch}
-          />
+          {tab === "permissions" && (
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
+              <FolderPermissionsSection />
+              <div className="lg:sticky lg:top-4">
+                <MembersCard roomId={room.id} members={room.members ?? []} onChanged={refetch} />
+              </div>
+            </div>
+          )}
 
-          <AccessRequestsCard
-            roomId={room.id}
-            requests={room.accessRequests ?? []}
-            onChanged={refetch}
-          />
-        </div>
-      </DetailLayout>
-    </div>
+          {tab === "analytics" && (
+            <DealRoomAnalyticsTab
+              documentCount={room.documentCount}
+              viewCount={room.viewCount}
+              activeLinkCount={room.activeLinkCount}
+              recentVisitors={room.recentVisitors}
+            />
+          )}
+
+          {tab === "qa" && <DealRoomQATab />}
+        </motion.div>
+      </AnimatePresence>
+
+      <DealRoomDocumentsDialog
+        roomId={room.id}
+        folders={room.folders ?? []}
+        folderDocs={room.documents ?? []}
+        workspaceDocuments={data?.workspaceDocs ?? []}
+        onChanged={refetch}
+        open={documentsDialogOpen}
+        onOpenChange={(open) => setDocumentsDialogOpen(open)}
+      />
+
+      {/* Hidden file input for toolbar upload. */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={onFileChange}
+        className="hidden"
+        accept=".pdf,.docx,.pptx,.xlsx"
+        disabled={uploading}
+      />
+    </motion.div>
   );
 }

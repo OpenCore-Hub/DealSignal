@@ -18,8 +18,8 @@ import (
 )
 
 var (
-	ErrInvalidSlug        = errors.New("slug must be lowercase alphanumeric with hyphens")
-	ErrSlugExists         = errors.New("workspace slug already exists")
+	ErrInvalidSlug        = errors.New("the workspace URL can only contain lowercase letters, numbers, and hyphens")
+	ErrSlugExists         = errors.New("a workspace with this URL already exists. please choose a different name")
 	ErrNotMember          = errors.New("user is not a member of this workspace")
 	ErrAlreadyMember      = errors.New("user is already a member")
 	ErrInvalidRole        = errors.New("invalid role")

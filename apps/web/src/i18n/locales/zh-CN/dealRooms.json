@@ -44,7 +44,7 @@
     "manageDocs": "管理文档",
     "documents": "文档",
     "members": "成员",
-    "accessRequests": "访问申请",
+    "invitees": "受邀者",
     "security": "安全",
     "folders": "文件夹结构",
     "noFolders": "该数据室尚无文件夹。",
@@ -55,6 +55,128 @@
     "uploadProgress": "文件上传进度",
     "uploadFailed": "上传失败",
     "noTemplate": "未匹配到模板结构。"
+  },
+  "tabs": {
+    "documents": "文档",
+    "permissions": "权限",
+    "analytics": "分析",
+    "qa": "问答"
+  },
+  "share": {
+    "title": "分享数据室",
+    "copyLink": "复制链接",
+    "copied": "链接已复制",
+    "publicLink": "公开链接"
+  },
+  "toolbar": {
+    "addDocument": "添加文档",
+    "addFromWorkspace": "从工作区添加",
+    "addFolder": "添加文件夹",
+    "reorder": "排序",
+    "download": "下载",
+    "share": "分享"
+  },
+  "documentList": {
+    "title": "文档",
+    "emptyTitle": "暂无文档",
+    "emptyDescription": "从工作区添加文档或上传新文件开始使用。",
+    "open": "打开",
+    "preview": "预览",
+    "move": "移动",
+    "remove": "移除",
+    "allDocuments": "全部文档",
+    "documentsInFolder": "{{name}} 中的文档",
+    "selected": "已选 {{count}} 个"
+  },
+  "activity": {
+    "documents": "文档",
+    "noVisitors": "暂无访客"
+  },
+  "permissions": {
+    "title": "权限",
+    "members": "成员",
+    "folderPermissions": "文件夹权限",
+    "description": "管理该数据室中每个文件夹的访问级别。",
+    "configureAccess": "配置访问权限",
+    "configureAccessComingSoon": "文件夹权限配置功能即将上线。",
+    "table": {
+      "name": "名称",
+      "link": "链接",
+      "views": "浏览量",
+      "lastViewed": "最近查看",
+      "active": "活跃"
+    },
+    "emptyLinksTitle": "未找到该数据室的链接",
+    "createLink": "创建分享链接",
+    "createLinkSheet": {
+      "title": "创建新链接",
+      "linkName": "链接名称",
+      "linkNamePlaceholder": "接收方组织",
+      "domain": "域名",
+      "linkPreset": "链接预设",
+      "manage": "管理",
+      "selectPreset": "选择预设",
+      "presetHint": "应用预设以快速配置链接设置",
+      "presets": {
+        "public": "公开",
+        "standard": "标准",
+        "confidential": "保密"
+      },
+      "linkOptions": "链接选项",
+      "receiveEmailNotification": "接收邮件通知",
+      "requireEmailToView": "要求邮箱查看",
+      "requireEmailVerification": "要求邮箱验证",
+      "allowDownloading": "允许下载",
+      "allowSpecifiedViewers": "允许指定访客",
+      "blockSpecifiedViewers": "阻止指定访客",
+      "securityControls": "安全控制",
+      "requirePassword": "要求密码查看",
+      "expirationDate": "过期日期",
+      "enableScreenshotProtection": "启用截图保护",
+      "applyWatermark": "应用水印",
+      "requireNda": "要求签署 NDA 查看",
+      "customFormFields": "自定义表单字段",
+      "advancedControls": "高级控制",
+      "aiAgents": "AI 助手",
+      "enableFileRequests": "启用文件请求",
+      "enableIndexFileGeneration": "启用索引文件生成",
+      "enableQaConversations": "启用问答对话",
+      "tags": "标签",
+      "selectTags": "选择标签...",
+      "preview": "预览",
+      "saveLink": "保存链接",
+      "manageFilePermissions": "管理文件权限"
+    },
+    "emptyTitle": "暂无文件夹",
+    "emptyDescription": "添加到该数据室的文件夹将在此处显示。",
+    "folder": "文件夹",
+    "level": "访问级别",
+    "levels": {
+      "none": "无权限",
+      "view": "查看",
+      "download": "下载",
+      "admin": "管理"
+    }
+  },
+  "analytics": {
+    "title": "分析",
+    "comingSoon": "详细分析功能即将上线。",
+    "views": "浏览量",
+    "activeLinks": "活跃链接",
+    "recentVisitors": "最近访客",
+    "trend": "浏览趋势",
+    "topDocuments": "热门文档"
+  },
+  "qa": {
+    "title": "问答",
+    "askQuestion": "提问",
+    "placeholder": "就此数据室提问...",
+    "comingSoon": "问答功能即将上线，你的问题已记录。",
+    "emptyTitle": "暂无问题",
+    "emptyDescription": "关于该数据室的提问与回答将显示在这里。",
+    "submitted": "问题已提交",
+    "answeredBy": "由 {{name}} 回答",
+    "askedAt": "提问于 {{time}}"
   },
   "new": {
     "title": "新建数据室",
@@ -188,15 +310,6 @@
     "removed": "已移除 {{email}}",
     "ndaSigned": "NDA 已签署",
     "empty": "该数据室尚无成员。"
-  },
-  "access": {
-    "pending": "待审批",
-    "approve": "批准",
-    "reject": "拒绝",
-    "approved": "已批准 {{email}}",
-    "rejected": "已拒绝 {{email}}",
-    "rejectConfirm": "拒绝 {{email}} 的访问申请？",
-    "empty": "暂无待审批访问申请。"
   },
   "public": {
     "title": "数据室",

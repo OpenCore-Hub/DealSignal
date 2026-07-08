@@ -32,7 +32,9 @@
     "loadFailed": "加载失败",
     "saveFailed": "保存失败",
     "deleteFailed": "删除失败",
-    "copyFailed": "复制失败，请手动复制"
+    "copyFailed": "复制失败，请手动复制",
+    "duplicateSlug": "该 URL 已被占用，请选择其他名称。",
+    "invalidSlug": "URL 只能包含小写字母、数字和连字符。"
   },
   "empty": {
     "title": "暂无数据",
