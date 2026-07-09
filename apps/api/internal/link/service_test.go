@@ -282,3 +282,202 @@ func TestMakeVisitorIDConsistency(t *testing.T) {
 }
 
 
+
+func TestEvaluateAccessRules(t *testing.T) {
+	cases := []struct {
+		name   string
+		rules  []AccessRule
+		email  string
+		want   bool
+		reason string
+	}{
+		{
+			name:   "no rules allows any email",
+			rules:  nil,
+			email:  "anyone@example.com",
+			want:   true,
+			reason: "no_rules",
+		},
+		{
+			name:   "no rules allows empty email",
+			rules:  nil,
+			email:  "",
+			want:   true,
+			reason: "no_rules",
+		},
+		{
+			name: "block email denies match",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "leaker@bad.com", Action: "block"},
+			},
+			email:  "leaker@bad.com",
+			want:   false,
+			reason: "blocked_email",
+		},
+		{
+			name: "block domain denies any matching email",
+			rules: []AccessRule{
+				{RuleType: "domain", Value: "competitor.com", Action: "block"},
+			},
+			email:  "spy@competitor.com",
+			want:   false,
+			reason: "blocked_domain",
+		},
+		{
+			name: "allow email permits only matched address",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+			},
+			email:  "alice@vc.com",
+			want:   true,
+			reason: "allowed_email",
+		},
+		{
+			name: "allow email denies non-matched address",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+			},
+			email:  "bob@vc.com",
+			want:   false,
+			reason: "no_allow_match",
+		},
+		{
+			name: "allow domain permits matching domain",
+			rules: []AccessRule{
+				{RuleType: "domain", Value: "vc.com", Action: "allow"},
+			},
+			email:  "bob@vc.com",
+			want:   true,
+			reason: "allowed_domain",
+		},
+		{
+			name: "block takes priority over allow",
+			rules: []AccessRule{
+				{RuleType: "domain", Value: "vc.com", Action: "allow"},
+				{RuleType: "email", Value: "leaker@vc.com", Action: "block"},
+			},
+			email:  "leaker@vc.com",
+			want:   false,
+			reason: "blocked_email",
+		},
+		{
+			name: "email block takes priority over domain block",
+			rules: []AccessRule{
+				{RuleType: "domain", Value: "vc.com", Action: "block"},
+				{RuleType: "email", Value: "alice@vc.com", Action: "block"},
+			},
+			email:  "alice@vc.com",
+			want:   false,
+			reason: "blocked_email",
+		},
+		{
+			name: "empty email with allow rules denied",
+			rules: []AccessRule{
+				{RuleType: "domain", Value: "vc.com", Action: "allow"},
+			},
+			email:  "",
+			want:   false,
+			reason: "no_allow_match",
+		},
+		{
+			name: "empty email with only block rules allowed",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "leaker@bad.com", Action: "block"},
+			},
+			email:  "",
+			want:   true,
+			reason: "no_rules",
+		},
+		{
+			name: "email comparison is case-insensitive",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "Alice@VC.com", Action: "allow"},
+			},
+			email:  "ALICE@vc.com",
+			want:   true,
+			reason: "allowed_email",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := evaluateAccessRules(tc.rules, tc.email)
+			if got.Allowed != tc.want {
+				t.Errorf("allowed = %v, want %v", got.Allowed, tc.want)
+			}
+			if got.Reason != tc.reason {
+				t.Errorf("reason = %q, want %q", got.Reason, tc.reason)
+			}
+		})
+	}
+}
+
+func TestValidateAccessRules(t *testing.T) {
+	cases := []struct {
+		name    string
+		rules   []AccessRule
+		wantErr bool
+	}{
+		{
+			name:    "empty is valid",
+			rules:   []AccessRule{},
+			wantErr: false,
+		},
+		{
+			name: "valid allow and block rules",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+				{RuleType: "domain", Value: "competitor.com", Action: "block"},
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid rule type",
+			rules: []AccessRule{
+				{RuleType: "ip", Value: "10.0.0.1", Action: "allow"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid action",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "deny"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "empty value",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "  ", Action: "allow"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "domain rule contains @",
+			rules: []AccessRule{
+				{RuleType: "domain", Value: "user@vc.com", Action: "allow"},
+			},
+			wantErr: true,
+		},
+		{
+			name: "duplicate rule",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+				{RuleType: "email", Value: "ALICE@vc.com", Action: "block"},
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := validateAccessRules(tc.rules)
+			if tc.wantErr && err == nil {
+				t.Error("expected error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Errorf("unexpected error: %v", err)
+			}
+		})
+	}
+}

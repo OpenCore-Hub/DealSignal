@@ -116,7 +116,10 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 	r.Use(securityHeadersMiddleware())
 
 	s.engine = r
-	s.registerRoutes()
+	if err := s.registerRoutes(); err != nil {
+		logger.ErrorCtx(context.Background(), "route registration failed", err)
+		os.Exit(1)
+	}
 	s.registerObservabilityRoutes()
 	return s
 }

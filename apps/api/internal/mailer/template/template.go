@@ -154,16 +154,6 @@ func (e *Engine) RenderLocale(name, locale string, vars map[string]string) (html
 	return html, text, subject, nil
 }
 
-// MustRender is like Render but panics on error. Useful for template catalogs
-// that are known to be valid at startup.
-func (e *Engine) MustRender(name string, vars map[string]string) (html, text, subject string) {
-	html, text, subject, err := e.Render(name, vars)
-	if err != nil {
-		panic(err)
-	}
-	return html, text, subject
-}
-
 // SubjectOnly renders only the subject line for a template using the default
 // (English) locale.
 func (e *Engine) SubjectOnly(name string, vars map[string]string) (string, error) {

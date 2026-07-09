@@ -11,6 +11,8 @@ const (
 	EmailTypeMarketing    EmailType = "marketing"
 	EmailTypeCustom       EmailType = "custom"
 	EmailTypeInvitation   EmailType = "invitation"
+	EmailTypeLinkInvite   EmailType = "link_invite"
+	EmailTypeLinkAccess   EmailType = "link_access"
 )
 
 // Attachment is an email attachment carried inside an EmailJob.
@@ -86,6 +88,10 @@ func (j EmailJob) templateName() string {
 		return "marketing"
 	case EmailTypeInvitation:
 		return "invitation"
+	case EmailTypeLinkInvite:
+		return "link_invite"
+	case EmailTypeLinkAccess:
+		return "link_access"
 	default:
 		return "custom"
 	}

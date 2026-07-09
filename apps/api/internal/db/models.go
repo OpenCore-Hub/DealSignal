@@ -266,6 +266,25 @@ type Link struct {
 	RequireNda               bool
 	RequireEmailVerification bool
 	AiCopilotEnabled         bool
+	DealRoomID               pgtype.UUID
+	RequirePassword          bool
+	PasswordHash             pgtype.Text
+	CustomDomain             pgtype.Text
+	Tags                     []string
+	NotifyOnAccess           bool
+}
+
+type LinkAccessRule struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	RuleType    string
+	Value       string
+	Action      string
+	SortOrder   int32
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type LinkContact struct {
@@ -284,6 +303,21 @@ type LinkDocument struct {
 	DocumentID pgtype.UUID
 	SortOrder  int32
 	CreatedAt  pgtype.Timestamptz
+}
+
+type LinkInvitation struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       string
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type LinkNdaAgreement struct {

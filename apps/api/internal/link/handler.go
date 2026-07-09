@@ -55,6 +55,16 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.PUT("/:id", h.UpdateFull)
 	g.DELETE("/:id", h.Delete)
 	g.GET("/:id/access-logs", h.AccessLogs)
+	g.GET("/:id/access-rules", h.GetAccessRules)
+	g.POST("/:id/access-rules", h.SetAccessRules)
+	g.GET("/:id/invitations", h.ListInvitations)
+	g.POST("/:id/invitations", h.CreateInvitations)
+	g.POST("/:id/invitations/:invitationId/revoke", h.RevokeInvitation)
+
+	// Deal-room-scoped link routes.
+	dr := r.Group("/deal-rooms/:roomId/links")
+	dr.POST("", h.CreateDealRoomLink)
+	dr.GET("", h.ListDealRoomLinks)
 }
 
 // RegisterPublicRoutes mounts public link routes.
@@ -150,17 +160,23 @@ func langFromContext(c *gin.Context) string {
 type CreateRequest struct {
 	DocumentID               string   `json:"document_id,omitempty"`
 	DocumentIDs              []string `json:"document_ids,omitempty"`
+	DealRoomID               string   `json:"deal_room_id,omitempty"`
 	Name                     string   `json:"name,omitempty"`
 	PermissionType           string   `json:"permission_type,omitempty"`
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
+	RequirePassword          bool     `json:"require_password,omitempty"`
+	Password                 string   `json:"password,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
 	ContactIDs               []string `json:"contact_ids,omitempty"`
+	CustomDomain             string   `json:"custom_domain,omitempty"`
+	Tags                     []string `json:"tags,omitempty"`
+	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
 }
 
 // UpdateRequest is the JSON body for updating a link.
@@ -171,12 +187,17 @@ type UpdateRequest struct {
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
+	RequirePassword          bool     `json:"require_password,omitempty"`
+	Password                 string   `json:"password,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          *bool    `json:"download_enabled,omitempty"`
 	WatermarkEnabled         *bool    `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled         *bool    `json:"ai_copilot_enabled,omitempty"`
 	ContactIDs               []string `json:"contact_ids,omitempty"`
+	CustomDomain             string   `json:"custom_domain,omitempty"`
+	Tags                     []string `json:"tags,omitempty"`
+	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
 }
 
 // List returns links for the workspace, optionally filtered by document_id.
@@ -278,11 +299,6 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		return
 	}
 
-	if len(req.DocumentIDs) == 0 {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "document_ids is required and must contain at least one document"})
-		return
-	}
-
 	var expiresAt *time.Time
 	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
 		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
@@ -315,12 +331,17 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
+		RequirePassword:          req.RequirePassword,
+		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          downloadEnabled,
 		WatermarkEnabled:         watermarkEnabled,
 		AICopilotEnabled:         aiCopilotEnabled,
 		ContactIDs:               req.ContactIDs,
+		CustomDomain:             req.CustomDomain,
+		Tags:                     req.Tags,
+		NotifyOnAccess:           req.NotifyOnAccess,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
@@ -341,6 +362,229 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, item)
+}
+
+// AccessRulesRequest is the JSON body for replacing a link's access rules.
+type AccessRulesRequest struct {
+	Rules []struct {
+		RuleType string `json:"ruleType" binding:"required,oneof=email domain"`
+		Value    string `json:"value" binding:"required"`
+		Action   string `json:"action" binding:"required,oneof=allow block"`
+	} `json:"rules" binding:"required,dive"`
+}
+
+// GetAccessRules returns the allow/block rules for a link.
+func (h *Handler) GetAccessRules(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	rules, err := h.service.ListAccessRules(c.Request.Context(), workspaceID, c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": rules})
+}
+
+// SetAccessRules replaces all access rules for a link.
+func (h *Handler) SetAccessRules(c *gin.Context) {
+	var req AccessRulesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	rules := make([]AccessRule, 0, len(req.Rules))
+	for _, r := range req.Rules {
+		rules = append(rules, AccessRule{
+			RuleType: r.RuleType,
+			Value:    r.Value,
+			Action:   r.Action,
+		})
+	}
+
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if err := h.service.UpdateAccessRules(c.Request.Context(), userID, workspaceID, c.Param("id"), rules); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		case errors.Is(err, ErrInvalidAccessRule), errors.Is(err, ErrConflictingAccessRule):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_access_rules", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// CreateInvitationsRequest is the JSON body for inviting viewers.
+type CreateInvitationsRequest struct {
+	Emails []string `json:"emails" binding:"required,dive,email"`
+}
+
+// ListInvitations returns all invitations for a link.
+func (h *Handler) ListInvitations(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	invitations, err := h.service.ListInvitations(c.Request.Context(), workspaceID, c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": invitations})
+}
+
+// CreateInvitations creates invitations for the given emails.
+func (h *Handler) CreateInvitations(c *gin.Context) {
+	var req CreateInvitationsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	invitations, err := h.service.InviteViewers(c.Request.Context(), userID, workspaceID, c.Param("id"), req.Emails)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		case errors.Is(err, ErrLinkDisabled):
+			c.JSON(http.StatusConflict, gin.H{"code": "link_disabled", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": invitations})
+}
+
+// RevokeInvitationRequest is the JSON body for revoking an invitation.
+type RevokeInvitationRequest struct {
+	RemoveFromAllowList bool `json:"removeFromAllowList"`
+}
+
+// RevokeInvitation revokes a single invitation.
+func (h *Handler) RevokeInvitation(c *gin.Context) {
+	var req RevokeInvitationRequest
+	// Body is optional; default to removing from allow list.
+	_ = c.ShouldBindJSON(&req)
+
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if err := h.service.RevokeInvitation(c.Request.Context(), workspaceID, c.Param("invitationId"), req.RemoveFromAllowList); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// CreateDealRoomLinkRequest is the JSON body for creating a deal-room share link.
+type CreateDealRoomLinkRequest struct {
+	Name                     string   `json:"name,omitempty"`
+	RequireEmail             bool     `json:"require_email,omitempty"`
+	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
+	RequireNDA               bool     `json:"require_nda,omitempty"`
+	RequirePassword          bool     `json:"require_password,omitempty"`
+	Password                 string   `json:"password,omitempty"`
+	ExpiresAt                *string  `json:"expires_at,omitempty"`
+	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
+	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
+	CustomDomain             string   `json:"custom_domain,omitempty"`
+	Tags                     []string `json:"tags,omitempty"`
+	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
+}
+
+// CreateDealRoomLink creates a share link scoped to a deal room.
+func (h *Handler) CreateDealRoomLink(c *gin.Context) {
+	var req CreateDealRoomLinkRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	var expiresAt *time.Time
+	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
+			return
+		}
+		expiresAt = &t
+	}
+
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	roomID := c.Param("roomId")
+
+	link, err := h.service.CreateDealRoomLink(c.Request.Context(), userID, workspaceID, roomID, DealRoomLinkRequest{
+		Name:                     req.Name,
+		RequireEmail:             req.RequireEmail,
+		RequireEmailVerification: req.RequireEmailVerification,
+		RequireNDA:               req.RequireNDA,
+		RequirePassword:          req.RequirePassword,
+		Password:                 req.Password,
+		ExpiresAt:                expiresAt,
+		DownloadEnabled:          req.DownloadEnabled,
+		WatermarkEnabled:         req.WatermarkEnabled,
+		AICopilotEnabled:         req.AICopilotEnabled,
+		CustomDomain:             req.CustomDomain,
+		Tags:                     req.Tags,
+		NotifyOnAccess:           req.NotifyOnAccess,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDealRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+
+	item, err := h.linkResponse(c, link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, item)
+}
+
+// ListDealRoomLinks returns active share links for a deal room.
+func (h *Handler) ListDealRoomLinks(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	links, err := h.service.ListDealRoomLinks(c.Request.Context(), workspaceID, c.Param("roomId"))
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	out := make([]gin.H, 0, len(links))
+	for _, link := range links {
+		item, err := h.linkResponse(c, link)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			return
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
 }
 
 // Delete soft-deletes a link within a workspace.
@@ -401,17 +645,23 @@ func (h *Handler) Create(c *gin.Context) {
 	link, err := h.service.CreateLink(c.Request.Context(), userID, workspaceID, CreateLinkRequest{
 		DocumentID:               req.DocumentID,
 		DocumentIDs:              req.DocumentIDs,
+		DealRoomID:               req.DealRoomID,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
+		RequirePassword:          req.RequirePassword,
+		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AICopilotEnabled:         req.AICopilotEnabled,
 		ContactIDs:               req.ContactIDs,
+		CustomDomain:             req.CustomDomain,
+		Tags:                     req.Tags,
+		NotifyOnAccess:           req.NotifyOnAccess,
 	})
 	if err != nil {
 		switch {
@@ -442,7 +692,7 @@ func (h *Handler) Access(c *gin.Context) {
 	if sessionToken := c.GetHeader("X-Link-Session"); sessionToken != "" {
 		session, ok := VerifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
 		if ok && session.PublicToken == token {
-			link, err := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token)
+			link, err := h.service.GetByPublicToken(c.Request.Context(), token)
 			if err == nil {
 				// Invalidate session if link security config changed since session was issued.
 				configChanged := session.LinkUpdatedAt > 0 &&
@@ -484,10 +734,11 @@ func (h *Handler) Access(c *gin.Context) {
 	}
 
 	var body struct {
-		Email     string `json:"email"`
-		EmailCode string `json:"email_code"`
-		Password  string `json:"password"`
-		NDAAgreed bool   `json:"nda_agreed"`
+		Email       string `json:"email"`
+		EmailCode   string `json:"email_code"`
+		Password    string `json:"password"`
+		NDAAgreed   bool   `json:"nda_agreed"`
+		InviteToken string `json:"invite_token"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
@@ -509,30 +760,36 @@ func (h *Handler) Access(c *gin.Context) {
 	visitorID := makeVisitorID(body.Email, c.Request.UserAgent())
 
 	result, err := h.service.Access(c.Request.Context(), token, AccessRequest{
-		Email:     body.Email,
-		EmailCode: body.EmailCode,
-		NDAAgreed: body.NDAAgreed,
-		IP:        c.ClientIP(),
-		UA:        c.Request.UserAgent(),
+		Email:       body.Email,
+		EmailCode:   body.EmailCode,
+		Password:    body.Password,
+		NDAAgreed:   body.NDAAgreed,
+		InviteToken: body.InviteToken,
+		IP:          c.ClientIP(),
+		UA:          c.Request.UserAgent(),
 	})
 	if err != nil {
 		// Record security audit event for access failures.
-		if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
+		if link, lerr := h.service.GetByPublicToken(c.Request.Context(), token); lerr == nil {
 			h.recordSecurityEventFromAccessError(c.Request.Context(), link, err, visitorID, body.Email, c.ClientIP(), c.Request.UserAgent())
 
 			// For credential-gate errors, include the link's security flags so the
 			// UI can render all required fields on the first attempt.
-			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) {
+			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrBlockedDomain) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrNotAllowedDomain) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) {
 				requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
-				if errors.Is(err, ErrInvalidEmailCode) {
+				if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrInvalidPassword) {
 					status = http.StatusUnauthorized
+				}
+				if errors.Is(err, ErrInviteExpired) {
+					status = http.StatusGone
 				}
 				c.JSON(status, gin.H{
 					"code":                      accessErrorCode(err),
 					"message":                   err.Error(),
 					"requiresEmail":             requiresEmail,
 					"requiresEmailVerification": requiresEmailVerification,
+					"requiresPassword":          link.RequirePassword,
 					"requiresNda":               requiresNda,
 				})
 				return
@@ -558,39 +815,7 @@ func (h *Handler) Access(c *gin.Context) {
 // LinkUpdatedAt is stored so sessions are invalidated when link security
 // config changes.
 func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool) {
-	// Fetch all documents for the link bundle.
-	linkDocs, linkDocsErr := h.service.queries.ListLinkDocumentsByPublicToken(c.Request.Context(), token)
-	if linkDocsErr != nil {
-		logger.ErrorCtx(c.Request.Context(), "list link documents for access response failed", linkDocsErr,
-			logger.Attr("token", token),
-		)
-	}
-	documents := make([]gin.H, 0, len(linkDocs))
-	for _, ld := range linkDocs {
-		documents = append(documents, gin.H{
-			"id":         uuidToString(ld.DocumentID),
-			"title":      ld.Title,
-			"sourceType": ld.SourceType,
-			"pageCount":  ld.PageCount,
-		})
-	}
-	// Fallback: single-document legacy links.
-	if len(documents) == 0 {
-		doc, err := h.service.queries.GetDocumentByID(c.Request.Context(), db.GetDocumentByIDParams{
-			ID:          link.DocumentID,
-			WorkspaceID: link.WorkspaceID,
-		})
-		if err == nil {
-			documents = append(documents, gin.H{
-				"id":         uuidToString(doc.ID),
-				"title":      doc.Title,
-				"pageCount":  doc.PageCount.Int32,
-				"status":     doc.Status,
-				"sourceType": doc.SourceType,
-				"fileSize":   0,
-			})
-		}
-	}
+	documents := h.documentsForAccessResponse(c.Request.Context(), link, token)
 
 	var linkUpdatedAt int64
 	if link.UpdatedAt.Valid {
@@ -611,16 +836,20 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 	}
 
 	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
+	linkPayload := gin.H{
+		"id":               uuidToString(link.ID),
+		"name":             textOrNil(link.Name),
+		"permissionType":   link.PermissionType,
+		"downloadEnabled":  link.DownloadEnabled,
+		"watermarkEnabled": link.WatermarkEnabled,
+		"aiCopilotEnabled": link.AiCopilotEnabled,
+		"isBundle":         len(documents) > 1,
+	}
+	if link.DealRoomID.Valid {
+		linkPayload["dealRoomId"] = uuidToString(link.DealRoomID)
+	}
 	c.JSON(http.StatusOK, gin.H{
-		"link": gin.H{
-			"id":               uuidToString(link.ID),
-			"name":             textOrNil(link.Name),
-			"permissionType":   link.PermissionType,
-			"downloadEnabled":  link.DownloadEnabled,
-			"watermarkEnabled": link.WatermarkEnabled,
-			"aiCopilotEnabled": link.AiCopilotEnabled,
-			"isBundle":         len(documents) > 1,
-		},
+		"link": linkPayload,
 		"documents":                 documents,
 		"visitorId":                 visitorID,
 		"requiresEmail":             requiresEmail,
@@ -628,6 +857,66 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"requiresEmailVerification": requiresEmailVerification,
 		"sessionToken":              session,
 	})
+}
+
+// documentsForAccessResponse returns the documents that should be exposed to a
+// public visitor. For deal-room links it returns the deal room documents; for
+// document links it returns the linked documents or the legacy primary document.
+func (h *Handler) documentsForAccessResponse(ctx context.Context, link db.Link, token string) []gin.H {
+	documents := make([]gin.H, 0)
+
+	if link.DealRoomID.Valid {
+		drDocs, err := h.service.queries.ListDealRoomDocumentsWithMeta(ctx, link.DealRoomID)
+		if err != nil {
+			logger.ErrorCtx(ctx, "list deal room documents for access response failed", err,
+				logger.Attr("deal_room_id", uuidToString(link.DealRoomID)),
+			)
+		} else {
+			for _, d := range drDocs {
+				documents = append(documents, gin.H{
+					"id":         uuidToString(d.DocumentID),
+					"title":      d.DocumentTitle,
+					"sourceType": d.SourceType,
+					"pageCount":  d.PageCount,
+					"folderPath": d.FolderPath,
+				})
+			}
+		}
+		return documents
+	}
+
+	linkDocs, err := h.service.queries.ListLinkDocumentsByPublicToken(ctx, token)
+	if err != nil {
+		logger.ErrorCtx(ctx, "list link documents for access response failed", err,
+			logger.Attr("token", token),
+		)
+	}
+	for _, ld := range linkDocs {
+		documents = append(documents, gin.H{
+			"id":         uuidToString(ld.DocumentID),
+			"title":      ld.Title,
+			"sourceType": ld.SourceType,
+			"pageCount":  ld.PageCount,
+		})
+	}
+	// Fallback: single-document legacy links.
+	if len(documents) == 0 {
+		doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+			ID:          link.DocumentID,
+			WorkspaceID: link.WorkspaceID,
+		})
+		if err == nil {
+			documents = append(documents, gin.H{
+				"id":         uuidToString(doc.ID),
+				"title":      doc.Title,
+				"pageCount":  doc.PageCount.Int32,
+				"status":     doc.Status,
+				"sourceType": doc.SourceType,
+				"fileSize":   0,
+			})
+		}
+	}
+	return documents
 }
 
 // SendEmailVerificationCode sends a one-time access code to the visitor's email.
@@ -846,7 +1135,7 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 	if sessionToken := c.GetHeader("X-Link-Session"); sessionToken != "" {
 		session, ok := VerifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
 		if ok && session.PublicToken == token {
-			link, err := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token)
+			link, err := h.service.GetByPublicToken(c.Request.Context(), token)
 			if err != nil {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return AccessResult{}, ErrLinkNotFound
@@ -900,7 +1189,7 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 	if err != nil {
 		// Record security audit event for access failures from asset/event endpoints
 		// that share this helper.
-		if link, lerr := h.service.queries.GetLinkByPublicToken(c.Request.Context(), token); lerr == nil {
+		if link, lerr := h.service.GetByPublicToken(c.Request.Context(), token); lerr == nil {
 			visitorID := makeVisitorID(req.Email, req.UA)
 			h.recordSecurityEventFromAccessError(c.Request.Context(), link, err, visitorID, req.Email, req.IP, req.UA)
 		}
@@ -979,6 +1268,20 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_email_code", "message": err.Error()})
 	case errors.Is(err, ErrRequiresNDA):
 		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
+	case errors.Is(err, ErrRequiresPassword):
+		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": err.Error()})
+	case errors.Is(err, ErrInvalidPassword):
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_password", "message": err.Error()})
+	case errors.Is(err, ErrBlockedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": err.Error()})
+	case errors.Is(err, ErrBlockedDomain):
+		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_domain", "message": err.Error()})
+	case errors.Is(err, ErrNotAllowedEmail), errors.Is(err, ErrNotAllowedDomain):
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+	case errors.Is(err, ErrInviteExpired):
+		c.JSON(http.StatusGone, gin.H{"code": "invite_expired", "message": err.Error()})
+	case errors.Is(err, ErrInviteRevoked):
+		c.JSON(http.StatusForbidden, gin.H{"code": "invite_revoked", "message": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 	}
@@ -1003,6 +1306,18 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "security_gate_failed", "email_code_required", true
 	case errors.Is(err, ErrRequiresNDA):
 		return "security_gate_failed", "nda_required", true
+	case errors.Is(err, ErrRequiresPassword), errors.Is(err, ErrInvalidPassword):
+		return "security_gate_failed", "password", true
+	case errors.Is(err, ErrBlockedEmail):
+		return "blocked_email", "", true
+	case errors.Is(err, ErrBlockedDomain):
+		return "blocked_domain", "", true
+	case errors.Is(err, ErrNotAllowedEmail), errors.Is(err, ErrNotAllowedDomain):
+		return "not_in_allow_list", "", true
+	case errors.Is(err, ErrInviteExpired):
+		return "invite_token_expired", "", false
+	case errors.Is(err, ErrInviteRevoked):
+		return "invite_token_revoked", "", false
 	default:
 		return "", "", false
 	}
@@ -1063,12 +1378,33 @@ func accessErrorCode(err error) string {
 		return "invalid_email_code"
 	case errors.Is(err, ErrRequiresNDA):
 		return "nda_required"
+	case errors.Is(err, ErrRequiresPassword):
+		return "requires_password"
+	case errors.Is(err, ErrInvalidPassword):
+		return "invalid_password"
+	case errors.Is(err, ErrBlockedEmail):
+		return "blocked_email"
+	case errors.Is(err, ErrBlockedDomain):
+		return "blocked_domain"
+	case errors.Is(err, ErrNotAllowedEmail), errors.Is(err, ErrNotAllowedDomain):
+		return "not_allowed"
+	case errors.Is(err, ErrInviteExpired):
+		return "invite_expired"
+	case errors.Is(err, ErrInviteRevoked):
+		return "invite_revoked"
 	default:
 		return "internal_error"
 	}
 }
 
-func publicURL(c *gin.Context, cfg *config.Config, token string) string {
+func publicURL(c *gin.Context, cfg *config.Config, token, customDomain string) string {
+	if customDomain != "" {
+		scheme := "https"
+		if c.Request.TLS == nil && c.Request.Header.Get("X-Forwarded-Proto") != "https" {
+			scheme = "http"
+		}
+		return scheme + "://" + strings.TrimSuffix(customDomain, "/") + "/l/" + token
+	}
 	base := cfg.ViewerBaseURL
 	if base == "" {
 		base = c.Request.Header.Get("Origin")
@@ -1191,20 +1527,28 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"documents":                documents,
 		"isBundle":                 isBundle,
 		"name":                     textOrNil(link.Name),
-		"shortUrl":                 publicURL(c, h.cfg, link.PublicToken),
+		"shortUrl":                 publicURL(c, h.cfg, link.PublicToken, link.CustomDomain.String),
 		"accessCount":              link.AccessCount,
 		"heatLevel":                score.Level,
 		"status":                   link.Status,
 		"createdAt":                link.CreatedAt.Time.Format(time.RFC3339),
 		"isActive":                 isActive,
 		"permissionType":           mapPermissionType(link.PermissionType),
+		"requireEmail":             link.RequireEmail,
 		"requireNda":               link.RequireNda,
+		"requirePassword":          link.RequirePassword,
 		"downloadEnabled":          link.DownloadEnabled,
 		"watermarkEnabled":         link.WatermarkEnabled,
 		"aiCopilotEnabled":         link.AiCopilotEnabled,
 		"requireEmailVerification": link.RequireEmailVerification,
 		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
 		"contactIds":               contactIDs,
+		"customDomain":             textOrNil(link.CustomDomain),
+		"tags":                     link.Tags,
+		"notifyOnAccess":           link.NotifyOnAccess,
+	}
+	if link.DealRoomID.Valid {
+		item["dealRoomId"] = uuidToString(link.DealRoomID)
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)

@@ -6,6 +6,8 @@ const (
 	TemplateAccessCode   = "access_code"
 	TemplateMarketing    = "marketing"
 	TemplateInvitation   = "invitation"
+	TemplateLinkInvite   = "link_invite"
+	TemplateLinkAccess   = "link_access"
 )
 
 // RegisterDefaults registers the built-in DealSignal templates.
@@ -276,6 +278,190 @@ Accept invitation:
 This invitation expires in {{.ExpiryDays}} days.
 
 If you were not expecting this invitation, you can safely ignore this email.
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplateLinkInvite, Template{
+		Subject: "You've been invited to view {{.LinkName}} on {{.BrandName}}",
+		HTML: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Document Invitation</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>{{.BrandName}}</h1>
+    </div>
+    <div class="body">
+      <p>Hello,</p>
+      <p>You've been invited to view <strong>{{.LinkName}}</strong>.</p>
+      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">View document</a></p>
+      <p>Or copy and paste this link into your browser:</p>
+      <p style="word-break:break-all;"><a href="{{.InvitationLink}}">{{.InvitationLink}}</a></p>
+      <p>If you were not expecting this invitation, you can safely ignore this email.</p>
+    </div>
+    <div class="footer">
+      &copy; {{.BrandName}}. All rights reserved.
+    </div>
+  </div>
+</body>
+</html>`,
+		Text: `Hello,
+
+You've been invited to view {{.LinkName}} on {{.BrandName}}.
+
+View document:
+{{.InvitationLink}}
+
+If you were not expecting this invitation, you can safely ignore this email.
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplateLinkInvite+".zh-CN", Template{
+		Subject: "您被邀请查看 {{.BrandName}} 上的 {{.LinkName}}",
+		HTML: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>文档邀请</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>{{.BrandName}}</h1></div>
+    <div class="body">
+      <p>您好，</p>
+      <p>您被邀请查看 <strong>{{.LinkName}}</strong>。</p>
+      <p style="text-align:center;"><a class="button" href="{{.InvitationLink}}">查看文档</a></p>
+      <p>或复制以下链接到浏览器打开：</p>
+      <p style="word-break:break-all;"><a href="{{.InvitationLink}}">{{.InvitationLink}}</a></p>
+      <p>如果您没有期待此邀请，可以忽略此邮件。</p>
+    </div>
+    <div class="footer">&copy; {{.BrandName}}. 保留所有权利。</div>
+  </div>
+</body>
+</html>`,
+		Text: `您好，
+
+您被邀请查看 {{.BrandName}} 上的 {{.LinkName}}。
+
+查看文档：
+{{.InvitationLink}}
+
+如果您没有期待此邀请，可以忽略此邮件。
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplateLinkAccess, Template{
+		Subject: "Someone viewed {{.LinkName}} on {{.BrandName}}",
+		HTML: `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Link viewed</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>{{.BrandName}}</h1></div>
+    <div class="body">
+      <p>Hello,</p>
+      <p><strong>{{.VisitorEmail}}</strong> just viewed <strong>{{.LinkName}}</strong>.</p>
+      <p style="text-align:center;"><a class="button" href="{{.LinkURL}}">View link analytics</a></p>
+      <p>If you do not want to receive these notifications, you can disable "Notify on access" in the link settings.</p>
+    </div>
+    <div class="footer">&copy; {{.BrandName}}. All rights reserved.</div>
+  </div>
+</body>
+</html>`,
+		Text: `Hello,
+
+{{.VisitorEmail}} just viewed {{.LinkName}} on {{.BrandName}}.
+
+View link analytics:
+{{.LinkURL}}
+
+If you do not want to receive these notifications, disable "Notify on access" in the link settings.
+
+- {{.BrandName}}`,
+	})
+
+	_ = e.Register(TemplateLinkAccess+".zh-CN", Template{
+		Subject: "有人查看了 {{.BrandName}} 上的 {{.LinkName}}",
+		HTML: `<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>链接被查看</title>
+  <style>
+    body { margin: 0; padding: 0; background-color: #f4f6f8; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    .container { max-width: 600px; margin: 40px auto; background: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }
+    .header { background: #111827; padding: 32px 24px; text-align: center; }
+    .header h1 { color: #ffffff; margin: 0; font-size: 24px; font-weight: 600; }
+    .body { padding: 32px 24px; color: #374151; font-size: 16px; line-height: 1.6; }
+    .body p { margin: 0 0 16px; }
+    .button { display: inline-block; margin: 16px 0; padding: 14px 28px; background: #2563eb; color: #ffffff; text-decoration: none; border-radius: 8px; font-weight: 600; }
+    .footer { padding: 24px; text-align: center; font-size: 13px; color: #9ca3af; background: #f9fafb; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header"><h1>{{.BrandName}}</h1></div>
+    <div class="body">
+      <p>您好，</p>
+      <p><strong>{{.VisitorEmail}}</strong> 刚刚查看了 <strong>{{.LinkName}}</strong>。</p>
+      <p style="text-align:center;"><a class="button" href="{{.LinkURL}}">查看链接分析</a></p>
+      <p>如果您不想继续收到此类通知，可以在链接设置中关闭“访问时通知”。</p>
+    </div>
+    <div class="footer">&copy; {{.BrandName}}. 保留所有权利。</div>
+  </div>
+</body>
+</html>`,
+		Text: `您好，
+
+{{.VisitorEmail}} 刚刚查看了 {{.BrandName}} 上的 {{.LinkName}}。
+
+查看链接分析：
+{{.LinkURL}}
+
+如果您不想继续收到此类通知，可以在链接设置中关闭“访问时通知”。
 
 - {{.BrandName}}`,
 	})

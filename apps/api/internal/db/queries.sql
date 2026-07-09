@@ -282,30 +282,22 @@ ORDER BY created_at ASC
 LIMIT $2;
 -- name: CreateLink :one
 INSERT INTO links (
-    tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
+    tenant_id, workspace_id, document_id, deal_room_id, public_token, name, permission_type, expires_at, max_access_count,
     download_enabled, watermark_enabled, status, created_by,
     require_email, require_nda, require_email_verification,
-    ai_copilot_enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-          updated_at, require_email, require_nda, require_email_verification,
-          ai_copilot_enabled;
+    ai_copilot_enabled, require_password, password_hash,
+    custom_domain, tags, notify_on_access
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled
+SELECT *
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
 
 -- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled
+SELECT *
 FROM links
 WHERE public_token = $1
 LIMIT 1;
@@ -316,29 +308,20 @@ SET access_count = access_count + 1, updated_at = now()
 WHERE id = $1;
 
 -- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled
+SELECT *
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
 
 -- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled
+SELECT *
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 LIMIT $2;
 
 -- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-       access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled
+SELECT *
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
@@ -347,30 +330,30 @@ ORDER BY created_at DESC;
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled;
+RETURNING *;
 
 -- name: UpdateLinkFull :one
 UPDATE links SET
     name = $1,
     document_id = $2,
-    permission_type = $3,
-    expires_at = $4,
-    max_access_count = $5,
-    download_enabled = $6,
-    watermark_enabled = $7,
-    require_email = $8,
-    require_email_verification = $9,
-    require_nda = $10,
-    ai_copilot_enabled = $11,
+    deal_room_id = $3,
+    permission_type = $4,
+    expires_at = $5,
+    max_access_count = $6,
+    download_enabled = $7,
+    watermark_enabled = $8,
+    require_email = $9,
+    require_email_verification = $10,
+    require_nda = $11,
+    ai_copilot_enabled = $12,
+    require_password = $13,
+    password_hash = $14,
+    custom_domain = $15,
+    tags = $16,
+    notify_on_access = $17,
     updated_at = now()
-WHERE id = $12 AND workspace_id = $13
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count,
-          access_count, download_enabled, watermark_enabled, status, created_by, created_at,
-       updated_at, require_email, require_nda, require_email_verification,
-       ai_copilot_enabled;
+WHERE id = $18 AND workspace_id = $19
+RETURNING *;
 
 -- name: DeleteLink :execrows
 UPDATE links
@@ -1580,3 +1563,80 @@ SELECT event_type, COUNT(*) AS count
 FROM email_events
 WHERE email_log_id = $1
 GROUP BY event_type;
+
+-- name: ListLinksByDealRoom :many
+SELECT *
+FROM links
+WHERE workspace_id = $1 AND deal_room_id = $2 AND status NOT IN ('deleted', 'disabled')
+ORDER BY created_at DESC;
+
+-- name: CreateLinkAccessRule :exec
+INSERT INTO link_access_rules (
+    tenant_id, workspace_id, link_id, rule_type, value, action, sort_order
+) VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (link_id, rule_type, value, action) DO NOTHING;
+
+-- name: DeleteLinkAccessRulesByLink :exec
+DELETE FROM link_access_rules
+WHERE link_id = $1;
+
+-- name: ListLinkAccessRulesByLink :many
+SELECT id, tenant_id, workspace_id, link_id, rule_type, value, action, sort_order, created_at, updated_at
+FROM link_access_rules
+WHERE link_id = $1
+ORDER BY action DESC, sort_order ASC, created_at ASC;
+
+-- name: CreateLinkInvitation :one
+INSERT INTO link_invitations (
+    tenant_id, workspace_id, link_id, email, token, status, expires_at, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
+
+-- name: GetLinkInvitationByToken :one
+SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+FROM link_invitations
+WHERE token = $1
+LIMIT 1;
+
+-- name: GetLinkInvitationByLinkAndEmail :one
+SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+FROM link_invitations
+WHERE link_id = $1 AND email = $2
+LIMIT 1;
+
+-- name: UpdateLinkInvitationStatus :one
+UPDATE link_invitations
+SET status = $1, used_at = $2, updated_at = now()
+WHERE id = $3
+RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
+
+-- name: ListLinkInvitationsByLink :many
+SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+FROM link_invitations
+WHERE link_id = $1
+ORDER BY created_at DESC;
+
+-- name: TouchLinkUpdatedAt :exec
+UPDATE links
+SET updated_at = now()
+WHERE id = $1;
+
+-- name: GetLinkInvitationByID :one
+SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+FROM link_invitations
+WHERE id = $1
+LIMIT 1;
+
+-- name: DeleteLinkAccessRuleByLinkAndValue :exec
+DELETE FROM link_access_rules
+WHERE link_id = $1 AND rule_type = $2 AND value = $3 AND action = $4;
+
+-- name: ResetLinkInvitation :one
+UPDATE link_invitations
+SET token = $1,
+    status = 'pending',
+    expires_at = $2,
+    used_at = NULL,
+    updated_at = now()
+WHERE id = $3
+RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;

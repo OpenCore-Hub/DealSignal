@@ -251,6 +251,10 @@ func emailTypeToTemplateName(emailType EmailType) string {
 		return mailtemplate.TemplateMarketing
 	case EmailTypeInvitation:
 		return mailtemplate.TemplateInvitation
+	case EmailTypeLinkInvite:
+		return mailtemplate.TemplateLinkInvite
+	case EmailTypeLinkAccess:
+		return mailtemplate.TemplateLinkAccess
 	default:
 		return mailtemplate.TemplateMarketing
 	}
@@ -262,6 +266,10 @@ func emailTypeToDefaultSubject(emailType EmailType) string {
 		return "Verify your DealSignal account"
 	case EmailTypeAccessCode:
 		return "Your DealSignal document access code"
+	case EmailTypeLinkInvite:
+		return "You've been invited to view a document on DealSignal"
+	case EmailTypeLinkAccess:
+		return "Someone viewed your DealSignal link"
 	default:
 		return "DealSignal update"
 	}

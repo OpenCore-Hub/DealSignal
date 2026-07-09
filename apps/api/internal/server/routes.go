@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"net/http"
 	"strings"
@@ -65,7 +66,7 @@ type HealthResponse struct {
 	Checks  map[string]string `json:"checks,omitempty"`
 }
 
-func (s *Server) registerRoutes() {
+func (s *Server) registerRoutes() error {
 	s.engine.GET("/healthz", s.handleHealthz)
 
 	api := s.engine.Group("/api")
@@ -130,7 +131,7 @@ func (s *Server) registerRoutes() {
 		if s.cfg.S3Bucket != "" {
 			storageClient, err := storage.NewS3Client(s.cfg)
 			if err != nil {
-				panic(err)
+				return fmt.Errorf("s3 client: %w", err)
 			}
 
 			var llmClient *llm.Client
@@ -147,7 +148,7 @@ func (s *Server) registerRoutes() {
 					AppTitle:       s.cfg.OpenAIAppTitle,
 				})
 				if err != nil {
-					panic(err)
+					return fmt.Errorf("llm client: %w", err)
 				}
 				ingestionEmbedder = llmClient
 				searchEmbedder = llmClient
@@ -240,6 +241,7 @@ func (s *Server) registerRoutes() {
 			Message: "the requested resource does not exist",
 		})
 	})
+	return nil
 }
 
 func hostLookup(svc *domain.Service, baseDomain string) middleware.HostLookup {
