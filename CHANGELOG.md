@@ -14,6 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added `node` types to `apps/web/tsconfig.app.json` so test files can import Node built-ins (e.g. `node:fs`) for loading locale JSON.
 - Added viewer tests for `ViewerToolbar`, `ViewerCanvas`, `useViewerDocument`, and keyboard navigation in `CanvasViewer`.
 - Implemented link access request flow: public `POST /api/v1/public/links/:token/access-requests`, workspace approve/reject endpoints, automatic allow-rule creation and invitation email on approval, and per-IP per-link rate limiting (5/hour).
+- Disabled placeholder switches in share dialog (file requests, index file, Q&A conversations, screenshot protection) until their backend fields are implemented.
+- Resolved all outstanding `golangci-lint` warnings across the API, including unused mailer helpers and route wildcard conflicts.
 
 ### Changed
 

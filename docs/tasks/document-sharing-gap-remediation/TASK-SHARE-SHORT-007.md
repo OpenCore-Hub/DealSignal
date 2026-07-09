@@ -190,8 +190,8 @@ pnpm test PublicViewerPage
 - [x] 后端代码实现完成
 - [x] 单元/集成测试通过
 - [x] 前端请求访问 UI 实现完成
-- [ ] E2E 通过（依赖本地 Docker 全栈，未在本轮运行）
-- [ ] PR 已关联父 Issue：`Closes #DS-SHARE-017`
+- [x] E2E 通过：新增 `e2e/access-request-flow.spec.ts` 真实后端 spec，访问请求 → 审批 → allow-rule + invitation 全链路通过。
+- [x] PR 已关联父 Issue：#84 `Closes #DS-SHARE-017`
 - [x] lint / typecheck 通过
 - [x] 后端 `go test ./...` 通过
 - [ ] PR 已关联父 Issue：`Closes #DS-SHARE-017`
