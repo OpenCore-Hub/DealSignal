@@ -320,7 +320,7 @@ export function DealRoomDetailPage() {
 
       <PageHeader title={room.name} description={room.description}>
         <div className="flex flex-wrap items-center gap-2">
-          <DealRoomShareButton slug={room.slug} />
+          <DealRoomShareButton roomId={room.id} slug={room.slug} />
           <InviteMemberDialog roomId={room.id} onInvited={refetch}>
             <Button variant="outline" className="gap-1.5">
               <Envelope size={16} />
@@ -441,7 +441,7 @@ export function DealRoomDetailPage() {
 
           {tab === "permissions" && (
             <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
-              <FolderPermissionsSection />
+              <FolderPermissionsSection roomId={room.id} />
               <div className="lg:sticky lg:top-4">
                 <MembersCard roomId={room.id} members={room.members ?? []} onChanged={refetch} />
               </div>

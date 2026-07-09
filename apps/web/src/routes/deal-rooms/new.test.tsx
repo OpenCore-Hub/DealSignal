@@ -166,7 +166,7 @@ describe("NewDealRoomPage", () => {
     getDealRoomTemplatesMock.mockReturnValue(new Promise(() => {}));
     await renderPage();
 
-    expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll("[data-slot=\"skeleton\"]").length).toBeGreaterThan(0);
   });
 
   it("renders templates and pre-fills first template", async () => {

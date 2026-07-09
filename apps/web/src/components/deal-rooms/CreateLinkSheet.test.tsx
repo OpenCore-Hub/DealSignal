@@ -27,7 +27,7 @@ describe("CreateLinkSheet", () => {
   it("renders collapsible section titles after open", () => {
     render(
       <Wrapper>
-        <CreateLinkSheet>
+        <CreateLinkSheet dealRoomId="room-123">
           <Button>Open</Button>
         </CreateLinkSheet>
       </Wrapper>

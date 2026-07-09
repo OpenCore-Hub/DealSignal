@@ -31,8 +31,7 @@ export function DealRoomAnalyticsTab({
     lastSeenAt: v.lastSeenAt,
   }));
 
-  // Placeholder trend data for visual completeness.
-  const trendData = viewCount && viewCount > 0 ? [2, 4, 3, 6, 5, viewCount] : [];
+  const trendData: number[] = [];
 
   return (
     <div className="space-y-4">
