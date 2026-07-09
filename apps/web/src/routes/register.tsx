@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -8,6 +9,7 @@ import { api } from "@/lib/api";
 
 export function RegisterPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation("auth");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,37 +20,36 @@ export function RegisterPage() {
 
     const trimmedEmail = email.trim();
     if (!trimmedEmail || !trimmedEmail.includes("@")) {
-      setError("Please enter a valid email address.");
+      setError(t("register.errorInvalidEmail"));
       return;
     }
 
     setLoading(true);
     setError(null);
 
-    // Client-side password validation matching backend rules
     const pw = password;
     if (pw.length < 8) {
-      setError("Password must be at least 8 characters.");
+      setError(t("register.errorPasswordMinLength"));
       setLoading(false);
       return;
     }
     if (!/[A-Z]/.test(pw)) {
-      setError("Password must include at least one uppercase letter.");
+      setError(t("register.errorPasswordUppercase"));
       setLoading(false);
       return;
     }
     if (!/[a-z]/.test(pw)) {
-      setError("Password must include at least one lowercase letter.");
+      setError(t("register.errorPasswordLowercase"));
       setLoading(false);
       return;
     }
     if (!/[0-9]/.test(pw)) {
-      setError("Password must include at least one number.");
+      setError(t("register.errorPasswordNumber"));
       setLoading(false);
       return;
     }
     if (!/[^A-Za-z0-9]/.test(pw)) {
-      setError("Password must include at least one special character.");
+      setError(t("register.errorPasswordSpecial"));
       setLoading(false);
       return;
     }
@@ -57,7 +58,7 @@ export function RegisterPage() {
       await api.register(trimmedEmail, password);
       navigate("/login?registered=true", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Registration failed");
+      setError(err instanceof Error ? err.message : t("register.errorRegistrationFailed"));
       setLoading(false);
     }
   };
@@ -67,43 +68,43 @@ export function RegisterPage() {
       <div className="w-full max-w-md">
         <Card>
           <CardHeader>
-            <CardTitle className="text-h2">Create account</CardTitle>
+            <CardTitle className="text-h2">{t("register.title")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">{t("register.email")}</Label>
                 <Input
                   id="email"
                   type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@example.com"
+                  placeholder={t("register.emailPlaceholder")}
                   required
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="password">Password</Label>
+                <Label htmlFor="password">{t("register.password")}</Label>
                 <Input
                   id="password"
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
+                  placeholder={t("register.passwordPlaceholder")}
                   required
                 />
                 <p className="text-caption text-muted-foreground">
-                  At least 8 characters with uppercase, lowercase, number and special character.
+                  {t("register.passwordRules")}
                 </p>
               </div>
               {error && <p className="text-sm text-error-500">{error}</p>}
               <Button type="submit" className="w-full" disabled={loading}>
-                {loading ? "Creating account…" : "Create account"}
+                {loading ? t("register.submitting") : t("register.submit")}
               </Button>
               <p className="text-center text-sm text-muted-foreground">
-                Already have an account?{" "}
+                {t("register.hasAccount")}{" "}
                 <Button variant="link" className="p-0" onClick={() => navigate("/login")}>
-                  Sign in
+                  {t("register.signIn")}
                 </Button>
               </p>
             </form>

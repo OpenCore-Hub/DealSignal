@@ -6,6 +6,7 @@
   "searchPlaceholder": "搜索联系人...",
   "unknownOrganization": "未知机构",
   "visitCount": "{{count}} 次访问",
+  "visitCount_one": "{{count}} 次访问",
   "totalDuration": "累计 {{duration}}",
   "lastSeen": "最后 {{time}}",
   "empty": {

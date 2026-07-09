@@ -48,7 +48,7 @@ function SummaryCards({
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4" role="region" aria-label={t("summary.title")}>
+    <div className="grid grid-cols-2 gap-4 stagger-children" role="region" aria-label={t("summary.title")}>
       {items.map((item) => {
         const Icon = item.icon;
         return (
@@ -191,8 +191,8 @@ export function DashboardPage() {
         <RiskAlerts alerts={stats.riskAlerts} workspaceSlug={workspaceSlug} />
       )}
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        <div className="space-y-6 lg:col-span-2">
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3 stagger-children">
+        <div className="space-y-6 lg:col-span-2 stagger-children">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-h2 flex items-center gap-2">
@@ -287,7 +287,7 @@ export function DashboardPage() {
           </Card>
         </div>
 
-        <div className="space-y-6">
+        <div className="space-y-6 stagger-children">
           <Card>
             <CardHeader className="pb-3">
               <CardTitle className="text-h2 flex items-center gap-2">

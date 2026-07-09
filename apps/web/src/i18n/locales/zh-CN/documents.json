@@ -185,6 +185,18 @@
     "link_disabledTitle": "链接已停用",
     "link_disabledDescription": "该分享链接当前处于停用状态，请联系分享者确认是否重新启用。",
     "link_max_access_reachedTitle": "访问次数已达上限",
-    "link_max_access_reachedDescription": "该链接的访问次数已达上限，请联系分享者。"
+    "link_max_access_reachedDescription": "该链接的访问次数已达上限，请联系分享者。",
+    "blocked_emailTitle": "访问被拒绝",
+    "blocked_emailDescription": "该邮箱地址无权访问此链接。",
+    "blocked_domainTitle": "访问被拒绝",
+    "blocked_domainDescription": "该域名下的邮箱地址无权访问此链接。",
+    "not_allowedTitle": "访问被拒绝",
+    "not_allowedDescription": "您不在该链接的允许列表中，请联系分享者申请访问权限。",
+    "invite_expiredTitle": "邀请已过期",
+    "invite_expiredDescription": "此邀请已过期，请联系分享者重新发送邀请。",
+    "invite_revokedTitle": "邀请已撤销",
+    "invite_revokedDescription": "此邀请已被撤销，如有疑问请联系分享者。",
+    "inviteVerification": "正在验证您的邀请...",
+    "inviteVerificationFor": "正在验证 {{email}} 的邀请"
   }
 }

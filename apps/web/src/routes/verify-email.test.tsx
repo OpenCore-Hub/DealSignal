@@ -33,10 +33,10 @@ describe("VerifyEmailPage", () => {
     verifyEmailMock.mockResolvedValue({ code: "verified", message: "Email verified successfully" });
     renderPage("valid-token");
 
-    expect(screen.getByText(/verifying your email/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/verifyEmail.verifying/i).length).toBeGreaterThan(0);
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /continue to sign in/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /login.submit/i })).toBeInTheDocument();
     });
     expect(verifyEmailMock).toHaveBeenCalledWith("valid-token");
   });
@@ -48,7 +48,7 @@ describe("VerifyEmailPage", () => {
     await waitFor(() => {
       expect(screen.getByText(/invalid or expired token/i)).toBeInTheDocument();
     });
-    expect(screen.getByRole("button", { name: /back to sign in/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /register.signIn/i })).toBeInTheDocument();
   });
 
 

@@ -189,6 +189,18 @@
     "link_disabledTitle": "Link inactive",
     "link_disabledDescription": "This share link is currently inactive. Please contact the sender to check if it can be re-enabled.",
     "link_max_access_reachedTitle": "Access limit reached",
-    "link_max_access_reachedDescription": "This link has reached its access limit. Please contact the sender."
+    "link_max_access_reachedDescription": "This link has reached its access limit. Please contact the sender.",
+    "blocked_emailTitle": "Access denied",
+    "blocked_emailDescription": "This email address is not allowed to access this link.",
+    "blocked_domainTitle": "Access denied",
+    "blocked_domainDescription": "Email addresses from this domain are not allowed to access this link.",
+    "not_allowedTitle": "Access denied",
+    "not_allowedDescription": "You are not on the allowed list for this link. Please contact the sender to request access.",
+    "invite_expiredTitle": "Invitation expired",
+    "invite_expiredDescription": "This invitation has expired. Please contact the sender for a new invitation.",
+    "invite_revokedTitle": "Invitation revoked",
+    "invite_revokedDescription": "This invitation has been revoked. Please contact the sender if you think this is a mistake.",
+    "inviteVerification": "Verifying your invitation...",
+    "inviteVerificationFor": "Verifying invitation for {{email}}"
   }
 }

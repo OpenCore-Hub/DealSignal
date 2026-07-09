@@ -42,7 +42,7 @@ export function TopNav() {
     ?? "D";
 
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6">
+    <header className="sticky top-0 z-30 flex h-16 items-center gap-4 border-b border-border bg-background/80 px-4 shadow-[0_1px_3px_rgba(15,23,42,0.03)] backdrop-blur-xl supports-[backdrop-filter]:bg-background/50 md:px-6">
       {/* Mobile menu toggle */}
       <button
         onClick={toggleSidebar}

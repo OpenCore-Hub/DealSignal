@@ -1,6 +1,8 @@
 import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { motion } from "motion/react";
+import { useReducedMotion } from "@/hooks/useReducedMotion";
 
 interface EmptyStateProps {
   icon: ReactNode;
@@ -22,8 +24,13 @@ export function EmptyState({
   className,
   size = "default",
 }: EmptyStateProps) {
+  const reducedMotion = useReducedMotion();
+
   return (
-    <div
+    <motion.div
+      initial={reducedMotion ? false : { opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className={cn(
         "flex flex-col items-center justify-center rounded-xl bg-muted/30 px-6 py-10 text-center",
         size === "large" && "py-14",
@@ -45,6 +52,6 @@ export function EmptyState({
           {action.label}
         </Button>
       )}
-    </div>
+    </motion.div>
   );
 }

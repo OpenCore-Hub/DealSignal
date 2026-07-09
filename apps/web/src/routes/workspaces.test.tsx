@@ -80,7 +80,7 @@ describe("WorkspacesPage", () => {
     getWorkspacesMock.mockReturnValue(new Promise(() => {}));
     await renderPage();
 
-    expect(document.querySelectorAll(".animate-pulse").length).toBeGreaterThan(0);
+    expect(document.querySelectorAll("[data-slot=\"skeleton\"]").length).toBeGreaterThan(0);
   });
 
   it("renders workspace cards", async () => {

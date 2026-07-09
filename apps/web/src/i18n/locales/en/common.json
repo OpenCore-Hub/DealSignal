@@ -71,6 +71,7 @@
     "low": "Low impact"
   },
   "complete": "Complete",
+  "saving": "Saving...",
   "dueDate": "Due",
   "fileType": {
     "pdf": "PDF",
@@ -129,5 +130,10 @@
     "whitelist": "Whitelist",
     "password": "Password",
     "nda": "NDA"
-  }
+  },
+  "confirm": "Confirm",
+  "disable": "Disable",
+  "unsavedChangesTitle": "Unsaved changes",
+  "unsavedChangesDescription": "You have unsaved changes. Are you sure you want to close without saving?",
+  "unsavedChangesConfirm": "Close without saving"
 }

@@ -2,6 +2,7 @@ import { Sidebar } from "./Sidebar";
 import { TopNav } from "./TopNav";
 import { AIAssistant } from "@/components/ai/AIAssistant";
 import { UploadDialog } from "@/components/upload/UploadDialog";
+import { PageTransition } from "@/components/common/PageTransition";
 import { useUIStore } from "@/stores/uiStore";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +24,9 @@ export function AppShell({ children }: AppShellProps) {
       >
         <TopNav />
         <main className="flex-1 overflow-auto p-6 md:p-8">
-          <div className="mx-auto h-full max-w-[1400px]">{children}</div>
+          <div className="mx-auto h-full max-w-[1400px]">
+            <PageTransition>{children}</PageTransition>
+          </div>
         </main>
       </div>
       <AIAssistant />

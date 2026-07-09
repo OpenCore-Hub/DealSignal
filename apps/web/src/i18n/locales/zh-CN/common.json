@@ -70,6 +70,7 @@
     "low": "低影响"
   },
   "complete": "完成",
+  "saving": "保存中...",
   "dueDate": "截止日期",
   "fileType": {
     "pdf": "PDF",
@@ -127,5 +128,10 @@
     "whitelist": "白名单",
     "password": "密码保护",
     "nda": "NDA 保护"
-  }
+  },
+  "confirm": "确认",
+  "disable": "禁用",
+  "unsavedChangesTitle": "未保存的更改",
+  "unsavedChangesDescription": "您有未保存的更改，确定不保存直接关闭吗？",
+  "unsavedChangesConfirm": "不保存并关闭"
 }

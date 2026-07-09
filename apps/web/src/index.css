@@ -65,10 +65,11 @@
   --radius-lg: 0.75rem;
   --radius-xl: 1rem;
 
-  /* Shadows */
-  --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.05);
-  --shadow-dropdown: 0 4px 12px rgba(0, 0, 0, 0.08);
-  --shadow-modal: 0 12px 40px rgba(0, 0, 0, 0.12);
+  /* Shadows — tinted with slate hue instead of pure black */
+  --shadow-card: 0 1px 3px rgba(15, 23, 42, 0.06);
+  --shadow-card-hover: 0 4px 16px rgba(15, 23, 42, 0.1);
+  --shadow-dropdown: 0 4px 16px rgba(15, 23, 42, 0.1);
+  --shadow-modal: 0 16px 48px rgba(15, 23, 42, 0.15);
 }
 
 :root {
@@ -206,30 +207,38 @@
   font-size: 2rem;
   font-weight: 700;
   line-height: 2.5rem;
+  letter-spacing: -0.02em;
+  text-wrap: balance;
 }
 
 .text-h1 {
   font-size: 1.5rem;
   font-weight: 600;
   line-height: 2rem;
+  letter-spacing: -0.015em;
+  text-wrap: balance;
 }
 
 .text-h2 {
   font-size: 1.25rem;
   font-weight: 600;
   line-height: 1.75rem;
+  letter-spacing: -0.01em;
+  text-wrap: pretty;
 }
 
 .text-h3 {
   font-size: 1rem;
   font-weight: 600;
   line-height: 1.5rem;
+  text-wrap: pretty;
 }
 
 .text-body {
   font-size: 0.875rem;
   font-weight: 400;
-  line-height: 1.375rem;
+  line-height: 1.5rem;
+  text-wrap: pretty;
 }
 
 .text-caption {
@@ -243,6 +252,7 @@
   font-weight: 700;
   line-height: 2.5rem;
   font-variant-numeric: tabular-nums;
+  letter-spacing: -0.03em;
 }
 
 /* Data numbers */
@@ -265,6 +275,125 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* ── Noise texture overlay ── */
+.noise-overlay::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.015;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+}
+
+/* ── Spring physics easing ── */
+.ease-spring {
+  transition-timing-function: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.ease-spring-out {
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ── Staggered entry animation ── */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Stagger children direct descendants */
+.stagger-children > * {
+  opacity: 0;
+  animation: fade-up 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 80ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 160ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 240ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 320ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 400ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 480ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 560ms; }
+
+/* ── Wave skeleton (replaces pulse) ── */
+@keyframes skeleton-wave {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+.skeleton-wave {
+  background: linear-gradient(
+    110deg,
+    var(--muted) 30%,
+    color-mix(in srgb, var(--muted-foreground) 8%, var(--muted)) 50%,
+    var(--muted) 70%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-wave 1.8s ease-in-out infinite;
+}
+
+/* ── Spotlight border on hover ── */
+.spotlight-border {
+  position: relative;
+  overflow: hidden;
+}
+.spotlight-border::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1px;
+  background: radial-gradient(
+    600px circle at var(--spotlight-x, 50%) var(--spotlight-y, 50%),
+    rgba(148, 163, 184, 0.15),
+    transparent 40%
+  );
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s ease;
+}
+.spotlight-border:hover::before {
+  opacity: 1;
+}
+
+/* ── Number counting animation ── */
+@keyframes count-up {
+  from { opacity: 0; transform: translateY(0.5em); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.animate-count-up {
+  animation: count-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ── Press feedback ── */
+.pressable:active {
+  transform: scale(0.97);
+  transition: transform 0.1s ease;
+}
+
+/* ── Page enter transition ── */
+@keyframes page-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.page-enter {
+  animation: page-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
 /* Pulse ring animation for CTA buttons */
@@ -297,12 +426,8 @@
 
 /* Shimmer sweep animation for CTA buttons */
 @keyframes shimmer {
-  0% {
-    background-position: 200% 0;
-  }
-  100% {
-    background-position: -200% 0;
-  }
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
 }
 
 .animate-shimmer {

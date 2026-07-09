@@ -134,9 +134,9 @@ export function Sidebar() {
                     title={t(item.labelKey)}
                     className={({ isActive }) =>
                       cn(
-                        "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+                        "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
                         isActive
-                          ? "bg-primary text-primary-foreground"
+                          ? "bg-primary text-primary-foreground shadow-[0_1px_3px_rgba(15,23,42,0.12)]"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
                       )
                     }
