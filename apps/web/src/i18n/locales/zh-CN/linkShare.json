@@ -29,7 +29,7 @@
     "expiresOn": "过期时间",
     "expiresOnHint": "链接将在该日期后失效",
     "expiresAtFuture": "过期时间必须是未来时间",
-    "oldSlugHint": "旧链接 /r/{slug} 仍可用，但新分享建议使用 /l/{token}。",
+    "oldSlugHint": "旧链接 /r/{{slug}} 仍可用，但新分享建议使用 /l/{{token}}。",
     "customDomain": "自定义域名",
     "customDomainPlaceholder": "links.yourdomain.com",
     "customDomainHint": "配置后公开链接将从此域名提供",
@@ -128,7 +128,7 @@
     },
     "advanced": {
       "title": "高级",
-      "enabledCount": "{count} 项已启用",
+      "enabledCount": "{{count}} 项已启用",
       "aiAgents": "AI 助手",
       "aiAgentsDescription": "允许在查看器中使用 AI 助手",
       "fileRequests": "启用文件请求",

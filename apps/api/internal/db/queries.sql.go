@@ -189,6 +189,42 @@ func (q *Queries) CountEmailEventsByLogID(ctx context.Context, emailLogID pgtype
 	return items, nil
 }
 
+const countPendingFileRequests = `-- name: CountPendingFileRequests :one
+SELECT COUNT(*) AS count
+FROM link_file_requests
+WHERE link_id = $1 AND visitor_id = $2 AND status = 'pending'
+`
+
+type CountPendingFileRequestsParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) CountPendingFileRequests(ctx context.Context, arg CountPendingFileRequestsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingFileRequests, arg.LinkID, arg.VisitorID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countPendingLinkAccessRequestsByLinkAndEmail = `-- name: CountPendingLinkAccessRequestsByLinkAndEmail :one
+SELECT COUNT(*)
+FROM link_access_requests
+WHERE link_id = $1 AND email = $2 AND status = 'pending'
+`
+
+type CountPendingLinkAccessRequestsByLinkAndEmailParams struct {
+	LinkID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) CountPendingLinkAccessRequestsByLinkAndEmail(ctx context.Context, arg CountPendingLinkAccessRequestsByLinkAndEmailParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countPendingLinkAccessRequestsByLinkAndEmail, arg.LinkID, arg.Email)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
 SELECT COUNT(*) AS count
 FROM suggestions
@@ -891,6 +927,47 @@ func (q *Queries) CreateEmailLog(ctx context.Context, arg CreateEmailLogParams) 
 	return i, err
 }
 
+const createFileRequest = `-- name: CreateFileRequest :one
+INSERT INTO link_file_requests (
+    tenant_id, workspace_id, link_id, visitor_id, visitor_email, message
+) VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, message, status, created_at, updated_at
+`
+
+type CreateFileRequestParams struct {
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    pgtype.Text
+	VisitorEmail pgtype.Text
+	Message      string
+}
+
+func (q *Queries) CreateFileRequest(ctx context.Context, arg CreateFileRequestParams) (LinkFileRequest, error) {
+	row := q.db.QueryRow(ctx, createFileRequest,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.VisitorEmail,
+		arg.Message,
+	)
+	var i LinkFileRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.Message,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createHubSpotSyncJob = `-- name: CreateHubSpotSyncJob :one
 INSERT INTO hubspot_sync_jobs (workspace_id, record_type, record_id, direction, payload)
 VALUES ($1, $2, $3, $4, $5)
@@ -1051,9 +1128,10 @@ INSERT INTO links (
     download_enabled, watermark_enabled, status, created_by,
     require_email, require_nda, require_email_verification,
     ai_copilot_enabled, require_password, password_hash,
+    qa_enabled, file_requests_enabled, index_file_enabled,
     custom_domain, tags, notify_on_access
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 `
 
 type CreateLinkParams struct {
@@ -1076,6 +1154,9 @@ type CreateLinkParams struct {
 	AiCopilotEnabled         bool
 	RequirePassword          bool
 	PasswordHash             pgtype.Text
+	QaEnabled                bool
+	FileRequestsEnabled      bool
+	IndexFileEnabled         bool
 	CustomDomain             pgtype.Text
 	Tags                     []string
 	NotifyOnAccess           bool
@@ -1102,6 +1183,9 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.AiCopilotEnabled,
 		arg.RequirePassword,
 		arg.PasswordHash,
+		arg.QaEnabled,
+		arg.FileRequestsEnabled,
+		arg.IndexFileEnabled,
 		arg.CustomDomain,
 		arg.Tags,
 		arg.NotifyOnAccess,
@@ -1134,6 +1218,52 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.CustomDomain,
 		&i.Tags,
 		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
+	)
+	return i, err
+}
+
+const createLinkAccessRequest = `-- name: CreateLinkAccessRequest :one
+INSERT INTO link_access_requests (
+    tenant_id, workspace_id, link_id, email, reason, status
+) VALUES ($1, $2, $3, $4, $5, 'pending')
+RETURNING id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+`
+
+type CreateLinkAccessRequestParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Reason      pgtype.Text
+}
+
+func (q *Queries) CreateLinkAccessRequest(ctx context.Context, arg CreateLinkAccessRequestParams) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, createLinkAccessRequest,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.Email,
+		arg.Reason,
+	)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1212,13 +1342,28 @@ type CreateLinkInvitationParams struct {
 	WorkspaceID pgtype.UUID
 	LinkID      pgtype.UUID
 	Email       string
-	Token       string
+	Token       pgtype.Text
 	Status      string
 	ExpiresAt   pgtype.Timestamptz
 	CreatedBy   pgtype.UUID
 }
 
-func (q *Queries) CreateLinkInvitation(ctx context.Context, arg CreateLinkInvitationParams) (LinkInvitation, error) {
+type CreateLinkInvitationRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) CreateLinkInvitation(ctx context.Context, arg CreateLinkInvitationParams) (CreateLinkInvitationRow, error) {
 	row := q.db.QueryRow(ctx, createLinkInvitation,
 		arg.TenantID,
 		arg.WorkspaceID,
@@ -1229,7 +1374,7 @@ func (q *Queries) CreateLinkInvitation(ctx context.Context, arg CreateLinkInvita
 		arg.ExpiresAt,
 		arg.CreatedBy,
 	)
-	var i LinkInvitation
+	var i CreateLinkInvitationRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -1316,7 +1461,7 @@ func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreement
 const createNotification = `-- name: CreateNotification :one
 INSERT INTO notifications (workspace_id, user_id, channel, subject, body)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at
+RETURNING id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at, recipient_email, metadata, next_attempt_at, sent_at, provider_message_id
 `
 
 type CreateNotificationParams struct {
@@ -1348,6 +1493,11 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		&i.LastError,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.RecipientEmail,
+		&i.Metadata,
+		&i.NextAttemptAt,
+		&i.SentAt,
+		&i.ProviderMessageID,
 	)
 	return i, err
 }
@@ -1433,7 +1583,7 @@ func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (CreateP
 
 const createPageView = `-- name: CreatePageView :exec
 INSERT INTO page_views (tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES ($1, $2, $3, $4, $5, $6, $7::numeric)
 `
 
 type CreatePageViewParams struct {
@@ -1443,7 +1593,7 @@ type CreatePageViewParams struct {
 	VisitorID       pgtype.Text
 	PageNumber      int32
 	DurationSeconds int32
-	ScrollDepth     pgtype.Numeric
+	Column7         pgtype.Numeric
 }
 
 func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) error {
@@ -1454,28 +1604,32 @@ func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) 
 		arg.VisitorID,
 		arg.PageNumber,
 		arg.DurationSeconds,
-		arg.ScrollDepth,
+		arg.Column7,
 	)
 	return err
 }
 
 const createSecurityEvent = `-- name: CreateSecurityEvent :exec
-INSERT INTO security_events (link_id, event_type, visitor_id, email, ip, user_agent, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO security_events (tenant_id, workspace_id, link_id, event_type, visitor_id, email, ip, user_agent, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 `
 
 type CreateSecurityEventParams struct {
-	LinkID    pgtype.UUID
-	EventType string
-	VisitorID pgtype.Text
-	Email     pgtype.Text
-	Ip        *netip.Addr
-	UserAgent pgtype.Text
-	Reason    pgtype.Text
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	EventType   string
+	VisitorID   pgtype.Text
+	Email       pgtype.Text
+	Ip          *netip.Addr
+	UserAgent   pgtype.Text
+	Reason      pgtype.Text
 }
 
 func (q *Queries) CreateSecurityEvent(ctx context.Context, arg CreateSecurityEventParams) error {
 	_, err := q.db.Exec(ctx, createSecurityEvent,
+		arg.TenantID,
+		arg.WorkspaceID,
 		arg.LinkID,
 		arg.EventType,
 		arg.VisitorID,
@@ -1769,6 +1923,49 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 	return i, err
 }
 
+const createVisitorQuestion = `-- name: CreateVisitorQuestion :one
+INSERT INTO link_visitor_questions (
+    tenant_id, workspace_id, link_id, visitor_id, visitor_email, question
+) VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at
+`
+
+type CreateVisitorQuestionParams struct {
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    string
+	VisitorEmail pgtype.Text
+	Question     string
+}
+
+func (q *Queries) CreateVisitorQuestion(ctx context.Context, arg CreateVisitorQuestionParams) (LinkVisitorQuestion, error) {
+	row := q.db.QueryRow(ctx, createVisitorQuestion,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.VisitorEmail,
+		arg.Question,
+	)
+	var i LinkVisitorQuestion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.Question,
+		&i.Answer,
+		&i.AnsweredBy,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspaces (tenant_id, name, slug, brand_color)
 VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled
@@ -1912,6 +2109,21 @@ func (q *Queries) DeleteLinkDocumentsByLink(ctx context.Context, linkID pgtype.U
 	return err
 }
 
+const deleteNotificationRule = `-- name: DeleteNotificationRule :exec
+DELETE FROM notification_rules
+WHERE workspace_id = $1 AND rule_type = $2
+`
+
+type DeleteNotificationRuleParams struct {
+	WorkspaceID pgtype.UUID
+	RuleType    string
+}
+
+func (q *Queries) DeleteNotificationRule(ctx context.Context, arg DeleteNotificationRuleParams) error {
+	_, err := q.db.Exec(ctx, deleteNotificationRule, arg.WorkspaceID, arg.RuleType)
+	return err
+}
+
 const deleteOAuthState = `-- name: DeleteOAuthState :exec
 DELETE FROM oauth_states WHERE state = $1
 `
@@ -2004,6 +2216,53 @@ type DismissSuggestionParams struct {
 func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionParams) error {
 	_, err := q.db.Exec(ctx, dismissSuggestion, arg.ID, arg.WorkspaceID)
 	return err
+}
+
+const findMergeableNotification = `-- name: FindMergeableNotification :one
+SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at, recipient_email, metadata, next_attempt_at, sent_at, provider_message_id FROM notifications
+WHERE workspace_id = $1
+  AND channel = $2
+  AND status = 'pending'
+  AND subject ILIKE $3
+  AND created_at > now() - ($4 || ' minutes')::interval
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type FindMergeableNotificationParams struct {
+	WorkspaceID pgtype.UUID
+	Channel     string
+	Subject     string
+	Column4     pgtype.Text
+}
+
+func (q *Queries) FindMergeableNotification(ctx context.Context, arg FindMergeableNotificationParams) (Notification, error) {
+	row := q.db.QueryRow(ctx, findMergeableNotification,
+		arg.WorkspaceID,
+		arg.Channel,
+		arg.Subject,
+		arg.Column4,
+	)
+	var i Notification
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.Channel,
+		&i.Subject,
+		&i.Body,
+		&i.Status,
+		&i.Attempts,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RecipientEmail,
+		&i.Metadata,
+		&i.NextAttemptAt,
+		&i.SentAt,
+		&i.ProviderMessageID,
+	)
+	return i, err
 }
 
 const findUnsyncedContactEmails = `-- name: FindUnsyncedContactEmails :many
@@ -3127,6 +3386,63 @@ func (q *Queries) GetLinkAccessMetricsBatch(ctx context.Context, dollar_1 []pgty
 	return items, nil
 }
 
+const getLinkAccessRequestByID = `-- name: GetLinkAccessRequestByID :one
+SELECT id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM link_access_requests
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetLinkAccessRequestByID(ctx context.Context, id pgtype.UUID) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, getLinkAccessRequestByID, id)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLinkAccessRequestByLinkAndEmail = `-- name: GetLinkAccessRequestByLinkAndEmail :one
+SELECT id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM link_access_requests
+WHERE link_id = $1 AND email = $2
+LIMIT 1
+`
+
+type GetLinkAccessRequestByLinkAndEmailParams struct {
+	LinkID pgtype.UUID
+	Email  string
+}
+
+func (q *Queries) GetLinkAccessRequestByLinkAndEmail(ctx context.Context, arg GetLinkAccessRequestByLinkAndEmailParams) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, getLinkAccessRequestByLinkAndEmail, arg.LinkID, arg.Email)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLinkBounceCount = `-- name: GetLinkBounceCount :one
 SELECT COUNT(*) AS bounce_count
 FROM access_logs a
@@ -3185,7 +3501,7 @@ func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtyp
 }
 
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -3226,12 +3542,18 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.CustomDomain,
 		&i.Tags,
 		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
 	)
 	return i, err
 }
 
 const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -3267,6 +3589,12 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.CustomDomain,
 		&i.Tags,
 		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
 	)
 	return i, err
 }
@@ -3417,9 +3745,24 @@ WHERE id = $1
 LIMIT 1
 `
 
-func (q *Queries) GetLinkInvitationByID(ctx context.Context, id pgtype.UUID) (LinkInvitation, error) {
+type GetLinkInvitationByIDRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetLinkInvitationByID(ctx context.Context, id pgtype.UUID) (GetLinkInvitationByIDRow, error) {
 	row := q.db.QueryRow(ctx, getLinkInvitationByID, id)
-	var i LinkInvitation
+	var i GetLinkInvitationByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -3449,9 +3792,24 @@ type GetLinkInvitationByLinkAndEmailParams struct {
 	Email  string
 }
 
-func (q *Queries) GetLinkInvitationByLinkAndEmail(ctx context.Context, arg GetLinkInvitationByLinkAndEmailParams) (LinkInvitation, error) {
+type GetLinkInvitationByLinkAndEmailRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetLinkInvitationByLinkAndEmail(ctx context.Context, arg GetLinkInvitationByLinkAndEmailParams) (GetLinkInvitationByLinkAndEmailRow, error) {
 	row := q.db.QueryRow(ctx, getLinkInvitationByLinkAndEmail, arg.LinkID, arg.Email)
-	var i LinkInvitation
+	var i GetLinkInvitationByLinkAndEmailRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -3476,9 +3834,24 @@ WHERE token = $1
 LIMIT 1
 `
 
-func (q *Queries) GetLinkInvitationByToken(ctx context.Context, token string) (LinkInvitation, error) {
+type GetLinkInvitationByTokenRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetLinkInvitationByToken(ctx context.Context, token pgtype.Text) (GetLinkInvitationByTokenRow, error) {
 	row := q.db.QueryRow(ctx, getLinkInvitationByToken, token)
-	var i LinkInvitation
+	var i GetLinkInvitationByTokenRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -4296,6 +4669,31 @@ WHERE id = $1
 
 func (q *Queries) IncrementLinkAccessCount(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, incrementLinkAccessCount, id)
+	return err
+}
+
+const insertLinkAccessRuleRevision = `-- name: InsertLinkAccessRuleRevision :exec
+INSERT INTO link_access_rule_revisions (
+    tenant_id, workspace_id, link_id, changed_by, rules_snapshot
+) VALUES ($1, $2, $3, $4, $5)
+`
+
+type InsertLinkAccessRuleRevisionParams struct {
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	LinkID        pgtype.UUID
+	ChangedBy     pgtype.UUID
+	RulesSnapshot []byte
+}
+
+func (q *Queries) InsertLinkAccessRuleRevision(ctx context.Context, arg InsertLinkAccessRuleRevisionParams) error {
+	_, err := q.db.Exec(ctx, insertLinkAccessRuleRevision,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.ChangedBy,
+		arg.RulesSnapshot,
+	)
 	return err
 }
 
@@ -5153,6 +5551,124 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listFileRequestsByLink = `-- name: ListFileRequestsByLink :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, message, status, created_at, updated_at FROM link_file_requests
+WHERE link_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListFileRequestsByLink(ctx context.Context, linkID pgtype.UUID) ([]LinkFileRequest, error) {
+	rows, err := q.db.Query(ctx, listFileRequestsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkFileRequest
+	for rows.Next() {
+		var i LinkFileRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.Message,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFileRequestsByVisitor = `-- name: ListFileRequestsByVisitor :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, message, status, created_at, updated_at FROM link_file_requests
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY created_at DESC
+`
+
+type ListFileRequestsByVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) ListFileRequestsByVisitor(ctx context.Context, arg ListFileRequestsByVisitorParams) ([]LinkFileRequest, error) {
+	rows, err := q.db.Query(ctx, listFileRequestsByVisitor, arg.LinkID, arg.VisitorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkFileRequest
+	for rows.Next() {
+		var i LinkFileRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.Message,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinkAccessRequestsByLink = `-- name: ListLinkAccessRequestsByLink :many
+SELECT id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM link_access_requests
+WHERE link_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListLinkAccessRequestsByLink(ctx context.Context, linkID pgtype.UUID) ([]LinkAccessRequest, error) {
+	rows, err := q.db.Query(ctx, listLinkAccessRequestsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkAccessRequest
+	for rows.Next() {
+		var i LinkAccessRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.Email,
+			&i.Reason,
+			&i.Status,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLinkAccessRulesByLink = `-- name: ListLinkAccessRulesByLink :many
 SELECT id, tenant_id, workspace_id, link_id, rule_type, value, action, sort_order, created_at, updated_at
 FROM link_access_rules
@@ -5313,15 +5829,30 @@ WHERE link_id = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListLinkInvitationsByLink(ctx context.Context, linkID pgtype.UUID) ([]LinkInvitation, error) {
+type ListLinkInvitationsByLinkRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListLinkInvitationsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListLinkInvitationsByLinkRow, error) {
 	rows, err := q.db.Query(ctx, listLinkInvitationsByLink, linkID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []LinkInvitation
+	var items []ListLinkInvitationsByLinkRow
 	for rows.Next() {
-		var i LinkInvitation
+		var i ListLinkInvitationsByLinkRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -5347,7 +5878,7 @@ func (q *Queries) ListLinkInvitationsByLink(ctx context.Context, linkID pgtype.U
 }
 
 const listLinksByDealRoom = `-- name: ListLinksByDealRoom :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 FROM links
 WHERE workspace_id = $1 AND deal_room_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -5394,6 +5925,12 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 			&i.CustomDomain,
 			&i.Tags,
 			&i.NotifyOnAccess,
+			&i.SecurityVersion,
+			&i.QaEnabled,
+			&i.FileRequestsEnabled,
+			&i.IndexFileEnabled,
+			&i.LinkType,
+			&i.TargetFolderPath,
 		); err != nil {
 			return nil, err
 		}
@@ -5406,7 +5943,7 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 }
 
 const listLinksByDocument = `-- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -5453,6 +5990,12 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.CustomDomain,
 			&i.Tags,
 			&i.NotifyOnAccess,
+			&i.SecurityVersion,
+			&i.QaEnabled,
+			&i.FileRequestsEnabled,
+			&i.IndexFileEnabled,
+			&i.LinkType,
+			&i.TargetFolderPath,
 		); err != nil {
 			return nil, err
 		}
@@ -5465,7 +6008,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 }
 
 const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -5507,6 +6050,49 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.CustomDomain,
 			&i.Tags,
 			&i.NotifyOnAccess,
+			&i.SecurityVersion,
+			&i.QaEnabled,
+			&i.FileRequestsEnabled,
+			&i.IndexFileEnabled,
+			&i.LinkType,
+			&i.TargetFolderPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listNotificationRulesByWorkspace = `-- name: ListNotificationRulesByWorkspace :many
+SELECT id, tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes, created_at, updated_at FROM notification_rules
+WHERE workspace_id = $1
+ORDER BY rule_type
+`
+
+func (q *Queries) ListNotificationRulesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]NotificationRule, error) {
+	rows, err := q.db.Query(ctx, listNotificationRulesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationRule
+	for rows.Next() {
+		var i NotificationRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RuleType,
+			&i.Channels,
+			&i.Enabled,
+			&i.Unsubscribable,
+			&i.MergeWindowMinutes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -5691,7 +6277,7 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 }
 
 const listPendingNotifications = `-- name: ListPendingNotifications :many
-SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at
+SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at, recipient_email, metadata, next_attempt_at, sent_at, provider_message_id
 FROM notifications
 WHERE status = 'pending' AND attempts < 3
 ORDER BY created_at ASC
@@ -5719,6 +6305,11 @@ func (q *Queries) ListPendingNotifications(ctx context.Context) ([]Notification,
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.RecipientEmail,
+			&i.Metadata,
+			&i.NextAttemptAt,
+			&i.SentAt,
+			&i.ProviderMessageID,
 		); err != nil {
 			return nil, err
 		}
@@ -5862,7 +6453,7 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 }
 
 const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -5910,6 +6501,12 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.CustomDomain,
 			&i.Tags,
 			&i.NotifyOnAccess,
+			&i.SecurityVersion,
+			&i.QaEnabled,
+			&i.FileRequestsEnabled,
+			&i.IndexFileEnabled,
+			&i.LinkType,
+			&i.TargetFolderPath,
 		); err != nil {
 			return nil, err
 		}
@@ -6113,15 +6710,27 @@ type ListSecurityEventsByLinkParams struct {
 	Offset int32
 }
 
-func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurityEventsByLinkParams) ([]SecurityEvent, error) {
+type ListSecurityEventsByLinkRow struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        *netip.Addr
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurityEventsByLinkParams) ([]ListSecurityEventsByLinkRow, error) {
 	rows, err := q.db.Query(ctx, listSecurityEventsByLink, arg.LinkID, arg.Limit, arg.Offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []SecurityEvent
+	var items []ListSecurityEventsByLinkRow
 	for rows.Next() {
-		var i SecurityEvent
+		var i ListSecurityEventsByLinkRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.LinkID,
@@ -6447,6 +7056,89 @@ func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const listVisitorQuestionsByLink = `-- name: ListVisitorQuestionsByLink :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at FROM link_visitor_questions
+WHERE link_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListVisitorQuestionsByLink(ctx context.Context, linkID pgtype.UUID) ([]LinkVisitorQuestion, error) {
+	rows, err := q.db.Query(ctx, listVisitorQuestionsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkVisitorQuestion
+	for rows.Next() {
+		var i LinkVisitorQuestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.Question,
+			&i.Answer,
+			&i.AnsweredBy,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVisitorQuestionsByVisitor = `-- name: ListVisitorQuestionsByVisitor :many
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at FROM link_visitor_questions
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY created_at DESC
+`
+
+type ListVisitorQuestionsByVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID string
+}
+
+func (q *Queries) ListVisitorQuestionsByVisitor(ctx context.Context, arg ListVisitorQuestionsByVisitorParams) ([]LinkVisitorQuestion, error) {
+	rows, err := q.db.Query(ctx, listVisitorQuestionsByVisitor, arg.LinkID, arg.VisitorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkVisitorQuestion
+	for rows.Next() {
+		var i LinkVisitorQuestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.Question,
+			&i.Answer,
+			&i.AnsweredBy,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceMembers = `-- name: ListWorkspaceMembers :many
 SELECT
     wm.workspace_id,
@@ -6739,14 +7431,29 @@ RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at
 `
 
 type ResetLinkInvitationParams struct {
-	Token     string
+	Token     pgtype.Text
 	ExpiresAt pgtype.Timestamptz
 	ID        pgtype.UUID
 }
 
-func (q *Queries) ResetLinkInvitation(ctx context.Context, arg ResetLinkInvitationParams) (LinkInvitation, error) {
+type ResetLinkInvitationRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ResetLinkInvitation(ctx context.Context, arg ResetLinkInvitationParams) (ResetLinkInvitationRow, error) {
 	row := q.db.QueryRow(ctx, resetLinkInvitation, arg.Token, arg.ExpiresAt, arg.ID)
-	var i LinkInvitation
+	var i ResetLinkInvitationRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -7517,6 +8224,22 @@ func (q *Queries) UpdateEmailLogStatusByProviderMessageID(ctx context.Context, a
 	return err
 }
 
+const updateFileRequestStatus = `-- name: UpdateFileRequestStatus :exec
+UPDATE link_file_requests
+SET status = $1, updated_at = now()
+WHERE id = $2
+`
+
+type UpdateFileRequestStatusParams struct {
+	Status string
+	ID     pgtype.UUID
+}
+
+func (q *Queries) UpdateFileRequestStatus(ctx context.Context, arg UpdateFileRequestStatusParams) error {
+	_, err := q.db.Exec(ctx, updateFileRequestStatus, arg.Status, arg.ID)
+	return err
+}
+
 const updateIngestionJob = `-- name: UpdateIngestionJob :exec
 UPDATE ingestion_jobs
 SET status = $1, attempts = $2, error_message = $3, updated_at = now()
@@ -7538,6 +8261,41 @@ func (q *Queries) UpdateIngestionJob(ctx context.Context, arg UpdateIngestionJob
 		arg.ID,
 	)
 	return err
+}
+
+const updateLinkAccessRequestStatus = `-- name: UpdateLinkAccessRequestStatus :one
+UPDATE link_access_requests
+SET status = $1,
+    reviewed_by = $2,
+    reviewed_at = now(),
+    updated_at = now()
+WHERE id = $3
+RETURNING id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+`
+
+type UpdateLinkAccessRequestStatusParams struct {
+	Status     string
+	ReviewedBy pgtype.UUID
+	ID         pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkAccessRequestStatus(ctx context.Context, arg UpdateLinkAccessRequestStatusParams) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, updateLinkAccessRequestStatus, arg.Status, arg.ReviewedBy, arg.ID)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateLinkContactAccessCode = `-- name: UpdateLinkContactAccessCode :exec
@@ -7575,9 +8333,13 @@ UPDATE links SET
     custom_domain = $15,
     tags = $16,
     notify_on_access = $17,
+    qa_enabled = $18,
+    file_requests_enabled = $19,
+    index_file_enabled = $20,
+    security_version = $21,
     updated_at = now()
-WHERE id = $18 AND workspace_id = $19
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+WHERE id = $22 AND workspace_id = $23
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 `
 
 type UpdateLinkFullParams struct {
@@ -7598,6 +8360,10 @@ type UpdateLinkFullParams struct {
 	CustomDomain             pgtype.Text
 	Tags                     []string
 	NotifyOnAccess           bool
+	QaEnabled                bool
+	FileRequestsEnabled      bool
+	IndexFileEnabled         bool
+	SecurityVersion          int32
 	ID                       pgtype.UUID
 	WorkspaceID              pgtype.UUID
 }
@@ -7621,6 +8387,10 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		arg.CustomDomain,
 		arg.Tags,
 		arg.NotifyOnAccess,
+		arg.QaEnabled,
+		arg.FileRequestsEnabled,
+		arg.IndexFileEnabled,
+		arg.SecurityVersion,
 		arg.ID,
 		arg.WorkspaceID,
 	)
@@ -7652,6 +8422,12 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		&i.CustomDomain,
 		&i.Tags,
 		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
 	)
 	return i, err
 }
@@ -7669,9 +8445,24 @@ type UpdateLinkInvitationStatusParams struct {
 	ID     pgtype.UUID
 }
 
-func (q *Queries) UpdateLinkInvitationStatus(ctx context.Context, arg UpdateLinkInvitationStatusParams) (LinkInvitation, error) {
+type UpdateLinkInvitationStatusRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Token       pgtype.Text
+	Status      string
+	ExpiresAt   pgtype.Timestamptz
+	UsedAt      pgtype.Timestamptz
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) UpdateLinkInvitationStatus(ctx context.Context, arg UpdateLinkInvitationStatusParams) (UpdateLinkInvitationStatusRow, error) {
 	row := q.db.QueryRow(ctx, updateLinkInvitationStatus, arg.Status, arg.UsedAt, arg.ID)
-	var i LinkInvitation
+	var i UpdateLinkInvitationStatusRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -7693,7 +8484,7 @@ const updateLinkStatus = `-- name: UpdateLinkStatus :one
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
 `
 
 type UpdateLinkStatusParams struct {
@@ -7732,8 +8523,30 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.CustomDomain,
 		&i.Tags,
 		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
 	)
 	return i, err
+}
+
+const updateNotificationBody = `-- name: UpdateNotificationBody :exec
+UPDATE notifications
+SET body = $2, updated_at = now()
+WHERE id = $1
+`
+
+type UpdateNotificationBodyParams struct {
+	ID   pgtype.UUID
+	Body string
+}
+
+func (q *Queries) UpdateNotificationBody(ctx context.Context, arg UpdateNotificationBodyParams) error {
+	_, err := q.db.Exec(ctx, updateNotificationBody, arg.ID, arg.Body)
+	return err
 }
 
 const updateRoomFolderPermissionsFolderPath = `-- name: UpdateRoomFolderPermissionsFolderPath :exec
@@ -7808,6 +8621,23 @@ func (q *Queries) UpdateTenantDomainSSL(ctx context.Context, arg UpdateTenantDom
 		arg.ID,
 		arg.TenantID,
 	)
+	return err
+}
+
+const updateVisitorQuestionAnswer = `-- name: UpdateVisitorQuestionAnswer :exec
+UPDATE link_visitor_questions
+SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
+WHERE id = $3
+`
+
+type UpdateVisitorQuestionAnswerParams struct {
+	Answer     pgtype.Text
+	AnsweredBy pgtype.UUID
+	ID         pgtype.UUID
+}
+
+func (q *Queries) UpdateVisitorQuestionAnswer(ctx context.Context, arg UpdateVisitorQuestionAnswerParams) error {
+	_, err := q.db.Exec(ctx, updateVisitorQuestionAnswer, arg.Answer, arg.AnsweredBy, arg.ID)
 	return err
 }
 
@@ -7937,6 +8767,53 @@ func (q *Queries) UpsertIntegrationToken(ctx context.Context, arg UpsertIntegrat
 		arg.ExternalID,
 	)
 	return err
+}
+
+const upsertNotificationRule = `-- name: UpsertNotificationRule :one
+INSERT INTO notification_rules (tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, rule_type) DO UPDATE SET
+    channels = EXCLUDED.channels,
+    enabled = EXCLUDED.enabled,
+    merge_window_minutes = EXCLUDED.merge_window_minutes,
+    updated_at = now()
+RETURNING id, tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes, created_at, updated_at
+`
+
+type UpsertNotificationRuleParams struct {
+	TenantID           pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	RuleType           string
+	Channels           []string
+	Enabled            bool
+	Unsubscribable     bool
+	MergeWindowMinutes int32
+}
+
+func (q *Queries) UpsertNotificationRule(ctx context.Context, arg UpsertNotificationRuleParams) (NotificationRule, error) {
+	row := q.db.QueryRow(ctx, upsertNotificationRule,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RuleType,
+		arg.Channels,
+		arg.Enabled,
+		arg.Unsubscribable,
+		arg.MergeWindowMinutes,
+	)
+	var i NotificationRule
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RuleType,
+		&i.Channels,
+		&i.Enabled,
+		&i.Unsubscribable,
+		&i.MergeWindowMinutes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertNotificationSettings = `-- name: UpsertNotificationSettings :one

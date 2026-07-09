@@ -256,7 +256,6 @@ func TestAccessSessionReuseLinkStatuses(t *testing.T) {
 // TestAccessSessionExpiryCheck verifies the expiration check logic.
 func TestAccessSessionExpiryCheck(t *testing.T) {
 	// Link expiration check is only done when ExpiresAt is set and in the past.
-	type checkFunc func(expiresAtValid bool, expiresAtIsPast bool) (shouldBlock bool)
 	check := func(valid, past bool) bool { return valid && past }
 
 	if check(false, false) {

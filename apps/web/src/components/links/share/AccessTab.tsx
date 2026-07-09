@@ -42,6 +42,7 @@ function OptionSwitch({
         </Label>
       </div>
       <Switch
+        aria-label={label}
         checked={checked}
         onCheckedChange={onCheckedChange}
         disabled={disabled}
@@ -79,10 +80,10 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
   const advancedCount = ADVANCED_KEYS.filter((key) => draft[key]).length;
 
   const handleRequireEmailChange = (checked: boolean) => {
-    updateDraft({ requireEmail: checked });
-    if (!checked) {
-      updateDraft({ requireEmailVerification: false });
-    }
+    updateDraft({
+      requireEmail: checked,
+      requireEmailVerification: checked ? draft.requireEmailVerification : false,
+    });
   };
 
   const handleRequireVerificationChange = (checked: boolean) => {

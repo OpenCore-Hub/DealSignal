@@ -286,8 +286,9 @@ INSERT INTO links (
     download_enabled, watermark_enabled, status, created_by,
     require_email, require_nda, require_email_verification,
     ai_copilot_enabled, require_password, password_hash,
+    qa_enabled, file_requests_enabled, index_file_enabled,
     custom_domain, tags, notify_on_access
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
 RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
@@ -351,8 +352,12 @@ UPDATE links SET
     custom_domain = $15,
     tags = $16,
     notify_on_access = $17,
+    qa_enabled = $18,
+    file_requests_enabled = $19,
+    index_file_enabled = $20,
+    security_version = $21,
     updated_at = now()
-WHERE id = $18 AND workspace_id = $19
+WHERE id = $22 AND workspace_id = $23
 RETURNING *;
 
 -- name: DeleteLink :execrows
@@ -401,7 +406,7 @@ WHERE EXISTS (SELECT 1 FROM inc);
 
 -- name: CreatePageView :exec
 INSERT INTO page_views (tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+VALUES ($1, $2, $3, $4, $5, $6, $7::numeric);
 
 -- name: GetLinkAccessMetrics :one
 SELECT
@@ -964,10 +969,10 @@ RETURNING workspace_id, email_enabled, slack_webhook_url, slack_connected, hubsp
 -- name: CreateNotification :one
 INSERT INTO notifications (workspace_id, user_id, channel, subject, body)
 VALUES ($1, $2, $3, $4, $5)
-RETURNING id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at;
+RETURNING *;
 
 -- name: ListPendingNotifications :many
-SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at
+SELECT *
 FROM notifications
 WHERE status = 'pending' AND attempts < 3
 ORDER BY created_at ASC
@@ -984,6 +989,11 @@ SET attempts = attempts + 1,
     last_error = $2,
     status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
     updated_at = now()
+WHERE id = $1;
+
+-- name: UpdateNotificationBody :exec
+UPDATE notifications
+SET body = $2, updated_at = now()
 WHERE id = $1;
 
 -- name: CreateOAuthState :exec
@@ -1515,8 +1525,8 @@ FROM documents
 WHERE id = $1 AND workspace_id = $2 LIMIT 1;
 
 -- name: CreateSecurityEvent :exec
-INSERT INTO security_events (link_id, event_type, visitor_id, email, ip, user_agent, reason)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO security_events (tenant_id, workspace_id, link_id, event_type, visitor_id, email, ip, user_agent, reason)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9);
 
 -- name: CountSecurityEventsByIPAndWindow :one
 SELECT COUNT(*) AS count
@@ -1586,6 +1596,11 @@ FROM link_access_rules
 WHERE link_id = $1
 ORDER BY action DESC, sort_order ASC, created_at ASC;
 
+-- name: InsertLinkAccessRuleRevision :exec
+INSERT INTO link_access_rule_revisions (
+    tenant_id, workspace_id, link_id, changed_by, rules_snapshot
+) VALUES ($1, $2, $3, $4, $5);
+
 -- name: CreateLinkInvitation :one
 INSERT INTO link_invitations (
     tenant_id, workspace_id, link_id, email, token, status, expires_at, created_by
@@ -1640,3 +1655,117 @@ SET token = $1,
     updated_at = now()
 WHERE id = $3
 RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
+
+-- name: CreateLinkAccessRequest :one
+INSERT INTO link_access_requests (
+    tenant_id, workspace_id, link_id, email, reason, status
+) VALUES ($1, $2, $3, $4, $5, 'pending')
+RETURNING *;
+
+-- name: GetLinkAccessRequestByID :one
+SELECT *
+FROM link_access_requests
+WHERE id = $1
+LIMIT 1;
+
+-- name: GetLinkAccessRequestByLinkAndEmail :one
+SELECT *
+FROM link_access_requests
+WHERE link_id = $1 AND email = $2
+LIMIT 1;
+
+-- name: ListLinkAccessRequestsByLink :many
+SELECT *
+FROM link_access_requests
+WHERE link_id = $1
+ORDER BY created_at DESC;
+
+-- name: CountPendingLinkAccessRequestsByLinkAndEmail :one
+SELECT COUNT(*)
+FROM link_access_requests
+WHERE link_id = $1 AND email = $2 AND status = 'pending';
+
+-- name: UpdateLinkAccessRequestStatus :one
+UPDATE link_access_requests
+SET status = $1,
+    reviewed_by = $2,
+    reviewed_at = now(),
+    updated_at = now()
+WHERE id = $3
+RETURNING *;
+
+-- name: CreateVisitorQuestion :one
+INSERT INTO link_visitor_questions (
+    tenant_id, workspace_id, link_id, visitor_id, visitor_email, question
+) VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: ListVisitorQuestionsByLink :many
+SELECT * FROM link_visitor_questions
+WHERE link_id = $1
+ORDER BY created_at DESC;
+
+-- name: ListVisitorQuestionsByVisitor :many
+SELECT * FROM link_visitor_questions
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY created_at DESC;
+
+-- name: UpdateVisitorQuestionAnswer :exec
+UPDATE link_visitor_questions
+SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
+WHERE id = $3;
+
+-- name: CreateFileRequest :one
+INSERT INTO link_file_requests (
+    tenant_id, workspace_id, link_id, visitor_id, visitor_email, message
+) VALUES ($1, $2, $3, $4, $5, $6)
+RETURNING *;
+
+-- name: ListFileRequestsByLink :many
+SELECT * FROM link_file_requests
+WHERE link_id = $1
+ORDER BY created_at DESC;
+
+-- name: ListFileRequestsByVisitor :many
+SELECT * FROM link_file_requests
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY created_at DESC;
+
+-- name: CountPendingFileRequests :one
+SELECT COUNT(*) AS count
+FROM link_file_requests
+WHERE link_id = $1 AND visitor_id = $2 AND status = 'pending';
+
+-- name: UpdateFileRequestStatus :exec
+UPDATE link_file_requests
+SET status = $1, updated_at = now()
+WHERE id = $2;
+
+-- name: ListNotificationRulesByWorkspace :many
+SELECT * FROM notification_rules
+WHERE workspace_id = $1
+ORDER BY rule_type;
+
+-- name: UpsertNotificationRule :one
+INSERT INTO notification_rules (tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+ON CONFLICT (workspace_id, rule_type) DO UPDATE SET
+    channels = EXCLUDED.channels,
+    enabled = EXCLUDED.enabled,
+    merge_window_minutes = EXCLUDED.merge_window_minutes,
+    updated_at = now()
+RETURNING *;
+
+-- name: DeleteNotificationRule :exec
+DELETE FROM notification_rules
+WHERE workspace_id = $1 AND rule_type = $2;
+
+-- name: FindMergeableNotification :one
+SELECT * FROM notifications
+WHERE workspace_id = $1
+  AND channel = $2
+  AND status = 'pending'
+  AND subject ILIKE $3
+  AND created_at > now() - ($4 || ' minutes')::interval
+ORDER BY created_at DESC
+LIMIT 1;

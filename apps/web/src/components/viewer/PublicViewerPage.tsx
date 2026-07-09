@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Prohibit } from "@phosphor-icons/react";
+import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,7 +24,7 @@ interface PublicDocumentSummary {
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -59,6 +60,12 @@ export function PublicViewerPage() {
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
   const [folderView, setFolderView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [requestEmail, setRequestEmail] = useState(prefilledEmail);
+  const [requestReason, setRequestReason] = useState("");
+  const [requestLoading, setRequestLoading] = useState(false);
+  const [requestSubmitted, setRequestSubmitted] = useState(false);
+  const [showAccessRequestForm, setShowAccessRequestForm] = useState(false);
+  const [requestError, setRequestError] = useState<string | null>(null);
   const accessingRef = useRef(false);
   const sessionCheckedRef = useRef(false);
 
@@ -221,6 +228,8 @@ export function PublicViewerPage() {
   }
 
   if (linkErrorCode) {
+    const requestableErrorCodes = new Set(["blocked_email", "blocked_domain", "not_allowed"]);
+    const canRequestAccess = requestableErrorCodes.has(linkErrorCode);
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
         <Card className="w-full max-w-md">
@@ -232,6 +241,89 @@ export function PublicViewerPage() {
           </CardHeader>
           <CardContent className="space-y-4 text-center">
             <p className="text-muted-foreground">{t(`viewer.${linkErrorCode}Description`)}</p>
+
+            {canRequestAccess && !requestSubmitted && !showAccessRequestForm && (
+              <Button
+                className="w-full"
+                onClick={() => {
+                  setShowAccessRequestForm(true);
+                  setRequestError(null);
+                }}
+              >
+                {t("viewer.requestAccess")}
+              </Button>
+            )}
+
+            {canRequestAccess && showAccessRequestForm && !requestSubmitted && (
+              <div className="space-y-4 text-left">
+                <p className="text-sm text-muted-foreground">{t("viewer.requestAccessDescription")}</p>
+                {requestError && (
+                  <p className="text-sm text-destructive" role="alert">
+                    {requestError}
+                  </p>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="request-email">{t("viewer.requestAccessEmailLabel")}</Label>
+                  <Input
+                    id="request-email"
+                    type="email"
+                    value={requestEmail}
+                    onChange={(e) => setRequestEmail(e.target.value)}
+                    placeholder={t("viewer.requestAccessEmailPlaceholder")}
+                    disabled={requestLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="request-reason">{t("viewer.requestAccessReasonLabel")}</Label>
+                  <Input
+                    id="request-reason"
+                    type="text"
+                    value={requestReason}
+                    onChange={(e) => setRequestReason(e.target.value)}
+                    placeholder={t("viewer.requestAccessReasonPlaceholder")}
+                    disabled={requestLoading}
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  disabled={requestLoading}
+                  onClick={() => {
+                    setRequestError(null);
+                    const trimmed = requestEmail.trim();
+                    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+                      setRequestError(t("viewer.requestAccessEmailRequired"));
+                      return;
+                    }
+                    if (!token) return;
+                    setRequestLoading(true);
+                    api
+                      .createLinkAccessRequest(token, { email: trimmed, reason: requestReason.trim() || undefined })
+                      .then(() => {
+                        setRequestSubmitted(true);
+                        setShowAccessRequestForm(false);
+                        toast.success(t("viewer.requestAccessSubmitted"));
+                      })
+                      .catch((e: ApiError) => {
+                        if (e.code === "access_request_exists") {
+                          setRequestError(t("viewer.requestAccessExists"));
+                        } else {
+                          setRequestError(t("viewer.requestAccessFailed"));
+                        }
+                      })
+                      .finally(() => setRequestLoading(false));
+                  }}
+                >
+                  {requestLoading ? t("common:loading") : t("viewer.requestAccessSubmit")}
+                </Button>
+              </div>
+            )}
+
+            {canRequestAccess && requestSubmitted && (
+              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
+                {t("viewer.requestAccessSubmitted")}
+              </div>
+            )}
+
             <Button variant="outline" className="w-full" onClick={() => navigate("/")}>
               {t("common:backToHome")}
             </Button>
@@ -396,6 +488,9 @@ export function PublicViewerPage() {
             onSelectDoc={setSelectedDocIndex}
             activeDocumentId={selectedDoc?.id}
             aiCopilotEnabled={access.link.aiCopilotEnabled}
+            qaEnabled={access.link.qaEnabled}
+            fileRequestsEnabled={access.link.fileRequestsEnabled}
+            publicToken={token}
             publicSessionToken={accessCredentials.sessionToken}
           />
         }

@@ -76,6 +76,12 @@ export interface Link {
   downloadEnabled?: boolean;
   watermarkEnabled?: boolean;
   aiCopilotEnabled?: boolean;
+  /** Q&A feature toggle (available from v2.7+ backend). */
+  qaEnabled?: boolean;
+  /** File request feature toggle (available from v2.7+ backend). */
+  fileRequestsEnabled?: boolean;
+  /** Index file feature toggle (available from v2.7+ backend). */
+  indexFileEnabled?: boolean;
   requireEmailVerification?: boolean;
   maxAccessCount?: number;
   /** Allowed emails for whitelist (available from v2.5+ backend). */
@@ -98,6 +104,40 @@ export interface Link {
   tags?: string[];
   /** Whether the link creator should be emailed when the link is accessed. */
   notifyOnAccess?: boolean;
+}
+
+export interface VisitorQuestion {
+  id: string;
+  link_id: string;
+  visitor_id: string;
+  visitor_email?: string;
+  question: string;
+  answer?: string;
+  answered_by?: string;
+  status: "pending" | "answered";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FileRequest {
+  id: string;
+  link_id: string;
+  visitor_id?: string;
+  visitor_email?: string;
+  message: string;
+  status: "pending" | "approved" | "rejected" | "fulfilled";
+  created_at: string;
+  updated_at: string;
+}
+
+export interface LinkAccessRequest {
+  id: string;
+  link_id: string;
+  email: string;
+  reason?: string;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
+  updated_at: string;
 }
 
 export interface AccessRule {
@@ -145,6 +185,9 @@ export interface PermissionFields {
   allowDownload: boolean;
   watermarkEnabled: boolean;
   aiCopilotEnabled: boolean;
+  qaEnabled: boolean;
+  fileRequestsEnabled: boolean;
+  indexFileEnabled: boolean;
   expiryDays: number | "custom";
   maxViews: number | "unlimited";
 }

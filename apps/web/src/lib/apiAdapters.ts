@@ -17,6 +17,9 @@ export interface CreateLinkPayload {
   download_enabled?: boolean;
   watermark_enabled?: boolean;
   ai_copilot_enabled?: boolean;
+  qa_enabled?: boolean;
+  file_requests_enabled?: boolean;
+  index_file_enabled?: boolean;
   custom_domain?: string;
   tags?: string[];
   notify_on_access?: boolean;

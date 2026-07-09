@@ -29,7 +29,7 @@
     "expiresOn": "Expires on",
     "expiresOnHint": "Link will stop working after this date",
     "expiresAtFuture": "Expiration must be in the future",
-    "oldSlugHint": "Old slug /r/{slug} is still available. New shares should use /l/{token}.",
+    "oldSlugHint": "Old slug /r/{{slug}} is still available. New shares should use /l/{{token}}.",
     "customDomain": "Custom domain",
     "customDomainPlaceholder": "links.yourdomain.com",
     "customDomainHint": "Public link will be served from this hostname when configured",
@@ -128,7 +128,7 @@
     },
     "advanced": {
       "title": "Advanced",
-      "enabledCount": "{count} enabled",
+      "enabledCount": "{{count}} enabled",
       "aiAgents": "AI Agents",
       "aiAgentsDescription": "Allow AI assistant in the viewer",
       "fileRequests": "Enable file requests",

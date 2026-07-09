@@ -18,6 +18,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -37,20 +38,26 @@ type emailCode struct {
 	code  string
 }
 
+// Notifier is the subset of notification.Service needed by link.Service.
+type Notifier interface {
+	Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) (notification.Notification, error)
+}
+
 // Service handles smart links.
 type Service struct {
 	queries         *db.Queries
 	pool            Beginner
 	redisClient     *redis.Client
 	mailer          mailer.Mailer
+	notifier        Notifier
 	viewerBaseURL   string
 	emailSem        chan struct{} // limits concurrent email sends (bounded goroutines)
 }
 
 // NewService creates a link service.
-func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string) *Service {
+func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, n Notifier) *Service {
 	return &Service{
-		queries: q, pool: pool, redisClient: r, mailer: m, viewerBaseURL: viewerBaseURL,
+		queries: q, pool: pool, redisClient: r, mailer: m, notifier: n, viewerBaseURL: viewerBaseURL,
 		emailSem: make(chan struct{}, 8), // cap concurrent email goroutines
 	}
 }
@@ -60,6 +67,7 @@ var (
 	ErrInvalidPermission    = errors.New("invalid permission configuration")
 	ErrLinkNotFound         = errors.New("link not found")
 	ErrLinkExpired          = errors.New("link expired")
+	ErrLinkArchived         = errors.New("link archived")
 	ErrLinkRevoked          = errors.New("link revoked")
 	ErrLinkDisabled         = errors.New("link disabled")
 	ErrLinkMaxAccessReached = errors.New("link max access reached")
@@ -979,7 +987,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			}
 			expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
 			inv, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
-				Token:     token,
+				Token:     pgtype.Text{String: token, Valid: true},
 				ExpiresAt: expiresAt,
 				ID:        existing.ID,
 			})
@@ -1004,7 +1012,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			WorkspaceID: workspaceUUID,
 			LinkID:      link.ID,
 			Email:       email,
-			Token:       token,
+			Token:       pgtype.Text{String: token, Valid: true},
 			Status:      "pending",
 			ExpiresAt:   expiresAt,
 			CreatedBy:   userUUID,
@@ -1058,7 +1066,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 
 // ResolveInviteToken validates an invitation token and returns the invitation.
 func (s *Service) ResolveInviteToken(ctx context.Context, token string) (LinkInvitation, error) {
-	inv, err := s.queries.GetLinkInvitationByToken(ctx, token)
+	inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: token, Valid: true})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return LinkInvitation{}, ErrLinkNotFound
@@ -1154,23 +1162,355 @@ func (s *Service) ListInvitations(ctx context.Context, workspaceID, linkID strin
 	return out, nil
 }
 
-func dbInvitationToDomain(inv db.LinkInvitation) LinkInvitation {
-	var expiresAt, usedAt *time.Time
-	if inv.ExpiresAt.Valid {
-		expiresAt = &inv.ExpiresAt.Time
+func dbInvitationToDomain(inv any) LinkInvitation {
+	switch v := inv.(type) {
+	case db.LinkInvitation:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.CreateLinkInvitationRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.GetLinkInvitationByLinkAndEmailRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.ResetLinkInvitationRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.GetLinkInvitationByTokenRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.ListLinkInvitationsByLinkRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.UpdateLinkInvitationStatusRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
+	case db.GetLinkInvitationByIDRow:
+		return linkInvitationFromFields(v.ID, v.LinkID, v.Email, v.Token, v.Status, v.ExpiresAt, v.UsedAt)
 	}
-	if inv.UsedAt.Valid {
-		usedAt = &inv.UsedAt.Time
+	return LinkInvitation{}
+}
+
+func linkInvitationFromFields(
+	id pgtype.UUID,
+	linkID pgtype.UUID,
+	email string,
+	token pgtype.Text,
+	status string,
+	expiresAt pgtype.Timestamptz,
+	usedAt pgtype.Timestamptz,
+) LinkInvitation {
+	var ea, ua *time.Time
+	if expiresAt.Valid {
+		ea = &expiresAt.Time
+	}
+	if usedAt.Valid {
+		ua = &usedAt.Time
 	}
 	return LinkInvitation{
-		ID:        uuid.UUID(inv.ID.Bytes).String(),
-		LinkID:    uuid.UUID(inv.LinkID.Bytes).String(),
-		Email:     inv.Email,
-		Token:     inv.Token,
-		Status:    inv.Status,
-		ExpiresAt: expiresAt,
-		UsedAt:    usedAt,
+		ID:        uuid.UUID(id.Bytes).String(),
+		LinkID:    uuid.UUID(linkID.Bytes).String(),
+		Email:     email,
+		Token:     token.String,
+		Status:    status,
+		ExpiresAt: ea,
+		UsedAt:    ua,
 	}
+}
+
+func dbAccessRequestToDomain(r db.LinkAccessRequest) LinkAccessRequest {
+	var reviewedBy *string
+	if r.ReviewedBy.Valid {
+		s := uuid.UUID(r.ReviewedBy.Bytes).String()
+		reviewedBy = &s
+	}
+	var reviewedAt *time.Time
+	if r.ReviewedAt.Valid {
+		reviewedAt = &r.ReviewedAt.Time
+	}
+	return LinkAccessRequest{
+		ID:         uuid.UUID(r.ID.Bytes).String(),
+		LinkID:     uuid.UUID(r.LinkID.Bytes).String(),
+		Email:      r.Email,
+		Reason:     r.Reason.String,
+		Status:     r.Status,
+		ReviewedBy: reviewedBy,
+		ReviewedAt: reviewedAt,
+		CreatedAt:  r.CreatedAt.Time,
+		UpdatedAt:  r.UpdatedAt.Time,
+	}
+}
+
+func isValidEmail(email string) bool {
+	email = strings.TrimSpace(email)
+	if len(email) < 3 || len(email) > 254 {
+		return false
+	}
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return false
+	}
+	user := email[:at]
+	domain := email[at+1:]
+	if len(user) == 0 || len(domain) == 0 {
+		return false
+	}
+	if strings.Contains(domain, ".") {
+		parts := strings.Split(domain, ".")
+		for _, p := range parts {
+			if len(p) == 0 {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// RequestAccess lets a blocked or not-allowed visitor request access to a link.
+func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason string) (LinkAccessRequest, error) {
+	email = strings.TrimSpace(strings.ToLower(email))
+	if !isValidEmail(email) {
+		return LinkAccessRequest{}, errors.New("invalid email address")
+	}
+	reason = strings.TrimSpace(reason)
+	if len(reason) > 500 {
+		return LinkAccessRequest{}, errors.New("reason must be 500 characters or less")
+	}
+
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	ev, err := s.EvaluateAccessRules(ctx, linkID, email)
+	if err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("evaluate access rules: %w", err)
+	}
+	if !ev.Allowed && (ev.Reason == "blocked_email" || ev.Reason == "blocked_domain") {
+		return LinkAccessRequest{}, ErrAccessRequestBlocked
+	}
+
+	existing, err := s.queries.GetLinkAccessRequestByLinkAndEmail(ctx, db.GetLinkAccessRequestByLinkAndEmailParams{
+		LinkID: link.ID,
+		Email:  email,
+	})
+	if err == nil {
+		if existing.Status == "pending" {
+			return dbAccessRequestToDomain(existing), nil
+		}
+		return LinkAccessRequest{}, ErrAccessRequestExists
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return LinkAccessRequest{}, fmt.Errorf("lookup existing access request: %w", err)
+	}
+
+	row, err := s.queries.CreateLinkAccessRequest(ctx, db.CreateLinkAccessRequestParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
+		Email:       email,
+		Reason:      pgtype.Text{String: reason, Valid: reason != ""},
+	})
+	if err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("create access request: %w", err)
+	}
+
+	if s.notifier != nil {
+		creatorID := uuid.UUID(link.CreatedBy.Bytes).String()
+		wsID := uuid.UUID(link.WorkspaceID.Bytes).String()
+		subject := "New access request on your link"
+		body := fmt.Sprintf("A visitor (%s) requested access to \"%s\". Reason: %s. Review the request in the share dialog.", email, link.Name.String, reason)
+		if reason == "" {
+			body = fmt.Sprintf("A visitor (%s) requested access to \"%s\". Review the request in the share dialog.", email, link.Name.String)
+		}
+		if _, notifyErr := s.notifier.Enqueue(ctx, wsID, creatorID, "email", subject, body); notifyErr != nil {
+			logger.ErrorCtx(ctx, "failed to enqueue access request notification", notifyErr,
+				logger.Attr("link_id", linkID),
+				logger.Attr("email", email),
+			)
+		}
+	}
+
+	return dbAccessRequestToDomain(row), nil
+}
+
+// ListAccessRequests returns all access requests for a link.
+func (s *Service) ListAccessRequests(ctx context.Context, workspaceID, linkID string) ([]LinkAccessRequest, error) {
+	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
+		return nil, err
+	}
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return nil, errors.New("invalid link id")
+	}
+	rows, err := s.queries.ListLinkAccessRequestsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		return nil, fmt.Errorf("list access requests: %w", err)
+	}
+	out := make([]LinkAccessRequest, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, dbAccessRequestToDomain(r))
+	}
+	return out, nil
+}
+
+// ApproveAccessRequest approves a pending request, adds an allow-rule and sends an invitation email.
+func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (LinkAccessRequest, error) {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return LinkAccessRequest{}, err
+	}
+	if uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
+		return LinkAccessRequest{}, errors.New("only the link creator can approve access requests")
+	}
+
+	reqUUID, err := uuid.Parse(requestID)
+	if err != nil {
+		return LinkAccessRequest{}, errors.New("invalid request id")
+	}
+	reqRow, err := s.queries.GetLinkAccessRequestByID(ctx, pgtype.UUID{Bytes: reqUUID, Valid: true})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return LinkAccessRequest{}, errors.New("access request not found")
+		}
+		return LinkAccessRequest{}, fmt.Errorf("get access request: %w", err)
+	}
+	if reqRow.Status != "pending" {
+		return LinkAccessRequest{}, errors.New("access request is not pending")
+	}
+	if uuid.UUID(reqRow.LinkID.Bytes).String() != linkID {
+		return LinkAccessRequest{}, errors.New("access request does not belong to this link")
+	}
+
+	reviewerUUID, err := uuid.Parse(reviewerID)
+	if err != nil {
+		return LinkAccessRequest{}, errors.New("invalid reviewer id")
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	updated, err := qtx.UpdateLinkAccessRequestStatus(ctx, db.UpdateLinkAccessRequestStatusParams{
+		Status:     "approved",
+		ReviewedBy: pgtype.UUID{Bytes: reviewerUUID, Valid: true},
+		ID:         pgtype.UUID{Bytes: reqUUID, Valid: true},
+	})
+	if err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("approve access request: %w", err)
+	}
+
+	inv, err := s.createInvitationForRequest(ctx, qtx, link, reqRow.Email, pgtype.UUID{Bytes: reviewerUUID, Valid: true})
+	if err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("create invitation: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	s.sendInvitationEmail(ctx, inv, link.Name.String, linkURL)
+
+	return dbAccessRequestToDomain(updated), nil
+}
+
+// RejectAccessRequest rejects a pending access request.
+func (s *Service) RejectAccessRequest(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (LinkAccessRequest, error) {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return LinkAccessRequest{}, err
+	}
+	if uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
+		return LinkAccessRequest{}, errors.New("only the link creator can reject access requests")
+	}
+
+	reqUUID, err := uuid.Parse(requestID)
+	if err != nil {
+		return LinkAccessRequest{}, errors.New("invalid request id")
+	}
+	reqRow, err := s.queries.GetLinkAccessRequestByID(ctx, pgtype.UUID{Bytes: reqUUID, Valid: true})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return LinkAccessRequest{}, errors.New("access request not found")
+		}
+		return LinkAccessRequest{}, fmt.Errorf("get access request: %w", err)
+	}
+	if reqRow.Status != "pending" {
+		return LinkAccessRequest{}, errors.New("access request is not pending")
+	}
+	if uuid.UUID(reqRow.LinkID.Bytes).String() != linkID {
+		return LinkAccessRequest{}, errors.New("access request does not belong to this link")
+	}
+
+	reviewerUUID, err := uuid.Parse(reviewerID)
+	if err != nil {
+		return LinkAccessRequest{}, errors.New("invalid reviewer id")
+	}
+
+	updated, err := s.queries.UpdateLinkAccessRequestStatus(ctx, db.UpdateLinkAccessRequestStatusParams{
+		Status:     "rejected",
+		ReviewedBy: pgtype.UUID{Bytes: reviewerUUID, Valid: true},
+		ID:         pgtype.UUID{Bytes: reqUUID, Valid: true},
+	})
+	if err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("reject access request: %w", err)
+	}
+	return dbAccessRequestToDomain(updated), nil
+}
+
+func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Queries, link db.Link, email string, createdBy pgtype.UUID) (LinkInvitation, error) {
+	workspaceUUID := link.WorkspaceID
+	existing, err := qtx.GetLinkInvitationByLinkAndEmail(ctx, db.GetLinkInvitationByLinkAndEmailParams{
+		LinkID: link.ID,
+		Email:  email,
+	})
+	if err == nil {
+		if existing.Status != "revoked" {
+			return dbInvitationToDomain(existing), nil
+		}
+		token, err := generateToken()
+		if err != nil {
+			return LinkInvitation{}, fmt.Errorf("generate invite token: %w", err)
+		}
+		inv, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
+			Token:     pgtype.Text{String: token, Valid: true},
+			ExpiresAt: pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)},
+			ID:        existing.ID,
+		})
+		if err != nil {
+			return LinkInvitation{}, fmt.Errorf("reset invitation: %w", err)
+		}
+		return dbInvitationToDomain(inv), nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return LinkInvitation{}, fmt.Errorf("get invitation by email: %w", err)
+	}
+
+	token, err := generateToken()
+	if err != nil {
+		return LinkInvitation{}, fmt.Errorf("generate invite token: %w", err)
+	}
+	inv, err := qtx.CreateLinkInvitation(ctx, db.CreateLinkInvitationParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: workspaceUUID,
+		LinkID:      link.ID,
+		Email:       email,
+		Token:       pgtype.Text{String: token, Valid: true},
+		Status:      "pending",
+		ExpiresAt:   pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)},
+		CreatedBy:   createdBy,
+	})
+	if err != nil {
+		return LinkInvitation{}, fmt.Errorf("create invitation: %w", err)
+	}
+
+	if err := qtx.CreateLinkAccessRule(ctx, db.CreateLinkAccessRuleParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: workspaceUUID,
+		LinkID:      link.ID,
+		RuleType:    "email",
+		Value:       email,
+		Action:      "allow",
+		SortOrder:   0,
+	}); err != nil {
+		return LinkInvitation{}, fmt.Errorf("create allow rule: %w", err)
+	}
+
+	return dbInvitationToDomain(inv), nil
 }
 
 func (s *Service) sendInvitationEmail(ctx context.Context, inv LinkInvitation, linkName, linkURL string) {
@@ -1262,6 +1602,24 @@ type AccessResult struct {
 	SessionToken  string // refreshed session token for sliding expiry; empty if no session was used
 }
 
+// LinkAccessRequest is the domain representation of a visitor access request.
+type LinkAccessRequest struct {
+	ID         string
+	LinkID     string
+	Email      string
+	Reason     string
+	Status     string
+	ReviewedBy *string
+	ReviewedAt *time.Time
+	CreatedAt  time.Time
+	UpdatedAt  time.Time
+}
+
+var (
+	ErrAccessRequestBlocked = errors.New("this email is blocked from requesting access")
+	ErrAccessRequestExists  = errors.New("an access request from this email is already pending")
+)
+
 // Access validates a public token and returns the link if access is granted.
 func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (AccessResult, error) {
 	link, err := s.queries.GetLinkByPublicToken(ctx, token)
@@ -1277,6 +1635,10 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		return AccessResult{}, ErrLinkNotFound
 	case "disabled", "revoked":
 		return AccessResult{}, ErrLinkDisabled
+	case "archived":
+		return AccessResult{}, ErrLinkArchived
+	case "expired":
+		return AccessResult{}, ErrLinkExpired
 	}
 	if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
 		return AccessResult{}, ErrLinkExpired
@@ -1386,7 +1748,7 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	// Mark invitation as used/verified if present.
 	if req.InviteToken != "" {
-		if inv, err := s.queries.GetLinkInvitationByToken(ctx, req.InviteToken); err == nil {
+		if inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: req.InviteToken, Valid: true}); err == nil {
 			usedAt := pgtype.Timestamptz{Valid: true, Time: time.Now()}
 			status := "verified"
 			if inv.Status == "pending" {
@@ -1684,6 +2046,91 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 		return db.Link{}, fmt.Errorf("update link status: %w", err)
 	}
 	return link, nil
+}
+
+// ArchiveLink soft-archives an active link, denying public access.
+// Archived links can be renewed to restore access.
+func (s *Service) ArchiveLink(ctx context.Context, workspaceID, linkID string) (db.Link, error) {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return db.Link{}, err
+	}
+	if link.Status == "deleted" {
+		return db.Link{}, ErrNotFoundInWorkspace
+	}
+	if link.Status == "archived" {
+		return link, nil // idempotent
+	}
+	if _, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+		ID:          link.ID,
+		WorkspaceID: link.WorkspaceID,
+		Status:      "archived",
+	}); err != nil {
+		return db.Link{}, fmt.Errorf("archive link: %w", err)
+	}
+	s.recordSecurityEvent(ctx, link, "", "", "link_archived", "")
+	return s.GetByID(ctx, linkID, workspaceID)
+}
+
+// RenewLink reactivates an archived or expired link, optionally extending its expiry.
+func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, newExpiresAt *time.Time) (db.Link, error) {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return db.Link{}, err
+	}
+	if link.Status == "deleted" {
+		return db.Link{}, ErrNotFoundInWorkspace
+	}
+	if link.Status != "archived" && link.Status != "expired" {
+		return db.Link{}, errors.New("only archived or expired links can be renewed")
+	}
+	// Validate new expiry date is in the future.
+	if newExpiresAt != nil && newExpiresAt.Before(time.Now()) {
+		return db.Link{}, errors.New("expiry date must be in the future")
+	}
+	expiresAt := link.ExpiresAt
+	if newExpiresAt != nil {
+		expiresAt = pgtype.Timestamptz{Time: *newExpiresAt, Valid: true}
+	}
+	// Bump security_version so any stale sessions are invalidated.
+	newVersion := link.SecurityVersion + 1
+	if _, err := s.queries.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
+		Name:                     link.Name,
+		DocumentID:               link.DocumentID,
+		DealRoomID:               link.DealRoomID,
+		PermissionType:           link.PermissionType,
+		ExpiresAt:                expiresAt,
+		MaxAccessCount:           link.MaxAccessCount,
+		DownloadEnabled:          link.DownloadEnabled,
+		WatermarkEnabled:         link.WatermarkEnabled,
+		RequireEmail:             link.RequireEmail,
+		RequireEmailVerification: link.RequireEmailVerification,
+		RequireNda:               link.RequireNda,
+		AiCopilotEnabled:         link.AiCopilotEnabled,
+		RequirePassword:          link.RequirePassword,
+		PasswordHash:             link.PasswordHash,
+		CustomDomain:             link.CustomDomain,
+		Tags:                     link.Tags,
+		NotifyOnAccess:           link.NotifyOnAccess,
+		QaEnabled:                link.QaEnabled,
+		FileRequestsEnabled:      link.FileRequestsEnabled,
+		IndexFileEnabled:         link.IndexFileEnabled,
+		SecurityVersion:          newVersion,
+		ID:                       link.ID,
+		WorkspaceID:              link.WorkspaceID,
+	}); err != nil {
+		return db.Link{}, fmt.Errorf("renew link: %w", err)
+	}
+	// Reset status to active.
+	if _, err := s.queries.UpdateLinkStatus(ctx, db.UpdateLinkStatusParams{
+		ID:          link.ID,
+		WorkspaceID: link.WorkspaceID,
+		Status:      "active",
+	}); err != nil {
+		return db.Link{}, fmt.Errorf("reactivate link: %w", err)
+	}
+	s.recordSecurityEvent(ctx, link, "", "", "link_renewed", "")
+	return s.GetByID(ctx, linkID, workspaceID)
 }
 
 // Delete removes a link from listings. It first attempts a soft delete by marking

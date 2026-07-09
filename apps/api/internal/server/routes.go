@@ -171,7 +171,8 @@ func (s *Server) registerRoutes() error {
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL)
+			notificationSvc := notification.NewService(queries, appMailer, s.cfg)
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, notificationSvc)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
 				dedupChecker = analytics.NewFailoverDedupChecker(s.redisClient, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
@@ -179,7 +180,6 @@ func (s *Server) registerRoutes() error {
 				dedupChecker = analytics.NewFailoverDedupChecker(nil, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			}
 			analyticsSvc := analytics.NewService(queries, dedupChecker)
-			notificationSvc := notification.NewService(queries, appMailer, s.cfg)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)

@@ -113,7 +113,7 @@ func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID st
 		VisitorID:       pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		PageNumber:      pageNumber,
 		DurationSeconds: durationSeconds,
-		ScrollDepth:     depth,
+		Column7: pgtype.Numeric{Valid: true},
 	})
 }
 

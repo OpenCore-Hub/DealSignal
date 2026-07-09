@@ -19,6 +19,7 @@ import type {
   HeatLevel,
   IntegrationStatus,
   Link,
+  LinkAccessRequest,
   LinkInvitation,
   PageAnalytics,
   PermissionConfig,
@@ -32,6 +33,8 @@ import type {
   WorkspaceInvitation,
   WorkspaceMember,
   WorkspaceSettings,
+  VisitorQuestion,
+  FileRequest,
 } from "@/types";
 import { request } from "@/lib/apiClient";
 import {
@@ -292,7 +295,7 @@ export const api = {
     }
   ) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
       documents: { id: string; title: string; pageCount: number; sourceType: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -311,6 +314,44 @@ export const api = {
         invite_token: opts?.inviteToken,
       }),
       headers: opts?.sessionToken ? { "X-Link-Session": opts.sessionToken } : undefined,
+    }),
+
+  // Public Visitor Q&A
+  createPublicQuestion: (token: string, question: string, creds?: PublicLinkCredentials) =>
+    request<{ data: VisitorQuestion }>(undefined, `/v1/public/links/${token}/questions`, {
+      method: "POST",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+      body: JSON.stringify({ question }),
+    }),
+  listPublicQuestions: (token: string, creds?: PublicLinkCredentials) =>
+    request<{ data: VisitorQuestion[] }>(undefined, `/v1/public/links/${token}/questions/me`, {
+      method: "GET",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+    }),
+
+  // Public File Requests
+  createPublicFileRequest: (token: string, message: string, creds?: PublicLinkCredentials) =>
+    request<{ data: FileRequest }>(undefined, `/v1/public/links/${token}/file-requests`, {
+      method: "POST",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+      body: JSON.stringify({ message }),
+    }),
+  listPublicFileRequests: (token: string, creds?: PublicLinkCredentials) =>
+    request<{ data: FileRequest[] }>(undefined, `/v1/public/links/${token}/file-requests/me`, {
+      method: "GET",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+    }),
+
+  // Public access requests
+  createLinkAccessRequest: (token: string, payload: { email: string; reason?: string }) =>
+    request<{ data: LinkAccessRequest }>(undefined, `/v1/public/links/${token}/access-requests`, {
+      method: "POST",
+      skipAuth: true,
+      body: JSON.stringify(payload),
     }),
 
   sendEmailVerificationCode: (token: string, email: string) =>
@@ -478,6 +519,24 @@ export const api = {
         body: JSON.stringify({ removeFromAllowList }),
       }
     ),
+
+  // Visitor Q&A
+  listLinkQuestions: (linkId: string) =>
+    request<{ data: VisitorQuestion[] }>(getWorkspaceSlug(), `/links/${linkId}/questions`),
+  answerQuestion: (linkId: string, questionId: string, answer: string) =>
+    request<{ data: VisitorQuestion }>(getWorkspaceSlug(), `/links/${linkId}/questions/${questionId}/answer`, {
+      method: "PATCH",
+      body: JSON.stringify({ answer }),
+    }),
+
+  // File Requests
+  listLinkFileRequests: (linkId: string) =>
+    request<{ data: FileRequest[] }>(getWorkspaceSlug(), `/links/${linkId}/file-requests`),
+  updateFileRequestStatus: (linkId: string, requestId: string, status: string) =>
+    request<{ data: FileRequest }>(getWorkspaceSlug(), `/links/${linkId}/file-requests/${requestId}/status`, {
+      method: "PATCH",
+      body: JSON.stringify({ status }),
+    }),
 
   getContacts: () =>
     request<{ data: Contact[] }>(getWorkspaceSlug(), "/contacts"),

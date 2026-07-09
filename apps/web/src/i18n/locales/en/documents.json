@@ -201,6 +201,17 @@
     "invite_revokedTitle": "Invitation revoked",
     "invite_revokedDescription": "This invitation has been revoked. Please contact the sender if you think this is a mistake.",
     "inviteVerification": "Verifying your invitation...",
-    "inviteVerificationFor": "Verifying invitation for {{email}}"
+    "inviteVerificationFor": "Verifying invitation for {{email}}",
+    "requestAccess": "Request access",
+    "requestAccessDescription": "Enter your email and an optional reason. The link owner will be notified.",
+    "requestAccessEmailLabel": "Email",
+    "requestAccessEmailPlaceholder": "you@company.com",
+    "requestAccessReasonLabel": "Reason (optional)",
+    "requestAccessReasonPlaceholder": "Why do you need access?",
+    "requestAccessEmailRequired": "Please enter a valid email address.",
+    "requestAccessSubmit": "Submit request",
+    "requestAccessSubmitted": "Your access request has been submitted.",
+    "requestAccessExists": "You have already submitted a request for this link.",
+    "requestAccessFailed": "Failed to submit request. Please try again later."
   }
 }

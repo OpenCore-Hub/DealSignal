@@ -197,6 +197,17 @@
     "invite_revokedTitle": "邀请已撤销",
     "invite_revokedDescription": "此邀请已被撤销，如有疑问请联系分享者。",
     "inviteVerification": "正在验证您的邀请...",
-    "inviteVerificationFor": "正在验证 {{email}} 的邀请"
+    "inviteVerificationFor": "正在验证 {{email}} 的邀请",
+    "requestAccess": "申请访问",
+    "requestAccessDescription": "请输入您的邮箱和申请原因（选填），链接所有者将收到通知。",
+    "requestAccessEmailLabel": "邮箱",
+    "requestAccessEmailPlaceholder": "you@company.com",
+    "requestAccessReasonLabel": "申请原因（选填）",
+    "requestAccessReasonPlaceholder": "您为什么需要访问？",
+    "requestAccessEmailRequired": "请输入有效的邮箱地址。",
+    "requestAccessSubmit": "提交申请",
+    "requestAccessSubmitted": "您的访问申请已提交。",
+    "requestAccessExists": "您已提交过该链接的访问申请。",
+    "requestAccessFailed": "提交失败，请稍后重试。"
   }
 }

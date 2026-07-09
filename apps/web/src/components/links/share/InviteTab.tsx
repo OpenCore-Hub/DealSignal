@@ -145,7 +145,7 @@ export function InviteTab({
                     <DropdownMenu>
                       <DropdownMenuTrigger
                         render={(
-                          <Button variant="ghost" size="icon">
+                          <Button variant="ghost" size="icon" aria-label={t("invite.table.actions")}>
                             <DotsThree size={16} />
                           </Button>
                         )}

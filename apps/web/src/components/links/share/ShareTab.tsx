@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -71,6 +72,17 @@ export function ShareTab({
                 disabled={!publicUrl}
               />
             </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="w-full"
+              onClick={() =>
+                window.open(publicUrl, "_blank", "noopener,noreferrer")
+              }
+            >
+              {t("share.preview")}
+            </Button>
           </div>
         </div>
       ) : (
@@ -120,6 +132,7 @@ export function ShareTab({
         <div className="flex items-center justify-between gap-4">
           <Label className="font-normal">{t("share.expiresOn")}</Label>
           <Switch
+            aria-label={t("share.expiresOn")}
             checked={expiresEnabled}
             onCheckedChange={(checked) =>
               updateDraft({ expiresAt: checked ? PRESETS.standard.expiresAt : "" })
@@ -170,6 +183,7 @@ export function ShareTab({
           <p className="text-xs text-muted-foreground">{t("share.notifyOnAccessHint")}</p>
         </div>
         <Switch
+          aria-label={t("share.notifyOnAccess")}
           checked={draft.notifyOnAccess}
           onCheckedChange={(checked) => updateDraft({ notifyOnAccess: checked })}
         />

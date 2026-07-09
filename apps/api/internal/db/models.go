@@ -272,6 +272,26 @@ type Link struct {
 	CustomDomain             pgtype.Text
 	Tags                     []string
 	NotifyOnAccess           bool
+	SecurityVersion          int32
+	QaEnabled                bool
+	FileRequestsEnabled      bool
+	IndexFileEnabled         bool
+	LinkType                 string
+	TargetFolderPath         string
+}
+
+type LinkAccessRequest struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Email       string
+	Reason      pgtype.Text
+	Status      string
+	ReviewedBy  pgtype.UUID
+	ReviewedAt  pgtype.Timestamptz
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type LinkAccessRule struct {
@@ -285,6 +305,16 @@ type LinkAccessRule struct {
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+}
+
+type LinkAccessRuleRevision struct {
+	ID            pgtype.UUID
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	LinkID        pgtype.UUID
+	RulesSnapshot []byte
+	ChangedBy     pgtype.UUID
+	CreatedAt     pgtype.Timestamptz
 }
 
 type LinkContact struct {
@@ -305,19 +335,46 @@ type LinkDocument struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type LinkFileRequest struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    pgtype.Text
+	VisitorEmail pgtype.Text
+	Message      string
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type LinkIndexFile struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	Status       string
+	ContentHtml  pgtype.Text
+	ErrorMessage pgtype.Text
+	GeneratedAt  pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type LinkInvitation struct {
 	ID          pgtype.UUID
 	TenantID    pgtype.UUID
 	WorkspaceID pgtype.UUID
 	LinkID      pgtype.UUID
 	Email       string
-	Token       string
+	Token       pgtype.Text
 	Status      string
 	ExpiresAt   pgtype.Timestamptz
 	UsedAt      pgtype.Timestamptz
 	CreatedBy   pgtype.UUID
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	TokenHash   pgtype.Text
 }
 
 type LinkNdaAgreement struct {
@@ -333,18 +390,71 @@ type LinkNdaAgreement struct {
 	SignedAt    pgtype.Timestamptz
 }
 
+type LinkUploadedFile struct {
+	ID                pgtype.UUID
+	TenantID          pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	LinkID            pgtype.UUID
+	DocumentID        pgtype.UUID
+	OriginalFilename  string
+	StorageKey        string
+	FileSize          int64
+	MimeType          string
+	UploaderEmail     pgtype.Text
+	UploaderVisitorID pgtype.Text
+	UploaderIp        *netip.Addr
+	UploaderUserAgent pgtype.Text
+	Status            string
+	ReviewedBy        pgtype.UUID
+	ReviewedAt        pgtype.Timestamptz
+	CreatedAt         pgtype.Timestamptz
+}
+
+type LinkVisitorQuestion struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    string
+	VisitorEmail pgtype.Text
+	Question     string
+	Answer       pgtype.Text
+	AnsweredBy   pgtype.UUID
+	Status       string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
 type Notification struct {
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-	UserID      pgtype.UUID
-	Channel     string
-	Subject     string
-	Body        string
-	Status      string
-	Attempts    int32
-	LastError   pgtype.Text
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
+	ID                pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	UserID            pgtype.UUID
+	Channel           string
+	Subject           string
+	Body              string
+	Status            string
+	Attempts          int32
+	LastError         pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	RecipientEmail    pgtype.Text
+	Metadata          []byte
+	NextAttemptAt     pgtype.Timestamptz
+	SentAt            pgtype.Timestamptz
+	ProviderMessageID pgtype.Text
+}
+
+type NotificationRule struct {
+	ID                 pgtype.UUID
+	TenantID           pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	RuleType           string
+	Channels           []string
+	Enabled            bool
+	Unsubscribable     bool
+	MergeWindowMinutes int32
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 type NotificationSetting struct {
@@ -440,15 +550,17 @@ type RoomNdaAgreement struct {
 }
 
 type SecurityEvent struct {
-	ID        pgtype.UUID
-	LinkID    pgtype.UUID
-	EventType string
-	VisitorID pgtype.Text
-	Email     pgtype.Text
-	Ip        *netip.Addr
-	UserAgent pgtype.Text
-	Reason    pgtype.Text
-	CreatedAt pgtype.Timestamptz
+	ID          pgtype.UUID
+	LinkID      pgtype.UUID
+	EventType   string
+	VisitorID   pgtype.Text
+	Email       pgtype.Text
+	Ip          *netip.Addr
+	UserAgent   pgtype.Text
+	Reason      pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
 }
 
 type Signal struct {

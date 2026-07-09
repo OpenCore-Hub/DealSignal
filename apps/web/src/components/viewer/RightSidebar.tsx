@@ -1,14 +1,18 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { FileText, Robot, X } from "@phosphor-icons/react";
+import { ChatCenteredDots, FileText, Robot, X } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { SidebarAIChat } from "./SidebarAIChat";
+import { FileRequestPanel } from "./FileRequestPanel";
+import { QAPanel } from "./QAPanel";
 
 interface DocSummary {
   id: string;
   title: string;
   pageCount: number;
 }
+
+type SidebarTab = "documents" | "ai" | "qa" | "requests";
 
 interface RightSidebarProps {
   open: boolean;
@@ -18,6 +22,9 @@ interface RightSidebarProps {
   onSelectDoc?: (index: number) => void;
   activeDocumentId?: string;
   aiCopilotEnabled?: boolean;
+  qaEnabled?: boolean;
+  fileRequestsEnabled?: boolean;
+  publicToken?: string;
   publicSessionToken?: string;
 }
 
@@ -29,11 +36,14 @@ export function RightSidebar({
   onSelectDoc,
   activeDocumentId,
   aiCopilotEnabled,
+  qaEnabled,
+  fileRequestsEnabled,
+  publicToken,
   publicSessionToken,
 }: RightSidebarProps) {
   const { t } = useTranslation(["documents", "ai"]);
-  const [activeTab, setActiveTab] = useState<"documents" | "ai">("documents");
-  const showDocuments = activeTab === "documents" || !aiCopilotEnabled;
+  const [activeTab, setActiveTab] = useState<SidebarTab>(aiCopilotEnabled ? "ai" : "documents");
+  const hasAnyFeature = aiCopilotEnabled || qaEnabled || fileRequestsEnabled;
 
   return (
     <AnimatePresence>
@@ -61,32 +71,37 @@ export function RightSidebar({
               {t("documents:viewer.sidebarDocuments")}
             </button>
             {aiCopilotEnabled && (
-              <button
-                type="button"
-                onClick={() => setActiveTab("ai")}
-                className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${
-                  activeTab === "ai"
-                    ? "border-primary text-primary"
-                    : "border-transparent text-muted-foreground hover:text-foreground"
-                }`}
-              >
-                <Robot size={14} />
-                {t("documents:viewer.sidebarAI")}
-              </button>
+              <button type="button" onClick={() => setActiveTab("ai")}
+                className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${activeTab === "ai" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+              ><Robot size={14} />{t("documents:viewer.sidebarAI")}</button>
             )}
-            <button
-              type="button"
-              onClick={onClose}
+            {!hasAnyFeature && (
+            <button type="button" onClick={onClose}
               className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              aria-label={t("ai:viewer.close")}
-            >
-              <X size={14} />
-            </button>
+              aria-label={t("ai:viewer.close")}><X size={14} /></button>
+            )}
           </div>
+
+          {/* Feature tabs row */}
+          {hasAnyFeature && (
+            <div className="flex items-center border-b border-border">
+              {qaEnabled && (
+                <button type="button" onClick={() => setActiveTab("qa")}
+                  className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${activeTab === "qa" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                ><ChatCenteredDots size={14} />Q&A</button>
+              )}
+              {fileRequestsEnabled && (
+                <button type="button" onClick={() => setActiveTab("requests")}
+                  className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${activeTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+                ><FileText size={14} />Requests</button>
+              )}
+              <button type="button" onClick={onClose} className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0" aria-label={t("ai:viewer.close")}><X size={14} /></button>
+            </div>
+          )}
 
           {/* Content */}
           <div className="flex-1 overflow-hidden">
-            {showDocuments ? (
+            {activeTab === "documents" && (
               <div className="h-full overflow-y-auto py-1">
                 {(!documents || documents.length === 0) ? (
                   <p className="px-4 py-8 text-center text-xs text-muted-foreground">
@@ -126,9 +141,10 @@ export function RightSidebar({
                   ))
                 )}
               </div>
-            ) : (
-              <SidebarAIChat documentId={activeDocumentId} publicSessionToken={publicSessionToken} />
             )}
+            {activeTab === "ai" && <SidebarAIChat documentId={activeDocumentId} publicSessionToken={publicSessionToken} />}
+            {activeTab === "requests" && fileRequestsEnabled && publicToken && <FileRequestPanel token={publicToken} sessionToken={publicSessionToken} />}
+            {activeTab === "qa" && qaEnabled && publicToken && <QAPanel token={publicToken} sessionToken={publicSessionToken} />}
           </div>
         </motion.aside>
       )}
