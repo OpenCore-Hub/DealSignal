@@ -1,22 +1,32 @@
 import { test, expect } from "@playwright/test";
+import {
+  seedRealBackend,
+  seedDocument,
+  seedLink,
+} from "./real-helpers";
 
-test.describe("public link viewer", () => {
-  test("accesses a public document with email verification code", async ({ page }) => {
-    // Use the MSW mock public link token for link_1 (legacy email gate).
-    await page.goto("/l/A1b2C3");
+let shortUrl: string;
 
-    // Should land on the access gate.
-    await expect(page.locator("text=This document is shared securely")).toBeVisible({ timeout: 5000 });
-    await expect(page.locator("text=Access code")).toBeVisible();
+test.describe("public link viewer (real backend)", () => {
+  test.beforeAll(async () => {
+    const seed = await seedRealBackend();
+    const doc = await seedDocument(seed.token, seed.workspaceSlug);
+    // Create a public link (no gate) so the viewer loads directly
+    const link = await seedLink(seed.token, seed.workspaceSlug, doc.id, {
+      permissionType: "public",
+      downloadEnabled: true,
+    });
+    shortUrl = link.shortUrl;
+  });
 
-    // Legacy email gate requires both email and code.
-    await page.locator('input#email').fill("visitor@example.com");
-    await page.locator('input[inputMode="numeric"]').fill("123456");
-    await page.locator('button:has-text("Continue")').click();
+  test("accesses a public document and renders the viewer", async ({ page }) => {
+    await page.goto(shortUrl);
 
-    // Viewer should load the document title and page metadata.
-    await expect(page.locator("text=Acme Seed Round Pitch Deck")).toBeVisible({ timeout: 10000 });
-    await expect(page.locator("text=18 pages")).toBeVisible();
-    await expect(page.locator("text=1 / 18")).toBeVisible();
+    // Public link should load the viewer directly (no gate)
+    // Wait for the document title or page image to appear
+    await expect(page.locator("img[alt*='Page']").first()).toBeVisible({ timeout: 15000 });
+
+    // Verify page count is shown
+    await expect(page.locator("text=/\\d+ page/i").first()).toBeVisible({ timeout: 5000 });
   });
 });

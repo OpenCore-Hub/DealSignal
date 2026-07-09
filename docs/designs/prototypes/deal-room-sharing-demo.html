@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Deal Room 链接分享 - 页面原型 Demo</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/@phosphor-icons/web"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .tab-active { border-bottom: 2px solid #0f172a; color: #0f172a; }
+    .tab-inactive { border-bottom: 2px solid transparent; color: #64748b; }
+    .toggle:checked + div { background-color: #0f172a; }
+    .toggle:checked + div::after { transform: translateX(20px); }
+    .chip { transition: all .15s ease; }
+    .chip:hover { transform: translateY(-1px); }
+    /* 模拟 Toast */
+    @keyframes slideIn { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    .toast { animation: slideIn .25s ease; }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+
+  <!-- ========== 顶部导航 ========== -->
+  <header class="sticky top-0 z-40 border-b bg-white/80 backdrop-blur">
+    <div class="mx-auto flex h-14 max-w-6xl items-center justify-between px-4">
+      <div class="flex items-center gap-2">
+        <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900 text-white">
+          <i class="ph ph-files text-lg"></i>
+        </div>
+        <span class="font-semibold">DealSignal</span>
+      </div>
+      <div class="flex items-center gap-3 text-sm text-slate-500">
+        <span>Acme Capital Workspace</span>
+        <div class="h-4 w-px bg-slate-200"></div>
+        <span class="font-medium text-slate-900">admin@acme.capital</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="mx-auto max-w-6xl px-4 py-6">
+    <!-- ========== Deal Room 详情页 ========== -->
+    <div class="mb-6 flex items-start justify-between">
+      <div>
+        <button class="mb-2 flex items-center gap-1 text-sm text-slate-500 hover:text-slate-900">
+          <i class="ph ph-arrow-left"></i> Back to deal rooms
+        </button>
+        <h1 class="text-2xl font-semibold">Series A Due Diligence</h1>
+        <p class="text-sm text-slate-500">Startup Fundraising · 12 documents · 3 members</p>
+      </div>
+      <div class="flex items-center gap-2">
+        <button class="inline-flex items-center gap-1.5 rounded-lg border bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50">
+          <i class="ph ph-plus"></i> Add document
+        </button>
+        <button onclick="openShare()" class="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          <i class="ph ph-share-network"></i> Share
+        </button>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="mb-6 flex gap-6 border-b text-sm font-medium">
+      <button class="pb-3 tab-active">Documents</button>
+      <button class="pb-3 tab-inactive">Members</button>
+      <button class="pb-3 tab-inactive">Permissions</button>
+      <button class="pb-3 tab-inactive">Analytics</button>
+      <button class="pb-3 tab-inactive">Q&A</button>
+    </div>
+
+    <!-- 文档列表占位 -->
+    <div class="grid gap-3">
+      <div class="flex items-center justify-between rounded-xl border bg-white p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 text-red-600"><i class="ph ph-file-pdf text-xl"></i></div>
+          <div>
+            <p class="font-medium">Pitch Deck 2026.pdf</p>
+            <p class="text-xs text-slate-500">24 pages · updated 2h ago</p>
+          </div>
+        </div>
+        <i class="ph ph-dots-three text-slate-400"></i>
+      </div>
+      <div class="flex items-center justify-between rounded-xl border bg-white p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600"><i class="ph ph-file-xls text-xl"></i></div>
+          <div>
+            <p class="font-medium">Financial Model.xlsx</p>
+            <p class="text-xs text-slate-500">3 sheets · updated 1d ago</p>
+          </div>
+        </div>
+        <i class="ph ph-dots-three text-slate-400"></i>
+      </div>
+      <div class="flex items-center justify-between rounded-xl border bg-white p-4">
+        <div class="flex items-center gap-3">
+          <div class="flex h-10 w-10 items-center justify-center rounded-lg bg-indigo-50 text-indigo-600"><i class="ph ph-file-doc text-xl"></i></div>
+          <div>
+            <p class="font-medium">Cap Table.docx</p>
+            <p class="text-xs text-slate-500">12 pages · updated 3d ago</p>
+          </div>
+        </div>
+        <i class="ph ph-dots-three text-slate-400"></i>
+      </div>
+    </div>
+  </main>
+
+  <!-- ========== Share Dialog ========== -->
+  <div id="shareDialog" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/40 p-4 backdrop-blur-sm">
+    <div class="w-full max-w-lg overflow-hidden rounded-2xl bg-white shadow-2xl">
+      <!-- Header -->
+      <div class="flex items-center justify-between border-b px-5 py-4">
+        <div>
+          <h2 class="text-lg font-semibold">Share deal room</h2>
+          <p class="text-xs text-slate-500">Choose how you want to share this deal room</p>
+        </div>
+        <button onclick="closeShare()" class="rounded-lg p-1 hover:bg-slate-100"><i class="ph ph-x text-xl text-slate-500"></i></button>
+      </div>
+
+      <!-- 三入口 Tab -->
+      <div class="flex border-b px-5">
+        <button onclick="switchTab('share')" id="tab-share" class="tab-active flex items-center gap-1.5 px-3 py-3 text-sm font-medium">
+          <i class="ph ph-link"></i> Share link
+        </button>
+        <button onclick="switchTab('invite')" id="tab-invite" class="tab-inactive flex items-center gap-1.5 px-3 py-3 text-sm font-medium">
+          <i class="ph ph-envelope-simple"></i> Invite viewers
+        </button>
+        <button onclick="switchTab('access')" id="tab-access" class="tab-inactive flex items-center gap-1.5 px-3 py-3 text-sm font-medium">
+          <i class="ph ph-shield-check"></i> Access rules
+        </button>
+      </div>
+
+      <!-- ===== Tab 1: Share link ===== -->
+      <div id="panel-share" class="p-5">
+        <div class="mb-5 rounded-lg border bg-slate-50 p-4">
+          <label class="mb-1 block text-xs font-medium text-slate-500">Public link</label>
+          <div class="flex gap-2">
+            <input id="shareUrl" type="text" readonly value="https://app.dealsignal.io/l/a3f9b2e8" class="flex-1 rounded-lg border bg-white px-3 py-2 text-sm" />
+            <button onclick="copyLink()" class="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-medium text-white hover:bg-slate-800">
+              <i class="ph ph-copy"></i> Copy
+            </button>
+          </div>
+          <p class="mt-2 flex items-start gap-1.5 text-xs text-amber-700">
+            <i class="ph ph-warning mt-0.5"></i>
+            This link is restricted by Access rules. Unauthorized emails will be denied.
+          </p>
+        </div>
+
+        <div class="space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require email to view</p>
+              <p class="text-xs text-slate-500">Visitors must provide their email address</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require email verification (OTP)</p>
+              <p class="text-xs text-slate-500">Send a 6-digit code to verify identity</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require password</p>
+              <p class="text-xs text-slate-500">Additional password before access</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Allow downloading</p>
+              <p class="text-xs text-slate-500">Let visitors download original files</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Notify on access</p>
+              <p class="text-xs text-slate-500">Send email when someone views this room</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Tab 2: Invite viewers ===== -->
+      <div id="panel-invite" class="hidden p-5">
+        <div class="mb-4">
+          <label class="mb-1 block text-sm font-medium">Add viewers</label>
+          <textarea id="inviteEmails" rows="3" placeholder="Enter emails separated by commas&#10;alice@vc.com, bob@vc.com" class="w-full rounded-lg border px-3 py-2 text-sm"></textarea>
+          <p class="mt-1 text-xs text-slate-500">Each recipient gets a unique invite link. Their email will be pre-filled and locked.</p>
+        </div>
+        <button onclick="sendInvites()" class="mb-6 w-full rounded-lg bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800">
+          Send invitations
+        </button>
+
+        <div>
+          <h3 class="mb-2 text-sm font-semibold">Invitation status</h3>
+          <div class="space-y-2">
+            <div class="flex items-center justify-between rounded-lg border px-3 py-2">
+              <div class="flex items-center gap-2">
+                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 text-xs font-semibold">A</div>
+                <div>
+                  <p class="text-sm font-medium">alice@vc.com</p>
+                  <p class="text-xs text-slate-500">Sent 2h ago · Expires in 5 days</p>
+                </div>
+              </div>
+              <span class="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">Verified</span>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border px-3 py-2">
+              <div class="flex items-center gap-2">
+                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-700 text-xs font-semibold">B</div>
+                <div>
+                  <p class="text-sm font-medium">bob@vc.com</p>
+                  <p class="text-xs text-slate-500">Sent 2h ago · Expires in 5 days</p>
+                </div>
+              </div>
+              <div class="flex items-center gap-2">
+                <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">Pending</span>
+                <button class="text-xs text-slate-500 hover:text-slate-900">Resend</button>
+                <button class="text-xs text-red-500 hover:text-red-700">Revoke</button>
+              </div>
+            </div>
+            <div class="flex items-center justify-between rounded-lg border px-3 py-2 opacity-60">
+              <div class="flex items-center gap-2">
+                <div class="flex h-7 w-7 items-center justify-center rounded-full bg-slate-100 text-slate-400 text-xs font-semibold">C</div>
+                <div>
+                  <p class="text-sm font-medium">charlie@old.com</p>
+                  <p class="text-xs text-slate-500">Sent 8d ago</p>
+                </div>
+              </div>
+              <span class="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">Expired</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== Tab 3: Access rules ===== -->
+      <div id="panel-access" class="hidden p-5">
+        <div class="mb-5 space-y-4">
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require email</p>
+              <p class="text-xs text-slate-500">Must provide email to continue</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require OTP</p>
+              <p class="text-xs text-slate-500">High-security mode forces OTP</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require password</p>
+              <p class="text-xs text-slate-500">Additional password gate</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+
+          <div class="flex items-center justify-between">
+            <div>
+              <p class="text-sm font-medium">Require NDA</p>
+              <p class="text-xs text-slate-500">Visitors must agree to NDA</p>
+            </div>
+            <label class="relative inline-flex cursor-pointer">
+              <input type="checkbox" checked class="toggle sr-only" />
+              <div class="h-6 w-11 rounded-full bg-slate-200 transition-colors after:absolute after:left-0.5 after:top-0.5 after:h-5 after:w-5 after:rounded-full after:bg-white after:shadow after:transition-transform"></div>
+            </label>
+          </div>
+        </div>
+
+        <div class="space-y-4">
+          <!-- Allowed viewers -->
+          <div class="rounded-lg border p-3">
+            <label class="mb-1 block text-sm font-medium">Allowed viewers</label>
+            <div id="allowedEmails" class="mb-2 flex flex-wrap gap-2">
+              <span class="chip inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                alice@vc.com <button class="hover:text-emerald-900"><i class="ph ph-x"></i></button>
+              </span>
+              <span class="chip inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-700">
+                bob@vc.com <button class="hover:text-emerald-900"><i class="ph ph-x"></i></button>
+              </span>
+            </div>
+            <input type="text" placeholder="Add email and press Enter" class="w-full rounded-lg border px-3 py-2 text-sm" onkeydown="addChip(event, 'allowedEmails', 'emerald')" />
+          </div>
+
+          <!-- Allowed domains -->
+          <div class="rounded-lg border p-3">
+            <label class="mb-1 block text-sm font-medium">Allowed domains</label>
+            <div id="allowedDomains" class="mb-2 flex flex-wrap gap-2">
+              <span class="chip inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+                @vc.com <button class="hover:text-blue-900"><i class="ph ph-x"></i></button>
+              </span>
+            </div>
+            <input type="text" placeholder="Add domain and press Enter" class="w-full rounded-lg border px-3 py-2 text-sm" onkeydown="addChip(event, 'allowedDomains', 'blue')" />
+          </div>
+
+          <!-- Blocked viewers -->
+          <div class="rounded-lg border p-3">
+            <label class="mb-1 block text-sm font-medium">Blocked viewers</label>
+            <div id="blockedEmails" class="mb-2 flex flex-wrap gap-2">
+              <span class="chip inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                leaker@bad.com <button class="hover:text-red-900"><i class="ph ph-x"></i></button>
+              </span>
+            </div>
+            <input type="text" placeholder="Add email and press Enter" class="w-full rounded-lg border px-3 py-2 text-sm" onkeydown="addChip(event, 'blockedEmails', 'red')" />
+          </div>
+
+          <!-- Blocked domains -->
+          <div class="rounded-lg border p-3">
+            <label class="mb-1 block text-sm font-medium">Blocked domains</label>
+            <div id="blockedDomains" class="mb-2 flex flex-wrap gap-2">
+              <span class="chip inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-xs font-medium text-red-700">
+                @bad.com <button class="hover:text-red-900"><i class="ph ph-x"></i></button>
+              </span>
+            </div>
+            <input type="text" placeholder="Add domain and press Enter" class="w-full rounded-lg border px-3 py-2 text-sm" onkeydown="addChip(event, 'blockedDomains', 'red')" />
+          </div>
+        </div>
+
+        <div class="mt-5 flex items-center justify-end gap-2">
+          <button onclick="closeShare()" class="rounded-lg border px-4 py-2 text-sm font-medium hover:bg-slate-50">Cancel</button>
+          <button onclick="saveRules()" class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white hover:bg-slate-800">Save rules</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ========== Public Viewer Gate Demo ========== -->
+  <div class="mx-auto mt-12 max-w-md rounded-2xl border bg-white p-6 shadow-sm">
+    <div class="mb-5 text-center">
+      <div class="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100">
+        <i class="ph ph-lock-key text-2xl text-slate-700"></i>
+      </div>
+      <h2 class="text-lg font-semibold">This deal room is shared securely</h2>
+      <p class="text-sm text-slate-500">Series A Due Diligence</p>
+    </div>
+
+    <div class="space-y-4">
+      <div>
+        <label class="mb-1 block text-sm font-medium">Email</label>
+        <input type="email" value="alice@vc.com" readonly class="w-full rounded-lg border bg-slate-50 px-3 py-2 text-sm text-slate-500" />
+        <p class="mt-1 text-xs text-slate-500">Recognized from your invite link. <a href="#" class="text-slate-900 underline">Not you?</a></p>
+      </div>
+
+      <div>
+        <label class="mb-1 block text-sm font-medium">Access code</label>
+        <input type="text" placeholder="Enter 6-digit code" class="w-full rounded-lg border px-3 py-2 text-sm" />
+        <p class="mt-1 text-right text-xs text-slate-500"><a href="#" class="text-slate-900 underline">Resend code</a></p>
+      </div>
+
+      <div>
+        <label class="mb-1 block text-sm font-medium">Password</label>
+        <input type="password" placeholder="Enter link password" class="w-full rounded-lg border px-3 py-2 text-sm" />
+      </div>
+
+      <label class="flex items-start gap-2 text-sm">
+        <input type="checkbox" checked class="mt-1 h-4 w-4 rounded border-slate-300" />
+        <span>I agree to the non-disclosure agreement</span>
+      </label>
+
+      <button class="w-full rounded-lg bg-slate-900 py-2 text-sm font-medium text-white hover:bg-slate-800">Continue</button>
+    </div>
+  </div>
+
+  <!-- Toast container -->
+  <div id="toastContainer" class="fixed bottom-4 right-4 z-50 space-y-2"></div>
+
+  <script>
+    function openShare() { document.getElementById('shareDialog').classList.remove('hidden'); document.getElementById('shareDialog').classList.add('flex'); }
+    function closeShare() { document.getElementById('shareDialog').classList.add('hidden'); document.getElementById('shareDialog').classList.remove('flex'); }
+
+    function switchTab(name) {
+      ['share','invite','access'].forEach(t => {
+        document.getElementById('panel-' + t).classList.add('hidden');
+        const btn = document.getElementById('tab-' + t);
+        btn.classList.remove('tab-active');
+        btn.classList.add('tab-inactive');
+      });
+      document.getElementById('panel-' + name).classList.remove('hidden');
+      const activeBtn = document.getElementById('tab-' + name);
+      activeBtn.classList.remove('tab-inactive');
+      activeBtn.classList.add('tab-active');
+    }
+
+    function copyLink() {
+      navigator.clipboard.writeText(document.getElementById('shareUrl').value);
+      showToast('Link copied to clipboard');
+    }
+
+    function sendInvites() {
+      const val = document.getElementById('inviteEmails').value.trim();
+      if (!val) return showToast('Please enter at least one email', 'error');
+      showToast('Invitations sent');
+      document.getElementById('inviteEmails').value = '';
+    }
+
+    function saveRules() {
+      showToast('Access rules saved');
+      closeShare();
+    }
+
+    function addChip(event, containerId, color) {
+      if (event.key !== 'Enter' || !event.target.value.trim()) return;
+      event.preventDefault();
+      const val = event.target.value.trim();
+      const container = document.getElementById(containerId);
+      const span = document.createElement('span');
+      const bg = color === 'emerald' ? 'bg-emerald-50 text-emerald-700 hover:text-emerald-900' : color === 'blue' ? 'bg-blue-50 text-blue-700 hover:text-blue-900' : 'bg-red-50 text-red-700 hover:text-red-900';
+      span.className = `chip inline-flex items-center gap-1 rounded-full ${bg} px-2 py-1 text-xs font-medium`;
+      span.innerHTML = `${val} <button onclick="this.parentElement.remove()" class="${bg.split(' ')[1]}"><i class="ph ph-x"></i></button>`;
+      container.appendChild(span);
+      event.target.value = '';
+    }
+
+    function showToast(message, type = 'success') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      const bg = type === 'error' ? 'bg-red-600' : 'bg-slate-900';
+      toast.className = `toast flex items-center gap-2 rounded-lg ${bg} px-4 py-2 text-sm font-medium text-white shadow-lg`;
+      toast.innerHTML = `<i class="ph ${type === 'error' ? 'ph-warning' : 'ph-check-circle'}"></i> ${message}`;
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 2500);
+    }
+  </script>
+</body>
+</html>

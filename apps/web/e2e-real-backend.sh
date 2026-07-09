@@ -44,5 +44,7 @@ until curl -fsS http://localhost:8080/healthz >/dev/null 2>&1; do
   sleep 1
 done
 
-echo "[frontend] running real-backend E2E"
+echo "[frontend] running ALL real-backend E2E specs"
 pnpm test:e2e:real
+echo ""
+echo "=== Real-backend E2E complete ==="

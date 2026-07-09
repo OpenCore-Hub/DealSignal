@@ -30,6 +30,7 @@ Backend:
 ```bash
 cd apps/api
 go test ./...
+go test ./internal/link -tags=integration  # requires PostgreSQL (default: localhost:5435)
 ./e2e-test.sh      # P0 backend E2E (no AI)
 ./e2e-ai.sh        # P0 + AI E2E with mock LLM
 ```
@@ -73,7 +74,7 @@ If you find existing hard-coded strings, convert them to i18n keys and update bo
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **DealSignal** (14851 symbols, 32557 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **DealSignal** (15561 symbols, 34783 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

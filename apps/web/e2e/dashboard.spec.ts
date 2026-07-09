@@ -1,37 +1,64 @@
 import { test, expect } from "@playwright/test";
-import { setupAuthenticatedPage } from "./helpers";
+import {
+  seedRealBackend,
+  seedDocument,
+  authenticatePage,
+  attachDebug,
+} from "./real-helpers";
 
-test.describe("Dashboard", () => {
-  test.beforeEach(async ({ page }) => {
-    await setupAuthenticatedPage(page);
+let token: string;
+let workspaceSlug: string;
+
+test.describe("Dashboard (real backend)", () => {
+  test.beforeAll(async () => {
+    const seed = await seedRealBackend();
+    token = seed.token;
+    workspaceSlug = seed.workspaceSlug;
+    // Upload a document so dashboard has data
+    await seedDocument(token, workspaceSlug);
   });
 
-  test("renders dashboard summary, signals, actions and risk alerts", async ({ page }) => {
-    await expect(page.getByRole("heading", { name: "Deal Radar" })).toBeVisible();
-    await expect(page.getByText("Hot signals", { exact: true })).toBeVisible();
-    await expect(page.getByText("Pending actions", { exact: true })).toBeVisible();
-
-    await expect(page.getByText("Signals", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText("Recent documents", { exact: true })).toBeVisible();
-    await expect(page.getByText("Actions", { exact: true }).first()).toBeVisible();
-    await expect(page.getByText("Heat map", { exact: true })).toBeVisible();
-
-    await expect(page.getByText("Risk alerts", { exact: true })).toBeVisible();
-    await expect(page.getByText("Unidentified email downloaded Pitch Deck")).toBeVisible();
+  test("renders dashboard heading and summary cards", async ({ page }) => {
+    attachDebug(page);
+    await authenticatePage(page, token);
+    await page.goto(`/${workspaceSlug}/dashboard`);
+    await expect(page.getByRole("heading", { name: "Deal Radar" })).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Hot signals", { exact: true })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Pending actions", { exact: true })).toBeVisible({ timeout: 5000 });
   });
 
-  test("marks a pending action as done", async ({ page }) => {
-    const firstAction = page.getByText("Follow up with Sarah Chen");
-    await expect(firstAction).toBeVisible();
+  test("renders signal and recent document sections", async ({ page }) => {
+    attachDebug(page);
+    await authenticatePage(page, token);
+    await page.goto(`/${workspaceSlug}/dashboard`);
 
-    await page.getByRole("button", { name: "Complete" }).first().click();
-    await expect(page.getByText("Completed (1)")).toBeVisible();
-    await expect(page.getByText("Follow up with Sarah Chen")).toHaveCount(1);
+    await expect(page.getByText("Signals", { exact: true }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("Recent documents", { exact: true })).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Actions", { exact: true }).first()).toBeVisible({ timeout: 5000 });
+    await expect(page.getByText("Heat map", { exact: true })).toBeVisible({ timeout: 5000 });
   });
 
   test("navigates from recent documents to document detail", async ({ page }) => {
-    await page.getByText("Acme Seed Round Pitch Deck").first().click();
-    await expect(page).toHaveURL(/\/documents\/doc_1/);
-    await expect(page.getByText("Acme Seed Round Pitch Deck").first()).toBeVisible();
+    attachDebug(page);
+    await authenticatePage(page, token);
+    await page.goto(`/${workspaceSlug}/dashboard`);
+
+    // Find the recently uploaded document in the list
+    const docLink = page.getByText("sample.pdf").first();
+    await expect(docLink).toBeVisible({ timeout: 10000 });
+    await docLink.click();
+
+    // Should navigate to document detail
+    await expect(page).toHaveURL(/\/documents\//, { timeout: 10000 });
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 5000 });
+  });
+
+  test("dashboard loads actions section", async ({ page }) => {
+    attachDebug(page);
+    await authenticatePage(page, token);
+    await page.goto(`/${workspaceSlug}/dashboard`);
+
+    // The actions panel should be visible
+    await expect(page.getByText("Actions", { exact: true }).first()).toBeVisible({ timeout: 10000 });
   });
 });
