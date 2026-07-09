@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Copy, PencilSimple, ToggleRight, FileText } from "@phosphor-icons/react";
+import { Copy, PencilSimple, ToggleRight, FileText, ShareNetwork } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -13,6 +13,7 @@ import { PageDurationChart } from "@/components/common/PageDurationChart";
 import { PermissionBadge } from "@/components/common/PermissionBadge";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { LinkAccessLog } from "./LinkAccessLog";
+import { LinkShareDialog } from "./share";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
@@ -154,6 +155,12 @@ export function LinkDetail() {
           <Copy size={16} />
           {tc("copy")}
         </Button>
+        <LinkShareDialog linkId={link.id}>
+          <Button variant="outline" className="gap-1.5">
+            <ShareNetwork size={16} />
+            {t("detail.share")}
+          </Button>
+        </LinkShareDialog>
         <Button
           className="gap-1.5"
           onClick={async () => {

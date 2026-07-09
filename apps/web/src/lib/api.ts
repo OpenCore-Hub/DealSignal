@@ -1,5 +1,6 @@
 import type {
   AccessLog,
+  AccessRule,
   ActionItem,
   Activity,
   BillingInfo,
@@ -18,6 +19,7 @@ import type {
   HeatLevel,
   IntegrationStatus,
   Link,
+  LinkInvitation,
   PageAnalytics,
   PermissionConfig,
   RiskAlert,
@@ -91,6 +93,22 @@ export interface PublicDealRoomView {
   } | null;
   folders: DealRoomFolder[];
   documents: DealRoomFolderDocs[];
+}
+
+export interface CreateDealRoomLinkPayload {
+  name?: string;
+  require_email?: boolean;
+  require_email_verification?: boolean;
+  require_nda?: boolean;
+  require_password?: boolean;
+  password?: string;
+  expires_at?: string;
+  download_enabled?: boolean;
+  watermark_enabled?: boolean;
+  ai_copilot_enabled?: boolean;
+  custom_domain?: string;
+  tags?: string[];
+  notify_on_access?: boolean;
 }
 
 export interface SendMarketingBatchRequest {
@@ -262,9 +280,19 @@ export const api = {
       `/documents/${id}/download-url`
     ),
 
-  accessPublicLink: (token: string, opts?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean; sessionToken?: string }) =>
+  accessPublicLink: (
+    token: string,
+    opts?: {
+      email?: string;
+      emailCode?: string;
+      password?: string;
+      ndaAgreed?: boolean;
+      sessionToken?: string;
+      inviteToken?: string;
+    }
+  ) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean; dealRoomId?: string };
       documents: { id: string; title: string; pageCount: number; sourceType: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -280,6 +308,7 @@ export const api = {
         email_code: opts?.emailCode,
         password: opts?.password,
         nda_agreed: opts?.ndaAgreed ?? false,
+        invite_token: opts?.inviteToken,
       }),
       headers: opts?.sessionToken ? { "X-Link-Session": opts.sessionToken } : undefined,
     }),
@@ -408,6 +437,46 @@ export const api = {
     request<{ data: AccessLog[] }>(
       getWorkspaceSlug(),
       `/links/${linkId}/access-logs`
+    ),
+
+  // Deal-room share links.
+  createDealRoomLink: (roomId: string, payload: CreateDealRoomLinkPayload) =>
+    request<Link>(getWorkspaceSlug(), `/deal-rooms/${roomId}/links`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  getDealRoomLinks: (roomId: string) =>
+    request<{ data: Link[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/links`),
+
+  // Link access rules.
+  getLinkAccessRules: (linkId: string) =>
+    request<{ data: AccessRule[] }>(getWorkspaceSlug(), `/links/${linkId}/access-rules`),
+  setLinkAccessRules: (linkId: string, rules: AccessRule[]) =>
+    request<void>(getWorkspaceSlug(), `/links/${linkId}/access-rules`, {
+      method: "POST",
+      body: JSON.stringify({ rules }),
+    }),
+
+  // Link invitations.
+  getLinkInvitations: (linkId: string) =>
+    request<{ data: LinkInvitation[] }>(getWorkspaceSlug(), `/links/${linkId}/invitations`),
+  inviteLinkViewers: (linkId: string, emails: string[]) =>
+    request<{ data: LinkInvitation[] }>(getWorkspaceSlug(), `/links/${linkId}/invitations`, {
+      method: "POST",
+      body: JSON.stringify({ emails }),
+    }),
+  revokeLinkInvitation: (
+    linkId: string,
+    invitationId: string,
+    removeFromAllowList = true
+  ) =>
+    request<void>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/invitations/${invitationId}/revoke`,
+      {
+        method: "POST",
+        body: JSON.stringify({ removeFromAllowList }),
+      }
     ),
 
   getContacts: () =>

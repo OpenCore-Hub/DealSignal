@@ -4,6 +4,7 @@ export interface CreateLinkPayload {
   document_ids: string[];
   name?: string;
   permission_type?: string;
+  require_email?: boolean;
   require_email_verification?: boolean;
   require_password?: boolean;
   require_nda?: boolean;
@@ -16,6 +17,9 @@ export interface CreateLinkPayload {
   download_enabled?: boolean;
   watermark_enabled?: boolean;
   ai_copilot_enabled?: boolean;
+  custom_domain?: string;
+  tags?: string[];
+  notify_on_access?: boolean;
 }
 
 export type UpdateLinkPayload = CreateLinkPayload;

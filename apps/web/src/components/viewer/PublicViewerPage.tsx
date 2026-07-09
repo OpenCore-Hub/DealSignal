@@ -11,6 +11,7 @@ import { api, type PublicLinkCredentials } from "@/lib/api";
 import { ApiError, setLinkSessionRefreshHandler } from "@/lib/apiClient";
 import { CanvasViewer } from "./CanvasViewer";
 import { RightSidebar } from "./RightSidebar";
+import { PublicDealRoomLinkViewer } from "./PublicDealRoomLinkViewer";
 import type { Document } from "@/types";
 
 interface PublicDocumentSummary {
@@ -18,10 +19,11 @@ interface PublicDocumentSummary {
   title: string;
   pageCount: number;
   sourceType: string;
+  folderPath?: string;
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; isBundle: boolean; dealRoomId?: string };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -40,6 +42,7 @@ export function PublicViewerPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const prefilledEmail = searchParams.get("email") ?? "";
+  const inviteToken = searchParams.get("inviteToken") ?? undefined;
   const [email, setEmail] = useState(prefilledEmail);
   const [emailCode, setEmailCode] = useState("");
   const [password, setPassword] = useState("");
@@ -54,6 +57,7 @@ export function PublicViewerPage() {
   const [gateError, setGateError] = useState<string | null>(null);
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
+  const [folderView, setFolderView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const accessingRef = useRef(false);
   const sessionCheckedRef = useRef(false);
@@ -62,7 +66,7 @@ export function PublicViewerPage() {
   // that re-visits within the session lifetime skip the credential prompt.
   const sessionKey = token ? `link-session:${token}` : null;
 
-  const tryAccess = useCallback(async (gateParams?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean; sessionToken?: string }) => {
+  const tryAccess = useCallback(async (gateParams?: { email?: string; emailCode?: string; password?: string; ndaAgreed?: boolean; sessionToken?: string; inviteToken?: string }) => {
     if (!token || accessingRef.current) return;
     accessingRef.current = true;
     setLoading(true);
@@ -117,10 +121,19 @@ export function PublicViewerPage() {
         "link_revoked",
         "link_disabled",
         "link_max_access_reached",
+        "blocked_email",
+        "blocked_domain",
+        "not_allowed",
+        "invite_expired",
+        "invite_revoked",
       ]);
       if (unavailableCodes.has(err.code)) {
         setLinkErrorCode(err.code);
-      } else if (err.code === "invalid_password" || err.code === "whitelist_denied" || err.code === "invalid_email_code") {
+      } else if (
+        err.code === "invalid_password" ||
+        err.code === "whitelist_denied" ||
+        err.code === "invalid_email_code"
+      ) {
         // Only show raw backend messages for actual validation failures.
         // Missing required fields are handled by client-side checks on Continue.
         setGateError(err.message ?? t("common:error.loadFailed"));
@@ -143,13 +156,13 @@ export function PublicViewerPage() {
         storedSession = sessionStorage.getItem(sessionKey);
       } catch { /* ignore */ }
       if (storedSession) {
-        void tryAccess({ sessionToken: storedSession });
+        void tryAccess({ sessionToken: storedSession, inviteToken });
         return;
       }
     }
      
-    void tryAccess();
-  }, [token, tryAccess, sessionKey]);
+    void tryAccess({ inviteToken });
+  }, [token, tryAccess, sessionKey, inviteToken]);
 
   // Sliding session: when the backend returns X-Link-Session-Refresh on any
   // API response (page signed-URL, download-URL, etc.), update sessionStorage
@@ -228,6 +241,22 @@ export function PublicViewerPage() {
     );
   }
 
+  if (access?.link.dealRoomId && folderView) {
+    return (
+      <PublicDealRoomLinkViewer
+        linkName={access.link.name}
+        documents={access.documents}
+        onViewDocument={(documentId) => {
+          const idx = access.documents.findIndex((d) => d.id === documentId);
+          if (idx >= 0) {
+            setSelectedDocIndex(idx);
+          }
+          setFolderView(false);
+        }}
+      />
+    );
+  }
+
   if (!access) {
     const hasGates = security.email || security.emailVerification || security.password || security.nda;
     return (
@@ -242,7 +271,14 @@ export function PublicViewerPage() {
                 {gateError}
               </p>
             )}
-            {security.email && (
+            {inviteToken && (
+              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm">
+                {prefilledEmail
+                  ? t("viewer.inviteVerificationFor", { email: prefilledEmail })
+                  : t("viewer.inviteVerification")}
+              </div>
+            )}
+            {security.email && !inviteToken && (
               <div className="space-y-2">
                 <Label htmlFor="email">{t("viewer.emailLabel")}</Label>
                 <Input
@@ -294,7 +330,7 @@ export function PublicViewerPage() {
               onClick={() => {
                 setGateError(null);
                 const accessEmail = prefilledEmail || email;
-                if (security.email && !accessEmail.trim()) {
+                if (security.email && !inviteToken && !accessEmail.trim()) {
                   setGateError(t("viewer.emailRequired"));
                   return;
                 }
@@ -315,6 +351,7 @@ export function PublicViewerPage() {
                   emailCode: security.emailVerification ? emailCode : undefined,
                   password: security.password ? password : undefined,
                   ndaAgreed: security.nda ? ndaAgreed : undefined,
+                  inviteToken,
                 });
               }}
             >
@@ -331,6 +368,16 @@ export function PublicViewerPage() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden">
+      {access.link.dealRoomId && (
+        <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
+          <Button variant="ghost" size="sm" onClick={() => setFolderView(true)}>
+            {t("common:back")}
+          </Button>
+          <span className="text-sm font-medium truncate">
+            {selectedDoc?.title}
+          </span>
+        </div>
+      )}
       <CanvasViewer
         publicToken={token}
         publicLink={access.link}

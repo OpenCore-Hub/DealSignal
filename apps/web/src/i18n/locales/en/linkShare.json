@@ -1,0 +1,167 @@
+{
+  "share": {
+    "title": "Share",
+    "createTitle": "Create share link",
+    "copyLink": "Copy link",
+    "copied": "Link copied",
+    "copyFailed": "Failed to copy link",
+    "copyInviteLink": "Copy invite link",
+    "publicLink": "Public link",
+    "inviteLink": "Invite link",
+    "linkName": "Link name",
+    "linkNamePlaceholder": "Recipient's Organization",
+    "linkPreset": "Link preset",
+    "presetHint": "Apply a preset to quickly configure link settings",
+    "presets": {
+      "public": "Public",
+      "standard": "Standard",
+      "confidential": "Confidential",
+      "custom": "Custom"
+    },
+    "presetDescriptions": {
+      "public": "Anyone with the link can access",
+      "standard": "Require email, apply watermark, expire in 30 days",
+      "confidential": "Require verified email + password, watermark, expire in 7 days"
+    },
+    "accessSummary": "Access summary",
+    "accessSummaryEmpty": "No access restrictions configured",
+    "editAccessRules": "Edit access rules",
+    "expiresOn": "Expires on",
+    "expiresOnHint": "Link will stop working after this date",
+    "expiresAtFuture": "Expiration must be in the future",
+    "oldSlugHint": "Old slug /r/{slug} is still available. New shares should use /l/{token}.",
+    "customDomain": "Custom domain",
+    "customDomainPlaceholder": "links.yourdomain.com",
+    "customDomainHint": "Public link will be served from this hostname when configured",
+    "tags": "Tags",
+    "tagsPlaceholder": "investor, q3-2026",
+    "tagsHint": "Add tags separated by commas",
+    "notifyOnAccess": "Notify on access",
+    "notifyOnAccessHint": "Send an email to the link creator when someone opens this link",
+    "customDomainInvalid": "Please enter a valid domain",
+    "saveLinkSettings": "Save link settings",
+    "createLink": "Create link",
+    "saveSuccess": "Saved",
+    "createSuccess": "Link created",
+    "restrictedAlert": "This link is restricted. Only allowed emails or domains can access.",
+    "active": "Active",
+    "inactive": "Inactive",
+    "disableConfirmTitle": "Disable this link?",
+    "disableConfirmDescription": "Existing viewer sessions will be invalidated immediately.",
+    "preview": "Preview as visitor",
+    "linkNameRequired": "Link name is required"
+  },
+  "invite": {
+    "title": "Invite",
+    "addViewers": "Add viewers",
+    "addViewersPlaceholder": "alice@vc.com, bob@vc.com",
+    "addViewersHint": "Add email addresses separated by commas or new lines",
+    "invalidEmails": "Some email addresses are invalid: {emails}",
+    "sendInvitations": "Send invitations",
+    "sending": "Sending...",
+    "sent": "Invitations sent",
+    "sentOne": "Invitation sent to {email}",
+    "emptyTitle": "No invitations yet",
+    "emptyDescription": "Add viewers above to send secure invites.",
+    "table": {
+      "email": "Email",
+      "status": "Status",
+      "sentAt": "Sent at",
+      "actions": "Actions"
+    },
+    "status": {
+      "pending": "Pending",
+      "opened": "Opened",
+      "verified": "Verified",
+      "expired": "Expired",
+      "revoked": "Revoked"
+    },
+    "resend": "Resend",
+    "resendTooltip": "Resend invitation email without changing token",
+    "revoke": "Revoke",
+    "revokeConfirmTitle": "Revoke access for {email}?",
+    "revokeConfirmDescription": "They will no longer be able to use this invitation link.",
+    "revokeConfirmButton": "Revoke",
+    "revokeAndRemove": "Revoke and remove from allowed list",
+    "revokedMessage": "Invitation revoked and email removed from allowed list",
+    "createLinkFirst": "Save the link to start inviting viewers",
+    "copyInviteLink": "Copy invite link",
+    "copied": "Invite link copied"
+  },
+  "accessRules": {
+    "title": "Access",
+    "saveAccessRules": "Save access rules",
+    "saved": "Access rules saved",
+    "savedDescription": "Changes take effect immediately; existing viewer sessions will be invalidated.",
+    "authentication": {
+      "title": "Authentication",
+      "requireEmail": "Require email to view",
+      "requireEmailDescription": "Only verified emails can access",
+      "requireVerification": "Require email verification",
+      "requireVerificationDescription": "Send a one-time code to the viewer's email",
+      "requirePassword": "Require password to view",
+      "requirePasswordDescription": "Viewer must enter a password",
+      "passwordPlaceholder": "Enter password"
+    },
+    "allowedViewers": {
+      "title": "Allowed viewers",
+      "placeholder": "alice@vc.com or *@vc.com",
+      "hint": "Add full emails or domain wildcards like *@vc.com",
+      "autoAddInvited": "Auto-add invited viewers",
+      "autoAddInvitedDescription": "Sending an invite automatically adds the email to allowed list"
+    },
+    "blockedViewers": {
+      "title": "Blocked viewers",
+      "placeholder": "leaker@bad.com or *@competitor.com",
+      "hint": "Block specific emails or entire domains"
+    },
+    "additionalProtections": {
+      "title": "Additional protections",
+      "watermark": "Apply watermark",
+      "watermarkDescription": "Overlay viewer email on documents",
+      "requireNda": "Require NDA to view",
+      "requireNdaDescription": "Viewer must agree to NDA before access",
+      "allowDownloading": "Allow downloading",
+      "allowDownloadingDescription": "Allow viewers to download documents",
+      "screenshotProtection": "Enable screenshot protection",
+      "screenshotProtectionDescription": "Show warning and blur on Print Screen"
+    },
+    "advanced": {
+      "title": "Advanced",
+      "enabledCount": "{count} enabled",
+      "aiAgents": "AI Agents",
+      "aiAgentsDescription": "Allow AI assistant in the viewer",
+      "fileRequests": "Enable file requests",
+      "fileRequestsDescription": "Allow viewers to request additional files",
+      "indexFile": "Enable index file generation",
+      "indexFileDescription": "Generate an index page for the deal room",
+      "qaConversations": "Enable Q&A conversations",
+      "qaConversationsDescription": "Allow viewers to ask questions"
+    },
+    "emptyTitle": "No restrictions",
+    "emptyDescription": "Anyone with the link can access if authentication gates are disabled.",
+    "errors": {
+      "allowRequiresEmail": "Allowed viewers require email verification to be enabled",
+      "verificationRequiresEmail": "Email verification requires email to be required",
+      "passwordRequired": "Password is required when password protection is enabled",
+      "passwordMinLength": "Password must be at least 8 characters",
+      "conflict": "{value} cannot be in both allowed and blocked lists",
+      "blockPriority": "Block rules always take priority over allow rules"
+    }
+  },
+  "emailTagInput": {
+    "invalid": "invalid email or domain",
+    "remove": "Remove {{value}}"
+  },
+  "analytics": {
+    "title": "Analytics",
+    "views": "Views",
+    "uniqueVisitors": "Unique visitors",
+    "avgDuration": "Avg. time",
+    "lastVisit": "Last visit",
+    "recentActivity": "Recent activity",
+    "emptyTitle": "No visits yet",
+    "emptyDescription": "Share the link and viewer activity will appear here.",
+    "done": "Close"
+  }
+}
