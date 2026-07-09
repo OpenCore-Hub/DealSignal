@@ -29,27 +29,27 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g := r.Group("/deal-rooms")
 	g.GET("", h.List)
 	g.POST("", h.Create)
-	g.GET("/:id", h.Get)
+	g.GET("/:roomId", h.Get)
 
-	g.GET("/:id/folders", h.ListFolders)
-	g.POST("/:id/folders", h.CreateFolder)
-	g.PATCH("/:id/folders/*path", h.RenameFolder)
-	g.DELETE("/:id/folders/*path", h.DeleteFolder)
+	g.GET("/:roomId/folders", h.ListFolders)
+	g.POST("/:roomId/folders", h.CreateFolder)
+	g.PATCH("/:roomId/folders/*path", h.RenameFolder)
+	g.DELETE("/:roomId/folders/*path", h.DeleteFolder)
 
-	g.GET("/:id/documents", h.GetRoomDocuments)
-	g.POST("/:id/documents", h.AddDocument)
-	g.DELETE("/:id/documents/:docId", h.RemoveDocument)
-	g.PATCH("/:id/documents/:docId", h.UpdateDocument)
+	g.GET("/:roomId/documents", h.GetRoomDocuments)
+	g.POST("/:roomId/documents", h.AddDocument)
+	g.DELETE("/:roomId/documents/:docId", h.RemoveDocument)
+	g.PATCH("/:roomId/documents/:docId", h.UpdateDocument)
 
-	g.GET("/:id/members", h.ListMembers)
-	g.POST("/:id/members", h.AddMember)
-	g.DELETE("/:id/members/:memberId", h.RemoveMember)
+	g.GET("/:roomId/members", h.ListMembers)
+	g.POST("/:roomId/members", h.AddMember)
+	g.DELETE("/:roomId/members/:memberId", h.RemoveMember)
 
-	g.GET("/:id/access-requests", h.ListAccessRequests)
-	g.POST("/:id/access-requests/:requestId/approve", h.ApproveRequest)
-	g.POST("/:id/access-requests/:requestId/reject", h.RejectAccessRequest)
+	g.GET("/:roomId/access-requests", h.ListAccessRequests)
+	g.POST("/:roomId/access-requests/:requestId/approve", h.ApproveRequest)
+	g.POST("/:roomId/access-requests/:requestId/reject", h.RejectAccessRequest)
 
-	g.POST("/:id/folder-permissions", h.SetFolderPermission)
+	g.POST("/:roomId/folder-permissions", h.SetFolderPermission)
 
 	r.GET("/deal-room-templates", h.ListTemplates)
 }
@@ -141,7 +141,7 @@ func (h *Handler) Create(c *gin.Context) {
 func (h *Handler) Get(c *gin.Context) {
 	detail, err := h.service.GetRoomDetail(
 		c.Request.Context(),
-		c.Param("id"),
+		c.Param("roomId"),
 		middleware.WorkspaceIDFrom(c),
 		middleware.UserIDFrom(c),
 	)
@@ -172,7 +172,7 @@ func (h *Handler) AddMember(c *gin.Context) {
 	if req.Role == "" {
 		req.Role = "viewer"
 	}
-	member, err := h.service.AddMember(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.Role)
+	member, err := h.service.AddMember(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.Role)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -189,7 +189,7 @@ func (h *Handler) AddMember(c *gin.Context) {
 
 // ApproveRequest handles access request approval.
 func (h *Handler) ApproveRequest(c *gin.Context) {
-	req, err := h.service.ApproveAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	req, err := h.service.ApproveAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -296,7 +296,7 @@ func (h *Handler) AddDocument(c *gin.Context) {
 		return
 	}
 	if req.FolderPath == "" || req.FolderPath == "/" {
-		folders, ferr := h.service.ListFolders(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
+		folders, ferr := h.service.ListFolders(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
 		if ferr != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": ferr.Error()})
 			return
@@ -307,7 +307,7 @@ func (h *Handler) AddDocument(c *gin.Context) {
 		}
 		req.FolderPath = folders[0].Path
 	}
-	doc, err := h.service.AddDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.DocumentID, req.FolderPath, req.SortOrder)
+	doc, err := h.service.AddDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.DocumentID, req.FolderPath, req.SortOrder)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -334,7 +334,7 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	perm, err := h.service.SetFolderPermission(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.FolderPath, req.Permission)
+	perm, err := h.service.SetFolderPermission(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.FolderPath, req.Permission)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -349,7 +349,7 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 
 // ListFolders returns the folder structure of a room.
 func (h *Handler) ListFolders(c *gin.Context) {
-	folders, err := h.service.ListFolders(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c))
+	folders, err := h.service.ListFolders(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
 	if err != nil {
 		if errors.Is(err, ErrRoomNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
@@ -374,7 +374,7 @@ func (h *Handler) CreateFolder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	folders, err := h.service.CreateFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Name, req.ParentPath)
+	folders, err := h.service.CreateFolder(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Name, req.ParentPath)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -403,7 +403,7 @@ func (h *Handler) RenameFolder(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	folders, err := h.service.RenameFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")), req.Name)
+	folders, err := h.service.RenameFolder(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")), req.Name)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -422,7 +422,7 @@ func (h *Handler) RenameFolder(c *gin.Context) {
 
 // DeleteFolder handles folder deletion.
 func (h *Handler) DeleteFolder(c *gin.Context) {
-	folders, err := h.service.DeleteFolder(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")))
+	folders, err := h.service.DeleteFolder(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -441,7 +441,7 @@ func (h *Handler) DeleteFolder(c *gin.Context) {
 
 // GetRoomDocuments returns documents grouped by folder for a room.
 func (h *Handler) GetRoomDocuments(c *gin.Context) {
-	docs, err := h.service.GetRoomDocuments(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	docs, err := h.service.GetRoomDocuments(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRoomNotFound):
@@ -458,7 +458,7 @@ func (h *Handler) GetRoomDocuments(c *gin.Context) {
 
 // RemoveDocument removes a document from a room.
 func (h *Handler) RemoveDocument(c *gin.Context) {
-	if err := h.service.RemoveDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId")); err != nil {
+	if err := h.service.RemoveDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId")); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
@@ -492,7 +492,7 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "folder_path cannot be root"})
 			return
 		}
-		if err := h.service.MoveDocument(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId"), req.FolderPath, req.SortOrder); err != nil {
+		if err := h.service.MoveDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId"), req.FolderPath, req.SortOrder); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):
 				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
@@ -504,7 +504,7 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 			return
 		}
 	} else {
-		if err := h.service.ReorderDocuments(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), []DocumentOrder{{DocumentID: c.Param("docId"), SortOrder: *req.SortOrder}}); err != nil {
+		if err := h.service.ReorderDocuments(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), []DocumentOrder{{DocumentID: c.Param("docId"), SortOrder: *req.SortOrder}}); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):
 				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
@@ -519,7 +519,7 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 
 // ListMembers returns room members.
 func (h *Handler) ListMembers(c *gin.Context) {
-	members, err := h.service.ListMembers(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	members, err := h.service.ListMembers(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -536,7 +536,7 @@ func (h *Handler) ListMembers(c *gin.Context) {
 
 // RemoveMember removes a member from a room.
 func (h *Handler) RemoveMember(c *gin.Context) {
-	if err := h.service.RemoveMember(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("memberId")); err != nil {
+	if err := h.service.RemoveMember(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("memberId")); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
@@ -552,7 +552,7 @@ func (h *Handler) RemoveMember(c *gin.Context) {
 
 // ListAccessRequests returns pending access requests for a room.
 func (h *Handler) ListAccessRequests(c *gin.Context) {
-	requests, err := h.service.ListAccessRequests(c.Request.Context(), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	requests, err := h.service.ListAccessRequests(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -569,7 +569,7 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 
 // RejectAccessRequest handles access request rejection.
 func (h *Handler) RejectAccessRequest(c *gin.Context) {
-	req, err := h.service.RejectAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("id"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
+	req, err := h.service.RejectAccessRequest(c.Request.Context(), c.Param("requestId"), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c))
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
@@ -685,14 +685,6 @@ func documentResponse(d db.DealRoomDocument) gin.H {
 		"sort_order":  d.SortOrder,
 		"created_at":  d.CreatedAt.Time.Format(time.RFC3339),
 	}
-}
-
-func documentList(docs []db.DealRoomDocument) []gin.H {
-	out := make([]gin.H, len(docs))
-	for i, d := range docs {
-		out[i] = documentResponse(d)
-	}
-	return out
 }
 
 func folderPermissionResponse(p db.RoomMemberFolderPermission) gin.H {

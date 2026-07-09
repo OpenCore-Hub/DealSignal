@@ -445,7 +445,7 @@ func (s *Service) AcceptInvitation(ctx context.Context, token, userID string) (M
 	if err != nil {
 		return Member{}, fmt.Errorf("begin tx: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer func() { _ = tx.Rollback(ctx) }()
 
 	qtx := s.queries.WithTx(tx)
 

@@ -124,7 +124,8 @@
       "allowDownloading": "允许下载",
       "allowDownloadingDescription": "允许访客下载文档",
       "screenshotProtection": "启用截图保护",
-      "screenshotProtectionDescription": "检测到 Print Screen 时显示警告并模糊内容"
+      "screenshotProtectionDescription": "检测到 Print Screen 时显示警告并模糊内容",
+      "comingSoon": "即将上线"
     },
     "advanced": {
       "title": "高级",
@@ -136,7 +137,8 @@
       "indexFile": "启用索引文件生成",
       "indexFileDescription": "为数据室生成索引页",
       "qaConversations": "启用问答对话",
-      "qaConversationsDescription": "允许访客提问"
+      "qaConversationsDescription": "允许访客提问",
+      "comingSoon": "即将上线"
     },
     "emptyTitle": "无限制",
     "emptyDescription": "如果未启用身份验证门控，任何拥有链接的人都可以访问。",

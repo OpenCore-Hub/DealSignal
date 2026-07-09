@@ -60,6 +60,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:id/invitations", h.ListInvitations)
 	g.POST("/:id/invitations", h.CreateInvitations)
 	g.POST("/:id/invitations/:invitationId/revoke", h.RevokeInvitation)
+	g.GET("/:id/access-requests", h.ListAccessRequests)
+	g.POST("/:id/access-requests/:requestId/approve", h.ApproveAccessRequest)
+	g.POST("/:id/access-requests/:requestId/reject", h.RejectAccessRequest)
 
 	// Deal-room-scoped link routes.
 	dr := r.Group("/deal-rooms/:roomId/links")
@@ -72,6 +75,7 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.POST("/links/:publicToken", h.Access)
 	r.POST("/links/:publicToken/send-email-code", h.SendEmailVerificationCode)
 	r.POST("/links/:publicToken/resend-code", h.SendEmailVerificationCode)
+	r.POST("/links/:publicToken/access-requests", h.CreateAccessRequest)
 	r.POST("/events", h.RecordEvent)
 	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
@@ -488,6 +492,112 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 		return
 	}
 	c.Status(http.StatusNoContent)
+}
+
+// CreateAccessRequestRequest is the JSON body for requesting access to a link.
+type CreateAccessRequestRequest struct {
+	Email  string `json:"email" binding:"required,email"`
+	Reason string `json:"reason,omitempty"`
+}
+
+// CreateAccessRequest allows a blocked or not-allowed visitor to request access.
+func (h *Handler) CreateAccessRequest(c *gin.Context) {
+	ctx := c.Request.Context()
+	token := c.Param("publicToken")
+
+	link, err := h.service.ResolvePublicLink(ctx, token)
+	if err != nil {
+		code := "link_not_found"
+		status := http.StatusNotFound
+		switch {
+		case errors.Is(err, ErrLinkExpired):
+			code, status = "link_expired", http.StatusGone
+		case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
+			code, status = "link_revoked", http.StatusGone
+		}
+		c.JSON(status, gin.H{"code": code, "message": err.Error()})
+		return
+	}
+
+	allowed, err := h.service.AllowAccessRequest(ctx, c.ClientIP(), token)
+	if err != nil {
+		logger.ErrorCtx(ctx, "access request rate limit check failed", err)
+	}
+	if !allowed {
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limit_exceeded", "message": "too many access requests, please try again later"})
+		return
+	}
+
+	var req CreateAccessRequestRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	ar, err := h.service.RequestAccess(ctx, link, req.Email, req.Reason)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrAccessRequestBlocked):
+			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": err.Error()})
+		case errors.Is(err, ErrAccessRequestExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": err.Error()})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": ar})
+}
+
+// ListAccessRequests returns all access requests for a link.
+func (h *Handler) ListAccessRequests(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	requests, err := h.service.ListAccessRequests(c.Request.Context(), workspaceID, c.Param("id"))
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": requests})
+}
+
+// ApproveAccessRequest approves a pending access request.
+func (h *Handler) ApproveAccessRequest(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	ar, err := h.service.ApproveAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		case errors.Is(err, ErrAccessRequestBlocked):
+			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": err.Error()})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": ar})
+}
+
+// RejectAccessRequest rejects a pending access request.
+func (h *Handler) RejectAccessRequest(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	ar, err := h.service.RejectAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": ar})
 }
 
 // CreateDealRoomLinkRequest is the JSON body for creating a deal-room share link.

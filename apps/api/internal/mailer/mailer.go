@@ -633,56 +633,6 @@ func renderJob(templates *mailtemplate.Engine, tracker *Tracker, job EmailJob) (
 	return html, text, subject, nil
 }
 
-// brandNameFromFrom extracts a display name from the From address, falling back
-// to a sensible default. It handles "Name <email@example.com>" and bare addresses.
-func brandNameFromFrom(from string) string {
-	from = strings.TrimSpace(from)
-	if from == "" {
-		return "DealSignal"
-	}
-	if idx := strings.LastIndex(from, "<"); idx > 0 {
-		name := strings.TrimSpace(from[:idx])
-		name = strings.Trim(name, "\"")
-		if name != "" {
-			return name
-		}
-	}
-	if at := strings.Index(from, "@"); at > 0 {
-		return titleCase(from[:at])
-	}
-	return "DealSignal"
-}
-
-// titleCase returns a rough title-cased version of a lowercase ASCII string.
-func titleCase(s string) string {
-	if s == "" {
-		return s
-	}
-	runes := []rune(s)
-	for i, r := range runes {
-		if i == 0 {
-			runes[i] = toUpper(r)
-		} else {
-			runes[i] = toLower(r)
-		}
-	}
-	return string(runes)
-}
-
-func toUpper(r rune) rune {
-	if r >= 'a' && r <= 'z' {
-		return r - 'a' + 'A'
-	}
-	return r
-}
-
-func toLower(r rune) rune {
-	if r >= 'A' && r <= 'Z' {
-		return r - 'A' + 'a'
-	}
-	return r
-}
-
 // withRetry executes fn with exponential backoff and jitter for transient errors.
 func withRetry(ctx context.Context, maxRetries int, provider string, fn func() error) error {
 	var lastErr error

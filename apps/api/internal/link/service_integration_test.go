@@ -507,3 +507,232 @@ func TestInviteViewers_Integration(t *testing.T) {
 		}
 	})
 }
+
+func TestRequestAccess(t *testing.T) {
+	t.Run("creates access request for not-allowed email", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		linkID := uuid.UUID(f.link.ID.Bytes).String()
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "domain",
+			Value:       "allowed.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "Please grant access")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+		if req.Email != "visitor@other.com" {
+			t.Fatalf("unexpected email: %s", req.Email)
+		}
+		if req.Status != "pending" {
+			t.Fatalf("expected pending, got %s", req.Status)
+		}
+		if req.LinkID != linkID {
+			t.Fatalf("unexpected link id: %s", req.LinkID)
+		}
+	})
+
+	t.Run("returns existing pending request idempotently", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "domain",
+			Value:       "allowed.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		first, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		if err != nil {
+			t.Fatalf("first request: %v", err)
+		}
+		second, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "updated reason")
+		if err != nil {
+			t.Fatalf("second request: %v", err)
+		}
+		if first.ID != second.ID {
+			t.Fatal("expected same request id for duplicate pending request")
+		}
+	})
+
+	t.Run("rejects request for blocked email", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "blocked@example.com",
+			Action:      "block",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create block rule: %v", err)
+		}
+
+		_, err := f.svc.RequestAccess(f.ctx, f.link, "blocked@example.com", "")
+		if !errors.Is(err, ErrAccessRequestBlocked) {
+			t.Fatalf("expected ErrAccessRequestBlocked, got %v", err)
+		}
+	})
+
+	t.Run("returns error when non-pending request already exists", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "domain",
+			Value:       "allowed.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		_, err = f.svc.RejectAccessRequest(f.ctx,
+			uuid.UUID(f.workspace.ID.Bytes).String(),
+			uuid.UUID(f.link.ID.Bytes).String(),
+			req.ID,
+			uuid.UUID(f.user.ID.Bytes).String(),
+		)
+		if err != nil {
+			t.Fatalf("reject access request: %v", err)
+		}
+
+		_, err = f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		if !errors.Is(err, ErrAccessRequestExists) {
+			t.Fatalf("expected ErrAccessRequestExists, got %v", err)
+		}
+	})
+}
+
+func TestApproveAccessRequest(t *testing.T) {
+	t.Run("approves request and creates allow rule plus invitation", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "domain",
+			Value:       "allowed.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "Please grant access")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		approved, err := f.svc.ApproveAccessRequest(f.ctx,
+			uuid.UUID(f.workspace.ID.Bytes).String(),
+			uuid.UUID(f.link.ID.Bytes).String(),
+			req.ID,
+			uuid.UUID(f.user.ID.Bytes).String(),
+		)
+		if err != nil {
+			t.Fatalf("approve access request: %v", err)
+		}
+		if approved.Status != "approved" {
+			t.Fatalf("expected approved status, got %s", approved.Status)
+		}
+
+		rules, err := f.q.ListLinkAccessRulesByLink(f.ctx, f.link.ID)
+		if err != nil {
+			t.Fatalf("list access rules: %v", err)
+		}
+		var foundAllow bool
+		for _, r := range rules {
+			if r.Action == "allow" && r.Value == "visitor@other.com" {
+				foundAllow = true
+				break
+			}
+		}
+		if !foundAllow {
+			t.Fatal("expected allow-rule for approved email")
+		}
+
+		invitations, err := f.svc.ListInvitations(f.ctx, uuid.UUID(f.workspace.ID.Bytes).String(), uuid.UUID(f.link.ID.Bytes).String())
+		if err != nil {
+			t.Fatalf("list invitations: %v", err)
+		}
+		var foundInvite bool
+		for _, inv := range invitations {
+			if inv.Email == "visitor@other.com" {
+				foundInvite = true
+				break
+			}
+		}
+		if !foundInvite {
+			t.Fatal("expected invitation for approved email")
+		}
+	})
+
+	t.Run("non-creator cannot approve", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		other, err := f.q.CreateUser(f.ctx, db.CreateUserParams{
+			Email:        fmt.Sprintf("other-%s@example.com", uuid.NewString()),
+			PasswordHash: "hash",
+		})
+		if err != nil {
+			t.Fatalf("create other user: %v", err)
+		}
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "domain",
+			Value:       "allowed.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		_, err = f.svc.ApproveAccessRequest(f.ctx,
+			uuid.UUID(f.workspace.ID.Bytes).String(),
+			uuid.UUID(f.link.ID.Bytes).String(),
+			req.ID,
+			uuid.UUID(other.ID.Bytes).String(),
+		)
+		if err == nil {
+			t.Fatal("expected error when non-creator approves")
+		}
+	})
+}

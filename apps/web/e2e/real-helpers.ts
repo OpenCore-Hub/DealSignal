@@ -162,6 +162,7 @@ export async function seedLink(
   opts: {
     name?: string;
     permissionType?: string;
+    requireEmail?: boolean;
     requireEmailVerification?: boolean;
     requirePassword?: boolean;
     requireNda?: boolean;
@@ -181,6 +182,7 @@ export async function seedLink(
     download_enabled: opts.downloadEnabled ?? true,
   };
   if (opts.permissionType) body.permission_type = opts.permissionType;
+  if (opts.requireEmail) body.require_email = true;
   if (opts.requireEmailVerification) body.require_email_verification = true;
   if (opts.requirePassword) body.require_password = true;
   if (opts.requireNda) body.require_nda = true;

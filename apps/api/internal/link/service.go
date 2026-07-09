@@ -1260,6 +1260,16 @@ func isValidEmail(email string) bool {
 	return false
 }
 
+// AllowAccessRequest checks the per-IP per-link rate limit for access requests.
+func (s *Service) AllowAccessRequest(ctx context.Context, clientIP, publicToken string) (bool, error) {
+	if s.redisClient == nil {
+		return true, nil
+	}
+	key := "access_request:" + clientIP + ":" + publicToken
+	allowed, _, err := s.redisClient.RateLimitAllow(ctx, key, 5, time.Hour)
+	return allowed, err
+}
+
 // RequestAccess lets a blocked or not-allowed visitor request access to a link.
 func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason string) (LinkAccessRequest, error) {
 	email = strings.TrimSpace(strings.ToLower(email))

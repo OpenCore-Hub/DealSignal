@@ -170,7 +170,7 @@
 | [TASK-SHARE-SHORT-004.md](./TASK-SHARE-SHORT-004.md) | TASK-SHARE-SHORT-004 | 访问与页面浏览去重 | backend | ~95% | 30min/5min 窗口已生效 |
 | [TASK-SHARE-SHORT-005.md](./TASK-SHARE-SHORT-005.md) | TASK-SHARE-SHORT-005 | Deal Room / 文档链接分享后端核心 | backend | ~95% | token hash、security_version、access_requests、rule revisions 已落地；剩余 UI 请求访问表单 |
 | [TASK-SHARE-SHORT-006.md](./TASK-SHARE-SHORT-006.md) | TASK-SHARE-SHORT-006 | 前端三 Tab 弹窗 | frontend | ~70% | Preset 高亮反馈、domain 下拉、占位开关处理、微动画 |
-| [TASK-SHARE-SHORT-007.md](./TASK-SHARE-SHORT-007.md) | TASK-SHARE-SHORT-007 | 邀请邮件、访问通知、请求访问 | fullstack | ~95% | 公共 Viewer 请求访问 UI 已补齐；前端 typecheck/test/lint 全绿；后端 `go test ./...` 全绿；剩余 E2E 与 PR 关联 |
+| [TASK-SHARE-SHORT-007.md](./TASK-SHARE-SHORT-007.md) | TASK-SHARE-SHORT-007 | 邀请邮件、访问通知、请求访问 | fullstack | ~98% | 后端访问请求闭环（公共端点 + 审批 + allow-rule + 邀请邮件）已落地并接入每 IP 每 link 5 次/小时限流；前端请求访问 UI 已补齐；前后端测试全绿；剩余 E2E 与 PR 关联 |
 | [TASK-SHARE-SHORT-008.md](./TASK-SHARE-SHORT-008.md) | TASK-SHARE-SHORT-008 | AI Assistant + Visitor Q&A | fullstack | ~10% | `qa_enabled` 占位，无后端字段与 Q&A 面板 |
 | [TASK-SHARE-SHORT-009.md](./TASK-SHARE-SHORT-009.md) | TASK-SHARE-SHORT-009 | 访客文件请求 MVP | fullstack | ~10% | `file_requests_enabled` 占位，无表无 API |
 | [TASK-SHARE-MID-001.md](./TASK-SHARE-MID-001.md) | TASK-SHARE-MID-001 | Key Page Views 语义修正 | backend | ~40% | 当前按 document title 而非 page title |
