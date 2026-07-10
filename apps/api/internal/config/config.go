@@ -90,6 +90,15 @@ type Config struct {
 	PageViewDedupWindow time.Duration
 	DedupRedisEnabled   bool
 
+	URLSigningSecret string
+
+	SecurityAnomalyWindow    time.Duration
+	SecurityAnomalyThreshold int
+
+	AccessLogsRetentionDays    int
+	PageViewsRetentionDays     int
+	SecurityEventsRetentionDays int
+
 	CORSAllowedOrigins string
 	MetricsEnabled     bool
 	PprofEnabled       bool
@@ -177,6 +186,15 @@ func Load() (*Config, error) {
 		LinkOpenDedupWindow: time.Duration(getEnvInt("LINK_OPEN_DEDUP_WINDOW_MINUTES", 30)) * time.Minute,
 		PageViewDedupWindow: time.Duration(getEnvInt("PAGE_VIEW_DEDUP_WINDOW_MINUTES", 5)) * time.Minute,
 		DedupRedisEnabled:   strings.ToLower(getEnv("DEDUP_REDIS_ENABLED", "true")) == "true",
+
+		URLSigningSecret: getEnv("URL_SIGNING_SECRET", ""),
+
+		SecurityAnomalyWindow:    time.Duration(getEnvInt("SECURITY_ANOMALY_WINDOW_MINUTES", 5)) * time.Minute,
+		SecurityAnomalyThreshold: getEnvInt("SECURITY_ANOMALY_THRESHOLD", 5),
+
+		AccessLogsRetentionDays:     getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
+		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
+		SecurityEventsRetentionDays: getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",

@@ -4,7 +4,7 @@ parent_issue: DS-SHARE-018
 agent_task_id: AGENT-TASK-SHARE-018
 version: v1.0.0
 priority: P1
-status: 待执行
+status: 已完成
 type: fullstack
 effort: M
 branch: feat/share-mid-006-server-side-watermark

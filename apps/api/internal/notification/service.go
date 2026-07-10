@@ -46,11 +46,26 @@ type Service struct {
 	queries Querier
 	mailer  mailer.Mailer
 	cfg     *config.Config
+	rules   *RuleEngine
 }
 
 // NewService creates a notification service.
 func NewService(q Querier, m mailer.Mailer, cfg *config.Config) *Service {
 	return &Service{queries: q, mailer: m, cfg: cfg}
+}
+
+// SetRuleEngine injects the rule engine for merge-window and preference checks.
+func (s *Service) SetRuleEngine(r *RuleEngine) {
+	s.rules = r
+}
+
+// Evaluate runs the event through the notification rule engine.
+// If no rule engine is configured the event is silently dropped.
+func (s *Service) Evaluate(ctx context.Context, ev Event) error {
+	if s.rules == nil {
+		return nil
+	}
+	return s.rules.Evaluate(ctx, ev)
 }
 
 // Enqueue creates a pending notification.

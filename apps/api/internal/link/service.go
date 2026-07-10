@@ -9,6 +9,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"net/netip"
 	"net/url"
 	"sort"
@@ -41,6 +42,7 @@ type emailCode struct {
 // Notifier is the subset of notification.Service needed by link.Service.
 type Notifier interface {
 	Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) (notification.Notification, error)
+	Evaluate(ctx context.Context, ev notification.Event) error
 }
 
 // Service handles smart links.
@@ -51,13 +53,26 @@ type Service struct {
 	mailer          mailer.Mailer
 	notifier        Notifier
 	viewerBaseURL   string
+	llm             LLMClient
 	emailSem        chan struct{} // limits concurrent email sends (bounded goroutines)
 }
 
+// LLMClient is the subset of llm.Client used by the link service.
+type LLMClient interface {
+	ChatCompletion(ctx context.Context, systemPrompt string, history []llmMessage) (string, error)
+}
+
+// llmMessage mirrors llm.Message without importing the llm package.
+type llmMessage struct {
+	Role    string
+	Content string
+}
+
 // NewService creates a link service.
-func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, n Notifier) *Service {
+func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, n Notifier, llm LLMClient) *Service {
 	return &Service{
 		queries: q, pool: pool, redisClient: r, mailer: m, notifier: n, viewerBaseURL: viewerBaseURL,
+		llm:      llm,
 		emailSem: make(chan struct{}, 8), // cap concurrent email goroutines
 	}
 }
@@ -118,6 +133,23 @@ func (s *Service) ResolvePublicLink(ctx context.Context, publicToken string) (db
 	return link, nil
 }
 
+// EvaluateNotificationRules runs a link activity event through the workspace's
+// notification rule engine. Callers should invoke this after recording events
+// such as link_opened or page_viewed.
+func (s *Service) EvaluateNotificationRules(ctx context.Context, link db.Link, eventType, visitorID, visitorEmail string, metadata map[string]string) error {
+	if s.notifier == nil {
+		return nil
+	}
+	return s.notifier.Evaluate(ctx, notification.Event{
+		WorkspaceID:  uuid.UUID(link.WorkspaceID.Bytes).String(),
+		LinkID:       uuid.UUID(link.ID.Bytes).String(),
+		EventType:    eventType,
+		VisitorID:    visitorID,
+		VisitorEmail: visitorEmail,
+		Metadata:     metadata,
+	})
+}
+
 // CreateLinkRequest is the input for creating a link.
 type CreateLinkRequest struct {
 	DocumentID               string
@@ -137,6 +169,9 @@ type CreateLinkRequest struct {
 	DownloadEnabled          bool
 	WatermarkEnabled         bool
 	AICopilotEnabled         bool
+	QaEnabled                bool
+	FileRequestsEnabled      bool
+	IndexFileEnabled         bool
 	ContactIDs               []string
 	CustomDomain             string
 	Tags                     []string
@@ -161,6 +196,9 @@ type UpdateLinkRequest struct {
 	DownloadEnabled          bool
 	WatermarkEnabled         bool
 	AICopilotEnabled         bool
+	QaEnabled                bool
+	FileRequestsEnabled      bool
+	IndexFileEnabled         bool
 	ContactIDs               []string
 	CustomDomain             string
 	Tags                     []string
@@ -342,6 +380,9 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AiCopilotEnabled:         req.AICopilotEnabled,
+		QaEnabled:                req.QaEnabled,
+		FileRequestsEnabled:      req.FileRequestsEnabled,
+		IndexFileEnabled:         req.IndexFileEnabled,
 		RequireEmail:             requireEmail,
 		RequireEmailVerification: requireEmailVerification,
 		RequireNda:               requireNDA,
@@ -504,6 +545,9 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AICopilotEnabled:         req.AICopilotEnabled,
+		QaEnabled:                req.QaEnabled,
+		FileRequestsEnabled:      req.FileRequestsEnabled,
+		IndexFileEnabled:         req.IndexFileEnabled,
 		ContactIDs:               req.ContactIDs,
 	}
 
@@ -570,11 +614,15 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		RequireEmailVerification: requireEmailVerification,
 		RequireNda:               requireNDA,
 		AiCopilotEnabled:         req.AICopilotEnabled,
+		QaEnabled:                req.QaEnabled,
+		FileRequestsEnabled:      req.FileRequestsEnabled,
+		IndexFileEnabled:         req.IndexFileEnabled,
 		RequirePassword:          req.RequirePassword,
 		PasswordHash:             passwordHash,
 		CustomDomain:             customDomain,
 		Tags:                     tags,
 		NotifyOnAccess:           req.NotifyOnAccess,
+		SecurityVersion:          existing.SecurityVersion + 1,
 		ID:                       existing.ID,
 		WorkspaceID:              workspaceUUID,
 	})
@@ -730,6 +778,28 @@ func (s *Service) ListDealRoomLinks(ctx context.Context, workspaceID, dealRoomID
 		WorkspaceID: workspaceUUID,
 		DealRoomID:  pgtype.UUID{Bytes: drUUID, Valid: true},
 	})
+}
+
+// ResolveDealRoomSlug looks up a deal room by slug and returns the public token
+// of its first active share link. Returns empty string if no link exists.
+func (s *Service) ResolveDealRoomSlug(ctx context.Context, slug string) (string, error) {
+	room, err := s.queries.GetDealRoomBySlug(ctx, slug)
+	if err != nil {
+		return "", fmt.Errorf("deal room not found: %w", err)
+	}
+	links, err := s.queries.ListLinksByDealRoom(ctx, db.ListLinksByDealRoomParams{
+		WorkspaceID: room.WorkspaceID,
+		DealRoomID:  room.ID,
+	})
+	if err != nil {
+		return "", fmt.Errorf("list links: %w", err)
+	}
+	for _, l := range links {
+		if l.Status == "active" {
+			return l.PublicToken, nil
+		}
+	}
+	return "", nil
 }
 
 // EvaluateAccessRules determines whether the given email is allowed to access
@@ -1040,15 +1110,15 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 				return nil, fmt.Errorf("generate invite token: %w", err)
 			}
 			expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
-			inv, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
-				Token:     pgtype.Text{String: token, Valid: true},
+			if _, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
+				Token:     pgtype.Text{String: "", Valid: false},
+				TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
 				ExpiresAt: expiresAt,
 				ID:        existing.ID,
-			})
-			if err != nil {
+			}); err != nil {
 				return nil, fmt.Errorf("reset invitation: %w", err)
 			}
-			invitations = append(invitations, dbInvitationToDomain(inv))
+			invitations = append(invitations, invitationFromRaw(token, existing.ID, link.ID, email, "pending", expiresAt, pgtype.Timestamptz{}))
 			continue
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -1066,7 +1136,8 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			WorkspaceID: workspaceUUID,
 			LinkID:      link.ID,
 			Email:       email,
-			Token:       pgtype.Text{String: token, Valid: true},
+			Token:       pgtype.Text{String: "", Valid: false},
+			TokenHash:   pgtype.Text{String: hashToken(token), Valid: true},
 			Status:      "pending",
 			ExpiresAt:   expiresAt,
 			CreatedBy:   userUUID,
@@ -1074,7 +1145,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 		if err != nil {
 			return nil, fmt.Errorf("create invitation: %w", err)
 		}
-		invitations = append(invitations, dbInvitationToDomain(inv))
+		invitations = append(invitations, invitationFromRaw(token, inv.ID, link.ID, email, inv.Status, expiresAt, pgtype.Timestamptz{}))
 	}
 
 	// Add invited emails to allow list.
@@ -1120,13 +1191,25 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 
 // ResolveInviteToken validates an invitation token and returns the invitation.
 func (s *Service) ResolveInviteToken(ctx context.Context, token string) (LinkInvitation, error) {
-	inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: token, Valid: true})
+	inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: hashToken(token), Valid: true})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return LinkInvitation{}, ErrLinkNotFound
 		}
 		return LinkInvitation{}, fmt.Errorf("get invitation: %w", err)
 	}
+
+	// Lazy backfill: legacy invitations stored the plaintext token. Compute and
+	// persist the hash on first lookup so future lookups use the hash path.
+	if !inv.TokenHash.Valid || inv.TokenHash.String == "" {
+		if err := s.queries.UpdateLinkInvitationTokenHash(ctx, db.UpdateLinkInvitationTokenHashParams{
+			TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
+			ID:        inv.ID,
+		}); err != nil {
+			logger.ErrorCtx(ctx, "failed to backfill invitation token hash", err)
+		}
+	}
+
 	switch inv.Status {
 	case "revoked":
 		return LinkInvitation{}, ErrInviteRevoked
@@ -1530,15 +1613,16 @@ func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Querie
 		if err != nil {
 			return LinkInvitation{}, fmt.Errorf("generate invite token: %w", err)
 		}
-		inv, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
-			Token:     pgtype.Text{String: token, Valid: true},
-			ExpiresAt: pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)},
+		expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
+		if _, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
+			Token:     pgtype.Text{String: "", Valid: false},
+			TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
+			ExpiresAt: expiresAt,
 			ID:        existing.ID,
-		})
-		if err != nil {
+		}); err != nil {
 			return LinkInvitation{}, fmt.Errorf("reset invitation: %w", err)
 		}
-		return dbInvitationToDomain(inv), nil
+		return invitationFromRaw(token, existing.ID, link.ID, email, "pending", expiresAt, pgtype.Timestamptz{}), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return LinkInvitation{}, fmt.Errorf("get invitation by email: %w", err)
@@ -1548,14 +1632,16 @@ func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Querie
 	if err != nil {
 		return LinkInvitation{}, fmt.Errorf("generate invite token: %w", err)
 	}
+	expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
 	inv, err := qtx.CreateLinkInvitation(ctx, db.CreateLinkInvitationParams{
 		TenantID:    link.TenantID,
 		WorkspaceID: workspaceUUID,
 		LinkID:      link.ID,
 		Email:       email,
-		Token:       pgtype.Text{String: token, Valid: true},
+		Token:       pgtype.Text{String: "", Valid: false},
+		TokenHash:   pgtype.Text{String: hashToken(token), Valid: true},
 		Status:      "pending",
-		ExpiresAt:   pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)},
+		ExpiresAt:   expiresAt,
 		CreatedBy:   createdBy,
 	})
 	if err != nil {
@@ -1574,7 +1660,35 @@ func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Querie
 		return LinkInvitation{}, fmt.Errorf("create allow rule: %w", err)
 	}
 
-	return dbInvitationToDomain(inv), nil
+	return invitationFromRaw(token, inv.ID, link.ID, email, inv.Status, expiresAt, pgtype.Timestamptz{}), nil
+}
+
+// hashToken returns the HMAC-SHA256 hash (hex) of an invite token.
+func hashToken(token string) string {
+	sum := sha256.Sum256([]byte(token))
+	return hex.EncodeToString(sum[:])
+}
+
+// invitationFromRaw builds a LinkInvitation domain object from a raw token and
+// database fields. The raw token is never persisted; it is only returned to the
+// caller once, immediately after creation or reset.
+func invitationFromRaw(token string, id, linkID pgtype.UUID, email, status string, expiresAt, usedAt pgtype.Timestamptz) LinkInvitation {
+	inv := LinkInvitation{
+		ID:     uuid.UUID(id.Bytes).String(),
+		LinkID: uuid.UUID(linkID.Bytes).String(),
+		Email:  email,
+		Token:  token,
+		Status: status,
+	}
+	if expiresAt.Valid {
+		t := expiresAt.Time
+		inv.ExpiresAt = &t
+	}
+	if usedAt.Valid {
+		t := usedAt.Time
+		inv.UsedAt = &t
+	}
+	return inv
 }
 
 func (s *Service) sendInvitationEmail(ctx context.Context, inv LinkInvitation, linkName, linkURL string) {
@@ -1814,7 +1928,7 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	// Mark invitation as used/verified if present.
 	if req.InviteToken != "" {
-		if inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: req.InviteToken, Valid: true}); err == nil {
+		if inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: hashToken(req.InviteToken), Valid: true}); err == nil {
 			usedAt := pgtype.Timestamptz{Valid: true, Time: time.Now()}
 			status := "verified"
 			if inv.Status == "pending" {
@@ -2482,3 +2596,315 @@ func constantTimeEmailCompare(a, b string) bool {
 	) == 1
 }
 
+// CreateVisitorQuestion creates a new visitor question on a public link.
+// The qa_enabled flag must be checked by the caller before invoking this method.
+func (s *Service) CreateVisitorQuestion(ctx context.Context, link db.Link, visitorID, visitorEmail, question string) (db.LinkVisitorQuestion, error) {
+	if strings.TrimSpace(question) == "" {
+		return db.LinkVisitorQuestion{}, fmt.Errorf("question is required")
+	}
+	if len(question) > 500 {
+		return db.LinkVisitorQuestion{}, fmt.Errorf("question must not exceed 500 characters")
+	}
+
+	return s.queries.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
+		TenantID:     link.TenantID,
+		WorkspaceID:  link.WorkspaceID,
+		LinkID:       link.ID,
+		VisitorID:    visitorID,
+		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
+		Question:     strings.TrimSpace(question),
+	})
+}
+
+// ListMyVisitorQuestions returns all questions submitted by a specific visitor on a link.
+func (s *Service) ListMyVisitorQuestions(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]db.LinkVisitorQuestion, error) {
+	return s.queries.ListVisitorQuestionsByVisitor(ctx, db.ListVisitorQuestionsByVisitorParams{
+		LinkID:    linkID,
+		VisitorID: visitorID,
+	})
+}
+
+// ListLinkVisitorQuestions returns all questions for a link (owner view).
+func (s *Service) ListLinkVisitorQuestions(ctx context.Context, linkID pgtype.UUID) ([]db.LinkVisitorQuestion, error) {
+	return s.queries.ListVisitorQuestionsByLink(ctx, linkID)
+}
+
+// AnswerVisitorQuestion records an answer to a visitor question.
+// The caller must verify workspace ownership before invoking.
+func (s *Service) AnswerVisitorQuestion(ctx context.Context, questionID, workspaceID, userID pgtype.UUID, answer string) (db.LinkVisitorQuestion, error) {
+	if strings.TrimSpace(answer) == "" {
+		return db.LinkVisitorQuestion{}, fmt.Errorf("answer is required")
+	}
+	return s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
+		Answer:      pgtype.Text{String: strings.TrimSpace(answer), Valid: true},
+		AnsweredBy:  userID,
+		ID:          questionID,
+		WorkspaceID: workspaceID,
+	})
+}
+
+const maxPendingFileRequestsPerVisitor = 3
+
+// CreateFileRequest allows a visitor to request a missing file from the link owner.
+func (s *Service) CreateFileRequest(ctx context.Context, link db.Link, visitorID, visitorEmail, message string) (db.LinkFileRequest, error) {
+	msg := strings.TrimSpace(message)
+	if msg == "" {
+		return db.LinkFileRequest{}, fmt.Errorf("message is required")
+	}
+	if len(msg) > 500 {
+		return db.LinkFileRequest{}, fmt.Errorf("message must not exceed 500 characters")
+	}
+
+	count, err := s.queries.CountPendingFileRequestsByVisitor(ctx, db.CountPendingFileRequestsByVisitorParams{
+		LinkID:    link.ID,
+		VisitorID: pgtype.Text{String: visitorID, Valid: true},
+	})
+	if err != nil {
+		return db.LinkFileRequest{}, fmt.Errorf("count pending: %w", err)
+	}
+	if count >= maxPendingFileRequestsPerVisitor {
+		return db.LinkFileRequest{}, fmt.Errorf("too many pending requests")
+	}
+
+	return s.queries.CreateFileRequest(ctx, db.CreateFileRequestParams{
+		TenantID:     link.TenantID,
+		WorkspaceID:  link.WorkspaceID,
+		LinkID:       link.ID,
+		VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
+		Message:      msg,
+	})
+}
+
+// ListMyFileRequests returns file requests submitted by a visitor on a link.
+func (s *Service) ListMyFileRequests(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]db.LinkFileRequest, error) {
+	return s.queries.ListFileRequestsByVisitor(ctx, db.ListFileRequestsByVisitorParams{
+		LinkID:    linkID,
+		VisitorID: pgtype.Text{String: visitorID, Valid: true},
+	})
+}
+
+// ListLinkFileRequests returns all file requests for a link (owner view).
+func (s *Service) ListLinkFileRequests(ctx context.Context, linkID pgtype.UUID) ([]db.LinkFileRequest, error) {
+	return s.queries.ListFileRequestsByLink(ctx, linkID)
+}
+
+// UpdateFileRequestStatus changes the status of a file request.
+func (s *Service) UpdateFileRequestStatus(ctx context.Context, requestID pgtype.UUID, status string) error {
+	return s.queries.UpdateFileRequestStatus(ctx, db.UpdateFileRequestStatusParams{
+		Status: status,
+		ID:     requestID,
+	})
+}
+
+// GetFileRequestByID returns a single file request.
+func (s *Service) GetFileRequestByID(ctx context.Context, id pgtype.UUID) (db.LinkFileRequest, error) {
+	return s.queries.GetFileRequestByID(ctx, id)
+}
+
+// GetLinkIndexFileByLink returns the index file for a link.
+func (s *Service) GetLinkIndexFileByLink(ctx context.Context, linkID pgtype.UUID) (db.LinkIndexFile, error) {
+	return s.queries.GetLinkIndexFileByLink(ctx, linkID)
+}
+
+// GenerateIndexFile creates or regenerates an AI-powered summary index for a link.
+// Returns the index file record. The caller must verify the link belongs to the workspace.
+func (s *Service) GenerateIndexFile(ctx context.Context, link db.Link) (db.LinkIndexFile, error) {
+	if s.llm == nil {
+		_ = s.queries.UpdateLinkIndexFileFailed(ctx, db.UpdateLinkIndexFileFailedParams{
+			ErrorMessage: pgtype.Text{String: "AI service is not configured", Valid: true},
+			LinkID:       link.ID,
+		})
+		return db.LinkIndexFile{}, fmt.Errorf("AI service not configured")
+	}
+
+	row, err := s.queries.UpsertLinkIndexFile(ctx, db.UpsertLinkIndexFileParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
+	})
+	if err != nil {
+		return db.LinkIndexFile{}, fmt.Errorf("upsert index file: %w", err)
+	}
+
+	docTitles := s.collectDocTitles(ctx, link)
+	if len(docTitles) == 0 {
+		docTitles = []string{link.Name.String}
+	}
+
+	systemPrompt := "You are an AI assistant that creates executive summaries of shared documents. Generate a concise index with: 1) a 2-3 sentence executive summary, 2) a bullet-point list of key topics covered, and 3) a recommended reading order. Format the output in HTML (without <html>/<body> tags). Use <h2>, <p>, <ul>/<li>. Keep it under 2000 characters. Do NOT make up content not in the documents."
+
+	docContext := "Documents in this link:\n"
+	for _, t := range docTitles {
+		docContext += "- " + t + "\n"
+	}
+
+	content, chatErr := s.llm.ChatCompletion(ctx, systemPrompt, []llmMessage{
+		{Role: "user", Content: fmt.Sprintf("Generate an AI-generated index/summary for the following documents. Label the output as AI-generated.\n\n%s", docContext)},
+	})
+
+	if chatErr != nil {
+		_ = s.queries.UpdateLinkIndexFileFailed(ctx, db.UpdateLinkIndexFileFailedParams{
+			ErrorMessage: pgtype.Text{String: chatErr.Error(), Valid: true},
+			LinkID:       link.ID,
+		})
+		return db.LinkIndexFile{}, fmt.Errorf("AI generation failed: %w", chatErr)
+	}
+
+	sanitized := sanitizeHTML(content)
+	if err := s.queries.UpdateLinkIndexFileReady(ctx, db.UpdateLinkIndexFileReadyParams{
+		ContentHtml: pgtype.Text{String: sanitized, Valid: true},
+		LinkID:      link.ID,
+	}); err != nil {
+		return db.LinkIndexFile{}, fmt.Errorf("update index file ready: %w", err)
+	}
+
+	row, _ = s.queries.GetLinkIndexFileByLink(ctx, link.ID)
+	return row, nil
+}
+
+func (s *Service) collectDocTitles(ctx context.Context, link db.Link) []string {
+	var titles []string
+	if link.DocumentID.Valid {
+		doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+			ID:          link.DocumentID,
+			WorkspaceID: link.WorkspaceID,
+		})
+		if err == nil && doc.Title != "" {
+			titles = append(titles, doc.Title)
+		}
+	}
+	// For deal room links, generate index from the deal room context.
+	if link.DealRoomID.Valid {
+		room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+			ID:          link.DealRoomID,
+			WorkspaceID: link.WorkspaceID,
+		})
+		if err == nil && room.Name != "" {
+			titles = append(titles, room.Name)
+		}
+	}
+	return titles
+}
+
+// sanitizeHTML removes script, iframe, and object tags for basic XSS prevention.
+func sanitizeHTML(html string) string {
+	html = strings.ReplaceAll(html, "<script", "<!--removed-script")
+	html = strings.ReplaceAll(html, "</script>", "removed-script-->")
+	html = strings.ReplaceAll(html, "<iframe", "<!--removed-iframe")
+	html = strings.ReplaceAll(html, "</iframe>", "removed-iframe-->")
+	html = strings.ReplaceAll(html, "<object", "<!--removed-object")
+	html = strings.ReplaceAll(html, "</object>", "removed-object-->")
+	return html
+}
+
+// FileUploader abstracts file storage for uploaded files.
+type FileUploader interface {
+	PutObject(ctx context.Context, key string, body io.Reader, size int64, contentType string) error
+}
+
+var allowedUploadMimeTypes = map[string]bool{
+	"application/pdf": true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
+	"application/zip": true,
+}
+
+// UploadFileForLink stores a file uploaded through a file-request link.
+func (s *Service) UploadFileForLink(ctx context.Context, storage FileUploader, link db.Link, filename, mimeType string, size int64, body io.Reader, visitorID, visitorEmail, ip, ua string) (db.LinkUploadedFile, error) {
+	if link.LinkType != "file_request" {
+		return db.LinkUploadedFile{}, fmt.Errorf("link is not a file request link")
+	}
+	if !allowedUploadMimeTypes[mimeType] {
+		return db.LinkUploadedFile{}, fmt.Errorf("unsupported file type: %s", mimeType)
+	}
+	const maxSize = 50 * 1024 * 1024
+	if size > maxSize {
+		return db.LinkUploadedFile{}, fmt.Errorf("file too large (max 50MB)")
+	}
+	if size <= 0 {
+		return db.LinkUploadedFile{}, fmt.Errorf("file is empty")
+	}
+
+	storageKey := fmt.Sprintf("uploads/%s/%s/%s", uuid.New().String(), link.PublicToken, filename)
+	if err := storage.PutObject(ctx, storageKey, body, size, mimeType); err != nil {
+		return db.LinkUploadedFile{}, fmt.Errorf("store upload: %w", err)
+	}
+
+	return s.queries.CreateUploadedFile(ctx, db.CreateUploadedFileParams{
+		TenantID:          link.TenantID,
+		WorkspaceID:       link.WorkspaceID,
+		LinkID:            link.ID,
+		OriginalFilename:  filename,
+		StorageKey:        storageKey,
+		FileSize:          size,
+		MimeType:          mimeType,
+		UploaderEmail:     pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
+		UploaderVisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		UploaderUserAgent: pgtype.Text{String: ua, Valid: ua != ""},
+	})
+}
+
+// ListUploadedFiles returns all uploaded files for a link.
+func (s *Service) ListUploadedFiles(ctx context.Context, linkID pgtype.UUID) ([]db.LinkUploadedFile, error) {
+	return s.queries.ListUploadedFilesByLink(ctx, linkID)
+}
+
+// ApproveUploadedFile approves a pending uploaded file.
+func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, reviewerID pgtype.UUID) error {
+	return s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
+		Status:     "approved",
+		ReviewedBy: reviewerID,
+		ID:         fileID,
+	})
+}
+
+// RejectUploadedFile rejects a pending uploaded file.
+func (s *Service) RejectUploadedFile(ctx context.Context, fileID pgtype.UUID, reviewerID pgtype.UUID) error {
+	return s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
+		Status:     "rejected",
+		ReviewedBy: reviewerID,
+		ID:         fileID,
+	})
+}
+
+// GetUploadedFileByID returns a single uploaded file record.
+func (s *Service) GetUploadedFileByID(ctx context.Context, id pgtype.UUID) (db.LinkUploadedFile, error) {
+	return s.queries.GetUploadedFileByID(ctx, id)
+}
+
+// ClassifyQuestionIntent runs an LLM-powered intent classification on a visitor
+// question and stores the result. Called asynchronously after question creation.
+func (s *Service) ClassifyQuestionIntent(ctx context.Context, questionID pgtype.UUID, questionText string) {
+	if s.llm == nil || questionText == "" {
+		return
+	}
+
+	systemPrompt := "You are an intent classifier for document sharing Q&A. " +
+		"Analyze the question and respond with exactly ONE label from: " +
+		"pricing, security, timeline, implementation, feature_request, support, objection, general. " +
+		"Output only the label, no explanation."
+
+	label, err := s.llm.ChatCompletion(ctx, systemPrompt, []llmMessage{
+		{Role: "user", Content: questionText},
+	})
+	if err != nil {
+		return
+	}
+
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return
+	}
+
+	_ = s.queries.UpdateQuestionIntentTag(ctx, db.UpdateQuestionIntentTagParams{
+		IntentTag: label,
+		ID:        questionID,
+	})
+}
+
+// ListDormantLinks returns links that were active but went cold, ranked by reactivation potential.
+func (s *Service) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListDormantLinksRow, error) {
+	return s.queries.ListDormantLinks(ctx, workspaceID)
+}

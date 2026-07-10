@@ -854,10 +854,10 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			TwoFactorEnabled:       false,
 			CreatedAt:              nowTs(),
 		}
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, false, false, false}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, false, false, false, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 limit"):
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, false, false, false}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, false, false, false, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
 	case strings.Contains(sqlLower, "insert into deal_rooms"):
 		room := db.DealRoom{

@@ -212,6 +212,20 @@
     "requestAccessSubmit": "Submit request",
     "requestAccessSubmitted": "Your access request has been submitted.",
     "requestAccessExists": "You have already submitted a request for this link.",
-    "requestAccessFailed": "Failed to submit request. Please try again later."
+    "requestAccessFailed": "Failed to submit request. Please try again later.",
+    "sidebarQA": "Q&A",
+    "qaLoadError": "Could not load questions",
+    "qaLengthError": "Question must be 1–500 characters",
+    "qaDisabled": "Q&A is not available for this link",
+    "qaError": "Failed to submit question",
+    "qaEmpty": "No questions yet. Ask the owner about this document.",
+    "qaOwnerReply": "Owner reply",
+    "qaAnswered": "Answered",
+    "qaPending": "Awaiting answer",
+    "qaPlaceholder": "Ask a question...",
+    "qaSubmit": "Ask",
+    "sidebarRequests": "Requests",
+    "printWarning": "Printing disabled",
+    "printWarningHint": "This document is protected. Please contact the owner for an authorized copy."
   }
 }

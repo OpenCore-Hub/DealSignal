@@ -26,6 +26,11 @@ type Client struct {
 	rdb *redis.Client
 }
 
+// GoRedis returns the underlying go-redis client for advanced operations.
+func (c *Client) GoRedis() *redis.Client {
+	return c.rdb
+}
+
 // NewClient creates a Redis client from a URL string (e.g. redis:6379 or redis://user:pass@host:port/db).
 func NewClient(rawURL string) (*Client, error) {
 	var opt *redis.Options

@@ -48,7 +48,13 @@ type Input struct {
 	ForwardSignals     int
 	Downloads          int
 	BouncePenalty      int
+	// DecayDays is the number of days since the link's last activity.
+	// Used for exponential time decay of the final score. Zero means today.
+	DecayDays float64
 }
+
+// DecayHalfLifeDays is the default half-life for time decay (7 days).
+const DecayHalfLifeDays = 7.0
 
 // Result is the computed heat score output.
 type Result struct {
@@ -116,6 +122,14 @@ func Compute(circle Circle, in Input) Result {
 	for _, v := range breakdown {
 		raw += v
 	}
+
+	// Apply exponential time decay: factor = 2^(-decayDays / halfLifeDays)
+	// A link with no recent activity gradually loses score weight.
+	if in.DecayDays > 0 && DecayHalfLifeDays > 0 {
+		decay := math.Pow(2, -in.DecayDays/DecayHalfLifeDays)
+		raw *= decay
+	}
+
 	score := int(math.Max(0, math.Min(100, math.Round(raw))))
 
 	level := "cold"

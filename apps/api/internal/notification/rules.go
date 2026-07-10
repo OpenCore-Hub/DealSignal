@@ -12,12 +12,14 @@ import (
 
 // RuleEngine evaluates notification rules and creates or merges notifications.
 type RuleEngine struct {
-	queries *db.Queries
+	queries  *db.Queries
+	enqueuer func(ctx context.Context, workspaceID, userID, channel, subject, body string) error
 }
 
-// NewRuleEngine creates a RuleEngine.
-func NewRuleEngine(q *db.Queries) *RuleEngine {
-	return &RuleEngine{queries: q}
+// NewRuleEngine creates a RuleEngine. The enqueuer should be the notification
+// Service.Enqueue method or an equivalent that sends/persists the notification.
+func NewRuleEngine(q *db.Queries, enqueuer func(ctx context.Context, workspaceID, userID, channel, subject, body string) error) *RuleEngine {
+	return &RuleEngine{queries: q, enqueuer: enqueuer}
 }
 
 // Event describes an activity that may trigger notification rules.
@@ -64,17 +66,17 @@ func (e *RuleEngine) fireRule(ctx context.Context, rule db.NotificationRule, wsU
 		window = 10
 	}
 	channel := "email"
-	subjectPattern := fmt.Sprintf("%%[%s]%%", ev.EventType)
+	subject := fmt.Sprintf("[%s] Activity on your link", ev.EventType)
 	windowStr := pgtype.Text{String: fmt.Sprintf("%d", window), Valid: true}
 
 	// Try to merge into an existing pending notification.
 	existing, err := e.queries.FindMergeableNotification(ctx, db.FindMergeableNotificationParams{
 		WorkspaceID: wsu,
 		Channel:     channel,
-		Subject:     subjectPattern,
+		Subject:     fmt.Sprintf("%%[%s]%%", ev.EventType),
 		Column4:     windowStr,
 	})
-	if err == nil {
+	if err == nil && existing.ID.Valid {
 		merged := mergeNotificationBody(existing.Body, ev.Metadata)
 		_ = e.queries.UpdateNotificationBody(ctx, db.UpdateNotificationBodyParams{
 			Body: merged,
@@ -83,16 +85,9 @@ func (e *RuleEngine) fireRule(ctx context.Context, rule db.NotificationRule, wsU
 		return
 	}
 
-	// Create new notification.
-	subject := fmt.Sprintf("[%s] Activity on your link", ev.EventType)
+	// Create new notification via the enqueuer so it goes through the mailer.
 	body := formatEventBody(ev)
-
-	_, _ = e.queries.CreateNotification(ctx, db.CreateNotificationParams{
-		WorkspaceID: wsu,
-		Channel:     channel,
-		Subject:     subject,
-		Body:        body,
-	})
+	_ = e.enqueuer(ctx, ev.WorkspaceID, "", channel, subject, body)
 }
 
 // mergeNotificationBody appends new metadata to an existing notification body.

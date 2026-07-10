@@ -4,7 +4,7 @@ parent_issue: DS-SHARE-017
 agent_task_id: AGENT-TASK-SHARE-017
 version: v1.0.0
 priority: P1
-status: 完成
+status: "已完成"
 type: fullstack
 effort: M
 branch: feat/share-short-007-invite-email-access-request

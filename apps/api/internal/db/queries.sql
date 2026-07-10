@@ -1603,15 +1603,21 @@ INSERT INTO link_access_rule_revisions (
 
 -- name: CreateLinkInvitation :one
 INSERT INTO link_invitations (
-    tenant_id, workspace_id, link_id, email, token, status, expires_at, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
+    tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, used_at, created_by, created_at, updated_at;
 
 -- name: GetLinkInvitationByToken :one
-SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+SELECT id, tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, used_at, created_by, created_at, updated_at
 FROM link_invitations
-WHERE token = $1
+WHERE token_hash = $1 OR (token_hash IS NULL AND token = $1)
 LIMIT 1;
+
+-- name: UpdateLinkInvitationTokenHash :exec
+UPDATE link_invitations
+SET token_hash = $1,
+    updated_at = now()
+WHERE id = $2;
 
 -- name: GetLinkInvitationByLinkAndEmail :one
 SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
@@ -1649,12 +1655,13 @@ WHERE link_id = $1 AND rule_type = $2 AND value = $3 AND action = $4;
 -- name: ResetLinkInvitation :one
 UPDATE link_invitations
 SET token = $1,
+    token_hash = $2,
     status = 'pending',
-    expires_at = $2,
+    expires_at = $3,
     used_at = NULL,
     updated_at = now()
-WHERE id = $3
-RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
+WHERE id = $4
+RETURNING id, tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, used_at, created_by, created_at, updated_at;
 
 -- name: CreateLinkAccessRequest :one
 INSERT INTO link_access_requests (
@@ -1710,6 +1717,18 @@ SELECT * FROM link_visitor_questions
 WHERE link_id = $1 AND visitor_id = $2
 ORDER BY created_at DESC;
 
+-- name: AnswerVisitorQuestion :one
+UPDATE link_visitor_questions
+SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
+WHERE id = $3 AND workspace_id = $4
+RETURNING *;
+
+-- name: GetVisitorQuestionByID :one
+SELECT *
+FROM link_visitor_questions
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
+
 -- name: UpdateVisitorQuestionAnswer :exec
 UPDATE link_visitor_questions
 SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
@@ -1741,6 +1760,16 @@ UPDATE link_file_requests
 SET status = $1, updated_at = now()
 WHERE id = $2;
 
+-- name: CountPendingFileRequestsByVisitor :one
+SELECT COUNT(*)::int
+FROM link_file_requests
+WHERE link_id = $1 AND visitor_id = $2 AND status = 'pending';
+
+-- name: GetFileRequestByID :one
+SELECT * FROM link_file_requests
+WHERE id = $1
+LIMIT 1;
+
 -- name: ListNotificationRulesByWorkspace :many
 SELECT * FROM notification_rules
 WHERE workspace_id = $1
@@ -1769,3 +1798,144 @@ WHERE workspace_id = $1
   AND created_at > now() - ($4 || ' minutes')::interval
 ORDER BY created_at DESC
 LIMIT 1;
+
+-- name: ListLinksExpiringWithin :many
+SELECT * FROM links
+WHERE status = 'active'
+  AND expires_at IS NOT NULL
+  AND expires_at > now()
+  AND expires_at <= now() + ($1 || ' hours')::interval
+  AND notify_on_access = true
+ORDER BY expires_at ASC;
+
+-- name: GetVisitorFirstAccess :one
+SELECT MIN(created_at)::timestamptz AS first_accessed_at
+FROM access_logs
+WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened';
+
+-- name: CountVisitorAccesses :one
+SELECT COUNT(*)::int
+FROM access_logs
+WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened';
+
+-- name: UpsertLinkIndexFile :one
+INSERT INTO link_index_files (tenant_id, workspace_id, link_id, status, content_html)
+VALUES ($1, $2, $3, 'generating', NULL)
+ON CONFLICT (link_id) DO UPDATE SET
+    status = 'generating',
+    content_html = NULL,
+    error_message = NULL,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetLinkIndexFileByLink :one
+SELECT * FROM link_index_files
+WHERE link_id = $1;
+
+-- name: UpdateLinkIndexFileReady :exec
+UPDATE link_index_files
+SET status = 'ready', content_html = $1, generated_at = now(), updated_at = now()
+WHERE link_id = $2;
+
+-- name: UpdateLinkIndexFileFailed :exec
+UPDATE link_index_files
+SET status = 'failed', error_message = $1, updated_at = now()
+WHERE link_id = $2;
+
+-- name: CreateUploadedFile :one
+INSERT INTO link_uploaded_files (tenant_id, workspace_id, link_id, original_filename, storage_key, file_size, mime_type, uploader_email, uploader_visitor_id, uploader_ip, uploader_user_agent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING *;
+
+-- name: ListUploadedFilesByLink :many
+SELECT * FROM link_uploaded_files
+WHERE link_id = $1
+ORDER BY created_at DESC;
+
+-- name: UpdateUploadedFileStatus :exec
+UPDATE link_uploaded_files
+SET status = $1, reviewed_by = $2, reviewed_at = now()
+WHERE id = $3;
+
+-- name: GetUploadedFileByID :one
+SELECT * FROM link_uploaded_files
+WHERE id = $1;
+
+-- name: DeleteAccessLogsBefore :execrows
+DELETE FROM access_logs
+WHERE created_at < $1;
+
+-- name: DeletePageViewsBefore :execrows
+DELETE FROM page_views
+WHERE created_at < $1;
+
+-- name: DeleteSecurityEventsBefore :execrows
+DELETE FROM security_events
+WHERE created_at < $1;
+
+-- name: UpdateQuestionIntentTag :exec
+UPDATE link_visitor_questions
+SET intent_tag = $1
+WHERE id = $2;
+
+-- name: UpsertCrmSyncState :exec
+INSERT INTO crm_sync_state (workspace_id, event_min, event_max, contact_email, link_id, event_types, summary, pushed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (workspace_id, link_id, contact_email, event_min) DO UPDATE SET
+    event_max = $3, event_types = $6, summary = $7, pushed_at = now();
+
+-- name: GetLastCrmSyncTime :one
+SELECT COALESCE(MAX(event_max), '1970-01-01'::timestamptz)::timestamptz AS last_sync
+FROM crm_sync_state
+WHERE workspace_id = $1;
+
+-- name: ListWorkspacesWithCrmEnabled :many
+SELECT id, crm_config, webhook_secret FROM workspaces
+WHERE crm_config->>'syncEnabled' = 'true';
+
+-- name: GetUnsyncedCrmEvents :many
+SELECT
+    al.link_id,
+    al.visitor_email AS contact_email,
+    al.event_type,
+    al.created_at AS event_time,
+    l.name AS link_name,
+    CASE al.event_type
+        WHEN 'link_opened' THEN 'Opened link: ' || l.name
+        WHEN 'file_downloaded' THEN 'Downloaded file from: ' || l.name
+        ELSE al.event_type || ' on ' || l.name
+    END AS event_summary
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.workspace_id = $1
+  AND al.created_at > $2
+  AND al.visitor_email != ''
+ORDER BY al.visitor_email, al.link_id, al.created_at;
+
+-- name: ListDormantLinks :many
+WITH link_activity AS (
+    SELECT
+        l.id, l.workspace_id, l.name, l.created_by,
+        MAX(al.created_at) AS last_active_at,
+        COUNT(*) FILTER (WHERE al.created_at > NOW() - INTERVAL '30 days')::bigint AS recent_events,
+        MAX(daily.cnt)::bigint AS peak_daily_events,
+        bool_or(al.event_type = 'forward_visited') AS was_forwarded,
+        bool_or(al.event_type = 'file_downloaded') AS had_downloads
+    FROM links l
+    JOIN access_logs al ON al.link_id = l.id
+    JOIN (
+        SELECT link_id, DATE(created_at) AS day, COUNT(*)::bigint AS cnt
+        FROM access_logs WHERE created_at > NOW() - INTERVAL '30 days'
+        GROUP BY link_id, DATE(created_at)
+    ) daily ON daily.link_id = l.id
+    WHERE l.status = 'active'
+      AND l.workspace_id = $1
+    GROUP BY l.id, l.workspace_id, l.name, l.created_by
+    HAVING MAX(al.created_at) < NOW() - INTERVAL '7 days'
+       AND MAX(al.created_at) > NOW() - INTERVAL '30 days'
+)
+SELECT id, workspace_id, name, created_by, last_active_at, recent_events,
+       peak_daily_events, was_forwarded, had_downloads
+FROM link_activity
+ORDER BY (peak_daily_events * (1.0 + EXTRACT(DAY FROM NOW() - last_active_at) / 7.0)) DESC
+LIMIT 20;

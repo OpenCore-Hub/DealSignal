@@ -5,6 +5,7 @@ export interface WatermarkInfo {
   email?: string;
   ip?: string;
   viewedAt?: string;
+  watermarkText?: string;
 }
 
 interface WatermarkOverlayProps {
@@ -29,7 +30,9 @@ export function WatermarkOverlay({ watermark, tiled = true, className }: Waterma
 
   if (!watermark) return null;
 
-  const text = [watermark.email, mountedAt].filter(Boolean).join(" · ") || "CONFIDENTIAL";
+  const text = watermark.watermarkText
+    || [watermark.email, mountedAt].filter(Boolean).join(" · ")
+    || "CONFIDENTIAL";
 
   if (tiled) {
     return (

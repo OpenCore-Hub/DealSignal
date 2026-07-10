@@ -97,6 +97,17 @@ type Contact struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type CrmSyncState struct {
+	WorkspaceID  pgtype.UUID
+	EventMin     pgtype.Timestamptz
+	EventMax     pgtype.Timestamptz
+	ContactEmail string
+	LinkID       pgtype.UUID
+	EventTypes   []string
+	Summary      string
+	PushedAt     pgtype.Timestamptz
+}
+
 type Deal struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
@@ -423,6 +434,7 @@ type LinkVisitorQuestion struct {
 	Status       string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	IntentTag    string
 }
 
 type Notification struct {
@@ -634,6 +646,8 @@ type Workspace struct {
 	ForceEmailVerification bool
 	WatermarkDownloads     bool
 	TwoFactorEnabled       bool
+	CrmConfig              []byte
+	WebhookSecret          pgtype.Text
 }
 
 type WorkspaceInvitation struct {

@@ -3,11 +3,17 @@ package link
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
+	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -33,12 +39,18 @@ type Handler struct {
 	suggestions *suggestions.Service
 	storage     *storage.Client
 	cfg         *config.Config
+	publisher   EventPublisher
 }
 
-const (
-	securityEventAnomalyWindow    = 5 * time.Minute
-	securityEventAnomalyThreshold = 5
-)
+// EventPublisher is the interface for publishing real-time events.
+type EventPublisher interface {
+	PublishLinkEvent(ctx context.Context, workspaceID, linkID string, eventType string, payload any)
+}
+
+// SetEventPublisher sets the event publisher for SSE push.
+func (h *Handler) SetEventPublisher(p EventPublisher) {
+	h.publisher = p
+}
 
 // NewHandler creates a link handler.
 func NewHandler(s *Service, a *analytics.Service, sg *suggestions.Service, st *storage.Client, cfg *config.Config) *Handler {
@@ -63,6 +75,17 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:id/access-requests", h.ListAccessRequests)
 	g.POST("/:id/access-requests/:requestId/approve", h.ApproveAccessRequest)
 	g.POST("/:id/access-requests/:requestId/reject", h.RejectAccessRequest)
+	g.POST("/:id/archive", h.ArchiveLink)
+	g.POST("/:id/renew", h.RenewLink)
+	g.POST("/:id/generate-index", h.GenerateLinkIndex)
+	g.GET("/:id/index-file", h.GetLinkIndexFile)
+	g.GET("/:id/questions", h.ListLinkVisitorQuestions)
+	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion)
+	g.GET("/:id/file-requests", h.ListLinkFileRequests)
+	g.PATCH("/:id/file-requests/:requestId/status", h.UpdateFileRequestStatus)
+	g.GET("/:id/uploaded-files", h.ListUploadedFiles)
+	g.POST("/:id/uploaded-files/:fileId/approve", h.ApproveUploadedFile)
+	g.POST("/:id/uploaded-files/:fileId/reject", h.RejectUploadedFile)
 
 	// Deal-room-scoped link routes.
 	dr := r.Group("/deal-rooms/:roomId/links")
@@ -80,6 +103,14 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
 	r.GET("/documents/:documentId/download-url", h.PublicDownloadURL)
+	r.GET("/deal-rooms/:slug/redirect", h.PublicDealRoomRedirect)
+	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion)
+	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions)
+	r.POST("/links/:publicToken/file-requests", h.PublicCreateFileRequest)
+	r.GET("/links/:publicToken/file-requests/me", h.PublicListMyFileRequests)
+	r.GET("/links/:publicToken/index-file", h.PublicGetLinkIndexFile)
+	r.POST("/links/:publicToken/upload", h.PublicUploadFile)
+	r.GET("/files/signed", h.ServeSignedFile)
 }
 
 // EventRequest is the public event payload.
@@ -140,8 +171,28 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
+
+	metadata := map[string]string{}
+	if req.EventType == "page_viewed" {
+		metadata["page_number"] = strconv.Itoa(int(req.PageNumber))
+	}
+	_ = h.service.EvaluateNotificationRules(ctx, res.Link, ruleEventType(req.EventType), visitorID, email, metadata)
+
 	h.triggerSuggestions(c.Request.Context(), res.Link, langFromContext(c))
 	c.Status(http.StatusNoContent)
+}
+
+// ruleEventType maps frontend event names to notification rule event types.
+func ruleEventType(eventType string) string {
+	switch eventType {
+	case "link_opened":
+		return "first_open"
+	case "page_viewed":
+		return "repeat_key_page"
+	case "download_attempted":
+		return "forward_signal"
+	}
+	return eventType
 }
 
 func (h *Handler) triggerSuggestions(ctx context.Context, link db.Link, lang string) {
@@ -183,6 +234,9 @@ type CreateRequest struct {
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
 	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
+	QaEnabled                bool     `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
 }
 
 // UpdateRequest is the JSON body for updating a link.
@@ -204,6 +258,9 @@ type UpdateRequest struct {
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
 	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
+	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled      *bool    `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
 }
 
 // List returns links for the workspace, optionally filtered by document_id.
@@ -316,21 +373,45 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
 
-	downloadEnabled := true
+	// Fetch existing link so omitted optional flags keep their current values.
+	existing, err := h.service.GetByID(c.Request.Context(), linkID, workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+
+	downloadEnabled := existing.DownloadEnabled
 	if req.DownloadEnabled != nil {
 		downloadEnabled = *req.DownloadEnabled
 	}
-	watermarkEnabled := true
+	watermarkEnabled := existing.WatermarkEnabled
 	if req.WatermarkEnabled != nil {
 		watermarkEnabled = *req.WatermarkEnabled
 	}
-	aiCopilotEnabled := false
+	aiCopilotEnabled := existing.AiCopilotEnabled
 	if req.AICopilotEnabled != nil {
 		aiCopilotEnabled = *req.AICopilotEnabled
 	}
+	qaEnabled := existing.QaEnabled
+	if req.QaEnabled != nil {
+		qaEnabled = *req.QaEnabled
+	}
+	fileRequestsEnabled := existing.FileRequestsEnabled
+	if req.FileRequestsEnabled != nil {
+		fileRequestsEnabled = *req.FileRequestsEnabled
+	}
+	indexFileEnabled := existing.IndexFileEnabled
+	if req.IndexFileEnabled != nil {
+		indexFileEnabled = *req.IndexFileEnabled
+	}
 
-	link, err := h.service.UpdateLink(c.Request.Context(), c.Param("id"), workspaceID, UpdateLinkRequest{
+	link, err := h.service.UpdateLink(c.Request.Context(), linkID, workspaceID, UpdateLinkRequest{
 		DocumentIDs:              req.DocumentIDs,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
@@ -344,6 +425,9 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		DownloadEnabled:          downloadEnabled,
 		WatermarkEnabled:         watermarkEnabled,
 		AICopilotEnabled:         aiCopilotEnabled,
+		QaEnabled:                qaEnabled,
+		FileRequestsEnabled:      fileRequestsEnabled,
+		IndexFileEnabled:         indexFileEnabled,
 		ContactIDs:               req.ContactIDs,
 		CustomDomain:             req.CustomDomain,
 		Tags:                     req.Tags,
@@ -770,6 +854,9 @@ func (h *Handler) Create(c *gin.Context) {
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AICopilotEnabled:         req.AICopilotEnabled,
+		QaEnabled:                req.QaEnabled,
+		FileRequestsEnabled:      req.FileRequestsEnabled,
+		IndexFileEnabled:         req.IndexFileEnabled,
 		ContactIDs:               req.ContactIDs,
 		AllowedEmails:            req.AllowedEmails,
 		AllowedDomains:           req.AllowedDomains,
@@ -917,6 +1004,7 @@ func (h *Handler) Access(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
+	_ = h.service.EvaluateNotificationRules(c.Request.Context(), result.Link, "first_open", result.VisitorID, result.Email, nil)
 	h.triggerSuggestions(c.Request.Context(), result.Link, langFromContext(c))
 
 	h.respondAccessSuccess(c, result.Link, token, result.Email, body.NDAAgreed, result.VisitorID, result.EmailVerified)
@@ -951,13 +1039,17 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 
 	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 	linkPayload := gin.H{
-		"id":               uuidToString(link.ID),
-		"name":             textOrNil(link.Name),
-		"permissionType":   link.PermissionType,
-		"downloadEnabled":  link.DownloadEnabled,
-		"watermarkEnabled": link.WatermarkEnabled,
-		"aiCopilotEnabled": link.AiCopilotEnabled,
-		"isBundle":         len(documents) > 1,
+		"id":                    uuidToString(link.ID),
+		"name":                  textOrNil(link.Name),
+		"permissionType":        link.PermissionType,
+		"downloadEnabled":       link.DownloadEnabled,
+		"watermarkEnabled":      link.WatermarkEnabled,
+		"watermarkText":         h.watermarkTextFor(email, c.ClientIP()),
+		"aiCopilotEnabled":      link.AiCopilotEnabled,
+		"qaEnabled":             link.QaEnabled,
+		"fileRequestsEnabled":   link.FileRequestsEnabled,
+		"indexFileEnabled":      link.IndexFileEnabled,
+		"isBundle":              len(documents) > 1,
 	}
 	if link.DealRoomID.Valid {
 		linkPayload["dealRoomId"] = uuidToString(link.DealRoomID)
@@ -1112,15 +1204,11 @@ func (h *Handler) PublicSignedURL(c *gin.Context) {
 		return
 	}
 
-	url, err := h.storage.PresignedGetURL(ctx, page.ImageObjectKey.String, 15*time.Minute)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
-		return
-	}
+	imageURL := h.signResourceURL(page.ImageObjectKey.String, c.Param("publicToken"), result.VisitorID, "")
 
 	c.JSON(http.StatusOK, gin.H{
 		"pageNumber": pageNum,
-		"imageUrl":   url,
+		"imageUrl":   imageURL,
 		"expiresAt":  time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339),
 		"width":      page.Width.Int32,
 		"height":     page.Height.Int32,
@@ -1161,11 +1249,7 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		return
 	}
 
-	url, err := h.storage.PresignedGetURL(ctx, doc.StorageKey, 15*time.Minute)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
-		return
-	}
+	url := h.signResourceURL(doc.StorageKey, c.Param("publicToken"), result.VisitorID, doc.Title)
 
 	contentType := "application/octet-stream"
 	switch doc.SourceType {
@@ -1185,6 +1269,81 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		"filename":    doc.Title,
 		"contentType": contentType,
 	})
+}
+
+// watermarkTextFor builds a visible watermark string for the current visitor.
+// It combines the visitor email, the current UTC time, and a short hash of the
+// IP address so the watermark both identifies the viewer and discourages leaks.
+func (h *Handler) watermarkTextFor(email, ip string) string {
+	if email == "" {
+		email = "Guest"
+	}
+	ipHash := ""
+	if ip != "" {
+		sum := sha256.Sum256([]byte(ip))
+		ipHash = hex.EncodeToString(sum[:])[:8]
+	}
+	return fmt.Sprintf("%s | %s | IP:%s", email, time.Now().UTC().Format(time.RFC3339), ipHash)
+}
+
+// signResourceURL returns an HMAC-signed proxy URL for a storage resource.
+// If no URL signing secret is configured, it falls back to a short-lived
+// MinIO presigned URL so existing deployments keep working.
+// The optional filename is appended as a query parameter and used by the proxy
+// to set Content-Disposition when the resource is downloaded.
+func (h *Handler) signResourceURL(storageKey, publicToken, visitorID, filename string) string {
+	if h.cfg.URLSigningSecret == "" {
+		ctx := context.Background()
+		url, _ := h.storage.PresignedGetURL(ctx, storageKey, 15*time.Minute)
+		return url
+	}
+	u := SignResource(h.cfg.URLSigningSecret, storageKey, publicToken, visitorID, h.cfg.AppBaseURL, 15*time.Minute)
+	if filename != "" {
+		u += "&filename=" + url.QueryEscape(filename)
+	}
+	return u
+}
+
+// ServeSignedFile verifies an HMAC-signed resource request and streams the
+// object from storage. It does not require an X-Link-Session header, so it
+// works with plain <img> and <a> tags.
+func (h *Handler) ServeSignedFile(c *gin.Context) {
+	if h.cfg.URLSigningSecret == "" {
+		c.JSON(http.StatusNotImplemented, gin.H{"code": "not_configured", "message": "signed URLs are not configured"})
+		return
+	}
+	key, err := VerifySignedURL(
+		h.cfg.URLSigningSecret,
+		c.Query("key"),
+		c.Query("token"),
+		c.Query("vid"),
+		c.Query("expires"),
+		c.Query("sig"),
+	)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signature", "message": err.Error()})
+		return
+	}
+
+	ctx := c.Request.Context()
+	obj, err := h.storage.GetObject(ctx, key)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+		return
+	}
+	defer obj.Close()
+
+	contentType := mime.TypeByExtension(path.Ext(key))
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	c.Header("Content-Type", contentType)
+	c.Header("Cache-Control", "private, max-age=300")
+	if filename := c.Query("filename"); filename != "" {
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, path.Base(filename)))
+	}
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, obj)
 }
 
 // PublicDocumentPages returns the page list for a public link visitor.
@@ -1445,6 +1604,10 @@ func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link d
 		return
 	}
 	_ = h.analytics.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
+	_ = h.service.EvaluateNotificationRules(ctx, link, "abnormal_access", visitorID, email, map[string]string{
+		"event_type": eventType,
+		"reason":     reason,
+	})
 	if gateFailure {
 		h.checkAndRecordAbnormalAccessPattern(ctx, link, visitorID, email, ip, ua)
 	}
@@ -1453,12 +1616,16 @@ func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link d
 // checkAndRecordAbnormalAccessPattern records an abnormal_access_pattern event when
 // the same IP generates too many security_gate_failed events within the window.
 func (h *Handler) checkAndRecordAbnormalAccessPattern(ctx context.Context, link db.Link, visitorID, email, ip, ua string) {
-	res, aerr := h.analytics.CheckAnomaly(ctx, ip, "security_gate_failed", securityEventAnomalyWindow, securityEventAnomalyThreshold)
+	res, aerr := h.analytics.CheckAnomaly(ctx, ip, "security_gate_failed", h.cfg.SecurityAnomalyWindow, int64(h.cfg.SecurityAnomalyThreshold))
 	if aerr != nil || !res.Triggered {
 		return
 	}
 	reason := fmt.Sprintf("%d+ security_gate_failed events from IP in %v", res.Count, res.Window)
 	_ = h.analytics.RecordSecurityEvent(ctx, link, "abnormal_access_pattern", visitorID, email, ip, ua, reason)
+	_ = h.service.EvaluateNotificationRules(ctx, link, "abnormal_access", visitorID, email, map[string]string{
+		"event_type": "abnormal_access_pattern",
+		"reason":     reason,
+	})
 }
 
 // linkSecurityFlags returns the active gate requirements for a link based on
@@ -1654,6 +1821,9 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"downloadEnabled":          link.DownloadEnabled,
 		"watermarkEnabled":         link.WatermarkEnabled,
 		"aiCopilotEnabled":         link.AiCopilotEnabled,
+		"qaEnabled":                link.QaEnabled,
+		"fileRequestsEnabled":      link.FileRequestsEnabled,
+		"indexFileEnabled":         link.IndexFileEnabled,
 		"requireEmailVerification": link.RequireEmailVerification,
 		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
 		"contactIds":               contactIDs,
@@ -1716,4 +1886,466 @@ func accessLogList(logs []db.ListAccessLogsByLinkRow) []gin.H {
 		out = append(out, item)
 	}
 	return out
+}
+
+// ReverseFunnel returns dormant links with high re-activation potential.
+
+
+// ReverseFunnel returns dormant links with high re-activation potential.
+func (h *Handler) ReverseFunnel(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	wUUID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": "invalid workspace id"})
+		return
+	}
+	links, err := h.service.ListDormantLinks(c.Request.Context(), pgtype.UUID{Bytes: wUUID, Valid: true})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	type rec struct {
+		LinkID            string  `json:"linkId"`
+		LinkName          string  `json:"linkName"`
+		LastActiveAt      string  `json:"lastActiveAt"`
+		PeakDaily         int64   `json:"peakDailyActivity"`
+		ReactivationScore float64 `json:"reactivationScore"`
+		WasForwarded      bool    `json:"wasForwarded"`
+		HadDownloads      bool    `json:"hadDownloads"`
+	}
+	items := make([]rec, len(links))
+	for i, l := range links {
+		name := ""
+		if l.Name.Valid {
+			name = l.Name.String
+		}
+		lastActive := ""
+		if t, ok := l.LastActiveAt.(time.Time); ok {
+			lastActive = t.Format(time.RFC3339)
+		}
+		score := float64(l.PeakDailyEvents)
+		if lastActive != "" {
+			if t, ok := l.LastActiveAt.(time.Time); ok {
+				days := time.Since(t).Hours() / 24
+				if days > 0 {
+					score *= (1.0 + days/7.0)
+				}
+			}
+		}
+		items[i] = rec{
+			LinkID:            uuid.UUID(l.ID.Bytes).String(),
+			LinkName:          name,
+			LastActiveAt:      lastActive,
+			PeakDaily:         l.PeakDailyEvents,
+			ReactivationScore: score,
+			WasForwarded:      l.WasForwarded,
+			HadDownloads:      l.HadDownloads,
+		}
+	}
+	c.JSON(http.StatusOK, gin.H{"recommendations": items})
+}
+
+
+// ArchiveLink sets a link status to archived.
+func (h *Handler) ArchiveLink(c *gin.Context) {
+	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
+	if _, err := h.service.ArchiveLink(c.Request.Context(), wsID, lID); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "archived"})
+}
+
+// RenewLink extends a link's expiry.
+func (h *Handler) RenewLink(c *gin.Context) {
+	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
+	if _, err := h.service.RenewLink(c.Request.Context(), wsID, lID, nil); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "renewed"})
+}
+
+// GenerateLinkIndex triggers AI-powered index file generation for a link.
+func (h *Handler) GenerateLinkIndex(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), linkID, workspaceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	if !link.IndexFileEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "index_file_disabled", "message": "index file is not enabled for this link"})
+		return
+	}
+	go func() { _, _ = h.service.GenerateIndexFile(context.Background(), link) }()
+	c.JSON(http.StatusAccepted, gin.H{"status": "generating"})
+}
+
+// GetLinkIndexFile returns the AI-generated index file for a link (owner view).
+func (h *Handler) GetLinkIndexFile(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), linkID, workspaceID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	indexFile, err := h.service.GetLinkIndexFileByLink(c.Request.Context(), link.ID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "no index file"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"status":      indexFile.Status,
+		"contentHtml": textOrNil(indexFile.ContentHtml),
+		"error":       textOrNil(indexFile.ErrorMessage),
+		"generatedAt": indexFile.GeneratedAt,
+	})
+}
+
+// ListLinkVisitorQuestions returns all visitor questions for a link (owner view).
+func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"questions": questions})
+}
+
+// AnswerVisitorQuestion allows the owner to answer a visitor question.
+func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	qUUID, err := uuid.Parse(c.Param("questionId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid question id"})
+		return
+	}
+	var body struct {
+		Answer string `json:"answer" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	wsUUID, _ := uuid.Parse(wsID)
+	uUUID, _ := uuid.Parse(middleware.UserIDFrom(c))
+	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
+	wID := pgtype.UUID{Bytes: wsUUID, Valid: true}
+	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
+	if _, err := h.service.AnswerVisitorQuestion(c.Request.Context(), qID, wID, uID, body.Answer); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "answered"})
+}
+
+// ListLinkFileRequests returns all file requests for a link (owner view).
+func (h *Handler) ListLinkFileRequests(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	reqs, err := h.service.ListLinkFileRequests(c.Request.Context(), link.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"fileRequests": reqs})
+}
+
+// UpdateFileRequestStatus updates a file request status (owner approve/reject).
+func (h *Handler) UpdateFileRequestStatus(c *gin.Context) {
+	rid, err := uuid.Parse(c.Param("requestId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid request id"})
+		return
+	}
+	var body struct {
+		Status string `json:"status" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	rID := pgtype.UUID{Bytes: rid, Valid: true}
+	if err := h.service.UpdateFileRequestStatus(c.Request.Context(), rID, body.Status); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": body.Status})
+}
+
+// uploadedFileResponse is the JSON shape for a link_uploaded_file row.
+type uploadedFileResponse struct {
+	ID               string `json:"id"`
+	OriginalFilename string `json:"originalFilename"`
+	FileSize         int64  `json:"fileSize"`
+	MimeType         string `json:"mimeType"`
+	Status           string `json:"status"`
+	UploaderEmail    string `json:"uploaderEmail,omitempty"`
+	CreatedAt        string `json:"createdAt"`
+}
+
+func uploadedFileToResponse(f db.LinkUploadedFile) uploadedFileResponse {
+	r := uploadedFileResponse{
+		ID:               uuid.UUID(f.ID.Bytes).String(),
+		OriginalFilename: f.OriginalFilename,
+		FileSize:         f.FileSize,
+		MimeType:         f.MimeType,
+		Status:           f.Status,
+		CreatedAt:        f.CreatedAt.Time.Format(time.RFC3339),
+	}
+	if f.UploaderEmail.Valid {
+		r.UploaderEmail = f.UploaderEmail.String
+	}
+	return r
+}
+
+// ListUploadedFiles returns all files uploaded through a file-request link.
+func (h *Handler) ListUploadedFiles(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	files, err := h.service.ListUploadedFiles(c.Request.Context(), link.ID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	items := make([]uploadedFileResponse, len(files))
+	for i, f := range files {
+		items[i] = uploadedFileToResponse(f)
+	}
+	c.JSON(http.StatusOK, gin.H{"files": items})
+}
+
+// ApproveUploadedFile approves a pending uploaded file.
+func (h *Handler) ApproveUploadedFile(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	fID, err := uuid.Parse(c.Param("fileId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid file id"})
+		return
+	}
+	f, err := h.service.GetUploadedFileByID(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
+		return
+	}
+	if uuid.UUID(f.WorkspaceID.Bytes).String() != wsID {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
+		return
+	}
+	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
+	if err := h.service.ApproveUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "approved"})
+}
+
+// RejectUploadedFile rejects a pending uploaded file.
+func (h *Handler) RejectUploadedFile(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	fID, err := uuid.Parse(c.Param("fileId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid file id"})
+		return
+	}
+	f, err := h.service.GetUploadedFileByID(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
+		return
+	}
+	if uuid.UUID(f.WorkspaceID.Bytes).String() != wsID {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "file not found"})
+		return
+	}
+	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
+	if err := h.service.RejectUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"status": "rejected"})
+}
+
+// PublicDealRoomRedirect resolves a legacy /r/:slug URL to the corresponding /l/:token share link.
+func (h *Handler) PublicDealRoomRedirect(c *gin.Context) {
+	token, err := h.service.ResolveDealRoomSlug(c.Request.Context(), c.Param("slug"))
+	if err != nil || token == "" {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "no active link for this deal room"})
+		return
+	}
+	c.Redirect(http.StatusFound, "/l/"+token)
+}
+
+// PublicCreateVisitorQuestion allows a visitor to submit a question.
+func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	var body struct {
+		Question string `json:"question" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	q, err := h.service.CreateVisitorQuestion(c.Request.Context(), result.Link, result.VisitorID, result.Email, body.Question)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, body.Question)
+	c.JSON(http.StatusCreated, gin.H{"question": q})
+}
+
+// PublicListMyVisitorQuestions returns the visitor's own questions.
+func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	questions, err := h.service.ListMyVisitorQuestions(c.Request.Context(), result.Link.ID, result.VisitorID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"questions": questions})
+}
+
+// PublicCreateFileRequest allows a visitor to request a file.
+func (h *Handler) PublicCreateFileRequest(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.FileRequestsEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "file_requests_disabled", "message": "file requests not available"})
+		return
+	}
+	var body struct {
+		Description string `json:"description" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	req, err := h.service.CreateFileRequest(c.Request.Context(), result.Link, result.VisitorID, result.Email, body.Description)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, gin.H{"fileRequest": req})
+}
+
+// PublicListMyFileRequests returns the visitor's own file requests.
+func (h *Handler) PublicListMyFileRequests(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	reqs, err := h.service.ListMyFileRequests(c.Request.Context(), result.Link.ID, result.VisitorID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"fileRequests": reqs})
+}
+
+// PublicGetLinkIndexFile returns the AI-generated index file for a public visitor.
+func (h *Handler) PublicGetLinkIndexFile(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.IndexFileEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "index_file_disabled", "message": "index file not available"})
+		return
+	}
+	idx, err := h.service.GetLinkIndexFileByLink(c.Request.Context(), result.Link.ID)
+	if err != nil || idx.Status != "ready" {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "no index file"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"contentHtml": textOrNil(idx.ContentHtml),
+		"generatedAt": idx.GeneratedAt,
+	})
+}
+
+// PublicUploadFile handles file uploads through a file-request link.
+func (h *Handler) PublicUploadFile(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if result.Link.LinkType != "file_request" {
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_file_request_link", "message": "this link does not accept file uploads"})
+		return
+	}
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "file is required"})
+		return
+	}
+	defer file.Close()
+	mimeType := header.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
+	uploaded, err := h.service.UploadFileForLink(
+		c.Request.Context(), h.storage, result.Link,
+		header.Filename, mimeType, header.Size, file,
+		result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(),
+	)
+	if err != nil {
+		switch {
+		case strings.Contains(err.Error(), "not a file request link"):
+			c.JSON(http.StatusForbidden, gin.H{"code": "not_file_request_link", "message": err.Error()})
+		case strings.Contains(err.Error(), "unsupported file type"):
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_type", "message": err.Error()})
+		case strings.Contains(err.Error(), "too large"):
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "file_too_large", "message": err.Error()})
+		case strings.Contains(err.Error(), "empty"):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "file_empty", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, uploadedFileToResponse(uploaded))
 }

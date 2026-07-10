@@ -46,6 +46,8 @@ type Querier interface {
 	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
 	CreateSecurityEvent(ctx context.Context, arg db.CreateSecurityEventParams) error
 	CountSecurityEventsByIPAndWindow(ctx context.Context, arg db.CountSecurityEventsByIPAndWindowParams) (int64, error)
+	GetVisitorFirstAccess(ctx context.Context, arg db.GetVisitorFirstAccessParams) (pgtype.Timestamptz, error)
+	CountVisitorAccesses(ctx context.Context, arg db.CountVisitorAccessesParams) (int32, error)
 }
 
 // Service records events and computes heat scores.
@@ -113,7 +115,7 @@ func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID st
 		VisitorID:       pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		PageNumber:      pageNumber,
 		DurationSeconds: durationSeconds,
-		Column7: pgtype.Numeric{Valid: true},
+		Column7:         depth,
 	})
 }
 
@@ -134,14 +136,57 @@ func (s *Service) RecordDownload(ctx context.Context, link db.Link, visitorID, e
 // RecordSecurityEvent records a security-related access event.
 func (s *Service) RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error {
 	return s.queries.CreateSecurityEvent(ctx, db.CreateSecurityEventParams{
-		LinkID:    link.ID,
-		EventType: eventType,
-		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
-		Email:     pgtype.Text{String: email, Valid: email != ""},
-		Ip:        parseIP(ip),
-		UserAgent: pgtype.Text{String: ua, Valid: ua != ""},
-		Reason:    pgtype.Text{String: reason, Valid: reason != ""},
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
+		EventType:   eventType,
+		VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		Email:       pgtype.Text{String: email, Valid: email != ""},
+		Ip:          parseIP(ip),
+		UserAgent:   pgtype.Text{String: ua, Valid: ua != ""},
+		Reason:      pgtype.Text{String: reason, Valid: reason != ""},
 	})
+}
+
+// RecordCustomEvent records an arbitrary event type in the access_logs table.
+func (s *Service) RecordCustomEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua string) error {
+	return s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
+		TenantID:     link.TenantID,
+		WorkspaceID:  link.WorkspaceID,
+		LinkID:       link.ID,
+		VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		VisitorEmail: pgtype.Text{String: email, Valid: email != ""},
+		EventType:    eventType,
+		Ip:           parseIP(ip),
+		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
+	})
+}
+
+// DetectForwardOrReturn checks whether this is a first-time visit (forward_signal)
+// or a return visit after 30+ minutes (return_visit). Returns the event type to record,
+// or empty string if neither applies (within 30min window).
+func (s *Service) DetectForwardOrReturn(ctx context.Context, linkID pgtype.UUID, visitorID string) string {
+	firstAccess, err := s.queries.GetVisitorFirstAccess(ctx, db.GetVisitorFirstAccessParams{
+		LinkID:    linkID,
+		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
+	})
+	if err != nil || !firstAccess.Valid {
+		return "forward_signal"
+	}
+	count, err := s.queries.CountVisitorAccesses(ctx, db.CountVisitorAccessesParams{
+		LinkID:    linkID,
+		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
+	})
+	if err != nil {
+		return ""
+	}
+	if count <= 1 {
+		return "forward_signal"
+	}
+	if time.Since(firstAccess.Time) > 30*time.Minute {
+		return "return_visit"
+	}
+	return ""
 }
 
 // AnomalyCheckResult describes the outcome of an anomaly check.
@@ -231,20 +276,20 @@ func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID,
 		return heat.Result{}, err
 	}
 
-	return s.getScoreForLink(ctx, link.ID, circle)
+	return s.getScoreForLink(ctx, link, circle)
 }
 
 // getScoreForLink computes the heat score without re-fetching the link from DB.
-func (s *Service) getScoreForLink(ctx context.Context, linkID pgtype.UUID, circle heat.Circle) (heat.Result, error) {
-	access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
+func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat.Circle) (heat.Result, error) {
+	access, err := s.queries.GetLinkAccessMetrics(ctx, link.ID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("access metrics: %w", err)
 	}
-	pageViews, err := s.queries.GetLinkPageViewMetrics(ctx, linkID)
+	pageViews, err := s.queries.GetLinkPageViewMetrics(ctx, link.ID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("page view metrics: %w", err)
 	}
-	bounce, err := s.queries.GetLinkBounceCount(ctx, linkID)
+	bounce, err := s.queries.GetLinkBounceCount(ctx, link.ID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("bounce count: %w", err)
 	}
@@ -259,6 +304,11 @@ func (s *Service) getScoreForLink(ctx context.Context, linkID pgtype.UUID, circl
 		keyPageViews = int(pageViews.TotalPageViews)
 	}
 
+	decayDays := 0.0
+	if link.CreatedAt.Valid {
+		decayDays = time.Since(link.CreatedAt.Time).Hours() / 24
+	}
+
 	input := heat.Input{
 		Opens:              int(access.Opens),
 		Revisits:           revisits,
@@ -267,6 +317,7 @@ func (s *Service) getScoreForLink(ctx context.Context, linkID pgtype.UUID, circl
 		ForwardSignals:     int(access.UniqueVisitors),
 		Downloads:          int(access.Downloads),
 		BouncePenalty:      int(bounce),
+		DecayDays:          decayDays,
 	}
 	return heat.Compute(circle, input), nil
 }
@@ -325,7 +376,7 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 	// Compute scores for all links in one batch pass, caching results for reuse.
 	scoreCache := make(map[string]heat.Result, len(allLinks))
 	for _, link := range allLinks {
-		res, err := s.getScoreForLink(ctx, link.ID, heat.CircleDefault)
+		res, err := s.getScoreForLink(ctx, link, heat.CircleDefault)
 		if err != nil {
 			res = heat.Result{Level: "cold"}
 		}
@@ -468,7 +519,7 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 
 	overview.TopLinks = make([]LinkScore, 0, len(links))
 	for _, link := range links {
-		res, _ := s.getScoreForLink(ctx, link.ID, heat.CircleDefault)
+		res, _ := s.getScoreForLink(ctx, link, heat.CircleDefault)
 		if res.Level == "" {
 			res.Level = "cold"
 		}

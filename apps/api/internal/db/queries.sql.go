@@ -121,6 +121,46 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 	return i, err
 }
 
+const answerVisitorQuestion = `-- name: AnswerVisitorQuestion :one
+UPDATE link_visitor_questions
+SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
+WHERE id = $3 AND workspace_id = $4
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag
+`
+
+type AnswerVisitorQuestionParams struct {
+	Answer      pgtype.Text
+	AnsweredBy  pgtype.UUID
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) AnswerVisitorQuestion(ctx context.Context, arg AnswerVisitorQuestionParams) (LinkVisitorQuestion, error) {
+	row := q.db.QueryRow(ctx, answerVisitorQuestion,
+		arg.Answer,
+		arg.AnsweredBy,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i LinkVisitorQuestion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.Question,
+		&i.Answer,
+		&i.AnsweredBy,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IntentTag,
+	)
+	return i, err
+}
+
 const archiveDocument = `-- name: ArchiveDocument :exec
 UPDATE documents
 SET status = 'archived', updated_at = now()
@@ -207,6 +247,24 @@ func (q *Queries) CountPendingFileRequests(ctx context.Context, arg CountPending
 	return count, err
 }
 
+const countPendingFileRequestsByVisitor = `-- name: CountPendingFileRequestsByVisitor :one
+SELECT COUNT(*)::int
+FROM link_file_requests
+WHERE link_id = $1 AND visitor_id = $2 AND status = 'pending'
+`
+
+type CountPendingFileRequestsByVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) CountPendingFileRequestsByVisitor(ctx context.Context, arg CountPendingFileRequestsByVisitorParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countPendingFileRequestsByVisitor, arg.LinkID, arg.VisitorID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countPendingLinkAccessRequestsByLinkAndEmail = `-- name: CountPendingLinkAccessRequestsByLinkAndEmail :one
 SELECT COUNT(*)
 FROM link_access_requests
@@ -263,6 +321,24 @@ func (q *Queries) CountSecurityEventsByIPAndWindow(ctx context.Context, arg Coun
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countVisitorAccesses = `-- name: CountVisitorAccesses :one
+SELECT COUNT(*)::int
+FROM access_logs
+WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened'
+`
+
+type CountVisitorAccessesParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) CountVisitorAccesses(ctx context.Context, arg CountVisitorAccessesParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countVisitorAccesses, arg.LinkID, arg.VisitorID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const createAccessLog = `-- name: CreateAccessLog :exec
@@ -1332,9 +1408,9 @@ func (q *Queries) CreateLinkDocument(ctx context.Context, arg CreateLinkDocument
 
 const createLinkInvitation = `-- name: CreateLinkInvitation :one
 INSERT INTO link_invitations (
-    tenant_id, workspace_id, link_id, email, token, status, expires_at, created_by
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+    tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, used_at, created_by, created_at, updated_at
 `
 
 type CreateLinkInvitationParams struct {
@@ -1343,6 +1419,7 @@ type CreateLinkInvitationParams struct {
 	LinkID      pgtype.UUID
 	Email       string
 	Token       pgtype.Text
+	TokenHash   pgtype.Text
 	Status      string
 	ExpiresAt   pgtype.Timestamptz
 	CreatedBy   pgtype.UUID
@@ -1355,6 +1432,7 @@ type CreateLinkInvitationRow struct {
 	LinkID      pgtype.UUID
 	Email       string
 	Token       pgtype.Text
+	TokenHash   pgtype.Text
 	Status      string
 	ExpiresAt   pgtype.Timestamptz
 	UsedAt      pgtype.Timestamptz
@@ -1370,6 +1448,7 @@ func (q *Queries) CreateLinkInvitation(ctx context.Context, arg CreateLinkInvita
 		arg.LinkID,
 		arg.Email,
 		arg.Token,
+		arg.TokenHash,
 		arg.Status,
 		arg.ExpiresAt,
 		arg.CreatedBy,
@@ -1382,6 +1461,7 @@ func (q *Queries) CreateLinkInvitation(ctx context.Context, arg CreateLinkInvita
 		&i.LinkID,
 		&i.Email,
 		&i.Token,
+		&i.TokenHash,
 		&i.Status,
 		&i.ExpiresAt,
 		&i.UsedAt,
@@ -1899,6 +1979,63 @@ func (q *Queries) CreateTenantDomain(ctx context.Context, arg CreateTenantDomain
 	return i, err
 }
 
+const createUploadedFile = `-- name: CreateUploadedFile :one
+INSERT INTO link_uploaded_files (tenant_id, workspace_id, link_id, original_filename, storage_key, file_size, mime_type, uploader_email, uploader_visitor_id, uploader_ip, uploader_user_agent)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, tenant_id, workspace_id, link_id, document_id, original_filename, storage_key, file_size, mime_type, uploader_email, uploader_visitor_id, uploader_ip, uploader_user_agent, status, reviewed_by, reviewed_at, created_at
+`
+
+type CreateUploadedFileParams struct {
+	TenantID          pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	LinkID            pgtype.UUID
+	OriginalFilename  string
+	StorageKey        string
+	FileSize          int64
+	MimeType          string
+	UploaderEmail     pgtype.Text
+	UploaderVisitorID pgtype.Text
+	UploaderIp        *netip.Addr
+	UploaderUserAgent pgtype.Text
+}
+
+func (q *Queries) CreateUploadedFile(ctx context.Context, arg CreateUploadedFileParams) (LinkUploadedFile, error) {
+	row := q.db.QueryRow(ctx, createUploadedFile,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.OriginalFilename,
+		arg.StorageKey,
+		arg.FileSize,
+		arg.MimeType,
+		arg.UploaderEmail,
+		arg.UploaderVisitorID,
+		arg.UploaderIp,
+		arg.UploaderUserAgent,
+	)
+	var i LinkUploadedFile
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.OriginalFilename,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.MimeType,
+		&i.UploaderEmail,
+		&i.UploaderVisitorID,
+		&i.UploaderIp,
+		&i.UploaderUserAgent,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (email, password_hash)
 VALUES ($1, $2)
@@ -1927,7 +2064,7 @@ const createVisitorQuestion = `-- name: CreateVisitorQuestion :one
 INSERT INTO link_visitor_questions (
     tenant_id, workspace_id, link_id, visitor_id, visitor_email, question
 ) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag
 `
 
 type CreateVisitorQuestionParams struct {
@@ -1962,13 +2099,14 @@ func (q *Queries) CreateVisitorQuestion(ctx context.Context, arg CreateVisitorQu
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.IntentTag,
 	)
 	return i, err
 }
 
 const createWorkspace = `-- name: CreateWorkspace :one
 INSERT INTO workspaces (tenant_id, name, slug, brand_color)
-VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled
+VALUES ($1, $2, $3, $4) RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret
 `
 
 type CreateWorkspaceParams struct {
@@ -1996,8 +2134,23 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
+}
+
+const deleteAccessLogsBefore = `-- name: DeleteAccessLogsBefore :execrows
+DELETE FROM access_logs
+WHERE created_at < $1
+`
+
+func (q *Queries) DeleteAccessLogsBefore(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAccessLogsBefore, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteChunksByDocument = `-- name: DeleteChunksByDocument :exec
@@ -2133,6 +2286,19 @@ func (q *Queries) DeleteOAuthState(ctx context.Context, state string) error {
 	return err
 }
 
+const deletePageViewsBefore = `-- name: DeletePageViewsBefore :execrows
+DELETE FROM page_views
+WHERE created_at < $1
+`
+
+func (q *Queries) DeletePageViewsBefore(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deletePageViewsBefore, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deletePagesByDocument = `-- name: DeletePagesByDocument :exec
 DELETE FROM pages WHERE document_id = $1
 `
@@ -2185,6 +2351,19 @@ type DeleteRoomMemberParams struct {
 func (q *Queries) DeleteRoomMember(ctx context.Context, arg DeleteRoomMemberParams) error {
 	_, err := q.db.Exec(ctx, deleteRoomMember, arg.ID, arg.RoomID)
 	return err
+}
+
+const deleteSecurityEventsBefore = `-- name: DeleteSecurityEventsBefore :execrows
+DELETE FROM security_events
+WHERE created_at < $1
+`
+
+func (q *Queries) DeleteSecurityEventsBefore(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSecurityEventsBefore, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteTenantDomain = `-- name: DeleteTenantDomain :exec
@@ -3031,6 +3210,30 @@ func (q *Queries) GetEmailLogByProviderMessageID(ctx context.Context, providerMe
 	return i, err
 }
 
+const getFileRequestByID = `-- name: GetFileRequestByID :one
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, message, status, created_at, updated_at FROM link_file_requests
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetFileRequestByID(ctx context.Context, id pgtype.UUID) (LinkFileRequest, error) {
+	row := q.db.QueryRow(ctx, getFileRequestByID, id)
+	var i LinkFileRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.Message,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getFolderPermission = `-- name: GetFolderPermission :one
 SELECT id, tenant_id, workspace_id, room_id, email, folder_path, permission, created_at, updated_at
 FROM room_member_folder_permissions
@@ -3274,6 +3477,19 @@ func (q *Queries) GetLastAccessLogsByLinks(ctx context.Context, dollar_1 []pgtyp
 		return nil, err
 	}
 	return items, nil
+}
+
+const getLastCrmSyncTime = `-- name: GetLastCrmSyncTime :one
+SELECT COALESCE(MAX(event_max), '1970-01-01'::timestamptz)::timestamptz AS last_sync
+FROM crm_sync_state
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetLastCrmSyncTime(ctx context.Context, workspaceID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLastCrmSyncTime, workspaceID)
+	var last_sync pgtype.Timestamptz
+	err := row.Scan(&last_sync)
+	return last_sync, err
 }
 
 const getLastLinkOpenByVisitor = `-- name: GetLastLinkOpenByVisitor :one
@@ -3738,6 +3954,29 @@ func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken 
 	return items, nil
 }
 
+const getLinkIndexFileByLink = `-- name: GetLinkIndexFileByLink :one
+SELECT id, tenant_id, workspace_id, link_id, status, content_html, error_message, generated_at, created_at, updated_at FROM link_index_files
+WHERE link_id = $1
+`
+
+func (q *Queries) GetLinkIndexFileByLink(ctx context.Context, linkID pgtype.UUID) (LinkIndexFile, error) {
+	row := q.db.QueryRow(ctx, getLinkIndexFileByLink, linkID)
+	var i LinkIndexFile
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Status,
+		&i.ContentHtml,
+		&i.ErrorMessage,
+		&i.GeneratedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getLinkInvitationByID = `-- name: GetLinkInvitationByID :one
 SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
 FROM link_invitations
@@ -3828,9 +4067,9 @@ func (q *Queries) GetLinkInvitationByLinkAndEmail(ctx context.Context, arg GetLi
 }
 
 const getLinkInvitationByToken = `-- name: GetLinkInvitationByToken :one
-SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+SELECT id, tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, used_at, created_by, created_at, updated_at
 FROM link_invitations
-WHERE token = $1
+WHERE token_hash = $1 OR (token_hash IS NULL AND token = $1)
 LIMIT 1
 `
 
@@ -3841,6 +4080,7 @@ type GetLinkInvitationByTokenRow struct {
 	LinkID      pgtype.UUID
 	Email       string
 	Token       pgtype.Text
+	TokenHash   pgtype.Text
 	Status      string
 	ExpiresAt   pgtype.Timestamptz
 	UsedAt      pgtype.Timestamptz
@@ -3849,8 +4089,8 @@ type GetLinkInvitationByTokenRow struct {
 	UpdatedAt   pgtype.Timestamptz
 }
 
-func (q *Queries) GetLinkInvitationByToken(ctx context.Context, token pgtype.Text) (GetLinkInvitationByTokenRow, error) {
-	row := q.db.QueryRow(ctx, getLinkInvitationByToken, token)
+func (q *Queries) GetLinkInvitationByToken(ctx context.Context, tokenHash pgtype.Text) (GetLinkInvitationByTokenRow, error) {
+	row := q.db.QueryRow(ctx, getLinkInvitationByToken, tokenHash)
 	var i GetLinkInvitationByTokenRow
 	err := row.Scan(
 		&i.ID,
@@ -3859,6 +4099,7 @@ func (q *Queries) GetLinkInvitationByToken(ctx context.Context, token pgtype.Tex
 		&i.LinkID,
 		&i.Email,
 		&i.Token,
+		&i.TokenHash,
 		&i.Status,
 		&i.ExpiresAt,
 		&i.UsedAt,
@@ -4366,6 +4607,97 @@ func (q *Queries) GetTenantDomainByDomain(ctx context.Context, domain string) (T
 	return i, err
 }
 
+const getUnsyncedCrmEvents = `-- name: GetUnsyncedCrmEvents :many
+SELECT
+    al.link_id,
+    al.visitor_email AS contact_email,
+    al.event_type,
+    al.created_at AS event_time,
+    l.name AS link_name,
+    CASE al.event_type
+        WHEN 'link_opened' THEN 'Opened link: ' || l.name
+        WHEN 'file_downloaded' THEN 'Downloaded file from: ' || l.name
+        ELSE al.event_type || ' on ' || l.name
+    END AS event_summary
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.workspace_id = $1
+  AND al.created_at > $2
+  AND al.visitor_email != ''
+ORDER BY al.visitor_email, al.link_id, al.created_at
+`
+
+type GetUnsyncedCrmEventsParams struct {
+	WorkspaceID pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+}
+
+type GetUnsyncedCrmEventsRow struct {
+	LinkID       pgtype.UUID
+	ContactEmail pgtype.Text
+	EventType    string
+	EventTime    pgtype.Timestamptz
+	LinkName     pgtype.Text
+	EventSummary interface{}
+}
+
+func (q *Queries) GetUnsyncedCrmEvents(ctx context.Context, arg GetUnsyncedCrmEventsParams) ([]GetUnsyncedCrmEventsRow, error) {
+	rows, err := q.db.Query(ctx, getUnsyncedCrmEvents, arg.WorkspaceID, arg.CreatedAt)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetUnsyncedCrmEventsRow
+	for rows.Next() {
+		var i GetUnsyncedCrmEventsRow
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.ContactEmail,
+			&i.EventType,
+			&i.EventTime,
+			&i.LinkName,
+			&i.EventSummary,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getUploadedFileByID = `-- name: GetUploadedFileByID :one
+SELECT id, tenant_id, workspace_id, link_id, document_id, original_filename, storage_key, file_size, mime_type, uploader_email, uploader_visitor_id, uploader_ip, uploader_user_agent, status, reviewed_by, reviewed_at, created_at FROM link_uploaded_files
+WHERE id = $1
+`
+
+func (q *Queries) GetUploadedFileByID(ctx context.Context, id pgtype.UUID) (LinkUploadedFile, error) {
+	row := q.db.QueryRow(ctx, getUploadedFileByID, id)
+	var i LinkUploadedFile
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.OriginalFilename,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.MimeType,
+		&i.UploaderEmail,
+		&i.UploaderVisitorID,
+		&i.UploaderIp,
+		&i.UploaderUserAgent,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
 SELECT id, email, password_hash, created_at, email_verified
 FROM users
@@ -4400,6 +4732,57 @@ func (q *Queries) GetUserByID(ctx context.Context, id pgtype.UUID) (User, error)
 		&i.PasswordHash,
 		&i.CreatedAt,
 		&i.EmailVerified,
+	)
+	return i, err
+}
+
+const getVisitorFirstAccess = `-- name: GetVisitorFirstAccess :one
+SELECT MIN(created_at)::timestamptz AS first_accessed_at
+FROM access_logs
+WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened'
+`
+
+type GetVisitorFirstAccessParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) GetVisitorFirstAccess(ctx context.Context, arg GetVisitorFirstAccessParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getVisitorFirstAccess, arg.LinkID, arg.VisitorID)
+	var first_accessed_at pgtype.Timestamptz
+	err := row.Scan(&first_accessed_at)
+	return first_accessed_at, err
+}
+
+const getVisitorQuestionByID = `-- name: GetVisitorQuestionByID :one
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag
+FROM link_visitor_questions
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetVisitorQuestionByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetVisitorQuestionByID(ctx context.Context, arg GetVisitorQuestionByIDParams) (LinkVisitorQuestion, error) {
+	row := q.db.QueryRow(ctx, getVisitorQuestionByID, arg.ID, arg.WorkspaceID)
+	var i LinkVisitorQuestion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.Question,
+		&i.Answer,
+		&i.AnsweredBy,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.IntentTag,
 	)
 	return i, err
 }
@@ -4469,7 +4852,7 @@ func (q *Queries) GetVisitorSummariesByDocument(ctx context.Context, arg GetVisi
 }
 
 const getWorkspaceByID = `-- name: GetWorkspaceByID :one
-SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled FROM workspaces WHERE id = $1 LIMIT 1
+SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret FROM workspaces WHERE id = $1 LIMIT 1
 `
 
 func (q *Queries) GetWorkspaceByID(ctx context.Context, id pgtype.UUID) (Workspace, error) {
@@ -4485,12 +4868,14 @@ func (q *Queries) GetWorkspaceByID(ctx context.Context, id pgtype.UUID) (Workspa
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getWorkspaceByIDAndTenant = `-- name: GetWorkspaceByIDAndTenant :one
-SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled FROM workspaces WHERE id = $1 AND tenant_id = $2 LIMIT 1
+SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret FROM workspaces WHERE id = $1 AND tenant_id = $2 LIMIT 1
 `
 
 type GetWorkspaceByIDAndTenantParams struct {
@@ -4511,12 +4896,14 @@ func (q *Queries) GetWorkspaceByIDAndTenant(ctx context.Context, arg GetWorkspac
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getWorkspaceBySlug = `-- name: GetWorkspaceBySlug :one
-SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled FROM workspaces WHERE slug = $1 LIMIT 1
+SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret FROM workspaces WHERE slug = $1 LIMIT 1
 `
 
 func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspace, error) {
@@ -4532,12 +4919,14 @@ func (q *Queries) GetWorkspaceBySlug(ctx context.Context, slug string) (Workspac
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
 
 const getWorkspaceByTenantAndSlug = `-- name: GetWorkspaceByTenantAndSlug :one
-SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled FROM workspaces WHERE tenant_id = $1 AND slug = $2 LIMIT 1
+SELECT id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret FROM workspaces WHERE tenant_id = $1 AND slug = $2 LIMIT 1
 `
 
 type GetWorkspaceByTenantAndSlugParams struct {
@@ -4558,6 +4947,8 @@ func (q *Queries) GetWorkspaceByTenantAndSlug(ctx context.Context, arg GetWorksp
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -5551,6 +5942,77 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listDormantLinks = `-- name: ListDormantLinks :many
+WITH link_activity AS (
+    SELECT
+        l.id, l.workspace_id, l.name, l.created_by,
+        MAX(al.created_at) AS last_active_at,
+        COUNT(*) FILTER (WHERE al.created_at > NOW() - INTERVAL '30 days')::bigint AS recent_events,
+        MAX(daily.cnt)::bigint AS peak_daily_events,
+        bool_or(al.event_type = 'forward_visited') AS was_forwarded,
+        bool_or(al.event_type = 'file_downloaded') AS had_downloads
+    FROM links l
+    JOIN access_logs al ON al.link_id = l.id
+    JOIN (
+        SELECT link_id, DATE(created_at) AS day, COUNT(*)::bigint AS cnt
+        FROM access_logs WHERE created_at > NOW() - INTERVAL '30 days'
+        GROUP BY link_id, DATE(created_at)
+    ) daily ON daily.link_id = l.id
+    WHERE l.status = 'active'
+      AND l.workspace_id = $1
+    GROUP BY l.id, l.workspace_id, l.name, l.created_by
+    HAVING MAX(al.created_at) < NOW() - INTERVAL '7 days'
+       AND MAX(al.created_at) > NOW() - INTERVAL '30 days'
+)
+SELECT id, workspace_id, name, created_by, last_active_at, recent_events,
+       peak_daily_events, was_forwarded, had_downloads
+FROM link_activity
+ORDER BY (peak_daily_events * (1.0 + EXTRACT(DAY FROM NOW() - last_active_at) / 7.0)) DESC
+LIMIT 20
+`
+
+type ListDormantLinksRow struct {
+	ID              pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	Name            pgtype.Text
+	CreatedBy       pgtype.UUID
+	LastActiveAt    interface{}
+	RecentEvents    int64
+	PeakDailyEvents int64
+	WasForwarded    bool
+	HadDownloads    bool
+}
+
+func (q *Queries) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID) ([]ListDormantLinksRow, error) {
+	rows, err := q.db.Query(ctx, listDormantLinks, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDormantLinksRow
+	for rows.Next() {
+		var i ListDormantLinksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.CreatedBy,
+			&i.LastActiveAt,
+			&i.RecentEvents,
+			&i.PeakDailyEvents,
+			&i.WasForwarded,
+			&i.HadDownloads,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFileRequestsByLink = `-- name: ListFileRequestsByLink :many
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, message, status, created_at, updated_at FROM link_file_requests
 WHERE link_id = $1
@@ -6016,6 +6478,69 @@ ORDER BY created_at DESC
 
 func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Link, error) {
 	rows, err := q.db.Query(ctx, listLinksByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Link
+	for rows.Next() {
+		var i Link
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.DocumentID,
+			&i.PublicToken,
+			&i.Name,
+			&i.PermissionType,
+			&i.ExpiresAt,
+			&i.MaxAccessCount,
+			&i.AccessCount,
+			&i.DownloadEnabled,
+			&i.WatermarkEnabled,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RequireEmail,
+			&i.RequireNda,
+			&i.RequireEmailVerification,
+			&i.AiCopilotEnabled,
+			&i.DealRoomID,
+			&i.RequirePassword,
+			&i.PasswordHash,
+			&i.CustomDomain,
+			&i.Tags,
+			&i.NotifyOnAccess,
+			&i.SecurityVersion,
+			&i.QaEnabled,
+			&i.FileRequestsEnabled,
+			&i.IndexFileEnabled,
+			&i.LinkType,
+			&i.TargetFolderPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinksExpiringWithin = `-- name: ListLinksExpiringWithin :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path FROM links
+WHERE status = 'active'
+  AND expires_at IS NOT NULL
+  AND expires_at > now()
+  AND expires_at <= now() + ($1 || ' hours')::interval
+  AND notify_on_access = true
+ORDER BY expires_at ASC
+`
+
+func (q *Queries) ListLinksExpiringWithin(ctx context.Context, dollar_1 pgtype.Text) ([]Link, error) {
+	rows, err := q.db.Query(ctx, listLinksExpiringWithin, dollar_1)
 	if err != nil {
 		return nil, err
 	}
@@ -7056,8 +7581,52 @@ func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const listUploadedFilesByLink = `-- name: ListUploadedFilesByLink :many
+SELECT id, tenant_id, workspace_id, link_id, document_id, original_filename, storage_key, file_size, mime_type, uploader_email, uploader_visitor_id, uploader_ip, uploader_user_agent, status, reviewed_by, reviewed_at, created_at FROM link_uploaded_files
+WHERE link_id = $1
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListUploadedFilesByLink(ctx context.Context, linkID pgtype.UUID) ([]LinkUploadedFile, error) {
+	rows, err := q.db.Query(ctx, listUploadedFilesByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkUploadedFile
+	for rows.Next() {
+		var i LinkUploadedFile
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.OriginalFilename,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.MimeType,
+			&i.UploaderEmail,
+			&i.UploaderVisitorID,
+			&i.UploaderIp,
+			&i.UploaderUserAgent,
+			&i.Status,
+			&i.ReviewedBy,
+			&i.ReviewedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisitorQuestionsByLink = `-- name: ListVisitorQuestionsByLink :many
-SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at FROM link_visitor_questions
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag FROM link_visitor_questions
 WHERE link_id = $1
 ORDER BY created_at DESC
 `
@@ -7084,6 +7653,7 @@ func (q *Queries) ListVisitorQuestionsByLink(ctx context.Context, linkID pgtype.
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IntentTag,
 		); err != nil {
 			return nil, err
 		}
@@ -7096,7 +7666,7 @@ func (q *Queries) ListVisitorQuestionsByLink(ctx context.Context, linkID pgtype.
 }
 
 const listVisitorQuestionsByVisitor = `-- name: ListVisitorQuestionsByVisitor :many
-SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at FROM link_visitor_questions
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag FROM link_visitor_questions
 WHERE link_id = $1 AND visitor_id = $2
 ORDER BY created_at DESC
 `
@@ -7128,6 +7698,7 @@ func (q *Queries) ListVisitorQuestionsByVisitor(ctx context.Context, arg ListVis
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.IntentTag,
 		); err != nil {
 			return nil, err
 		}
@@ -7295,6 +7866,37 @@ func (q *Queries) ListWorkspacesByUserAndTenant(ctx context.Context, arg ListWor
 	return items, nil
 }
 
+const listWorkspacesWithCrmEnabled = `-- name: ListWorkspacesWithCrmEnabled :many
+SELECT id, crm_config, webhook_secret FROM workspaces
+WHERE crm_config->>'syncEnabled' = 'true'
+`
+
+type ListWorkspacesWithCrmEnabledRow struct {
+	ID            pgtype.UUID
+	CrmConfig     []byte
+	WebhookSecret pgtype.Text
+}
+
+func (q *Queries) ListWorkspacesWithCrmEnabled(ctx context.Context) ([]ListWorkspacesWithCrmEnabledRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspacesWithCrmEnabled)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkspacesWithCrmEnabledRow
+	for rows.Next() {
+		var i ListWorkspacesWithCrmEnabledRow
+		if err := rows.Scan(&i.ID, &i.CrmConfig, &i.WebhookSecret); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markHubSpotSyncJobCompleted = `-- name: MarkHubSpotSyncJobCompleted :exec
 UPDATE hubspot_sync_jobs
 SET status = 'completed', attempts = attempts + 1, updated_at = now()
@@ -7422,16 +8024,18 @@ func (q *Queries) RecordLinkOpened(ctx context.Context, arg RecordLinkOpenedPara
 const resetLinkInvitation = `-- name: ResetLinkInvitation :one
 UPDATE link_invitations
 SET token = $1,
+    token_hash = $2,
     status = 'pending',
-    expires_at = $2,
+    expires_at = $3,
     used_at = NULL,
     updated_at = now()
-WHERE id = $3
-RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
+WHERE id = $4
+RETURNING id, tenant_id, workspace_id, link_id, email, token, token_hash, status, expires_at, used_at, created_by, created_at, updated_at
 `
 
 type ResetLinkInvitationParams struct {
 	Token     pgtype.Text
+	TokenHash pgtype.Text
 	ExpiresAt pgtype.Timestamptz
 	ID        pgtype.UUID
 }
@@ -7443,6 +8047,7 @@ type ResetLinkInvitationRow struct {
 	LinkID      pgtype.UUID
 	Email       string
 	Token       pgtype.Text
+	TokenHash   pgtype.Text
 	Status      string
 	ExpiresAt   pgtype.Timestamptz
 	UsedAt      pgtype.Timestamptz
@@ -7452,7 +8057,12 @@ type ResetLinkInvitationRow struct {
 }
 
 func (q *Queries) ResetLinkInvitation(ctx context.Context, arg ResetLinkInvitationParams) (ResetLinkInvitationRow, error) {
-	row := q.db.QueryRow(ctx, resetLinkInvitation, arg.Token, arg.ExpiresAt, arg.ID)
+	row := q.db.QueryRow(ctx, resetLinkInvitation,
+		arg.Token,
+		arg.TokenHash,
+		arg.ExpiresAt,
+		arg.ID,
+	)
 	var i ResetLinkInvitationRow
 	err := row.Scan(
 		&i.ID,
@@ -7461,6 +8071,7 @@ func (q *Queries) ResetLinkInvitation(ctx context.Context, arg ResetLinkInvitati
 		&i.LinkID,
 		&i.Email,
 		&i.Token,
+		&i.TokenHash,
 		&i.Status,
 		&i.ExpiresAt,
 		&i.UsedAt,
@@ -8432,6 +9043,38 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 	return i, err
 }
 
+const updateLinkIndexFileFailed = `-- name: UpdateLinkIndexFileFailed :exec
+UPDATE link_index_files
+SET status = 'failed', error_message = $1, updated_at = now()
+WHERE link_id = $2
+`
+
+type UpdateLinkIndexFileFailedParams struct {
+	ErrorMessage pgtype.Text
+	LinkID       pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkIndexFileFailed(ctx context.Context, arg UpdateLinkIndexFileFailedParams) error {
+	_, err := q.db.Exec(ctx, updateLinkIndexFileFailed, arg.ErrorMessage, arg.LinkID)
+	return err
+}
+
+const updateLinkIndexFileReady = `-- name: UpdateLinkIndexFileReady :exec
+UPDATE link_index_files
+SET status = 'ready', content_html = $1, generated_at = now(), updated_at = now()
+WHERE link_id = $2
+`
+
+type UpdateLinkIndexFileReadyParams struct {
+	ContentHtml pgtype.Text
+	LinkID      pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkIndexFileReady(ctx context.Context, arg UpdateLinkIndexFileReadyParams) error {
+	_, err := q.db.Exec(ctx, updateLinkIndexFileReady, arg.ContentHtml, arg.LinkID)
+	return err
+}
+
 const updateLinkInvitationStatus = `-- name: UpdateLinkInvitationStatus :one
 UPDATE link_invitations
 SET status = $1, used_at = $2, updated_at = now()
@@ -8478,6 +9121,23 @@ func (q *Queries) UpdateLinkInvitationStatus(ctx context.Context, arg UpdateLink
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const updateLinkInvitationTokenHash = `-- name: UpdateLinkInvitationTokenHash :exec
+UPDATE link_invitations
+SET token_hash = $1,
+    updated_at = now()
+WHERE id = $2
+`
+
+type UpdateLinkInvitationTokenHashParams struct {
+	TokenHash pgtype.Text
+	ID        pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkInvitationTokenHash(ctx context.Context, arg UpdateLinkInvitationTokenHashParams) error {
+	_, err := q.db.Exec(ctx, updateLinkInvitationTokenHash, arg.TokenHash, arg.ID)
+	return err
 }
 
 const updateLinkStatus = `-- name: UpdateLinkStatus :one
@@ -8546,6 +9206,22 @@ type UpdateNotificationBodyParams struct {
 
 func (q *Queries) UpdateNotificationBody(ctx context.Context, arg UpdateNotificationBodyParams) error {
 	_, err := q.db.Exec(ctx, updateNotificationBody, arg.ID, arg.Body)
+	return err
+}
+
+const updateQuestionIntentTag = `-- name: UpdateQuestionIntentTag :exec
+UPDATE link_visitor_questions
+SET intent_tag = $1
+WHERE id = $2
+`
+
+type UpdateQuestionIntentTagParams struct {
+	IntentTag string
+	ID        pgtype.UUID
+}
+
+func (q *Queries) UpdateQuestionIntentTag(ctx context.Context, arg UpdateQuestionIntentTagParams) error {
+	_, err := q.db.Exec(ctx, updateQuestionIntentTag, arg.IntentTag, arg.ID)
 	return err
 }
 
@@ -8624,6 +9300,23 @@ func (q *Queries) UpdateTenantDomainSSL(ctx context.Context, arg UpdateTenantDom
 	return err
 }
 
+const updateUploadedFileStatus = `-- name: UpdateUploadedFileStatus :exec
+UPDATE link_uploaded_files
+SET status = $1, reviewed_by = $2, reviewed_at = now()
+WHERE id = $3
+`
+
+type UpdateUploadedFileStatusParams struct {
+	Status     string
+	ReviewedBy pgtype.UUID
+	ID         pgtype.UUID
+}
+
+func (q *Queries) UpdateUploadedFileStatus(ctx context.Context, arg UpdateUploadedFileStatusParams) error {
+	_, err := q.db.Exec(ctx, updateUploadedFileStatus, arg.Status, arg.ReviewedBy, arg.ID)
+	return err
+}
+
 const updateVisitorQuestionAnswer = `-- name: UpdateVisitorQuestionAnswer :exec
 UPDATE link_visitor_questions
 SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
@@ -8645,7 +9338,7 @@ const updateWorkspace = `-- name: UpdateWorkspace :one
 UPDATE workspaces
 SET name = $2, brand_color = $3
 WHERE id = $1
-RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled
+RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret
 `
 
 type UpdateWorkspaceParams struct {
@@ -8667,6 +9360,8 @@ func (q *Queries) UpdateWorkspace(ctx context.Context, arg UpdateWorkspaceParams
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -8675,7 +9370,7 @@ const updateWorkspaceSecurity = `-- name: UpdateWorkspaceSecurity :one
 UPDATE workspaces
 SET force_email_verification = $1, watermark_downloads = $2, two_factor_enabled = $3
 WHERE id = $4
-RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled
+RETURNING id, tenant_id, name, slug, brand_color, created_at, force_email_verification, watermark_downloads, two_factor_enabled, crm_config, webhook_secret
 `
 
 type UpdateWorkspaceSecurityParams struct {
@@ -8703,6 +9398,8 @@ func (q *Queries) UpdateWorkspaceSecurity(ctx context.Context, arg UpdateWorkspa
 		&i.ForceEmailVerification,
 		&i.WatermarkDownloads,
 		&i.TwoFactorEnabled,
+		&i.CrmConfig,
+		&i.WebhookSecret,
 	)
 	return i, err
 }
@@ -8732,6 +9429,36 @@ func (q *Queries) UpsertContactByEmail(ctx context.Context, arg UpsertContactByE
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const upsertCrmSyncState = `-- name: UpsertCrmSyncState :exec
+INSERT INTO crm_sync_state (workspace_id, event_min, event_max, contact_email, link_id, event_types, summary, pushed_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+ON CONFLICT (workspace_id, link_id, contact_email, event_min) DO UPDATE SET
+    event_max = $3, event_types = $6, summary = $7, pushed_at = now()
+`
+
+type UpsertCrmSyncStateParams struct {
+	WorkspaceID  pgtype.UUID
+	EventMin     pgtype.Timestamptz
+	EventMax     pgtype.Timestamptz
+	ContactEmail string
+	LinkID       pgtype.UUID
+	EventTypes   []string
+	Summary      string
+}
+
+func (q *Queries) UpsertCrmSyncState(ctx context.Context, arg UpsertCrmSyncStateParams) error {
+	_, err := q.db.Exec(ctx, upsertCrmSyncState,
+		arg.WorkspaceID,
+		arg.EventMin,
+		arg.EventMax,
+		arg.ContactEmail,
+		arg.LinkID,
+		arg.EventTypes,
+		arg.Summary,
+	)
+	return err
 }
 
 const upsertIntegrationToken = `-- name: UpsertIntegrationToken :exec
@@ -8767,6 +9494,41 @@ func (q *Queries) UpsertIntegrationToken(ctx context.Context, arg UpsertIntegrat
 		arg.ExternalID,
 	)
 	return err
+}
+
+const upsertLinkIndexFile = `-- name: UpsertLinkIndexFile :one
+INSERT INTO link_index_files (tenant_id, workspace_id, link_id, status, content_html)
+VALUES ($1, $2, $3, 'generating', NULL)
+ON CONFLICT (link_id) DO UPDATE SET
+    status = 'generating',
+    content_html = NULL,
+    error_message = NULL,
+    updated_at = now()
+RETURNING id, tenant_id, workspace_id, link_id, status, content_html, error_message, generated_at, created_at, updated_at
+`
+
+type UpsertLinkIndexFileParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+}
+
+func (q *Queries) UpsertLinkIndexFile(ctx context.Context, arg UpsertLinkIndexFileParams) (LinkIndexFile, error) {
+	row := q.db.QueryRow(ctx, upsertLinkIndexFile, arg.TenantID, arg.WorkspaceID, arg.LinkID)
+	var i LinkIndexFile
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Status,
+		&i.ContentHtml,
+		&i.ErrorMessage,
+		&i.GeneratedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertNotificationRule = `-- name: UpsertNotificationRule :one
