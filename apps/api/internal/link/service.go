@@ -2718,12 +2718,11 @@ func (s *Service) GenerateIndexFile(ctx context.Context, link db.Link) (db.LinkI
 		return db.LinkIndexFile{}, fmt.Errorf("AI service not configured")
 	}
 
-	row, err := s.queries.UpsertLinkIndexFile(ctx, db.UpsertLinkIndexFileParams{
+	if _, err := s.queries.UpsertLinkIndexFile(ctx, db.UpsertLinkIndexFileParams{
 		TenantID:    link.TenantID,
 		WorkspaceID: link.WorkspaceID,
 		LinkID:      link.ID,
-	})
-	if err != nil {
+	}); err != nil {
 		return db.LinkIndexFile{}, fmt.Errorf("upsert index file: %w", err)
 	}
 
@@ -2759,7 +2758,7 @@ func (s *Service) GenerateIndexFile(ctx context.Context, link db.Link) (db.LinkI
 		return db.LinkIndexFile{}, fmt.Errorf("update index file ready: %w", err)
 	}
 
-	row, _ = s.queries.GetLinkIndexFileByLink(ctx, link.ID)
+	row, _ := s.queries.GetLinkIndexFileByLink(ctx, link.ID)
 	return row, nil
 }
 
