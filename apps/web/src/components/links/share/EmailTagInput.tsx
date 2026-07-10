@@ -105,7 +105,7 @@ export function EmailTagInput({
         {values.map((value) => (
           <span
             key={value}
-            className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary"
+            className="inline-flex animate-in fade-in zoom-in items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary duration-200"
           >
             {value}
             {!disabled && (

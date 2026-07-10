@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/sse"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/crm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
@@ -172,7 +174,11 @@ func (s *Server) registerRoutes() error {
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
 			notificationSvc := notification.NewService(queries, appMailer, s.cfg)
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, notificationSvc)
+			notificationSvc.SetRuleEngine(notification.NewRuleEngine(queries, func(ctx context.Context, wsID, userID, channel, subject, body string) error {
+				_, err := notificationSvc.Enqueue(ctx, wsID, userID, channel, subject, body)
+				return err
+			}))
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, notificationSvc, nil)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
 				dedupChecker = analytics.NewFailoverDedupChecker(s.redisClient, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
@@ -182,6 +188,25 @@ func (s *Server) registerRoutes() error {
 			analyticsSvc := analytics.NewService(queries, dedupChecker)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
+			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
+			s.registerWorker(analytics.NewRetentionCleaner(queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays))
+
+			// SSE realtime push
+			sseHub := sse.NewHub(s.redisClient.GoRedis())
+			sseHandler := sse.NewHandler(sseHub)
+			ssePublisher := sse.NewLinkPublisher(sseHub)
+			linkHandler.SetEventPublisher(ssePublisher)
+
+		// CRM integration (noop by default; swap for HubSpot/Salesforce when configured).
+		crmClient := crm.NoOp{}
+		_ = crmClient // available for future handler integration
+
+		// Register CRM aggregation worker (30min window).
+		s.registerWorker(crm.NewWindowAggregator(queries, 30*time.Minute))
+
+		// CRM webhook endpoint (CRM → DealSignal deal stage changes).
+		webhookHandler := crm.NewWebhookHandler()
+		public.POST("/webhooks/crm/deal-stage", webhookHandler.HandleDealStageChange)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
 
@@ -206,6 +231,8 @@ func (s *Server) registerRoutes() error {
 			assistantHandler.RegisterRoutes(ws)
 			linkHandler.RegisterWorkspaceRoutes(ws)
 			analyticsHandler.RegisterWorkspaceRoutes(ws)
+			ws.GET("/reverse-funnel", linkHandler.ReverseFunnel)
+			ws.GET("/events", sseHandler.StreamEvents)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)

@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
-import { Suspense, lazy } from "react";
-import { createBrowserRouter, Navigate, Outlet, useRouteError } from "react-router";
+import { Suspense, lazy, useEffect } from "react";
+import { createBrowserRouter, Navigate, Outlet, useRouteError, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -35,7 +35,20 @@ const SettingsSecurityPage = lazy(() => import("@/routes/settings/security").the
 const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").then((m) => ({ default: m.SettingsLanguagePage })));
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
 const PublicViewerPage = lazy(() => import("@/components/viewer/PublicViewerPage").then((m) => ({ default: m.PublicViewerPage })));
-const PublicDealRoomPage = lazy(() => import("@/routes/deal-rooms/public").then((m) => ({ default: m.PublicDealRoomPage })));
+
+function DealRoomRedirect() {
+	const { slug } = useParams<{ slug: string }>();
+	useEffect(() => {
+		if (!slug) return;
+		fetch(`/api/v1/public/deal-rooms/${encodeURIComponent(slug)}/redirect`)
+			.then((r) => {
+				if (r.redirected) window.location.replace(r.url);
+			})
+			.catch(() => {});
+	}, [slug]);
+	return <PageLoader />;
+}
+
 const NotFoundPage = lazy(() => import("@/routes/not-found").then((m) => ({ default: m.NotFoundPage })));
 const LoginPage = lazy(() => import("@/routes/login").then((m) => ({ default: m.LoginPage })));
 const RegisterPage = lazy(() => import("@/routes/register").then((m) => ({ default: m.RegisterPage })));
@@ -195,5 +208,5 @@ export const router = createBrowserRouter([
   { path: "/workspaces/new", element: <Suspense fallback={<PageLoader />}><CreateWorkspacePage /></Suspense> },
   { path: "/viewer/:documentId", element: <Suspense fallback={<PageLoader />}><ViewerPage /></Suspense> },
   { path: "/l/:token", element: <Suspense fallback={<PageLoader />}><PublicViewerPage /></Suspense> },
-  { path: "/r/:slug", element: <Suspense fallback={<PageLoader />}><PublicDealRoomPage /></Suspense> },
+  { path: "/r/:slug", element: <Suspense fallback={<PageLoader />}><DealRoomRedirect /></Suspense> },
 ]);

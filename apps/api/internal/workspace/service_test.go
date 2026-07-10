@@ -193,7 +193,7 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			TwoFactorEnabled:       false,
 			CreatedAt:              now,
 		}
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
 	case strings.Contains(sqlLower, "insert into workspace_members"):
 		f.member = db.WorkspaceMember{
@@ -219,13 +219,13 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		return fakeRow{values: []interface{}{f.invitation.Token, f.invitation.WorkspaceID, f.invitation.Email, f.invitation.Role, f.invitation.ExpiresAt, f.invitation.UsedAt, f.invitation.CreatedAt}}
 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 limit"):
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where id = $1 and tenant_id"):
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
 	case strings.Contains(sqlLower, "from workspaces") && strings.Contains(sqlLower, "where slug"):
-		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled}}
+		return fakeRow{values: []interface{}{f.workspace.ID, f.workspace.TenantID, f.workspace.Name, f.workspace.Slug, f.workspace.BrandColor, f.workspace.CreatedAt, f.workspace.ForceEmailVerification, f.workspace.WatermarkDownloads, f.workspace.TwoFactorEnabled, f.workspace.CrmConfig, f.workspace.WebhookSecret}}
 
 	case strings.Contains(sqlLower, "from workspace_members") && strings.Contains(sqlLower, "where workspace_id"):
 		if f.memberRole == "" || !bytesEqual(argUUID(args, 1).Bytes, pgUUIDFromString(f.actorUserID).Bytes) {

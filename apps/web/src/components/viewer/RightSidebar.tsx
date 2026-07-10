@@ -88,12 +88,12 @@ export function RightSidebar({
               {qaEnabled && (
                 <button type="button" onClick={() => setActiveTab("qa")}
                   className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${activeTab === "qa" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-                ><ChatCenteredDots size={14} />Q&A</button>
+                ><ChatCenteredDots size={14} />{t("documents:viewer.sidebarQA")}</button>
               )}
               {fileRequestsEnabled && (
                 <button type="button" onClick={() => setActiveTab("requests")}
                   className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${activeTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-                ><FileText size={14} />Requests</button>
+                ><FileText size={14} />{t("documents:viewer.sidebarRequests")}</button>
               )}
               <button type="button" onClick={onClose} className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0" aria-label={t("ai:viewer.close")}><X size={14} /></button>
             </div>

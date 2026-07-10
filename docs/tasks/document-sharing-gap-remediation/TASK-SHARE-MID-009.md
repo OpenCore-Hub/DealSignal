@@ -4,7 +4,7 @@ parent_issue: DS-SHARE-023
 agent_task_id: AGENT-TASK-SHARE-023
 version: v1.1.0
 priority: P2
-status: 待执行
+status: 已完成
 type: fullstack
 effort: L
 branch: feat/share-mid-009-file-request-links

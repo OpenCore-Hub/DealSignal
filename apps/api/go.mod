@@ -15,6 +15,7 @@ require (
 	github.com/resend/resend-go/v2 v2.28.0
 	github.com/sashabaranov/go-openai v1.32.0
 	github.com/stretchr/testify v1.11.1
+	golang.org/x/oauth2 v0.36.0
 )
 
 require (

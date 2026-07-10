@@ -4,7 +4,7 @@ parent_issue: DS-SHARE-019
 agent_task_id: AGENT-TASK-SHARE-019
 version: v1.0.0
 priority: P1
-status: 部分完成
+status: 已完成
 type: fullstack
 effort: M
 branch: feat/share-mid-007-link-analytics-lifecycle

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { FileText } from "@phosphor-icons/react";
+import { FileText, Warning } from "@phosphor-icons/react";
 import { ThumbnailNav } from "./ThumbnailNav";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
@@ -47,6 +47,7 @@ export function ViewerCanvas({
   const { highlightedEvidence } = useAIStore();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
+  const [printWarning, setPrintWarning] = useState(false);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -89,7 +90,33 @@ export function ViewerCanvas({
     ? currentPageInfo.width / currentPageInfo.height
     : 0.75;
 
-  // Fit the page inside the available viewport at zoom = 100%.
+  // Print Screen detection: Ctrl+P / Cmd+P triggers a warning overlay.
+  useEffect(() => {
+    if (!watermark) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        setPrintWarning(true);
+        setTimeout(() => setPrintWarning(false), 4000);
+      }
+    };
+
+    // Disable right-click context menu on the document area.
+    const handleContextMenu = (e: MouseEvent) => {
+      e.preventDefault();
+    };
+
+    const el = viewportRef.current;
+    if (el) {
+      el.addEventListener("contextmenu", handleContextMenu);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      if (el) el.removeEventListener("contextmenu", handleContextMenu);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [watermark]);
   const availableWidth = Math.max(300, viewportSize.width);
   const availableHeight = Math.max(300, viewportSize.height);
   const fitWidth = Math.min(availableWidth, availableHeight * aspectRatio);
@@ -146,6 +173,19 @@ export function ViewerCanvas({
 
           <HighlightOverlay evidences={activeEvidence} />
           <WatermarkOverlay watermark={activeWatermark} />
+          {printWarning && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+              <div className="flex flex-col items-center gap-3 rounded-lg bg-card p-6 shadow-lg">
+                <Warning size={32} className="text-destructive" />
+                <p className="text-sm font-medium text-foreground">
+                  {t("documents:viewer.printWarning")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("documents:viewer.printWarningHint")}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
 
         {pageAnalytics && (

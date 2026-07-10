@@ -139,6 +139,14 @@ func (m *mockAnalyticsQuerier) CountSecurityEventsByIPAndWindow(_ context.Contex
 	return m.securityEventCount, nil
 }
 
+func (m *mockAnalyticsQuerier) GetVisitorFirstAccess(_ context.Context, _ db.GetVisitorFirstAccessParams) (pgtype.Timestamptz, error) {
+	return pgtype.Timestamptz{}, nil
+}
+
+func (m *mockAnalyticsQuerier) CountVisitorAccesses(_ context.Context, _ db.CountVisitorAccessesParams) (int32, error) {
+	return 0, nil
+}
+
 type mockDedupChecker struct {
 	openOk      bool
 	openErr     error

@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Production-hardened document sharing (P0/P1):
+  - Invite tokens are now stored as HMAC-SHA256 hashes with lazy backfill for legacy tokens.
+  - Security events and page views now record `tenant_id`/`workspace_id` and scroll depth.
+  - HMAC-signed `/api/v1/public/files/signed` proxy with `Content-Disposition` support replaces direct MinIO presigned URLs for viewer assets and downloads.
+  - Dynamic watermark text (`email | UTC timestamp | IP hash`) returned on public access.
+  - Notification rule engine now evaluates `link_opened`, `page_viewed`, and security events with merge-window deduplication.
+  - Heat score applies time decay based on link age.
+  - New owner/public routes: link archive/renew, visitor Q&A, file requests, file-request upload/approval, AI index file, deal-room slug redirect, and SSE realtime events stream.
+  - Retention cleaner, expiry reminder worker, and CRM sync/webhook scaffolding.
 - Completed `useAsyncData` rollout across remaining data-fetching routes: `WorkspacesPage`, `NewDealRoomPage`, and `InsightsSuggestionsPage`.
 - Added unit tests for `WorkspacesPage`, `InsightsSuggestionsPage`, `NewDealRoomPage`, `DealRoomDetailPage`, `ContactDetailPage`, `InsightsOverviewPage`, and `SettingsIntegrationsPage` (141 frontend tests total).
 - Added `node` types to `apps/web/tsconfig.app.json` so test files can import Node built-ins (e.g. `node:fs`) for loading locale JSON.

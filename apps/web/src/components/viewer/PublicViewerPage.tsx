@@ -24,7 +24,7 @@ interface PublicDocumentSummary {
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -560,7 +560,7 @@ export function PublicViewerPage() {
         publicDocument={doc}
         publicVisitorId={access.visitorId}
         publicAccessCredentials={accessCredentials}
-        watermark={access.link.watermarkEnabled ? { email: accessCredentials.email || email || access.visitorId } : null}
+        watermark={access.link.watermarkEnabled ? { watermarkText: access.link.watermarkText } : null}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={toggleSidebar}
         sidebar={
