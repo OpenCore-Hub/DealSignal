@@ -24,6 +24,8 @@ export function WorkspacesPage() {
   useEffect(() => {
     if (workspaces?.length === 1) {
       navigate(`/${workspaces[0].slug}/dashboard`, { replace: true });
+    } else if (workspaces?.length === 0) {
+      navigate("/workspaces/new", { replace: true });
     }
   }, [workspaces, navigate]);
 

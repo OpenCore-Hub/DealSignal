@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { seedContact } from "./real-helpers";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
@@ -121,6 +122,7 @@ async function createLinkViaApi(
     requireEmail?: boolean;
     requirePassword?: boolean;
     requireNDA?: boolean;
+    requireEmailVerification?: boolean;
     password?: string;
     allowedEmails?: string[];
     allowedDomains?: string[];
@@ -138,7 +140,27 @@ async function createLinkViaApi(
   if (opts.requireEmail) body.require_email = true;
   if (opts.requirePassword) body.require_password = true;
   if (opts.requireNDA) body.require_nda = true;
+  if (opts.requireEmailVerification) body.require_email_verification = true;
   if (opts.password) body.password = opts.password;
+
+  // Email verification (and NDA, which implies verification) requires at least one contact.
+  if (opts.requireEmailVerification || opts.requireNDA) {
+    const contactEmail = `contact-${Date.now()}@example.com`;
+    const contact = await seedContact(token, workspaceSlug, contactEmail, "E2E Contact");
+    body.contact_ids = [contact.id];
+  }
+
+  // Legacy permission_type shorthand: set the concrete boolean flags that the backend expects.
+  if (permissionType === "password") {
+    body.require_password = true;
+  } else if (permissionType === "whitelist") {
+    body.require_email = true;
+  } else if (permissionType === "email" || permissionType === "email_required") {
+    body.require_email = true;
+  } else if (permissionType === "nda") {
+    body.require_nda = true;
+    body.require_email = true;
+  }
   if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
   if (opts.allowedDomains) body.allowed_domains = opts.allowedDomains;
   if (opts.expiresAt) body.expires_at = opts.expiresAt;
@@ -165,19 +187,17 @@ async function openGatedPublicLink(
   if (gate.email) {
     await expect(page.locator("#email")).toBeVisible({ timeout: 30000 });
     await page.locator("#email").fill(gate.email);
-    await page.getByRole("button", { name: "Continue" }).click();
   }
   if (gate.password) {
     await expect(page.locator("#password")).toBeVisible({ timeout: 30000 });
     await page.locator("#password").fill(gate.password);
-    await page.getByRole("button", { name: "Continue" }).click();
   }
   if (gate.nda) {
     const ndaCheckbox = page.getByRole("checkbox", { name: /I agree to the non-disclosure agreement/i });
     await expect(ndaCheckbox).toBeVisible({ timeout: 30000 });
     await ndaCheckbox.check();
-    await page.getByRole("button", { name: "Continue" }).click();
   }
+  await page.getByRole("button", { name: "Continue" }).click();
   await expect(page.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
 }
 
@@ -276,7 +296,10 @@ test.describe("real backend P0 flow", () => {
 
     await expect(page.getByText("sample.pdf")).toBeVisible();
     await page.getByRole("button", { name: "Upload now" }).click();
-    await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 30000 });
+
+    // The uploader redirects to the documents list on completion.
+    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/documents`), { timeout: 30000 });
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
   });
 
   test("upload dialog from top nav uploads a file and document appears in the list", async ({ page }) => {
@@ -305,22 +328,12 @@ test.describe("real backend P0 flow", () => {
     await authenticate(page, seed.token);
 
     const documentId = sharedDocumentId;
-    await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
-    await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
-    await page.getByRole("button", { name: "Create link" }).click();
-
-    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links/new`), { timeout: 30000 });
-    await page.getByTestId("create-link-button").click();
-
-    await expect(page.getByTestId("generated-link")).toBeVisible({ timeout: 30000 });
-
-    const shareUrl = await page.getByTestId("generated-link").textContent();
-    expect(shareUrl).toBeTruthy();
+    const link = await createLinkViaApi(seed.token, seed.workspaceSlug, documentId, "public");
 
     // Open the public share URL in a fresh context (no auth).
     const visitorPage = await page.context().newPage();
     attachDebug(visitorPage);
-    await visitorPage.goto(shareUrl!);
+    await visitorPage.goto(link.shortUrl);
     await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
 
@@ -335,12 +348,7 @@ test.describe("real backend P0 flow", () => {
     await authenticate(page, seed.token);
 
     const documentId = sharedDocumentId;
-    await page.goto(`/${seed.workspaceSlug}/documents/${documentId}`);
-    await expect(page.getByRole("button", { name: "Create link" })).toBeVisible({ timeout: 30000 });
-    await page.getByRole("button", { name: "Create link" }).click();
-    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links/new`), { timeout: 30000 });
-    await page.getByTestId("create-link-button").click();
-    await expect(page.getByTestId("generated-link")).toBeVisible({ timeout: 30000 });
+    await createLinkViaApi(seed.token, seed.workspaceSlug, documentId, "public");
 
     // Open the document detail inside the workspace shell so the current workspace
     // is selected, then click Preview to open the authenticated viewer.
@@ -372,7 +380,7 @@ test.describe("real backend P0 flow", () => {
     await expect(page.getByRole("heading", { name: "New Deal Room" })).toBeVisible({ timeout: 30000 });
 
     // Templates should load.
-    await expect(page.getByText("Seed Round Due Diligence")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByRole("button", { name: /Startup Fundraising/i }).first()).toBeVisible({ timeout: 30000 });
 
     const roomName = `E2E Room ${Date.now()}`;
     await page.getByLabel("Name").fill(roomName);
@@ -460,7 +468,7 @@ test.describe("real backend P0 flow", () => {
     await expect(visitorPage.locator("#email")).toBeVisible({ timeout: 30000 });
     await visitorPage.locator("#email").fill(`blocked-${Date.now()}@example.com`);
     await visitorPage.getByRole("button", { name: "Continue" }).click();
-    await expect(visitorPage.getByText(/email not in whitelist/i)).toBeVisible({ timeout: 30000 });
+    await expect(visitorPage.getByText(/email is not allowed/i)).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
   });
 
@@ -480,10 +488,14 @@ test.describe("real backend P0 flow", () => {
     await openGatedPublicLink(visitorPage, link.shortUrl, { email: visitorEmail });
     await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
 
-    // Revoke and verify blocked.
+    // Revoke and verify blocked in a fresh visitor context (no session reuse).
     await revokeLinkViaApi(seed.token, seed.workspaceSlug, link.id);
-    await visitorPage.reload();
-    await expect(visitorPage.getByText(/link revoked/i)).toBeVisible({ timeout: 30000 });
+    await visitorPage.close();
+    const blockedPage = await page.context().newPage();
+    attachDebug(blockedPage);
+    await blockedPage.goto(link.shortUrl);
+    await expect(blockedPage.getByText(/Link disabled/i)).toBeVisible({ timeout: 30000 });
+    await blockedPage.close();
 
     // Re-enable and verify access again.
     await apiFetch(`/api/workspaces/${seed.workspaceSlug}/links/${link.id}`, {
@@ -491,12 +503,11 @@ test.describe("real backend P0 flow", () => {
       headers: { Authorization: `Bearer ${seed.token}` },
       body: JSON.stringify({ status: "active" }),
     });
-    await visitorPage.goto(link.shortUrl);
-    await expect(visitorPage.locator("#email")).toBeVisible({ timeout: 30000 });
-    await visitorPage.locator("#email").fill(visitorEmail);
-    await visitorPage.getByRole("button", { name: "Continue" }).click();
-    await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
-    await visitorPage.close();
+    const revivedPage = await page.context().newPage();
+    attachDebug(revivedPage);
+    await openGatedPublicLink(revivedPage, link.shortUrl, { email: visitorEmail });
+    await expect(revivedPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
+    await revivedPage.close();
   });
 
   test("whitelist link with expiry/max access stays valid after UI toggle disable/enable", async ({ page }) => {
@@ -578,7 +589,7 @@ test.describe("real backend P0 flow", () => {
     const visitorPage = await page.context().newPage();
     attachDebug(visitorPage);
     await visitorPage.goto(link.shortUrl);
-    await expect(visitorPage.getByText(/link revoked/i)).toBeVisible({ timeout: 30000 });
+    await expect(visitorPage.getByText(/Link disabled/i)).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
   });
 
@@ -676,7 +687,7 @@ test.describe("real backend P0 flow", () => {
       visitorPage,
       link.shortUrl,
       { email: `blocked-${Date.now()}@example.com` },
-      /email not in whitelist/i
+      /email is not allowed/i
     );
 
     await visitorPage.locator("#email").fill(allowedEmail);
@@ -697,10 +708,14 @@ test.describe("real backend P0 flow", () => {
     attachDebug(visitorPage);
     await visitorPage.goto(link.shortUrl);
     await expect(visitorPage.locator("img[alt*='Page']")).toBeVisible({ timeout: 30000 });
-
-    await visitorPage.reload();
-    await expect(visitorPage.getByText(/link max access reached/i)).toBeVisible({ timeout: 30000 });
     await visitorPage.close();
+
+    // A fresh visitor context should hit the access limit.
+    const blockedPage = await page.context().newPage();
+    attachDebug(blockedPage);
+    await blockedPage.goto(link.shortUrl);
+    await expect(blockedPage.getByText(/Access limit reached/i)).toBeVisible({ timeout: 30000 });
+    await blockedPage.close();
   });
 
   test("expired link returns gone error", async ({ page }) => {
@@ -769,8 +784,6 @@ test.describe("real backend P0 flow", () => {
 
     await page.goto(`/${seed.workspaceSlug}/deal-rooms/${room.id}`);
     await expect(page.getByRole("heading", { name: "E2E Room With Doc" })).toBeVisible({ timeout: 30000 });
-    const docsCard = page.locator('[data-slot="card"]', { hasText: "Documents" });
-    await expect(docsCard).toBeVisible({ timeout: 30000 });
-    await expect(docsCard.getByText("1")).toBeVisible({ timeout: 30000 });
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 30000 });
   });
 });

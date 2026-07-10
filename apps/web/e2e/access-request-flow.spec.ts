@@ -40,15 +40,18 @@ test.describe("link access request flow (real backend)", () => {
   });
 
   test("visitor requests access and creator approves", async ({ page }) => {
-    // 1. Visitor opens the link and is denied because the domain is not allowed.
+    // 1. Visitor opens the link and submits a denied email so the request-access CTA appears.
     await page.goto(shortUrl);
     await page.waitForLoadState("networkidle");
+    await page.getByLabel(/Email/i).fill(visitorEmail);
+    await page.getByRole("button", { name: /Continue/i }).click();
+
     const requestButton = page.getByRole("button", { name: /Request access/i });
     await expect(requestButton).toBeVisible({ timeout: 10000 });
     await requestButton.click();
 
     // 2. Fill and submit the access request form.
-    await page.getByLabel(/Email/i).fill(visitorEmail);
+    await page.locator("#request-email").fill(visitorEmail);
     await page.getByRole("button", { name: /Submit request/i }).click();
     await expect(page.getByText(/Your access request has been submitted/i).first()).toBeVisible({ timeout: 10000 });
 

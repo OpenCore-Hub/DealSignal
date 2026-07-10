@@ -172,6 +172,8 @@ type CreateRequest struct {
 	RequireNDA               bool     `json:"require_nda,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
+	AllowedEmails            []string `json:"allowed_emails,omitempty"`
+	AllowedDomains           []string `json:"allowed_domains,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
@@ -769,6 +771,8 @@ func (h *Handler) Create(c *gin.Context) {
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AICopilotEnabled:         req.AICopilotEnabled,
 		ContactIDs:               req.ContactIDs,
+		AllowedEmails:            req.AllowedEmails,
+		AllowedDomains:           req.AllowedDomains,
 		CustomDomain:             req.CustomDomain,
 		Tags:                     req.Tags,
 		NotifyOnAccess:           req.NotifyOnAccess,

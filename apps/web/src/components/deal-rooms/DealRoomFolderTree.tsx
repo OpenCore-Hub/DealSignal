@@ -467,7 +467,7 @@ export function DealRoomFolderTree({
   };
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2" data-testid="folder-tree">
       {folders.length === 0 && <p className="text-sm text-muted-foreground">{t("folders.empty")}</p>}
 
       {isNavigator && (

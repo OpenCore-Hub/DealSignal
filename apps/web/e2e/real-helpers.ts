@@ -44,6 +44,7 @@ interface SeedLink {
   shortUrl: string;
   publicToken: string;
   permissionType: string;
+  contactEmail?: string;
 }
 
 interface SeedDealRoom {
@@ -174,6 +175,8 @@ export async function seedLink(
     expiresAt?: string;
     maxAccessCount?: number;
     aiCopilotEnabled?: boolean;
+    contactEmail?: string;
+    contactName?: string;
   } = {}
 ): Promise<SeedLink> {
   const body: Record<string, unknown> = {
@@ -194,6 +197,13 @@ export async function seedLink(
   if (typeof opts.watermarkEnabled === "boolean") body.watermark_enabled = opts.watermarkEnabled;
   if (typeof opts.aiCopilotEnabled === "boolean") body.ai_copilot_enabled = opts.aiCopilotEnabled;
 
+  let contactEmail: string | undefined;
+  if (opts.requireEmailVerification || opts.requireNda) {
+    contactEmail = opts.contactEmail ?? `contact-${Date.now()}@example.com`;
+    const contact = await seedContact(token, workspaceSlug, contactEmail, opts.contactName ?? "E2E Contact");
+    body.contact_ids = [contact.id];
+  }
+
   const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
@@ -202,7 +212,7 @@ export async function seedLink(
   if (!res.ok) throw new Error(`create link failed: ${res.status} ${await res.text()}`);
   const link = (await res.json()) as { id: string; shortUrl: string; permissionType?: string };
   const publicToken = link.shortUrl.split("/").pop()!;
-  return { id: link.id, shortUrl: link.shortUrl, publicToken, permissionType: link.permissionType ?? "public" };
+  return { id: link.id, shortUrl: link.shortUrl, publicToken, permissionType: link.permissionType ?? "public", contactEmail };
 }
 
 // ── Deal room creation (with folders + document) ──────────────────
@@ -274,40 +284,32 @@ export async function visitPublicLink(
 ) {
   await page.goto(shortUrl);
 
-  // Handle email gate
-  if (gate?.email) {
-    const emailInput = page.locator("#email");
-    if (await emailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await emailInput.fill(gate.email);
-      await page.getByRole("button", { name: /continue/i }).click();
-    }
+  // Fill all visible gate fields, then submit once. The public viewer renders
+  // every configured control on the first response, so we must not click
+  // Continue between fields.
+  const emailInput = page.locator("#email");
+  if (gate?.email && (await emailInput.isVisible({ timeout: 5000 }).catch(() => false))) {
+    await emailInput.fill(gate.email);
   }
 
-  // Handle email code gate
-  if (gate?.emailCode) {
-    const codeInput = page.locator('input[inputmode="numeric"]');
-    if (await codeInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await codeInput.fill(gate.emailCode);
-      await page.getByRole("button", { name: /continue/i }).click();
-    }
+  const codeInput = page.locator('input[inputmode="numeric"]');
+  if (gate?.emailCode && (await codeInput.isVisible({ timeout: 5000 }).catch(() => false))) {
+    await codeInput.fill(gate.emailCode);
   }
 
-  // Handle password gate
-  if (gate?.password) {
-    const pwdInput = page.locator("#password");
-    if (await pwdInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await pwdInput.fill(gate.password);
-      await page.getByRole("button", { name: /continue/i }).click();
-    }
+  const pwdInput = page.locator("#password");
+  if (gate?.password && (await pwdInput.isVisible({ timeout: 5000 }).catch(() => false))) {
+    await pwdInput.fill(gate.password);
   }
 
-  // Handle NDA gate
-  if (gate?.nda) {
-    const ndaCheckbox = page.getByRole("checkbox", { name: /agree/i });
-    if (await ndaCheckbox.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await ndaCheckbox.check();
-      await page.getByRole("button", { name: /continue/i }).click();
-    }
+  const ndaCheckbox = page.getByRole("checkbox", { name: /agree/i });
+  if (gate?.nda && (await ndaCheckbox.isVisible({ timeout: 5000 }).catch(() => false))) {
+    await ndaCheckbox.check();
+  }
+
+  const continueButton = page.getByRole("button", { name: /continue/i });
+  if (await continueButton.isVisible({ timeout: 5000 }).catch(() => false)) {
+    await continueButton.click();
   }
 
   // Wait for viewer to render

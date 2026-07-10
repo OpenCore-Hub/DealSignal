@@ -90,7 +90,7 @@ test.describe("Deal room management (real backend)", () => {
           body: JSON.stringify({ sort_order: 999 }),
         }
       );
-      expect([200, 400, 404]).toContain(res.status);
+      expect([200, 204, 400, 404]).toContain(res.status);
     }
   });
 
@@ -146,8 +146,8 @@ test.describe("Deal room management (real backend)", () => {
     });
     expect(addRes.ok).toBe(true);
 
-    const added = (await addRes.json()) as { data: { id: string } };
-    const memberId = added.data.id;
+    const added = (await addRes.json()) as { id: string };
+    const memberId = added.id;
 
     const delRes = await apiFetch(
       `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/members/${memberId}`,

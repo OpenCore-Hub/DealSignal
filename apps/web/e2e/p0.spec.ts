@@ -33,7 +33,9 @@ test.describe("P0 user flow (real backend)", () => {
     await fileInput.setInputFiles(path.join(__dirname, "fixtures", "sample.pdf"));
 
     await page.getByRole("button", { name: "Upload now" }).click();
-    await expect(page.getByTestId("upload-success")).toBeVisible({ timeout: 15000 });
+    // Uploader navigates to the documents list on completion.
+    await expect(page).toHaveURL(new RegExp(`/${workspaceSlug}/documents$`), { timeout: 15000 });
+    await expect(page.getByText("sample.pdf").first()).toBeVisible({ timeout: 10000 });
   });
 
   test("create a smart link via bundle pipeline", async ({ page }) => {

@@ -130,6 +130,8 @@ type CreateLinkRequest struct {
 	RequireNDA               bool
 	RequirePassword          bool
 	Password                 string // plaintext; stored as bcrypt hash
+	AllowedEmails            []string
+	AllowedDomains           []string
 	ExpiresAt                *time.Time
 	MaxAccessCount           *int32
 	DownloadEnabled          bool
@@ -152,6 +154,8 @@ type UpdateLinkRequest struct {
 	RequireNDA               bool
 	RequirePassword          bool
 	Password                 string // plaintext; if empty and require_password unchanged, keep existing hash
+	AllowedEmails            []string
+	AllowedDomains           []string
 	ExpiresAt                *time.Time
 	MaxAccessCount           *int32
 	DownloadEnabled          bool
@@ -403,6 +407,56 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 				return db.Link{}, fmt.Errorf("create link contact: %w", err)
 			}
 			emailCodes = append(emailCodes, emailCode{email: contact.Email.String, code: code})
+		}
+	}
+
+	// Create allow-list rules from allowed_emails / allowed_domains.
+	allowRules := make([]AccessRule, 0, len(req.AllowedEmails)+len(req.AllowedDomains))
+	seenRules := make(map[string]struct{})
+	for _, email := range req.AllowedEmails {
+		v := strings.TrimSpace(strings.ToLower(email))
+		if v == "" {
+			continue
+		}
+		key := "email:" + v
+		if _, ok := seenRules[key]; ok {
+			continue
+		}
+		seenRules[key] = struct{}{}
+		allowRules = append(allowRules, AccessRule{RuleType: "email", Value: v, Action: "allow"})
+	}
+	for _, domain := range req.AllowedDomains {
+		v := strings.TrimSpace(strings.ToLower(domain))
+		if v == "" {
+			continue
+		}
+		v = strings.TrimPrefix(v, "@")
+		if strings.Contains(v, "@") {
+			return db.Link{}, fmt.Errorf("%w: invalid allowed domain %q", ErrInvalidAccessRule, domain)
+		}
+		key := "domain:" + v
+		if _, ok := seenRules[key]; ok {
+			continue
+		}
+		seenRules[key] = struct{}{}
+		allowRules = append(allowRules, AccessRule{RuleType: "domain", Value: v, Action: "allow"})
+	}
+	if len(allowRules) > 0 {
+		if err := validateAccessRules(allowRules); err != nil {
+			return db.Link{}, err
+		}
+		for _, r := range allowRules {
+			if err := qtx.CreateLinkAccessRule(ctx, db.CreateLinkAccessRuleParams{
+				TenantID:    tenantID,
+				WorkspaceID: workspaceUUID,
+				LinkID:      link.ID,
+				RuleType:    r.RuleType,
+				Value:       r.Value,
+				Action:      r.Action,
+				SortOrder:   0,
+			}); err != nil {
+				return db.Link{}, fmt.Errorf("create access rule: %w", err)
+			}
 		}
 	}
 
@@ -1643,8 +1697,10 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	switch link.Status {
 	case "deleted":
 		return AccessResult{}, ErrLinkNotFound
-	case "disabled", "revoked":
+	case "disabled":
 		return AccessResult{}, ErrLinkDisabled
+	case "revoked":
+		return AccessResult{}, ErrLinkRevoked
 	case "archived":
 		return AccessResult{}, ErrLinkArchived
 	case "expired":
@@ -2229,11 +2285,13 @@ func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requireEmailV
 		requireEmail = true
 	}
 
-	// NDA always requires email verification for identity check.
-	if !requireEmailVerification && requireNDA {
-		requireEmailVerification = true
-	}
+	// NDA requires email collection but not a verification code.
 	if !requireEmail && requireNDA {
+		requireEmail = true
+	}
+
+	// Allow-list rules require email collection so there is an email to evaluate.
+	if !requireEmail && (len(req.AllowedEmails) > 0 || len(req.AllowedDomains) > 0) {
 		requireEmail = true
 	}
 
