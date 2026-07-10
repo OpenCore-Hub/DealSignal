@@ -1,12 +1,13 @@
 /**
  * 安全选项排列组合验收 — 真实后端版本
  *
- * 覆盖: 6 个布尔开关 × 关键组合的完整创建链路验证 (UI → 真实后端 API → 返回结果)
+ * 覆盖: 4 个可见布尔开关 × 关键组合的完整创建链路验证 (UI → 真实后端 API → 返回结果)
  */
 import { test, expect, type Page } from "@playwright/test";
 import {
   seedRealBackend,
   seedDocument,
+  seedContact,
   authenticatePage,
   attachDebug,
 } from "./real-helpers";
@@ -14,12 +15,11 @@ import {
 // ── 全局状态 ──────────────────────────────────────────────────────
 let token: string;
 let workspaceSlug: string;
+let contactId: string;
 
 // ── 常量 ──────────────────────────────────────────────────────────
 const BOOL_FIELDS = [
   { key: "requireEmailVerification", label: "Email verification code", testId: "security-switch-requireEmailVerification" },
-  { key: "whitelistEnabled", label: "Whitelist emails/domains", testId: "security-switch-whitelistEnabled" },
-  { key: "passwordEnabled", label: "Access password", testId: "security-switch-passwordEnabled" },
   { key: "ndaEnabled", label: "NDA agreement", testId: "security-switch-ndaEnabled" },
   { key: "allowDownload", label: "Allow download", testId: "security-switch-allowDownload" },
   { key: "watermarkEnabled", label: "Dynamic watermark", testId: "security-switch-watermarkEnabled" },
@@ -76,14 +76,13 @@ async function getSwitchState(page: Page, testId: string): Promise<boolean> {
   return dataChecked === "" || dataChecked === "true";
 }
 
-async function setWhitelist(page: Page, value: string) {
-  const input = page.locator('[data-testid="security-whitelist-input"]');
-  await input.fill(value);
-}
-
-async function setPassword(page: Page, value: string) {
-  const input = page.locator('[data-testid="security-password-input"]');
-  await input.fill(value);
+async function selectContact(page: Page, id: string) {
+  const trigger = page.locator('[data-testid="contact-selector-trigger"]').first();
+  await expect(trigger).toBeVisible({ timeout: 5000 });
+  await trigger.click();
+  const option = page.locator(`[data-testid="contact-option-${id}"]`).first();
+  await expect(option).toBeVisible({ timeout: 5000 });
+  await option.click();
 }
 
 async function openAdvancedSettings(page: Page) {
@@ -121,6 +120,13 @@ test.describe("安全选项排列组合验收 (真实后端)", () => {
     token = seed.token;
     workspaceSlug = seed.workspaceSlug;
     await seedDocument(token, workspaceSlug);
+    const contact = await seedContact(
+      token,
+      workspaceSlug,
+      `security-contact-${Date.now()}@example.com`,
+      "Security Contact",
+    );
+    contactId = contact.id;
   });
 
   test.beforeEach(async ({ page }) => {
@@ -128,58 +134,38 @@ test.describe("安全选项排列组合验收 (真实后端)", () => {
     await authenticatePage(page, token);
   });
 
-  test.fixme("64 种布尔开关笛卡尔积 — UI 状态与约束验收", async ({ page }) => {
+  test("16 种布尔开关笛卡尔积 — UI 状态与约束验收", async ({ page }) => {
     test.setTimeout(180000);
     await gotoSecurityStep(page);
     const combos = generateBoolCombinations();
 
-    for (let idx = 0; idx < combos.length; idx++) {
-      const combo = combos[idx];
-
+    for (const combo of combos) {
       // Reset all switches to OFF first
-      await setSwitch(page, "security-switch-whitelistEnabled", false);
       await setSwitch(page, "security-switch-ndaEnabled", false);
       await setSwitch(page, "security-switch-requireEmailVerification", false);
-      await setSwitch(page, "security-switch-passwordEnabled", false);
       await setSwitch(page, "security-switch-allowDownload", false);
       await setSwitch(page, "security-switch-watermarkEnabled", false);
 
-      // Expected email verification state (forced by whitelist/NDA)
+      // NDA forces email verification so the signer identity is recorded.
       const expectedEmailVerification =
-        combo.requireEmailVerification || combo.whitelistEnabled || combo.ndaEnabled;
+        combo.requireEmailVerification || combo.ndaEnabled;
 
       // Set independent switches first
-      await setSwitch(page, "security-switch-passwordEnabled", combo.passwordEnabled);
       await setSwitch(page, "security-switch-allowDownload", combo.allowDownload);
       await setSwitch(page, "security-switch-watermarkEnabled", combo.watermarkEnabled);
 
-      // Set whitelist/NDA (forces email verification)
-      await setSwitch(page, "security-switch-whitelistEnabled", combo.whitelistEnabled);
+      // Set NDA (forces email verification)
       await setSwitch(page, "security-switch-ndaEnabled", combo.ndaEnabled);
 
-      // Set email verification only if not forced
-      if (!combo.whitelistEnabled && !combo.ndaEnabled) {
+      // Set email verification only if not forced by NDA
+      if (!combo.ndaEnabled) {
         await setSwitch(page, "security-switch-requireEmailVerification", combo.requireEmailVerification);
-      }
-
-      // Fill dependent fields
-      if (combo.whitelistEnabled) {
-        await setWhitelist(page, "vip@example.com");
-      }
-      if (combo.passwordEnabled) {
-        await setPassword(page, "TestPass123!");
       }
 
       // Assert UI state
       await expect(
         getSwitchState(page, "security-switch-requireEmailVerification"),
       ).resolves.toBe(expectedEmailVerification);
-      await expect(
-        getSwitchState(page, "security-switch-whitelistEnabled"),
-      ).resolves.toBe(combo.whitelistEnabled);
-      await expect(
-        getSwitchState(page, "security-switch-passwordEnabled"),
-      ).resolves.toBe(combo.passwordEnabled);
       await expect(
         getSwitchState(page, "security-switch-ndaEnabled"),
       ).resolves.toBe(combo.ndaEnabled);
@@ -190,10 +176,13 @@ test.describe("安全选项排列组合验收 (真实后端)", () => {
         getSwitchState(page, "security-switch-watermarkEnabled"),
       ).resolves.toBe(combo.watermarkEnabled);
 
-      // Email switch should be disabled when whitelist/NDA is on
+      // Email switch should be disabled when NDA is on
       const emailSwitch = page.locator('[data-testid="security-switch-requireEmailVerification"]');
-      const emailDisabled = await emailSwitch.isDisabled();
-      expect(emailDisabled).toBe(combo.whitelistEnabled || combo.ndaEnabled);
+      if (combo.ndaEnabled) {
+        await expect(emailSwitch).toBeDisabled();
+      } else {
+        await expect(emailSwitch).toBeEnabled();
+      }
     }
   });
 
@@ -236,20 +225,18 @@ test.describe("安全选项排列组合验收 (真实后端)", () => {
     }
   });
 
-  test.fixme("关键组合完整链路 — UI → Review → 提交 Link", async ({ page }) => {
+  test("关键组合完整链路 — UI → Review → 提交 Link", async ({ page }) => {
     test.setTimeout(60000);
     await gotoSecurityStep(page);
 
-    // Set high-security combination
-    await setSwitch(page, "security-switch-whitelistEnabled", true);
-    await setWhitelist(page, "ceo@corp.com, @partner.io");
-    await setSwitch(page, "security-switch-passwordEnabled", true);
-    await setPassword(page, "UltraSecure123!");
+    // Set high-security combination available in the current UI
+    await setSwitch(page, "security-switch-requireEmailVerification", true);
+    await selectContact(page, contactId);
     await setSwitch(page, "security-switch-ndaEnabled", true);
     await setSwitch(page, "security-switch-allowDownload", false);
     await setSwitch(page, "security-switch-watermarkEnabled", true);
 
-    // whitelist/NDA forces email verification
+    // NDA already forces email verification; contact is selected above.
 
     // Set advanced options
     await openAdvancedSettings(page);
@@ -280,10 +267,12 @@ test.describe("安全选项排列组合验收 (真实后端)", () => {
 
       // Verify key security fields are sent correctly
       expect(payload.require_nda).toBe(true);
-      expect(payload.require_password).toBe(true);
-      expect(payload.password).toBe("UltraSecure123!");
+      expect(payload.require_email_verification).toBe(true);
+      expect(payload.contact_ids).toContain(contactId);
       expect(payload.download_enabled).toBe(false);
       expect(payload.watermark_enabled).toBe(true);
+      expect(payload.max_access_count).toBe(10);
+      expect(payload.expires_at).toBeDefined();
 
       // Verify the link was created successfully
       await expect(page.locator('[data-testid="generated-link"]')).toBeVisible({ timeout: 10000 });

@@ -164,6 +164,7 @@ export function ContactSelector({ workspaceSlug, value, onChange, contacts: cont
       >
         <Combobox.Trigger
           disabled={loading}
+          data-testid="contact-selector-trigger"
           className={cn(
             "flex w-full items-center justify-between gap-2 rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none transition-colors",
             "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
