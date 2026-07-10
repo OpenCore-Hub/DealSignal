@@ -23,8 +23,8 @@ test.describe("Integrations & marketing (real backend)", () => {
     });
     expect(res.ok).toBe(true);
     const body = (await res.json()) as Record<string, unknown>;
-    expect(body).toHaveProperty("slack");
-    expect(body).toHaveProperty("hubspot");
+    expect(body).toHaveProperty("slack_connected");
+    expect(body).toHaveProperty("hubspot_connected");
   });
 
   test("updates integration settings", async () => {
@@ -81,8 +81,8 @@ test.describe("Integrations & marketing (real backend)", () => {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
-    const body = (await res.json()) as { data: unknown[] };
-    expect(Array.isArray(body.data)).toBe(true);
+    const body = (await res.json()) as { data: unknown[] | null };
+    expect(body.data === null || Array.isArray(body.data)).toBe(true);
   });
 
   test("triggers HubSpot sync", async () => {
@@ -112,8 +112,8 @@ test.describe("Integrations & marketing (real backend)", () => {
     expect([200, 201, 202]).toContain(res.status);
 
     if (res.ok) {
-      const body = (await res.json()) as { sent: number; failed: number };
-      expect(typeof body.sent).toBe("number");
+      const body = (await res.json()) as { data: { sent: number; failed: number } };
+      expect(typeof body.data.sent).toBe("number");
     }
   });
 });

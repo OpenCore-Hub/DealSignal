@@ -108,12 +108,10 @@ describe("AccessTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ allowDownloading: true });
   });
 
-  it("toggles screenshot protection", () => {
+  it("disables screenshot protection placeholder switch", () => {
     renderAccessTab(baseDraft);
     const switchEl = screen.getByRole("switch", { name: /screenshot protection/i });
-    fireEvent.click(switchEl);
-    // screenshot protection is in the Advanced section, but the label is still rendered
-    expect(screen.getByText(/screenshot protection/i)).toBeInTheDocument();
+    expect(switchEl).toBeDisabled();
   });
 
   it("shows advanced count badge when AI Copilot is enabled", () => {
@@ -121,14 +119,14 @@ describe("AccessTab", () => {
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("shows advanced count badge with multiple advanced fields enabled", () => {
+  it("does not count placeholder switches in the advanced badge", () => {
     renderAccessTab({
       ...baseDraft,
       aiCopilotEnabled: true,
       enableFileRequests: true,
       enableQaConversations: true,
     });
-    expect(screen.getByText("3 enabled")).toBeInTheDocument();
+    expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
   it("renders all advanced options when section is expanded", () => {
@@ -139,6 +137,14 @@ describe("AccessTab", () => {
     expect(screen.getByText(/file requests/i)).toBeInTheDocument();
     expect(screen.getByText(/index file/i)).toBeInTheDocument();
     expect(screen.getByText(/Q&A conversations/i)).toBeInTheDocument();
+  });
+
+  it("disables placeholder advanced switches", () => {
+    renderAccessTab(baseDraft);
+    fireEvent.click(screen.getByText(/advanced/i));
+    expect(screen.getByRole("switch", { name: /file requests/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /index file/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Q&A conversations/i })).toBeDisabled();
   });
 
   it("displays validation errors", () => {

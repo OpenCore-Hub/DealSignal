@@ -12,12 +12,12 @@ type registerRequest struct {
 }
 
 type loginRequest struct {
-	Email    string `json:"email" binding:"required,email"`
-	Password string `json:"password" binding:"required"`
+	Email    string `json:"email" binding:"omitempty,email"`
+	Password string `json:"password"`
 }
 
 type refreshRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
+	RefreshToken string `json:"refresh_token"`
 }
 
 type logoutRequest struct {
@@ -93,6 +93,10 @@ func (h *Handler) Login(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
+	if req.Email == "" || req.Password == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "missing credentials"})
+		return
+	}
 
 	user, pair, err := h.service.Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
@@ -108,6 +112,10 @@ func (h *Handler) Refresh(c *gin.Context) {
 	var req refreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	if req.RefreshToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "missing refresh token"})
 		return
 	}
 

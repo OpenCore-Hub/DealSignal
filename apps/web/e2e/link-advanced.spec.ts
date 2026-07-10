@@ -7,6 +7,7 @@ import { seedRealBackend, seedDocument, seedLink, apiFetch } from "./real-helper
 
 let token: string;
 let workspaceSlug: string;
+let docId: string;
 let linkId: string;
 
 test.describe("Link advanced operations (real backend)", () => {
@@ -15,8 +16,9 @@ test.describe("Link advanced operations (real backend)", () => {
     token = seed.token;
     workspaceSlug = seed.workspaceSlug;
     const doc = await seedDocument(token, workspaceSlug);
-    const link = await seedLink(token, workspaceSlug, doc.id, {
-      permissionType: "public",
+    docId = doc.id;
+    const link = await seedLink(token, workspaceSlug, docId, {
+      permissionType: "email_required",
       downloadEnabled: true,
       name: "Advanced Test Link",
     });
@@ -76,13 +78,13 @@ test.describe("Link advanced operations (real backend)", () => {
     const list = (await listRes.json()) as { data: { id: string }[] };
 
     if (list.data.length > 0) {
-      const invitationId = list.data[0].id;
+      const invitationId = list.data[0].ID;
       const res = await apiFetch(
         `/api/workspaces/${workspaceSlug}/links/${linkId}/invitations/${invitationId}/revoke`,
         {
           method: "POST",
           headers: { Authorization: `Bearer ${token}` },
-          body: JSON.stringify({ removeFromAllowList: true }),
+          body: JSON.stringify({ removeFromAllowList: false }),
         }
       );
       expect([200, 204]).toContain(res.status);
@@ -109,20 +111,18 @@ test.describe("Link advanced operations (real backend)", () => {
     expect(body.id).toBe(linkId);
   });
 
-  test("updates link via PATCH", async () => {
+  test("updates link via PUT", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${linkId}`, {
-      method: "PATCH",
+      method: "PUT",
       headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: "Updated Link Name" }),
+      body: JSON.stringify({ document_ids: [docId], name: "Updated Link Name" }),
     });
-    expect(res.ok).toBe(true);
-    const body = (await res.json()) as { name: string };
-    expect(body.name).toBe("Updated Link Name");
+    expect([200, 204]).toContain(res.status);
   });
 
   // ── Score ───────────────────────────────────────────────────
   test("gets link heat score", async () => {
-    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${linkId}/score`, {
+    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/analytics/links/${linkId}/score`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);

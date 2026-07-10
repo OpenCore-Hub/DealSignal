@@ -58,6 +58,17 @@ const ADVANCED_KEYS: Array<keyof DraftLink> = [
   "enableQaConversations",
 ];
 
+// These switches are visible for discovery but disabled until their backend
+// counterparts (SHORT-008/009/MID-008) are implemented.
+const PLACEHOLDER_KEYS: Array<keyof DraftLink> = [
+  "enableFileRequests",
+  "enableIndexFileGeneration",
+  "enableQaConversations",
+  "enableScreenshotProtection",
+];
+
+const FUNCTIONAL_ADVANCED_KEYS: Array<keyof DraftLink> = ["aiCopilotEnabled"];
+
 const ADVANCED_LABELS: Record<string, string> = {
   aiCopilotEnabled: "accessRules.advanced.aiAgents",
   enableFileRequests: "accessRules.advanced.fileRequests",
@@ -77,7 +88,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
-  const advancedCount = ADVANCED_KEYS.filter((key) => draft[key]).length;
+  const advancedCount = FUNCTIONAL_ADVANCED_KEYS.filter((key) => draft[key]).length;
 
   const handleRequireEmailChange = (checked: boolean) => {
     updateDraft({
@@ -200,6 +211,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
           description={t("accessRules.additionalProtections.screenshotProtectionDescription")}
           checked={draft.enableScreenshotProtection}
           onCheckedChange={(checked) => updateDraft({ enableScreenshotProtection: checked })}
+          disabled={true}
         />
       </div>
 
@@ -222,6 +234,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
             description={t(ADVANCED_DESCRIPTIONS[key])}
             checked={draft[key] as boolean}
             onCheckedChange={(checked) => updateDraft({ [key]: checked } as Partial<DraftLink>)}
+            disabled={PLACEHOLDER_KEYS.includes(key)}
           />
         ))}
       </CollapsibleSection>

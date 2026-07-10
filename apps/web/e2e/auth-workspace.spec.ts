@@ -65,8 +65,8 @@ test.describe("auth & workspace flows (real backend)", () => {
     await page.getByLabel("Password").fill(password);
     await page.getByRole("button", { name: "Sign in" }).click();
 
-    // Should redirect to workspace list and auto-redirect to dashboard if only one workspace
-    await expect(page).toHaveURL(/\/dashboard/, { timeout: 15000 });
+    // No workspace exists yet; app redirects to workspace creation.
+    await expect(page).toHaveURL(/\/workspaces\/new/, { timeout: 15000 });
   });
 
   test("log out returns to login", async ({ page }) => {
@@ -91,15 +91,17 @@ test.describe("auth & workspace flows (real backend)", () => {
     await page.addInitScript((t: string) => localStorage.setItem("access_token", t), seed.token);
     await page.goto("/");
 
-    // Should auto-redirect to dashboard (only one workspace)
+    // Should auto-redirect to the only workspace dashboard
     await expect(page).toHaveURL(new RegExp(`/${seed.slug}/dashboard`), { timeout: 10000 });
 
     // Visit workspace create page
     await page.goto("/workspaces/new");
     await expect(page.getByText("Create workspace").first()).toBeVisible({ timeout: 10000 });
 
-    await page.getByLabel("Workspace name").fill("E2E Workspace");
-    // Auto-generated slug
+    const uniqueSuffix = Date.now();
+    await page.getByLabel("Workspace name").fill(`E2E Workspace ${uniqueSuffix}`);
+    // Use a unique slug to avoid collisions across test runs.
+    await page.getByLabel("Workspace slug").fill(`e2e-workspace-${uniqueSuffix}`);
     await page.getByRole("button", { name: "Create workspace" }).click();
 
     // Should navigate to the new workspace dashboard

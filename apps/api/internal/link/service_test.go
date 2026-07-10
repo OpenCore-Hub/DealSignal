@@ -23,11 +23,10 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 			wantPerm:              "email_required",
 		},
 		{
-			name:                  "nda implies email verification",
-			req:                   CreateLinkRequest{RequireNDA: true},
-			wantEmailVerification: true,
-			wantNDA:               true,
-			wantPerm:              "nda",
+			name:     "nda implies email collection",
+			req:      CreateLinkRequest{RequireNDA: true},
+			wantNDA:  true,
+			wantPerm: "nda",
 		},
 		{
 			name:                  "email verification + nda",
@@ -105,13 +104,13 @@ func TestUpdateLinkRequestToCreateRequest(t *testing.T) {
 			wantPerm: "email_required",
 		},
 		{
-			name: "nda-only (implies email verification)",
+			name: "nda-only (implies email collection)",
 			update: UpdateLinkRequest{
 				DocumentIDs: []string{"11111111-1111-1111-1111-111111111111"},
 				RequireNDA:  true,
 			},
 			wantNDA:  true,
-			wantEV:   true,
+			wantEV:   false,
 			wantPerm: "nda",
 		},
 	}

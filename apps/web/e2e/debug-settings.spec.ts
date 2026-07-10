@@ -1,6 +1,6 @@
 import { test, expect } from "@playwright/test";
 
-const API_BASE_URL = process.env.REAL_API_BASE_URL || "http://localhost:8086";
+const API_BASE_URL = process.env.REAL_API_BASE_URL || "http://localhost:8080";
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   return fetch(`${API_BASE_URL}${input}`, {

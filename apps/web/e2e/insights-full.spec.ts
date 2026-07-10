@@ -4,11 +4,12 @@
  *         GET /suggestions, POST /suggestions (generate), POST /suggestions/:id/dismiss
  */
 import { test, expect } from "@playwright/test";
-import { seedRealBackend, seedDocument, apiFetch } from "./real-helpers";
+import { seedRealBackend, seedDocument, seedLink, apiFetch } from "./real-helpers";
 
 let token: string;
 let workspaceSlug: string;
 let docId: string;
+let linkId: string;
 
 test.describe("Insights & suggestions (real backend)", () => {
   test.beforeAll(async () => {
@@ -17,6 +18,8 @@ test.describe("Insights & suggestions (real backend)", () => {
     workspaceSlug = seed.workspaceSlug;
     const doc = await seedDocument(token, workspaceSlug);
     docId = doc.id;
+    const link = await seedLink(token, workspaceSlug, docId, { permissionType: "public" });
+    linkId = link.id;
   });
 
   // ── Insights overview ─────────────────────────────────────
@@ -63,8 +66,8 @@ test.describe("Insights & suggestions (real backend)", () => {
   });
 
   // ── Suggestions ───────────────────────────────────────────
-  test("lists suggestions", async () => {
-    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/suggestions`, {
+  test("lists workspace suggestions", async () => {
+    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/insights/suggestions`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
@@ -72,31 +75,29 @@ test.describe("Insights & suggestions (real backend)", () => {
     expect(Array.isArray(body.data)).toBe(true);
   });
 
-  test("generates suggestions (AI-dependent)", async () => {
-    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/suggestions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({}),
-    });
-    // May fail if AI is disabled — both 200 and 503 are acceptable
-    const ok = res.ok || res.status === 503;
-    expect(ok).toBe(true);
+  test("generates link suggestions", async () => {
+    const res = await apiFetch(
+      `/api/workspaces/${workspaceSlug}/analytics/links/${linkId}/suggestions`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      }
+    );
+    expect([200, 201, 400, 503]).toContain(res.status);
   });
 
-  test("dismisses a suggestion", async () => {
-    // Get first suggestion
-    const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/suggestions`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    const list = (await listRes.json()) as { data: { id: string }[] };
+  test("dismisses a link suggestion", async () => {
+    // Get first active suggestion for the link
+    const listRes = await apiFetch(
+      `/api/workspaces/${workspaceSlug}/analytics/links/${linkId}/suggestions`,
+      { headers: { Authorization: `Bearer ${token}` } }
+    );
+    const list = (await listRes.json()) as { suggestions: { id: string }[] };
 
-    if (list.data.length > 0) {
+    if (list.suggestions && list.suggestions.length > 0) {
       const res = await apiFetch(
-        `/api/workspaces/${workspaceSlug}/suggestions/${list.data[0].id}/dismiss`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        `/api/workspaces/${workspaceSlug}/analytics/links/${linkId}/suggestions/${list.suggestions[0].id}/dismiss`,
+        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
       );
       expect([200, 204]).toContain(res.status);
     }

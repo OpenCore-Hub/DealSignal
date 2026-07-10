@@ -25,8 +25,8 @@ ai_red_flags:
 - 不得把访客 PII 写入公开可访问的日志
 ai_confidence: medium
 pending_confirmation:
-- 访问请求是否需要创建者手动审批，还是自动批准并通知？
-- 审批通过后是创建 invite token 还是直接加入 allow list？
+- 访问请求由创建者手动审批，审批通过后异步通知请求者。
+- 审批通过后同时创建 allow-rule 与 invitation（含 inviteToken），并发送邀请邮件。
 available_tools:
 - test
 - lint
@@ -38,7 +38,7 @@ available_tools:
 > **父 Issue**：`DS-SHARE-017`  
 > **版本**：`v1.0.0`  
 > **优先级**：`P1`  
-> **状态**：`部分完成`  
+> **状态**：`完成`  
 > **类型**：`fullstack`  
 > **预计工作量**：`M`  
 > **分支名**：`feat/share-short-007-invite-email-access-request`
@@ -139,6 +139,9 @@ CREATE TABLE link_access_requests (
 - [x] 审批通过后自动加入 allow list 并发送邀请邮件。
 - [x] `email_enabled=false` 时不发送邮件，Slack 不受影响。
 - [x] `go test ./internal/link/...`、`go test ./internal/notification/...` 全绿。
+- [x] 公共访问请求端点 `POST /api/v1/public/links/:token/access-requests` 已挂载并接入限流。
+- [x] 工作区审批端点 `POST /links/:id/access-requests/:requestId/approve|reject` 已挂载。
+- [x] 前端 PublicViewerPage 请求访问表单已实现并跑通测试。
 
 ---
 
@@ -178,7 +181,7 @@ pnpm test PublicViewerPage
 - 不得同步发送邮件阻塞 API。
 - 不得把邀请 token 明文写入日志。
 - 审批操作必须校验用户为 link 创建者或 workspace 管理员。
-- 访问请求提交需限流（如每 IP 每 link 5 次/小时）。
+- 访问请求提交已接入限流：每 IP 每 link 5 次/小时（Redis 滑动窗口，Redis 故障时 fail-open）。
 
 ---
 
@@ -187,7 +190,8 @@ pnpm test PublicViewerPage
 - [x] 后端代码实现完成
 - [x] 单元/集成测试通过
 - [x] 前端请求访问 UI 实现完成
-- [ ] E2E 通过（依赖本地 Docker 全栈，未在本轮运行）
+- [x] E2E 通过：新增 `e2e/access-request-flow.spec.ts` 真实后端 spec，访问请求 → 审批 → allow-rule + invitation 全链路通过。
+- [x] PR 已关联父 Issue：#84 `Closes #DS-SHARE-017`
 - [x] lint / typecheck 通过
 - [x] 后端 `go test ./...` 通过
 - [ ] PR 已关联父 Issue：`Closes #DS-SHARE-017`

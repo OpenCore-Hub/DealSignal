@@ -56,6 +56,7 @@ export function PublicViewerPage() {
     nda: false,
   });
   const [gateError, setGateError] = useState<string | null>(null);
+  const [gateErrorCode, setGateErrorCode] = useState<string | null>(null);
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
   const [folderView, setFolderView] = useState(false);
@@ -79,6 +80,7 @@ export function PublicViewerPage() {
     setLoading(true);
     setError(null);
     setGateError(null);
+    setGateErrorCode(null);
     setLinkErrorCode(null);
     try {
       const res = await api.accessPublicLink(token, gateParams);
@@ -130,19 +132,21 @@ export function PublicViewerPage() {
         "link_max_access_reached",
         "blocked_email",
         "blocked_domain",
-        "not_allowed",
         "invite_expired",
         "invite_revoked",
       ]);
+      const gateErrorCodes = new Set([
+        "invalid_password",
+        "whitelist_denied",
+        "invalid_email_code",
+        "not_allowed",
+      ]);
       if (unavailableCodes.has(err.code)) {
         setLinkErrorCode(err.code);
-      } else if (
-        err.code === "invalid_password" ||
-        err.code === "whitelist_denied" ||
-        err.code === "invalid_email_code"
-      ) {
+      } else if (gateErrorCodes.has(err.code)) {
         // Only show raw backend messages for actual validation failures.
         // Missing required fields are handled by client-side checks on Continue.
+        setGateErrorCode(err.code);
         setGateError(err.message ?? t("common:error.loadFailed"));
       }
     } finally {
@@ -362,6 +366,86 @@ export function PublicViewerPage() {
               <p className="text-sm text-destructive" role="alert">
                 {gateError}
               </p>
+            )}
+            {gateErrorCode === "not_allowed" && !requestSubmitted && !showAccessRequestForm && (
+              <Button
+                className="w-full"
+                onClick={() => {
+                  setShowAccessRequestForm(true);
+                  setRequestError(null);
+                  setRequestEmail(email);
+                }}
+              >
+                {t("viewer.requestAccess")}
+              </Button>
+            )}
+            {gateErrorCode === "not_allowed" && showAccessRequestForm && !requestSubmitted && (
+              <div className="space-y-4 text-left">
+                <p className="text-sm text-muted-foreground">{t("viewer.requestAccessDescription")}</p>
+                {requestError && (
+                  <p className="text-sm text-destructive" role="alert">
+                    {requestError}
+                  </p>
+                )}
+                <div className="space-y-2">
+                  <Label htmlFor="request-email">{t("viewer.requestAccessEmailLabel")}</Label>
+                  <Input
+                    id="request-email"
+                    type="email"
+                    value={requestEmail}
+                    onChange={(e) => setRequestEmail(e.target.value)}
+                    placeholder={t("viewer.requestAccessEmailPlaceholder")}
+                    disabled={requestLoading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="request-reason">{t("viewer.requestAccessReasonLabel")}</Label>
+                  <Input
+                    id="request-reason"
+                    type="text"
+                    value={requestReason}
+                    onChange={(e) => setRequestReason(e.target.value)}
+                    placeholder={t("viewer.requestAccessReasonPlaceholder")}
+                    disabled={requestLoading}
+                  />
+                </div>
+                <Button
+                  className="w-full"
+                  disabled={requestLoading}
+                  onClick={() => {
+                    setRequestError(null);
+                    const trimmed = requestEmail.trim();
+                    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+                      setRequestError(t("viewer.requestAccessEmailRequired"));
+                      return;
+                    }
+                    if (!token) return;
+                    setRequestLoading(true);
+                    api
+                      .createLinkAccessRequest(token, { email: trimmed, reason: requestReason.trim() || undefined })
+                      .then(() => {
+                        setRequestSubmitted(true);
+                        setShowAccessRequestForm(false);
+                        toast.success(t("viewer.requestAccessSubmitted"));
+                      })
+                      .catch((e: ApiError) => {
+                        if (e.code === "access_request_exists") {
+                          setRequestError(t("viewer.requestAccessExists"));
+                        } else {
+                          setRequestError(t("viewer.requestAccessFailed"));
+                        }
+                      })
+                      .finally(() => setRequestLoading(false));
+                  }}
+                >
+                  {requestLoading ? t("common:loading") : t("viewer.requestAccessSubmit")}
+                </Button>
+              </div>
+            )}
+            {gateErrorCode === "not_allowed" && requestSubmitted && (
+              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
+                {t("viewer.requestAccessSubmitted")}
+              </div>
             )}
             {inviteToken && (
               <div className="rounded-md border border-border bg-muted/50 p-3 text-sm">

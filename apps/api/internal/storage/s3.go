@@ -139,10 +139,7 @@ func (c *Client) PresignedGetURLInternal(ctx context.Context, key string, expiry
 // PublicURLInternal returns a non-signed URL using the internal S3 endpoint.
 // The bucket must allow public read access for this URL to work.
 func (c *Client) PublicURLInternal(key string) string {
-	ep := c.endpoint
-	if strings.HasSuffix(ep, "/") {
-		ep = strings.TrimSuffix(ep, "/")
-	}
+	ep := strings.TrimSuffix(c.endpoint, "/")
 	if c.pathStyle {
 		return fmt.Sprintf("%s/%s/%s", ep, c.bucket, key)
 	}

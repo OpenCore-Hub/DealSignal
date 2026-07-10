@@ -123,12 +123,6 @@ func (m *QueuedMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, li
 	})
 }
 
-func (m *QueuedMailer) from() string {
-	// QueuedMailer does not store the from address; it relies on the worker
-	// mailer to set the real sender. The brand name is derived from a default.
-	return "noreply@dealsignal.com"
-}
-
 // EnqueueOpts carries all arguments for enqueuing an email job. It replaces the
 // previous 11-parameter enqueue signature and makes call sites self-documenting.
 type EnqueueOpts struct {

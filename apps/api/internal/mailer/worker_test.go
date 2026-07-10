@@ -154,7 +154,9 @@ func TestWorkerProcessesJob(t *testing.T) {
 	queue := &mockQueue{}
 	sender := &recordingSender{}
 	job := EmailJob{ID: "job-1", EmailType: EmailTypeVerification, Recipient: "to@example.com", VerificationLink: "http://link", MaxAttempts: 3}
-	queue.Enqueue(context.Background(), job)
+	if err := queue.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
 
 	w := NewWorker(queue, sender, nil, "log", 1, 10, 10*time.Millisecond, 0, 0)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -176,7 +178,9 @@ func TestWorkerRetriesAndDeadLetters(t *testing.T) {
 	queue := &mockQueue{}
 	sender := &recordingSender{failNth: 1}
 	job := EmailJob{ID: "job-1", EmailType: EmailTypeVerification, Recipient: "to@example.com", VerificationLink: "http://link", Attempt: 3, MaxAttempts: 3}
-	queue.Enqueue(context.Background(), job)
+	if err := queue.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
 
 	w := NewWorker(queue, sender, nil, "log", 1, 10, 10*time.Millisecond, 0, 0)
 	ctx, cancel := context.WithCancel(context.Background())
@@ -198,7 +202,9 @@ func TestWorkerUsesDelayedRequeue(t *testing.T) {
 	queue := &mockDelayedQueue{}
 	sender := &recordingSender{failNth: 1}
 	job := EmailJob{ID: "job-1", EmailType: EmailTypeVerification, Recipient: "to@example.com", VerificationLink: "http://link", Attempt: 1, MaxAttempts: 3}
-	queue.Enqueue(context.Background(), job)
+	if err := queue.Enqueue(context.Background(), job); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
 
 	w := NewWorker(queue, sender, nil, "log", 1, 10, 10*time.Millisecond, 5*time.Second, 1*time.Hour)
 	ctx, cancel := context.WithCancel(context.Background())

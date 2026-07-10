@@ -124,7 +124,8 @@
       "allowDownloading": "Allow downloading",
       "allowDownloadingDescription": "Allow viewers to download documents",
       "screenshotProtection": "Enable screenshot protection",
-      "screenshotProtectionDescription": "Show warning and blur on Print Screen"
+      "screenshotProtectionDescription": "Show warning and blur on Print Screen",
+      "comingSoon": "Coming soon"
     },
     "advanced": {
       "title": "Advanced",
@@ -136,7 +137,8 @@
       "indexFile": "Enable index file generation",
       "indexFileDescription": "Generate an index page for the deal room",
       "qaConversations": "Enable Q&A conversations",
-      "qaConversationsDescription": "Allow viewers to ask questions"
+      "qaConversationsDescription": "Allow viewers to ask questions",
+      "comingSoon": "Coming soon"
     },
     "emptyTitle": "No restrictions",
     "emptyDescription": "Anyone with the link can access if authentication gates are disabled.",

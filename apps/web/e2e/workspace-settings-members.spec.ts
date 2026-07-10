@@ -33,19 +33,19 @@ test.describe("Workspace settings & members (real backend)", () => {
       body: JSON.stringify({
         name: "E2E Workspace Updated",
         slug: workspaceSlug,
-        brandColor: "#ff6600",
+        brand_color: "#ff6600",
       }),
     });
     expect(res.ok).toBe(true);
-    const body = (await res.json()) as { name: string; brandColor: string };
+    const body = (await res.json()) as { name: string; brand_color: string };
     expect(body.name).toBe("E2E Workspace Updated");
-    expect(body.brandColor).toBe("#ff6600");
+    expect(body.brand_color).toBe("#ff6600");
 
     // Revert
     await apiFetch(`/api/workspaces/${workspaceSlug}/settings`, {
       method: "PUT",
       headers: { Authorization: `Bearer ${token}` },
-      body: JSON.stringify({ name: "E2E Workspace", slug: workspaceSlug, brandColor: "#0055ff" }),
+      body: JSON.stringify({ name: "E2E Workspace", slug: workspaceSlug, brand_color: "#0055ff" }),
     });
   });
 

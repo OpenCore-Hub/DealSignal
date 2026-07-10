@@ -422,34 +422,6 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 	return stats, nil
 }
 
-func (s *Service) enrichLink(ctx context.Context, link db.Link) LinkOverview {
-	res, _ := s.getScoreForLink(ctx, link.ID, heat.CircleDefault)
-	if res.Level == "" {
-		res.Level = "cold"
-	}
-
-	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-		ID:          link.DocumentID,
-		WorkspaceID: link.WorkspaceID,
-	})
-	documentTitle := doc.Title
-	if err != nil {
-		documentTitle = ""
-	}
-
-	metrics, _ := s.queries.GetLinkPageViewMetrics(ctx, link.ID)
-	lastLog, _ := s.queries.GetLastAccessLogByLink(ctx, link.ID)
-
-	return LinkOverview{
-		Link:               link,
-		DocumentTitle:      documentTitle,
-		Score:              res.Score,
-		Level:              res.Level,
-		AvgDurationSeconds: metrics.AvgDurationSeconds,
-		LastViewedAt:       lastLog.CreatedAt,
-	}
-}
-
 // LinkScore pairs a link with its computed heat score.
 type LinkScore struct {
 	Link  db.Link

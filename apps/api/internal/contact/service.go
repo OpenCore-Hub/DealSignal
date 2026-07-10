@@ -13,6 +13,8 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/google/uuid"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -171,7 +173,7 @@ func (s *Service) ListContacts(ctx context.Context, workspaceID string) ([]Conta
 	out := make([]Contact, 0, len(rows))
 	for _, c := range rows {
 		email := c.Email.String
-		agg, _ := aggByEmail[strings.ToLower(email)]
+		agg := aggByEmail[strings.ToLower(email)]
 		viewed, err := s.queries.ListContactViewedDocumentIDs(ctx, db.ListContactViewedDocumentIDsParams{
 			WorkspaceID:  wsUUID,
 			VisitorEmail: c.Email,
@@ -350,7 +352,7 @@ func displayName(c db.Contact, email string) string {
 	local = strings.ReplaceAll(local, ".", " ")
 	local = strings.ReplaceAll(local, "_", " ")
 	local = strings.ReplaceAll(local, "-", " ")
-	return strings.Title(local)
+	return cases.Title(language.English).String(local)
 }
 
 func mapEventType(t string) string {
