@@ -135,7 +135,7 @@
 | 扩展 security_events.event_type | ✅ | `044/045` migrations |
 | RecordSecurityEvent (tenant/workspace 已补齐) | ✅ | `analytics/service.go:135–145` |
 | 异常访问检测 (abnormal_access_pattern) | ✅ | 可配置: `SECURITY_ANOMALY_WINDOW_MINUTES`/`THRESHOLD` |
-| 安全事件 retention / partitioning | ❌ | INFRA-003 待执行 |
+| 安全事件 retention / partitioning | ✅ | INFRA-003 已提交 PR #86 (partitioning + retention worker) |
 
 ### 3.6 邮件与通知
 
@@ -220,7 +220,7 @@
 | INFRA-001 | Schema 编排 | ~100% | 047-058 全部 migration |
 | INFRA-002 | 异步通知 worker | ~95% | email 队列 + 重试/死信 |
 | INFRA-003 | 事件 retention / 按月分区 + 分区清理 | ~100% | 分区表 + 自动创建/清理分区 |
-| COMPLIANCE-001 | PII 合规 | ~0% | 待执行 |
+| COMPLIANCE-001 | PII 合规 | ~100% | PR #87 已提交 |
 
 ---
 
@@ -235,12 +235,12 @@ P1 中期（全部完成 ✅）
 ├── MID-001~009    全部完成
 └── SHORT-003 收尾 可配置阈值
 
-P2 中期（待执行）
+P2 中期（已完成）
 ├── INFRA-003      事件 retention / partitioning  ✅ 已完成
 └── domain dropdown  需 workspace 集成后端，范围外
 
-P3 长期/合规（待执行）
-├── COMPLIANCE-001 PII 最小化 / 导出 / 删除
+P3 长期/合规（已完成）
+├── COMPLIANCE-001 PII 最小化 / 导出 / 删除（PR #87 已提交）
 └── LONG-001~005   Heat Score 衰减 / AI 意图 / SSE / CRM / ML
 ```
 
@@ -253,4 +253,4 @@ P3 长期/合规（待执行）
 | v1.0.0 | 2026-07-08 | 初版，基于细胞级代码审阅与任务计划 v1.4.0 |
 | v1.1.0 | 2026-07-09 | INFRA-001/002、SHORT-002/003/005-A/005-B 核心实现 |
 | v2.0.0 | 2026-07-10 | 全部 P0+P1 完成。MID-001~009、SHORT-008/009、30+ 新端点、RuleEngine、ExpiryReminder、签名 URL、动态水印、索引文件 AI 生成、文件收集链接。整体完成度 93%。 |
-| v2.1.0 | 2026-07-11 | COMPLIANCE-001 完成（PII 哈希、合规端点、审计日志、前端 Compliance 页）；SHORT-006 前端 polish 收尾（preset 覆盖确认、字段高亮、保存成功态、未保存提示、i18n）。|
+| v2.1.0 | 2026-07-11 | SHORT-006 前端 polish 收尾；INFRA-003 提交（事件表按月分区 + retention 清理）；COMPLIANCE-001 完成（IP HMAC 哈希、数据主体导出/匿名化/删除、合规审计日志、前端 Compliance 面板）。整体完成度 ~98%。 |

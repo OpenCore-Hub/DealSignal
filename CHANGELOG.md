@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PII minimization & data-subject rights (COMPLIANCE-001)**:
+  - New `IP_HASH_KEY` config and HMAC-SHA256 IP hashing; visitor IPs are no longer stored in plaintext.
+  - Migration `062_pii_hashing` converts IP columns to `TEXT`, nullifies historical plaintext IPs, and adds `compliance_audit_log`.
+  - New workspace-scoped endpoints for export, anonymize, and delete by visitor email (`/api/workspaces/:slug/compliance/data`).
+  - New frontend **Settings > Compliance** page with i18n support (`en` / `zh-CN`).
 - Production-hardened document sharing (P0/P1):
   - Invite tokens are now stored as HMAC-SHA256 hashes with lazy backfill for legacy tokens.
   - Security events and page views now record `tenant_id`/`workspace_id` and scroll depth.

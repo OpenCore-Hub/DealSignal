@@ -10,7 +10,8 @@
     "members": "Members",
     "integrations": "Integrations",
     "billing": "Billing",
-    "security": "Security"
+    "security": "Security",
+    "compliance": "Compliance"
   },
   "general": {
     "title": "Workspace",
@@ -98,5 +99,20 @@
     "auditLogDisabled": "Audit log requires backend support",
     "viewAuditLog": "View audit log",
     "loadFailed": "Failed to load security settings"
+  },
+  "compliance": {
+    "title": "Compliance",
+    "description": "Manage visitor data subject rights: export, anonymize, or delete PII.",
+    "visitorEmail": "Visitor email",
+    "visitorEmailPlaceholder": "visitor@example.com",
+    "visitorEmailHint": "Enter the email address used by the visitor to access your shared links or deal rooms.",
+    "export": "Export data",
+    "exportSuccess": "Visitor data exported",
+    "anonymize": "Anonymize data",
+    "anonymizeConfirm": "This will replace the visitor's email and clear IP addresses across all logs. Continue?",
+    "anonymizeSuccess": "Visitor data anonymized ({{count}} records affected)",
+    "delete": "Delete data",
+    "deleteConfirm": "This will permanently delete all identifiable records for this visitor. This action cannot be undone.",
+    "deleteSuccess": "Visitor data deleted ({{count}} records removed)"
   }
 }

@@ -361,8 +361,8 @@ func TestAccessErrorCodeMapping(t *testing.T) {
 func TestAccessRateLimitKeyFormat(t *testing.T) {
 	// validate that hashIPForRateLimit produces deterministic, fixed-length output.
 	ip := "192.168.1.1"
-	h1 := hashIPForRateLimit(ip)
-	h2 := hashIPForRateLimit(ip)
+	h1 := hashIPForRateLimit("test-key", ip)
+	h2 := hashIPForRateLimit("test-key", ip)
 	if h1 != h2 {
 		t.Error("hashIPForRateLimit must be deterministic")
 	}
@@ -371,7 +371,7 @@ func TestAccessRateLimitKeyFormat(t *testing.T) {
 	}
 
 	// Different IPs must produce different hashes (collision extremely unlikely).
-	h3 := hashIPForRateLimit("10.0.0.1")
+	h3 := hashIPForRateLimit("test-key", "10.0.0.1")
 	if h1 == h3 {
 		t.Error("different IPs must produce different hashes")
 	}

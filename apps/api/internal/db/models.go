@@ -5,8 +5,6 @@
 package db
 
 import (
-	"net/netip"
-
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pgvector/pgvector-go"
 )
@@ -19,7 +17,7 @@ type AccessLog struct {
 	VisitorID    pgtype.Text
 	VisitorEmail pgtype.Text
 	EventType    string
-	Ip           *netip.Addr
+	Ip           pgtype.Text
 	UserAgent    pgtype.Text
 	CreatedAt    pgtype.Timestamptz
 }
@@ -87,6 +85,17 @@ type ChunkBox struct {
 	Source          string
 	Confidence      float64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type ComplianceAuditLog struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	ActorUserID  pgtype.UUID
+	Action       string
+	VisitorEmail string
+	Payload      []byte
+	CreatedAt    pgtype.Timestamptz
 }
 
 type Contact struct {
@@ -395,7 +404,7 @@ type LinkNdaAgreement struct {
 	LinkID      pgtype.UUID
 	VisitorID   pgtype.Text
 	Email       pgtype.Text
-	Ip          *netip.Addr
+	Ip          pgtype.Text
 	UserAgent   pgtype.Text
 	NdaAgreed   bool
 	SignedAt    pgtype.Timestamptz
@@ -413,7 +422,7 @@ type LinkUploadedFile struct {
 	MimeType          string
 	UploaderEmail     pgtype.Text
 	UploaderVisitorID pgtype.Text
-	UploaderIp        *netip.Addr
+	UploaderIp        pgtype.Text
 	UploaderUserAgent pgtype.Text
 	Status            string
 	ReviewedBy        pgtype.UUID
@@ -556,7 +565,7 @@ type RoomNdaAgreement struct {
 	ID        pgtype.UUID
 	RoomID    pgtype.UUID
 	Email     string
-	Ip        *netip.Addr
+	Ip        pgtype.Text
 	UserAgent pgtype.Text
 	AgreedAt  pgtype.Timestamptz
 }
@@ -567,7 +576,7 @@ type SecurityEvent struct {
 	EventType   string
 	VisitorID   pgtype.Text
 	Email       pgtype.Text
-	Ip          *netip.Addr
+	Ip          pgtype.Text
 	UserAgent   pgtype.Text
 	Reason      pgtype.Text
 	CreatedAt   pgtype.Timestamptz

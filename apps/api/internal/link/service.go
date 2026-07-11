@@ -10,12 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net/netip"
 	"net/url"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
@@ -53,6 +54,7 @@ type Service struct {
 	mailer          mailer.Mailer
 	notifier        Notifier
 	viewerBaseURL   string
+	cfg             *config.Config
 	llm             LLMClient
 	emailSem        chan struct{} // limits concurrent email sends (bounded goroutines)
 }
@@ -69,9 +71,10 @@ type llmMessage struct {
 }
 
 // NewService creates a link service.
-func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, n Notifier, llm LLMClient) *Service {
+func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, cfg *config.Config, n Notifier, llm LLMClient) *Service {
 	return &Service{
 		queries: q, pool: pool, redisClient: r, mailer: m, notifier: n, viewerBaseURL: viewerBaseURL,
+		cfg:      cfg,
 		llm:      llm,
 		emailSem: make(chan struct{}, 8), // cap concurrent email goroutines
 	}
@@ -1905,18 +1908,13 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	visitorID := makeVisitorID(emailForRecords, req.UA)
 
 	if requiresNDA {
-		ipAddr, _ := netip.ParseAddr(req.IP)
-		var ip *netip.Addr
-		if ipAddr.IsValid() {
-			ip = &ipAddr
-		}
 		_, ndaErr := s.queries.CreateLinkNDAAgreement(ctx, db.CreateLinkNDAAgreementParams{
 			TenantID:    link.TenantID,
 			WorkspaceID: link.WorkspaceID,
 			LinkID:      link.ID,
 			VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
 			Email:       pgtype.Text{String: emailForRecords, Valid: emailForRecords != ""},
-			Ip:          ip,
+			Ip:          hashIPText(s.cfg.IPHashKey, req.IP),
 			UserAgent:   pgtype.Text{String: req.UA, Valid: req.UA != ""},
 		})
 		if ndaErr != nil {
@@ -2061,7 +2059,7 @@ func (s *Service) checkAccessAttemptRateLimit(ctx context.Context, token, ip str
 	if s.redisClient == nil {
 		return nil
 	}
-	key := fmt.Sprintf("link:access:ratelimit:%s:%s", token, hashIPForRateLimit(ip))
+	key := fmt.Sprintf("link:access:ratelimit:%s:%s", token, hashIPForRateLimit(s.cfg.IPHashKey, ip))
 	allowed, _, err := s.redisClient.RateLimitAllow(ctx, key, 10, time.Minute)
 	if err != nil {
 		logger.ErrorCtx(ctx, "access rate limit check failed", err)
@@ -2073,9 +2071,8 @@ func (s *Service) checkAccessAttemptRateLimit(ctx context.Context, token, ip str
 	return nil
 }
 
-func hashIPForRateLimit(ip string) string {
-	h := sha256.Sum256([]byte(ip))
-	return hex.EncodeToString(h[:])[:16]
+func hashIPForRateLimit(key, ip string) string {
+	return compliance.ShortHashIP(key, ip, 16)
 }
 
 func (s *Service) verifyLinkContactCode(ctx context.Context, token, email, code string, modern bool) (*db.GetLinkContactByEmailRow, error) {
@@ -2841,6 +2838,7 @@ func (s *Service) UploadFileForLink(ctx context.Context, storage FileUploader, l
 		MimeType:          mimeType,
 		UploaderEmail:     pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
 		UploaderVisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		UploaderIp:        hashIPText(s.cfg.IPHashKey, ip),
 		UploaderUserAgent: pgtype.Text{String: ua, Valid: ua != ""},
 	})
 }
@@ -2906,4 +2904,11 @@ func (s *Service) ClassifyQuestionIntent(ctx context.Context, questionID pgtype.
 // ListDormantLinks returns links that were active but went cold, ranked by reactivation potential.
 func (s *Service) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListDormantLinksRow, error) {
 	return s.queries.ListDormantLinks(ctx, workspaceID)
+}
+
+func hashIPText(key, ip string) pgtype.Text {
+	if ip == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: compliance.HashIP(key, ip), Valid: true}
 }

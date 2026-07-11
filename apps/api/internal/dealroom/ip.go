@@ -1,14 +1,13 @@
 package dealroom
 
-import "net/netip"
+import (
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
-func parseIP(s string) *netip.Addr {
-	if s == "" {
-		return nil
+func hashIPText(key, ip string) pgtype.Text {
+	if ip == "" {
+		return pgtype.Text{}
 	}
-	addr, err := netip.ParseAddr(s)
-	if err != nil {
-		return nil
-	}
-	return &addr
+	return pgtype.Text{String: compliance.HashIP(key, ip), Valid: true}
 }

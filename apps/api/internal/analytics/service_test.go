@@ -6,10 +6,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+func testCfg() *config.Config {
+	return &config.Config{IPHashKey: "test-key"}
+}
 
 type mockAnalyticsQuerier struct {
 	recordLinkOpenedRows   int64
@@ -164,7 +169,7 @@ func (m *mockDedupChecker) MarkPageView(_ context.Context, _, _ string, _ int32)
 
 func TestRecordLinkOpenedAtomicSuccess(t *testing.T) {
 	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1}
-	svc := NewService(q, nil)
+	svc := NewService(q, nil, testCfg())
 	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}}
 	if err := svc.RecordLinkOpened(context.Background(), link, "v1", "a@example.test", "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -173,7 +178,7 @@ func TestRecordLinkOpenedAtomicSuccess(t *testing.T) {
 
 func TestRecordLinkOpenedSkippedWhenDuplicate(t *testing.T) {
 	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1}
-	svc := NewService(q, &mockDedupChecker{openOk: false})
+	svc := NewService(q, &mockDedupChecker{openOk: false}, testCfg())
 	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{5}, Valid: true}}
 	if err := svc.RecordLinkOpened(context.Background(), link, "v1", "a@example.test", "", ""); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -185,7 +190,7 @@ func TestRecordLinkOpenedSkippedWhenDuplicate(t *testing.T) {
 
 func TestRecordLinkOpenedAtomicRejectsExhaustedLink(t *testing.T) {
 	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 0}
-	svc := NewService(q, nil)
+	svc := NewService(q, nil, testCfg())
 	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true}}
 	err := svc.RecordLinkOpened(context.Background(), link, "v1", "", "", "")
 	if !errors.Is(err, ErrLinkMaxAccessReached) {
@@ -205,7 +210,7 @@ func TestGetScoreReturnsSevenFactors(t *testing.T) {
 		bounce: 1,
 		link:   db.Link{ID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true}},
 	}
-	svc := NewService(q, nil)
+	svc := NewService(q, nil, testCfg())
 	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, heat.CircleFounder)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -220,7 +225,7 @@ func TestGetScoreReturnsSevenFactors(t *testing.T) {
 
 func TestRecordSecurityEventStoresEvent(t *testing.T) {
 	q := &mockAnalyticsQuerier{}
-	svc := NewService(q, nil)
+	svc := NewService(q, nil, testCfg())
 	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{4}, Valid: true}}
 	if err := svc.RecordSecurityEvent(context.Background(), link, "expired_link_accessed", "vid", "a@example.test", "1.2.3.4", "ua", "reason"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -242,7 +247,7 @@ func TestRecordSecurityEventStoresEvent(t *testing.T) {
 
 func TestCheckAnomalyTriggersWhenThresholdReached(t *testing.T) {
 	q := &mockAnalyticsQuerier{securityEventCount: 5}
-	svc := NewService(q, nil)
+	svc := NewService(q, nil, testCfg())
 	res, err := svc.CheckAnomaly(context.Background(), "1.2.3.4", "security_gate_failed", 5*time.Minute, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -257,7 +262,7 @@ func TestCheckAnomalyTriggersWhenThresholdReached(t *testing.T) {
 
 func TestCheckAnomalyEmptyIPNeverTriggers(t *testing.T) {
 	q := &mockAnalyticsQuerier{securityEventCount: 100}
-	svc := NewService(q, nil)
+	svc := NewService(q, nil, testCfg())
 	res, err := svc.CheckAnomaly(context.Background(), "", "security_gate_failed", 5*time.Minute, 5)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -269,7 +274,7 @@ func TestCheckAnomalyEmptyIPNeverTriggers(t *testing.T) {
 
 func TestRecordPageViewSkippedWhenDuplicate(t *testing.T) {
 	q := &mockAnalyticsQuerier{}
-	svc := NewService(q, &mockDedupChecker{pageViewOk: false})
+	svc := NewService(q, &mockDedupChecker{pageViewOk: false}, testCfg())
 	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{6}, Valid: true}}
 	if err := svc.RecordPageView(context.Background(), link, "v1", 1, 5, 0.5); err != nil {
 		t.Fatalf("unexpected error: %v", err)

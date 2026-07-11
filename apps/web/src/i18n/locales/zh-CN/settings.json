@@ -10,7 +10,8 @@
     "members": "成员",
     "integrations": "集成",
     "billing": "账单",
-    "security": "安全"
+    "security": "安全",
+    "compliance": "合规"
   },
   "general": {
     "title": "工作区信息",
@@ -98,5 +99,20 @@
     "auditLogDisabled": "审计日志需后端支持",
     "viewAuditLog": "查看审计日志",
     "loadFailed": "加载安全设置失败"
+  },
+  "compliance": {
+    "title": "合规",
+    "description": "管理访客数据主体权利：导出、匿名化或删除个人信息。",
+    "visitorEmail": "访客邮箱",
+    "visitorEmailPlaceholder": "visitor@example.com",
+    "visitorEmailHint": "输入访客用于访问分享链接或数据室的邮箱地址。",
+    "export": "导出数据",
+    "exportSuccess": "访客数据已导出",
+    "anonymize": "匿名化数据",
+    "anonymizeConfirm": "这将替换访客邮箱并清除所有日志中的 IP 地址，是否继续？",
+    "anonymizeSuccess": "访客数据已匿名化（共 {{count}} 条记录）",
+    "delete": "删除数据",
+    "deleteConfirm": "这将永久删除该访客的所有可识别记录，操作不可撤销。",
+    "deleteSuccess": "访客数据已删除（共 {{count}} 条记录）"
   }
 }

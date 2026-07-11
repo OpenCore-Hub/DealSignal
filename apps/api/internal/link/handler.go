@@ -3,9 +3,7 @@ package link
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -19,6 +17,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
@@ -1280,8 +1279,7 @@ func (h *Handler) watermarkTextFor(email, ip string) string {
 	}
 	ipHash := ""
 	if ip != "" {
-		sum := sha256.Sum256([]byte(ip))
-		ipHash = hex.EncodeToString(sum[:])[:8]
+		ipHash = compliance.ShortHashIP(h.cfg.IPHashKey, ip, 8)
 	}
 	return fmt.Sprintf("%s | %s | IP:%s", email, time.Now().UTC().Format(time.RFC3339), ipHash)
 }

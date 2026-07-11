@@ -7,7 +7,6 @@ package db
 
 import (
 	"context"
-	"net/netip"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/pgvector/pgvector-go"
@@ -311,7 +310,7 @@ WHERE ip = $1
 `
 
 type CountSecurityEventsByIPAndWindowParams struct {
-	Ip        *netip.Addr
+	Ip        pgtype.Text
 	EventType string
 	Column3   pgtype.Interval
 }
@@ -353,7 +352,7 @@ type CreateAccessLogParams struct {
 	VisitorID    pgtype.Text
 	VisitorEmail pgtype.Text
 	EventType    string
-	Ip           *netip.Addr
+	Ip           pgtype.Text
 	UserAgent    pgtype.Text
 }
 
@@ -1485,7 +1484,7 @@ type CreateLinkNDAAgreementParams struct {
 	LinkID      pgtype.UUID
 	VisitorID   pgtype.Text
 	Email       pgtype.Text
-	Ip          *netip.Addr
+	Ip          pgtype.Text
 	UserAgent   pgtype.Text
 }
 
@@ -1524,7 +1523,7 @@ ON CONFLICT (room_id, email) DO NOTHING
 type CreateNDAAgreementParams struct {
 	RoomID    pgtype.UUID
 	Email     string
-	Ip        *netip.Addr
+	Ip        pgtype.Text
 	UserAgent pgtype.Text
 }
 
@@ -1701,7 +1700,7 @@ type CreateSecurityEventParams struct {
 	EventType   string
 	VisitorID   pgtype.Text
 	Email       pgtype.Text
-	Ip          *netip.Addr
+	Ip          pgtype.Text
 	UserAgent   pgtype.Text
 	Reason      pgtype.Text
 }
@@ -1995,7 +1994,7 @@ type CreateUploadedFileParams struct {
 	MimeType          string
 	UploaderEmail     pgtype.Text
 	UploaderVisitorID pgtype.Text
-	UploaderIp        *netip.Addr
+	UploaderIp        pgtype.Text
 	UploaderUserAgent pgtype.Text
 }
 
@@ -5116,7 +5115,7 @@ FROM (
         link_id,
         visitor_id,
         'page_viewed'::text AS event_type,
-        NULL::inet AS ip,
+        NULL::text AS ip,
         NULL::text AS user_agent,
         page_number,
         duration_seconds,
@@ -5157,7 +5156,7 @@ type ListAccessLogsByLinkRow struct {
 	VisitorID       pgtype.Text
 	VisitorEmail    string
 	EventType       string
-	Ip              *netip.Addr
+	Ip              pgtype.Text
 	UserAgent       pgtype.Text
 	PageNumber      int32
 	DurationSeconds int32
@@ -7241,7 +7240,7 @@ type ListSecurityEventsByLinkRow struct {
 	EventType string
 	VisitorID pgtype.Text
 	Email     pgtype.Text
-	Ip        *netip.Addr
+	Ip        pgtype.Text
 	UserAgent pgtype.Text
 	Reason    pgtype.Text
 	CreatedAt pgtype.Timestamptz
@@ -8000,7 +7999,7 @@ type RecordLinkOpenedParams struct {
 	LinkID       pgtype.UUID
 	VisitorID    pgtype.Text
 	VisitorEmail pgtype.Text
-	Ip           *netip.Addr
+	Ip           pgtype.Text
 	UserAgent    pgtype.Text
 }
 

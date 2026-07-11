@@ -15,6 +15,7 @@ export function SettingsPage() {
     { path: "integrations", label: t("nav.integrations") },
     { path: "billing", label: t("nav.billing") },
     { path: "security", label: t("nav.security") },
+    { path: "compliance", label: t("nav.compliance") },
   ];
 
   return (

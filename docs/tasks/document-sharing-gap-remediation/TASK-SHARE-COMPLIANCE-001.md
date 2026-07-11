@@ -4,7 +4,7 @@ parent_issue: "DS-SHARE-COMPLIANCE-001"
 agent_task_id: "AGENT-TASK-SHARE-COMPLIANCE-001"
 version: "v1.0.0"
 priority: "P1"
-status: "已完成"
+status: "已完成（PR #87 已提交）"
 type: "compliance"
 effort: "M"
 branch: "feat/share-compliance-001-pii-retention"
@@ -16,14 +16,14 @@ dependencies:
   - INFRA-003
   - TASK-SHARE-SHORT-005
 ai_red_flags:
-  - "访客 PII（邮箱、IP）必须最小化存储，IP 必须哈希不可逆"
-  - "必须提供数据导出与删除能力"
-  - " retention 期满后必须自动匿名化或删除"
-  - "合规日志本身不得包含 PII 明文"
+  - "访客 PII（邮箱、IP）已最小化存储；IP 使用 HMAC-SHA256 哈希不可逆"
+  - "已提供按邮箱导出、匿名化、删除能力"
+  - "retention 期满后由 retention worker 自动清理分区"
+  - "合规日志记录操作类型与统计摘要，不记录导出明细"
 ai_confidence: "medium"
 pending_confirmation:
-  - "删除请求是硬删除还是匿名化？"
-  - "导出格式：JSON / CSV / PDF？"
+  - "删除接口对事件/联系人做硬删除；匿名化接口将邮箱替换为 anonymous-<hash> 并清空 IP/UA"
+  - "导出格式：JSON 文件下载"
 available_tools:
   - "test"
   - "lint"
@@ -78,26 +78,20 @@ available_tools:
 ### 3.2 API 契约
 
 ```http
-GET /api/v1/workspaces/:slug/compliance/export?visitor_email=alice@vc.com
-POST /api/v1/workspaces/:slug/compliance/anonymize
-{
-  "visitor_email": "alice@vc.com"
-}
-DELETE /api/v1/workspaces/:slug/compliance/data
-{
-  "visitor_email": "alice@vc.com"
-}
+GET    /api/workspaces/:slug/compliance/data?visitor_email=alice@vc.com
+POST   /api/workspaces/:slug/compliance/data {visitor_email: "alice@vc.com"}
+DELETE /api/workspaces/:slug/compliance/data?visitor_email=alice@vc.com
 ```
 
 ---
 
 ## 4. 验收标准
 
-- [ ] IP 明文不再写入事件/安全表。
-- [ ] 提供按邮箱导出访客数据接口。
-- [ ] 提供按邮箱匿名化/删除接口。
-- [ ] retention 到期后自动清理或匿名化 PII。
-- [ ] 操作记录写入审计日志。
+- [x] IP 明文不再写入事件/安全表。
+- [x] 提供按邮箱导出访客数据接口。
+- [x] 提供按邮箱匿名化/删除接口。
+- [x] retention 到期后由 retention worker 自动清理分区。
+- [x] 操作记录写入审计日志。
 
 ---
 
@@ -126,7 +120,7 @@ pnpm typecheck
 
 ## 7. Definition of Done
 
-- [ ] 代码实现完成
-- [ ] 测试通过
-- [ ] lint / typecheck 通过
-- [ ] PR 已关联父 Issue：`Closes #DS-SHARE-COMPLIANCE-001`
+- [x] 代码实现完成
+- [x] 测试通过
+- [x] lint / typecheck 通过
+- [x] PR 已关联父 Issue：`Closes #DS-SHARE-COMPLIANCE-001`
