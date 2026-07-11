@@ -189,7 +189,7 @@ func (s *Server) registerRoutes() error {
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
-			s.registerWorker(analytics.NewRetentionCleaner(queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays))
+			s.registerWorker(analytics.NewRetentionCleaner(s.dbPool, queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays))
 
 			// SSE realtime push
 			sseHub := sse.NewHub(s.redisClient.GoRedis())

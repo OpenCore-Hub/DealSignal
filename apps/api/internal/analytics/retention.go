@@ -7,11 +7,14 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-// RetentionCleaner periodically removes old event data beyond configured retention periods.
+const partitionLookaheadMonths = 2
+
+// RetentionCleaner periodically removes old event data beyond configured retention periods
+// by dropping monthly partitions instead of row-level DELETE.
 type RetentionCleaner struct {
+	pool            dbPool
 	queries         *db.Queries
 	accessLogsDays  int
 	pageViewsDays   int
@@ -20,8 +23,9 @@ type RetentionCleaner struct {
 }
 
 // NewRetentionCleaner creates a retention cleanup worker.
-func NewRetentionCleaner(q *db.Queries, accessLogsDays, pageViewsDays, securityEvtDays int) *RetentionCleaner {
+func NewRetentionCleaner(pool dbPool, q *db.Queries, accessLogsDays, pageViewsDays, securityEvtDays int) *RetentionCleaner {
 	return &RetentionCleaner{
+		pool:            pool,
 		queries:         q,
 		accessLogsDays:  accessLogsDays,
 		pageViewsDays:   pageViewsDays,
@@ -30,6 +34,7 @@ func NewRetentionCleaner(q *db.Queries, accessLogsDays, pageViewsDays, securityE
 	}
 }
 
+// Start runs the cleaner immediately and then on a 24h ticker until ctx is done.
 func (r *RetentionCleaner) Start(ctx context.Context) {
 	r.runOnce(ctx)
 	ticker := time.NewTicker(r.interval)
@@ -44,23 +49,39 @@ func (r *RetentionCleaner) Start(ctx context.Context) {
 	}
 }
 
+// Stop is a no-op for compatibility with the worker interface.
 func (r *RetentionCleaner) Stop() {}
 
 func (r *RetentionCleaner) runOnce(ctx context.Context) {
-	clean := func(days int, fn func(context.Context, pgtype.Timestamptz) (int64, error), label string) {
-		if days <= 0 {
-			return
-		}
-		cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
-		ts := pgtype.Timestamptz{Time: cutoff, Valid: true}
-		n, err := fn(ctx, ts)
-		if err != nil {
-			logger.ErrorCtx(ctx, "retention: delete "+label+" failed", err)
-		} else if n > 0 {
-			logger.InfoCtx(ctx, "retention: deleted "+label+" rows", slog.Int64("count", n))
+	// Ensure future partitions exist so that writes never fail when a new month begins.
+	upTo := time.Now().AddDate(0, partitionLookaheadMonths, 0)
+	for _, table := range []string{"access_logs", "page_views", "security_events"} {
+		if err := EnsurePartitions(ctx, r.pool, table, upTo); err != nil {
+			logger.ErrorCtx(ctx, "retention: ensure partitions failed", err,
+				slog.String("table", table))
 		}
 	}
-	clean(r.accessLogsDays, r.queries.DeleteAccessLogsBefore, "access_logs")
-	clean(r.pageViewsDays, r.queries.DeletePageViewsBefore, "page_views")
-	clean(r.securityEvtDays, r.queries.DeleteSecurityEventsBefore, "security_events")
+
+	// Drop partitions older than the configured retention.
+	type job struct {
+		days  int
+		table string
+	}
+	for _, j := range []job{
+		{r.accessLogsDays, "access_logs"},
+		{r.pageViewsDays, "page_views"},
+		{r.securityEvtDays, "security_events"},
+	} {
+		if j.days <= 0 {
+			continue
+		}
+		n, err := DropExpiredPartitions(ctx, r.pool, j.table, j.days)
+		if err != nil {
+			logger.ErrorCtx(ctx, "retention: drop expired partitions failed", err,
+				slog.String("table", j.table))
+		} else if n > 0 {
+			logger.InfoCtx(ctx, "retention: dropped expired partitions",
+				slog.String("table", j.table), slog.Int("count", n))
+		}
+	}
 }

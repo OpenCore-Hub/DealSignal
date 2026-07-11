@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Heat score applies time decay based on link age.
   - New owner/public routes: link archive/renew, visitor Q&A, file requests, file-request upload/approval, AI index file, deal-room slug redirect, and SSE realtime events stream.
   - Retention cleaner, expiry reminder worker, and CRM sync/webhook scaffolding.
+  - Partitioned high-volume event tables (`access_logs`, `page_views`, `security_events`) by month on `created_at`; retention is now enforced by dropping old partitions instead of row DELETE.
 - Completed `useAsyncData` rollout across remaining data-fetching routes: `WorkspacesPage`, `NewDealRoomPage`, and `InsightsSuggestionsPage`.
 - Added unit tests for `WorkspacesPage`, `InsightsSuggestionsPage`, `NewDealRoomPage`, `DealRoomDetailPage`, `ContactDetailPage`, `InsightsOverviewPage`, and `SettingsIntegrationsPage` (141 frontend tests total).
 - Added `node` types to `apps/web/tsconfig.app.json` so test files can import Node built-ins (e.g. `node:fs`) for loading locale JSON.
