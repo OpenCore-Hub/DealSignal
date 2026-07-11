@@ -4,10 +4,10 @@ parent_issue: DS-SHARE-016
 agent_task_id: AGENT-TASK-SHARE-016
 version: v1.0.0
 priority: P0
-status: 部分完成
+status: 已完成
 type: frontend
 effort: L
-branch: feat/share-short-006-share-dialog-frontend
+branch: feat/share-short-006-share-dialog-polish
 estimated_files: '18'
 max_lines: '900'
 project_stack: React 19 + TypeScript + Vite 8 + Tailwind CSS 4 + shadcn/ui
@@ -51,7 +51,7 @@ available_tools:
 - Invite Tab：邮箱 TagInput、发送邀请、邀请状态列表、Resend / Revoke。
 - Access Tab：认证开关、允许/阻止邮箱与域名、水印/NDA/下载/AI 等高级选项。
 
-当前三 Tab 主体已实现，剩余 Preset Custom 状态、完整动画、部分 i18n 与移动端适配需收尾。
+三 Tab 弹窗已收尾：preset 覆盖二次确认、字段 200ms 高亮反馈、保存成功态、未保存离开提示、完整 i18n、Resend tooltip 与成功 toast。
 
 ---
 
@@ -137,12 +137,12 @@ components/links/
 
 ## 5. 验收标准
 
-- [ ] Share / Invite / Access 三 Tab 职责分离，无重复字段。
-- [ ] Preset Custom 状态与二次确认逻辑完整。
-- [ ] allow/block 冲突 inline 校验。
-- [ ] Revoke 操作有二次确认。
-- [ ] 所有新增文案同步 `en` / `zh-CN`。
-- [ ] `pnpm lint`、`pnpm typecheck`、`pnpm test` 全绿。
+- [x] Share / Invite / Access 三 Tab 职责分离，无重复字段。
+- [x] Preset Custom 状态与二次确认逻辑完整。
+- [x] allow/block 冲突 inline 校验。
+- [x] Revoke 操作有二次确认。
+- [x] 所有新增文案同步 `en` / `zh-CN`。
+- [x] `pnpm lint`、`pnpm typecheck`、`pnpm test` 全绿。
 
 ---
 
@@ -179,7 +179,7 @@ pnpm typecheck
 
 ## 9. Definition of Done
 
-- [ ] 代码实现完成
-- [ ] 测试通过
-- [ ] lint / typecheck 通过
-- [ ] PR 已关联父 Issue：`Closes #DS-SHARE-016`
+- [x] 代码实现完成
+- [x] 测试通过
+- [x] lint / typecheck 通过
+- [x] PR 已关联父 Issue：`Closes #DS-SHARE-016`（PR #88）

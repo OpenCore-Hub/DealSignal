@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useReducedMotion } from "motion/react";
 import { motion, AnimatePresence } from "motion/react";
-import { ShareNetwork } from "@phosphor-icons/react";
+import { ShareNetwork, Check } from "@phosphor-icons/react";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +25,7 @@ import {
   AccessTab,
   AnalyticsTab,
   CopyButton,
-  PRESETS,
+  applyPreset,
   buildDraft,
   buildRules,
   buildLinkPayload,
@@ -124,6 +124,8 @@ function DealRoomShareDialogContent({
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
   const [inviteEmailsRaw, setInviteEmailsRaw] = useState("");
   const [inviteInvalid, setInviteInvalid] = useState<string[]>([]);
@@ -181,6 +183,7 @@ function DealRoomShareDialogContent({
 
   const updateDraft = (patch: Partial<DraftLink>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
+    if (Object.keys(errors).length > 0) setErrors({});
   };
 
   const saveLinkAndRules = async (): Promise<Link | null> => {
@@ -209,6 +212,8 @@ function DealRoomShareDialogContent({
 
       await api.setLinkAccessRules(link.id, buildRules(draft));
       markClean();
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 1500);
       toast.success(t(selectedLink ? "share.saveSuccess" : "share.createSuccess"));
       await refetch();
       onChanged?.();
@@ -229,6 +234,7 @@ function DealRoomShareDialogContent({
     }
     const link = await saveLinkAndRules();
     if (link && isNew) {
+      setSaveSuccess(false);
       setTab("invite");
     }
   };
@@ -291,6 +297,7 @@ function DealRoomShareDialogContent({
     setInviteSending(true);
     try {
       await api.inviteLinkViewers(selectedLink.id, [email]);
+      toast.success(lt("invite.resendSuccess", { email }));
       await refetch();
     } finally {
       setInviteSending(false);
@@ -323,9 +330,9 @@ function DealRoomShareDialogContent({
 
   const primaryAction =
     tab === "share"
-      ? { label: isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
+      ? { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
       : tab === "access"
-      ? { label: isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
+      ? { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
       : tab === "analytics"
       ? { label: t("common:close"), onClick: onClose }
       : { label: t("invite.sendInvitations"), onClick: handleInviteSend };
@@ -407,24 +414,18 @@ function DealRoomShareDialogContent({
                     updateDraft={updateDraft}
                     preset={preset}
                     setPreset={(name) => {
-                      if (name === "public") {
-                        updateDraft({
-                          ...PRESETS.public,
-                          allowedViewers: [],
-                          blockedViewers: [],
-                          password: "",
-                        });
-                      } else if (name !== "custom") {
-                        updateDraft({
-                          ...PRESETS[name],
-                          password: name === "confidential" ? "" : draft.password,
-                        });
-                      }
+                      if (name === "custom") return;
+                      const { patch, changedFields } = applyPreset(name, draft);
+                      updateDraft(patch);
+                      setHighlightedFields(changedFields);
+                      const timer = setTimeout(() => setHighlightedFields([]), 200);
+                      return () => clearTimeout(timer);
                     }}
                     link={selectedLink}
                     onEditAccess={() => setTab("access")}
                     errors={errors}
                     slug={slug}
+                    highlightedFields={highlightedFields}
                   />
                 </TabsContent>
                 <TabsContent value="invite">
@@ -443,7 +444,7 @@ function DealRoomShareDialogContent({
                   />
                 </TabsContent>
                 <TabsContent value="access">
-                  <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} />
+                  <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} highlightedFields={highlightedFields} />
                 </TabsContent>
                 {!isNew && selectedLink && (
                   <TabsContent value="analytics">
@@ -467,10 +468,19 @@ function DealRoomShareDialogContent({
           disabled={
             saving ||
             (tab === "invite" && (!inviteHasInput || inviteSending)) ||
-            (tab === "analytics" && false)
+            ((tab === "share" || tab === "access") && Object.keys(errors).length > 0)
           }
         >
-          {saving || inviteSending ? t("common:saving") : primaryAction.label}
+          {saving || inviteSending ? (
+            t("common:saving")
+          ) : saveSuccess ? (
+            <span className="flex items-center gap-1.5">
+              <Check size={16} />
+              {primaryAction.label}
+            </span>
+          ) : (
+            primaryAction.label
+          )}
         </Button>
       </DialogFooter>
 

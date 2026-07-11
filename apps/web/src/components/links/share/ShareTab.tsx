@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -11,11 +13,19 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import type { Link } from "@/types";
+import { cn } from "@/lib/utils";
 import { AccessSummaryCard } from "./AccessSummaryCard";
+
 import { CopyButton } from "./CopyButton";
 import { PRESETS, PRESET_NAMES } from "./presets";
 import { getPublicUrl } from "./utils";
 import type { DraftLink, LinkPreset } from "./types";
+
+function highlightClass(field: string, fields: string[]) {
+  return fields.includes(field)
+    ? "rounded-md bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
+    : "";
+}
 
 interface ShareTabProps {
   draft: DraftLink;
@@ -26,6 +36,7 @@ interface ShareTabProps {
   onEditAccess: () => void;
   errors: Record<string, string>;
   slug?: string;
+  highlightedFields?: string[];
 }
 
 export function ShareTab({
@@ -37,14 +48,21 @@ export function ShareTab({
   onEditAccess,
   errors,
   slug,
+  highlightedFields = [],
 }: ShareTabProps) {
   const { t } = useTranslation("linkShare");
 
   const publicUrl = getPublicUrl(link);
+  const [pendingPreset, setPendingPreset] = useState<LinkPreset | null>(null);
 
   const handlePresetChange = (value: string | null) => {
     if (!value) return;
-    setPreset(value as LinkPreset);
+    const next = value as LinkPreset;
+    if (preset === "custom" && next !== "custom") {
+      setPendingPreset(next);
+      return;
+    }
+    setPreset(next);
   };
 
   const expiresEnabled = Boolean(draft.expiresAt);
@@ -128,7 +146,7 @@ export function ShareTab({
         onEditAccess={onEditAccess}
       />
 
-      <div className="space-y-3">
+      <div className={cn("space-y-3", highlightClass("expiresAt", highlightedFields))}>
         <div className="flex items-center justify-between gap-4">
           <Label className="font-normal">{t("share.expiresOn")}</Label>
           <Switch
@@ -194,6 +212,23 @@ export function ShareTab({
           {t("share.oldSlugHint", { slug, token: link.shortUrl.split("/").pop() ?? "" })}
         </p>
       )}
+
+      <ConfirmDialog
+        open={pendingPreset !== null}
+        title={t("share.presetOverwriteTitle")}
+        description={
+          pendingPreset
+            ? t("share.presetOverwriteDescription", { preset: t(`share.presets.${pendingPreset}`) })
+            : ""
+        }
+        confirmLabel={t("share.presetOverwriteConfirm")}
+        cancelLabel={t("share.presetOverwriteCancel")}
+        onConfirm={() => {
+          if (pendingPreset) setPreset(pendingPreset);
+          setPendingPreset(null);
+        }}
+        onCancel={() => setPendingPreset(null)}
+      />
     </div>
   );
 }

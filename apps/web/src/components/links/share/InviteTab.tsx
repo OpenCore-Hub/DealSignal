@@ -160,7 +160,10 @@ export function InviteTab({
                             {t("invite.copyInviteLink")}
                           </DropdownMenuItem>
                         )}
-                        <DropdownMenuItem onClick={() => onResend(inv.email)}>
+                        <DropdownMenuItem
+                          onClick={() => onResend(inv.email)}
+                          title={t("invite.resendTooltip")}
+                        >
                           {t("invite.resend")}
                         </DropdownMenuItem>
                         <DropdownMenuItem

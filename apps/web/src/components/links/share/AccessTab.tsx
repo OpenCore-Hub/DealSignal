@@ -14,6 +14,7 @@ interface AccessTabProps {
   draft: DraftLink;
   updateDraft: (patch: Partial<DraftLink>) => void;
   errors: Record<string, string>;
+  highlightedFields?: string[];
 }
 
 function OptionSwitch({
@@ -22,15 +23,21 @@ function OptionSwitch({
   checked,
   onCheckedChange,
   disabled,
+  highlighted,
 }: {
   label: string;
   description?: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
+  highlighted?: boolean;
 }) {
   return (
-    <div className={cn("flex items-start justify-between gap-4", disabled && "opacity-50")}>
+    <div className={cn(
+      "flex items-start justify-between gap-4 rounded-md p-1",
+      disabled && "opacity-50",
+      highlighted && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
+    )}>
       <div className="space-y-0.5">
         <Label className="flex items-center gap-1.5 font-normal text-foreground">
           {label}
@@ -83,8 +90,10 @@ const ADVANCED_DESCRIPTIONS: Record<string, string> = {
   enableQaConversations: "accessRules.advanced.qaConversationsDescription",
 };
 
-export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
+export function AccessTab({ draft, updateDraft, errors, highlightedFields = [] }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
+
+  const isHighlighted = (field: string) => highlightedFields.includes(field);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
 
@@ -114,6 +123,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
           description={t("accessRules.authentication.requireEmailDescription")}
           checked={draft.requireEmail}
           onCheckedChange={handleRequireEmailChange}
+          highlighted={isHighlighted("requireEmail")}
         />
         <OptionSwitch
           label={t("accessRules.authentication.requireVerification")}
@@ -121,8 +131,9 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
           checked={draft.requireEmailVerification}
           onCheckedChange={handleRequireVerificationChange}
           disabled={!draft.requireEmail}
+          highlighted={isHighlighted("requireEmailVerification")}
         />
-        <div className="space-y-2">
+        <div className={cn("space-y-2 rounded-md p-1", isHighlighted("requirePassword") && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200")}>
           <OptionSwitch
             label={t("accessRules.authentication.requirePassword")}
             description={t("accessRules.authentication.requirePasswordDescription")}
@@ -142,7 +153,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
-                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-label={showPassword ? t("accessRules.authentication.hidePassword") : t("accessRules.authentication.showPassword")}
               >
                 {showPassword ? <EyeSlash size={16} /> : <Eye size={16} />}
               </button>
@@ -193,18 +204,21 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
           description={t("accessRules.additionalProtections.watermarkDescription")}
           checked={draft.watermarkEnabled}
           onCheckedChange={(checked) => updateDraft({ watermarkEnabled: checked })}
+          highlighted={isHighlighted("watermarkEnabled")}
         />
         <OptionSwitch
           label={t("accessRules.additionalProtections.requireNda")}
           description={t("accessRules.additionalProtections.requireNdaDescription")}
           checked={draft.requireNda}
           onCheckedChange={(checked) => updateDraft({ requireNda: checked })}
+          highlighted={isHighlighted("requireNda")}
         />
         <OptionSwitch
           label={t("accessRules.additionalProtections.allowDownloading")}
           description={t("accessRules.additionalProtections.allowDownloadingDescription")}
           checked={draft.allowDownloading}
           onCheckedChange={(checked) => updateDraft({ allowDownloading: checked })}
+          highlighted={isHighlighted("allowDownloading")}
         />
         <OptionSwitch
           label={t("accessRules.additionalProtections.screenshotProtection")}
@@ -212,6 +226,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
           checked={draft.enableScreenshotProtection}
           onCheckedChange={(checked) => updateDraft({ enableScreenshotProtection: checked })}
           disabled={true}
+          highlighted={isHighlighted("enableScreenshotProtection")}
         />
       </div>
 
@@ -235,6 +250,7 @@ export function AccessTab({ draft, updateDraft, errors }: AccessTabProps) {
             checked={draft[key] as boolean}
             onCheckedChange={(checked) => updateDraft({ [key]: checked } as Partial<DraftLink>)}
             disabled={PLACEHOLDER_KEYS.includes(key)}
+            highlighted={isHighlighted(key)}
           />
         ))}
       </CollapsibleSection>

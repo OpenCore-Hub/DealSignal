@@ -69,6 +69,59 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
   },
 };
 
+export function applyPreset(
+  name: Exclude<LinkPreset, "custom">,
+  draft: PresetValues & { allowedViewers: string[]; blockedViewers: string[] }
+): { patch: Partial<PresetValues & { allowedViewers: string[]; blockedViewers: string[]; password: string }>; changedFields: string[] } {
+  const base = PRESETS[name];
+  const patch: Partial<PresetValues & { allowedViewers: string[]; blockedViewers: string[]; password: string }> = {};
+  const changedFields: string[] = [];
+
+  const fields: Array<keyof PresetValues> = [
+    "requireEmail",
+    "requireEmailVerification",
+    "requirePassword",
+    "watermarkEnabled",
+    "requireNda",
+    "allowDownloading",
+    "enableScreenshotProtection",
+    "aiCopilotEnabled",
+    "enableFileRequests",
+    "enableIndexFileGeneration",
+    "enableQaConversations",
+    "expiresAt",
+  ];
+
+  for (const key of fields) {
+    if (base[key] !== (draft as PresetValues)[key]) {
+      patch[key] = base[key] as never;
+      changedFields.push(key);
+    }
+  }
+
+  if (name === "public") {
+    if (draft.allowedViewers.length > 0) {
+      patch.allowedViewers = [];
+      changedFields.push("allowedViewers");
+    }
+    if (draft.blockedViewers.length > 0) {
+      patch.blockedViewers = [];
+      changedFields.push("blockedViewers");
+    }
+    if (draft.requirePassword && (draft as { password?: string }).password) {
+      patch.password = "";
+      changedFields.push("password");
+    }
+  } else {
+    if (name === "confidential" && (draft as { password?: string }).password) {
+      patch.password = "";
+      changedFields.push("password");
+    }
+  }
+
+  return { patch, changedFields };
+}
+
 export function isPresetMatch(
   preset: Exclude<LinkPreset, "custom">,
   draft: PresetValues

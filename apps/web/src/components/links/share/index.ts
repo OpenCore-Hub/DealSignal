@@ -7,7 +7,7 @@ export { AccessSummaryCard } from "./AccessSummaryCard";
 export { EmailTagInput } from "./EmailTagInput";
 export { CopyButton } from "./CopyButton";
 export { CollapsibleSection } from "./CollapsibleSection";
-export { PRESETS, isPresetMatch, PRESET_NAMES } from "./presets";
+export { PRESETS, isPresetMatch, PRESET_NAMES, applyPreset } from "./presets";
 export type { DraftLink, LinkPreset } from "./types";
 export {
   buildDraft,

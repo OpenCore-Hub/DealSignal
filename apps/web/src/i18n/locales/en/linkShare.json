@@ -42,7 +42,12 @@
     "saveLinkSettings": "Save link settings",
     "createLink": "Create link",
     "saveSuccess": "Saved",
+    "savedButtonLabel": "Saved",
     "createSuccess": "Link created",
+    "presetOverwriteTitle": "Overwrite custom settings?",
+    "presetOverwriteDescription": "Applying the {{preset}} preset will replace your current access rules.",
+    "presetOverwriteConfirm": "Apply",
+    "presetOverwriteCancel": "Cancel",
     "restrictedAlert": "This link is restricted. Only allowed emails or domains can access.",
     "active": "Active",
     "inactive": "Inactive",
@@ -78,6 +83,7 @@
     },
     "resend": "Resend",
     "resendTooltip": "Resend invitation email without changing token",
+    "resendSuccess": "Invitation resent to {email}",
     "revoke": "Revoke",
     "revokeConfirmTitle": "Revoke access for {email}?",
     "revokeConfirmDescription": "They will no longer be able to use this invitation link.",
@@ -101,7 +107,9 @@
       "requireVerificationDescription": "Send a one-time code to the viewer's email",
       "requirePassword": "Require password to view",
       "requirePasswordDescription": "Viewer must enter a password",
-      "passwordPlaceholder": "Enter password"
+      "passwordPlaceholder": "Enter password",
+      "showPassword": "Show password",
+      "hidePassword": "Hide password"
     },
     "allowedViewers": {
       "title": "Allowed viewers",

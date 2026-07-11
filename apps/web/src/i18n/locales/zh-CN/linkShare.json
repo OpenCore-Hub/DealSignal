@@ -42,7 +42,12 @@
     "saveLinkSettings": "保存链接设置",
     "createLink": "创建链接",
     "saveSuccess": "已保存",
+    "savedButtonLabel": "已保存",
     "createSuccess": "链接已创建",
+    "presetOverwriteTitle": "覆盖自定义设置？",
+    "presetOverwriteDescription": "应用 {{preset}} 预设将替换当前的访问规则。",
+    "presetOverwriteConfirm": "应用",
+    "presetOverwriteCancel": "取消",
     "restrictedAlert": "此链接受限，仅允许指定邮箱或域名访问。",
     "active": "活跃",
     "inactive": "未激活",
@@ -78,6 +83,7 @@
     },
     "resend": "重发",
     "resendTooltip": "重新发送邀请邮件，不更换 token",
+    "resendSuccess": "已向 {email} 重发邀请",
     "revoke": "撤销",
     "revokeConfirmTitle": "撤销 {email} 的访问权限？",
     "revokeConfirmDescription": "他们将无法再使用此邀请链接。",
@@ -101,7 +107,9 @@
       "requireVerificationDescription": "向访客邮箱发送一次性验证码",
       "requirePassword": "要求密码查看",
       "requirePasswordDescription": "访客必须输入密码",
-      "passwordPlaceholder": "输入密码"
+      "passwordPlaceholder": "输入密码",
+      "showPassword": "显示密码",
+      "hidePassword": "隐藏密码"
     },
     "allowedViewers": {
       "title": "允许访问的访客",
