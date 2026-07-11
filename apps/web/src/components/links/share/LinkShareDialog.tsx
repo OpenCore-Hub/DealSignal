@@ -1,7 +1,8 @@
-import { useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { ShareNetwork } from "@phosphor-icons/react";
+import { motion, AnimatePresence } from "motion/react";
+import { ShareNetwork, Check } from "@phosphor-icons/react";
 import {
   Dialog,
   DialogContent,
@@ -23,7 +24,7 @@ import {
   AccessTab,
   AnalyticsTab,
   CopyButton,
-  PRESETS,
+  applyPreset,
   buildDraft,
   buildRules,
   buildLinkPayload,
@@ -47,6 +48,13 @@ function isValidEmail(value: string): boolean {
 function now(): number {
   return Date.now();
 }
+
+const tabTransition = {
+  initial: { opacity: 0, x: 8 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -8 },
+  transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] as const },
+};
 
 interface DialogData {
   link: Link;
@@ -78,6 +86,7 @@ function LinkShareDialogContent({
   refetch,
   onChanged,
   onClose,
+  registerCloseGuard,
 }: {
   defaultTab?: "share" | "invite" | "access" | "analytics";
   data: DialogData | null;
@@ -85,16 +94,41 @@ function LinkShareDialogContent({
   refetch: () => Promise<void>;
   onChanged?: () => void;
   onClose: () => void;
+  registerCloseGuard: (guard: () => boolean) => void;
 }) {
   const { t } = useTranslation("linkShare");
   const [tab, setTab] = useState<"share" | "invite" | "access" | "analytics">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.link, data?.rules));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
+  const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
   const [inviteEmailsRaw, setInviteEmailsRaw] = useState("");
   const [inviteInvalid, setInviteInvalid] = useState<string[]>([]);
   const [inviteSending, setInviteSending] = useState(false);
+
+  // Unsaved-changes tracking.
+  const initialDraftRef = useRef<DraftLink>(draft);
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
+  const hasUnsavedChanges = useCallback(() => {
+    return JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current);
+  }, [draft]);
+  const markClean = useCallback(() => {
+    initialDraftRef.current = { ...draft };
+  }, [draft]);
+
+  const handleConditionalClose = useCallback(() => {
+    if (hasUnsavedChanges()) {
+      setCloseConfirmOpen(true);
+      return true;
+    }
+    onClose();
+    return false;
+  }, [hasUnsavedChanges, onClose]);
+  useEffect(() => {
+    registerCloseGuard(handleConditionalClose);
+  }, [registerCloseGuard, handleConditionalClose]);
 
   const link = data?.link ?? null;
   const invitations = data?.invitations ?? [];
@@ -111,6 +145,7 @@ function LinkShareDialogContent({
 
   const updateDraft = (patch: Partial<DraftLink>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
+    if (Object.keys(errors).length > 0) setErrors({});
   };
 
   const saveLinkAndRules = async (): Promise<boolean> => {
@@ -120,6 +155,7 @@ function LinkShareDialogContent({
       await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
       await api.setLinkAccessRules(link.id, buildRules(draft));
       toast.success(t("share.saveSuccess"));
+      markClean();
       await refetch();
       onChanged?.();
       return true;
@@ -138,7 +174,11 @@ function LinkShareDialogContent({
       setErrors(validationErrors);
       return;
     }
-    await saveLinkAndRules();
+    const ok = await saveLinkAndRules();
+    if (ok) {
+      setSaveSuccess(true);
+      setTimeout(() => onClose(), 1500);
+    }
   };
 
   const handleActiveChange = async (checked: boolean) => {
@@ -203,6 +243,7 @@ function LinkShareDialogContent({
     setInviteSending(true);
     try {
       await api.inviteLinkViewers(link.id, [email]);
+      toast.success(t("invite.resendSuccess", { email }));
       await refetch();
     } finally {
       setInviteSending(false);
@@ -233,9 +274,9 @@ function LinkShareDialogContent({
 
   const primaryAction =
     tab === "share"
-      ? { label: t("share.saveLinkSettings"), onClick: handleSave }
+      ? { label: saveSuccess ? t("share.savedButtonLabel") : t("share.saveLinkSettings"), onClick: handleSave }
       : tab === "access"
-      ? { label: t("accessRules.saveAccessRules"), onClick: handleSave }
+      ? { label: saveSuccess ? t("accessRules.saved") : t("accessRules.saveAccessRules"), onClick: handleSave }
       : tab === "invite"
       ? { label: t("invite.sendInvitations"), onClick: handleInviteSend }
       : { label: t("analytics.done"), onClick: onClose };
@@ -294,59 +335,55 @@ function LinkShareDialogContent({
           {loadingData || !data ? (
             <div className="py-10 text-center text-sm text-muted-foreground">{t("common:loading")}</div>
           ) : (
-            <>
-              <TabsContent value="share">
-                <ShareTab
-                  draft={draft}
-                  updateDraft={updateDraft}
-                  preset={preset}
-                  setPreset={(name) => {
-                    if (name === "public") {
-                      updateDraft({
-                        ...PRESETS.public,
-                        allowedViewers: [],
-                        blockedViewers: [],
-                        password: "",
-                      });
-                    } else if (name !== "custom") {
-                      updateDraft({
-                        ...PRESETS[name],
-                        password: name === "confidential" ? "" : draft.password,
-                      });
-                    }
-                  }}
-                  link={link}
-                  onEditAccess={() => setTab("access")}
-                  errors={errors}
-                />
-              </TabsContent>
-              <TabsContent value="invite">
-                <InviteTab
-                  linkId={link?.id}
-                  emailsRaw={inviteEmailsRaw}
-                  setEmailsRaw={setInviteEmailsRaw}
-                  invalid={inviteInvalid}
-                  sending={inviteSending}
-                  invitations={invitations}
-                  loading={loadingData}
-                  onSend={handleInviteSend}
-                  onResend={handleInviteResend}
-                  onRevoke={handleInviteRevoke}
-                />
-              </TabsContent>
-              <TabsContent value="access">
-                <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} />
-              </TabsContent>
-              <TabsContent value="analytics">
-                {link && <AnalyticsTab link={link} logs={logs} />}
-              </TabsContent>
-            </>
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div key={tab} {...tabTransition}>
+                <TabsContent value="share">
+                  <ShareTab
+                    draft={draft}
+                    updateDraft={updateDraft}
+                    preset={preset}
+                    setPreset={(name) => {
+                      if (name === "custom") return;
+                      const { patch, changedFields } = applyPreset(name, draft);
+                      updateDraft(patch);
+                      setHighlightedFields(changedFields);
+                      const timer = setTimeout(() => setHighlightedFields([]), 200);
+                      return () => clearTimeout(timer);
+                    }}
+                    link={link}
+                    onEditAccess={() => setTab("access")}
+                    errors={errors}
+                    highlightedFields={highlightedFields}
+                  />
+                </TabsContent>
+                <TabsContent value="invite">
+                  <InviteTab
+                    linkId={link?.id}
+                    emailsRaw={inviteEmailsRaw}
+                    setEmailsRaw={setInviteEmailsRaw}
+                    invalid={inviteInvalid}
+                    sending={inviteSending}
+                    invitations={invitations}
+                    loading={loadingData}
+                    onSend={handleInviteSend}
+                    onResend={handleInviteResend}
+                    onRevoke={handleInviteRevoke}
+                  />
+                </TabsContent>
+                <TabsContent value="access">
+                  <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} highlightedFields={highlightedFields} />
+                </TabsContent>
+                <TabsContent value="analytics">
+                  {link && <AnalyticsTab link={link} logs={logs} />}
+                </TabsContent>
+              </motion.div>
+            </AnimatePresence>
           )}
         </div>
       </Tabs>
 
       <DialogFooter>
-        <Button variant="outline" onClick={onClose}>
+        <Button variant="outline" onClick={handleConditionalClose}>
           {t("common:cancel")}
         </Button>
         <Button
@@ -354,10 +391,20 @@ function LinkShareDialogContent({
           disabled={
             saving ||
             inviteSending ||
-            (tab === "invite" && (!inviteHasInput || inviteSending))
+            (tab === "invite" && (!inviteHasInput || inviteSending)) ||
+            ((tab === "share" || tab === "access") && Object.keys(errors).length > 0)
           }
         >
-          {saving || inviteSending ? t("common:saving") : primaryAction.label}
+          {saving || inviteSending ? (
+            t("common:saving")
+          ) : saveSuccess ? (
+            <span className="flex items-center gap-1.5">
+              <Check size={16} />
+              {primaryAction.label}
+            </span>
+          ) : (
+            primaryAction.label
+          )}
         </Button>
       </DialogFooter>
 
@@ -370,6 +417,21 @@ function LinkShareDialogContent({
         destructive={confirmDialog.destructive}
         onConfirm={confirmDialog.onConfirm}
         onCancel={() => setConfirmDialog((prev) => ({ ...prev, open: false }))}
+      />
+
+      <ConfirmDialog
+        open={closeConfirmOpen}
+        title={t("common:unsavedChangesTitle")}
+        description={t("common:unsavedChangesDescription")}
+        confirmLabel={t("common:unsavedChangesConfirm")}
+        cancelLabel={t("common:cancel")}
+        destructive
+        onConfirm={() => {
+          setCloseConfirmOpen(false);
+          markClean();
+          onClose();
+        }}
+        onCancel={() => setCloseConfirmOpen(false)}
       />
     </>
   );
@@ -387,20 +449,32 @@ export function LinkShareDialog({
     [open, linkId]
   );
 
+  const closeGuardRef = useRef<(() => boolean) | null>(null);
+  const registerCloseGuard = useCallback((guard: () => boolean) => {
+    closeGuardRef.current = guard;
+  }, []);
+
+  const handleOpenChange = useCallback((isOpen: boolean) => {
+    if (!isOpen && closeGuardRef.current?.()) {
+      return;
+    }
+    setOpen(isOpen);
+  }, []);
+
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       {children && <DialogTrigger render={children} />}
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-xl">
         {open && (
           <LinkShareDialogContent
             key={linkId}
-
             defaultTab={defaultTab}
             data={data}
             loadingData={loading}
             refetch={refetch}
             onChanged={onChanged}
             onClose={() => setOpen(false)}
+            registerCloseGuard={registerCloseGuard}
           />
         )}
       </DialogContent>

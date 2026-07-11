@@ -18,12 +18,12 @@
 | 会话与安全失效 | 3 | 3 | 0 | 0 | 100% |
 | 安全审计 | 4 | 3 | 0 | 1 | 88% |
 | 邮件与通知 | 5 | 5 | 0 | 0 | 100% |
-| 前端三 Tab 弹窗 | 14 | 11 | 3 | 0 | 89% |
+| 前端三 Tab 弹窗 | 14 | 13 | 1 | 0 | 95% |
 | 公共 Viewer | 6 | 6 | 0 | 0 | 100% |
 | Analytics / 生命周期 | 5 | 3 | 0 | 2 | 60% |
 | **合计** | **69** | **61** | **5** | **3** | **93%** |
 
-> **说明**：完成度按"已完成=1、部分完成=0.5、未开始=0"加权计算。短期 P0 (9/9) 和中期 P1 (9/9) 已全部完成。剩余缺口为 INFRA-003 (retention/partitioning)、COMPLIANCE-001 (PII 合规) 和 SHORT-006 前端 polish (Preset 反馈、domain 下拉、微动画)。
+> **说明**：完成度按"已完成=1、部分完成=0.5、未开始=0"加权计算。短期 P0 (9/9) 和中期 P1 (9/9) 已全部完成。剩余缺口为 INFRA-003 (retention/partitioning) 和 domain dropdown（需 workspace 集成后端，已排除在本次 SHORT-006 范围外）；COMPLIANCE-001 与 SHORT-006 已收尾。
 
 ---
 
@@ -159,13 +159,13 @@
 | 未保存离开提示 | ✅ | — |
 | Active toggle 二次确认 | ✅ | — |
 | allow list 受限提示 | ✅ | — |
-| Preset 切换 | ⚠️ | 缺少 200ms 高亮反馈 |
+| Preset 切换 | ✅ | 200ms 高亮反馈 + custom 覆盖二次确认 |
 | Share Tab domain 下拉 | ❌ | 自由文本输入，待 workspace 集成 |
 | Access Tab 字段分层 | ✅ | — |
 | Advanced 折叠 + badge | ✅ | — |
 | EmailTagInput | ⚠️ | 缺少微动画 |
 | Revoke 二次确认 | ✅ | — |
-| Resend tooltip | ⚠️ | 未确认按设计实现 |
+| Resend tooltip | ✅ | title 提示 + 重发成功 toast |
 | 占位开关激活 | ✅ | qa/fileRequests/index 后端已实现 |
 
 ### 3.8 公共 Viewer
@@ -204,7 +204,7 @@
 | SHORT-003 | 安全审计事件 | ~95% | 安全事件表 + 可配置阈值 |
 | SHORT-004 | 访问与页面浏览去重 | ~95% | Redis TTL 30min/5min |
 | SHORT-005 | 分享后端核心 | ~95% | token hash + security_version + access_requests |
-| SHORT-006 | 前端三 Tab 弹窗 | ~75% | Preset/domain/动画 polish |
+| SHORT-006 | 前端三 Tab 弹窗 | ~95% | Preset 覆盖确认 + 字段高亮 + 保存成功态 + 未保存提示 + i18n |
 | SHORT-007 | 邀请邮件/通知/请求访问 | ~100% | 全链路闭环 |
 | SHORT-008 | AI Assistant + Visitor Q&A | ~95% | 4 后端端点 + QAPanel |
 | SHORT-009 | 访客文件请求 MVP | ~95% | 4 后端端点 + FileRequestPanel |
@@ -237,7 +237,7 @@ P1 中期（全部完成 ✅）
 
 P2 中期（待执行）
 ├── INFRA-003      事件 retention / partitioning
-└── SHORT-006      前端 polish (Preset feedback, domain dropdown)
+└── domain dropdown  需 workspace 集成后端，范围外
 
 P3 长期/合规（待执行）
 ├── COMPLIANCE-001 PII 最小化 / 导出 / 删除
@@ -253,3 +253,4 @@ P3 长期/合规（待执行）
 | v1.0.0 | 2026-07-08 | 初版，基于细胞级代码审阅与任务计划 v1.4.0 |
 | v1.1.0 | 2026-07-09 | INFRA-001/002、SHORT-002/003/005-A/005-B 核心实现 |
 | v2.0.0 | 2026-07-10 | 全部 P0+P1 完成。MID-001~009、SHORT-008/009、30+ 新端点、RuleEngine、ExpiryReminder、签名 URL、动态水印、索引文件 AI 生成、文件收集链接。整体完成度 93%。 |
+| v2.1.0 | 2026-07-11 | COMPLIANCE-001 完成（PII 哈希、合规端点、审计日志、前端 Compliance 页）；SHORT-006 前端 polish 收尾（preset 覆盖确认、字段高亮、保存成功态、未保存提示、i18n）。|
