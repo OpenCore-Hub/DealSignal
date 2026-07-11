@@ -303,7 +303,9 @@
       "createError": "Failed to create link",
       "shortUrl": "Share link",
       "copyLink": "Copy link",
-      "copied": "Link copied"
+      "copied": "Link copied",
+      "manageDisabled": "Management requires backend support",
+      "previewDisabled": "Preview requires backend support"
     },
     "emptyTitle": "No folders yet",
     "emptyDescription": "Folders added to this deal room will appear here.",

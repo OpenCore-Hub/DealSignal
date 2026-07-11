@@ -100,6 +100,7 @@ export function CreateLinkSheet({ dealRoomId, children, onCreated }: CreateLinkS
   });
   const [saving, setSaving] = useState(false);
   const [createdLink, setCreatedLink] = useState<Link | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const toggle = (key: OptionKey) => {
     setOptions((prev) => ({ ...prev, [key]: !prev[key] }));
@@ -141,6 +142,15 @@ export function CreateLinkSheet({ dealRoomId, children, onCreated }: CreateLinkS
       toast.error(t("permissions.createLinkSheet.createError"));
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleCopy = async () => {
+    if (!displayUrl) return;
+    const ok = await copyToClipboard(displayUrl, t("permissions.createLinkSheet.copied"));
+    if (ok) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     }
   };
 
@@ -194,10 +204,10 @@ export function CreateLinkSheet({ dealRoomId, children, onCreated }: CreateLinkS
                 <Button
                   variant="outline"
                   size="icon"
-                  onClick={() => copyToClipboard(displayUrl, t("permissions.createLinkSheet.copied"))}
+                  onClick={handleCopy}
                   aria-label={t("permissions.createLinkSheet.copyLink")}
                 >
-                  <Copy size={16} />
+                  {copied ? <Check size={16} className="text-success-500" /> : <Copy size={16} />}
                 </Button>
               </div>
             </div>
@@ -237,7 +247,13 @@ export function CreateLinkSheet({ dealRoomId, children, onCreated }: CreateLinkS
               <div className="space-y-2">
                 <div className="flex items-center justify-between">
                   <Label>{t("permissions.createLinkSheet.linkPreset")}</Label>
-                  <Button variant="link" size="sm" className="h-auto p-0">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    disabled
+                    title={t("permissions.createLinkSheet.manageDisabled")}
+                  >
                     {t("permissions.createLinkSheet.manage")}
                   </Button>
                 </div>
@@ -329,7 +345,13 @@ export function CreateLinkSheet({ dealRoomId, children, onCreated }: CreateLinkS
                     {t("permissions.createLinkSheet.tags")}
                     <Question size={14} className="text-muted-foreground" />
                   </Label>
-                  <Button variant="link" size="sm" className="h-auto p-0">
+                  <Button
+                    variant="link"
+                    size="sm"
+                    className="h-auto p-0"
+                    disabled
+                    title={t("permissions.createLinkSheet.manageDisabled")}
+                  >
                     {t("permissions.createLinkSheet.manage")}
                   </Button>
                 </div>

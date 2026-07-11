@@ -94,6 +94,7 @@
     "twoFactor": "双因素认证",
     "twoFactorDescription": "为管理员账号启用 2FA",
     "configure": "配置",
+    "twoFactorDisabled": "双因素认证需后端支持",
     "auditLog": "审计日志",
     "auditLogDescription": "查看最近 30 天的工作区关键操作记录。",
     "auditLogDisabled": "审计日志需后端支持",

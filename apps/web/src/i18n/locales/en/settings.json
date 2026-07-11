@@ -94,6 +94,7 @@
     "twoFactor": "Two-factor authentication",
     "twoFactorDescription": "Enable 2FA for admin accounts",
     "configure": "Configure",
+    "twoFactorDisabled": "Two-factor authentication requires backend support",
     "auditLog": "Audit Log",
     "auditLogDescription": "Review key workspace actions from the last 30 days.",
     "auditLogDisabled": "Audit log requires backend support",
