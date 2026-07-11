@@ -20,8 +20,8 @@
 | 邮件与通知 | 5 | 5 | 0 | 0 | 100% |
 | 前端三 Tab 弹窗 | 14 | 13 | 1 | 0 | 95% |
 | 公共 Viewer | 6 | 6 | 0 | 0 | 100% |
-| Analytics / 生命周期 | 5 | 3 | 0 | 2 | 60% |
-| **合计** | **69** | **61** | **5** | **3** | **93%** |
+| Analytics / 生命周期 | 5 | 4 | 0 | 1 | 80% |
+| **合计** | **69** | **62** | **5** | **2** | **94%** |
 
 > **说明**：完成度按"已完成=1、部分完成=0.5、未开始=0"加权计算。短期 P0 (9/9) 和中期 P1 (9/9) 已全部完成。剩余缺口为 INFRA-003 (retention/partitioning) 和 domain dropdown（需 workspace 集成后端，已排除在本次 SHORT-006 范围外）；COMPLIANCE-001 与 SHORT-006 已收尾。
 
@@ -219,7 +219,7 @@
 | MID-009 | 文件收集链接 | ~90% | 上传 + 审批 + 6 端点 |
 | INFRA-001 | Schema 编排 | ~100% | 047-058 全部 migration |
 | INFRA-002 | 异步通知 worker | ~95% | email 队列 + 重试/死信 |
-| INFRA-003 | 事件 retention | ~0% | 待执行 |
+| INFRA-003 | 事件 retention / 按月分区 + 分区清理 | ~100% | 分区表 + 自动创建/清理分区 |
 | COMPLIANCE-001 | PII 合规 | ~0% | 待执行 |
 
 ---
@@ -236,7 +236,7 @@ P1 中期（全部完成 ✅）
 └── SHORT-003 收尾 可配置阈值
 
 P2 中期（待执行）
-├── INFRA-003      事件 retention / partitioning
+├── INFRA-003      事件 retention / partitioning  ✅ 已完成
 └── domain dropdown  需 workspace 集成后端，范围外
 
 P3 长期/合规（待执行）
