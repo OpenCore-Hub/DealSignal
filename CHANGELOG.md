@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Disabled placeholder switches in share dialog (file requests, index file, Q&A conversations, screenshot protection) until their backend fields are implemented.
 - Polished Share / Invite / Access dialog (SHORT-006): preset overwrite confirmation, 200ms field highlight with `prefers-reduced-motion` support, save-success button state with auto-close in `LinkShareDialog`, unsaved-changes guard in `LinkShareDialog`, validation-driven primary-action disable, Resend tooltip + success toast, and full `en`/`zh-CN` i18n coverage.
 - Frontend blocker-button cleanup (TASK-FRONTEND-006): added disabled + title explanations for `Security` 2FA and `CreateLinkSheet` manage/preview buttons; added copy icon feedback in `CreateLinkSheet`; synced `en`/`zh-CN` i18n keys.
+- Backend middleware modules (TASK-BACKEND-012): confirmed rate-limit and idempotency middleware, memory token store, structured logger, mailer abstraction, and Redis wrapper are implemented, tested, and wired into `server.go`.
 - Resolved all outstanding `golangci-lint` warnings across the API, including unused mailer helpers and route wildcard conflicts.
 
 ### Changed
