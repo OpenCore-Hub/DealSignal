@@ -478,7 +478,7 @@ FROM (
         link_id,
         visitor_id,
         'page_viewed'::text AS event_type,
-        NULL::inet AS ip,
+        NULL::text AS ip,
         NULL::text AS user_agent,
         page_number,
         duration_seconds,

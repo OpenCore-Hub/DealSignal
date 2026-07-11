@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -20,6 +21,10 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+func testCfg() *config.Config {
+	return &config.Config{IPHashKey: "test-key"}
+}
 
 func TestNormalizeRole(t *testing.T) {
 	cases := []struct {
@@ -76,7 +81,7 @@ func TestMemberStatusFor(t *testing.T) {
 
 func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -112,7 +117,7 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 
 func TestCreateRoomCustomHasGeneralFolder(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -141,7 +146,7 @@ func TestCreateRoomCustomHasGeneralFolder(t *testing.T) {
 
 func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -194,7 +199,7 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 
 func TestFolderCRUD(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -249,7 +254,7 @@ func TestFolderCRUD(t *testing.T) {
 
 func TestDeleteFolderRejectsNonEmpty(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -291,7 +296,7 @@ func TestDeleteFolderRejectsNonEmpty(t *testing.T) {
 
 func TestRenameFolderCascadesPaths(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -355,7 +360,7 @@ func TestRenameFolderCascadesPaths(t *testing.T) {
 
 func TestDocumentMoveRemoveReorder(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -439,7 +444,7 @@ func TestDocumentMoveRemoveReorder(t *testing.T) {
 
 func TestAdminAuthorization(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	viewerID := uuid.NewString()
 	wsID := uuid.NewString()
@@ -483,7 +488,7 @@ func TestAdminAuthorization(t *testing.T) {
 
 func TestGetRoomDetailEnriched(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -544,7 +549,7 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 
 func TestListAccessRequestsAndReject(t *testing.T) {
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -1228,7 +1233,7 @@ func argInt32(args []interface{}, i int) int32 {
 func TestRenameFolderHandlerDecodesEncodedPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -1282,7 +1287,7 @@ func TestRenameFolderHandlerDecodesEncodedPath(t *testing.T) {
 func TestDeleteFolderHandlerDecodesEncodedPath(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{
@@ -1334,7 +1339,7 @@ func TestDeleteFolderHandlerDecodesEncodedPath(t *testing.T) {
 func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	fake := newFakeDB(t)
-	svc := NewService(db.New(fake), nil)
+	svc := NewService(db.New(fake), nil, testCfg())
 	ownerID := uuid.NewString()
 	wsID := uuid.NewString()
 	fake.workspace = db.Workspace{

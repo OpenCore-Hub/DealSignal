@@ -32,6 +32,7 @@ const SettingsMembersPage = lazy(() => import("@/routes/settings/members").then(
 const SettingsIntegrationsPage = lazy(() => import("@/routes/settings/integrations").then((m) => ({ default: m.SettingsIntegrationsPage })));
 const SettingsBillingPage = lazy(() => import("@/routes/settings/billing").then((m) => ({ default: m.SettingsBillingPage })));
 const SettingsSecurityPage = lazy(() => import("@/routes/settings/security").then((m) => ({ default: m.SettingsSecurityPage })));
+const SettingsCompliancePage = lazy(() => import("@/routes/settings/compliance").then((m) => ({ default: m.SettingsCompliancePage })));
 const SettingsLanguagePage = lazy(() => import("@/routes/settings/language").then((m) => ({ default: m.SettingsLanguagePage })));
 const ViewerPage = lazy(() => import("@/routes/viewer").then((m) => ({ default: m.ViewerPage })));
 const PublicViewerPage = lazy(() => import("@/components/viewer/PublicViewerPage").then((m) => ({ default: m.PublicViewerPage })));
@@ -200,6 +201,7 @@ export const router = createBrowserRouter([
           { path: "integrations", element: <SettingsIntegrationsPage /> },
           { path: "billing", element: <SettingsBillingPage /> },
           { path: "security", element: <SettingsSecurityPage /> },
+          { path: "compliance", element: <SettingsCompliancePage /> },
         ],
       },
       { path: "*", element: <NotFoundPage /> },

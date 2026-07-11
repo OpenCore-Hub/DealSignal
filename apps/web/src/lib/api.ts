@@ -805,5 +805,25 @@ export const api = {
 
   getDealRoomTemplates: () =>
     request<{ data: DealRoomTemplate[] }>(getWorkspaceSlug(), "/deal-room-templates"),
+
+  exportVisitorData: (email: string) =>
+    request<{ data: Record<string, unknown> }>(
+      getWorkspaceSlug(),
+      `/compliance/data?visitor_email=${encodeURIComponent(email)}`
+    ).then((res) => res.data),
+
+  anonymizeVisitorData: (email: string) =>
+    request<{ data: Record<string, number> }>(
+      getWorkspaceSlug(),
+      "/compliance/data",
+      { method: "POST", body: JSON.stringify({ visitor_email: email }) }
+    ).then((res) => res.data),
+
+  deleteVisitorData: (email: string) =>
+    request<{ data: Record<string, number> }>(
+      getWorkspaceSlug(),
+      `/compliance/data?visitor_email=${encodeURIComponent(email)}`,
+      { method: "DELETE" }
+    ).then((res) => res.data),
 };
 

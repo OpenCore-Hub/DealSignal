@@ -9,6 +9,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/google/uuid"
@@ -54,14 +56,15 @@ type Querier interface {
 type Service struct {
 	queries Querier
 	dedup   DedupChecker
+	cfg     *config.Config
 }
 
 // NewService creates an analytics service.
-func NewService(q Querier, dedup DedupChecker) *Service {
+func NewService(q Querier, dedup DedupChecker, cfg *config.Config) *Service {
 	if dedup == nil {
 		dedup = NoopDedupChecker{}
 	}
-	return &Service{queries: q, dedup: dedup}
+	return &Service{queries: q, dedup: dedup, cfg: cfg}
 }
 
 // RecordLinkOpened atomically increments the link access counter and records the event.
@@ -81,7 +84,7 @@ func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID,
 		LinkID:       link.ID,
 		VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		VisitorEmail: pgtype.Text{String: email, Valid: email != ""},
-		Ip:           parseIP(ip),
+		Ip:           hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
 	if err != nil {
@@ -128,7 +131,7 @@ func (s *Service) RecordDownload(ctx context.Context, link db.Link, visitorID, e
 		VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		VisitorEmail: pgtype.Text{String: email, Valid: email != ""},
 		EventType:    "download_attempted",
-		Ip:           parseIP(ip),
+		Ip:           hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
 }
@@ -142,7 +145,7 @@ func (s *Service) RecordSecurityEvent(ctx context.Context, link db.Link, eventTy
 		EventType:   eventType,
 		VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		Email:       pgtype.Text{String: email, Valid: email != ""},
-		Ip:          parseIP(ip),
+		Ip:          hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:   pgtype.Text{String: ua, Valid: ua != ""},
 		Reason:      pgtype.Text{String: reason, Valid: reason != ""},
 	})
@@ -157,7 +160,7 @@ func (s *Service) RecordCustomEvent(ctx context.Context, link db.Link, eventType
 		VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
 		VisitorEmail: pgtype.Text{String: email, Valid: email != ""},
 		EventType:    eventType,
-		Ip:           parseIP(ip),
+		Ip:           hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
 }
@@ -204,7 +207,7 @@ func (s *Service) CheckAnomaly(ctx context.Context, ip, eventType string, window
 	}
 	interval := pgtype.Interval{Microseconds: window.Microseconds(), Valid: true}
 	count, err := s.queries.CountSecurityEventsByIPAndWindow(ctx, db.CountSecurityEventsByIPAndWindowParams{
-		Ip:        parseIP(ip),
+		Ip:        hashIPText(s.cfg.IPHashKey, ip),
 		EventType: eventType,
 		Column3:   interval,
 	})
@@ -726,4 +729,11 @@ func parseUUID(id string) (pgtype.UUID, error) {
 		return pgtype.UUID{}, err
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
+}
+
+func hashIPText(key, ip string) pgtype.Text {
+	if ip == "" {
+		return pgtype.Text{}
+	}
+	return pgtype.Text{String: compliance.HashIP(key, ip), Valid: true}
 }

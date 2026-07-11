@@ -15,6 +15,7 @@ type Config struct {
 	DatabaseURL       string
 	RedisURL          string
 	JWTSecret         string
+	IPHashKey         string
 	LinkSessionSecret string
 	LogLevel          string
 	Version           string
@@ -114,6 +115,7 @@ func Load() (*Config, error) {
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		RedisURL:          os.Getenv("REDIS_URL"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),
+		IPHashKey:         os.Getenv("IP_HASH_KEY"),
 		LinkSessionSecret: os.Getenv("LINK_SESSION_SECRET"),
 
 		S3Endpoint:       os.Getenv("S3_ENDPOINT"),
@@ -212,6 +214,10 @@ func Load() (*Config, error) {
 	}
 	if cfg.LinkSessionSecret == "" {
 		cfg.LinkSessionSecret = cfg.JWTSecret
+	}
+	if cfg.IPHashKey == "" {
+		cfg.IPHashKey = cfg.JWTSecret
+		fmt.Fprintf(os.Stderr, "warning: IP_HASH_KEY is not set; falling back to JWT_SECRET. Set IP_HASH_KEY explicitly in production.\n")
 	}
 	if cfg.S3Bucket == "" {
 		return nil, fmt.Errorf("S3_BUCKET is required")

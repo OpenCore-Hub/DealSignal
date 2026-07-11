@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
@@ -46,11 +47,12 @@ type Beginner interface {
 type Service struct {
 	queries *db.Queries
 	pool    Beginner
+	cfg     *config.Config
 }
 
 // NewService creates a deal room service.
-func NewService(q *db.Queries, pool Beginner) *Service {
-	return &Service{queries: q, pool: pool}
+func NewService(q *db.Queries, pool Beginner, cfg *config.Config) *Service {
+	return &Service{queries: q, pool: pool, cfg: cfg}
 }
 
 // CreateRoomRequest is the input for creating a room.
@@ -676,7 +678,7 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 	if err := s.queries.CreateNDAAgreement(ctx, db.CreateNDAAgreementParams{
 		RoomID:    room.ID,
 		Email:     email,
-		Ip:        parseIP(ip),
+		Ip:        hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent: pgtype.Text{String: ua, Valid: ua != ""},
 	}); err != nil {
 		return fmt.Errorf("record nda: %w", err)

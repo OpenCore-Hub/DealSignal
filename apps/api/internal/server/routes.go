@@ -13,6 +13,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/contact"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -178,14 +179,14 @@ func (s *Server) registerRoutes() error {
 				_, err := notificationSvc.Enqueue(ctx, wsID, userID, channel, subject, body)
 				return err
 			}))
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, notificationSvc, nil)
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
 				dedupChecker = analytics.NewFailoverDedupChecker(s.redisClient, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			} else {
 				dedupChecker = analytics.NewFailoverDedupChecker(nil, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			}
-			analyticsSvc := analytics.NewService(queries, dedupChecker)
+			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
@@ -210,8 +211,11 @@ func (s *Server) registerRoutes() error {
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
 
-			dealroomSvc := dealroom.NewService(queries, s.dbPool)
+			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
+
+			complianceSvc := compliance.NewService(queries, s.dbPool, s.cfg)
+			complianceHandler := compliance.NewHandler(complianceSvc, workspaceSvc)
 
 			suggestionHandler := suggestions.NewHandler(suggestionSvc)
 			signalSvc := signal.NewService(queries)
@@ -234,6 +238,7 @@ func (s *Server) registerRoutes() error {
 			ws.GET("/reverse-funnel", linkHandler.ReverseFunnel)
 			ws.GET("/events", sseHandler.StreamEvents)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
+			complianceHandler.RegisterRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)
 			contactHandler.RegisterRoutes(ws)
