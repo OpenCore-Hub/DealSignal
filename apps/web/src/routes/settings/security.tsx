@@ -102,7 +102,12 @@ export function SettingsSecurityPage() {
               <p className="text-sm font-medium">{t("security.twoFactor")}</p>
               <p className="text-caption text-muted-foreground">{t("security.twoFactorDescription")}</p>
             </div>
-            <Button variant="outline" className="gap-1.5" disabled={!settings.twoFactorEnabled}>
+            <Button
+              variant="outline"
+              className="gap-1.5"
+              disabled={!settings.twoFactorEnabled}
+              title={t("security.twoFactorDisabled")}
+            >
               <Key size={16} />
               {t("security.configure")}
             </Button>

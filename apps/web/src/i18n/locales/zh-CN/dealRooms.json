@@ -300,7 +300,9 @@
       "createError": "创建链接失败",
       "shortUrl": "分享链接",
       "copyLink": "复制链接",
-      "copied": "链接已复制"
+      "copied": "链接已复制",
+      "manageDisabled": "管理功能需后端支持",
+      "previewDisabled": "预览功能需后端支持"
     },
     "emptyTitle": "暂无文件夹",
     "emptyDescription": "添加到该数据室的文件夹将在此处显示。",
