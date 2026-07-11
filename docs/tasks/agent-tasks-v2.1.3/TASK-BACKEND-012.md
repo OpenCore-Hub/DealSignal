@@ -4,7 +4,7 @@ parent_issue: "DS-037"
 agent_task_id: "AGENT-TASK-037"
 version: "v2.1.3"
 priority: "P0"
-status: "待执行"
+status: "已完成"
 type: "backend"
 effort: "M"
 branch: "feat/agent-task-037-middleware-modules"
@@ -33,7 +33,7 @@ available_tools:
 
 ## 1. 目标
 
-完成并测试当前未落库的新增中间件与基础模块：
+中间件与基础模块已在代码库中实现并通过测试：
 - 限流中间件（`internal/middleware/ratelimit.go`）
 - 幂等中间件（`internal/middleware/idempotency.go`）
 - auth 内存 store（`internal/auth/memory_store.go`）
@@ -110,11 +110,11 @@ available_tools:
 
 ## 5. 验收标准
 
-- [ ] 限流/幂等中间件单元测试全绿。
-- [ ] auth memory store 测试全绿。
-- [ ] logger/mailer/redis 模块可在测试中 mock。
-- [ ] 中间件在 server 路由中正确注册。
-- [ ] `go test ./...` 与 `make lint` 全绿。
+- [x] 限流/幂等中间件单元测试全绿。
+- [x] auth memory store 测试全绿。
+- [x] logger/mailer/redis 模块可在测试中 mock。
+- [x] 中间件在 server 路由中正确注册。
+- [x] `go test ./...` 与 `make lint` 全绿。
 
 ---
 
@@ -153,9 +153,9 @@ make lint
 
 ## 9. Definition of Done
 
-- [ ] 代码实现完成
-- [ ] 测试通过
-- [ ] lint / build 通过
+- [x] 代码实现完成
+- [x] 测试通过
+- [x] lint / build 通过
 - [ ] PR 已关联父 Issue：`Closes #DS-037`
 
 ---
