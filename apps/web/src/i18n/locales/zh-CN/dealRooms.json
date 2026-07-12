@@ -44,7 +44,6 @@
     "manageDocs": "管理文档",
     "documents": "文档",
     "members": "成员",
-    "invitees": "受邀者",
     "security": "安全",
     "folders": "文件夹结构",
     "noFolders": "该数据室尚无文件夹。",
@@ -465,8 +464,7 @@
     "remove": "移除 {{email}}",
     "removeConfirm": "将 {{email}} 从该数据室移除？",
     "removed": "已移除 {{email}}",
-    "ndaSigned": "NDA 已签署",
-    "empty": "该数据室尚无成员。"
+    "ndaSigned": "NDA 已签署"
   },
   "public": {
     "title": "数据室",

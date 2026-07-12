@@ -47,7 +47,6 @@
     "manageDocs": "Manage documents",
     "documents": "Documents",
     "members": "Members",
-    "invitees": "Invitees",
     "security": "Security",
     "folders": "Folder structure",
     "noFolders": "No folders in this deal room yet.",
@@ -471,8 +470,7 @@
     "remove": "Remove {{email}}",
     "removeConfirm": "Remove {{email}} from this deal room?",
     "removed": "Removed {{email}}",
-    "ndaSigned": "NDA signed",
-    "empty": "No members in this deal room yet."
+    "ndaSigned": "NDA signed"
   },
   "public": {
     "title": "Deal Room",

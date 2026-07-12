@@ -213,7 +213,7 @@ describe("DealRoomDetailPage", () => {
     expect(screen.queryByText("Upload progress")).not.toBeInTheDocument();
   });
 
-  it("switches to permissions tab and shows invitees", async () => {
+  it("switches to permissions tab and shows links section", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
     await renderPage();
 
@@ -224,9 +224,9 @@ describe("DealRoomDetailPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: /permissions/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("john@acme.capital")).toBeInTheDocument();
+      expect(screen.getByText("Links")).toBeInTheDocument();
     });
-    expect(screen.queryByText("owner@acme.capital")).not.toBeInTheDocument();
+    expect(screen.queryByText("Invitees")).not.toBeInTheDocument();
   });
 
   it("shows error and retries on failure", async () => {
