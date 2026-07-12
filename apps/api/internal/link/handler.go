@@ -66,6 +66,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.PUT("/:id", h.UpdateFull)
 	g.DELETE("/:id", h.Delete)
 	g.GET("/:id/access-logs", h.AccessLogs)
+	g.GET("/:id/analytics", h.LinkAnalytics)
 	g.GET("/:id/access-rules", h.GetAccessRules)
 	g.POST("/:id/access-rules", h.SetAccessRules)
 	g.GET("/:id/invitations", h.ListInvitations)
@@ -94,6 +95,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 // RegisterPublicRoutes mounts public link routes.
 func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
+	r.GET("/links/:publicToken", h.PublicLinkMetadata)
 	r.POST("/links/:publicToken", h.Access)
 	r.POST("/links/:publicToken/send-email-code", h.SendEmailVerificationCode)
 	r.POST("/links/:publicToken/resend-code", h.SendEmailVerificationCode)
@@ -236,6 +238,8 @@ type CreateRequest struct {
 	QaEnabled                bool     `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
+	LinkType                 string   `json:"link_type,omitempty"`
+	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
 }
 
 // UpdateRequest is the JSON body for updating a link.
@@ -260,6 +264,7 @@ type UpdateRequest struct {
 	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled      *bool    `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
+	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
 }
 
 // List returns links for the workspace, optionally filtered by document_id.
@@ -427,6 +432,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		QaEnabled:                qaEnabled,
 		FileRequestsEnabled:      fileRequestsEnabled,
 		IndexFileEnabled:         indexFileEnabled,
+		TargetFolderPath:         req.TargetFolderPath,
 		ContactIDs:               req.ContactIDs,
 		CustomDomain:             req.CustomDomain,
 		Tags:                     req.Tags,
@@ -816,6 +822,21 @@ func (h *Handler) AccessLogs(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": accessLogList(logs)})
 }
 
+// LinkAnalytics returns aggregated analytics for a link.
+func (h *Handler) LinkAnalytics(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	analytics, err := h.service.GetLinkAnalytics(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, analytics)
+}
+
 // Create handles smart-link creation.
 func (h *Handler) Create(c *gin.Context) {
 	var req CreateRequest
@@ -856,6 +877,8 @@ func (h *Handler) Create(c *gin.Context) {
 		QaEnabled:                req.QaEnabled,
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
+		LinkType:                 req.LinkType,
+		TargetFolderPath:         req.TargetFolderPath,
 		ContactIDs:               req.ContactIDs,
 		AllowedEmails:            req.AllowedEmails,
 		AllowedDomains:           req.AllowedDomains,
@@ -883,6 +906,38 @@ func (h *Handler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, item)
 }
 
+// PublicLinkMetadata returns safe metadata for a public link without consuming
+// an access attempt or requiring credentials.
+func (h *Handler) PublicLinkMetadata(c *gin.Context) {
+	token := c.Param("publicToken")
+	meta, err := h.service.GetPublicLinkMetadata(c.Request.Context(), token)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"id":                         uuidToString(meta.ID),
+		"public_token":               meta.PublicToken,
+		"name":                       meta.Name,
+		"status":                     meta.Status,
+		"expires_at":                 timestamptzOrNil(meta.ExpiresAt),
+		"permission_type":            meta.PermissionType,
+		"require_email":              meta.RequireEmail,
+		"require_email_verification": meta.RequireEmailVerification,
+		"require_password":           meta.RequirePassword,
+		"require_nda":                meta.RequireNda,
+		"download_enabled":              meta.DownloadEnabled,
+		"watermark_enabled":             meta.WatermarkEnabled,
+		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
+		"custom_domain":                 meta.CustomDomain,
+		"ai_copilot_enabled":         meta.AiCopilotEnabled,
+		"qa_enabled":                 meta.QaEnabled,
+		"file_requests_enabled":      meta.FileRequestsEnabled,
+		"index_file_enabled":         meta.IndexFileEnabled,
+	})
+}
+
 // Access handles public link access.
 func (h *Handler) Access(c *gin.Context) {
 	token := c.Param("publicToken")
@@ -895,9 +950,8 @@ func (h *Handler) Access(c *gin.Context) {
 			link, err := h.service.GetByPublicToken(c.Request.Context(), token)
 			if err == nil {
 				// Invalidate session if link security config changed since session was issued.
-				configChanged := session.LinkUpdatedAt > 0 &&
-					link.UpdatedAt.Valid &&
-					link.UpdatedAt.Time.Unix() > session.LinkUpdatedAt
+				configChanged := session.SecurityVersion > 0 &&
+					link.SecurityVersion != session.SecurityVersion
 				if !configChanged {
 					switch link.Status {
 					case "deleted":
@@ -922,9 +976,8 @@ func (h *Handler) Access(c *gin.Context) {
 						(link.RequireEmailVerification && !session.EmailVerified && session.Email == "")
 					if securityChanged {
 						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
-					}
-					if !securityChanged {
-						h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified)
+					} else {
+						h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified, session.PasswordVerified)
 						return
 					}
 				}
@@ -975,7 +1028,7 @@ func (h *Handler) Access(c *gin.Context) {
 
 			// For credential-gate errors, include the link's security flags so the
 			// UI can render all required fields on the first attempt.
-			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrBlockedDomain) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrNotAllowedDomain) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) {
+			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrBlockedDomain) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrNotAllowedDomain) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
 				requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
 				if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrInvalidPassword) {
@@ -1006,30 +1059,27 @@ func (h *Handler) Access(c *gin.Context) {
 	_ = h.service.EvaluateNotificationRules(c.Request.Context(), result.Link, "first_open", result.VisitorID, result.Email, nil)
 	h.triggerSuggestions(c.Request.Context(), result.Link, langFromContext(c))
 
-	h.respondAccessSuccess(c, result.Link, token, result.Email, body.NDAAgreed, result.VisitorID, result.EmailVerified)
+	passwordVerified := !result.Link.RequirePassword || body.Password != ""
+	h.respondAccessSuccess(c, result.Link, token, result.Email, body.NDAAgreed, result.VisitorID, result.EmailVerified, passwordVerified)
 }
 
 // respondAccessSuccess builds the access response payload (documents, security
 // flags, session token) and writes it as JSON. It is shared by the normal
 // Access flow and the session-reuse fast path.
 //
-// LinkUpdatedAt is stored so sessions are invalidated when link security
+// SecurityVersion is stored so sessions are invalidated when link security
 // config changes.
-func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool) {
+func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool, passwordVerified bool) {
 	documents := h.documentsForAccessResponse(c.Request.Context(), link, token)
 
-	var linkUpdatedAt int64
-	if link.UpdatedAt.Valid {
-		linkUpdatedAt = link.UpdatedAt.Time.Unix()
-	}
-
 	session, err := signLinkSession(LinkSession{
-		PublicToken:   token,
-		Email:         email,
-		EmailVerified: emailVerified,
-		NDAAgreed:     ndaAgreed,
-		VisitorID:     visitorID,
-		LinkUpdatedAt: linkUpdatedAt,
+		PublicToken:      token,
+		Email:            email,
+		EmailVerified:    emailVerified,
+		PasswordVerified: passwordVerified,
+		NDAAgreed:        ndaAgreed,
+		VisitorID:        visitorID,
+		SecurityVersion:  link.SecurityVersion,
 	}, h.cfg.LinkSessionSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to create session"})
@@ -1038,17 +1088,18 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 
 	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 	linkPayload := gin.H{
-		"id":                    uuidToString(link.ID),
-		"name":                  textOrNil(link.Name),
-		"permissionType":        link.PermissionType,
-		"downloadEnabled":       link.DownloadEnabled,
-		"watermarkEnabled":      link.WatermarkEnabled,
-		"watermarkText":         h.watermarkTextFor(email, c.ClientIP()),
-		"aiCopilotEnabled":      link.AiCopilotEnabled,
-		"qaEnabled":             link.QaEnabled,
-		"fileRequestsEnabled":   link.FileRequestsEnabled,
-		"indexFileEnabled":      link.IndexFileEnabled,
-		"isBundle":              len(documents) > 1,
+		"id":                        uuidToString(link.ID),
+		"name":                      textOrNil(link.Name),
+		"permissionType":            link.PermissionType,
+		"downloadEnabled":           link.DownloadEnabled,
+		"watermarkEnabled":          link.WatermarkEnabled,
+		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
+		"watermarkText":             h.watermarkTextFor(email, c.ClientIP()),
+		"aiCopilotEnabled":          link.AiCopilotEnabled,
+		"qaEnabled":                 link.QaEnabled,
+		"fileRequestsEnabled":       link.FileRequestsEnabled,
+		"indexFileEnabled":          link.IndexFileEnabled,
+		"isBundle":                  len(documents) > 1,
 	}
 	if link.DealRoomID.Valid {
 		linkPayload["dealRoomId"] = uuidToString(link.DealRoomID)
@@ -1414,9 +1465,8 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				return AccessResult{}, fmt.Errorf("get link: %w", err)
 			}
 			// Invalidate session if link config changed since session was issued.
-			configChanged := session.LinkUpdatedAt > 0 &&
-				link.UpdatedAt.Valid &&
-				link.UpdatedAt.Time.Unix() > session.LinkUpdatedAt
+			configChanged := session.SecurityVersion > 0 &&
+				link.SecurityVersion != session.SecurityVersion
 			if !configChanged {
 				switch link.Status {
 				case "deleted":
@@ -1553,6 +1603,8 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusGone, gin.H{"code": "invite_expired", "message": err.Error()})
 	case errors.Is(err, ErrInviteRevoked):
 		c.JSON(http.StatusForbidden, gin.H{"code": "invite_revoked", "message": err.Error()})
+	case errors.Is(err, ErrInviteAlreadyUsed):
+		c.JSON(http.StatusForbidden, gin.H{"code": "invite_already_used", "message": err.Error()})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 	}
@@ -1589,6 +1641,8 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "invite_token_expired", "", false
 	case errors.Is(err, ErrInviteRevoked):
 		return "invite_token_revoked", "", false
+	case errors.Is(err, ErrInviteAlreadyUsed):
+		return "invite_token_already_used", "", false
 	default:
 		return "", "", false
 	}
@@ -1671,6 +1725,8 @@ func accessErrorCode(err error) string {
 		return "invite_expired"
 	case errors.Is(err, ErrInviteRevoked):
 		return "invite_revoked"
+	case errors.Is(err, ErrInviteAlreadyUsed):
+		return "invite_already_used"
 	default:
 		return "internal_error"
 	}
@@ -1705,6 +1761,13 @@ func publicURL(c *gin.Context, cfg *config.Config, token, customDomain string) s
 func textOrNil(t pgtype.Text) interface{} {
 	if t.Valid {
 		return t.String
+	}
+	return nil
+}
+
+func timestamptzOrNil(t pgtype.Timestamptz) interface{} {
+	if t.Valid {
+		return t.Time.Format(time.RFC3339)
 	}
 	return nil
 }
@@ -1816,12 +1879,13 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"requireEmail":             link.RequireEmail,
 		"requireNda":               link.RequireNda,
 		"requirePassword":          link.RequirePassword,
-		"downloadEnabled":          link.DownloadEnabled,
-		"watermarkEnabled":         link.WatermarkEnabled,
-		"aiCopilotEnabled":         link.AiCopilotEnabled,
-		"qaEnabled":                link.QaEnabled,
-		"fileRequestsEnabled":      link.FileRequestsEnabled,
-		"indexFileEnabled":         link.IndexFileEnabled,
+		"downloadEnabled":           link.DownloadEnabled,
+		"watermarkEnabled":          link.WatermarkEnabled,
+		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
+		"aiCopilotEnabled":          link.AiCopilotEnabled,
+		"qaEnabled":                 link.QaEnabled,
+		"fileRequestsEnabled":       link.FileRequestsEnabled,
+		"indexFileEnabled":          link.IndexFileEnabled,
 		"requireEmailVerification": link.RequireEmailVerification,
 		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
 		"contactIds":               contactIDs,
@@ -1954,10 +2018,28 @@ func (h *Handler) ArchiveLink(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "archived"})
 }
 
-// RenewLink extends a link's expiry.
+// RenewLink extends a link's expiry. An optional `expires_at` in the request
+// body allows the caller to set a custom future expiry; otherwise the link is
+// extended by the default renewal window.
 func (h *Handler) RenewLink(c *gin.Context) {
 	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
-	if _, err := h.service.RenewLink(c.Request.Context(), wsID, lID, nil); err != nil {
+
+	var body struct {
+		ExpiresAt *string `json:"expires_at,omitempty"`
+	}
+	_ = c.ShouldBindJSON(&body) // body is optional; ignore bind errors
+
+	var expiresAt *time.Time
+	if body.ExpiresAt != nil && *body.ExpiresAt != "" {
+		t, err := time.Parse(time.RFC3339, *body.ExpiresAt)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
+			return
+		}
+		expiresAt = &t
+	}
+
+	if _, err := h.service.RenewLink(c.Request.Context(), wsID, lID, expiresAt); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -2017,7 +2099,7 @@ func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"questions": questions})
+	c.JSON(http.StatusOK, gin.H{"data": questions})
 }
 
 // AnswerVisitorQuestion allows the owner to answer a visitor question.
@@ -2040,11 +2122,12 @@ func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
 	wID := pgtype.UUID{Bytes: wsUUID, Valid: true}
 	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
-	if _, err := h.service.AnswerVisitorQuestion(c.Request.Context(), qID, wID, uID, body.Answer); err != nil {
+	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), qID, wID, uID, body.Answer)
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": "answered"})
+	c.JSON(http.StatusOK, gin.H{"data": q})
 }
 
 // ListLinkFileRequests returns all file requests for a link (owner view).
@@ -2061,7 +2144,7 @@ func (h *Handler) ListLinkFileRequests(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"fileRequests": reqs})
+	c.JSON(http.StatusOK, gin.H{"data": reqs})
 }
 
 // UpdateFileRequestStatus updates a file request status (owner approve/reject).
@@ -2083,7 +2166,12 @@ func (h *Handler) UpdateFileRequestStatus(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"status": body.Status})
+	req, err := h.service.GetFileRequestByID(c.Request.Context(), rID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": req})
 }
 
 // uploadedFileResponse is the JSON shape for a link_uploaded_file row.
@@ -2184,13 +2272,18 @@ func (h *Handler) RejectUploadedFile(c *gin.Context) {
 }
 
 // PublicDealRoomRedirect resolves a legacy /r/:slug URL to the corresponding /l/:token share link.
+// It preserves query parameters (including UTM/attribution tags) on redirect.
 func (h *Handler) PublicDealRoomRedirect(c *gin.Context) {
 	token, err := h.service.ResolveDealRoomSlug(c.Request.Context(), c.Param("slug"))
 	if err != nil || token == "" {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "no active link for this deal room"})
 		return
 	}
-	c.Redirect(http.StatusFound, "/l/"+token)
+	target := "/l/" + token
+	if rawQuery := c.Request.URL.RawQuery; rawQuery != "" {
+		target += "?" + rawQuery
+	}
+	c.Redirect(http.StatusFound, target)
 }
 
 // PublicCreateVisitorQuestion allows a visitor to submit a question.

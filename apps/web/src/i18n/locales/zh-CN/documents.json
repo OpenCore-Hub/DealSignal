@@ -196,6 +196,8 @@
     "invite_expiredDescription": "此邀请已过期，请联系分享者重新发送邀请。",
     "invite_revokedTitle": "邀请已撤销",
     "invite_revokedDescription": "此邀请已被撤销，如有疑问请联系分享者。",
+    "invite_already_usedTitle": "邀请已使用",
+    "invite_already_usedDescription": "此邀请已被使用，请联系分享者重新发送邀请。",
     "inviteVerification": "正在验证您的邀请...",
     "inviteVerificationFor": "正在验证 {{email}} 的邀请",
     "requestAccess": "申请访问",
@@ -220,8 +222,18 @@
     "qaPending": "等待回复",
     "qaPlaceholder": "输入您的问题...",
     "qaSubmit": "提问",
+    "qaSourceAI": "AI",
+    "qaSourceOwner": "所有者",
+    "qaSourceYou": "你",
+    "qaModeAI": "问 AI",
+    "qaModeOwner": "问所有者",
+    "qaAIPlaceholder": "向 AI 询问此文档...",
+    "qaOwnerPlaceholder": "向所有者提问...",
+    "qaEmptyUnified": "暂无消息，开始交流吧。",
     "sidebarRequests": "文件请求",
     "printWarning": "打印已禁用",
-    "printWarningHint": "本文档受保护。请联系文档所有者获取授权副本。"
+    "printWarningHint": "本文档受保护。请联系文档所有者获取授权副本。",
+    "watermarkFallback": "保密",
+    "pageCountShort": "{{count}} 页"
   }
 }

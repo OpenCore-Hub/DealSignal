@@ -14,9 +14,7 @@ interface PageInfo {
   height: number;
 }
 
-const DEFAULT_WATERMARK: WatermarkInfo = {
-  email: "viewer@example.test",
-};
+const DEFAULT_WATERMARK: WatermarkInfo = {};
 
 interface ViewerCanvasProps {
   doc: Document;
@@ -27,6 +25,7 @@ interface ViewerCanvasProps {
   imageUrl: string | null;
   evidence?: Evidence[];
   watermark?: WatermarkInfo | null;
+  screenshotProtectionEnabled?: boolean;
   onSelectPage: (page: number) => void;
   sidebar?: React.ReactNode;
 }
@@ -40,6 +39,7 @@ export function ViewerCanvas({
   imageUrl,
   evidence,
   watermark,
+  screenshotProtectionEnabled,
   onSelectPage,
   sidebar,
 }: ViewerCanvasProps) {
@@ -92,10 +92,21 @@ export function ViewerCanvas({
 
   // Print Screen detection: Ctrl+P / Cmd+P triggers a warning overlay.
   useEffect(() => {
-    if (!watermark) return;
+    if (!screenshotProtectionEnabled) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
+        e.preventDefault();
+        setPrintWarning(true);
+        setTimeout(() => setPrintWarning(false), 4000);
+      }
+      // Print Screen key and common screenshot shortcuts.
+      if (
+        e.key === "PrintScreen" ||
+        e.key === "Snapshot" ||
+        (e.ctrlKey && e.shiftKey && (e.key === "s" || e.key === "S")) ||
+        (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5"))
+      ) {
         e.preventDefault();
         setPrintWarning(true);
         setTimeout(() => setPrintWarning(false), 4000);
@@ -116,7 +127,7 @@ export function ViewerCanvas({
       if (el) el.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [watermark]);
+  }, [screenshotProtectionEnabled]);
   const availableWidth = Math.max(300, viewportSize.width);
   const availableHeight = Math.max(300, viewportSize.height);
   const fitWidth = Math.min(availableWidth, availableHeight * aspectRatio);

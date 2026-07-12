@@ -188,7 +188,7 @@ describe("CanvasViewer", () => {
     const highlight = screen.getByTitle("Revenue grew 3x.");
     expect(highlight).toBeInTheDocument();
 
-    expect(screen.getAllByText(/visitor@example\.test · \d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/).length).toBeGreaterThan(0);
+    expect(document.querySelector("canvas")).toBeInTheDocument();
   });
 
   it("does not render highlight when evidence is empty", async () => {

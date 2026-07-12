@@ -31,6 +31,8 @@
     "expiresAtFuture": "过期时间必须是未来时间",
     "oldSlugHint": "旧链接 /r/{{slug}} 仍可用，但新分享建议使用 /l/{{token}}。",
     "customDomain": "自定义域名",
+    "customDomainDefault": "默认域名",
+    "customDomainCustom": "自定义域名...",
     "customDomainPlaceholder": "links.yourdomain.com",
     "customDomainHint": "配置后公开链接将从此域名提供",
     "tags": "标签",
@@ -163,6 +165,38 @@
     "invalid": "无效的邮箱或域名",
     "remove": "移除 {{value}}"
   },
+  "management": {
+    "title": "管理",
+    "done": "完成",
+    "loading": "正在加载管理数据...",
+    "loadFailed": "加载管理数据失败",
+    "questionsTitle": "访客问题",
+    "questionsDescription": "回复访客提交的问题。",
+    "noQuestions": "暂无问题。",
+    "anonymous": "匿名",
+    "answerLabel": "回复：",
+    "answerPlaceholder": "输入回复内容...",
+    "sendAnswer": "发送回复",
+    "saving": "保存中...",
+    "answerSuccess": "回复已保存",
+    "answerFailed": "保存回复失败",
+    "questionStatus": {
+      "pending": "待回复",
+      "answered": "已回复"
+    },
+    "fileRequestsTitle": "文件请求",
+    "fileRequestsDescription": "审批或拒绝访客的文件请求。",
+    "noFileRequests": "暂无文件请求。",
+    "status": "状态",
+    "fileRequestUpdateSuccess": "文件请求已更新",
+    "fileRequestUpdateFailed": "更新文件请求失败",
+    "fileRequestStatus": {
+      "pending": "待处理",
+      "approved": "已通过",
+      "rejected": "已拒绝",
+      "fulfilled": "已完成"
+    }
+  },
   "analytics": {
     "title": "分析",
     "views": "访问次数",
@@ -172,6 +206,15 @@
     "recentActivity": "最近访问",
     "emptyTitle": "暂无访问",
     "emptyDescription": "分享链接后，访客活动将显示在这里。",
-    "done": "关闭"
+    "done": "关闭",
+    "loadFailed": "加载分析数据失败",
+    "recentVisitors": "最近访客",
+    "noRecentVisitors": "暂无最近访客。",
+    "visitorViews": "{{count}} 次访问",
+    "keyPages": "关键页面",
+    "noKeyPages": "暂无关键页面。",
+    "pageLabel": "第 {{pageNumber}} 页",
+    "qaRecords": "问答记录",
+    "noQARecords": "暂无问题。"
   }
 }

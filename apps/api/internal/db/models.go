@@ -266,38 +266,40 @@ type IntegrationToken struct {
 }
 
 type Link struct {
-	ID                       pgtype.UUID
-	TenantID                 pgtype.UUID
-	WorkspaceID              pgtype.UUID
-	DocumentID               pgtype.UUID
-	PublicToken              string
-	Name                     pgtype.Text
-	PermissionType           string
-	ExpiresAt                pgtype.Timestamptz
-	MaxAccessCount           pgtype.Int4
-	AccessCount              int32
-	DownloadEnabled          bool
-	WatermarkEnabled         bool
-	Status                   string
-	CreatedBy                pgtype.UUID
-	CreatedAt                pgtype.Timestamptz
-	UpdatedAt                pgtype.Timestamptz
-	RequireEmail             bool
-	RequireNda               bool
-	RequireEmailVerification bool
-	AiCopilotEnabled         bool
-	DealRoomID               pgtype.UUID
-	RequirePassword          bool
-	PasswordHash             pgtype.Text
-	CustomDomain             pgtype.Text
-	Tags                     []string
-	NotifyOnAccess           bool
-	SecurityVersion          int32
-	QaEnabled                bool
-	FileRequestsEnabled      bool
-	IndexFileEnabled         bool
-	LinkType                 string
-	TargetFolderPath         string
+	ID                          pgtype.UUID
+	TenantID                    pgtype.UUID
+	WorkspaceID                 pgtype.UUID
+	DocumentID                  pgtype.UUID
+	PublicToken                 string
+	Name                        pgtype.Text
+	PermissionType              string
+	ExpiresAt                   pgtype.Timestamptz
+	MaxAccessCount              pgtype.Int4
+	AccessCount                 int32
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	Status                      string
+	CreatedBy                   pgtype.UUID
+	CreatedAt                   pgtype.Timestamptz
+	UpdatedAt                   pgtype.Timestamptz
+	RequireEmail                bool
+	RequireNda                  bool
+	RequireEmailVerification    bool
+	AiCopilotEnabled            bool
+	DealRoomID                  pgtype.UUID
+	RequirePassword             bool
+	PasswordHash                pgtype.Text
+	CustomDomain                pgtype.Text
+	Tags                        []string
+	NotifyOnAccess              bool
+	SecurityVersion             int32
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	LinkType                    string
+	TargetFolderPath            string
+	ScreenshotProtectionEnabled bool
+	LastReminderSentAt          pgtype.Timestamptz
 }
 
 type LinkAccessRequest struct {

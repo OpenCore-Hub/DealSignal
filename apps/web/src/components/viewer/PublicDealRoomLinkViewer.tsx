@@ -121,7 +121,7 @@ export function PublicDealRoomLinkViewer({
                             </span>
                             <span className="text-xs text-muted-foreground">
                               {doc.pageCount > 0
-                                ? `${doc.pageCount} p`
+                                ? t("documents:viewer.pageCountShort", { count: doc.pageCount })
                                 : doc.sourceType.toUpperCase()}
                             </span>
                           </Button>

@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
 interface EmailTagInputProps {
+  id?: string;
   values: string[];
   onChange: (values: string[]) => void;
   placeholder?: string;
@@ -31,6 +32,7 @@ function isValid(value: string): boolean {
 const SEPARATORS = [",", ";", " ", "\n", "\t"];
 
 export function EmailTagInput({
+  id,
   values,
   onChange,
   placeholder,
@@ -124,6 +126,7 @@ export function EmailTagInput({
           </span>
         ))}
         <Input
+          id={id}
           ref={inputRef}
           value={raw}
           onChange={(e) => setRaw(e.target.value)}

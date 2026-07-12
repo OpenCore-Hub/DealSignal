@@ -15,7 +15,12 @@ interface CanvasViewerProps {
   evidence?: Evidence[];
   watermark?: WatermarkInfo | null;
   publicToken?: string;
-  publicLink?: { id: string; downloadEnabled: boolean; watermarkEnabled: boolean };
+  publicLink?: {
+    id: string;
+    downloadEnabled: boolean;
+    watermarkEnabled: boolean;
+    screenshotProtectionEnabled?: boolean;
+  };
   publicDocument?: Document;
   publicVisitorId?: string;
   publicAccessCredentials?: PublicLinkCredentials;
@@ -237,6 +242,7 @@ export function CanvasViewer({
         imageUrl={imageUrl}
         evidence={evidence}
         watermark={watermark}
+        screenshotProtectionEnabled={publicLink?.screenshotProtectionEnabled}
         onSelectPage={setPage}
         sidebar={sidebar}
       />

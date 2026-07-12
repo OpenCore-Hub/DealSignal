@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/gin-gonic/gin"
@@ -404,34 +403,29 @@ func TestAccessRateLimitDefaultBehavior(t *testing.T) {
 }
 
 // TestSessionConfigChangeInvalidationLogic verifies the pure-logic condition
-// for invalidating sessions when link config changes. This mirrors the
-// exact expression used in both Handler.Access and resolvePublicAccess.
+// for invalidating sessions when link security_version changes. This mirrors
+// the exact expression used in both Handler.Access and resolvePublicAccess.
 func TestSessionConfigChangeInvalidationLogic(t *testing.T) {
-	now := time.Now()
-	linkUpdatedBefore := now.Add(-1 * time.Hour).Unix()
-	linkUpdatedAfter := now.Add(1 * time.Hour).Unix()
-
-	checkConfigChanged := func(sessionLinkUpdatedAt int64, linkUpdatedAtValid bool, linkUpdatedAtUnix int64) bool {
-		return sessionLinkUpdatedAt > 0 && linkUpdatedAtValid && linkUpdatedAtUnix > sessionLinkUpdatedAt
+	checkConfigChanged := func(sessionSecurityVersion int32, linkSecurityVersion int32) bool {
+		return sessionSecurityVersion > 0 && linkSecurityVersion != sessionSecurityVersion
 	}
 
 	tests := []struct {
-		name               string
-		sessionLinkUpdated int64
-		linkUpdatedValid   bool
-		linkUpdatedUnix    int64
-		wantInvalidate     bool
+		name             string
+		sessionVersion   int32
+		linkVersion      int32
+		wantInvalidate   bool
 	}{
-		{"config not changed", linkUpdatedBefore, true, linkUpdatedBefore, false},
-		{"config changed (newer link)", linkUpdatedBefore, true, linkUpdatedAfter, true},
-		{"no link updated_at in DB", linkUpdatedBefore, false, 0, false},
-		{"old session (backward compat)", 0, true, linkUpdatedAfter, false},
-		{"both zero", 0, false, 0, false},
+		{"config not changed", 3, 3, false},
+		{"config changed (newer link)", 3, 4, true},
+		{"config changed (rollback unlikely)", 3, 2, true},
+		{"old session (backward compat)", 0, 4, false},
+		{"both zero", 0, 0, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := checkConfigChanged(tc.sessionLinkUpdated, tc.linkUpdatedValid, tc.linkUpdatedUnix)
+			got := checkConfigChanged(tc.sessionVersion, tc.linkVersion)
 			if got != tc.wantInvalidate {
 				t.Errorf("configChanged = %v, want %v", got, tc.wantInvalidate)
 			}
@@ -444,23 +438,23 @@ func TestSessionConfigChangeInvalidationLogic(t *testing.T) {
 func TestRespondAccessSuccessSessionFields(t *testing.T) {
 	// Verify that the session payload created in respondAccessSuccess:
 	// 1. Does NOT contain a password field (enforced by LinkSession struct)
-	// 2. DOES contain LinkUpdatedAt when available
+	// 2. DOES contain SecurityVersion when available
 	// This is a design invariant test.
 
 	// LinkSession struct has no Password field.
 	// If code compiles with undefined field access, this test documents it.
 	s := LinkSession{
-		PublicToken:   "tok",
-		Email:         "alice@example.com",
-		NDAAgreed:     true,
-		VisitorID:     "v1",
-		LinkUpdatedAt: time.Now().Unix(),
+		PublicToken:     "tok",
+		Email:           "alice@example.com",
+		NDAAgreed:       true,
+		VisitorID:       "v1",
+		SecurityVersion: 3,
 	}
 	if s.PublicToken != "tok" {
 		t.Error("basic session construction failed")
 	}
-	if s.LinkUpdatedAt <= 0 {
-		t.Error("LinkUpdatedAt should be set")
+	if s.SecurityVersion <= 0 {
+		t.Error("SecurityVersion should be set")
 	}
 	// The absence of a Password field is enforced at compile time.
 	// Any attempt to reference s.Password would not compile.

@@ -86,7 +86,7 @@ describe("ShareTab", () => {
 
   it("fires preset change", async () => {
     const { setPreset } = renderShareTab(baseDraft);
-    const trigger = screen.getByRole("combobox");
+    const trigger = screen.getByRole("combobox", { name: /link preset/i });
     fireEvent.pointerDown(trigger);
     fireEvent.click(trigger);
     const option = await waitFor(() => screen.getByRole("option", { name: /Confidential/i }));
@@ -121,8 +121,15 @@ describe("ShareTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ expiresAt: "" });
   });
 
-  it("updates custom domain", () => {
+  it("updates custom domain", async () => {
     const { updateDraft } = renderShareTab(baseDraft);
+    const trigger = screen.getByRole("combobox", { name: /custom domain/i });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const customOption = await waitFor(() => screen.getByRole("option", { name: /custom domain\.\.\./i }));
+    fireEvent.pointerDown(customOption);
+    fireEvent.click(customOption);
+
     fireEvent.change(screen.getByPlaceholderText(/yourdomain\.com/i), {
       target: { value: "invest.acme.capital" },
     });

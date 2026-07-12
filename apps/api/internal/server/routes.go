@@ -174,9 +174,9 @@ func (s *Server) registerRoutes() error {
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
-			notificationSvc := notification.NewService(queries, appMailer, s.cfg)
-			notificationSvc.SetRuleEngine(notification.NewRuleEngine(queries, func(ctx context.Context, wsID, userID, channel, subject, body string) error {
-				_, err := notificationSvc.Enqueue(ctx, wsID, userID, channel, subject, body)
+			notificationSvc := notification.NewService(s.dbPool, queries, appMailer, s.cfg)
+			notificationSvc.SetRuleEngine(notification.NewRuleEngine(queries, func(ctx context.Context, wsID, userID, channel, subject, body string, opts ...notification.EnqueueOption) error {
+				_, err := notificationSvc.Enqueue(ctx, wsID, userID, channel, subject, body, opts...)
 				return err
 			}))
 			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil)

@@ -65,16 +65,7 @@ const ADVANCED_KEYS: Array<keyof DraftLink> = [
   "enableQaConversations",
 ];
 
-// These switches are visible for discovery but disabled until their backend
-// counterparts (SHORT-008/009/MID-008) are implemented.
-const PLACEHOLDER_KEYS: Array<keyof DraftLink> = [
-  "enableFileRequests",
-  "enableIndexFileGeneration",
-  "enableQaConversations",
-  "enableScreenshotProtection",
-];
-
-const FUNCTIONAL_ADVANCED_KEYS: Array<keyof DraftLink> = ["aiCopilotEnabled"];
+const FUNCTIONAL_ADVANCED_KEYS: Array<keyof DraftLink> = [...ADVANCED_KEYS];
 
 const ADVANCED_LABELS: Record<string, string> = {
   aiCopilotEnabled: "accessRules.advanced.aiAgents",
@@ -225,7 +216,6 @@ export function AccessTab({ draft, updateDraft, errors, highlightedFields = [] }
           description={t("accessRules.additionalProtections.screenshotProtectionDescription")}
           checked={draft.enableScreenshotProtection}
           onCheckedChange={(checked) => updateDraft({ enableScreenshotProtection: checked })}
-          disabled={true}
           highlighted={isHighlighted("enableScreenshotProtection")}
         />
       </div>
@@ -249,7 +239,6 @@ export function AccessTab({ draft, updateDraft, errors, highlightedFields = [] }
             description={t(ADVANCED_DESCRIPTIONS[key])}
             checked={draft[key] as boolean}
             onCheckedChange={(checked) => updateDraft({ [key]: checked } as Partial<DraftLink>)}
-            disabled={PLACEHOLDER_KEYS.includes(key)}
             highlighted={isHighlighted(key)}
           />
         ))}

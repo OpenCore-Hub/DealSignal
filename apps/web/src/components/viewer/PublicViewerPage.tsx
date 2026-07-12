@@ -24,7 +24,7 @@ interface PublicDocumentSummary {
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; screenshotProtectionEnabled?: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -134,6 +134,7 @@ export function PublicViewerPage() {
         "blocked_domain",
         "invite_expired",
         "invite_revoked",
+        "invite_already_used",
       ]);
       const gateErrorCodes = new Set([
         "invalid_password",

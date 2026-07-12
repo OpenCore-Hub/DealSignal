@@ -26,7 +26,7 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 vi.mock("@/lib/clipboard", () => ({ copyToClipboard: vi.fn(() => Promise.resolve(true)) }));
 
 function renderInviteTab(props: Partial<Parameters<typeof InviteTab>[0]> = {}) {
-  const setEmailsRaw = vi.fn();
+  const setEmails = vi.fn();
   const onSend = vi.fn();
   const onResend = vi.fn();
   const onRevoke = vi.fn();
@@ -34,9 +34,8 @@ function renderInviteTab(props: Partial<Parameters<typeof InviteTab>[0]> = {}) {
   const base: Parameters<typeof InviteTab>[0] = {
     linkId: "link-1",
     publicUrl: "http://localhost/l/abc123",
-    emailsRaw: "",
-    setEmailsRaw,
-    invalid: [],
+    emails: [],
+    setEmails,
     sending: false,
     invitations: [],
     loading: false,
@@ -50,7 +49,7 @@ function renderInviteTab(props: Partial<Parameters<typeof InviteTab>[0]> = {}) {
       <InviteTab {...base} {...props} />
     </Wrapper>
   );
-  return { setEmailsRaw, onSend, onResend, onRevoke, rerender, base };
+  return { setEmails, onSend, onResend, onRevoke, rerender, base };
 }
 
 const mockInvitations: LinkInvitation[] = [
@@ -76,25 +75,33 @@ describe("InviteTab", () => {
     expect(screen.getByText(/save the link to start inviting viewers/i)).toBeInTheDocument();
   });
 
-  it("updates email input and triggers send", () => {
-    const { setEmailsRaw, onSend, rerender, base } = renderInviteTab();
-    fireEvent.change(screen.getByPlaceholderText(/alice@vc\.com/i), {
-      target: { value: "alice@vc.com, bob@vc.com" },
-    });
-    expect(setEmailsRaw).toHaveBeenCalledWith("alice@vc.com, bob@vc.com");
+  it("commits emails as tags and triggers send", () => {
+    const { setEmails, onSend, rerender, base } = renderInviteTab();
+    const input = screen.getByPlaceholderText(/alice@vc\.com/i);
+
+    fireEvent.change(input, { target: { value: "alice@vc.com, bob@vc.com" } });
+    fireEvent.keyDown(input, { key: "Enter", code: "Enter" });
+    expect(setEmails).toHaveBeenLastCalledWith(["alice@vc.com", "bob@vc.com"]);
 
     rerender(
       <Wrapper>
-        <InviteTab {...base} emailsRaw="alice@vc.com, bob@vc.com" />
+        <InviteTab {...base} emails={["alice@vc.com", "bob@vc.com"]} />
       </Wrapper>
     );
     fireEvent.click(screen.getByRole("button", { name: /send invitations/i }));
     expect(onSend).toHaveBeenCalled();
   });
 
-  it("disables send while sending", () => {
-    renderInviteTab({ sending: true, emailsRaw: "alice@vc.com" });
+  it("disables send while sending or when no emails are entered", () => {
+    const { rerender, base } = renderInviteTab({ sending: true, emails: ["alice@vc.com"] });
     expect(screen.getByRole("button", { name: /sending/i })).toBeDisabled();
+
+    rerender(
+      <Wrapper>
+        <InviteTab {...base} emails={[]} sending={false} />
+      </Wrapper>
+    );
+    expect(screen.getByRole("button", { name: /send invitations/i })).toBeDisabled();
   });
 
   it("renders invitations with status badges", () => {

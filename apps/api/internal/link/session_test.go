@@ -13,11 +13,11 @@ import (
 func TestLinkSessionRoundTrip(t *testing.T) {
 	secret := "test-secret"
 	s := LinkSession{
-		PublicToken:   "pub-token",
-		Email:         "alice@example.com",
-		NDAAgreed:     true,
-		VisitorID:     "visitor-1",
-		LinkUpdatedAt: time.Now().Unix(),
+		PublicToken:     "pub-token",
+		Email:           "alice@example.com",
+		NDAAgreed:       true,
+		VisitorID:       "visitor-1",
+		SecurityVersion: 3,
 	}
 	token, err := signLinkSession(s, secret)
 	if err != nil {
@@ -30,8 +30,8 @@ func TestLinkSessionRoundTrip(t *testing.T) {
 	if got.PublicToken != s.PublicToken || got.Email != s.Email || got.VisitorID != s.VisitorID || !got.NDAAgreed {
 		t.Fatalf("session mismatch: %+v", got)
 	}
-	if got.LinkUpdatedAt != s.LinkUpdatedAt {
-		t.Fatalf("linkUpdatedAt mismatch: got %d, want %d", got.LinkUpdatedAt, s.LinkUpdatedAt)
+	if got.SecurityVersion != s.SecurityVersion {
+		t.Fatalf("securityVersion mismatch: got %d, want %d", got.SecurityVersion, s.SecurityVersion)
 	}
 	if time.Now().Unix() > got.ExpiresAt {
 		t.Fatal("session already expired")
@@ -113,8 +113,8 @@ func TestLinkSessionEmptyFields(t *testing.T) {
 	if got.Email != "" {
 		t.Errorf("email should be empty, got %q", got.Email)
 	}
-	if got.LinkUpdatedAt != 0 {
-		t.Errorf("linkUpdatedAt should be 0 (backward compat), got %d", got.LinkUpdatedAt)
+	if got.SecurityVersion != 0 {
+		t.Errorf("securityVersion should be 0 (backward compat), got %d", got.SecurityVersion)
 	}
 }
 
@@ -166,40 +166,35 @@ func TestLinkSessionPasswordNotStored(t *testing.T) {
 	}
 }
 
-// TestLinkSessionLinkUpdatedAtInvalidation verifies that when a link's security
-// config changes (updated_at advances past the session's LinkUpdatedAt), the
-// session should be invalidated at the call site.
-func TestLinkSessionLinkUpdatedAtInvalidation(t *testing.T) {
-	now := time.Now()
-	linkUpdatedBefore := now.Add(-1 * time.Hour).Unix()
-	linkUpdatedAfter := now.Add(1 * time.Hour).Unix()
-
-	// Simulate link created at t=0, session issued at t=0, link updated at t=+30m.
-	// The session's LinkUpdatedAt must be <= link's UpdatedAt for validity.
+// TestLinkSessionSecurityVersionInvalidation verifies that when a link's security
+// config changes (security_version increments past the session's SecurityVersion),
+// the session should be invalidated at the call site.
+func TestLinkSessionSecurityVersionInvalidation(t *testing.T) {
+	// Simulate link at security_version=1, session issued at v=1, link bumped to v=2.
 	session := LinkSession{
-		PublicToken:   "tok",
-		Email:         "alice@example.com",
-		VisitorID:     "v1",
-		LinkUpdatedAt: linkUpdatedBefore, // session saw the link at this timestamp
+		PublicToken:     "tok",
+		Email:           "alice@example.com",
+		VisitorID:       "v1",
+		SecurityVersion: 1,
 	}
 
-	// Condition that should invalidate: link.UpdatedAt > session.LinkUpdatedAt
-	configChanged := session.LinkUpdatedAt > 0 && linkUpdatedAfter > session.LinkUpdatedAt
+	// Condition that should invalidate: link.SecurityVersion != session.SecurityVersion
+	configChanged := session.SecurityVersion > 0 && 2 != session.SecurityVersion
 	if !configChanged {
-		t.Error("session should be invalidated when link was updated after session was issued")
+		t.Error("session should be invalidated when link security_version was bumped")
 	}
 
-	// Condition that should pass: link.UpdatedAt == session.LinkUpdatedAt
-	configChanged = session.LinkUpdatedAt > 0 && linkUpdatedBefore > session.LinkUpdatedAt
+	// Condition that should pass: link.SecurityVersion == session.SecurityVersion
+	configChanged = session.SecurityVersion > 0 && 1 != session.SecurityVersion
 	if configChanged {
-		t.Error("session should NOT be invalidated when link UpdatedAt matches session")
+		t.Error("session should NOT be invalidated when link security_version matches session")
 	}
 
-	// Backward compatibility: LinkUpdatedAt=0 (old sessions) should never invalidate.
-	session.LinkUpdatedAt = 0
-	configChanged = session.LinkUpdatedAt > 0 && linkUpdatedAfter > session.LinkUpdatedAt
+	// Backward compatibility: SecurityVersion=0 (old sessions) should never invalidate.
+	session.SecurityVersion = 0
+	configChanged = session.SecurityVersion > 0 && 2 != session.SecurityVersion
 	if configChanged {
-		t.Error("old sessions (LinkUpdatedAt=0) should NOT be invalidated (backward compat)")
+		t.Error("old sessions (SecurityVersion=0) should NOT be invalidated (backward compat)")
 	}
 }
 
@@ -254,14 +249,13 @@ func TestVerifyLinkContactCodeUsedAtRemovable(t *testing.T) {
 // fields. This is the core mechanism of sliding (idle timeout) sessions.
 func TestRefreshLinkSessionSlidingExpiry(t *testing.T) {
 	secret := "test-secret"
-	now := time.Now()
 
 	original := LinkSession{
-		PublicToken:   "tok-abc",
-		Email:         "alice@example.com",
-		NDAAgreed:     true,
-		VisitorID:     "visitor-1",
-		LinkUpdatedAt: now.Unix(),
+		PublicToken:     "tok-abc",
+		Email:           "alice@example.com",
+		NDAAgreed:       true,
+		VisitorID:       "visitor-1",
+		SecurityVersion: 2,
 	}
 
 	// Sign original session.
@@ -313,8 +307,8 @@ func TestRefreshLinkSessionSlidingExpiry(t *testing.T) {
 	if s2.VisitorID != original.VisitorID {
 		t.Errorf("VisitorID changed: %q != %q", s2.VisitorID, original.VisitorID)
 	}
-	if s2.LinkUpdatedAt != original.LinkUpdatedAt {
-		t.Errorf("LinkUpdatedAt changed: %d != %d", s2.LinkUpdatedAt, original.LinkUpdatedAt)
+	if s2.SecurityVersion != original.SecurityVersion {
+		t.Errorf("SecurityVersion changed: %d != %d", s2.SecurityVersion, original.SecurityVersion)
 	}
 
 	// The refreshed token should not be identical to the original — if it is,

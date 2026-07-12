@@ -108,10 +108,12 @@ describe("AccessTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ allowDownloading: true });
   });
 
-  it("disables screenshot protection placeholder switch", () => {
-    renderAccessTab(baseDraft);
+  it("toggles screenshot protection switch", () => {
+    const { updateDraft } = renderAccessTab(baseDraft);
     const switchEl = screen.getByRole("switch", { name: /screenshot protection/i });
-    expect(switchEl).toBeDisabled();
+    expect(switchEl).not.toBeDisabled();
+    fireEvent.click(switchEl);
+    expect(updateDraft).toHaveBeenCalledWith({ enableScreenshotProtection: true });
   });
 
   it("shows advanced count badge when AI Copilot is enabled", () => {
@@ -119,14 +121,14 @@ describe("AccessTab", () => {
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("does not count placeholder switches in the advanced badge", () => {
+  it("counts all functional advanced switches in the advanced badge", () => {
     renderAccessTab({
       ...baseDraft,
       aiCopilotEnabled: true,
       enableFileRequests: true,
       enableQaConversations: true,
     });
-    expect(screen.getByText("1 enabled")).toBeInTheDocument();
+    expect(screen.getByText("3 enabled")).toBeInTheDocument();
   });
 
   it("renders all advanced options when section is expanded", () => {
@@ -139,12 +141,12 @@ describe("AccessTab", () => {
     expect(screen.getByText(/Q&A conversations/i)).toBeInTheDocument();
   });
 
-  it("disables placeholder advanced switches", () => {
+  it("enables functional advanced switches except screenshot protection", () => {
     renderAccessTab(baseDraft);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByRole("switch", { name: /file requests/i })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: /index file/i })).toBeDisabled();
-    expect(screen.getByRole("switch", { name: /Q&A conversations/i })).toBeDisabled();
+    expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
+    expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Q&A conversations/i })).not.toBeDisabled();
   });
 
   it("displays validation errors", () => {

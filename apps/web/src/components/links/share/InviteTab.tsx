@@ -1,7 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Envelope, DotsThree } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -21,13 +20,13 @@ import {
 import type { LinkInvitation } from "@/types";
 import { cn } from "@/lib/utils";
 import { copyToClipboard } from "@/lib/clipboard";
+import { EmailTagInput } from "./EmailTagInput";
 
 interface InviteTabProps {
   linkId?: string;
   publicUrl?: string;
-  emailsRaw: string;
-  setEmailsRaw: (value: string) => void;
-  invalid: string[];
+  emails: string[];
+  setEmails: (value: string[]) => void;
   sending: boolean;
   invitations: LinkInvitation[];
   loading: boolean;
@@ -48,9 +47,8 @@ function formatSentAt(value?: string): string {
 export function InviteTab({
   linkId,
   publicUrl,
-  emailsRaw,
-  setEmailsRaw,
-  invalid,
+  emails,
+  setEmails,
   sending,
   invitations,
   loading,
@@ -90,22 +88,17 @@ export function InviteTab({
       <div className="space-y-2">
         <Label htmlFor="invite-emails">{t("invite.addViewers")}</Label>
         <div className="flex items-start gap-2">
-          <div className="flex-1 space-y-2">
-            <Input
+          <div className="flex-1">
+            <EmailTagInput
               id="invite-emails"
-              value={emailsRaw}
-              onChange={(e) => setEmailsRaw(e.target.value)}
+              values={emails}
+              onChange={setEmails}
               placeholder={t("invite.addViewersPlaceholder")}
+              hint={t("invite.addViewersHint")}
               disabled={sending}
             />
-            <p className="text-xs text-muted-foreground">{t("invite.addViewersHint")}</p>
-            {invalid.length > 0 && (
-              <p className="text-xs text-destructive">
-                {t("invite.invalidEmails", { emails: invalid.join(", ") })}
-              </p>
-            )}
           </div>
-          <Button onClick={onSend} disabled={sending || !emailsRaw.trim()}>
+          <Button onClick={onSend} disabled={sending || emails.length === 0}>
             {sending ? t("invite.sending") : t("invite.sendInvitations")}
           </Button>
         </div>
