@@ -21,7 +21,6 @@ import { useAsyncData } from "@/hooks/useAsyncData";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
 import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
-import { MembersCard } from "@/components/deal-rooms/MembersCard";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
 import { DealRoomTabs } from "@/components/deal-rooms/DealRoomTabs";
@@ -440,11 +439,8 @@ export function DealRoomDetailPage() {
           )}
 
           {tab === "permissions" && (
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px] lg:items-start">
+            <div className="grid grid-cols-1 gap-4">
               <FolderPermissionsSection roomId={room.id} />
-              <div className="lg:sticky lg:top-4">
-                <MembersCard roomId={room.id} members={room.members ?? []} onChanged={refetch} />
-              </div>
             </div>
           )}
 
