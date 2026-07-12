@@ -31,6 +31,8 @@
     "expiresAtFuture": "Expiration must be in the future",
     "oldSlugHint": "Old slug /r/{{slug}} is still available. New shares should use /l/{{token}}.",
     "customDomain": "Custom domain",
+    "customDomainDefault": "Default domain",
+    "customDomainCustom": "Custom domain...",
     "customDomainPlaceholder": "links.yourdomain.com",
     "customDomainHint": "Public link will be served from this hostname when configured",
     "tags": "Tags",
@@ -163,6 +165,38 @@
     "invalid": "invalid email or domain",
     "remove": "Remove {{value}}"
   },
+  "management": {
+    "title": "Manage",
+    "done": "Done",
+    "loading": "Loading management data...",
+    "loadFailed": "Failed to load management data",
+    "questionsTitle": "Visitor questions",
+    "questionsDescription": "Reply to questions submitted by viewers.",
+    "noQuestions": "No questions yet.",
+    "anonymous": "Anonymous",
+    "answerLabel": "Answer:",
+    "answerPlaceholder": "Type your answer...",
+    "sendAnswer": "Send answer",
+    "saving": "Saving...",
+    "answerSuccess": "Answer saved",
+    "answerFailed": "Failed to save answer",
+    "questionStatus": {
+      "pending": "Pending",
+      "answered": "Answered"
+    },
+    "fileRequestsTitle": "File requests",
+    "fileRequestsDescription": "Approve or reject file requests from viewers.",
+    "noFileRequests": "No file requests yet.",
+    "status": "Status",
+    "fileRequestUpdateSuccess": "File request updated",
+    "fileRequestUpdateFailed": "Failed to update file request",
+    "fileRequestStatus": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "fulfilled": "Fulfilled"
+    }
+  },
   "analytics": {
     "title": "Analytics",
     "views": "Views",
@@ -172,6 +206,15 @@
     "recentActivity": "Recent activity",
     "emptyTitle": "No visits yet",
     "emptyDescription": "Share the link and viewer activity will appear here.",
-    "done": "Close"
+    "done": "Close",
+    "loadFailed": "Failed to load analytics",
+    "recentVisitors": "Recent visitors",
+    "noRecentVisitors": "No recent visitors yet.",
+    "visitorViews": "{{count}} views",
+    "keyPages": "Key pages",
+    "noKeyPages": "No key pages yet.",
+    "pageLabel": "Page {{pageNumber}}",
+    "qaRecords": "Q&A records",
+    "noQARecords": "No questions yet."
   }
 }

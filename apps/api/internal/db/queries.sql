@@ -286,9 +286,10 @@ INSERT INTO links (
     download_enabled, watermark_enabled, status, created_by,
     require_email, require_nda, require_email_verification,
     ai_copilot_enabled, require_password, password_hash,
-    qa_enabled, file_requests_enabled, index_file_enabled,
+    qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
+    link_type, target_folder_path,
     custom_domain, tags, notify_on_access
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
 RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
@@ -355,9 +356,12 @@ UPDATE links SET
     qa_enabled = $18,
     file_requests_enabled = $19,
     index_file_enabled = $20,
-    security_version = $21,
+    screenshot_protection_enabled = $21,
+    link_type = $22,
+    target_folder_path = $23,
+    security_version = $24,
     updated_at = now()
-WHERE id = $22 AND workspace_id = $23
+WHERE id = $25 AND workspace_id = $26
 RETURNING *;
 
 -- name: DeleteLink :execrows
@@ -504,6 +508,56 @@ FROM (
 LEFT JOIN visitor_emails ve ON ve.visitor_id = e.visitor_id
 ORDER BY e.created_at DESC
 LIMIT $2;
+
+-- name: GetLinkAnalytics :one
+WITH link_access AS (
+    SELECT visitor_id, created_at
+    FROM access_logs
+    WHERE link_id = $1 AND event_type = 'link_opened'
+),
+daily_views AS (
+    SELECT DATE(created_at)::text AS day, COUNT(*)::bigint AS views
+    FROM link_access
+    WHERE created_at >= now() - interval '30 days'
+    GROUP BY DATE(created_at)
+    ORDER BY day
+)
+SELECT
+    COALESCE((SELECT COUNT(*) FROM link_access), 0)::bigint AS total_views,
+    COALESCE((SELECT COUNT(DISTINCT visitor_id) FROM link_access WHERE visitor_id IS NOT NULL AND visitor_id <> ''), 0)::bigint AS unique_visitors,
+    COALESCE((SELECT COUNT(*) FROM access_logs al WHERE al.link_id = $1 AND al.event_type = 'download_attempted'), 0)::bigint AS download_attempts,
+    (SELECT MIN(created_at)::timestamptz FROM link_access) AS first_access_at,
+    (SELECT MAX(created_at)::timestamptz FROM link_access) AS last_access_at,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('day', day, 'views', views)) FROM daily_views), '[]'::jsonb)::jsonb AS views_over_time;
+
+-- name: ListRecentVisitorsByLink :many
+SELECT
+    visitor_id,
+    COALESCE(MAX(visitor_email), '')::text AS visitor_email,
+    MIN(created_at)::timestamptz AS first_access_at,
+    MAX(created_at)::timestamptz AS last_access_at,
+    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS total_views
+FROM access_logs
+WHERE link_id = $1 AND visitor_id IS NOT NULL AND visitor_id <> ''
+GROUP BY visitor_id
+ORDER BY last_access_at DESC
+LIMIT 10;
+
+-- name: GetAverageDurationByLink :one
+SELECT COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds
+FROM page_views
+WHERE link_id = $1;
+
+-- name: ListTopPagesByLink :many
+SELECT
+    page_number,
+    COUNT(*)::bigint AS views,
+    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds
+FROM page_views
+WHERE link_id = $1
+GROUP BY page_number
+ORDER BY views DESC, avg_duration_seconds DESC
+LIMIT 10;
 
 -- name: GetVisitorSummariesByDocument :many
 WITH visitor_emails AS (
@@ -967,27 +1021,35 @@ DO UPDATE SET
 RETURNING workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected, updated_at;
 
 -- name: CreateNotification :one
-INSERT INTO notifications (workspace_id, user_id, channel, subject, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO notifications (workspace_id, user_id, channel, subject, body, recipient_email, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING *;
 
--- name: ListPendingNotifications :many
+-- name: AcquirePendingNotifications :many
 SELECT *
 FROM notifications
-WHERE status = 'pending' AND attempts < 3
+WHERE status IN ('pending', 'failed')
+  AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+  AND attempts < $2
 ORDER BY created_at ASC
-LIMIT 100;
+LIMIT $1
+FOR UPDATE SKIP LOCKED;
 
 -- name: MarkNotificationSent :exec
 UPDATE notifications
-SET status = 'sent', attempts = attempts + 1, updated_at = now()
+SET status = 'sent',
+    sent_at = now(),
+    provider_message_id = $2,
+    attempts = attempts + 1,
+    updated_at = now()
 WHERE id = $1;
 
 -- name: MarkNotificationFailed :exec
 UPDATE notifications
 SET attempts = attempts + 1,
     last_error = $2,
-    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
+    status = CASE WHEN attempts + 1 >= $3 THEN 'dead' ELSE 'pending' END,
+    next_attempt_at = CASE WHEN attempts + 1 >= $3 THEN NULL ELSE now() + ($4 * interval '1 second') END,
     updated_at = now()
 WHERE id = $1;
 
@@ -1177,6 +1239,18 @@ WHERE c.workspace_id = $1
   AND c.search_vector @@ plainto_tsquery('english', sqlc.arg(query))
 ORDER BY rank DESC
 LIMIT $2;
+
+-- name: ListChunksByDocumentIDs :many
+SELECT
+    c.id,
+    c.text,
+    c.chunk_index,
+    p.page_number,
+    p.document_id
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
+ORDER BY p.document_id, p.page_number, c.chunk_index;
 
 -- name: SearchChunksByTrigramInDocuments :many
 SELECT
@@ -1796,6 +1870,7 @@ WHERE workspace_id = $1
   AND status = 'pending'
   AND subject ILIKE $3
   AND created_at > now() - ($4 || ' minutes')::interval
+  AND metadata ->> 'link_id' = $5::text
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -1805,8 +1880,13 @@ WHERE status = 'active'
   AND expires_at IS NOT NULL
   AND expires_at > now()
   AND expires_at <= now() + ($1 || ' hours')::interval
-  AND notify_on_access = true
+  AND (last_reminder_sent_at IS NULL OR last_reminder_sent_at < now() - interval '23 hours')
 ORDER BY expires_at ASC;
+
+-- name: UpdateLinkLastReminderSent :exec
+UPDATE links
+SET last_reminder_sent_at = now(), updated_at = now()
+WHERE id = $1;
 
 -- name: GetVisitorFirstAccess :one
 SELECT MIN(created_at)::timestamptz AS first_accessed_at

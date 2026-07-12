@@ -72,25 +72,25 @@ describe("ActionList", () => {
   it("supports postponing and ignoring via the dropdown", async () => {
     const onChange = vi.fn();
     await renderList([makeAction()], onChange);
-    fireEvent.click(screen.getByRole("button", { name: /actions\.moreOptions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /More options/i }));
     await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: /actions\.postpone/i })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: /Postpone/i })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("menuitem", { name: /actions\.postpone/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Postpone/i }));
     expect(onChange).toHaveBeenCalledWith("act_1", "snoozed");
 
-    fireEvent.click(screen.getByRole("button", { name: /actions\.moreOptions/i }));
+    fireEvent.click(screen.getByRole("button", { name: /More options/i }));
     await waitFor(() => {
-      expect(screen.getByRole("menuitem", { name: /actions\.ignore/i })).toBeInTheDocument();
+      expect(screen.getByRole("menuitem", { name: /Ignore/i })).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole("menuitem", { name: /actions\.ignore/i }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Ignore/i }));
     expect(onChange).toHaveBeenCalledWith("act_1", "ignored");
   });
 
   it("shows hidden actions and allows reactivation", async () => {
     const onChange = vi.fn();
     await renderList([makeAction("snoozed")], onChange);
-    fireEvent.click(screen.getByRole("button", { name: /actions\.hiddenWithCount/i }));
+    fireEvent.click(screen.getByRole("button", { name: /Hidden \(1\)/i }));
     await waitFor(() => {
       expect(screen.getByRole("button", { name: /Reactivate/i })).toBeInTheDocument();
     });

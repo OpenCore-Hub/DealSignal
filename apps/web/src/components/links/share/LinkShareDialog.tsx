@@ -41,10 +41,6 @@ interface LinkShareDialogProps {
   onChanged?: () => void;
 }
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
 function now(): number {
   return Date.now();
 }
@@ -104,18 +100,21 @@ function LinkShareDialogContent({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
-  const [inviteEmailsRaw, setInviteEmailsRaw] = useState("");
-  const [inviteInvalid, setInviteInvalid] = useState<string[]>([]);
+  const [inviteEmails, setInviteEmails] = useState<string[]>([]);
   const [inviteSending, setInviteSending] = useState(false);
 
   // Unsaved-changes tracking.
   const initialDraftRef = useRef<DraftLink>(draft);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const hasUnsavedChanges = useCallback(() => {
-    return JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current);
-  }, [draft]);
+    return (
+      JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current) ||
+      inviteEmails.length > 0
+    );
+  }, [draft, inviteEmails]);
   const markClean = useCallback(() => {
     initialDraftRef.current = { ...draft };
+    setInviteEmails([]);
   }, [draft]);
 
   const handleConditionalClose = useCallback(() => {
@@ -210,27 +209,13 @@ function LinkShareDialogContent({
     }
   };
 
-  const parseEmails = (raw: string): { valid: string[]; invalid: string[] } => {
-    const parts = raw.split(/[,;\n\t]+/).map((s) => s.trim()).filter(Boolean);
-    const valid: string[] = [];
-    const invalid: string[] = [];
-    for (const part of parts) {
-      if (isValidEmail(part)) valid.push(part.toLowerCase());
-      else invalid.push(part);
-    }
-    return { valid, invalid };
-  };
-
   const handleInviteSend = async () => {
-    if (!link) return;
-    const { valid, invalid } = parseEmails(inviteEmailsRaw);
-    setInviteInvalid(invalid);
-    if (valid.length === 0) return;
+    if (!link || inviteEmails.length === 0) return;
 
     setInviteSending(true);
     try {
-      await api.inviteLinkViewers(link.id, valid);
-      setInviteEmailsRaw("");
+      await api.inviteLinkViewers(link.id, inviteEmails);
+      setInviteEmails([]);
       await refetch();
       onChanged?.();
     } finally {
@@ -281,7 +266,7 @@ function LinkShareDialogContent({
       ? { label: t("invite.sendInvitations"), onClick: handleInviteSend }
       : { label: t("analytics.done"), onClick: onClose };
 
-  const inviteHasInput = inviteEmailsRaw.trim().length > 0;
+  const inviteHasInput = inviteEmails.length > 0;
 
   return (
     <>
@@ -359,9 +344,8 @@ function LinkShareDialogContent({
                 <TabsContent value="invite">
                   <InviteTab
                     linkId={link?.id}
-                    emailsRaw={inviteEmailsRaw}
-                    setEmailsRaw={setInviteEmailsRaw}
-                    invalid={inviteInvalid}
+                    emails={inviteEmails}
+                    setEmails={setInviteEmails}
                     sending={inviteSending}
                     invitations={invitations}
                     loading={loadingData}

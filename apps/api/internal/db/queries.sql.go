@@ -12,6 +12,59 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
+const acquirePendingNotifications = `-- name: AcquirePendingNotifications :many
+SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at, recipient_email, metadata, next_attempt_at, sent_at, provider_message_id
+FROM notifications
+WHERE status IN ('pending', 'failed')
+  AND (next_attempt_at IS NULL OR next_attempt_at <= now())
+  AND attempts < $2
+ORDER BY created_at ASC
+LIMIT $1
+FOR UPDATE SKIP LOCKED
+`
+
+type AcquirePendingNotificationsParams struct {
+	Limit    int32
+	Attempts int32
+}
+
+func (q *Queries) AcquirePendingNotifications(ctx context.Context, arg AcquirePendingNotificationsParams) ([]Notification, error) {
+	rows, err := q.db.Query(ctx, acquirePendingNotifications, arg.Limit, arg.Attempts)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Notification
+	for rows.Next() {
+		var i Notification
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.UserID,
+			&i.Channel,
+			&i.Subject,
+			&i.Body,
+			&i.Status,
+			&i.Attempts,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RecipientEmail,
+			&i.Metadata,
+			&i.NextAttemptAt,
+			&i.SentAt,
+			&i.ProviderMessageID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const addDealRoomDocument = `-- name: AddDealRoomDocument :one
 INSERT INTO deal_room_documents (tenant_id, workspace_id, room_id, document_id, folder_path, sort_order)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -1203,38 +1256,42 @@ INSERT INTO links (
     download_enabled, watermark_enabled, status, created_by,
     require_email, require_nda, require_email_verification,
     ai_copilot_enabled, require_password, password_hash,
-    qa_enabled, file_requests_enabled, index_file_enabled,
+    qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
+    link_type, target_folder_path,
     custom_domain, tags, notify_on_access
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 `
 
 type CreateLinkParams struct {
-	TenantID                 pgtype.UUID
-	WorkspaceID              pgtype.UUID
-	DocumentID               pgtype.UUID
-	DealRoomID               pgtype.UUID
-	PublicToken              string
-	Name                     pgtype.Text
-	PermissionType           string
-	ExpiresAt                pgtype.Timestamptz
-	MaxAccessCount           pgtype.Int4
-	DownloadEnabled          bool
-	WatermarkEnabled         bool
-	Status                   string
-	CreatedBy                pgtype.UUID
-	RequireEmail             bool
-	RequireNda               bool
-	RequireEmailVerification bool
-	AiCopilotEnabled         bool
-	RequirePassword          bool
-	PasswordHash             pgtype.Text
-	QaEnabled                bool
-	FileRequestsEnabled      bool
-	IndexFileEnabled         bool
-	CustomDomain             pgtype.Text
-	Tags                     []string
-	NotifyOnAccess           bool
+	TenantID                    pgtype.UUID
+	WorkspaceID                 pgtype.UUID
+	DocumentID                  pgtype.UUID
+	DealRoomID                  pgtype.UUID
+	PublicToken                 string
+	Name                        pgtype.Text
+	PermissionType              string
+	ExpiresAt                   pgtype.Timestamptz
+	MaxAccessCount              pgtype.Int4
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	Status                      string
+	CreatedBy                   pgtype.UUID
+	RequireEmail                bool
+	RequireNda                  bool
+	RequireEmailVerification    bool
+	AiCopilotEnabled            bool
+	RequirePassword             bool
+	PasswordHash                pgtype.Text
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	ScreenshotProtectionEnabled bool
+	LinkType                    string
+	TargetFolderPath            string
+	CustomDomain                pgtype.Text
+	Tags                        []string
+	NotifyOnAccess              bool
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -1261,6 +1318,9 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.QaEnabled,
 		arg.FileRequestsEnabled,
 		arg.IndexFileEnabled,
+		arg.ScreenshotProtectionEnabled,
+		arg.LinkType,
+		arg.TargetFolderPath,
 		arg.CustomDomain,
 		arg.Tags,
 		arg.NotifyOnAccess,
@@ -1299,6 +1359,8 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.IndexFileEnabled,
 		&i.LinkType,
 		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
 	)
 	return i, err
 }
@@ -1538,17 +1600,19 @@ func (q *Queries) CreateNDAAgreement(ctx context.Context, arg CreateNDAAgreement
 }
 
 const createNotification = `-- name: CreateNotification :one
-INSERT INTO notifications (workspace_id, user_id, channel, subject, body)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO notifications (workspace_id, user_id, channel, subject, body, recipient_email, metadata)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 RETURNING id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at, recipient_email, metadata, next_attempt_at, sent_at, provider_message_id
 `
 
 type CreateNotificationParams struct {
-	WorkspaceID pgtype.UUID
-	UserID      pgtype.UUID
-	Channel     string
-	Subject     string
-	Body        string
+	WorkspaceID    pgtype.UUID
+	UserID         pgtype.UUID
+	Channel        string
+	Subject        string
+	Body           string
+	RecipientEmail pgtype.Text
+	Metadata       []byte
 }
 
 func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotificationParams) (Notification, error) {
@@ -1558,6 +1622,8 @@ func (q *Queries) CreateNotification(ctx context.Context, arg CreateNotification
 		arg.Channel,
 		arg.Subject,
 		arg.Body,
+		arg.RecipientEmail,
+		arg.Metadata,
 	)
 	var i Notification
 	err := row.Scan(
@@ -2403,6 +2469,7 @@ WHERE workspace_id = $1
   AND status = 'pending'
   AND subject ILIKE $3
   AND created_at > now() - ($4 || ' minutes')::interval
+  AND metadata ->> 'link_id' = $5::text
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -2412,6 +2479,7 @@ type FindMergeableNotificationParams struct {
 	Channel     string
 	Subject     string
 	Column4     pgtype.Text
+	Column5     string
 }
 
 func (q *Queries) FindMergeableNotification(ctx context.Context, arg FindMergeableNotificationParams) (Notification, error) {
@@ -2420,6 +2488,7 @@ func (q *Queries) FindMergeableNotification(ctx context.Context, arg FindMergeab
 		arg.Channel,
 		arg.Subject,
 		arg.Column4,
+		arg.Column5,
 	)
 	var i Notification
 	err := row.Scan(
@@ -2624,6 +2693,19 @@ func (q *Queries) GetAssistantSessionByLinkAndVisitor(ctx context.Context, arg G
 		&i.VisitorID,
 	)
 	return i, err
+}
+
+const getAverageDurationByLink = `-- name: GetAverageDurationByLink :one
+SELECT COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds
+FROM page_views
+WHERE link_id = $1
+`
+
+func (q *Queries) GetAverageDurationByLink(ctx context.Context, linkID pgtype.UUID) (float64, error) {
+	row := q.db.QueryRow(ctx, getAverageDurationByLink, linkID)
+	var avg_duration_seconds float64
+	err := row.Scan(&avg_duration_seconds)
+	return avg_duration_seconds, err
 }
 
 const getContactAggregateByEmail = `-- name: GetContactAggregateByEmail :one
@@ -3658,6 +3740,51 @@ func (q *Queries) GetLinkAccessRequestByLinkAndEmail(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getLinkAnalytics = `-- name: GetLinkAnalytics :one
+WITH link_access AS (
+    SELECT visitor_id, created_at
+    FROM access_logs
+    WHERE link_id = $1 AND event_type = 'link_opened'
+),
+daily_views AS (
+    SELECT DATE(created_at)::text AS day, COUNT(*)::bigint AS views
+    FROM link_access
+    WHERE created_at >= now() - interval '30 days'
+    GROUP BY DATE(created_at)
+    ORDER BY day
+)
+SELECT
+    COALESCE((SELECT COUNT(*) FROM link_access), 0)::bigint AS total_views,
+    COALESCE((SELECT COUNT(DISTINCT visitor_id) FROM link_access WHERE visitor_id IS NOT NULL AND visitor_id <> ''), 0)::bigint AS unique_visitors,
+    COALESCE((SELECT COUNT(*) FROM access_logs al WHERE al.link_id = $1 AND al.event_type = 'download_attempted'), 0)::bigint AS download_attempts,
+    (SELECT MIN(created_at)::timestamptz FROM link_access) AS first_access_at,
+    (SELECT MAX(created_at)::timestamptz FROM link_access) AS last_access_at,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('day', day, 'views', views)) FROM daily_views), '[]'::jsonb)::jsonb AS views_over_time
+`
+
+type GetLinkAnalyticsRow struct {
+	TotalViews       int64
+	UniqueVisitors   int64
+	DownloadAttempts int64
+	FirstAccessAt    pgtype.Timestamptz
+	LastAccessAt     pgtype.Timestamptz
+	ViewsOverTime    []byte
+}
+
+func (q *Queries) GetLinkAnalytics(ctx context.Context, linkID pgtype.UUID) (GetLinkAnalyticsRow, error) {
+	row := q.db.QueryRow(ctx, getLinkAnalytics, linkID)
+	var i GetLinkAnalyticsRow
+	err := row.Scan(
+		&i.TotalViews,
+		&i.UniqueVisitors,
+		&i.DownloadAttempts,
+		&i.FirstAccessAt,
+		&i.LastAccessAt,
+		&i.ViewsOverTime,
+	)
+	return i, err
+}
+
 const getLinkBounceCount = `-- name: GetLinkBounceCount :one
 SELECT COUNT(*) AS bounce_count
 FROM access_logs a
@@ -3716,7 +3843,7 @@ func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtyp
 }
 
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -3763,12 +3890,14 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.IndexFileEnabled,
 		&i.LinkType,
 		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
 	)
 	return i, err
 }
 
 const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -3810,6 +3939,8 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.IndexFileEnabled,
 		&i.LinkType,
 		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
 	)
 	return i, err
 }
@@ -5456,6 +5587,53 @@ func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAs
 	return items, nil
 }
 
+const listChunksByDocumentIDs = `-- name: ListChunksByDocumentIDs :many
+SELECT
+    c.id,
+    c.text,
+    c.chunk_index,
+    p.page_number,
+    p.document_id
+FROM chunks c
+JOIN pages p ON p.id = c.page_id
+WHERE p.document_id = ANY($1::uuid[])
+ORDER BY p.document_id, p.page_number, c.chunk_index
+`
+
+type ListChunksByDocumentIDsRow struct {
+	ID         pgtype.UUID
+	Text       string
+	ChunkIndex pgtype.Int4
+	PageNumber int32
+	DocumentID pgtype.UUID
+}
+
+func (q *Queries) ListChunksByDocumentIDs(ctx context.Context, documentIds []pgtype.UUID) ([]ListChunksByDocumentIDsRow, error) {
+	rows, err := q.db.Query(ctx, listChunksByDocumentIDs, documentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChunksByDocumentIDsRow
+	for rows.Next() {
+		var i ListChunksByDocumentIDsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Text,
+			&i.ChunkIndex,
+			&i.PageNumber,
+			&i.DocumentID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listContactActivitiesByEmail = `-- name: ListContactActivitiesByEmail :many
 WITH visitor_ids AS (
     SELECT DISTINCT al.visitor_id
@@ -6339,7 +6517,7 @@ func (q *Queries) ListLinkInvitationsByLink(ctx context.Context, linkID pgtype.U
 }
 
 const listLinksByDealRoom = `-- name: ListLinksByDealRoom :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 FROM links
 WHERE workspace_id = $1 AND deal_room_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -6392,6 +6570,8 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 			&i.IndexFileEnabled,
 			&i.LinkType,
 			&i.TargetFolderPath,
+			&i.ScreenshotProtectionEnabled,
+			&i.LastReminderSentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6404,7 +6584,7 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 }
 
 const listLinksByDocument = `-- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -6457,6 +6637,8 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.IndexFileEnabled,
 			&i.LinkType,
 			&i.TargetFolderPath,
+			&i.ScreenshotProtectionEnabled,
+			&i.LastReminderSentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6469,7 +6651,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 }
 
 const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -6517,6 +6699,8 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.IndexFileEnabled,
 			&i.LinkType,
 			&i.TargetFolderPath,
+			&i.ScreenshotProtectionEnabled,
+			&i.LastReminderSentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6529,12 +6713,12 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 }
 
 const listLinksExpiringWithin = `-- name: ListLinksExpiringWithin :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path FROM links
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at FROM links
 WHERE status = 'active'
   AND expires_at IS NOT NULL
   AND expires_at > now()
   AND expires_at <= now() + ($1 || ' hours')::interval
-  AND notify_on_access = true
+  AND (last_reminder_sent_at IS NULL OR last_reminder_sent_at < now() - interval '23 hours')
 ORDER BY expires_at ASC
 `
 
@@ -6580,6 +6764,8 @@ func (q *Queries) ListLinksExpiringWithin(ctx context.Context, dollar_1 pgtype.T
 			&i.IndexFileEnabled,
 			&i.LinkType,
 			&i.TargetFolderPath,
+			&i.ScreenshotProtectionEnabled,
+			&i.LastReminderSentAt,
 		); err != nil {
 			return nil, err
 		}
@@ -6800,51 +6986,6 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 	return items, nil
 }
 
-const listPendingNotifications = `-- name: ListPendingNotifications :many
-SELECT id, workspace_id, user_id, channel, subject, body, status, attempts, last_error, created_at, updated_at, recipient_email, metadata, next_attempt_at, sent_at, provider_message_id
-FROM notifications
-WHERE status = 'pending' AND attempts < 3
-ORDER BY created_at ASC
-LIMIT 100
-`
-
-func (q *Queries) ListPendingNotifications(ctx context.Context) ([]Notification, error) {
-	rows, err := q.db.Query(ctx, listPendingNotifications)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []Notification
-	for rows.Next() {
-		var i Notification
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.UserID,
-			&i.Channel,
-			&i.Subject,
-			&i.Body,
-			&i.Status,
-			&i.Attempts,
-			&i.LastError,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.RecipientEmail,
-			&i.Metadata,
-			&i.NextAttemptAt,
-			&i.SentAt,
-			&i.ProviderMessageID,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPopularDocumentsByWorkspace = `-- name: ListPopularDocumentsByWorkspace :many
 SELECT
     d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
@@ -6977,7 +7118,7 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 }
 
 const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -7031,6 +7172,56 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.IndexFileEnabled,
 			&i.LinkType,
 			&i.TargetFolderPath,
+			&i.ScreenshotProtectionEnabled,
+			&i.LastReminderSentAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listRecentVisitorsByLink = `-- name: ListRecentVisitorsByLink :many
+SELECT
+    visitor_id,
+    COALESCE(MAX(visitor_email), '')::text AS visitor_email,
+    MIN(created_at)::timestamptz AS first_access_at,
+    MAX(created_at)::timestamptz AS last_access_at,
+    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS total_views
+FROM access_logs
+WHERE link_id = $1 AND visitor_id IS NOT NULL AND visitor_id <> ''
+GROUP BY visitor_id
+ORDER BY last_access_at DESC
+LIMIT 10
+`
+
+type ListRecentVisitorsByLinkRow struct {
+	VisitorID     pgtype.Text
+	VisitorEmail  string
+	FirstAccessAt pgtype.Timestamptz
+	LastAccessAt  pgtype.Timestamptz
+	TotalViews    int64
+}
+
+func (q *Queries) ListRecentVisitorsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListRecentVisitorsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listRecentVisitorsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentVisitorsByLinkRow
+	for rows.Next() {
+		var i ListRecentVisitorsByLinkRow
+		if err := rows.Scan(
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.FirstAccessAt,
+			&i.LastAccessAt,
+			&i.TotalViews,
 		); err != nil {
 			return nil, err
 		}
@@ -7520,6 +7711,44 @@ func (q *Queries) ListTenantDomainsExpiringBefore(ctx context.Context, sslExpire
 	return items, nil
 }
 
+const listTopPagesByLink = `-- name: ListTopPagesByLink :many
+SELECT
+    page_number,
+    COUNT(*)::bigint AS views,
+    COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds
+FROM page_views
+WHERE link_id = $1
+GROUP BY page_number
+ORDER BY views DESC, avg_duration_seconds DESC
+LIMIT 10
+`
+
+type ListTopPagesByLinkRow struct {
+	PageNumber         int32
+	Views              int64
+	AvgDurationSeconds float64
+}
+
+func (q *Queries) ListTopPagesByLink(ctx context.Context, linkID pgtype.UUID) ([]ListTopPagesByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listTopPagesByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListTopPagesByLinkRow
+	for rows.Next() {
+		var i ListTopPagesByLinkRow
+		if err := rows.Scan(&i.PageNumber, &i.Views, &i.AvgDurationSeconds); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listUnsharedDocumentsByWorkspace = `-- name: ListUnsharedDocumentsByWorkspace :many
 SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
 FROM documents d
@@ -7952,7 +8181,8 @@ const markNotificationFailed = `-- name: MarkNotificationFailed :exec
 UPDATE notifications
 SET attempts = attempts + 1,
     last_error = $2,
-    status = CASE WHEN attempts + 1 >= 3 THEN 'failed' ELSE 'pending' END,
+    status = CASE WHEN attempts + 1 >= $3 THEN 'dead' ELSE 'pending' END,
+    next_attempt_at = CASE WHEN attempts + 1 >= $3 THEN NULL ELSE now() + ($4 * interval '1 second') END,
     updated_at = now()
 WHERE id = $1
 `
@@ -7960,21 +8190,37 @@ WHERE id = $1
 type MarkNotificationFailedParams struct {
 	ID        pgtype.UUID
 	LastError pgtype.Text
+	Attempts  int32
+	Column4   interface{}
 }
 
 func (q *Queries) MarkNotificationFailed(ctx context.Context, arg MarkNotificationFailedParams) error {
-	_, err := q.db.Exec(ctx, markNotificationFailed, arg.ID, arg.LastError)
+	_, err := q.db.Exec(ctx, markNotificationFailed,
+		arg.ID,
+		arg.LastError,
+		arg.Attempts,
+		arg.Column4,
+	)
 	return err
 }
 
 const markNotificationSent = `-- name: MarkNotificationSent :exec
 UPDATE notifications
-SET status = 'sent', attempts = attempts + 1, updated_at = now()
+SET status = 'sent',
+    sent_at = now(),
+    provider_message_id = $2,
+    attempts = attempts + 1,
+    updated_at = now()
 WHERE id = $1
 `
 
-func (q *Queries) MarkNotificationSent(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, markNotificationSent, id)
+type MarkNotificationSentParams struct {
+	ID                pgtype.UUID
+	ProviderMessageID pgtype.Text
+}
+
+func (q *Queries) MarkNotificationSent(ctx context.Context, arg MarkNotificationSentParams) error {
+	_, err := q.db.Exec(ctx, markNotificationSent, arg.ID, arg.ProviderMessageID)
 	return err
 }
 
@@ -8946,36 +9192,42 @@ UPDATE links SET
     qa_enabled = $18,
     file_requests_enabled = $19,
     index_file_enabled = $20,
-    security_version = $21,
+    screenshot_protection_enabled = $21,
+    link_type = $22,
+    target_folder_path = $23,
+    security_version = $24,
     updated_at = now()
-WHERE id = $22 AND workspace_id = $23
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+WHERE id = $25 AND workspace_id = $26
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 `
 
 type UpdateLinkFullParams struct {
-	Name                     pgtype.Text
-	DocumentID               pgtype.UUID
-	DealRoomID               pgtype.UUID
-	PermissionType           string
-	ExpiresAt                pgtype.Timestamptz
-	MaxAccessCount           pgtype.Int4
-	DownloadEnabled          bool
-	WatermarkEnabled         bool
-	RequireEmail             bool
-	RequireEmailVerification bool
-	RequireNda               bool
-	AiCopilotEnabled         bool
-	RequirePassword          bool
-	PasswordHash             pgtype.Text
-	CustomDomain             pgtype.Text
-	Tags                     []string
-	NotifyOnAccess           bool
-	QaEnabled                bool
-	FileRequestsEnabled      bool
-	IndexFileEnabled         bool
-	SecurityVersion          int32
-	ID                       pgtype.UUID
-	WorkspaceID              pgtype.UUID
+	Name                        pgtype.Text
+	DocumentID                  pgtype.UUID
+	DealRoomID                  pgtype.UUID
+	PermissionType              string
+	ExpiresAt                   pgtype.Timestamptz
+	MaxAccessCount              pgtype.Int4
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequireNda                  bool
+	AiCopilotEnabled            bool
+	RequirePassword             bool
+	PasswordHash                pgtype.Text
+	CustomDomain                pgtype.Text
+	Tags                        []string
+	NotifyOnAccess              bool
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	ScreenshotProtectionEnabled bool
+	LinkType                    string
+	TargetFolderPath            string
+	SecurityVersion             int32
+	ID                          pgtype.UUID
+	WorkspaceID                 pgtype.UUID
 }
 
 func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) (Link, error) {
@@ -9000,6 +9252,9 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		arg.QaEnabled,
 		arg.FileRequestsEnabled,
 		arg.IndexFileEnabled,
+		arg.ScreenshotProtectionEnabled,
+		arg.LinkType,
+		arg.TargetFolderPath,
 		arg.SecurityVersion,
 		arg.ID,
 		arg.WorkspaceID,
@@ -9038,6 +9293,8 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		&i.IndexFileEnabled,
 		&i.LinkType,
 		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
 	)
 	return i, err
 }
@@ -9139,11 +9396,22 @@ func (q *Queries) UpdateLinkInvitationTokenHash(ctx context.Context, arg UpdateL
 	return err
 }
 
+const updateLinkLastReminderSent = `-- name: UpdateLinkLastReminderSent :exec
+UPDATE links
+SET last_reminder_sent_at = now(), updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) UpdateLinkLastReminderSent(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, updateLinkLastReminderSent, id)
+	return err
+}
+
 const updateLinkStatus = `-- name: UpdateLinkStatus :one
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at
 `
 
 type UpdateLinkStatusParams struct {
@@ -9188,6 +9456,8 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.IndexFileEnabled,
 		&i.LinkType,
 		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
 	)
 	return i, err
 }

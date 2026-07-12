@@ -52,10 +52,6 @@ interface DealRoomShareDialogProps {
 }
 
 
-function isValidEmail(value: string): boolean {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
-}
-
 function now(): number {
   return Date.now();
 }
@@ -127,20 +123,23 @@ function DealRoomShareDialogContent({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
-  const [inviteEmailsRaw, setInviteEmailsRaw] = useState("");
-  const [inviteInvalid, setInviteInvalid] = useState<string[]>([]);
+  const [inviteEmails, setInviteEmails] = useState<string[]>([]);
   const [inviteSending, setInviteSending] = useState(false);
 
   // Unsaved-changes tracking.
   const initialDraftRef = useRef<DraftLink>(draft);
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
   const hasUnsavedChanges = useCallback(() => {
-    return JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current);
-  }, [draft]);
+    return (
+      JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current) ||
+      inviteEmails.length > 0
+    );
+  }, [draft, inviteEmails]);
 
   // Resync baseline after save.
   const markClean = useCallback(() => {
     initialDraftRef.current = { ...draft };
+    setInviteEmails([]);
   }, [draft]);
 
   const selectedLink = data?.selectedLink ?? null;
@@ -269,22 +268,13 @@ function DealRoomShareDialogContent({
   };
 
   const handleInviteSend = async () => {
-    if (!selectedLink) return;
-    const parts = inviteEmailsRaw.split(/[,;\n\t]+/).map((s) => s.trim()).filter(Boolean);
-    const valid: string[] = [];
-    const invalid: string[] = [];
-    for (const part of parts) {
-      if (isValidEmail(part)) valid.push(part.toLowerCase());
-      else invalid.push(part);
-    }
-    setInviteInvalid(invalid);
-    if (valid.length === 0) return;
+    if (!selectedLink || inviteEmails.length === 0) return;
 
     setInviteSending(true);
     try {
-      await api.inviteLinkViewers(selectedLink.id, valid);
-      toast.success(lt("invite.sent", { count: valid.length }));
-      setInviteEmailsRaw("");
+      await api.inviteLinkViewers(selectedLink.id, inviteEmails);
+      toast.success(lt("invite.sent", { count: inviteEmails.length }));
+      setInviteEmails([]);
       await refetch();
       onChanged?.();
     } finally {
@@ -337,7 +327,7 @@ function DealRoomShareDialogContent({
       ? { label: t("common:close"), onClick: onClose }
       : { label: t("invite.sendInvitations"), onClick: handleInviteSend };
 
-  const inviteHasInput = inviteEmailsRaw.trim().length > 0;
+  const inviteHasInput = inviteEmails.length > 0;
 
   return (
     <>
@@ -432,9 +422,8 @@ function DealRoomShareDialogContent({
                   <InviteTab
                     linkId={selectedLink?.id}
                     publicUrl={publicUrl}
-                    emailsRaw={inviteEmailsRaw}
-                    setEmailsRaw={setInviteEmailsRaw}
-                    invalid={inviteInvalid}
+                    emails={inviteEmails}
+                    setEmails={setInviteEmails}
                     sending={inviteSending}
                     invitations={invitations}
                     loading={loadingData}

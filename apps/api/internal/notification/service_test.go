@@ -19,6 +19,9 @@ type mockNotificationQuerier struct {
 	user                db.User
 	userErr             error
 	createdNotification db.Notification
+	pending             []db.Notification
+	failedNotifications []db.Notification
+	sentNotifications   []pgtype.UUID
 }
 
 type mockMailer struct {
@@ -40,24 +43,29 @@ func (m *mockMailer) SendLinkAccessCodeEmail(_ context.Context, to, code, linkNa
 
 func (m *mockNotificationQuerier) CreateNotification(_ context.Context, arg db.CreateNotificationParams) (db.Notification, error) {
 	m.createdNotification = db.Notification{
-		WorkspaceID: arg.WorkspaceID,
-		UserID:      arg.UserID,
-		Channel:     arg.Channel,
-		Subject:     arg.Subject,
-		Body:        arg.Body,
+		ID:             pgtype.UUID{Valid: true},
+		WorkspaceID:    arg.WorkspaceID,
+		UserID:         arg.UserID,
+		Channel:        arg.Channel,
+		Subject:        arg.Subject,
+		Body:           arg.Body,
+		RecipientEmail: arg.RecipientEmail,
+		Status:         "pending",
 	}
 	return m.createdNotification, nil
 }
 
-func (m *mockNotificationQuerier) ListPendingNotifications(_ context.Context) ([]db.Notification, error) {
-	return nil, nil
+func (m *mockNotificationQuerier) AcquirePendingNotifications(_ context.Context, _ db.AcquirePendingNotificationsParams) ([]db.Notification, error) {
+	return m.pending, nil
 }
 
-func (m *mockNotificationQuerier) MarkNotificationFailed(_ context.Context, _ db.MarkNotificationFailedParams) error {
+func (m *mockNotificationQuerier) MarkNotificationFailed(_ context.Context, arg db.MarkNotificationFailedParams) error {
+	m.failedNotifications = append(m.failedNotifications, db.Notification{ID: arg.ID})
 	return nil
 }
 
-func (m *mockNotificationQuerier) MarkNotificationSent(_ context.Context, _ pgtype.UUID) error {
+func (m *mockNotificationQuerier) MarkNotificationSent(_ context.Context, arg db.MarkNotificationSentParams) error {
+	m.sentNotifications = append(m.sentNotifications, arg.ID)
 	return nil
 }
 
@@ -69,11 +77,43 @@ func (m *mockNotificationQuerier) GetUserByID(_ context.Context, _ pgtype.UUID) 
 	return m.user, m.userErr
 }
 
-func TestEnqueueEmailRespectsWorkspaceEmailEnabled(t *testing.T) {
+func TestEnqueueEmailCreatesPendingNotification(t *testing.T) {
+	q := &mockNotificationQuerier{
+		settings: db.NotificationSetting{EmailEnabled: true},
+	}
+	mm := &mockMailer{}
+	svc := NewService(nil, q, mm, &config.Config{})
+
+	n, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", "", "email", "Test", "Body")
+	require.NoError(t, err)
+	assert.Equal(t, "pending", n.Status)
+	assert.Equal(t, "email", q.createdNotification.Channel)
+	assert.Len(t, mm.calls, 0)
+}
+
+func TestEnqueueEmailWithRecipientCreatesPendingNotification(t *testing.T) {
+	q := &mockNotificationQuerier{
+		settings: db.NotificationSetting{EmailEnabled: true},
+	}
+	mm := &mockMailer{}
+	svc := NewService(nil, q, mm, &config.Config{})
+
+	_, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", "", "email", "Invite", "Body", WithRecipient("invited@example.com"))
+	require.NoError(t, err)
+	assert.True(t, q.createdNotification.RecipientEmail.Valid)
+	assert.Equal(t, "invited@example.com", q.createdNotification.RecipientEmail.String)
+	assert.Len(t, mm.calls, 0)
+}
+
+func TestSendPendingEmailRespectsWorkspaceEmailEnabled(t *testing.T) {
 	q := &mockNotificationQuerier{
 		settings: db.NotificationSetting{EmailEnabled: false},
+		pending: []db.Notification{
+			{ID: pgtype.UUID{Valid: true}, WorkspaceID: pgtype.UUID{Valid: true}, Channel: "email", Subject: "Test", Body: "Body"},
+		},
 	}
-	svc := NewService(q, &mockMailer{}, &config.Config{
+	mm := &mockMailer{}
+	svc := NewService(nil, q, mm, &config.Config{
 		SMTPHost: "smtp.example.com",
 		SMTPUser: "smtp@example.com",
 		SMTPPass: "secret",
@@ -81,19 +121,27 @@ func TestEnqueueEmailRespectsWorkspaceEmailEnabled(t *testing.T) {
 		SMTPPort: "587",
 	})
 
-	_, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", "", "email", "Test", "Body")
-	require.Error(t, err)
-	assert.Equal(t, "email notifications disabled for workspace", err.Error())
+	require.NoError(t, svc.SendPending(context.Background()))
+	assert.Len(t, mm.calls, 0)
 }
 
-func TestEnqueueEmailUsesUserEmailWhenAvailable(t *testing.T) {
-	userID := "11111111-1111-1111-1111-111111111112"
+func TestSendPendingEmailUsesUserEmailWhenAvailable(t *testing.T) {
 	q := &mockNotificationQuerier{
 		settings: db.NotificationSetting{EmailEnabled: true},
 		user:     db.User{Email: "creator@example.com"},
+		pending: []db.Notification{
+			{
+				ID:          pgtype.UUID{Valid: true},
+				WorkspaceID: pgtype.UUID{Valid: true},
+				UserID:      pgtype.UUID{Valid: true},
+				Channel:     "email",
+				Subject:     "Test",
+				Body:        "Body",
+			},
+		},
 	}
 	mm := &mockMailer{}
-	svc := NewService(q, mm, &config.Config{
+	svc := NewService(nil, q, mm, &config.Config{
 		SMTPHost: "smtp.example.com",
 		SMTPUser: "fallback@example.com",
 		SMTPPass: "secret",
@@ -101,58 +149,105 @@ func TestEnqueueEmailUsesUserEmailWhenAvailable(t *testing.T) {
 		SMTPPort: "587",
 	})
 
-	n, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", userID, "email", "Test", "Body")
-	require.NoError(t, err)
+	require.NoError(t, svc.SendPending(context.Background()))
 	require.Len(t, mm.calls, 1)
 	assert.Equal(t, "creator@example.com", mm.calls[0].Recipient)
 	assert.Equal(t, "raw", mm.calls[0].TemplateName)
-	assert.Equal(t, "sent", n.Status)
 }
 
-func TestEnqueueEmailFallsBackToSMTPUserWhenUserIDEmpty(t *testing.T) {
+func TestSendPendingEmailMarksFailedWhenNoRecipient(t *testing.T) {
 	q := &mockNotificationQuerier{
 		settings: db.NotificationSetting{EmailEnabled: true},
+		pending: []db.Notification{
+			{ID: pgtype.UUID{Valid: true}, WorkspaceID: pgtype.UUID{Valid: true}, Channel: "email", Subject: "Test", Body: "Body"},
+		},
 	}
 	mm := &mockMailer{}
-	svc := NewService(q, mm, &config.Config{
+	svc := NewService(nil, q, mm, &config.Config{
 		SMTPHost: "smtp.example.com",
-		SMTPUser: "fallback@example.com",
+		SMTPUser: "auth@example.com",
 		SMTPPass: "secret",
 		SMTPFrom: "noreply@example.com",
 		SMTPPort: "587",
 	})
 
-	_, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", "", "email", "Test", "Body")
-	require.NoError(t, err)
-	require.Len(t, mm.calls, 1)
-	assert.Equal(t, "fallback@example.com", mm.calls[0].Recipient)
+	require.NoError(t, svc.SendPending(context.Background()))
+	assert.Len(t, mm.calls, 0)
+	assert.Len(t, q.failedNotifications, 1)
 }
 
-func TestEnqueueEmailReturnsErrorWhenUserLookupFails(t *testing.T) {
-	userID := "11111111-1111-1111-1111-111111111112"
+func TestSendPendingEmailMarksFailedWhenUserLookupFails(t *testing.T) {
 	q := &mockNotificationQuerier{
 		settings: db.NotificationSetting{EmailEnabled: true},
 		userErr:  pgx.ErrNoRows,
+		pending: []db.Notification{
+			{
+				ID:          pgtype.UUID{Valid: true},
+				WorkspaceID: pgtype.UUID{Valid: true},
+				UserID:      pgtype.UUID{Valid: true},
+				Channel:     "email",
+				Subject:     "Test",
+				Body:        "Body",
+			},
+		},
 	}
-	svc := NewService(q, &mockMailer{}, &config.Config{
+	svc := NewService(nil, q, &mockMailer{}, &config.Config{
 		SMTPHost: "smtp.example.com",
-		SMTPUser: "fallback@example.com",
+		SMTPUser: "auth@example.com",
 		SMTPPass: "secret",
 		SMTPFrom: "noreply@example.com",
 		SMTPPort: "587",
 	})
 
-	_, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", userID, "email", "Test", "Body")
-	require.Error(t, err)
-	assert.ErrorIs(t, err, pgx.ErrNoRows)
+	require.NoError(t, svc.SendPending(context.Background()))
+	assert.Len(t, q.failedNotifications, 1)
 }
 
-func TestEnqueueEmailDefaultsToEnabledWhenSettingsMissing(t *testing.T) {
+func TestSendPendingEmailDefaultsToEnabledWhenSettingsMissing(t *testing.T) {
 	q := &mockNotificationQuerier{
 		settingsErr: pgx.ErrNoRows,
+		user:        db.User{Email: "creator@example.com"},
+		pending: []db.Notification{
+			{
+				ID:          pgtype.UUID{Valid: true},
+				WorkspaceID: pgtype.UUID{Valid: true},
+				UserID:      pgtype.UUID{Valid: true},
+				Channel:     "email",
+				Subject:     "Test",
+				Body:        "Body",
+			},
+		},
 	}
 	mm := &mockMailer{}
-	svc := NewService(q, mm, &config.Config{
+	svc := NewService(nil, q, mm, &config.Config{
+		SMTPHost: "smtp.example.com",
+		SMTPUser: "auth@example.com",
+		SMTPPass: "secret",
+		SMTPFrom: "noreply@example.com",
+		SMTPPort: "587",
+	})
+
+	require.NoError(t, svc.SendPending(context.Background()))
+	require.Len(t, mm.calls, 1)
+	assert.Equal(t, "creator@example.com", mm.calls[0].Recipient)
+}
+
+func TestSendPendingEmailUsesRecipientEmailOverride(t *testing.T) {
+	q := &mockNotificationQuerier{
+		settings: db.NotificationSetting{EmailEnabled: true},
+		pending: []db.Notification{
+			{
+				ID:             pgtype.UUID{Valid: true},
+				WorkspaceID:    pgtype.UUID{Valid: true},
+				Channel:        "email",
+				Subject:        "Invite",
+				Body:           "Body",
+				RecipientEmail: pgtype.Text{String: "invited@example.com", Valid: true},
+			},
+		},
+	}
+	mm := &mockMailer{}
+	svc := NewService(nil, q, mm, &config.Config{
 		SMTPHost: "smtp.example.com",
 		SMTPUser: "fallback@example.com",
 		SMTPPass: "secret",
@@ -160,16 +255,15 @@ func TestEnqueueEmailDefaultsToEnabledWhenSettingsMissing(t *testing.T) {
 		SMTPPort: "587",
 	})
 
-	_, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", "", "email", "Test", "Body")
-	require.NoError(t, err)
+	require.NoError(t, svc.SendPending(context.Background()))
 	require.Len(t, mm.calls, 1)
-	assert.Equal(t, "fallback@example.com", mm.calls[0].Recipient)
+	assert.Equal(t, "invited@example.com", mm.calls[0].Recipient)
 }
 
-func TestEnqueueSlackCreatesNotification(t *testing.T) {
+func TestEnqueueSlackCreatesPendingNotification(t *testing.T) {
 	q := &mockNotificationQuerier{}
 	mm := &mockMailer{}
-	svc := NewService(q, mm, &config.Config{})
+	svc := NewService(nil, q, mm, &config.Config{})
 
 	_, err := svc.Enqueue(context.Background(), "11111111-1111-1111-1111-111111111111", "", "slack", "Test", "Body")
 	require.NoError(t, err)
@@ -179,22 +273,33 @@ func TestEnqueueSlackCreatesNotification(t *testing.T) {
 	assert.Equal(t, "Body", q.createdNotification.Body)
 }
 
-func TestSendPendingSkipsEmailChannels(t *testing.T) {
+func TestSendPendingProcessesEmailChannels(t *testing.T) {
 	q := &mockNotificationQuerier{
 		settings: db.NotificationSetting{EmailEnabled: true},
+		user:     db.User{Email: "creator@example.com"},
+		pending: []db.Notification{
+			{
+				ID:          pgtype.UUID{Valid: true},
+				WorkspaceID: pgtype.UUID{Valid: true},
+				UserID:      pgtype.UUID{Valid: true},
+				Channel:     "email",
+				Subject:     "Test",
+				Body:        "Body",
+			},
+		},
 	}
 	mm := &mockMailer{}
-	svc := NewService(q, mm, &config.Config{
+	svc := NewService(nil, q, mm, &config.Config{
 		SMTPHost: "smtp.example.com",
-		SMTPUser: "fallback@example.com",
+		SMTPUser: "auth@example.com",
 		SMTPPass: "secret",
 		SMTPFrom: "noreply@example.com",
 		SMTPPort: "587",
 	})
 
-	// There are no pending Slack rows, so SendPending should be a no-op.
 	require.NoError(t, svc.SendPending(context.Background()))
-	assert.Len(t, mm.calls, 0)
+	assert.Len(t, mm.calls, 1)
+	assert.Equal(t, "creator@example.com", mm.calls[0].Recipient)
 }
 
 func TestTruncate(t *testing.T) {

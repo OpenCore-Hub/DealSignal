@@ -20,6 +20,9 @@ export interface CreateLinkPayload {
   qa_enabled?: boolean;
   file_requests_enabled?: boolean;
   index_file_enabled?: boolean;
+  screenshot_protection_enabled?: boolean;
+  link_type?: "share" | "file_request";
+  target_folder_path?: string;
   custom_domain?: string;
   tags?: string[];
   notify_on_access?: boolean;
@@ -71,6 +74,7 @@ export function toCreateLinkPayload(
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,
     ai_copilot_enabled: config.aiCopilotEnabled,
+    screenshot_protection_enabled: config.screenshotProtectionEnabled,
   };
 
   // Prefer exact expiresAt from edit-mode reconstruction to avoid round-trip

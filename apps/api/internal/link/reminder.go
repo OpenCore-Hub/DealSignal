@@ -43,6 +43,8 @@ func (r *ExpiryReminder) Start(ctx context.Context) {
 func (r *ExpiryReminder) Stop() {}
 
 func (r *ExpiryReminder) runOnce(ctx context.Context) {
+	// 24-hour window first; the query excludes links reminded within the last
+	// 23 hours, so a link won't get duplicate reminders across ticks.
 	window := pgtype.Text{String: "24", Valid: true}
 	links, err := r.queries.ListLinksExpiringWithin(ctx, window)
 	if err != nil {
@@ -55,6 +57,7 @@ func (r *ExpiryReminder) runOnce(ctx context.Context) {
 		r.sendReminder(ctx, link)
 	}
 
+	// 7-day window; skip any link already handled in the 24h window.
 	window7d := pgtype.Text{String: "168", Valid: true}
 	links7d, err := r.queries.ListLinksExpiringWithin(ctx, window7d)
 	if err != nil {
@@ -86,5 +89,9 @@ func (r *ExpiryReminder) sendReminder(ctx context.Context, link db.Link) {
 
 	if _, err := r.notifier.Enqueue(ctx, wsID, userID, "email", subject, body); err != nil {
 		logger.ErrorCtx(ctx, "expiry reminder: enqueue failed", err)
+		return
+	}
+	if err := r.queries.UpdateLinkLastReminderSent(ctx, link.ID); err != nil {
+		logger.ErrorCtx(ctx, "expiry reminder: update last_reminder_sent_at failed", err)
 	}
 }

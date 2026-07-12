@@ -18,18 +18,19 @@ import (
 // itself (HMAC-signed) proves the visitor passed all credential gates.
 // Storing credentials in the session would expose them if the token leaks.
 //
-// LinkUpdatedAt detects when a link's security configuration has changed
-// since the session was issued—if the link was updated (e.g. new password
-// or NDA added), the old session is invalidated and the visitor must
-// re-verify.
+// SecurityVersion detects when a link's security configuration has changed
+// since the session was issued. The database increments security_version via
+// trigger whenever access rules, password, or NDA settings change. If the
+// stored version no longer matches the session, the visitor must re-verify.
 type LinkSession struct {
-	PublicToken   string `json:"public_token"`
-	Email         string `json:"email"`
-	EmailVerified bool   `json:"email_verified"`
-	NDAAgreed     bool   `json:"nda_agreed"`
-	VisitorID     string `json:"visitor_id"`
-	LinkUpdatedAt int64  `json:"link_updated_at"` // unix seconds, 0 means backward-compat (no check)
-	ExpiresAt     int64  `json:"expires_at"`        // unix seconds
+	PublicToken     string `json:"public_token"`
+	Email           string `json:"email"`
+	EmailVerified   bool   `json:"email_verified"`
+	PasswordVerified bool  `json:"password_verified"`
+	NDAAgreed       bool   `json:"nda_agreed"`
+	VisitorID       string `json:"visitor_id"`
+	SecurityVersion int32  `json:"security_version"` // 0 means backward-compat (no check)
+	ExpiresAt       int64  `json:"expires_at"`       // unix seconds
 }
 
 const linkSessionLifetime = 15 * time.Minute
@@ -47,7 +48,7 @@ func signLinkSession(s LinkSession, secret string) (string, error) {
 // required.
 //
 // Only the ExpiresAt field is updated; all identity fields (Email,
-// VisitorID, NDAAgreed, LinkUpdatedAt) are preserved from the original
+// VisitorID, NDAAgreed, SecurityVersion) are preserved from the original
 // session.
 func refreshLinkSession(s LinkSession, secret string) (string, error) {
 	s.ExpiresAt = time.Now().Add(linkSessionLifetime).Unix()

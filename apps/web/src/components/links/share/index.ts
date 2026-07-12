@@ -2,6 +2,7 @@ export { ShareTab } from "./ShareTab";
 export { InviteTab } from "./InviteTab";
 export { AccessTab } from "./AccessTab";
 export { AnalyticsTab } from "./AnalyticsTab";
+export { ManagementTab } from "./ManagementTab";
 export { LinkShareDialog } from "./LinkShareDialog";
 export { AccessSummaryCard } from "./AccessSummaryCard";
 export { EmailTagInput } from "./EmailTagInput";

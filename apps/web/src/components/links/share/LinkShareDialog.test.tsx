@@ -40,6 +40,10 @@ vi.mock("@/lib/api", () => ({
     setLinkAccessRules: vi.fn(),
     updateLink: vi.fn(),
     getAccessLogs: vi.fn(),
+    listLinkQuestions: vi.fn(),
+    listLinkFileRequests: vi.fn(),
+    answerQuestion: vi.fn(),
+    updateFileRequestStatus: vi.fn(),
     inviteLinkViewers: vi.fn(),
     revokeLinkInvitation: vi.fn(),
   },
@@ -78,6 +82,8 @@ describe("LinkShareDialog", () => {
     vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
     vi.mocked(api.getLinkInvitations).mockResolvedValue({ data: [] });
     vi.mocked(api.getAccessLogs).mockResolvedValue({ data: [] });
+    vi.mocked(api.listLinkQuestions).mockResolvedValue({ data: [] });
+    vi.mocked(api.listLinkFileRequests).mockResolvedValue({ data: [] });
   });
 
   afterEach(() => {

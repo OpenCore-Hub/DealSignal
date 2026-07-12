@@ -82,6 +82,8 @@ export interface Link {
   fileRequestsEnabled?: boolean;
   /** Index file feature toggle (available from v2.7+ backend). */
   indexFileEnabled?: boolean;
+  /** Screenshot protection feature toggle (available from v2.7+ backend). */
+  screenshotProtectionEnabled?: boolean;
   requireEmailVerification?: boolean;
   maxAccessCount?: number;
   /** Allowed emails for whitelist (available from v2.5+ backend). */
@@ -102,6 +104,10 @@ export interface Link {
   customDomain?: string;
   /** Tags attached to the link for organization. */
   tags?: string[];
+  /** Link type: "share" or "file_request" (available from v2.8+ backend). */
+  linkType?: "share" | "file_request";
+  /** Target folder path for file-request links (available from v2.8+ backend). */
+  targetFolderPath?: string;
   /** Whether the link creator should be emailed when the link is accessed. */
   notifyOnAccess?: boolean;
 }
@@ -188,6 +194,7 @@ export interface PermissionFields {
   qaEnabled: boolean;
   fileRequestsEnabled: boolean;
   indexFileEnabled: boolean;
+  screenshotProtectionEnabled?: boolean;
   expiryDays: number | "custom";
   maxViews: number | "unlimited";
 }
@@ -259,6 +266,34 @@ export interface AccessLog {
   device?: string;
   location?: string;
   timestamp: string;
+}
+
+export interface LinkAnalytics {
+  total_views: number;
+  unique_visitors: number;
+  download_attempts: number;
+  first_access_at?: string;
+  last_access_at?: string;
+  views_over_time: { day: string; views: number }[];
+  average_duration_seconds: number;
+  recent_visitors: {
+    visitor_id: string;
+    visitor_email?: string;
+    first_access_at: string;
+    last_access_at: string;
+    total_views: number;
+  }[];
+  key_pages: {
+    page_number: number;
+    views: number;
+    average_duration_seconds: number;
+  }[];
+  qa_records: {
+    visitor_email?: string;
+    question: string;
+    answer?: string;
+    created_at: string;
+  }[];
 }
 
 export interface VisitorSummary {

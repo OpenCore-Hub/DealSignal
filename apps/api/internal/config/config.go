@@ -111,7 +111,7 @@ func Load() (*Config, error) {
 		Port:              getEnv("PORT", "8080"),
 		AppEnv:            getEnv("APP_ENV", "development"),
 		LogLevel:          getEnv("LOG_LEVEL", "info"),
-		Version:           getEnv("VERSION", "v2.1.2"),
+		Version:           getEnv("VERSION", "v2.5.0"),
 		DatabaseURL:       os.Getenv("DATABASE_URL"),
 		RedisURL:          os.Getenv("REDIS_URL"),
 		JWTSecret:         os.Getenv("JWT_SECRET"),

@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -26,7 +27,9 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/microcosm-cc/bluemonday"
 	"golang.org/x/crypto/bcrypt"
+	"golang.org/x/sync/singleflight"
 )
 
 // Beginner starts a database transaction.
@@ -42,21 +45,22 @@ type emailCode struct {
 
 // Notifier is the subset of notification.Service needed by link.Service.
 type Notifier interface {
-	Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) (notification.Notification, error)
+	Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string, opts ...notification.EnqueueOption) (notification.Notification, error)
 	Evaluate(ctx context.Context, ev notification.Event) error
 }
 
 // Service handles smart links.
 type Service struct {
-	queries         *db.Queries
-	pool            Beginner
-	redisClient     *redis.Client
-	mailer          mailer.Mailer
-	notifier        Notifier
-	viewerBaseURL   string
-	cfg             *config.Config
-	llm             LLMClient
-	emailSem        chan struct{} // limits concurrent email sends (bounded goroutines)
+	queries       *db.Queries
+	pool          Beginner
+	redisClient   *redis.Client
+	mailer        mailer.Mailer
+	notifier      Notifier
+	viewerBaseURL string
+	cfg           *config.Config
+	llm           LLMClient
+	emailSem      chan struct{} // limits concurrent email sends (bounded goroutines)
+	indexGenGroup singleflight.Group
 }
 
 // LLMClient is the subset of llm.Client used by the link service.
@@ -82,6 +86,7 @@ func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, 
 
 var (
 	ErrDocumentNotReady     = errors.New("document is not ready")
+	ErrInvalidInput         = errors.New("invalid input")
 	ErrInvalidPermission    = errors.New("invalid permission configuration")
 	ErrLinkNotFound         = errors.New("link not found")
 	ErrLinkExpired          = errors.New("link expired")
@@ -144,68 +149,75 @@ func (s *Service) EvaluateNotificationRules(ctx context.Context, link db.Link, e
 		return nil
 	}
 	return s.notifier.Evaluate(ctx, notification.Event{
-		WorkspaceID:  uuid.UUID(link.WorkspaceID.Bytes).String(),
-		LinkID:       uuid.UUID(link.ID.Bytes).String(),
-		EventType:    eventType,
-		VisitorID:    visitorID,
-		VisitorEmail: visitorEmail,
-		Metadata:     metadata,
+		WorkspaceID:     uuid.UUID(link.WorkspaceID.Bytes).String(),
+		LinkID:          uuid.UUID(link.ID.Bytes).String(),
+		EventType:       eventType,
+		VisitorID:       visitorID,
+		VisitorEmail:    visitorEmail,
+		RecipientUserID: uuid.UUID(link.CreatedBy.Bytes).String(),
+		Metadata:        metadata,
 	})
 }
 
 // CreateLinkRequest is the input for creating a link.
 type CreateLinkRequest struct {
-	DocumentID               string
-	DocumentIDs              []string // Multi-document bundle (takes precedence when non-empty)
-	DealRoomID               string
-	Name                     string
-	PermissionType           string
-	RequireEmail             bool
-	RequireEmailVerification bool
-	RequireNDA               bool
-	RequirePassword          bool
-	Password                 string // plaintext; stored as bcrypt hash
-	AllowedEmails            []string
-	AllowedDomains           []string
-	ExpiresAt                *time.Time
-	MaxAccessCount           *int32
-	DownloadEnabled          bool
-	WatermarkEnabled         bool
-	AICopilotEnabled         bool
-	QaEnabled                bool
-	FileRequestsEnabled      bool
-	IndexFileEnabled         bool
-	ContactIDs               []string
-	CustomDomain             string
-	Tags                     []string
-	NotifyOnAccess           bool
+	DocumentID                  string
+	DocumentIDs                 []string // Multi-document bundle (takes precedence when non-empty)
+	DealRoomID                  string
+	Name                        string
+	PermissionType              string
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequireNDA                  bool
+	RequirePassword             bool
+	Password                    string // plaintext; stored as bcrypt hash
+	AllowedEmails               []string
+	AllowedDomains              []string
+	ExpiresAt                   *time.Time
+	MaxAccessCount              *int32
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	AICopilotEnabled            bool
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	ScreenshotProtectionEnabled bool
+	LinkType                    string // "share" or "file_request"
+	TargetFolderPath            string // required when LinkType == "file_request"
+	ContactIDs                  []string
+	CustomDomain                string
+	Tags                        []string
+	NotifyOnAccess              bool
 }
 
 // UpdateLinkRequest is the input for updating an existing link (full replacement).
 type UpdateLinkRequest struct {
-	DocumentIDs              []string
-	DealRoomID               string
-	Name                     string
-	PermissionType           string
-	RequireEmail             bool
-	RequireEmailVerification bool
-	RequireNDA               bool
-	RequirePassword          bool
-	Password                 string // plaintext; if empty and require_password unchanged, keep existing hash
-	AllowedEmails            []string
-	AllowedDomains           []string
-	ExpiresAt                *time.Time
-	MaxAccessCount           *int32
-	DownloadEnabled          bool
-	WatermarkEnabled         bool
-	AICopilotEnabled         bool
-	QaEnabled                bool
-	FileRequestsEnabled      bool
-	IndexFileEnabled         bool
-	ContactIDs               []string
-	CustomDomain             string
-	Tags                     []string
-	NotifyOnAccess           bool
+	DocumentIDs                 []string
+	DealRoomID                  string
+	Name                        string
+	PermissionType              string
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequireNDA                  bool
+	RequirePassword             bool
+	Password                    string // plaintext; if empty and require_password unchanged, keep existing hash
+	AllowedEmails               []string
+	AllowedDomains              []string
+	ExpiresAt                   *time.Time
+	MaxAccessCount              *int32
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	AICopilotEnabled            bool
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	ScreenshotProtectionEnabled bool
+	LinkType                    string
+	TargetFolderPath            string
+	ContactIDs                  []string
+	CustomDomain                string
+	Tags                        []string
+	NotifyOnAccess              bool
 }
 
 // AccessRule represents a single allow/block rule for a link.
@@ -263,6 +275,24 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	}
 	if hasDocuments && hasDealRoom {
 		return db.Link{}, errors.New("a link cannot be associated with both documents and a deal room")
+	}
+
+	linkType := req.LinkType
+	if linkType == "" {
+		linkType = "share"
+	}
+	if linkType != "share" && linkType != "file_request" {
+		return db.Link{}, fmt.Errorf("%w: link_type must be 'share' or 'file_request'", ErrInvalidInput)
+	}
+	if linkType == "file_request" && !hasDealRoom {
+		return db.Link{}, fmt.Errorf("%w: file_request links must be associated with a deal_room_id", ErrInvalidInput)
+	}
+	if linkType == "file_request" && hasDocuments {
+		return db.Link{}, fmt.Errorf("%w: file_request links cannot be associated with documents", ErrInvalidInput)
+	}
+	targetFolderPath := req.TargetFolderPath
+	if targetFolderPath == "" {
+		targetFolderPath = "/Uploads"
 	}
 
 	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(req)
@@ -371,31 +401,34 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	}
 
 	link, err := qtx.CreateLink(ctx, db.CreateLinkParams{
-		TenantID:                 tenantID,
-		WorkspaceID:              workspaceUUID,
-		DocumentID:               primaryDocID,
-		DealRoomID:               dealRoomID,
-		PublicToken:              token,
-		Name:                     name,
-		PermissionType:           perm,
-		ExpiresAt:                expiresAt,
-		MaxAccessCount:           maxAccess,
-		DownloadEnabled:          req.DownloadEnabled,
-		WatermarkEnabled:         req.WatermarkEnabled,
-		AiCopilotEnabled:         req.AICopilotEnabled,
-		QaEnabled:                req.QaEnabled,
-		FileRequestsEnabled:      req.FileRequestsEnabled,
-		IndexFileEnabled:         req.IndexFileEnabled,
-		RequireEmail:             requireEmail,
-		RequireEmailVerification: requireEmailVerification,
-		RequireNda:               requireNDA,
-		RequirePassword:          req.RequirePassword,
-		PasswordHash:             passwordHash,
-		CustomDomain:             pgtype.Text{String: req.CustomDomain, Valid: req.CustomDomain != ""},
-		Tags:                     req.Tags,
-		NotifyOnAccess:           req.NotifyOnAccess,
-		Status:                   "active",
-		CreatedBy:                userUUID,
+		TenantID:                    tenantID,
+		WorkspaceID:                 workspaceUUID,
+		DocumentID:                  primaryDocID,
+		DealRoomID:                  dealRoomID,
+		PublicToken:                 token,
+		Name:                        name,
+		PermissionType:              perm,
+		ExpiresAt:                   expiresAt,
+		MaxAccessCount:              maxAccess,
+		DownloadEnabled:             req.DownloadEnabled,
+		WatermarkEnabled:            req.WatermarkEnabled,
+		AiCopilotEnabled:            req.AICopilotEnabled,
+		QaEnabled:                   req.QaEnabled,
+		FileRequestsEnabled:         req.FileRequestsEnabled,
+		IndexFileEnabled:            req.IndexFileEnabled,
+		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
+		LinkType:                    linkType,
+		TargetFolderPath:            targetFolderPath,
+		RequireEmail:                requireEmail,
+		RequireEmailVerification:    requireEmailVerification,
+		RequireNda:                  requireNDA,
+		RequirePassword:             req.RequirePassword,
+		PasswordHash:                passwordHash,
+		CustomDomain:                pgtype.Text{String: req.CustomDomain, Valid: req.CustomDomain != ""},
+		Tags:                        req.Tags,
+		NotifyOnAccess:              req.NotifyOnAccess,
+		Status:                      "active",
+		CreatedBy:                   userUUID,
 	})
 	if err != nil {
 		return db.Link{}, fmt.Errorf("create link: %w", err)
@@ -551,6 +584,8 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		QaEnabled:                req.QaEnabled,
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
+		LinkType:                 existing.LinkType,
+		TargetFolderPath:         existing.TargetFolderPath,
 		ContactIDs:               req.ContactIDs,
 	}
 
@@ -591,6 +626,11 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		tags = req.Tags
 	}
 
+	targetFolderPath := existing.TargetFolderPath
+	if req.TargetFolderPath != "" {
+		targetFolderPath = req.TargetFolderPath
+	}
+
 	passwordHash, err := s.resolvePasswordHashForUpdate(existing, req.RequirePassword, req.Password)
 	if err != nil {
 		return db.Link{}, err
@@ -605,29 +645,32 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	// Update the link record using the sqlc-generated UpdateLinkFull.
 	_, err = qtx.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
-		Name:                     name,
-		DocumentID:               existing.DocumentID,
-		DealRoomID:               existing.DealRoomID,
-		PermissionType:           perm,
-		ExpiresAt:                expiresAt,
-		MaxAccessCount:           maxAccess,
-		DownloadEnabled:          req.DownloadEnabled,
-		WatermarkEnabled:         req.WatermarkEnabled,
-		RequireEmail:             requireEmail,
-		RequireEmailVerification: requireEmailVerification,
-		RequireNda:               requireNDA,
-		AiCopilotEnabled:         req.AICopilotEnabled,
-		QaEnabled:                req.QaEnabled,
-		FileRequestsEnabled:      req.FileRequestsEnabled,
-		IndexFileEnabled:         req.IndexFileEnabled,
-		RequirePassword:          req.RequirePassword,
-		PasswordHash:             passwordHash,
-		CustomDomain:             customDomain,
-		Tags:                     tags,
-		NotifyOnAccess:           req.NotifyOnAccess,
-		SecurityVersion:          existing.SecurityVersion + 1,
-		ID:                       existing.ID,
-		WorkspaceID:              workspaceUUID,
+		Name:                        name,
+		DocumentID:                  existing.DocumentID,
+		DealRoomID:                  existing.DealRoomID,
+		PermissionType:              perm,
+		ExpiresAt:                   expiresAt,
+		MaxAccessCount:              maxAccess,
+		DownloadEnabled:             req.DownloadEnabled,
+		WatermarkEnabled:            req.WatermarkEnabled,
+		RequireEmail:                requireEmail,
+		RequireEmailVerification:    requireEmailVerification,
+		RequireNda:                  requireNDA,
+		AiCopilotEnabled:            req.AICopilotEnabled,
+		QaEnabled:                   req.QaEnabled,
+		FileRequestsEnabled:         req.FileRequestsEnabled,
+		IndexFileEnabled:            req.IndexFileEnabled,
+		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
+		LinkType:                    existing.LinkType,
+		TargetFolderPath:            targetFolderPath,
+		RequirePassword:             req.RequirePassword,
+		PasswordHash:                passwordHash,
+		CustomDomain:                customDomain,
+		Tags:                        tags,
+		NotifyOnAccess:              req.NotifyOnAccess,
+		SecurityVersion:             existing.SecurityVersion + 1,
+		ID:                          existing.ID,
+		WorkspaceID:                 workspaceUUID,
 	})
 	if err != nil {
 		return db.Link{}, fmt.Errorf("update link: %w", err)
@@ -813,6 +856,7 @@ func (s *Service) ResolveDealRoomSlug(ctx context.Context, slug string) (string,
 //  2. email rules take priority over domain rules.
 //  3. If any allow rule exists and none match, access is denied.
 //  4. If no rules exist, access is allowed.
+//
 // EvaluateAccessRules determines whether the given email is allowed to access
 // the link according to its allow/block rules.
 func (s *Service) EvaluateAccessRules(ctx context.Context, linkID, email string) (AccessEvaluation, error) {
@@ -991,6 +1035,26 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.queries.WithTx(tx)
 
+	// Snapshot current rules before replacing them.
+	oldRules, _ := qtx.ListLinkAccessRulesByLink(ctx, pgtype.UUID{Bytes: linkUUID, Valid: true})
+	snapshot := make([]AccessRule, 0, len(oldRules))
+	for _, r := range oldRules {
+		snapshot = append(snapshot, AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action})
+	}
+	snapshotBytes, err := json.Marshal(snapshot)
+	if err != nil {
+		return fmt.Errorf("marshal rule snapshot: %w", err)
+	}
+	if err := qtx.InsertLinkAccessRuleRevision(ctx, db.InsertLinkAccessRuleRevisionParams{
+		TenantID:      link.TenantID,
+		WorkspaceID:   workspaceUUID,
+		LinkID:        link.ID,
+		ChangedBy:     userUUID,
+		RulesSnapshot: snapshotBytes,
+	}); err != nil {
+		return fmt.Errorf("insert rule revision: %w", err)
+	}
+
 	if err := qtx.DeleteLinkAccessRulesByLink(ctx, pgtype.UUID{Bytes: linkUUID, Valid: true}); err != nil {
 		return fmt.Errorf("delete access rules: %w", err)
 	}
@@ -1007,6 +1071,24 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 			SortOrder:   int32(i),
 		}); err != nil {
 			return fmt.Errorf("create access rule: %w", err)
+		}
+	}
+
+	// Revoke active invitations because the access rules that governed them have
+	// changed. Used invitations are left untouched for audit purposes.
+	invitations, err := qtx.ListLinkInvitationsByLink(ctx, link.ID)
+	if err != nil {
+		return fmt.Errorf("list invitations: %w", err)
+	}
+	for _, inv := range invitations {
+		if inv.Status == "pending" || inv.Status == "opened" || inv.Status == "verified" {
+			if _, err := qtx.UpdateLinkInvitationStatus(ctx, db.UpdateLinkInvitationStatusParams{
+				Status: "revoked",
+				UsedAt: pgtype.Timestamptz{},
+				ID:     inv.ID,
+			}); err != nil {
+				return fmt.Errorf("revoke invitation: %w", err)
+			}
 		}
 	}
 
@@ -1102,17 +1184,18 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			Email:  email,
 		})
 		if err == nil {
-			if existing.Status != "revoked" {
-				invitations = append(invitations, dbInvitationToDomain(existing))
-				continue
-			}
-			// Revoked invitations still occupy the unique (link_id, email) slot,
-			// so reset them instead of trying to insert a duplicate.
+			// Existing invitations store only the token hash; the raw token cannot
+			// be recovered. Regenerate a fresh token (and bump expiry) so the email
+			// always contains a usable inviteToken, regardless of prior status.
 			token, err := generateToken()
 			if err != nil {
 				return nil, fmt.Errorf("generate invite token: %w", err)
 			}
 			expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
+			status := existing.Status
+			if status == "revoked" {
+				status = "pending"
+			}
 			if _, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
 				Token:     pgtype.Text{String: "", Valid: false},
 				TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
@@ -1121,7 +1204,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			}); err != nil {
 				return nil, fmt.Errorf("reset invitation: %w", err)
 			}
-			invitations = append(invitations, invitationFromRaw(token, existing.ID, link.ID, email, "pending", expiresAt, pgtype.Timestamptz{}))
+			invitations = append(invitations, invitationFromRaw(token, existing.ID, link.ID, email, status, expiresAt, pgtype.Timestamptz{}))
 			continue
 		}
 		if !errors.Is(err, pgx.ErrNoRows) {
@@ -1185,8 +1268,16 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 
 	// Send invitation emails after commit.
 	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	wsID := ""
+	if link.WorkspaceID.Valid {
+		wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
+	}
+	creatorID := ""
+	if link.CreatedBy.Valid {
+		creatorID = uuid.UUID(link.CreatedBy.Bytes).String()
+	}
 	for _, inv := range invitations {
-		s.sendInvitationEmail(ctx, inv, link.Name.String, linkURL)
+		s.sendInvitationEmail(ctx, inv, wsID, creatorID, link.Name.String, linkURL)
 	}
 
 	return invitations, nil
@@ -1218,6 +1309,8 @@ func (s *Service) ResolveInviteToken(ctx context.Context, token string) (LinkInv
 		return LinkInvitation{}, ErrInviteRevoked
 	case "expired":
 		return LinkInvitation{}, ErrInviteExpired
+	case "used":
+		return LinkInvitation{}, ErrInviteAlreadyUsed
 	}
 	if inv.ExpiresAt.Valid && inv.ExpiresAt.Time.Before(time.Now()) {
 		// Auto-expire if past expiration.
@@ -1553,7 +1646,15 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 	}
 
 	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
-	s.sendInvitationEmail(ctx, inv, link.Name.String, linkURL)
+	wsID := ""
+	if link.WorkspaceID.Valid {
+		wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
+	}
+	creatorID := ""
+	if link.CreatedBy.Valid {
+		creatorID = uuid.UUID(link.CreatedBy.Bytes).String()
+	}
+	s.sendInvitationEmail(ctx, inv, wsID, creatorID, link.Name.String, linkURL)
 
 	return dbAccessRequestToDomain(updated), nil
 }
@@ -1694,53 +1795,26 @@ func invitationFromRaw(token string, id, linkID pgtype.UUID, email, status strin
 	return inv
 }
 
-func (s *Service) sendInvitationEmail(ctx context.Context, inv LinkInvitation, linkName, linkURL string) {
+func (s *Service) sendInvitationEmail(ctx context.Context, inv LinkInvitation, workspaceID, userID, linkName, linkURL string) {
 	inviteURL := fmt.Sprintf("%s?inviteToken=%s", linkURL, inv.Token)
-	s.emailSem <- struct{}{}
-	go func() {
-		defer func() { <-s.emailSem }()
-		sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if _, err := s.mailer.SendEmail(sendCtx, mailer.EmailJob{
-			EmailType: mailer.EmailTypeLinkInvite,
-			Recipient: inv.Email,
-			LinkName:  linkName,
-			LinkURL:   inviteURL,
-			TemplateVariables: map[string]string{
-				"InvitationLink": inviteURL,
-				"LinkName":       linkName,
-				"Email":          inv.Email,
-			},
-		}); err != nil {
-			logger.ErrorCtx(sendCtx, "failed to send invitation email", err,
-				logger.Attr("email_local", localPart(inv.Email)),
-			)
-		}
-	}()
+	subject := fmt.Sprintf("You've been invited to view \"%s\"", linkName)
+	body := fmt.Sprintf("You have been invited to view \"%s\". Open the invitation: %s", linkName, inviteURL)
+	if _, err := s.notifier.Enqueue(ctx, workspaceID, userID, "email", subject, body, notification.WithRecipient(inv.Email)); err != nil {
+		logger.ErrorCtx(ctx, "failed to enqueue invitation email", err,
+			logger.Attr("email_local", localPart(inv.Email)),
+		)
+	}
 }
 
-func (s *Service) sendAccessNotificationEmail(ctx context.Context, recipient, linkName, visitorEmail, linkURL string) {
-	s.emailSem <- struct{}{}
-	go func() {
-		defer func() { <-s.emailSem }()
-		sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-		if _, err := s.mailer.SendEmail(sendCtx, mailer.EmailJob{
-			EmailType: mailer.EmailTypeLinkAccess,
-			Recipient: recipient,
-			LinkName:  linkName,
-			LinkURL:   linkURL,
-			TemplateVariables: map[string]string{
-				"VisitorEmail": visitorEmail,
-				"LinkName":     linkName,
-				"LinkURL":      linkURL,
-			},
-		}); err != nil {
-			logger.ErrorCtx(sendCtx, "failed to send access notification email", err,
-				logger.Attr("email_local", localPart(recipient)),
-			)
-		}
-	}()
+func (s *Service) sendAccessNotificationEmail(ctx context.Context, workspaceID, userID, linkName, visitorEmail, linkURL string) {
+	subject := fmt.Sprintf("Someone viewed your DealSignal link \"%s\"", linkName)
+	body := fmt.Sprintf("A visitor (%s) viewed \"%s\". Open the link: %s", visitorEmail, linkName, linkURL)
+	if _, err := s.notifier.Enqueue(ctx, workspaceID, userID, "email", subject, body); err != nil {
+		logger.ErrorCtx(ctx, "failed to enqueue access notification email", err,
+			logger.Attr("workspace_id", workspaceID),
+			logger.Attr("user_id", userID),
+		)
+	}
 }
 
 // recordSecurityEvent writes a security event for a link.
@@ -1924,16 +1998,14 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		}
 	}
 
-	// Mark invitation as used/verified if present.
+	// Mark invitation as used if present. Invitations are single-use: once a
+	// visitor successfully accesses the link through an invite token, the token
+	// is consumed and cannot be reused.
 	if req.InviteToken != "" {
 		if inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: hashToken(req.InviteToken), Valid: true}); err == nil {
 			usedAt := pgtype.Timestamptz{Valid: true, Time: time.Now()}
-			status := "verified"
-			if inv.Status == "pending" {
-				status = "opened"
-			}
 			if _, err := s.queries.UpdateLinkInvitationStatus(ctx, db.UpdateLinkInvitationStatusParams{
-				Status: status,
+				Status: "used",
 				UsedAt: usedAt,
 				ID:     inv.ID,
 			}); err != nil {
@@ -1943,9 +2015,12 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	}
 
 	if link.NotifyOnAccess && emailForRecords != "" && link.CreatedBy.Valid {
-		if creator, err := s.queries.GetUserByID(ctx, link.CreatedBy); err == nil && creator.Email != "" {
-			s.sendAccessNotificationEmail(ctx, creator.Email, link.Name.String, emailForRecords, publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String))
+		wsID := ""
+		if link.WorkspaceID.Valid {
+			wsID = uuid.UUID(link.WorkspaceID.Bytes).String()
 		}
+		creatorID := uuid.UUID(link.CreatedBy.Bytes).String()
+		s.sendAccessNotificationEmail(ctx, wsID, creatorID, link.Name.String, emailForRecords, publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String))
 	}
 
 	return AccessResult{Link: link, VisitorID: visitorID, Email: emailForRecords, EmailVerified: requiresEmailVerification}, nil
@@ -2149,6 +2224,28 @@ func (s *Service) GetByID(ctx context.Context, linkID, workspaceID string) (db.L
 	return link, nil
 }
 
+// PublicLinkMetadata is the subset of link data exposed to unauthenticated visitors.
+type PublicLinkMetadata struct {
+	ID                          pgtype.UUID
+	PublicToken                 string
+	Name                        string
+	Status                      string
+	ExpiresAt                   pgtype.Timestamptz
+	PermissionType              string
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequirePassword             bool
+	RequireNda                  bool
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	ScreenshotProtectionEnabled bool
+	CustomDomain                string
+	AiCopilotEnabled            bool
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+}
+
 // GetByPublicToken returns a link by its public token.
 func (s *Service) GetByPublicToken(ctx context.Context, publicToken string) (db.Link, error) {
 	link, err := s.queries.GetLinkByPublicToken(ctx, publicToken)
@@ -2182,6 +2279,34 @@ func (s *Service) GetByPublicToken(ctx context.Context, publicToken string) (db.
 		AiCopilotEnabled:         link.AiCopilotEnabled,
 		RequirePassword:          link.RequirePassword,
 		PasswordHash:             link.PasswordHash,
+	}, nil
+}
+
+// GetPublicLinkMetadata returns safe metadata for a public link.
+func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string) (PublicLinkMetadata, error) {
+	link, err := s.GetByPublicToken(ctx, publicToken)
+	if err != nil {
+		return PublicLinkMetadata{}, err
+	}
+	return PublicLinkMetadata{
+		ID:                          link.ID,
+		PublicToken:                 link.PublicToken,
+		Name:                        link.Name.String,
+		Status:                      link.Status,
+		ExpiresAt:                   link.ExpiresAt,
+		PermissionType:              link.PermissionType,
+		RequireEmail:                link.RequireEmail,
+		RequireEmailVerification:    link.RequireEmailVerification,
+		RequirePassword:             link.RequirePassword,
+		RequireNda:                  link.RequireNda,
+		DownloadEnabled:             link.DownloadEnabled,
+		WatermarkEnabled:            link.WatermarkEnabled,
+		ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
+		CustomDomain:                link.CustomDomain.String,
+		AiCopilotEnabled:            link.AiCopilotEnabled,
+		QaEnabled:                   link.QaEnabled,
+		FileRequestsEnabled:         link.FileRequestsEnabled,
+		IndexFileEnabled:            link.IndexFileEnabled,
 	}, nil
 }
 
@@ -2365,6 +2490,147 @@ func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string
 		LinkID: pgtype.UUID{Bytes: id, Valid: true},
 		Limit:  200,
 	})
+}
+
+// LinkAnalytics aggregates access metrics for a single link.
+type LinkAnalytics struct {
+	TotalViews             int64           `json:"total_views"`
+	UniqueVisitors         int64           `json:"unique_visitors"`
+	DownloadAttempts       int64           `json:"download_attempts"`
+	FirstAccessAt          *time.Time      `json:"first_access_at,omitempty"`
+	LastAccessAt           *time.Time      `json:"last_access_at,omitempty"`
+	ViewsOverTime          []DailyView     `json:"views_over_time"`
+	AverageDurationSeconds float64         `json:"average_duration_seconds"`
+	RecentVisitors         []RecentVisitor `json:"recent_visitors"`
+	KeyPages               []KeyPage       `json:"key_pages"`
+	QARecords              []QARecord      `json:"qa_records"`
+}
+
+// DailyView is a single day in the views-over-time series.
+type DailyView struct {
+	Day   string `json:"day"`
+	Views int64  `json:"views"`
+}
+
+// RecentVisitor is a single aggregated visitor summary.
+type RecentVisitor struct {
+	VisitorID     string    `json:"visitor_id"`
+	VisitorEmail  string    `json:"visitor_email,omitempty"`
+	FirstAccessAt time.Time `json:"first_access_at"`
+	LastAccessAt  time.Time `json:"last_access_at"`
+	TotalViews    int64     `json:"total_views"`
+}
+
+// KeyPage is a page that received meaningful attention.
+type KeyPage struct {
+	PageNumber             int     `json:"page_number"`
+	Views                  int64   `json:"views"`
+	AverageDurationSeconds float64 `json:"average_duration_seconds"`
+}
+
+// QARecord is a visitor question and its owner answer.
+type QARecord struct {
+	VisitorEmail string    `json:"visitor_email,omitempty"`
+	Question     string    `json:"question"`
+	Answer       string    `json:"answer,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// GetLinkAnalytics returns aggregated access metrics for a link.
+func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID string) (LinkAnalytics, error) {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return LinkAnalytics{}, errors.New("invalid link id")
+	}
+	// Verify link exists in workspace.
+	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
+		return LinkAnalytics{}, err
+	}
+
+	row, err := s.queries.GetLinkAnalytics(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		return LinkAnalytics{}, fmt.Errorf("get link analytics: %w", err)
+	}
+
+	analytics := LinkAnalytics{
+		TotalViews:       row.TotalViews,
+		UniqueVisitors:   row.UniqueVisitors,
+		DownloadAttempts: row.DownloadAttempts,
+		ViewsOverTime:    []DailyView{},
+	}
+	if row.FirstAccessAt.Valid {
+		t := row.FirstAccessAt.Time
+		analytics.FirstAccessAt = &t
+	}
+	if row.LastAccessAt.Valid {
+		t := row.LastAccessAt.Time
+		analytics.LastAccessAt = &t
+	}
+	if len(row.ViewsOverTime) > 0 {
+		if err := json.Unmarshal(row.ViewsOverTime, &analytics.ViewsOverTime); err != nil {
+			logger.ErrorCtx(ctx, "failed to unmarshal views_over_time", err)
+		}
+	}
+
+	avgDur, err := s.queries.GetAverageDurationByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		logger.ErrorCtx(ctx, "failed to get average duration", err)
+	} else {
+		analytics.AverageDurationSeconds = avgDur
+	}
+
+	visitors, err := s.queries.ListRecentVisitorsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		logger.ErrorCtx(ctx, "failed to list recent visitors", err)
+	} else {
+		analytics.RecentVisitors = make([]RecentVisitor, 0, len(visitors))
+		for _, v := range visitors {
+			rv := RecentVisitor{
+				VisitorID:     v.VisitorID.String,
+				TotalViews:    v.TotalViews,
+				FirstAccessAt: v.FirstAccessAt.Time,
+				LastAccessAt:  v.LastAccessAt.Time,
+				VisitorEmail:  v.VisitorEmail,
+			}
+			analytics.RecentVisitors = append(analytics.RecentVisitors, rv)
+		}
+	}
+
+	pages, err := s.queries.ListTopPagesByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		logger.ErrorCtx(ctx, "failed to list top pages", err)
+	} else {
+		analytics.KeyPages = make([]KeyPage, 0, len(pages))
+		for _, p := range pages {
+			analytics.KeyPages = append(analytics.KeyPages, KeyPage{
+				PageNumber:             int(p.PageNumber),
+				Views:                  p.Views,
+				AverageDurationSeconds: p.AvgDurationSeconds,
+			})
+		}
+	}
+
+	questions, err := s.queries.ListVisitorQuestionsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		logger.ErrorCtx(ctx, "failed to list visitor questions", err)
+	} else {
+		analytics.QARecords = make([]QARecord, 0, len(questions))
+		for _, q := range questions {
+			record := QARecord{
+				Question:  q.Question,
+				CreatedAt: q.CreatedAt.Time,
+			}
+			if q.VisitorEmail.Valid {
+				record.VisitorEmail = q.VisitorEmail.String
+			}
+			if q.Answer.Valid {
+				record.Answer = q.Answer.String
+			}
+			analytics.QARecords = append(analytics.QARecords, record)
+		}
+	}
+
+	return analytics, nil
 }
 
 // normalizeSecurityConfig resolves the security configuration from the modern
@@ -2704,15 +2970,40 @@ func (s *Service) GetLinkIndexFileByLink(ctx context.Context, linkID pgtype.UUID
 	return s.queries.GetLinkIndexFileByLink(ctx, linkID)
 }
 
+const (
+	indexFileCacheTTL   = 24 * time.Hour
+	indexFileLLMTimeout = 30 * time.Second
+)
+
 // GenerateIndexFile creates or regenerates an AI-powered summary index for a link.
+// Concurrent calls for the same link are deduplicated with singleflight, and
+// ready results are cached for 24 hours before regeneration.
 // Returns the index file record. The caller must verify the link belongs to the workspace.
 func (s *Service) GenerateIndexFile(ctx context.Context, link db.Link) (db.LinkIndexFile, error) {
+	key := uuid.UUID(link.ID.Bytes).String()
+	v, err, _ := s.indexGenGroup.Do(key, func() (interface{}, error) {
+		return s.generateIndexFileOnce(ctx, link)
+	})
+	if err != nil {
+		return db.LinkIndexFile{}, err
+	}
+	return v.(db.LinkIndexFile), nil
+}
+
+func (s *Service) generateIndexFileOnce(ctx context.Context, link db.Link) (db.LinkIndexFile, error) {
 	if s.llm == nil {
 		_ = s.queries.UpdateLinkIndexFileFailed(ctx, db.UpdateLinkIndexFileFailedParams{
 			ErrorMessage: pgtype.Text{String: "AI service is not configured", Valid: true},
 			LinkID:       link.ID,
 		})
 		return db.LinkIndexFile{}, fmt.Errorf("AI service not configured")
+	}
+
+	existing, err := s.queries.GetLinkIndexFileByLink(ctx, link.ID)
+	if err == nil && existing.Status == "ready" && existing.GeneratedAt.Valid {
+		if time.Since(existing.GeneratedAt.Time) < indexFileCacheTTL {
+			return existing, nil
+		}
 	}
 
 	if _, err := s.queries.UpsertLinkIndexFile(ctx, db.UpsertLinkIndexFileParams{
@@ -2723,19 +3014,20 @@ func (s *Service) GenerateIndexFile(ctx context.Context, link db.Link) (db.LinkI
 		return db.LinkIndexFile{}, fmt.Errorf("upsert index file: %w", err)
 	}
 
-	docTitles := s.collectDocTitles(ctx, link)
-	if len(docTitles) == 0 {
-		docTitles = []string{link.Name.String}
+	docContext, docErr := s.buildIndexDocumentContext(ctx, link)
+	if docErr != nil {
+		_ = s.queries.UpdateLinkIndexFileFailed(ctx, db.UpdateLinkIndexFileFailedParams{
+			ErrorMessage: pgtype.Text{String: docErr.Error(), Valid: true},
+			LinkID:       link.ID,
+		})
+		return db.LinkIndexFile{}, fmt.Errorf("build document context: %w", docErr)
 	}
 
 	systemPrompt := "You are an AI assistant that creates executive summaries of shared documents. Generate a concise index with: 1) a 2-3 sentence executive summary, 2) a bullet-point list of key topics covered, and 3) a recommended reading order. Format the output in HTML (without <html>/<body> tags). Use <h2>, <p>, <ul>/<li>. Keep it under 2000 characters. Do NOT make up content not in the documents."
 
-	docContext := "Documents in this link:\n"
-	for _, t := range docTitles {
-		docContext += "- " + t + "\n"
-	}
-
-	content, chatErr := s.llm.ChatCompletion(ctx, systemPrompt, []llmMessage{
+	llmCtx, cancel := context.WithTimeout(ctx, indexFileLLMTimeout)
+	defer cancel()
+	content, chatErr := s.llm.ChatCompletion(llmCtx, systemPrompt, []llmMessage{
 		{Role: "user", Content: fmt.Sprintf("Generate an AI-generated index/summary for the following documents. Label the output as AI-generated.\n\n%s", docContext)},
 	})
 
@@ -2759,39 +3051,72 @@ func (s *Service) GenerateIndexFile(ctx context.Context, link db.Link) (db.LinkI
 	return row, nil
 }
 
-func (s *Service) collectDocTitles(ctx context.Context, link db.Link) []string {
-	var titles []string
+// buildIndexDocumentContext gathers the visible document text for a link and
+// returns a structured context string suitable for an LLM index-generation
+// prompt. The total length is capped to avoid exceeding model context windows.
+func (s *Service) buildIndexDocumentContext(ctx context.Context, link db.Link) (string, error) {
+	const maxContextChars = 100000
+
+	docIDs := make([]pgtype.UUID, 0)
 	if link.DocumentID.Valid {
-		doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-			ID:          link.DocumentID,
-			WorkspaceID: link.WorkspaceID,
-		})
-		if err == nil && doc.Title != "" {
-			titles = append(titles, doc.Title)
+		docIDs = append(docIDs, link.DocumentID)
+	}
+	linkDocs, err := s.queries.ListLinkDocumentsByLink(ctx, link.ID)
+	if err == nil {
+		for _, ld := range linkDocs {
+			if ld.DocumentID.Valid {
+				docIDs = append(docIDs, ld.DocumentID)
+			}
 		}
 	}
-	// For deal room links, generate index from the deal room context.
-	if link.DealRoomID.Valid {
+
+	if len(docIDs) == 0 && link.DealRoomID.Valid {
 		room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
 			ID:          link.DealRoomID,
 			WorkspaceID: link.WorkspaceID,
 		})
 		if err == nil && room.Name != "" {
-			titles = append(titles, room.Name)
+			return fmt.Sprintf("Deal room: %s\nNo document text is available yet.", room.Name), nil
+		}
+		return "", errors.New("no documents available for index generation")
+	}
+
+	chunks, err := s.queries.ListChunksByDocumentIDs(ctx, docIDs)
+	if err != nil {
+		return "", fmt.Errorf("list chunks: %w", err)
+	}
+
+	var b strings.Builder
+	b.WriteString("Documents in this link:\n")
+	currentDoc := uuid.Nil
+	for _, c := range chunks {
+		docID := uuid.UUID(c.DocumentID.Bytes)
+		if docID != currentDoc {
+			b.WriteString(fmt.Sprintf("\n--- Document %s (page %d) ---\n", docID, c.PageNumber))
+			currentDoc = docID
+		}
+		b.WriteString(c.Text)
+		b.WriteString("\n")
+		if b.Len() > maxContextChars {
+			b.WriteString("\n[Additional content truncated due to length limit]\n")
+			break
 		}
 	}
-	return titles
+
+	if b.Len() == len("Documents in this link:\n") {
+		return "", errors.New("documents found but no extractable text chunks")
+	}
+	return b.String(), nil
 }
 
-// sanitizeHTML removes script, iframe, and object tags for basic XSS prevention.
+// sanitizeHTML sanitizes untrusted LLM output to a safe HTML subset.
+// It allows only the structural tags used in index files and strips all
+// event handlers, styles, and unknown attributes.
 func sanitizeHTML(html string) string {
-	html = strings.ReplaceAll(html, "<script", "<!--removed-script")
-	html = strings.ReplaceAll(html, "</script>", "removed-script-->")
-	html = strings.ReplaceAll(html, "<iframe", "<!--removed-iframe")
-	html = strings.ReplaceAll(html, "</iframe>", "removed-iframe-->")
-	html = strings.ReplaceAll(html, "<object", "<!--removed-object")
-	html = strings.ReplaceAll(html, "</object>", "removed-object-->")
-	return html
+	p := bluemonday.UGCPolicy()
+	p.AllowAttrs("class").Globally()
+	p.AllowAttrs("id").Globally()
+	return p.Sanitize(html)
 }
 
 // FileUploader abstracts file storage for uploaded files.
@@ -2801,8 +3126,8 @@ type FileUploader interface {
 
 var allowedUploadMimeTypes = map[string]bool{
 	"application/pdf": true,
-	"application/vnd.openxmlformats-officedocument.wordprocessingml.document": true,
-	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":       true,
+	"application/vnd.openxmlformats-officedocument.wordprocessingml.document":   true,
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":         true,
 	"application/vnd.openxmlformats-officedocument.presentationml.presentation": true,
 	"application/zip": true,
 }
@@ -2848,22 +3173,156 @@ func (s *Service) ListUploadedFiles(ctx context.Context, linkID pgtype.UUID) ([]
 	return s.queries.ListUploadedFilesByLink(ctx, linkID)
 }
 
-// ApproveUploadedFile approves a pending uploaded file.
+// ApproveUploadedFile approves a pending uploaded file and promotes it to a
+// workspace document inside the link's deal room. It runs in a transaction and
+// queues an ingestion job so the document becomes searchable.
 func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, reviewerID pgtype.UUID) error {
-	return s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
+	file, err := s.queries.GetUploadedFileByID(ctx, fileID)
+	if err != nil {
+		return fmt.Errorf("get uploaded file: %w", err)
+	}
+	if file.Status != "pending_review" {
+		return fmt.Errorf("uploaded file is not pending review")
+	}
+
+	link, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
+		ID:          file.LinkID,
+		WorkspaceID: file.WorkspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("get link: %w", err)
+	}
+	if !link.DealRoomID.Valid {
+		return fmt.Errorf("uploaded file approval requires a deal-room link")
+	}
+	if uuid.UUID(link.CreatedBy.Bytes) != uuid.UUID(reviewerID.Bytes) {
+		return fmt.Errorf("only the link creator can approve uploads")
+	}
+
+	sourceType := mimeToSourceType(file.MimeType)
+	if sourceType == "" {
+		return fmt.Errorf("unsupported mime type for document ingestion: %s", file.MimeType)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	docID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	doc, err := qtx.CreateDocument(ctx, db.CreateDocumentParams{
+		ID:          docID,
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		CreatedBy:   reviewerID,
+		Title:       file.OriginalFilename,
+		SourceType:  sourceType,
+		Status:      "uploaded",
+		StorageKey:  file.StorageKey,
+		FileSize:    pgtype.Int8{Int64: file.FileSize, Valid: true},
+		Category:    "uploaded",
+	})
+	if err != nil {
+		return fmt.Errorf("create document: %w", err)
+	}
+
+	folderPath := link.TargetFolderPath
+	if folderPath == "" {
+		folderPath = "/Uploads"
+	}
+	_, err = qtx.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		RoomID:      link.DealRoomID,
+		DocumentID:  doc.ID,
+		FolderPath:  folderPath,
+		SortOrder:   0,
+	})
+	if err != nil {
+		return fmt.Errorf("add deal room document: %w", err)
+	}
+
+	_, err = qtx.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		DocumentID:  doc.ID,
+		Status:      "queued",
+	})
+	if err != nil {
+		return fmt.Errorf("create ingestion job: %w", err)
+	}
+
+	if err := qtx.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
 		Status:     "approved",
 		ReviewedBy: reviewerID,
 		ID:         fileID,
-	})
+	}); err != nil {
+		return fmt.Errorf("update uploaded file status: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit approval: %w", err)
+	}
+
+	// Notify the uploader asynchronously; failures are logged but do not fail
+	// the approval transaction.
+	if file.UploaderEmail.Valid && file.UploaderEmail.String != "" && s.notifier != nil {
+		_, _ = s.notifier.Enqueue(ctx,
+			uuid.UUID(link.WorkspaceID.Bytes).String(),
+			uuid.UUID(link.CreatedBy.Bytes).String(),
+			"email",
+			fmt.Sprintf("Your uploaded file has been approved: %s", file.OriginalFilename),
+			fmt.Sprintf("The file '%s' you uploaded to the deal room has been approved and is now available.", file.OriginalFilename),
+			notification.WithRecipient(file.UploaderEmail.String),
+		)
+	}
+
+	return nil
 }
 
 // RejectUploadedFile rejects a pending uploaded file.
 func (s *Service) RejectUploadedFile(ctx context.Context, fileID pgtype.UUID, reviewerID pgtype.UUID) error {
+	file, err := s.queries.GetUploadedFileByID(ctx, fileID)
+	if err != nil {
+		return fmt.Errorf("get uploaded file: %w", err)
+	}
+	if file.Status != "pending_review" {
+		return fmt.Errorf("uploaded file is not pending review")
+	}
+	link, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
+		ID:          file.LinkID,
+		WorkspaceID: file.WorkspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("get link: %w", err)
+	}
+	if uuid.UUID(link.CreatedBy.Bytes) != uuid.UUID(reviewerID.Bytes) {
+		return fmt.Errorf("only the link creator can reject uploads")
+	}
 	return s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
 		Status:     "rejected",
 		ReviewedBy: reviewerID,
 		ID:         fileID,
 	})
+}
+
+// mimeToSourceType maps uploaded-file MIME types to the document source_type
+// values accepted by the documents table.
+func mimeToSourceType(mime string) string {
+	switch mime {
+	case "application/pdf":
+		return "pdf"
+	case "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+		return "docx"
+	case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+		return "xlsx"
+	case "application/vnd.openxmlformats-officedocument.presentationml.presentation":
+		return "pptx"
+	default:
+		return ""
+	}
 }
 
 // GetUploadedFileByID returns a single uploaded file record.

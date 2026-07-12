@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v2.5.0] - 2026-07-11
+
 ### Added
 
 - **PII minimization & data-subject rights (COMPLIANCE-001)**:
@@ -82,5 +84,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Secret-scan false positive in task documentation excluded via `.gitleaksignore`.
 - `golangci-lint` compatibility with Go 1.25 by installing from source.
 
-[unreleased]: https://github.com/OpenCore-Hub/DealSignal/compare/v2.1.2...HEAD
+[unreleased]: https://github.com/OpenCore-Hub/DealSignal/compare/v2.5.0...HEAD
+[v2.5.0]: https://github.com/OpenCore-Hub/DealSignal/compare/v2.1.2...v2.5.0
 [v2.1.2]: https://github.com/OpenCore-Hub/DealSignal/compare/068d335...v2.1.2

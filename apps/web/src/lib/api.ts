@@ -20,6 +20,7 @@ import type {
   IntegrationStatus,
   Link,
   LinkAccessRequest,
+  LinkAnalytics,
   LinkInvitation,
   PageAnalytics,
   PermissionConfig,
@@ -295,7 +296,7 @@ export const api = {
     }
   ) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
       documents: { id: string; title: string; pageCount: number; sourceType: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -479,6 +480,8 @@ export const api = {
       getWorkspaceSlug(),
       `/links/${linkId}/access-logs`
     ),
+  getLinkAnalytics: (linkId: string) =>
+    request<{ data: LinkAnalytics }>(getWorkspaceSlug(), `/links/${linkId}/analytics`),
 
   // Deal-room share links.
   createDealRoomLink: (roomId: string, payload: CreateDealRoomLinkPayload) =>

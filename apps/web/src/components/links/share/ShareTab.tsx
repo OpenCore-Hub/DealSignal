@@ -37,7 +37,11 @@ interface ShareTabProps {
   errors: Record<string, string>;
   slug?: string;
   highlightedFields?: string[];
+  /** Workspace-configured custom domains available for this link. */
+  availableDomains?: string[];
 }
+
+const CUSTOM_DOMAIN_VALUE = "__custom__";
 
 export function ShareTab({
   draft,
@@ -49,11 +53,21 @@ export function ShareTab({
   errors,
   slug,
   highlightedFields = [],
+  availableDomains = [],
 }: ShareTabProps) {
   const { t } = useTranslation("linkShare");
 
   const publicUrl = getPublicUrl(link);
   const [pendingPreset, setPendingPreset] = useState<LinkPreset | null>(null);
+  const isCustomValue =
+    draft.customDomain !== "" && !availableDomains.includes(draft.customDomain);
+  const [customDomainMode, setCustomDomainMode] = useState(isCustomValue);
+  const [customDomainInput, setCustomDomainInput] = useState(
+    isCustomValue ? draft.customDomain : ""
+  );
+  const selectedDomainValue = customDomainMode
+    ? CUSTOM_DOMAIN_VALUE
+    : draft.customDomain;
 
   const handlePresetChange = (value: string | null) => {
     if (!value) return;
@@ -118,7 +132,7 @@ export function ShareTab({
       <div className="space-y-2">
         <Label>{t("share.linkPreset")}</Label>
         <Select value={preset} onValueChange={handlePresetChange}>
-          <SelectTrigger className="w-full">
+          <SelectTrigger aria-label={t("share.linkPreset")} className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -169,11 +183,41 @@ export function ShareTab({
 
       <div className="space-y-2">
         <Label>{t("share.customDomain")}</Label>
-        <Input
-          value={draft.customDomain}
-          onChange={(e) => updateDraft({ customDomain: e.target.value })}
-          placeholder={t("share.customDomainPlaceholder")}
-        />
+        <Select
+          value={selectedDomainValue}
+          onValueChange={(value) => {
+            if (value === CUSTOM_DOMAIN_VALUE) {
+              setCustomDomainMode(true);
+              updateDraft({ customDomain: customDomainInput });
+            } else {
+              setCustomDomainMode(false);
+              updateDraft({ customDomain: value ?? "" });
+            }
+          }}
+        >
+          <SelectTrigger aria-label={t("share.customDomain")} className="w-full">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="">{t("share.customDomainDefault")}</SelectItem>
+            {availableDomains.map((domain) => (
+              <SelectItem key={domain} value={domain}>
+                {domain}
+              </SelectItem>
+            ))}
+            <SelectItem value={CUSTOM_DOMAIN_VALUE}>{t("share.customDomainCustom")}</SelectItem>
+          </SelectContent>
+        </Select>
+        {selectedDomainValue === CUSTOM_DOMAIN_VALUE && (
+          <Input
+            value={customDomainInput}
+            onChange={(e) => {
+              setCustomDomainInput(e.target.value);
+              updateDraft({ customDomain: e.target.value });
+            }}
+            placeholder={t("share.customDomainPlaceholder")}
+          />
+        )}
         {errors.customDomain && <p className="text-xs text-destructive">{errors.customDomain}</p>}
         <p className="text-xs text-muted-foreground">{t("share.customDomainHint")}</p>
       </div>

@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { ChatCenteredDots, FileText, Robot, X } from "@phosphor-icons/react";
+import { ChatCenteredDots, FileText, X } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
-import { SidebarAIChat } from "./SidebarAIChat";
 import { FileRequestPanel } from "./FileRequestPanel";
-import { QAPanel } from "./QAPanel";
+import { UnifiedQAPanel } from "./UnifiedQAPanel";
 
 interface DocSummary {
   id: string;
@@ -12,7 +11,7 @@ interface DocSummary {
   pageCount: number;
 }
 
-type SidebarTab = "documents" | "ai" | "qa" | "requests";
+type SidebarTab = "documents" | "qa" | "requests";
 
 interface RightSidebarProps {
   open: boolean;
@@ -42,8 +41,9 @@ export function RightSidebar({
   publicSessionToken,
 }: RightSidebarProps) {
   const { t } = useTranslation(["documents", "ai"]);
-  const [activeTab, setActiveTab] = useState<SidebarTab>(aiCopilotEnabled ? "ai" : "documents");
-  const hasAnyFeature = aiCopilotEnabled || qaEnabled || fileRequestsEnabled;
+  const qaAvailable = aiCopilotEnabled || qaEnabled;
+  const [activeTab, setActiveTab] = useState<SidebarTab>(qaAvailable ? "qa" : "documents");
+  const hasAnyFeature = qaAvailable || fileRequestsEnabled;
 
   return (
     <AnimatePresence>
@@ -56,7 +56,7 @@ export function RightSidebar({
           className="flex h-full shrink-0 flex-col border-l border-border bg-card overflow-hidden"
           style={{ minWidth: open ? 320 : 0 }}
         >
-          {/* Header with tabs */}
+          {/* Header with documents tab */}
           <div className="flex items-center border-b border-border">
             <button
               type="button"
@@ -70,32 +70,57 @@ export function RightSidebar({
               <FileText size={14} />
               {t("documents:viewer.sidebarDocuments")}
             </button>
-            {aiCopilotEnabled && (
-              <button type="button" onClick={() => setActiveTab("ai")}
-                className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-3 py-2.5 text-xs font-medium transition-colors ${activeTab === "ai" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-              ><Robot size={14} />{t("documents:viewer.sidebarAI")}</button>
-            )}
             {!hasAnyFeature && (
-            <button type="button" onClick={onClose}
-              className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-              aria-label={t("ai:viewer.close")}><X size={14} /></button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                aria-label={t("ai:viewer.close")}
+              >
+                <X size={14} />
+              </button>
             )}
           </div>
 
           {/* Feature tabs row */}
           {hasAnyFeature && (
             <div className="flex items-center border-b border-border">
-              {qaEnabled && (
-                <button type="button" onClick={() => setActiveTab("qa")}
-                  className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${activeTab === "qa" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-                ><ChatCenteredDots size={14} />{t("documents:viewer.sidebarQA")}</button>
+              {qaAvailable && (
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("qa")}
+                  className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${
+                    activeTab === "qa"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <ChatCenteredDots size={14} />
+                  {t("documents:viewer.sidebarQA")}
+                </button>
               )}
               {fileRequestsEnabled && (
-                <button type="button" onClick={() => setActiveTab("requests")}
-                  className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${activeTab === "requests" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}
-                ><FileText size={14} />{t("documents:viewer.sidebarRequests")}</button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab("requests")}
+                  className={`flex flex-1 items-center justify-center gap-1.5 border-b-2 px-2 py-2.5 text-xs font-medium transition-colors ${
+                    activeTab === "requests"
+                      ? "border-primary text-primary"
+                      : "border-transparent text-muted-foreground hover:text-foreground"
+                  }`}
+                >
+                  <FileText size={14} />
+                  {t("documents:viewer.sidebarRequests")}
+                </button>
               )}
-              <button type="button" onClick={onClose} className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0" aria-label={t("ai:viewer.close")}><X size={14} /></button>
+              <button
+                type="button"
+                onClick={onClose}
+                className="mx-1 flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground transition-colors shrink-0"
+                aria-label={t("ai:viewer.close")}
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
 
@@ -142,9 +167,18 @@ export function RightSidebar({
                 )}
               </div>
             )}
-            {activeTab === "ai" && <SidebarAIChat documentId={activeDocumentId} publicSessionToken={publicSessionToken} />}
-            {activeTab === "requests" && fileRequestsEnabled && publicToken && <FileRequestPanel token={publicToken} sessionToken={publicSessionToken} />}
-            {activeTab === "qa" && qaEnabled && publicToken && <QAPanel token={publicToken} sessionToken={publicSessionToken} />}
+            {activeTab === "requests" && fileRequestsEnabled && publicToken && (
+              <FileRequestPanel token={publicToken} sessionToken={publicSessionToken} />
+            )}
+            {activeTab === "qa" && qaAvailable && publicToken && (
+              <UnifiedQAPanel
+                token={publicToken}
+                sessionToken={publicSessionToken}
+                documentId={activeDocumentId}
+                qaEnabled={qaEnabled}
+                aiCopilotEnabled={aiCopilotEnabled}
+              />
+            )}
           </div>
         </motion.aside>
       )}

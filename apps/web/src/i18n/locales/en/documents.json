@@ -200,6 +200,8 @@
     "invite_expiredDescription": "This invitation has expired. Please contact the sender for a new invitation.",
     "invite_revokedTitle": "Invitation revoked",
     "invite_revokedDescription": "This invitation has been revoked. Please contact the sender if you think this is a mistake.",
+    "invite_already_usedTitle": "Invitation already used",
+    "invite_already_usedDescription": "This invitation has already been used. Please contact the sender for a new invitation.",
     "inviteVerification": "Verifying your invitation...",
     "inviteVerificationFor": "Verifying invitation for {{email}}",
     "requestAccess": "Request access",
@@ -224,8 +226,18 @@
     "qaPending": "Awaiting answer",
     "qaPlaceholder": "Ask a question...",
     "qaSubmit": "Ask",
+    "qaSourceAI": "AI",
+    "qaSourceOwner": "Owner",
+    "qaSourceYou": "You",
+    "qaModeAI": "Ask AI",
+    "qaModeOwner": "Ask Owner",
+    "qaAIPlaceholder": "Ask AI about this document...",
+    "qaOwnerPlaceholder": "Ask the owner a question...",
+    "qaEmptyUnified": "No messages yet. Start a conversation.",
     "sidebarRequests": "Requests",
     "printWarning": "Printing disabled",
-    "printWarningHint": "This document is protected. Please contact the owner for an authorized copy."
+    "printWarningHint": "This document is protected. Please contact the owner for an authorized copy.",
+    "watermarkFallback": "CONFIDENTIAL",
+    "pageCountShort": "{{count}} p"
   }
 }
