@@ -198,9 +198,6 @@ func (s *Server) registerRoutes() error {
 			ssePublisher := sse.NewLinkPublisher(sseHub)
 			linkHandler.SetEventPublisher(ssePublisher)
 
-		// CRM integration (noop by default; swap for HubSpot/Salesforce when configured).
-		crmClient := crm.NoOp{}
-		_ = crmClient // available for future handler integration
 
 		// Register CRM aggregation worker (30min window).
 		s.registerWorker(crm.NewWindowAggregator(queries, 30*time.Minute))
