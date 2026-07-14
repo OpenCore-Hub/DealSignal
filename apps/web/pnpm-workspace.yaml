@@ -1,2 +1,4 @@
+overrides:
+  rollup: ">=2.79.2"
 allowBuilds:
   msw: true
