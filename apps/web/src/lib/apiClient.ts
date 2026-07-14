@@ -86,65 +86,20 @@ function getBaseUrl(): string {
   return env?.replace(/\/+$/, "") ?? "";
 }
 
-function getAuthToken(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return localStorage.getItem("access_token");
-  } catch {
-    return null;
-  }
-}
+let refreshPromise: Promise<void> | null = null;
 
-function getRefreshToken(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    return localStorage.getItem("refresh_token");
-  } catch {
-    return null;
-  }
-}
-
-function setTokens(accessToken: string, refreshToken: string) {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem("access_token", accessToken);
-    localStorage.setItem("refresh_token", refreshToken);
-  } catch {
-    // ignore
-  }
-}
-
-function clearTokens() {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-  } catch {
-    // ignore
-  }
-}
-
-let refreshPromise: Promise<string> | null = null;
-
-async function doRefresh(baseUrl: string): Promise<string> {
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) {
-    throw new Error("No refresh token");
-  }
+async function doRefresh(baseUrl: string): Promise<void> {
   const res = await fetch(`${baseUrl}/api/auth/refresh`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ refresh_token: refreshToken }),
+    credentials: "include",
   });
   if (!res.ok) {
     throw new Error("Refresh failed");
   }
-  const data = (await res.json()) as { access_token: string; refresh_token: string };
-  setTokens(data.access_token, data.refresh_token);
-  return data.access_token;
 }
 
-function refreshAccessToken(baseUrl: string): Promise<string> {
+function refreshAccessToken(baseUrl: string): Promise<void> {
   if (!refreshPromise) {
     refreshPromise = doRefresh(baseUrl)
       .finally(() => {
@@ -156,7 +111,6 @@ function refreshAccessToken(baseUrl: string): Promise<string> {
 
 function redirectToLogin() {
   if (typeof window !== "undefined") {
-    clearTokens();
     const pathname = window.location.pathname ?? "";
     const search = window.location.search ?? "";
     const returnPath = pathname + search;
@@ -215,8 +169,6 @@ export async function request<T>(
     headers.set("Accept", "application/json");
   }
 
-  const token = options.token ?? getAuthToken();
-
   const requestId = generateRequestId();
   headers.set("X-Request-ID", requestId);
   headers.set("Accept-Language", getLanguage());
@@ -224,16 +176,16 @@ export async function request<T>(
     headers.set("X-Idempotency-Key", options.idempotencyKey);
   }
 
-  const execute = async (authToken: string | null): Promise<Response> => {
-    if (authToken && !options.skipAuth) {
-      headers.set("Authorization", `Bearer ${authToken}`);
+  const execute = async (): Promise<Response> => {
+    if (options.token && !options.skipAuth) {
+      headers.set("Authorization", `Bearer ${options.token}`);
     }
-    return fetch(url, { ...options, headers });
+    return fetch(url, { ...options, headers, credentials: "include" });
   };
 
   let response: Response;
   try {
-    response = await execute(token);
+    response = await execute();
   } catch (err) {
     throw new ApiError({
       status: 0,
@@ -246,8 +198,8 @@ export async function request<T>(
   // Attempt silent refresh on 401 (unless this is an auth endpoint).
   if (response.status === 401 && !options.skipAuth) {
     try {
-      const newToken = await refreshAccessToken(getBaseUrl());
-      response = await execute(newToken);
+      await refreshAccessToken(getBaseUrl());
+      response = await execute();
     } catch {
       redirectToLogin();
       throw new ApiError({

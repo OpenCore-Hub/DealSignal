@@ -11,20 +11,18 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let token: string;
 let workspaceSlug: string;
 
 test.describe("P0 user flow (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
-    await seedDocument(token, workspaceSlug);
+    await seedDocument(workspaceSlug);
   });
 
   test("select workspace and upload a document", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
 
     await page.goto(`/${workspaceSlug}/documents/upload`);
     await expect(page.getByRole("heading", { name: "Upload Document" })).toBeVisible({ timeout: 10000 });
@@ -40,7 +38,7 @@ test.describe("P0 user flow (real backend)", () => {
 
   test("create a smart link via bundle pipeline", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
 
     await page.goto(`/${workspaceSlug}/links/new`);
 

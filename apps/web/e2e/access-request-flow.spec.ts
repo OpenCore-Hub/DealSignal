@@ -14,8 +14,8 @@ const visitorEmail = "visitor@example.com";
 test.describe("link access request flow (real backend)", () => {
   test.beforeAll(async () => {
     seed = await seedRealBackend();
-    const doc = await seedDocument(seed.token, seed.workspaceSlug);
-    const link = await seedLink(seed.token, seed.workspaceSlug, doc.id, {
+    const doc = await seedDocument(seed.workspaceSlug);
+    const link = await seedLink(seed.workspaceSlug, doc.id, {
       downloadEnabled: true,
       requireEmail: true,
     });
@@ -27,7 +27,6 @@ test.describe("link access request flow (real backend)", () => {
       `/api/workspaces/${seed.workspaceSlug}/links/${linkId}/access-rules`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${seed.token}` },
         body: JSON.stringify({
           rules: [{ ruleType: "domain", value: "allowed.com", action: "allow" }],
         }),
@@ -58,7 +57,7 @@ test.describe("link access request flow (real backend)", () => {
     // 3. Creator lists access requests and finds the pending one.
     const listRes = await apiFetch(
       `/api/workspaces/${seed.workspaceSlug}/links/${linkId}/access-requests`,
-      { headers: { Authorization: `Bearer ${seed.token}` } }
+      { headers: { } }
     );
     expect(listRes.ok).toBe(true);
     const listBody = (await listRes.json()) as {
@@ -73,7 +72,6 @@ test.describe("link access request flow (real backend)", () => {
       `/api/workspaces/${seed.workspaceSlug}/links/${linkId}/access-requests/${request!.ID}/approve`,
       {
         method: "POST",
-        headers: { Authorization: `Bearer ${seed.token}` },
       }
     );
     expect(approveRes.ok).toBe(true);
@@ -86,7 +84,7 @@ test.describe("link access request flow (real backend)", () => {
     // 5. Approval creates an allow-rule for the visitor email.
     const rulesRes = await apiFetch(
       `/api/workspaces/${seed.workspaceSlug}/links/${linkId}/access-rules`,
-      { headers: { Authorization: `Bearer ${seed.token}` } }
+      { headers: { } }
     );
     expect(rulesRes.ok).toBe(true);
     const rulesBody = (await rulesRes.json()) as {
@@ -101,7 +99,7 @@ test.describe("link access request flow (real backend)", () => {
     // 6. Approval creates an invitation for the visitor.
     const invRes = await apiFetch(
       `/api/workspaces/${seed.workspaceSlug}/links/${linkId}/invitations`,
-      { headers: { Authorization: `Bearer ${seed.token}` } }
+      { headers: { } }
     );
     expect(invRes.ok).toBe(true);
     const invBody = (await invRes.json()) as {

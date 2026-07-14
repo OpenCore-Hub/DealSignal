@@ -79,18 +79,17 @@ function WorkspaceLayout() {
   );
 }
 
-function getAuthToken(): string | null {
-  if (typeof window === "undefined") return null;
+function hasAuthSession(): boolean {
+  if (typeof window === "undefined") return false;
   try {
-    return localStorage.getItem("access_token");
+    return document.cookie.split(";").some((c) => c.trim().startsWith("auth_session="));
   } catch {
-    return null;
+    return false;
   }
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const token = getAuthToken();
-  if (!token) {
+  if (!hasAuthSession()) {
     return <Navigate to={`/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`} replace />;
   }
   return <>{children}</>;

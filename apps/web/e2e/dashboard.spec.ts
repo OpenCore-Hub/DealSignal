@@ -6,21 +6,19 @@ import {
   attachDebug,
 } from "./real-helpers";
 
-let token: string;
 let workspaceSlug: string;
 
 test.describe("Dashboard (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
     // Upload a document so dashboard has data
-    await seedDocument(token, workspaceSlug);
+    await seedDocument(workspaceSlug);
   });
 
   test("renders dashboard heading and summary cards", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
     await expect(page.getByRole("heading", { name: "Deal Radar" })).toBeVisible({ timeout: 10000 });
     await expect(page.getByText("Hot signals", { exact: true })).toBeVisible({ timeout: 5000 });
@@ -29,7 +27,7 @@ test.describe("Dashboard (real backend)", () => {
 
   test("renders signal and recent document sections", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
 
     await expect(page.getByText("Signals", { exact: true }).first()).toBeVisible({ timeout: 10000 });
@@ -40,7 +38,7 @@ test.describe("Dashboard (real backend)", () => {
 
   test("navigates from recent documents to document detail", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
 
     // Find the recently uploaded document in the list
@@ -55,7 +53,7 @@ test.describe("Dashboard (real backend)", () => {
 
   test("dashboard loads actions section", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/dashboard`);
 
     // The actions panel should be visible

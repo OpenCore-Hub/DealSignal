@@ -2,8 +2,16 @@ package auth
 
 import (
 	"net/http"
+	"strings"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/gin-gonic/gin"
+)
+
+const (
+	accessTokenCookie  = "access_token"
+	refreshTokenCookie = "refresh_token"
+	authSessionCookie  = "auth_session"
 )
 
 type registerRequest struct {
@@ -21,24 +29,18 @@ type refreshRequest struct {
 }
 
 type logoutRequest struct {
-	RefreshToken string `json:"refresh_token" binding:"required"`
-}
-
-type authResponse struct {
-	User         User   `json:"user"`
-	AccessToken  string `json:"access_token"`
 	RefreshToken string `json:"refresh_token"`
-	ExpiresIn    int64  `json:"expires_in"`
 }
 
 // Handler exposes auth HTTP endpoints.
 type Handler struct {
 	service *Service
+	cfg     *config.Config
 }
 
 // NewHandler creates an auth handler.
-func NewHandler(s *Service) *Handler {
-	return &Handler{service: s}
+func NewHandler(s *Service, cfg *config.Config) *Handler {
+	return &Handler{service: s, cfg: cfg}
 }
 
 // RegisterRoutes mounts auth routes.
@@ -51,13 +53,45 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/verify-email/:token", h.VerifyEmail)
 }
 
-func pairResponse(u User, pair TokenPair) authResponse {
-	return authResponse{
-		User:         u,
-		AccessToken:  pair.AccessToken,
-		RefreshToken: pair.RefreshToken,
-		ExpiresIn:    pair.ExpiresIn,
+func (h *Handler) cookieSettings() (secure bool, sameSite http.SameSite) {
+	secure = strings.ToLower(h.cfg.AppEnv) == "production"
+	if secure {
+		return true, http.SameSiteNoneMode
 	}
+	return false, http.SameSiteLaxMode
+}
+
+func (h *Handler) setAuthCookies(c *gin.Context, pair TokenPair) {
+	secure, sameSite := h.cookieSettings()
+	c.SetSameSite(sameSite)
+	c.SetCookie(accessTokenCookie, pair.AccessToken, int(pair.ExpiresIn), "/", "", secure, true)
+	c.SetCookie(refreshTokenCookie, pair.RefreshToken, int(refreshTokenDuration.Seconds()), "/", "", secure, true)
+	c.SetCookie(authSessionCookie, "1", int(refreshTokenDuration.Seconds()), "/", "", secure, false)
+}
+
+func (h *Handler) clearAuthCookies(c *gin.Context) {
+	secure, sameSite := h.cookieSettings()
+	c.SetSameSite(sameSite)
+	c.SetCookie(accessTokenCookie, "", -1, "/", "", secure, true)
+	c.SetCookie(refreshTokenCookie, "", -1, "/", "", secure, true)
+	c.SetCookie(authSessionCookie, "", -1, "/", "", secure, false)
+}
+
+func accessTokenFromRequest(c *gin.Context) string {
+	if header := c.GetHeader("Authorization"); len(header) > 7 {
+		return header[7:]
+	}
+	token, _ := c.Cookie(accessTokenCookie)
+	return token
+}
+
+func refreshTokenFromRequest(c *gin.Context) string {
+	if token, err := c.Cookie(refreshTokenCookie); err == nil && token != "" {
+		return token
+	}
+	var req refreshRequest
+	_ = c.ShouldBindJSON(&req)
+	return req.RefreshToken
 }
 
 // Register handles user registration.
@@ -83,7 +117,8 @@ func (h *Handler) Register(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusCreated, pairResponse(user, pair))
+	h.setAuthCookies(c, pair)
+	c.JSON(http.StatusCreated, gin.H{"user": user, "expires_in": pair.ExpiresIn})
 }
 
 // Login handles user login.
@@ -104,32 +139,26 @@ func (h *Handler) Login(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, pairResponse(user, pair))
+	h.setAuthCookies(c, pair)
+	c.JSON(http.StatusOK, gin.H{"user": user, "expires_in": pair.ExpiresIn})
 }
 
-// Refresh issues a new token pair from a refresh token.
+// Refresh issues a new token pair from the refresh cookie.
 func (h *Handler) Refresh(c *gin.Context) {
-	var req refreshRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
-		return
-	}
-	if req.RefreshToken == "" {
+	refreshToken := refreshTokenFromRequest(c)
+	if refreshToken == "" {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "missing refresh token"})
 		return
 	}
 
-	pair, err := h.service.Refresh(c.Request.Context(), req.RefreshToken)
+	pair, err := h.service.Refresh(c.Request.Context(), refreshToken)
 	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid or expired refresh token"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"access_token":  pair.AccessToken,
-		"refresh_token": pair.RefreshToken,
-		"expires_in":    pair.ExpiresIn,
-	})
+	h.setAuthCookies(c, pair)
+	c.JSON(http.StatusOK, gin.H{"expires_in": pair.ExpiresIn})
 }
 
 // VerifyEmail verifies a user's email address using a single-use token.
@@ -148,24 +177,21 @@ func (h *Handler) VerifyEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"code": "verified", "message": "email verified successfully"})
 }
 
-// Logout revokes the current access and refresh tokens.
+// Logout revokes the current access and refresh tokens and clears cookies.
 func (h *Handler) Logout(c *gin.Context) {
-	var req logoutRequest
-	_ = c.ShouldBindJSON(&req)
-
-	accessToken := ""
-	if header := c.GetHeader("Authorization"); len(header) > 7 {
-		accessToken = header[7:]
-	}
+	accessToken := accessTokenFromRequest(c)
 	if accessToken == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": "missing access token"})
 		return
 	}
 
-	if err := h.service.Logout(c.Request.Context(), accessToken, req.RefreshToken); err != nil {
+	refreshToken := refreshTokenFromRequest(c)
+
+	if err := h.service.Logout(c.Request.Context(), accessToken, refreshToken); err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid token"})
 		return
 	}
 
+	h.clearAuthCookies(c)
 	c.JSON(http.StatusOK, gin.H{"code": "ok", "message": "logged out"})
 }

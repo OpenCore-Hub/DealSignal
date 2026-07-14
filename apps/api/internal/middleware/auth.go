@@ -18,24 +18,20 @@ const (
 	userIDKey      = "userID"
 	workspaceIDKey = "workspaceID"
 	tenantIDKey    = "tenantID"
+
+	accessTokenCookie = "access_token"
 )
 
 // Auth creates a middleware that validates the JWT bearer token and injects the user ID into the context.
 func Auth(validator TokenValidator) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		header := c.GetHeader("Authorization")
-		if header == "" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "missing authorization header"})
+		token := tokenFromRequest(c)
+		if token == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "missing authorization"})
 			return
 		}
 
-		parts := strings.SplitN(header, " ", 2)
-		if len(parts) != 2 || strings.ToLower(parts[0]) != "bearer" {
-			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid authorization header"})
-			return
-		}
-
-		claims, err := validator.ValidateAccessToken(c.Request.Context(), parts[1])
+		claims, err := validator.ValidateAccessToken(c.Request.Context(), token)
 		_ = claims
 		if err != nil {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid or expired token"})
@@ -45,6 +41,20 @@ func Auth(validator TokenValidator) gin.HandlerFunc {
 		c.Set(userIDKey, claims.Subject)
 		c.Next()
 	}
+}
+
+func tokenFromRequest(c *gin.Context) string {
+	if header := c.GetHeader("Authorization"); header != "" {
+		parts := strings.SplitN(header, " ", 2)
+		if len(parts) == 2 && strings.ToLower(parts[0]) == "bearer" {
+			return parts[1]
+		}
+	}
+	token, err := c.Cookie(accessTokenCookie)
+	if err == nil && token != "" {
+		return token
+	}
+	return ""
 }
 
 // UserIDFrom returns the authenticated user ID from the gin context.

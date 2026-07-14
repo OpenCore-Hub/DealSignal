@@ -10,9 +10,9 @@ let shortUrl: string;
 test.describe("public link viewer (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    const doc = await seedDocument(seed.token, seed.workspaceSlug);
+    const doc = await seedDocument(seed.workspaceSlug);
     // Create a public link (no gate) so the viewer loads directly
-    const link = await seedLink(seed.token, seed.workspaceSlug, doc.id, {
+    const link = await seedLink(seed.workspaceSlug, doc.id, {
       permissionType: "public",
       downloadEnabled: true,
     });

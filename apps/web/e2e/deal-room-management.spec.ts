@@ -6,17 +6,15 @@
 import { test, expect } from "@playwright/test";
 import { seedRealBackend, seedDocument, seedDealRoom, apiFetch } from "./real-helpers";
 
-let token: string;
 let workspaceSlug: string;
 let roomId: string;
 
 test.describe("Deal room management (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
-    const doc = await seedDocument(token, workspaceSlug);
-    const room = await seedDealRoom(token, workspaceSlug, {
+    const doc = await seedDocument(workspaceSlug);
+    const room = await seedDealRoom(workspaceSlug, {
       name: "Management Test Room",
       templateType: "seed",
       documentIds: [doc.id],
@@ -28,7 +26,6 @@ test.describe("Deal room management (real backend)", () => {
   test("creates a deal room folder", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/folders`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ name: "Legal Documents" }),
     });
     expect([200, 201]).toContain(res.status);
@@ -37,7 +34,6 @@ test.describe("Deal room management (real backend)", () => {
   test("renames a deal room folder", async () => {
     // First ensure we have a folder
     const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/folders`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     const folders = (await listRes.json()) as { data: { path: string }[] };
     const target = folders.data.find((f) => f.path !== "/general") ?? folders.data[0];
@@ -47,7 +43,6 @@ test.describe("Deal room management (real backend)", () => {
       `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/folders/${encodedPath}`,
       {
         method: "PATCH",
-        headers: { Authorization: `Bearer ${token}` },
         body: JSON.stringify({ name: "Renamed Folder" }),
       }
     );
@@ -57,7 +52,6 @@ test.describe("Deal room management (real backend)", () => {
   // ── Documents ───────────────────────────────────────────────
   test("lists deal room documents", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { data: unknown[] };
@@ -65,10 +59,9 @@ test.describe("Deal room management (real backend)", () => {
   });
 
   test("adds a document to deal room", async () => {
-    const doc = await seedDocument(token, workspaceSlug);
+    const doc = await seedDocument(workspaceSlug);
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ document_id: doc.id, folder_path: "/general" }),
     });
     expect([200, 201]).toContain(res.status);
@@ -77,7 +70,6 @@ test.describe("Deal room management (real backend)", () => {
   test("updates deal room document position", async () => {
     // Get the first document
     const docsRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     const docs = (await docsRes.json()) as { data: { documents: { id: string }[] }[] };
     const firstDoc = docs.data.flatMap((f) => f.documents)[0];
@@ -86,7 +78,6 @@ test.describe("Deal room management (real backend)", () => {
         `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents/${firstDoc.id}`,
         {
           method: "PATCH",
-          headers: { Authorization: `Bearer ${token}` },
           body: JSON.stringify({ sort_order: 999 }),
         }
       );
@@ -96,10 +87,9 @@ test.describe("Deal room management (real backend)", () => {
 
   test("removes a document from deal room", async () => {
     // Add a fresh document just for removal
-    const doc = await seedDocument(token, workspaceSlug);
+    const doc = await seedDocument(workspaceSlug);
     const addRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ document_id: doc.id }),
     });
     if (addRes.ok) {
@@ -108,7 +98,6 @@ test.describe("Deal room management (real backend)", () => {
         `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents/${added.id}`,
         {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
         }
       );
       expect([200, 204, 404]).toContain(delRes.status);
@@ -119,7 +108,6 @@ test.describe("Deal room management (real backend)", () => {
   test("sets folder permissions", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/folder-permissions`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         email: `perm-${Date.now()}@example.com`,
         folder_path: "/general",
@@ -132,7 +120,6 @@ test.describe("Deal room management (real backend)", () => {
   // ── Members ─────────────────────────────────────────────────
   test("lists deal room members", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/members`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
   });
@@ -141,7 +128,6 @@ test.describe("Deal room management (real backend)", () => {
     const email = `room-member-${Date.now()}@example.com`;
     const addRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/members`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ email, role: "viewer" }),
     });
     expect(addRes.ok).toBe(true);
@@ -153,7 +139,6 @@ test.describe("Deal room management (real backend)", () => {
       `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/members/${memberId}`,
       {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
       }
     );
     expect([200, 204]).toContain(delRes.status);
@@ -164,14 +149,12 @@ test.describe("Deal room management (real backend)", () => {
     // Create
     const createRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/links`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ name: "Room Share Link", download_enabled: true }),
     });
     expect([200, 201]).toContain(createRes.status);
 
     // List
     const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/links`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(listRes.ok).toBe(true);
   });

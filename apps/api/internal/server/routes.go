@@ -110,7 +110,7 @@ func (s *Server) registerRoutes() error {
 			auth.WithAppBaseURL(s.cfg.FrontendURL),
 			auth.WithVerificationTokenTTL(time.Duration(s.cfg.VerificationTokenTTLHours)*time.Hour),
 		)
-		authHandler := auth.NewHandler(authSvc)
+		authHandler := auth.NewHandler(authSvc, s.cfg)
 		authHandler.RegisterRoutes(api)
 
 		workspaceSvc := workspace.NewService(queries,

@@ -84,10 +84,12 @@ function generateId(prefix: string): string {
 function createTokenResponse(userId: string, email: string) {
   return {
     user: { id: userId, email, name: email.split("@")[0] },
-    access_token: `mock_access_${userId}`,
-    refresh_token: `mock_refresh_${userId}`,
     expires_in: 900,
   };
+}
+
+function authSessionCookieHeader() {
+  return { "Set-Cookie": "auth_session=1; Path=/; SameSite=Lax" };
 }
 
 function validatePassword(password: string): boolean {
@@ -168,7 +170,7 @@ export const handlers = [
     }
     const id = generateId("u");
     mockUsers.set(id, { id, email, password, name: email.split("@")[0] });
-    return HttpResponse.json(createTokenResponse(id, email), { status: 201 });
+    return HttpResponse.json(createTokenResponse(id, email), { status: 201, headers: authSessionCookieHeader() });
   }),
 
   http.post("*/api/auth/login", async ({ request }) => {
@@ -178,26 +180,17 @@ export const handlers = [
     if (!user || user.password !== body.password) {
       return HttpResponse.json({ code: "unauthorized", message: "invalid email or password" }, { status: 401 });
     }
-    return HttpResponse.json(createTokenResponse(user.id, user.email));
+    return HttpResponse.json(createTokenResponse(user.id, user.email), { headers: authSessionCookieHeader() });
   }),
 
-  http.post("*/api/auth/refresh", async ({ request }) => {
-    const body = (await request.json()) as { refresh_token?: string };
-    const token = body.refresh_token ?? "";
-    const userId = token.replace("mock_refresh_", "");
-    const user = mockUsers.get(userId);
-    if (!user) {
-      return HttpResponse.json({ code: "unauthorized", message: "invalid or expired refresh token" }, { status: 401 });
-    }
-    return HttpResponse.json({
-      access_token: `mock_access_${user.id}`,
-      refresh_token: `mock_refresh_${user.id}`,
-      expires_in: 900,
-    });
+  http.post("*/api/auth/refresh", async () => {
+    return HttpResponse.json({ expires_in: 900 }, { headers: authSessionCookieHeader() });
   }),
 
   http.post("*/api/auth/logout", async () => {
-    return HttpResponse.json({ code: "ok", message: "logged out" });
+    return HttpResponse.json({ code: "ok", message: "logged out" }, {
+      headers: { "Set-Cookie": "auth_session=; Path=/; Max-Age=0; SameSite=Lax" },
+    });
   }),
 
   http.get("*/api/auth/verify-email/:token", () => {

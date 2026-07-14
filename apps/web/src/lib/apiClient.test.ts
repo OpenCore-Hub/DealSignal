@@ -13,34 +13,6 @@ import { http, HttpResponse } from "msw";
 import { server } from "@/lib/mocks/server";
 import { ApiError, request } from "@/lib/apiClient";
 
-class MemoryStorage implements Storage {
-  private store = new Map<string, string>();
-
-  get length() {
-    return this.store.size;
-  }
-
-  key(index: number): string | null {
-    return Array.from(this.store.keys())[index] ?? null;
-  }
-
-  getItem(key: string): string | null {
-    return this.store.get(key) ?? null;
-  }
-
-  setItem(key: string, value: string): void {
-    this.store.set(key, String(value));
-  }
-
-  removeItem(key: string): void {
-    this.store.delete(key);
-  }
-
-  clear(): void {
-    this.store.clear();
-  }
-}
-
 describe("apiClient", () => {
   beforeAll(() => {
     import.meta.env.VITE_API_BASE_URL = "http://localhost";
@@ -49,11 +21,7 @@ describe("apiClient", () => {
   afterEach(() => server.resetHandlers());
   afterAll(() => server.close());
 
-  const storage = new MemoryStorage();
-
   beforeEach(() => {
-    vi.stubGlobal("localStorage", storage);
-    storage.clear();
     Object.defineProperty(navigator, "language", {
       configurable: true,
       value: "en-US",
@@ -219,8 +187,7 @@ describe("apiClient", () => {
     expect(data.ok).toBe(true);
   });
 
-  it("uses the stored access token by default", async () => {
-    localStorage.setItem("access_token", "stored-token");
+  it("sends credentials by default", async () => {
     let captured: Request | null = null;
     server.use(
       http.get("*/api/workspaces/acme/client-test/token", ({ request }) => {
@@ -230,34 +197,25 @@ describe("apiClient", () => {
     );
 
     await request("acme", "/client-test/token");
-    expect(captured!.headers.get("Authorization")).toBe("Bearer stored-token");
+    expect(captured!.credentials).toBe("include");
+    expect(captured!.headers.get("Authorization")).toBeNull();
   });
 
-  it("refreshes the token on 401 and retries the request", async () => {
-    localStorage.setItem("access_token", "old-token");
-    localStorage.setItem("refresh_token", "refresh-1");
-
+  it("refreshes the session on 401 and retries the request", async () => {
     let originalCalls = 0;
     let refreshCaptured: Request | null = null;
 
     server.use(
-      http.get("*/api/workspaces/acme/client-test/protected", ({ request }) => {
+      http.get("*/api/workspaces/acme/client-test/protected", () => {
         originalCalls++;
-        if (request.headers.get("Authorization") !== "Bearer new-token") {
+        if (originalCalls === 1) {
           return new HttpResponse(null, { status: 401 });
         }
         return HttpResponse.json({ ok: true });
       }),
-      http.post("*/api/auth/refresh", async ({ request }) => {
+      http.post("*/api/auth/refresh", ({ request }) => {
         refreshCaptured = request;
-        const body = (await request.json()) as { refresh_token: string };
-        if (body.refresh_token !== "refresh-1") {
-          return new HttpResponse(null, { status: 401 });
-        }
-        return HttpResponse.json({
-          access_token: "new-token",
-          refresh_token: "refresh-2",
-        });
+        return HttpResponse.json({ expires_in: 900 });
       })
     );
 
@@ -265,14 +223,10 @@ describe("apiClient", () => {
     expect(data.ok).toBe(true);
     expect(originalCalls).toBe(2);
     expect(refreshCaptured).not.toBeNull();
-    expect(localStorage.getItem("access_token")).toBe("new-token");
-    expect(localStorage.getItem("refresh_token")).toBe("refresh-2");
+    expect(refreshCaptured!.credentials).toBe("include");
   });
 
-  it("redirects to login when token refresh fails", async () => {
-    localStorage.setItem("access_token", "old-token");
-    localStorage.setItem("refresh_token", "refresh-1");
-
+  it("redirects to login when session refresh fails", async () => {
     const locationSpy = { href: "", pathname: "/", search: "" };
     vi.stubGlobal("location", locationSpy);
 
@@ -288,14 +242,11 @@ describe("apiClient", () => {
     ).rejects.toSatisfy((err: ApiError) => err instanceof ApiError && err.code === "unauthorized");
 
     expect(locationSpy.href).toBe("/login");
-    expect(localStorage.getItem("access_token")).toBeNull();
-    expect(localStorage.getItem("refresh_token")).toBeNull();
 
     vi.unstubAllGlobals();
   });
 
   it("honours skipAuth and does not send the Authorization header", async () => {
-    localStorage.setItem("access_token", "stored-token");
     let captured: Request | null = null;
     server.use(
       http.get("*/api/workspaces/acme/client-test/public", ({ request }) => {
@@ -306,6 +257,7 @@ describe("apiClient", () => {
 
     await request("acme", "/client-test/public", { skipAuth: true });
     expect(captured!.headers.get("Authorization")).toBeNull();
+    expect(captured!.credentials).toBe("include");
   });
 
   it("does not override Content-Type for FormData bodies", async () => {

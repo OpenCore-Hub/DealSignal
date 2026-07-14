@@ -1,37 +1,5 @@
 import { test, expect } from "@playwright/test";
-
-const API_BASE = process.env.REAL_API_BASE_URL || "http://localhost:8080";
-
-async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API_BASE}${input}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
-    ...init,
-  });
-}
-
-async function seedUserAndWorkspace() {
-  const ts = Date.now();
-  const email = `e2e-auth-${ts}@example.com`;
-  const password = "Password123!";
-
-  // Register
-  const regRes = await apiFetch("/api/auth/register", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-  });
-  if (!regRes.ok) throw new Error(`register failed: ${regRes.status} ${await regRes.text()}`);
-  const { access_token: token } = (await regRes.json()) as { access_token: string };
-
-  // Create workspace
-  const slug = `e2e-auth-${ts}`;
-  await apiFetch("/api/workspaces", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ name: "Auth E2E", slug }),
-  });
-
-  return { email, password, token, slug };
-}
+import { seedRealBackend, authenticatePage } from "./real-helpers";
 
 test.describe("auth & workspace flows (real backend)", () => {
   test("register with validation and then log in", async ({ page }) => {
@@ -70,11 +38,11 @@ test.describe("auth & workspace flows (real backend)", () => {
   });
 
   test("log out returns to login", async ({ page }) => {
-    const seed = await seedUserAndWorkspace();
+    const seed = await seedRealBackend();
 
-    // Inject token and go to dashboard
-    await page.addInitScript((t: string) => localStorage.setItem("access_token", t), seed.token);
-    await page.goto(`/${seed.slug}/dashboard`);
+    // Add cookies and go to dashboard
+    await authenticatePage(page);
+    await page.goto(`/${seed.workspaceSlug}/dashboard`);
     await expect(page.getByRole("heading", { name: "Deal Radar" })).toBeVisible({ timeout: 10000 });
 
     // Log out
@@ -85,14 +53,14 @@ test.describe("auth & workspace flows (real backend)", () => {
   });
 
   test("workspace list and creation", async ({ page }) => {
-    const seed = await seedUserAndWorkspace();
+    const seed = await seedRealBackend();
 
-    // Go to root with token
-    await page.addInitScript((t: string) => localStorage.setItem("access_token", t), seed.token);
+    // Go to root with cookies
+    await authenticatePage(page);
     await page.goto("/");
 
     // Should auto-redirect to the only workspace dashboard
-    await expect(page).toHaveURL(new RegExp(`/${seed.slug}/dashboard`), { timeout: 10000 });
+    await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/dashboard`), { timeout: 10000 });
 
     // Visit workspace create page
     await page.goto("/workspaces/new");

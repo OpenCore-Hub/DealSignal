@@ -6,7 +6,6 @@
 import { test, expect } from "@playwright/test";
 import { seedRealBackend, seedDocument, seedLink, apiFetch } from "./real-helpers";
 
-let testToken: string;
 let workspaceSlug: string;
 let verificationToken: string;
 let publicToken: string;
@@ -14,18 +13,17 @@ let publicToken: string;
 test.describe("Public viewer advanced (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    testToken = seed.token;
     workspaceSlug = seed.workspaceSlug;
-    const doc = await seedDocument(testToken, workspaceSlug);
+    const doc = await seedDocument(workspaceSlug);
     // Link used for email-verification gate tests.
-    const verificationLink = await seedLink(testToken, workspaceSlug, doc.id, {
+    const verificationLink = await seedLink(workspaceSlug, doc.id, {
       permissionType: "public",
       requireEmailVerification: true,
       downloadEnabled: true,
     });
     verificationToken = verificationLink.publicToken;
     // Public (non-gated) link used for event recording and asset access.
-    const publicLink = await seedLink(testToken, workspaceSlug, doc.id, {
+    const publicLink = await seedLink(workspaceSlug, doc.id, {
       permissionType: "public",
       downloadEnabled: true,
     });

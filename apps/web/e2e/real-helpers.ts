@@ -7,7 +7,7 @@
  *   let seed: Awaited<ReturnType<typeof seedRealBackend>>;
  *   test.beforeAll(async () => { seed = await seedRealBackend(); });
  *   test("...", async ({ page }) => {
- *     await authenticatePage(page, seed.token);
+ *     await authenticatePage(page);
  *     await page.goto(`/${seed.workspaceSlug}/dashboard`);
  *   });
  */
@@ -21,12 +21,12 @@ const __dirname = path.dirname(__filename);
 
 // ── Config ────────────────────────────────────────────────────────
 const API_BASE = process.env.REAL_API_BASE_URL || "http://localhost:8080";
+const API_URL = new URL(API_BASE);
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const PDF_PATH = path.join(FIXTURES_DIR, "sample.pdf");
 
 // ── Types ─────────────────────────────────────────────────────────
 interface SeedResult {
-  token: string;
   workspaceSlug: string;
   workspaceId: string;
   tenantId: string;
@@ -55,18 +55,151 @@ interface SeedDealRoom {
 interface SeedContact {
   id: string;
   email: string;
+  name?: string;
+}
+
+interface ParsedCookie {
+  name: string;
+  value: string;
+  domain?: string;
+  path?: string;
+  httpOnly?: boolean;
+  secure?: boolean;
+  expires?: number; // Unix seconds
+  sameSite?: "Strict" | "Lax" | "None";
+}
+
+// ── Cookie jar ────────────────────────────────────────────────────
+let cookieJar: ParsedCookie[] = [];
+
+export function getCookieJar(): string[] {
+  return cookieJar.map((c) => `${c.name}=${c.value}`);
+}
+
+export function clearCookieJar(): void {
+  cookieJar = [];
+}
+
+function parseSameSite(
+  value: string | undefined
+): "Strict" | "Lax" | "None" | undefined {
+  if (!value) return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "strict") return "Strict";
+  if (normalized === "lax") return "Lax";
+  if (normalized === "none") return "None";
+  return undefined;
+}
+
+function parseSetCookie(setCookie: string): ParsedCookie | null {
+  const parts = setCookie.split(";").map((p) => p.trim());
+  const first = parts[0];
+  if (!first) return null;
+
+  const eq = first.indexOf("=");
+  if (eq < 0) return null;
+
+  const name = first.slice(0, eq).trim();
+  let value = first.slice(eq + 1).trim();
+  // Strip surrounding quotes if present
+  if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
+    value = value.slice(1, -1);
+  }
+
+  const cookie: ParsedCookie = { name, value };
+
+  for (let i = 1; i < parts.length; i++) {
+    const part = parts[i];
+    const [attrName, attrValue = ""] = part.split("=").map((s) => s.trim());
+    const key = attrName.toLowerCase();
+    if (key === "path") {
+      cookie.path = attrValue || "/";
+    } else if (key === "domain") {
+      cookie.domain = attrValue;
+    } else if (key === "httponly") {
+      cookie.httpOnly = true;
+    } else if (key === "secure") {
+      cookie.secure = true;
+    } else if (key === "samesite") {
+      cookie.sameSite = parseSameSite(attrValue);
+    } else if (key === "max-age") {
+      const seconds = parseInt(attrValue, 10);
+      if (!isNaN(seconds)) {
+        cookie.expires = Math.floor(Date.now() / 1000) + seconds;
+      }
+    } else if (key === "expires") {
+      // If Max-Age is also present it takes precedence; we'll overwrite below
+      // if needed, but for now set from Expires.
+      const d = new Date(attrValue);
+      if (!isNaN(d.getTime())) {
+        cookie.expires = Math.floor(d.getTime() / 1000);
+      }
+    }
+  }
+
+  return cookie;
+}
+
+function updateCookieJar(setCookieHeader: string | null | undefined): void {
+  if (!setCookieHeader) return;
+
+  const parsed = parseSetCookie(setCookieHeader);
+  if (!parsed) return;
+
+  cookieJar = cookieJar.filter(
+    (c) => c.name.toLowerCase() !== parsed.name.toLowerCase()
+  );
+
+  // Empty value with an explicit expiration in the past means deletion.
+  if (parsed.value || parsed.expires === undefined || parsed.expires > Date.now() / 1000) {
+    cookieJar.push(parsed);
+  }
+}
+
+function updateJarFromResponse(res: Response): void {
+  const headers = res.headers as unknown as Headers;
+  let setCookies: string[] = [];
+  if (typeof headers.getSetCookie === "function") {
+    setCookies = headers.getSetCookie();
+  } else {
+    const combined = headers.get("Set-Cookie");
+    if (combined) {
+      // Best-effort split; backend cookies should not contain unquoted commas.
+      setCookies = combined.split(",").map((s) => s.trim());
+    }
+  }
+  for (const c of setCookies) {
+    updateCookieJar(c);
+  }
 }
 
 // ── API helpers ───────────────────────────────────────────────────
 export async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
-  return fetch(`${API_BASE}${input}`, {
-    headers: { "Content-Type": "application/json", ...init?.headers },
+  const headers = new Headers(init?.headers);
+
+  const body = init?.body;
+  const hasContentType = headers.has("Content-Type");
+  const isFormData = body instanceof FormData;
+  if (!hasContentType && !isFormData) {
+    headers.set("Content-Type", "application/json");
+  }
+
+  const cookieHeader = getCookieJar().join("; ");
+  if (cookieHeader) {
+    headers.set("Cookie", cookieHeader);
+  }
+
+  const res = await fetch(`${API_BASE}${input}`, {
     ...init,
+    headers,
   });
+
+  updateJarFromResponse(res);
+  return res;
 }
 
-export async function apiGetJson<T>(path: string, token: string): Promise<T> {
-  const res = await apiFetch(path, { headers: { Authorization: `Bearer ${token}` } });
+export async function apiGetJson<T>(path: string): Promise<T> {
+  const res = await apiFetch(path);
   if (!res.ok) throw new Error(`GET ${path} failed: ${res.status} ${await res.text()}`);
   return res.json() as Promise<T>;
 }
@@ -82,14 +215,31 @@ export function attachDebug(page: Page) {
   });
 }
 
-export async function authenticatePage(page: Page, token: string) {
-  await page.addInitScript((t: string) => {
-    localStorage.setItem("access_token", t);
-  }, token);
+export async function authenticatePage(page: Page) {
+  if (cookieJar.length === 0) {
+    console.warn("[authenticatePage] cookie jar is empty; browser will not be authenticated");
+    return;
+  }
+
+  const domain = API_URL.hostname;
+  const playwrightCookies = cookieJar.map((c) => ({
+    name: c.name,
+    value: c.value,
+    domain: c.domain || domain,
+    path: c.path || "/",
+    httpOnly: c.httpOnly ?? false,
+    secure: c.secure ?? false,
+    expires: c.expires,
+    sameSite: c.sameSite,
+  }));
+
+  await page.context().addCookies(playwrightCookies);
 }
 
 // ── Comprehensive seed ────────────────────────────────────────────
 export async function seedRealBackend(): Promise<SeedResult> {
+  clearCookieJar();
+
   const ts = Date.now();
   const email = `e2e-${ts}@example.com`;
   const password = "Password123!";
@@ -100,34 +250,31 @@ export async function seedRealBackend(): Promise<SeedResult> {
     body: JSON.stringify({ email, password }),
   });
   if (!regRes.ok) throw new Error(`register failed: ${regRes.status} ${await regRes.text()}`);
-  const reg = (await regRes.json()) as { user: { id: string }; access_token: string };
-  const token = reg.access_token;
+  const reg = (await regRes.json()) as { user: { id: string } };
   const userId = reg.user.id;
 
   // 2. Create workspace
   const slug = `e2e-${ts}`;
   const wsRes = await apiFetch("/api/workspaces", {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ name: "E2E Workspace", slug, brand_color: "#0055ff" }),
   });
   if (!wsRes.ok) throw new Error(`workspace create failed: ${wsRes.status} ${await wsRes.text()}`);
   const ws = (await wsRes.json()) as { id: string; tenant_id?: string };
   const workspaceId = ws.id;
 
-  return { token, workspaceSlug: slug, workspaceId, tenantId: "", userId };
+  return { workspaceSlug: slug, workspaceId, tenantId: ws.tenant_id ?? "", userId };
 }
 
 // ── Document upload + wait for ingestion ──────────────────────────
-export async function seedDocument(token: string, workspaceSlug: string): Promise<SeedDocument> {
+export async function seedDocument(workspaceSlug: string): Promise<SeedDocument> {
   const buffer = fs.readFileSync(PDF_PATH);
   const file = new File([buffer], "sample.pdf", { type: "application/pdf" });
   const form = new FormData();
   form.append("file", file);
 
-  const uploadRes = await fetch(`${API_BASE}/api/workspaces/${workspaceSlug}/documents`, {
+  const uploadRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: form,
   });
   if (!uploadRes.ok) {
@@ -140,8 +287,7 @@ export async function seedDocument(token: string, workspaceSlug: string): Promis
   for (let i = 0; i < 30; i++) {
     await sleep(1000);
     const statusRes = await apiFetch(
-      `/api/workspaces/${workspaceSlug}/documents/${docId}/status`,
-      { headers: { Authorization: `Bearer ${token}` } }
+      `/api/workspaces/${workspaceSlug}/documents/${docId}/status`
     );
     if (!statusRes.ok) continue;
     const st = (await statusRes.json()) as { status: string; page_count?: number };
@@ -157,7 +303,6 @@ export async function seedDocument(token: string, workspaceSlug: string): Promis
 
 // ── Link creation ─────────────────────────────────────────────────
 export async function seedLink(
-  token: string,
   workspaceSlug: string,
   documentId: string,
   opts: {
@@ -200,13 +345,12 @@ export async function seedLink(
   let contactEmail: string | undefined;
   if (opts.requireEmailVerification || opts.requireNda) {
     contactEmail = opts.contactEmail ?? `contact-${Date.now()}@example.com`;
-    const contact = await seedContact(token, workspaceSlug, contactEmail, opts.contactName ?? "E2E Contact");
+    const contact = await seedContact(workspaceSlug, contactEmail, opts.contactName ?? "E2E Contact");
     body.contact_ids = [contact.id];
   }
 
   const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`create link failed: ${res.status} ${await res.text()}`);
@@ -217,7 +361,6 @@ export async function seedLink(
 
 // ── Deal room creation (with folders + document) ──────────────────
 export async function seedDealRoom(
-  token: string,
   workspaceSlug: string,
   opts: {
     name?: string;
@@ -240,7 +383,6 @@ export async function seedDealRoom(
 
   const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`create deal room failed: ${res.status} ${await res.text()}`);
@@ -251,7 +393,6 @@ export async function seedDealRoom(
     for (const docId of opts.documentIds) {
       await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${room.id}/documents`, {
         method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
         body: JSON.stringify({ document_id: docId }),
       });
     }
@@ -262,14 +403,12 @@ export async function seedDealRoom(
 
 // ── Contact creation ──────────────────────────────────────────────
 export async function seedContact(
-  token: string,
   workspaceSlug: string,
   email: string,
   name?: string
 ): Promise<SeedContact> {
   const res = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ email, name }),
   });
   if (!res.ok) throw new Error(`create contact failed: ${res.status} ${await res.text()}`);

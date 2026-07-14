@@ -4,15 +4,13 @@
  *         GET /contacts/:id/activities
  */
 import { test, expect } from "@playwright/test";
-import { seedRealBackend, seedDocument, seedLink, apiFetch } from "./real-helpers";
+import { seedRealBackend, seedDocument, seedLink, apiFetch, authenticatePage } from "./real-helpers";
 
-let token: string;
 let workspaceSlug: string;
 
 test.describe("Contacts advanced (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
   });
 
@@ -20,7 +18,6 @@ test.describe("Contacts advanced (real backend)", () => {
     const email = `contact-${Date.now()}@example.com`;
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ email, name: "E2E Contact" }),
     });
     expect(res.ok).toBe(true);
@@ -31,7 +28,6 @@ test.describe("Contacts advanced (real backend)", () => {
 
   test("lists all contacts", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { data: { id: string; email: string }[] };
@@ -41,14 +37,12 @@ test.describe("Contacts advanced (real backend)", () => {
   test("gets a specific contact by ID", async () => {
     // First get list to find a contact
     const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     const list = (await listRes.json()) as { data: { id: string }[] };
 
     if (list.data.length > 0) {
       const contactId = list.data[0].id;
       const res = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts/${contactId}`, {
-        headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.ok).toBe(true);
       const contact = (await res.json()) as { id: string; email: string };
@@ -58,14 +52,12 @@ test.describe("Contacts advanced (real backend)", () => {
 
   test("gets contact activities (empty for new contact)", async () => {
     const listRes = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     const list = (await listRes.json()) as { data: { id: string }[] };
 
     if (list.data.length > 0) {
       const contactId = list.data[0].id;
       const res = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts/${contactId}/activities`, {
-        headers: { Authorization: `Bearer ${token}` },
       });
       expect(res.ok).toBe(true);
       const body = (await res.json()) as { data: unknown[] };
@@ -77,7 +69,7 @@ test.describe("Contacts advanced (real backend)", () => {
     page.on("console", (msg) => console.log(`[browser ${msg.type()}] ${msg.text()}`));
     page.on("pageerror", (err) => console.log(`[browser error] ${err.message}`));
 
-    await page.addInitScript((t: string) => localStorage.setItem("access_token", t), token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/contacts`);
     await expect(page.getByText(/contacts/i).first()).toBeVisible({ timeout: 10000 });
   });
@@ -90,13 +82,12 @@ test.describe("Contacts advanced (real backend)", () => {
     const email = `contact-page-${Date.now()}@example.com`;
     const createRes = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ email, name: "Page Test" }),
     });
     if (!createRes.ok) return;
     const contact = (await createRes.json()) as { id: string };
 
-    await page.addInitScript((t: string) => localStorage.setItem("access_token", t), token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/contacts/${contact.id}`);
     await page.waitForTimeout(2000);
 
@@ -109,8 +100,8 @@ test.describe("Contacts advanced (real backend)", () => {
 
   test("contacts appear after public link access by email", async () => {
     // Create a document and email-required link
-    const doc = await seedDocument(token, workspaceSlug);
-    const link = await seedLink(token, workspaceSlug, doc.id, {
+    const doc = await seedDocument(workspaceSlug);
+    const link = await seedLink(workspaceSlug, doc.id, {
       permissionType: "public",
       requireEmailVerification: true,
       downloadEnabled: true,
@@ -140,7 +131,6 @@ test.describe("Contacts advanced (real backend)", () => {
     // Wait and check if contact was auto-created
     await new Promise((r) => setTimeout(r, 2000));
     const contactsRes = await apiFetch(`/api/workspaces/${workspaceSlug}/contacts`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     const contacts = (await contactsRes.json()) as { data: { email: string }[] };
     const found = contacts.data.some((c) => c.email === visitorEmail);

@@ -5,20 +5,17 @@
 import { test, expect } from "@playwright/test";
 import { seedRealBackend, authenticatePage, apiFetch, attachDebug } from "./real-helpers";
 
-let token: string;
 let workspaceSlug: string;
 
 test.describe("Workspace settings & members (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
   });
 
   // ── Settings read/write ──────────────────────────────────────
   test("reads workspace settings", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/settings`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { name: string; slug: string };
@@ -29,7 +26,6 @@ test.describe("Workspace settings & members (real backend)", () => {
   test("updates workspace settings via API", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/settings`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         name: "E2E Workspace Updated",
         slug: workspaceSlug,
@@ -44,7 +40,6 @@ test.describe("Workspace settings & members (real backend)", () => {
     // Revert
     await apiFetch(`/api/workspaces/${workspaceSlug}/settings`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ name: "E2E Workspace", slug: workspaceSlug, brand_color: "#0055ff" }),
     });
   });
@@ -52,13 +47,11 @@ test.describe("Workspace settings & members (real backend)", () => {
   // ── Security settings ────────────────────────────────────────
   test("reads and updates security settings", async () => {
     const getRes = await apiFetch(`/api/workspaces/${workspaceSlug}/security`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(getRes.ok).toBe(true);
 
     const putRes = await apiFetch(`/api/workspaces/${workspaceSlug}/security`, {
       method: "PUT",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({
         forceEmailVerification: true,
         watermarkDownloads: true,
@@ -71,7 +64,6 @@ test.describe("Workspace settings & members (real backend)", () => {
   // ── Billing ──────────────────────────────────────────────────
   test("reads billing info", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/billing`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { plan: string };
@@ -81,7 +73,6 @@ test.describe("Workspace settings & members (real backend)", () => {
   // ── Members ──────────────────────────────────────────────────
   test("lists workspace members", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/members`, {
-      headers: { Authorization: `Bearer ${token}` },
     });
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { data: unknown[] };
@@ -93,7 +84,6 @@ test.describe("Workspace settings & members (real backend)", () => {
   test("creates a workspace invitation", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/invitations`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: JSON.stringify({ email: `invite-${Date.now()}@example.com`, role: "member" }),
     });
     // May succeed or return conflict if already invited
@@ -111,9 +101,8 @@ test.describe("Workspace settings & members (real backend)", () => {
     const form = new FormData();
     form.append("file", blob, "logo.png");
 
-    const res = await fetch(`http://localhost:8080/api/workspaces/${workspaceSlug}/logo`, {
+    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/logo`, {
       method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
       body: form,
     });
     // May not be supported in all environments
@@ -123,42 +112,42 @@ test.describe("Workspace settings & members (real backend)", () => {
   // ── Settings page renders in browser ────────────────────────
   test("settings general page shows form in browser", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/settings/general`);
     await expect(page.getByText(/workspace/i).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("settings members page renders", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/settings/members`);
     await expect(page.getByText(/members/i).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("settings security page renders", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/settings/security`);
     await expect(page.getByText(/security/i).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("settings billing page renders", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/settings/billing`);
     await expect(page.getByText(/subscription|billing|plan/i).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("settings integrations page renders", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/settings/integrations`);
     await expect(page.getByText(/integrations|slack|hubspot/i).first()).toBeVisible({ timeout: 10000 });
   });
 
   test("settings language page renders", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/settings/language`);
     await expect(page.getByText(/language|english|中文/i).first()).toBeVisible({ timeout: 10000 });
   });

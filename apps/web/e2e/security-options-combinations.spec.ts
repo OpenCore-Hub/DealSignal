@@ -13,7 +13,6 @@ import {
 } from "./real-helpers";
 
 // ── 全局状态 ──────────────────────────────────────────────────────
-let token: string;
 let workspaceSlug: string;
 let contactId: string;
 
@@ -117,11 +116,9 @@ async function gotoReviewStep(page: Page) {
 test.describe("安全选项排列组合验收 (真实后端)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
-    await seedDocument(token, workspaceSlug);
+    await seedDocument(workspaceSlug);
     const contact = await seedContact(
-      token,
       workspaceSlug,
       `security-contact-${Date.now()}@example.com`,
       "Security Contact",
@@ -131,7 +128,7 @@ test.describe("安全选项排列组合验收 (真实后端)", () => {
 
   test.beforeEach(async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
   });
 
   test("16 种布尔开关笛卡尔积 — UI 状态与约束验收", async ({ page }) => {

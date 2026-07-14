@@ -12,19 +12,17 @@ import {
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-let token: string;
 let workspaceSlug: string;
 let roomId: string;
 
 test.describe("Deal room folder upload (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
     // Create a document first
-    await seedDocument(token, workspaceSlug);
+    await seedDocument(workspaceSlug);
     // Create a deal room with seed-round template (has predefined folders)
-    const room = await seedDealRoom(token, workspaceSlug, {
+    const room = await seedDealRoom(workspaceSlug, {
       name: "Seed Round Due Diligence",
       templateType: "seed",
     });
@@ -33,7 +31,7 @@ test.describe("Deal room folder upload (real backend)", () => {
 
   test("uploads a file into a folder and shows it in the folder tree", async ({ page }) => {
     attachDebug(page);
-    await authenticatePage(page, token);
+    await authenticatePage(page);
 
     await page.goto(`/${workspaceSlug}/deal-rooms/${roomId}`);
     await expect(page.getByRole("heading", { name: "Seed Round Due Diligence" })).toBeVisible({ timeout: 10000 });

@@ -164,56 +164,34 @@ function getWorkspaceSlug(): string {
   throw new Error("No workspace selected");
 }
 
-function setTokens(accessToken: string, refreshToken: string) {
-  localStorage.setItem("access_token", accessToken);
-  localStorage.setItem("refresh_token", refreshToken);
-}
-
-function clearTokens() {
-  localStorage.removeItem("access_token");
-  localStorage.removeItem("refresh_token");
-}
-
 export const api = {
   login: async (email: string, password: string) => {
-    const res = await request<{ user: User; access_token: string; refresh_token: string; expires_in: number }>(
+    const res = await request<{ user: User; expires_in: number }>(
       undefined,
       "/auth/login",
       { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
     );
-    setTokens(res.access_token, res.refresh_token);
     return res.user;
   },
   register: async (email: string, password: string) => {
-    const res = await request<{ user: User; access_token: string; refresh_token: string; expires_in: number }>(
+    const res = await request<{ user: User; expires_in: number }>(
       undefined,
       "/auth/register",
       { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
     );
-    setTokens(res.access_token, res.refresh_token);
     return res.user;
   },
   logout: async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
-    try {
-      await request<void>(undefined, "/auth/logout", {
-        method: "POST",
-        body: JSON.stringify({ refresh_token: refreshToken }),
-      });
-    } finally {
-      clearTokens();
-    }
+    await request<void>(undefined, "/auth/logout", {
+      method: "POST",
+    });
   },
   refresh: async () => {
-    const refreshToken = localStorage.getItem("refresh_token");
-    if (!refreshToken) throw new Error("No refresh token");
-    const res = await request<{ access_token: string; refresh_token: string; expires_in: number }>(
+    await request<{ expires_in: number }>(
       undefined,
       "/auth/refresh",
-      { method: "POST", body: JSON.stringify({ refresh_token: refreshToken }), skipAuth: true }
+      { method: "POST", skipAuth: true }
     );
-    setTokens(res.access_token, res.refresh_token);
-    return res.access_token;
   },
 
   verifyEmail: async (token: string) => {

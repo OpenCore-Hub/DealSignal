@@ -6,18 +6,16 @@ import {
   authenticatePage,
 } from "./real-helpers";
 
-let token: string;
 let workspaceSlug: string;
 let linkId: string;
 
 test.describe("edit link save confirm (real backend)", () => {
   test.beforeAll(async () => {
     const seed = await seedRealBackend();
-    token = seed.token;
     workspaceSlug = seed.workspaceSlug;
-    const doc = await seedDocument(token, workspaceSlug);
+    const doc = await seedDocument(workspaceSlug);
     // Create a public link so we can edit without contact guard
-    const link = await seedLink(token, workspaceSlug, doc.id, {
+    const link = await seedLink(workspaceSlug, doc.id, {
       permissionType: "public",
       downloadEnabled: true,
       name: "Editable Test Link",
@@ -30,7 +28,7 @@ test.describe("edit link save confirm (real backend)", () => {
       throw new Error(`Unexpected legacy dialog: ${dialog.type()} - ${dialog.message()}`);
     });
 
-    await authenticatePage(page, token);
+    await authenticatePage(page);
 
     await page.goto(`/${workspaceSlug}/links/${linkId}/edit`);
 
