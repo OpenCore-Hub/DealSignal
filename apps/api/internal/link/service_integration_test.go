@@ -12,10 +12,11 @@ import (
 	"sort"
 	"strings"
 	"testing"
-	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -113,6 +114,24 @@ func newRecordingMailer() *recordingMailer {
 	return &recordingMailer{received: make(chan mailer.EmailJob, 16)}
 }
 
+type recordingNotifier struct {
+	enqueued []notification.Notification
+}
+
+func newRecordingNotifier() *recordingNotifier {
+	return &recordingNotifier{}
+}
+
+func (n *recordingNotifier) Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string, opts ...notification.EnqueueOption) (notification.Notification, error) {
+	ev := notification.Notification{WorkspaceID: workspaceID, UserID: userID, Channel: channel, Subject: subject, Body: body}
+	n.enqueued = append(n.enqueued, ev)
+	return ev, nil
+}
+
+func (n *recordingNotifier) Evaluate(ctx context.Context, ev notification.Event) error {
+	return nil
+}
+
 func (m *recordingMailer) SendEmail(ctx context.Context, job mailer.EmailJob) (string, error) {
 	m.jobs = append(m.jobs, job)
 	select {
@@ -139,6 +158,7 @@ type testFixture struct {
 	user      db.User
 	workspace db.Workspace
 	mailer    *recordingMailer
+	notifier  *recordingNotifier
 	cleanup   func()
 }
 
@@ -152,12 +172,18 @@ func newFixture(t *testing.T) *testFixture {
 	t.Cleanup(func() { _ = tx.Rollback(ctx) })
 
 	mailer := newRecordingMailer()
+	notifier := newRecordingNotifier()
 	svc := &Service{
 		queries:       db.New(tx),
 		pool:          tx,
 		mailer:        mailer,
+		notifier:      notifier,
 		viewerBaseURL: "http://viewer.example.com",
-		emailSem:      make(chan struct{}, 8),
+		cfg: &config.Config{
+			URLSigningSecret:   "test-url-signing-secret",
+			InviteTokenHashKey: "test-invite-token-hash-key",
+		},
+		emailSem: make(chan struct{}, 8),
 	}
 	q := db.New(tx)
 
@@ -205,10 +231,10 @@ func newFixture(t *testing.T) *testFixture {
 	}
 
 	link, err := svc.CreateLink(ctx, uuid.UUID(user.ID.Bytes).String(), uuid.UUID(workspace.ID.Bytes).String(), CreateLinkRequest{
-		DocumentID:   uuid.UUID(doc.ID.Bytes).String(),
-		Name:         "Test Link",
+		DocumentID:     uuid.UUID(doc.ID.Bytes).String(),
+		Name:           "Test Link",
 		PermissionType: "public",
-		RequireEmail: true,
+		RequireEmail:   true,
 	})
 	if err != nil {
 		t.Fatalf("create link: %v", err)
@@ -223,6 +249,7 @@ func newFixture(t *testing.T) *testFixture {
 		user:      user,
 		workspace: workspace,
 		mailer:    mailer,
+		notifier:  notifier,
 		cleanup:   func() { _ = tx.Rollback(ctx) },
 	}
 }
@@ -378,24 +405,15 @@ func TestInviteViewers_Integration(t *testing.T) {
 			t.Fatalf("expected 2 allow-email rules, got %d", allowEmails)
 		}
 
-		var jobs []mailer.EmailJob
-		for i := 0; i < 2; i++ {
-			select {
-			case job := <-f.mailer.received:
-				jobs = append(jobs, job)
-			case <-time.After(2 * time.Second):
-				t.Fatalf("timed out waiting for invitation email %d", i)
-			}
+		if len(f.notifier.enqueued) != 2 {
+			t.Fatalf("expected 2 invitation notifications, got %d", len(f.notifier.enqueued))
 		}
-		if len(jobs) != 2 {
-			t.Fatalf("expected 2 invitation emails, got %d", len(jobs))
-		}
-		for _, job := range jobs {
-			if job.EmailType != mailer.EmailTypeLinkInvite {
-				t.Errorf("unexpected email type: %q", job.EmailType)
+		for _, n := range f.notifier.enqueued {
+			if n.Channel != "email" {
+				t.Errorf("unexpected notification channel: %q", n.Channel)
 			}
-			if !strings.Contains(job.LinkURL, "?inviteToken=") {
-				t.Errorf("invite url missing token: %q", job.LinkURL)
+			if !strings.Contains(n.Body, "?inviteToken=") {
+				t.Errorf("invite url missing token: %q", n.Body)
 			}
 		}
 	})
@@ -419,8 +437,11 @@ func TestInviteViewers_Integration(t *testing.T) {
 		if len(first) != 1 || len(second) != 1 {
 			t.Fatalf("expected single invitation each time")
 		}
-		if first[0].Token != second[0].Token {
-			t.Error("duplicate invite changed token")
+		if first[0].ID != second[0].ID {
+			t.Error("duplicate invite created a different invitation row")
+		}
+		if second[0].Status != "pending" {
+			t.Errorf("duplicate invite status = %q, want pending", second[0].Status)
 		}
 
 		stored, err := f.q.ListLinkInvitationsByLink(f.ctx, f.link.ID)

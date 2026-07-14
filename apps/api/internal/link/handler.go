@@ -917,24 +917,24 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"id":                         uuidToString(meta.ID),
-		"public_token":               meta.PublicToken,
-		"name":                       meta.Name,
-		"status":                     meta.Status,
-		"expires_at":                 timestamptzOrNil(meta.ExpiresAt),
-		"permission_type":            meta.PermissionType,
-		"require_email":              meta.RequireEmail,
-		"require_email_verification": meta.RequireEmailVerification,
-		"require_password":           meta.RequirePassword,
-		"require_nda":                meta.RequireNda,
+		"id":                            uuidToString(meta.ID),
+		"public_token":                  meta.PublicToken,
+		"name":                          meta.Name,
+		"status":                        meta.Status,
+		"expires_at":                    timestamptzOrNil(meta.ExpiresAt),
+		"permission_type":               meta.PermissionType,
+		"require_email":                 meta.RequireEmail,
+		"require_email_verification":    meta.RequireEmailVerification,
+		"require_password":              meta.RequirePassword,
+		"require_nda":                   meta.RequireNda,
 		"download_enabled":              meta.DownloadEnabled,
 		"watermark_enabled":             meta.WatermarkEnabled,
 		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
 		"custom_domain":                 meta.CustomDomain,
-		"ai_copilot_enabled":         meta.AiCopilotEnabled,
-		"qa_enabled":                 meta.QaEnabled,
-		"file_requests_enabled":      meta.FileRequestsEnabled,
-		"index_file_enabled":         meta.IndexFileEnabled,
+		"ai_copilot_enabled":            meta.AiCopilotEnabled,
+		"qa_enabled":                    meta.QaEnabled,
+		"file_requests_enabled":         meta.FileRequestsEnabled,
+		"index_file_enabled":            meta.IndexFileEnabled,
 	})
 }
 
@@ -1088,24 +1088,24 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 
 	requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 	linkPayload := gin.H{
-		"id":                        uuidToString(link.ID),
-		"name":                      textOrNil(link.Name),
-		"permissionType":            link.PermissionType,
-		"downloadEnabled":           link.DownloadEnabled,
-		"watermarkEnabled":          link.WatermarkEnabled,
+		"id":                          uuidToString(link.ID),
+		"name":                        textOrNil(link.Name),
+		"permissionType":              link.PermissionType,
+		"downloadEnabled":             link.DownloadEnabled,
+		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
-		"watermarkText":             h.watermarkTextFor(email, c.ClientIP()),
-		"aiCopilotEnabled":          link.AiCopilotEnabled,
-		"qaEnabled":                 link.QaEnabled,
-		"fileRequestsEnabled":       link.FileRequestsEnabled,
-		"indexFileEnabled":          link.IndexFileEnabled,
-		"isBundle":                  len(documents) > 1,
+		"watermarkText":               h.watermarkTextFor(email, c.ClientIP()),
+		"aiCopilotEnabled":            link.AiCopilotEnabled,
+		"qaEnabled":                   link.QaEnabled,
+		"fileRequestsEnabled":         link.FileRequestsEnabled,
+		"indexFileEnabled":            link.IndexFileEnabled,
+		"isBundle":                    len(documents) > 1,
 	}
 	if link.DealRoomID.Valid {
 		linkPayload["dealRoomId"] = uuidToString(link.DealRoomID)
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"link": linkPayload,
+		"link":                      linkPayload,
 		"documents":                 documents,
 		"visitorId":                 visitorID,
 		"requiresEmail":             requiresEmail,
@@ -1336,16 +1336,9 @@ func (h *Handler) watermarkTextFor(email, ip string) string {
 }
 
 // signResourceURL returns an HMAC-signed proxy URL for a storage resource.
-// If no URL signing secret is configured, it falls back to a short-lived
-// MinIO presigned URL so existing deployments keep working.
 // The optional filename is appended as a query parameter and used by the proxy
 // to set Content-Disposition when the resource is downloaded.
 func (h *Handler) signResourceURL(storageKey, publicToken, visitorID, filename string) string {
-	if h.cfg.URLSigningSecret == "" {
-		ctx := context.Background()
-		url, _ := h.storage.PresignedGetURL(ctx, storageKey, 15*time.Minute)
-		return url
-	}
 	u := SignResource(h.cfg.URLSigningSecret, storageKey, publicToken, visitorID, h.cfg.AppBaseURL, 15*time.Minute)
 	if filename != "" {
 		u += "&filename=" + url.QueryEscape(filename)
@@ -1862,36 +1855,36 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	isBundle := len(documents) > 1
 
 	item := gin.H{
-		"id":                       uuidToString(link.ID),
-		"documentId":               uuidToString(link.DocumentID),
-		"documentTitle":            documentTitle,
-		"documentIds":              linkDocumentIDs(linkDocs, link),
-		"documents":                documents,
-		"isBundle":                 isBundle,
-		"name":                     textOrNil(link.Name),
-		"shortUrl":                 publicURL(c, h.cfg, link.PublicToken, link.CustomDomain.String),
-		"accessCount":              link.AccessCount,
-		"heatLevel":                score.Level,
-		"status":                   link.Status,
-		"createdAt":                link.CreatedAt.Time.Format(time.RFC3339),
-		"isActive":                 isActive,
-		"permissionType":           mapPermissionType(link.PermissionType),
-		"requireEmail":             link.RequireEmail,
-		"requireNda":               link.RequireNda,
-		"requirePassword":          link.RequirePassword,
-		"downloadEnabled":           link.DownloadEnabled,
-		"watermarkEnabled":          link.WatermarkEnabled,
+		"id":                          uuidToString(link.ID),
+		"documentId":                  uuidToString(link.DocumentID),
+		"documentTitle":               documentTitle,
+		"documentIds":                 linkDocumentIDs(linkDocs, link),
+		"documents":                   documents,
+		"isBundle":                    isBundle,
+		"name":                        textOrNil(link.Name),
+		"shortUrl":                    publicURL(c, h.cfg, link.PublicToken, link.CustomDomain.String),
+		"accessCount":                 link.AccessCount,
+		"heatLevel":                   score.Level,
+		"status":                      link.Status,
+		"createdAt":                   link.CreatedAt.Time.Format(time.RFC3339),
+		"isActive":                    isActive,
+		"permissionType":              mapPermissionType(link.PermissionType),
+		"requireEmail":                link.RequireEmail,
+		"requireNda":                  link.RequireNda,
+		"requirePassword":             link.RequirePassword,
+		"downloadEnabled":             link.DownloadEnabled,
+		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
-		"aiCopilotEnabled":          link.AiCopilotEnabled,
-		"qaEnabled":                 link.QaEnabled,
-		"fileRequestsEnabled":       link.FileRequestsEnabled,
-		"indexFileEnabled":          link.IndexFileEnabled,
-		"requireEmailVerification": link.RequireEmailVerification,
-		"avgDurationSeconds":       int(metrics.AvgDurationSeconds),
-		"contactIds":               contactIDs,
-		"customDomain":             textOrNil(link.CustomDomain),
-		"tags":                     link.Tags,
-		"notifyOnAccess":           link.NotifyOnAccess,
+		"aiCopilotEnabled":            link.AiCopilotEnabled,
+		"qaEnabled":                   link.QaEnabled,
+		"fileRequestsEnabled":         link.FileRequestsEnabled,
+		"indexFileEnabled":            link.IndexFileEnabled,
+		"requireEmailVerification":    link.RequireEmailVerification,
+		"avgDurationSeconds":          int(metrics.AvgDurationSeconds),
+		"contactIds":                  contactIDs,
+		"customDomain":                textOrNil(link.CustomDomain),
+		"tags":                        link.Tags,
+		"notifyOnAccess":              link.NotifyOnAccess,
 	}
 	if link.DealRoomID.Valid {
 		item["dealRoomId"] = uuidToString(link.DealRoomID)
@@ -1952,7 +1945,6 @@ func accessLogList(logs []db.ListAccessLogsByLinkRow) []gin.H {
 
 // ReverseFunnel returns dormant links with high re-activation potential.
 
-
 // ReverseFunnel returns dormant links with high re-activation potential.
 func (h *Handler) ReverseFunnel(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
@@ -2006,7 +1998,6 @@ func (h *Handler) ReverseFunnel(c *gin.Context) {
 	}
 	c.JSON(http.StatusOK, gin.H{"recommendations": items})
 }
-
 
 // ArchiveLink sets a link status to archived.
 func (h *Handler) ArchiveLink(c *gin.Context) {

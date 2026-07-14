@@ -3,6 +3,7 @@ package link
 
 import (
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -1198,7 +1199,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			}
 			if _, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
 				Token:     pgtype.Text{String: "", Valid: false},
-				TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
+				TokenHash: pgtype.Text{String: s.hashToken(token), Valid: true},
 				ExpiresAt: expiresAt,
 				ID:        existing.ID,
 			}); err != nil {
@@ -1223,7 +1224,7 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 			LinkID:      link.ID,
 			Email:       email,
 			Token:       pgtype.Text{String: "", Valid: false},
-			TokenHash:   pgtype.Text{String: hashToken(token), Valid: true},
+			TokenHash:   pgtype.Text{String: s.hashToken(token), Valid: true},
 			Status:      "pending",
 			ExpiresAt:   expiresAt,
 			CreatedBy:   userUUID,
@@ -1285,19 +1286,24 @@ func (s *Service) InviteViewers(ctx context.Context, userID, workspaceID, linkID
 
 // ResolveInviteToken validates an invitation token and returns the invitation.
 func (s *Service) ResolveInviteToken(ctx context.Context, token string) (LinkInvitation, error) {
-	inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: hashToken(token), Valid: true})
+	// Look up by HMAC-SHA256 first.
+	inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: s.hashToken(token), Valid: true})
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return LinkInvitation{}, ErrLinkNotFound
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return LinkInvitation{}, fmt.Errorf("get invitation: %w", err)
 		}
-		return LinkInvitation{}, fmt.Errorf("get invitation: %w", err)
-	}
 
-	// Lazy backfill: legacy invitations stored the plaintext token. Compute and
-	// persist the hash on first lookup so future lookups use the hash path.
-	if !inv.TokenHash.Valid || inv.TokenHash.String == "" {
+		// Fallback: legacy SHA-256 hashes. On match, backfill to HMAC.
+		inv, err = s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: s.legacyHashToken(token), Valid: true})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return LinkInvitation{}, ErrLinkNotFound
+			}
+			return LinkInvitation{}, fmt.Errorf("get invitation: %w", err)
+		}
+
 		if err := s.queries.UpdateLinkInvitationTokenHash(ctx, db.UpdateLinkInvitationTokenHashParams{
-			TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
+			TokenHash: pgtype.Text{String: s.hashToken(token), Valid: true},
 			ID:        inv.ID,
 		}); err != nil {
 			logger.ErrorCtx(ctx, "failed to backfill invitation token hash", err)
@@ -1720,7 +1726,7 @@ func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Querie
 		expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
 		if _, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
 			Token:     pgtype.Text{String: "", Valid: false},
-			TokenHash: pgtype.Text{String: hashToken(token), Valid: true},
+			TokenHash: pgtype.Text{String: s.hashToken(token), Valid: true},
 			ExpiresAt: expiresAt,
 			ID:        existing.ID,
 		}); err != nil {
@@ -1743,7 +1749,7 @@ func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Querie
 		LinkID:      link.ID,
 		Email:       email,
 		Token:       pgtype.Text{String: "", Valid: false},
-		TokenHash:   pgtype.Text{String: hashToken(token), Valid: true},
+		TokenHash:   pgtype.Text{String: s.hashToken(token), Valid: true},
 		Status:      "pending",
 		ExpiresAt:   expiresAt,
 		CreatedBy:   createdBy,
@@ -1768,7 +1774,25 @@ func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Querie
 }
 
 // hashToken returns the HMAC-SHA256 hash (hex) of an invite token.
-func hashToken(token string) string {
+func (s *Service) hashToken(token string) string {
+	if s.cfg == nil {
+		// Defensive fallback for tests or misconfigured environments.
+		return s.legacyHashToken(token)
+	}
+	key := s.cfg.InviteTokenHashKey
+	if key == "" {
+		// Defensive fallback: hashing with an empty key still produces a stable
+		// value, but production should always configure a secret.
+		key = s.cfg.JWTSecret
+	}
+	h := hmac.New(sha256.New, []byte(key))
+	_, _ = h.Write([]byte(token))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// legacyHashToken computes the original SHA-256 hash used before HMAC was
+// introduced. It is kept only for backward-compatible token lookup.
+func (s *Service) legacyHashToken(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
 }
@@ -1796,6 +1820,10 @@ func invitationFromRaw(token string, id, linkID pgtype.UUID, email, status strin
 }
 
 func (s *Service) sendInvitationEmail(ctx context.Context, inv LinkInvitation, workspaceID, userID, linkName, linkURL string) {
+	if s.notifier == nil {
+		logger.InfoCtx(ctx, "notifier not configured, skipping invitation email")
+		return
+	}
 	inviteURL := fmt.Sprintf("%s?inviteToken=%s", linkURL, inv.Token)
 	subject := fmt.Sprintf("You've been invited to view \"%s\"", linkName)
 	body := fmt.Sprintf("You have been invited to view \"%s\". Open the invitation: %s", linkName, inviteURL)
@@ -1807,6 +1835,10 @@ func (s *Service) sendInvitationEmail(ctx context.Context, inv LinkInvitation, w
 }
 
 func (s *Service) sendAccessNotificationEmail(ctx context.Context, workspaceID, userID, linkName, visitorEmail, linkURL string) {
+	if s.notifier == nil {
+		logger.InfoCtx(ctx, "notifier not configured, skipping access notification email")
+		return
+	}
 	subject := fmt.Sprintf("Someone viewed your DealSignal link \"%s\"", linkName)
 	body := fmt.Sprintf("A visitor (%s) viewed \"%s\". Open the link: %s", visitorEmail, linkName, linkURL)
 	if _, err := s.notifier.Enqueue(ctx, workspaceID, userID, "email", subject, body); err != nil {
@@ -2002,7 +2034,11 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	// visitor successfully accesses the link through an invite token, the token
 	// is consumed and cannot be reused.
 	if req.InviteToken != "" {
-		if inv, err := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: hashToken(req.InviteToken), Valid: true}); err == nil {
+		inv, invErr := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: s.hashToken(req.InviteToken), Valid: true})
+		if errors.Is(invErr, pgx.ErrNoRows) {
+			inv, invErr = s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: s.legacyHashToken(req.InviteToken), Valid: true})
+		}
+		if invErr == nil {
 			usedAt := pgtype.Timestamptz{Valid: true, Time: time.Now()}
 			if _, err := s.queries.UpdateLinkInvitationStatus(ctx, db.UpdateLinkInvitationStatusParams{
 				Status: "used",

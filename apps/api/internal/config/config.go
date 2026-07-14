@@ -10,15 +10,16 @@ import (
 
 // Config holds all runtime configuration loaded from environment variables.
 type Config struct {
-	Port              string
-	AppEnv            string
-	DatabaseURL       string
-	RedisURL          string
-	JWTSecret         string
-	IPHashKey         string
-	LinkSessionSecret string
-	LogLevel          string
-	Version           string
+	Port               string
+	AppEnv             string
+	DatabaseURL        string
+	RedisURL           string
+	JWTSecret          string
+	IPHashKey          string
+	LinkSessionSecret  string
+	InviteTokenHashKey string
+	LogLevel           string
+	Version            string
 
 	S3Endpoint       string
 	S3PublicEndpoint string
@@ -96,8 +97,8 @@ type Config struct {
 	SecurityAnomalyWindow    time.Duration
 	SecurityAnomalyThreshold int
 
-	AccessLogsRetentionDays    int
-	PageViewsRetentionDays     int
+	AccessLogsRetentionDays     int
+	PageViewsRetentionDays      int
 	SecurityEventsRetentionDays int
 
 	CORSAllowedOrigins string
@@ -108,15 +109,16 @@ type Config struct {
 // Load parses environment variables into Config and validates required fields.
 func Load() (*Config, error) {
 	cfg := &Config{
-		Port:              getEnv("PORT", "8080"),
-		AppEnv:            getEnv("APP_ENV", "development"),
-		LogLevel:          getEnv("LOG_LEVEL", "info"),
-		Version:           getEnv("VERSION", "v2.5.0"),
-		DatabaseURL:       os.Getenv("DATABASE_URL"),
-		RedisURL:          os.Getenv("REDIS_URL"),
-		JWTSecret:         os.Getenv("JWT_SECRET"),
-		IPHashKey:         os.Getenv("IP_HASH_KEY"),
-		LinkSessionSecret: os.Getenv("LINK_SESSION_SECRET"),
+		Port:               getEnv("PORT", "8080"),
+		AppEnv:             getEnv("APP_ENV", "development"),
+		LogLevel:           getEnv("LOG_LEVEL", "info"),
+		Version:            getEnv("VERSION", "v2.5.0"),
+		DatabaseURL:        os.Getenv("DATABASE_URL"),
+		RedisURL:           os.Getenv("REDIS_URL"),
+		JWTSecret:          os.Getenv("JWT_SECRET"),
+		IPHashKey:          os.Getenv("IP_HASH_KEY"),
+		LinkSessionSecret:  os.Getenv("LINK_SESSION_SECRET"),
+		InviteTokenHashKey: os.Getenv("INVITE_TOKEN_HASH_KEY"),
 
 		S3Endpoint:       os.Getenv("S3_ENDPOINT"),
 		S3PublicEndpoint: os.Getenv("S3_PUBLIC_ENDPOINT"),
@@ -212,12 +214,19 @@ func Load() (*Config, error) {
 	if cfg.JWTSecret == "" {
 		return nil, fmt.Errorf("JWT_SECRET is required")
 	}
+	if cfg.URLSigningSecret == "" {
+		return nil, fmt.Errorf("URL_SIGNING_SECRET is required")
+	}
 	if cfg.LinkSessionSecret == "" {
 		cfg.LinkSessionSecret = cfg.JWTSecret
 	}
 	if cfg.IPHashKey == "" {
 		cfg.IPHashKey = cfg.JWTSecret
 		fmt.Fprintf(os.Stderr, "warning: IP_HASH_KEY is not set; falling back to JWT_SECRET. Set IP_HASH_KEY explicitly in production.\n")
+	}
+	if cfg.InviteTokenHashKey == "" {
+		cfg.InviteTokenHashKey = cfg.JWTSecret
+		fmt.Fprintf(os.Stderr, "warning: INVITE_TOKEN_HASH_KEY is not set; falling back to JWT_SECRET. Set INVITE_TOKEN_HASH_KEY explicitly in production.\n")
 	}
 	if cfg.S3Bucket == "" {
 		return nil, fmt.Errorf("S3_BUCKET is required")
