@@ -4,6 +4,7 @@ export { AccessTab } from "./AccessTab";
 export { AnalyticsTab } from "./AnalyticsTab";
 export { ManagementTab } from "./ManagementTab";
 export { LinkShareDialog } from "./LinkShareDialog";
+export { LinkActivityDialog } from "./LinkActivityDialog";
 export { AccessSummaryCard } from "./AccessSummaryCard";
 export { EmailTagInput } from "./EmailTagInput";
 export { CopyButton } from "./CopyButton";

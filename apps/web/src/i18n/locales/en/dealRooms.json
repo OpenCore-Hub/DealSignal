@@ -250,7 +250,7 @@
         "views": "Views",
         "lastViewed": "Last viewed",
         "active": "Active",
-        "analytics": "Analytics"
+        "activity": "Activity"
       }
     },
     "emptyLinksTitle": "No links found for this dataroom",

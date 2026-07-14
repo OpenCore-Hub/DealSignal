@@ -14,6 +14,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
+import { LinkActivityDialog } from "@/components/links/share";
 
 interface FolderPermissionsSectionProps {
   roomId: string;
@@ -79,7 +80,7 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
                   {t("permissions.links.table.active")}
                 </TableHead>
                 <TableHead className="text-right text-muted-foreground">
-                  {t("permissions.links.table.analytics")}
+                  {t("permissions.links.table.activity")}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -133,16 +134,11 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <DealRoomShareDialog
-                        roomId={roomId}
-                        linkId={link.id}
-                        defaultTab="analytics"
-                        onChanged={refetch}
-                      >
+                      <LinkActivityDialog link={link}>
                         <Button variant="ghost" size="sm">
-                          {t("permissions.links.table.analytics")}
+                          {t("permissions.links.table.activity")}
                         </Button>
-                      </DealRoomShareDialog>
+                      </LinkActivityDialog>
                     </TableCell>
                   </TableRow>
                 ))
