@@ -247,7 +247,7 @@
         "views": "浏览量",
         "lastViewed": "最近查看",
         "active": "活跃",
-        "analytics": "分析"
+        "activity": "活动"
       }
     },
     "emptyLinksTitle": "未找到该数据室的链接",

@@ -197,8 +197,10 @@
       "fulfilled": "Fulfilled"
     }
   },
+  "activity": {
+    "title": "Link activity"
+  },
   "analytics": {
-    "title": "Analytics",
     "views": "Views",
     "uniqueVisitors": "Unique visitors",
     "avgDuration": "Avg. time",
@@ -206,7 +208,6 @@
     "recentActivity": "Recent activity",
     "emptyTitle": "No visits yet",
     "emptyDescription": "Share the link and viewer activity will appear here.",
-    "done": "Close",
     "loadFailed": "Failed to load analytics",
     "recentVisitors": "Recent visitors",
     "noRecentVisitors": "No recent visitors yet.",

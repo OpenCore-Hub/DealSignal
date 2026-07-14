@@ -16,14 +16,13 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { AccessLog, AccessRule, Link, LinkInvitation } from "@/types";
+import type { AccessRule, Link, LinkInvitation } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
   InviteTab,
   AccessTab,
-  AnalyticsTab,
   CopyButton,
   applyPreset,
   buildDraft,
@@ -46,7 +45,7 @@ interface DealRoomShareDialogProps {
   roomId: string;
   linkId?: string;
   slug?: string;
-  defaultTab?: "share" | "invite" | "access" | "analytics";
+  defaultTab?: "share" | "invite" | "access";
   children?: React.ReactElement;
   onChanged?: () => void;
 }
@@ -61,7 +60,6 @@ interface DialogData {
   selectedLink: Link | null;
   rules: AccessRule[];
   invitations: LinkInvitation[];
-  logs: AccessLog[];
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
@@ -72,13 +70,12 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     : loadedLinks.find((l) => l.status === "active" || l.isActive) || null;
 
   if (!selectedLink) {
-    return { links: loadedLinks, selectedLink: null, rules: [], invitations: [], logs: [] };
+    return { links: loadedLinks, selectedLink: null, rules: [], invitations: [] };
   }
 
-  const [rulesRes, invitationsRes, logsRes] = await Promise.all([
+  const [rulesRes, invitationsRes] = await Promise.all([
     api.getLinkAccessRules(selectedLink.id),
     api.getLinkInvitations(selectedLink.id),
-    api.getAccessLogs(selectedLink.id),
   ]);
 
   return {
@@ -86,14 +83,13 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     selectedLink,
     rules: rulesRes.data,
     invitations: invitationsRes.data,
-    logs: logsRes.data,
   };
 }
 
 interface DealRoomShareDialogContentProps {
   roomId: string;
   slug?: string;
-  defaultTab?: "share" | "invite" | "access" | "analytics";
+  defaultTab?: "share" | "invite" | "access";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
@@ -116,7 +112,7 @@ function DealRoomShareDialogContent({
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const reducedMotion = useReducedMotion();
-  const [tab, setTab] = useState<"share" | "invite" | "access" | "analytics">(defaultTab);
+  const [tab, setTab] = useState<"share" | "invite" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -144,7 +140,6 @@ function DealRoomShareDialogContent({
 
   const selectedLink = data?.selectedLink ?? null;
   const invitations = data?.invitations ?? [];
-  const logs = data?.logs ?? [];
   const preset = useMemo(() => inferPreset(draft), [draft]);
   const isNew = !selectedLink;
 
@@ -323,8 +318,6 @@ function DealRoomShareDialogContent({
       ? { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
       : tab === "access"
       ? { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
-      : tab === "analytics"
-      ? { label: t("common:close"), onClick: onClose }
       : { label: t("invite.sendInvitations"), onClick: handleInviteSend };
 
   const inviteHasInput = inviteEmails.length > 0;
@@ -384,9 +377,7 @@ function DealRoomShareDialogContent({
           <TabsTrigger value="share">{t("share.title")}</TabsTrigger>
           <TabsTrigger value="invite">{t("invite.title")}</TabsTrigger>
           <TabsTrigger value="access">{t("accessRules.title")}</TabsTrigger>
-          {!isNew && (
-            <TabsTrigger value="analytics">{t("analytics:title", { ns: "linkShare" })}</TabsTrigger>
-          )}
+
         </TabsList>
 
         <div className="flex-1 overflow-y-auto py-2">
@@ -435,11 +426,7 @@ function DealRoomShareDialogContent({
                 <TabsContent value="access">
                   <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} highlightedFields={highlightedFields} />
                 </TabsContent>
-                {!isNew && selectedLink && (
-                  <TabsContent value="analytics">
-                    <AnalyticsTab link={selectedLink} logs={logs} />
-                  </TabsContent>
-                )}
+
               </motion.div>
             </AnimatePresence>
             </>

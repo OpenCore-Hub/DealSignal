@@ -197,8 +197,10 @@
       "fulfilled": "已完成"
     }
   },
+  "activity": {
+    "title": "链接活动"
+  },
   "analytics": {
-    "title": "分析",
     "views": "访问次数",
     "uniqueVisitors": "独立访客",
     "avgDuration": "平均停留",
@@ -206,7 +208,6 @@
     "recentActivity": "最近访问",
     "emptyTitle": "暂无访问",
     "emptyDescription": "分享链接后，访客活动将显示在这里。",
-    "done": "关闭",
     "loadFailed": "加载分析数据失败",
     "recentVisitors": "最近访客",
     "noRecentVisitors": "暂无最近访客。",

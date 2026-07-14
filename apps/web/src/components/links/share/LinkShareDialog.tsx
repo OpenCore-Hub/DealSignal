@@ -15,14 +15,13 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { AccessLog, AccessRule, Link, LinkInvitation } from "@/types";
+import type { AccessRule, Link, LinkInvitation } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
   InviteTab,
   AccessTab,
-  AnalyticsTab,
   CopyButton,
   applyPreset,
   buildDraft,
@@ -36,7 +35,7 @@ import type { DraftLink } from "./types";
 
 interface LinkShareDialogProps {
   linkId: string;
-  defaultTab?: "share" | "invite" | "access" | "analytics";
+  defaultTab?: "share" | "invite" | "access";
   children?: React.ReactElement;
   onChanged?: () => void;
 }
@@ -56,22 +55,19 @@ interface DialogData {
   link: Link;
   rules: AccessRule[];
   invitations: LinkInvitation[];
-  logs: AccessLog[];
 }
 
 async function fetchDialogData(linkId: string): Promise<DialogData | null> {
-  const [link, rulesRes, invitationsRes, logsRes] = await Promise.all([
+  const [link, rulesRes, invitationsRes] = await Promise.all([
     api.getLinkById(linkId),
     api.getLinkAccessRules(linkId),
     api.getLinkInvitations(linkId),
-    api.getAccessLogs(linkId),
   ]);
   if (!link) return null;
   return {
     link,
     rules: rulesRes.data,
     invitations: invitationsRes.data,
-    logs: logsRes.data,
   };
 }
 
@@ -84,7 +80,7 @@ function LinkShareDialogContent({
   onClose,
   registerCloseGuard,
 }: {
-  defaultTab?: "share" | "invite" | "access" | "analytics";
+  defaultTab?: "share" | "invite" | "access";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
@@ -93,7 +89,7 @@ function LinkShareDialogContent({
   registerCloseGuard: (guard: () => boolean) => void;
 }) {
   const { t } = useTranslation("linkShare");
-  const [tab, setTab] = useState<"share" | "invite" | "access" | "analytics">(defaultTab);
+  const [tab, setTab] = useState<"share" | "invite" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.link, data?.rules));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -131,7 +127,6 @@ function LinkShareDialogContent({
 
   const link = data?.link ?? null;
   const invitations = data?.invitations ?? [];
-  const logs = data?.logs ?? [];
   const preset = useMemo(() => inferPreset(draft), [draft]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
@@ -262,9 +257,7 @@ function LinkShareDialogContent({
       ? { label: saveSuccess ? t("share.savedButtonLabel") : t("share.saveLinkSettings"), onClick: handleSave }
       : tab === "access"
       ? { label: saveSuccess ? t("accessRules.saved") : t("accessRules.saveAccessRules"), onClick: handleSave }
-      : tab === "invite"
-      ? { label: t("invite.sendInvitations"), onClick: handleInviteSend }
-      : { label: t("analytics.done"), onClick: onClose };
+      : { label: t("invite.sendInvitations"), onClick: handleInviteSend };
 
   const inviteHasInput = inviteEmails.length > 0;
 
@@ -313,7 +306,7 @@ function LinkShareDialogContent({
           <TabsTrigger value="share">{t("share.title")}</TabsTrigger>
           <TabsTrigger value="invite">{t("invite.title")}</TabsTrigger>
           <TabsTrigger value="access">{t("accessRules.title")}</TabsTrigger>
-          <TabsTrigger value="analytics">{t("analytics.title")}</TabsTrigger>
+
         </TabsList>
 
         <div className="flex-1 overflow-y-auto py-2">
@@ -357,9 +350,7 @@ function LinkShareDialogContent({
                 <TabsContent value="access">
                   <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} highlightedFields={highlightedFields} />
                 </TabsContent>
-                <TabsContent value="analytics">
-                  {link && <AnalyticsTab link={link} logs={logs} />}
-                </TabsContent>
+
               </motion.div>
             </AnimatePresence>
           )}
