@@ -124,7 +124,7 @@ jobs:
         run: make security
 
   frontend-e2e:
-    name: Frontend E2E
+    name: Frontend E2E (real backend)
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -152,8 +152,34 @@ jobs:
       - name: Install Playwright browsers
         run: pnpm exec playwright install --with-deps chromium
 
+      - name: Ensure docker-compose binary
+        run: |
+          if ! command -v docker-compose &> /dev/null; then
+            echo 'docker compose "$@"' | sudo tee /usr/local/bin/docker-compose > /dev/null
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+
+      - name: Prepare API env
+        working-directory: apps/api
+        run: |
+          cp .env.example .env
+          sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' .env
+          sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' .env
+
+      - name: Start backend services
+        working-directory: apps/api
+        run: docker-compose up -d
+
+      - name: Wait for API
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:8080/healthz && exit 0
+            sleep 2
+          done
+          exit 1
+
       - name: Run E2E tests
-        run: pnpm test:e2e
+        run: pnpm test:e2e:real
 
       - name: Upload Playwright report
         uses: actions/upload-artifact@v7

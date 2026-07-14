@@ -19,6 +19,10 @@ Health check: `curl http://localhost:8080/healthz`
 
 ## Key environment variables
 
+- `JWT_SECRET` — required. Used for signing access/refresh tokens.
+- `URL_SIGNING_SECRET` — required. HMAC key for signed viewer asset URLs.
+- `INVITE_TOKEN_HASH_KEY` — required. HMAC key for hashing link invitation tokens.
+- `IP_HASH_KEY` — required in production. HMAC key for hashing visitor IP addresses.
 - `OPENAI_API_KEY` — optional. Leave empty to disable vector search and assistant.
 - `OPENAI_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
 - `OPENAI_REFERER` / `OPENAI_APP_TITLE` — optional headers for OpenRouter-compatible providers.
