@@ -32,6 +32,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added viewer tests for `ViewerToolbar`, `ViewerCanvas`, `useViewerDocument`, and keyboard navigation in `CanvasViewer`.
 - Implemented link access request flow: public `POST /api/v1/public/links/:token/access-requests`, workspace approve/reject endpoints, automatic allow-rule creation and invitation email on approval, and per-IP per-link rate limiting (5/hour).
 - Disabled placeholder switches in share dialog (file requests, index file, Q&A conversations, screenshot protection) until their backend fields are implemented.
+- GitHub Actions release workflow: pushes of `v*` tags now auto-create a GitHub Release with generated notes.
+- Added backend unit tests for `redis`, `signal`, `sse`, and `storage` helper functions.
 - Polished Share / Invite / Access dialog (SHORT-006): preset overwrite confirmation, 200ms field highlight with `prefers-reduced-motion` support, save-success button state with auto-close in `LinkShareDialog`, unsaved-changes guard in `LinkShareDialog`, validation-driven primary-action disable, Resend tooltip + success toast, and full `en`/`zh-CN` i18n coverage.
 - Frontend blocker-button cleanup (TASK-FRONTEND-006): added disabled + title explanations for `Security` 2FA and `CreateLinkSheet` manage/preview buttons; added copy icon feedback in `CreateLinkSheet`; synced `en`/`zh-CN` i18n keys.
 - Backend middleware modules (TASK-BACKEND-012): confirmed rate-limit and idempotency middleware, memory token store, structured logger, mailer abstraction, and Redis wrapper are implemented, tested, and wired into `server.go`.
@@ -49,6 +51,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Hardened authentication for production: access/refresh tokens are now HttpOnly cookies; the SPA no longer stores tokens in `localStorage`. CORS allows credentials and the route guard checks a non-HttpOnly `auth_session` cookie.
+- Enforced `URL_SIGNING_SECRET` as a required config and removed the MinIO presigned-URL fallback for viewer assets.
+- Migrated invite token hashing from SHA-256 to HMAC-SHA256 with a dedicated `INVITE_TOKEN_HASH_KEY` and lazy backfill for legacy tokens.
+- Fixed the `frontend-e2e` CI job to start the backend stack and run the real-backend Playwright suite (`pnpm test:e2e:real`).
+- Remediated high-severity `rollup` vulnerabilities (via `@antv/g2plot>fmin>rollup`) by pinning `rollup >=2.79.2`.
+- Removed the misleading `crm.NoOp` placeholder; real CRM sync remains wired through the integration OAuth/settings flow and the CRM aggregation worker.
+- Hardened viewer screenshot protection by blocking copy/cut and image drag events and disabling text selection when the flag is enabled.
 - Playwright MSW E2E now forces `VITE_API_BASE_URL=` in `apps/web/playwright.config.ts` so `.env` cannot accidentally disable mocks.
 - Stabilized Playwright E2E selectors and upload flow: updated dashboard risk-alert assertions, added `id="file-upload"` / `data-testid="upload-success"` to `Uploader`, and clicked "Upload now" in the P0 test.
 - Updated `apps/api/e2e-test.sh` to parse the public token from `short_url` after the backend removed the `public_token` field.
