@@ -6,6 +6,7 @@ import { HighlightOverlay } from "./HighlightOverlay";
 import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
 import { useAIStore } from "@/stores/aiStore";
 import { formatDuration } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import type { Document, Evidence, PageAnalytics } from "@/types";
 
 interface PageInfo {
@@ -159,7 +160,10 @@ export function ViewerCanvas({
         className="relative flex min-h-0 flex-1 items-start justify-center overflow-auto p-2 sm:p-4 lg:p-8"
       >
         <div
-          className="relative overflow-hidden rounded-md bg-white shadow-card"
+          className={cn(
+            "relative overflow-hidden rounded-md bg-white shadow-card",
+            screenshotProtectionEnabled && "select-none"
+          )}
           style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
         >
           {doc.status !== "ready" ? (
