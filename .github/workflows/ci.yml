@@ -21,7 +21,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.26.1
+          version: 11.9.0
           package_json_file: apps/web/package.json
 
       - name: Setup Node.js
@@ -136,7 +136,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.26.1
+          version: 11.9.0
           package_json_file: apps/web/package.json
 
       - name: Setup Node.js
@@ -263,7 +263,7 @@ jobs:
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
         with:
-          version: 10.26.1
+          version: 11.9.0
           package_json_file: apps/web/package.json
 
       - name: Setup Node.js
