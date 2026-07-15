@@ -12,10 +12,11 @@ import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, Deal
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock } = vi.hoisted(() => ({
+const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocumentByIdMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
+  getDocumentByIdMock: vi.fn(),
   uploadDocumentMock: vi.fn(),
   addDealRoomDocumentMock: vi.fn(),
   createDealRoomFolderMock: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock("@/lib/api", () => ({
     getDealRoomById: getDealRoomByIdMock,
     getDealRoomTemplates: getDealRoomTemplatesMock,
     getDocuments: getDocumentsMock,
+    getDocumentById: getDocumentByIdMock,
     uploadDocument: uploadDocumentMock,
     addDealRoomDocument: addDealRoomDocumentMock,
     createDealRoomFolder: createDealRoomFolderMock,
@@ -184,6 +186,7 @@ describe("DealRoomDetailPage", () => {
     uploadDocumentMock.mockReset();
     addDealRoomDocumentMock.mockReset();
     createDealRoomFolderMock.mockReset();
+    getDocumentByIdMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
   });
@@ -210,7 +213,7 @@ describe("DealRoomDetailPage", () => {
     expect(screen.getByText("01 Pitch Deck")).toBeInTheDocument();
     expect(screen.getByText("02 Financials")).toBeInTheDocument();
     expect(screen.queryByText("Folder structure")).not.toBeInTheDocument();
-    expect(screen.queryByText("Upload progress")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("upload-progress-popup")).not.toBeInTheDocument();
   });
 
   it("switches to permissions tab and shows links section", async () => {
@@ -254,6 +257,18 @@ describe("DealRoomDetailPage", () => {
       status: "processing",
     });
     addDealRoomDocumentMock.mockResolvedValue({});
+    getDocumentByIdMock.mockResolvedValue({
+      id: "doc_new",
+      title: "Uploaded File.pdf",
+      sourceType: "pdf",
+      fileName: "Uploaded File.pdf",
+      fileType: "pdf",
+      fileSize: 1_000,
+      pageCount: 1,
+      status: "ready",
+      createdAt: "2026-06-20T10:00:00Z",
+      updatedAt: "2026-06-20T10:00:00Z",
+    });
     await renderPage();
 
     await waitFor(() => {
@@ -314,7 +329,7 @@ describe("DealRoomDetailPage", () => {
     });
   });
 
-  it("shows upload progress dashboard with folder path after uploading", async () => {
+  it("shows centered floating upload progress bar while uploading", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
     uploadDocumentMock.mockResolvedValue({
       id: "doc_new",
@@ -323,6 +338,18 @@ describe("DealRoomDetailPage", () => {
       status: "processing",
     });
     addDealRoomDocumentMock.mockResolvedValue({});
+    getDocumentByIdMock.mockResolvedValue({
+      id: "doc_new",
+      title: "Uploaded File.pdf",
+      sourceType: "pdf",
+      fileName: "Uploaded File.pdf",
+      fileType: "pdf",
+      fileSize: 1_000,
+      pageCount: 1,
+      status: "ready",
+      createdAt: "2026-06-20T10:00:00Z",
+      updatedAt: "2026-06-20T10:00:00Z",
+    });
     await renderPage();
 
     await waitFor(() => {
@@ -341,16 +368,140 @@ describe("DealRoomDetailPage", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
+    const popup = await waitFor(() => screen.getByTestId("upload-progress-popup"));
+    expect(popup).toBeInTheDocument();
     await waitFor(() => {
-      expect(screen.getByText("Upload progress")).toBeInTheDocument();
+      expect(within(popup).getByText("100%")).toBeInTheDocument();
     });
-
-    const dashboardCard = screen.getByText("Upload progress").closest("[data-slot='card']") as HTMLElement;
-    expect(dashboardCard).toBeInTheDocument();
-    expect(within(dashboardCard).getByText("Uploaded File.pdf")).toBeInTheDocument();
-    expect(within(dashboardCard).getByText("01 Pitch Deck")).toBeInTheDocument();
-    expect(within(dashboardCard).getByText("Uploaded")).toBeInTheDocument();
     // Refetch is triggered so the folder tree will reflect the new document.
     expect(getDealRoomByIdMock).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps the deal room rendered while refetching after an upload finishes", async () => {
+    let callCount = 0;
+    getDealRoomByIdMock.mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        return Promise.resolve(mockRoom);
+      }
+      // Slow down the background refetch so we can verify the page does not
+      // flash back to the loading skeleton while the upload overlay is shown.
+      return new Promise((resolve) => setTimeout(() => resolve(mockRoom), 800));
+    });
+    uploadDocumentMock.mockResolvedValue({
+      id: "doc_new",
+      title: "Uploaded File.pdf",
+      sourceType: "pdf",
+      status: "processing",
+    });
+    addDealRoomDocumentMock.mockResolvedValue({});
+    getDocumentByIdMock.mockResolvedValue({
+      id: "doc_new",
+      title: "Uploaded File.pdf",
+      sourceType: "pdf",
+      fileName: "Uploaded File.pdf",
+      fileType: "pdf",
+      fileSize: 1_000,
+      pageCount: 1,
+      status: "ready",
+      createdAt: "2026-06-20T10:00:00Z",
+      updatedAt: "2026-06-20T10:00:00Z",
+    });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+    });
+
+    const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
+    fireEvent.mouseEnter(folderRow);
+    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    fireEvent.click(uploadButton);
+
+    const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
+    const file = new File(["pdf content"], "Uploaded File.pdf", { type: "application/pdf" });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    // The upload overlay should appear and the page content must stay visible
+    // (no loading skeleton) while the background refetch is in flight.
+    await waitFor(() => {
+      expect(screen.getByTestId("upload-progress-popup")).toBeInTheDocument();
+    });
+    await waitFor(
+      () => {
+        expect(document.querySelector("[aria-busy='true']")).not.toBeInTheDocument();
+        expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      },
+      { timeout: 1_000 }
+    );
+  }, 10_000);
+
+  it("reflects real backend processing status in the progress bar", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    uploadDocumentMock.mockResolvedValue({
+      id: "doc_new",
+      title: "Uploaded File.pdf",
+      sourceType: "pdf",
+      status: "processing",
+    });
+    addDealRoomDocumentMock.mockResolvedValue({});
+    getDocumentByIdMock
+      .mockResolvedValueOnce({
+        id: "doc_new",
+        title: "Uploaded File.pdf",
+        sourceType: "pdf",
+        fileName: "Uploaded File.pdf",
+        fileType: "pdf",
+        fileSize: 1_000,
+        pageCount: 1,
+        status: "processing",
+        createdAt: "2026-06-20T10:00:00Z",
+        updatedAt: "2026-06-20T10:00:00Z",
+      })
+      .mockResolvedValueOnce({
+        id: "doc_new",
+        title: "Uploaded File.pdf",
+        sourceType: "pdf",
+        fileName: "Uploaded File.pdf",
+        fileType: "pdf",
+        fileSize: 1_000,
+        pageCount: 1,
+        status: "ready",
+        createdAt: "2026-06-20T10:00:00Z",
+        updatedAt: "2026-06-20T10:00:00Z",
+      });
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+    });
+
+    const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
+    fireEvent.mouseEnter(folderRow);
+    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    fireEvent.click(uploadButton);
+
+    const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
+    const file = new File(["pdf content"], "Uploaded File.pdf", { type: "application/pdf" });
+    await act(async () => {
+      fireEvent.change(fileInput, { target: { files: [file] } });
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    const popup = await waitFor(() => screen.getByTestId("upload-progress-popup"));
+    await waitFor(() => {
+      expect(within(popup).getByText("95%")).toBeInTheDocument();
+    });
+
+    await waitFor(
+      () => {
+        expect(within(popup).getByText("100%")).toBeInTheDocument();
+      },
+      { timeout: 6_000 }
+    );
+  }, 10_000);
 });
+

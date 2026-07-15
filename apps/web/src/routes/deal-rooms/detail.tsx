@@ -1,19 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams, useSearchParams } from "react-router";
+import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import {
-  FileText,
-  Envelope,
-  UploadSimple,
-  Plus,
-  Warning,
-} from "@phosphor-icons/react";
+import { Envelope } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Progress } from "@/components/ui/progress";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
-import { BackButton } from "@/components/common/BackButton";
+import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
@@ -52,7 +44,8 @@ interface UploadProgressItem {
   fileName: string;
   folderPath: string;
   folderName: string;
-  status: "pending" | "uploading" | "done" | "error";
+  documentId?: string;
+  status: "pending" | "uploading" | "processing" | "done" | "error";
   progress: number;
   error?: string;
 }
@@ -74,24 +67,29 @@ export function DealRoomDetailPage() {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
+  const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const shouldOpenDocuments = searchParams.get("addDocuments") === "1";
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(shouldOpenDocuments);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const activeUploadsRef = useRef(0);
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
-  const [uploading, setUploading] = useState(false);
+  const activePollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const { tab } = useDealRoomTab();
   const reducedMotion = useReducedMotion();
 
-  // Cleanup all progress intervals on unmount to prevent state updates on
-  // unmounted component.
+  // Cleanup all progress intervals and document-status polls on unmount to
+  // prevent state updates on an unmounted component.
   useEffect(() => {
     const intervals = activeIntervalsRef.current;
+    const polls = activePollsRef.current;
     return () => {
       for (const id of intervals) {
         clearInterval(id);
+      }
+      for (const poll of polls.values()) {
+        clearInterval(poll);
       }
     };
   }, []);
@@ -148,160 +146,263 @@ export function DealRoomDetailPage() {
 
   // Default target folder for move dialog.
 
+  const stopPolling = useCallback((itemId: string) => {
+    const poll = activePollsRef.current.get(itemId);
+    if (poll) {
+      clearInterval(poll);
+      activePollsRef.current.delete(itemId);
+    }
+  }, []);
 
-  const resolveTargetFolder = (fileName: string): { path: string; name: string } => {
-    const roomFolders = room?.folders ?? [];
-    for (const folder of roomFolders) {
-      if (matchesRecommendedFile(fileName, folder.name)) {
-        return { path: folder.path, name: folder.name };
+  const pollDocumentStatus = useCallback(
+    (itemId: string, documentId: string) => {
+      let consecutiveErrors = 0;
+      const check = async () => {
+        try {
+          const doc = await api.getDocumentById(documentId);
+          consecutiveErrors = 0;
+          setUploadItems((prev) =>
+            prev.map((item) => {
+              if (item.id !== itemId) return item;
+              if (doc.status === "ready") {
+                return { ...item, status: "done", progress: doc.progress ?? 100 };
+              }
+              if (doc.status === "failed") {
+                return {
+                  ...item,
+                  status: "error",
+                  progress: doc.progress ?? item.progress,
+                  error: doc.ingestionJob?.errorMessage ?? tc("error.saveFailed"),
+                };
+              }
+              return { ...item, status: "processing", progress: doc.progress ?? item.progress };
+            })
+          );
+          if (doc.status === "ready") {
+            stopPolling(itemId);
+            window.dispatchEvent(new CustomEvent("documents:uploaded"));
+            await refetch();
+          } else if (doc.status === "failed") {
+            stopPolling(itemId);
+            toast.error(doc.ingestionJob?.errorMessage ?? tc("error.saveFailed"));
+          }
+        } catch (e) {
+          consecutiveErrors++;
+          if (consecutiveErrors >= 3) {
+            stopPolling(itemId);
+            setUploadItems((prev) =>
+              prev.map((item) =>
+                item.id === itemId
+                  ? { ...item, status: "error", error: e instanceof Error ? e.message : tc("error.saveFailed") }
+                  : item
+              )
+            );
+            toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+          }
+        }
+      };
+      check();
+      const pollInterval = setInterval(check, 2500);
+      activePollsRef.current.set(itemId, pollInterval);
+    },
+    [refetch, stopPolling, tc]
+  );
+
+  const uploadFileToFolder = useCallback(
+    async (file: File, folderPath: string) => {
+      if (!roomId) return;
+      const id = Math.random().toString(36).slice(2);
+      const folderName = folderByPath.get(folderPath) ?? folderPath;
+
+      setUploadItems((prev) => [
+        ...prev,
+        {
+          id,
+          fileName: file.name,
+          folderPath,
+          folderName,
+          status: "uploading",
+          progress: 0,
+        },
+      ]);
+
+      const interval = setInterval(() => {
+        setUploadItems((prev) =>
+          prev.map((item) =>
+            item.id === id && item.status === "uploading"
+              ? { ...item, progress: Math.min(item.progress + Math.random() * 15, 95) }
+              : item
+          )
+        );
+      }, 300);
+
+      activeIntervalsRef.current.add(interval);
+
+      try {
+        const doc = await api.uploadDocument(file);
+        clearInterval(interval);
+        activeIntervalsRef.current.delete(interval);
+
+        const sortOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+        await api.addDealRoomDocument(roomId, {
+          document_id: doc.id,
+          folder_path: folderPath,
+          sort_order: sortOrder,
+        });
+
+        // HTTP upload + room association succeeded, but the backend may still be
+        // processing the document. Show the real backend status instead of jumping
+        // straight to "done" so this popup stays in sync with the Documents page.
+        setUploadItems((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? { ...item, documentId: doc.id, status: "processing", progress: doc.progress ?? 95 }
+              : item
+          )
+        );
+        pollDocumentStatus(id, doc.id);
+      } catch (e) {
+        clearInterval(interval);
+        activeIntervalsRef.current.delete(interval);
+        setUploadItems((prev) =>
+          prev.map((item) =>
+            item.id === id
+              ? { ...item, status: "error", progress: 0, error: e instanceof Error ? e.message : tc("error.saveFailed") }
+              : item
+          )
+        );
+        toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = "";
       }
-    }
-    const fallback = roomFolders[0];
-    if (fallback) {
-      return { path: fallback.path, name: fallback.name };
-    }
-    return { path: "/general", name: "General" };
-  };
+    },
+    [roomId, folderByPath, room?.documents, tc, pollDocumentStatus]
+  );
 
-  const uploadFileToFolder = async (file: File, folderPath: string) => {
-    if (!roomId) return;
-    const id = Math.random().toString(36).slice(2);
-    const folderName = folderByPath.get(folderPath) ?? folderPath;
-
-    setUploadItems((prev) => [
-      ...prev,
-      {
-        id,
-        fileName: file.name,
-        folderPath,
-        folderName,
-        status: "uploading",
-        progress: 0,
-      },
-    ]);
-    activeUploadsRef.current++;
-    setUploading(true);
-
-    const interval = setInterval(() => {
-      setUploadItems((prev) =>
-        prev.map((item) =>
-          item.id === id && item.status === "uploading"
-            ? { ...item, progress: Math.min(item.progress + Math.random() * 15, 95) }
-            : item
-        )
-      );
-    }, 300);
-
-    activeIntervalsRef.current.add(interval);
-
-    try {
-      const doc = await api.uploadDocument(file);
-      const sortOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
-      await api.addDealRoomDocument(roomId, {
-        document_id: doc.id,
-        folder_path: folderPath,
-        sort_order: sortOrder,
-      });
-      clearInterval(interval);
-      activeIntervalsRef.current.delete(interval);
-      setUploadItems((prev) =>
-        prev.map((item) => (item.id === id ? { ...item, status: "done", progress: 100 } : item))
-      );
-      toast.success(t("documents.uploadedAndAdded", { title: doc.title }));
-      await refetch();
-    } catch (e) {
-      clearInterval(interval);
-      activeIntervalsRef.current.delete(interval);
-      setUploadItems((prev) =>
-        prev.map((item) =>
-          item.id === id
-            ? { ...item, status: "error", error: e instanceof Error ? e.message : tc("error.saveFailed") }
-            : item
-        )
-      );
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
-    } finally {
-      activeUploadsRef.current--;
-      if (activeUploadsRef.current <= 0) {
-        setUploading(false);
+  const resolveTargetFolder = useCallback(
+    (fileName: string): { path: string; name: string } => {
+      const roomFolders = room?.folders ?? [];
+      for (const folder of roomFolders) {
+        if (matchesRecommendedFile(fileName, folder.name)) {
+          return { path: folder.path, name: folder.name };
+        }
       }
-      if (fileInputRef.current) fileInputRef.current.value = "";
-    }
-  };
+      const fallback = roomFolders[0];
+      if (fallback) {
+        return { path: fallback.path, name: fallback.name };
+      }
+      return { path: "/general", name: "General" };
+    },
+    [room?.folders]
+  );
 
-  const handleUpload = async (file: File) => {
-    const { path } = resolveTargetFolder(file.name);
-    await uploadFileToFolder(file, path);
-  };
+  const handleUpload = useCallback(
+    async (file: File) => {
+      const { path } = resolveTargetFolder(file.name);
+      await uploadFileToFolder(file, path);
+    },
+    [resolveTargetFolder, uploadFileToFolder]
+  );
 
-  const onFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) void handleUpload(file);
-  };
+  const onFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (file) void handleUpload(file);
+    },
+    [handleUpload]
+  );
 
-  const activeUploads = uploadItems.filter((item) => item.status === "uploading");
-  const hasHistory = uploadItems.some((item) => item.status !== "uploading");
-  const showUploadDashboard = activeUploads.length > 0 || hasHistory;
+  const isUploading = uploadItems.some((item) => item.status === "uploading" || item.status === "processing");
   const overallProgress =
     uploadItems.length === 0
       ? 0
       : Math.round(uploadItems.reduce((sum, item) => sum + item.progress, 0) / uploadItems.length);
 
-  const handleFolderCreate = async (name: string, parentPath?: string) => {
-    if (!roomId) return;
-    try {
-      await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
-      toast.success(t("folders.created", { name }));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("folders.createFailed"));
+  // Hide the floating progress bar automatically once everything finishes,
+  // keeping the UI minimal and integrated with the page.
+  useEffect(() => {
+    if (!isUploading && uploadItems.length > 0) {
+      const timer = setTimeout(() => {
+        for (const poll of activePollsRef.current.values()) {
+          clearInterval(poll);
+        }
+        activePollsRef.current.clear();
+        setUploadItems([]);
+      }, 1500);
+      return () => clearTimeout(timer);
     }
-  };
+  }, [isUploading, uploadItems.length]);
 
-  const handleFolderRename = async (path: string, name: string) => {
-    if (!roomId) return;
-    try {
-      await api.renameDealRoomFolder(roomId, path, { name });
-      toast.success(t("folders.renamed"));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
-    }
-  };
-
-  const handleFolderDelete = async (path: string) => {
-    if (!roomId) return;
-    try {
-      await api.deleteDealRoomFolder(roomId, path);
-      toast.success(t("folders.deleted"));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
-    }
-  };
-
-  const handleDocumentsAdd = async (documentIds: string[], folderPath: string) => {
-    if (!roomId) return;
-    try {
-      let lastOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
-      for (const documentId of documentIds) {
-        await api.addDealRoomDocument(roomId, {
-          document_id: documentId,
-          folder_path: folderPath,
-          sort_order: lastOrder++,
-        });
+  const handleFolderCreate = useCallback(
+    async (name: string, parentPath?: string) => {
+      if (!roomId) return;
+      try {
+        await api.createDealRoomFolder(roomId, { name, parent_path: parentPath });
+        toast.success(t("folders.created", { name }));
+        refetch();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t("folders.createFailed"));
       }
-      toast.success(t("documents.added", { count: documentIds.length }));
-      refetch();
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.addFailed"));
-    }
-  };
+    },
+    [roomId, t, refetch]
+  );
 
-  if (error) {
+  const handleFolderRename = useCallback(
+    async (path: string, name: string) => {
+      if (!roomId) return;
+      try {
+        await api.renameDealRoomFolder(roomId, path, { name });
+        toast.success(t("folders.renamed"));
+        refetch();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
+      }
+    },
+    [roomId, t, refetch]
+  );
+
+  const handleFolderDelete = useCallback(
+    async (path: string) => {
+      if (!roomId) return;
+      try {
+        await api.deleteDealRoomFolder(roomId, path);
+        toast.success(t("folders.deleted"));
+        refetch();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+      }
+    },
+    [roomId, t, refetch]
+  );
+
+  const handleDocumentsAdd = useCallback(
+    async (documentIds: string[], folderPath: string) => {
+      if (!roomId) return;
+      try {
+        let lastOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+        for (const documentId of documentIds) {
+          await api.addDealRoomDocument(roomId, {
+            document_id: documentId,
+            folder_path: folderPath,
+            sort_order: lastOrder++,
+          });
+        }
+        toast.success(t("documents.added", { count: documentIds.length }));
+        refetch();
+      } catch (e) {
+        toast.error(e instanceof Error ? e.message : t("documents.addFailed"));
+      }
+    },
+    [roomId, room?.documents, t, refetch]
+  );
+
+  // Only show the full loading/error placeholders on the initial load. During
+  // background refetches (e.g. after a document finishes processing) we keep the
+  // existing room rendered so the page doesn't flash behind the upload overlay.
+  if (error && !room) {
     return (
       <div className="space-y-6">
-        <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
+        <SmartBackButton fallbackTo={`/${workspaceSlug}/deal-rooms`} fallbackLabel={t("detail.back")} />
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border p-12 text-center">
           <p className="text-muted-foreground">{error}</p>
           <Button onClick={refetch}>{tc("retry")}</Button>
@@ -310,12 +411,17 @@ export function DealRoomDetailPage() {
     );
   }
 
-  if (loading || !room) {
+  if (loading && !room) {
     return <SkeletonDetail />;
   }
+
+  if (!room) {
+    return null;
+  }
+
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
-      <BackButton to={`/${workspaceSlug}/deal-rooms`} label={t("detail.back")} />
+      <SmartBackButton fallbackTo={`/${workspaceSlug}/deal-rooms`} fallbackLabel={t("detail.back")} />
 
       <PageHeader title={room.name} description={room.description}>
         <div className="flex flex-wrap items-center gap-2">
@@ -352,89 +458,18 @@ export function DealRoomDetailPage() {
                     onFolderDelete={handleFolderDelete}
                     onDocumentsAdd={handleDocumentsAdd}
                     onFolderUpload={uploadFileToFolder}
+                    onDocumentOpen={(docId) =>
+                      navigate(`/${workspaceSlug}/documents/${docId}`, {
+                        state: {
+                          returnTo: location.pathname + location.search,
+                          returnLabel: t("detail.back"),
+                        },
+                      })
+                    }
                   />
                 </CardContent>
               </Card>
 
-              {showUploadDashboard && (
-                <Card>
-                  <CardHeader>
-                    <CardTitle className="text-h2 flex items-center gap-2">
-                      <UploadSimple size={20} />
-                      {t("detail.uploadProgress")}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4">
-                    <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">{t("detail.completion")}</span>
-                      <span className="font-medium">{overallProgress}%</span>
-                    </div>
-                    <Progress value={overallProgress} className="h-2" />
-                    <input
-                      type="file"
-                      ref={fileInputRef}
-                      onChange={onFileChange}
-                      className="hidden"
-                      accept=".pdf,.docx,.pptx,.xlsx"
-                      disabled={uploading}
-                    />
-                    <ul className="space-y-2">
-                      {uploadItems.map((item) => (
-                        <li
-                          key={item.id}
-                          className="flex flex-col gap-2 rounded-md border border-border p-3"
-                          data-testid={`upload-item-${item.id}`}
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex min-w-0 items-center gap-2">
-                              <FileText
-                                size={16}
-                                className={item.status === "done" ? "text-success-500 shrink-0" : "text-muted-foreground shrink-0"}
-                              />
-                              <span className="truncate text-sm font-medium">{item.fileName}</span>
-                            </div>
-                            <div className="shrink-0">
-                              {item.status === "uploading" && (
-                                <Badge variant="outline" className="text-muted-foreground">
-                                  {t("detail.uploading")}
-                                </Badge>
-                              )}
-                              {item.status === "done" && (
-                                <Badge variant="outline" className="border-success-500/20 text-success-500">
-                                  {t("detail.uploaded")}
-                                </Badge>
-                              )}
-                              {item.status === "error" && (
-                                <Badge variant="outline" className="border-error/30 gap-1 text-error-500">
-                                  <Warning size={12} />
-                                  {t("detail.uploadFailed")}
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 text-caption text-muted-foreground">
-                            <span className="truncate">{item.folderName}</span>
-                            {item.status === "uploading" && <span>{Math.round(item.progress)}%</span>}
-                          </div>
-                          {item.status === "uploading" && <Progress value={item.progress} className="h-1" />}
-                          {item.status === "error" && item.error && (
-                            <p className="text-caption text-error-500 truncate">{item.error}</p>
-                          )}
-                        </li>
-                      ))}
-                    </ul>
-                    <Button
-                      variant="outline"
-                      className="w-full gap-1"
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={uploading}
-                    >
-                      <Plus size={16} />
-                      {uploading ? t("detail.uploading") : t("detail.uploadAny")}
-                    </Button>
-                  </CardContent>
-                </Card>
-              )}
             </div>
           )}
 
@@ -467,6 +502,48 @@ export function DealRoomDetailPage() {
         onOpenChange={(open) => setDocumentsDialogOpen(open)}
       />
 
+      {/* Full-screen centered upload progress overlay.
+          The deal room page is pushed into the background with a blur. */}
+      <AnimatePresence>
+        {uploadItems.length > 0 && (
+          <motion.div
+            data-testid="upload-progress-popup"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/10 backdrop-blur-sm dark:bg-white/10"
+            {...(reducedMotion
+              ? {}
+              : {
+                  initial: { opacity: 0 },
+                  animate: { opacity: 1 },
+                  exit: { opacity: 0 },
+                  transition: { duration: 0.3 },
+                })}
+          >
+            <motion.div
+              className="flex w-[calc(100%-2rem)] max-w-md items-center gap-3 rounded-full bg-background/70 px-6 py-4 shadow-none backdrop-blur-xl"
+              {...(reducedMotion
+                ? {}
+                : {
+                    initial: { opacity: 0, y: 12, scale: 0.96 },
+                    animate: { opacity: 1, y: 0, scale: 1 },
+                    exit: { opacity: 0, y: 12, scale: 0.98 },
+                    transition: { duration: 0.35, ease: [0.16, 1, 0.3, 1] as const },
+                  })}
+            >
+              <span className="text-sm font-medium tabular-nums text-foreground/80">{overallProgress}%</span>
+              <div className="relative h-2 flex-1 overflow-hidden rounded-full bg-foreground/10">
+                <motion.div
+                  className="absolute inset-y-0 left-0 rounded-full bg-primary"
+                  initial={false}
+                  animate={{ width: `${overallProgress}%` }}
+                  transition={reducedMotion ? { duration: 0 } : { duration: 0.3, ease: "easeOut" }}
+                />
+                <div className="pointer-events-none absolute inset-0 animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-background/60 to-transparent" />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Hidden file input for toolbar upload. */}
       <input
         type="file"
@@ -474,7 +551,7 @@ export function DealRoomDetailPage() {
         onChange={onFileChange}
         className="hidden"
         accept=".pdf,.docx,.pptx,.xlsx"
-        disabled={uploading}
+        disabled={isUploading}
       />
     </motion.div>
   );
