@@ -28,24 +28,31 @@ export function StepDocuments() {
       const res = await api.getDocuments();
       dispatch({ type: "SET_DOCUMENTS", documents: res.data });
 
-      // Restore selected documents from pending draft IDs (set in createInitialState)
+      // Restore selected documents from pending draft IDs (set in createInitialState).
+      // When the user enters from a single-document action (e.g. clicking "Create link"
+      // on a document row), discard any stale draft so it doesn't interfere with the
+      // explicit document choice or show confusing "draft unavailable" warnings.
       if (state.pendingDraftDocIds.length > 0) {
-        const restored = res.data.filter((d: Document) =>
-          state.pendingDraftDocIds.includes(d.id),
-        );
-        if (restored.length > 0) {
-          dispatch({ type: "SET_SELECTED_DOCUMENTS", documents: restored });
-        }
-        if (restored.length < state.pendingDraftDocIds.length) {
-          console.warn(
-            "Draft restore: some documents are no longer available",
-            { expected: state.pendingDraftDocIds.length, restored: restored.length },
+        if (initialDocumentId) {
+          clearPipelineDraft();
+        } else {
+          const restored = res.data.filter((d: Document) =>
+            state.pendingDraftDocIds.includes(d.id),
           );
-          toast.warning(t("creator.draftDocsUnavailable", { expected: state.pendingDraftDocIds.length, restored: restored.length }));
-          // When none of the draft documents are available, clear the stale draft
-          // so the user doesn't keep seeing this warning on subsequent visits.
-          if (restored.length === 0) {
-            clearPipelineDraft();
+          if (restored.length > 0) {
+            dispatch({ type: "SET_SELECTED_DOCUMENTS", documents: restored });
+          }
+          if (restored.length < state.pendingDraftDocIds.length) {
+            console.warn(
+              "Draft restore: some documents are no longer available",
+              { expected: state.pendingDraftDocIds.length, restored: restored.length },
+            );
+            toast.warning(t("creator.draftDocsUnavailable", { expected: state.pendingDraftDocIds.length, restored: restored.length }));
+            // When none of the draft documents are available, clear the stale draft
+            // so the user doesn't keep seeing this warning on subsequent visits.
+            if (restored.length === 0) {
+              clearPipelineDraft();
+            }
           }
         }
         dispatch({ type: "CLEAR_PENDING_DRAFT_DOC_IDS" });
