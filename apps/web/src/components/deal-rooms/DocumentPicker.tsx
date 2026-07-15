@@ -14,6 +14,46 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useTranslation } from "react-i18next";
 import type { DealRoomDocumentItem, DealRoomFolder, Document } from "@/types";
 
+function parentPath(path: string): string | null {
+  if (path === "/") return null;
+  const idx = path.lastIndexOf("/");
+  if (idx <= 0) return "/";
+  return path.slice(0, idx);
+}
+
+interface FolderNode {
+  folder: DealRoomFolder;
+  children: FolderNode[];
+}
+
+function buildFolderTree(folders: DealRoomFolder[]): FolderNode[] {
+  const sorted = [...folders].filter((f) => f.path !== "/");
+  const map = new Map<string, FolderNode>();
+  for (const f of sorted) map.set(f.path, { folder: f, children: [] });
+  const roots: FolderNode[] = [];
+  for (const f of sorted) {
+    const node = map.get(f.path)!;
+    const pp = parentPath(f.path);
+    if (pp === "/" || pp === null) {
+      roots.push(node);
+    } else {
+      const parent = map.get(pp);
+      if (parent) parent.children.push(node);
+      else roots.push(node);
+    }
+  }
+  return roots;
+}
+
+function flattenTree(nodes: FolderNode[], depth: number): { folder: DealRoomFolder; depth: number }[] {
+  let flat: { folder: DealRoomFolder; depth: number }[] = [];
+  for (const node of nodes) {
+    flat.push({ folder: node.folder, depth });
+    flat = flat.concat(flattenTree(node.children, depth + 1));
+  }
+  return flat;
+}
+
 interface DocumentPickerProps {
   workspaceDocuments: Document[];
   roomDocuments: DealRoomDocumentItem[];
@@ -47,6 +87,11 @@ export function DocumentPicker({
       .filter((d) => !roomDocumentIds.has(d.id))
       .filter((d) => !q || d.title.toLowerCase().includes(q) || d.fileName.toLowerCase().includes(q));
   }, [workspaceDocuments, roomDocumentIds, search]);
+
+  const folderTree = useMemo(() => {
+    const roots = buildFolderTree(folders);
+    return flattenTree(roots, 0);
+  }, [folders]);
 
   const toggleSelection = (id: string) => {
     setSelectedIds((prev) => {
@@ -89,9 +134,11 @@ export function DocumentPicker({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {folders.map((folder) => (
+                {folderTree.map(({ folder, depth }) => (
                   <SelectItem key={folder.path} value={folder.path}>
-                    {folder.name}
+                    <span style={{ paddingLeft: `${depth * 16}px` }}>
+                      {depth > 0 && "└ "}{folder.name}
+                    </span>
                   </SelectItem>
                 ))}
               </SelectContent>

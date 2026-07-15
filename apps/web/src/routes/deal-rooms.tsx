@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { Plus, Lock, Folder, MagnifyingGlass, Tag } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +31,7 @@ export function DealRoomsPage() {
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string>("all");
 
@@ -64,13 +65,22 @@ export function DealRoomsPage() {
     });
   }, [rooms, search, selectedTag]);
 
+  const navigateToRoom = (roomId: string, addDocuments = false) => {
+    navigate(`/${workspaceSlug}/deal-rooms/${roomId}${addDocuments ? "?addDocuments=1" : ""}`, {
+      state: {
+        returnTo: location.pathname + location.search,
+        returnLabel: t("detail.back"),
+      },
+    });
+  };
+
   const handleAddDocuments = (roomId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigate(`/${workspaceSlug}/deal-rooms/${roomId}?addDocuments=1`);
+    navigateToRoom(roomId, true);
   };
 
   const handleCardClick = (roomId: string) => {
-    navigate(`/${workspaceSlug}/deal-rooms/${roomId}`);
+    navigateToRoom(roomId);
   };
 
   const isActive = (room: DealRoom) => room.status === "active";

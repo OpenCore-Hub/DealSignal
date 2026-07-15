@@ -4,6 +4,7 @@ import { StatCard } from "@/components/common/StatCard";
 import { TrendChart } from "@/components/common/TrendChart";
 import { VisitorList } from "@/components/common/VisitorList";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router";
 import type { HeatLevel } from "@/types";
 
 interface DealRoomAnalyticsTabProps {
@@ -20,6 +21,7 @@ export function DealRoomAnalyticsTab({
   recentVisitors,
 }: DealRoomAnalyticsTabProps) {
   const { t } = useTranslation("dealRooms");
+  const location = useLocation();
 
   const visitors = (recentVisitors ?? []).map((v, idx) => ({
     id: `${v.email}-${idx}`,
@@ -54,7 +56,11 @@ export function DealRoomAnalyticsTab({
         </CardHeader>
         <CardContent>
           {visitors.length > 0 ? (
-            <VisitorList visitors={visitors} />
+            <VisitorList
+              visitors={visitors}
+              returnTo={location.pathname + location.search}
+              returnLabel={t("detail.back")}
+            />
           ) : (
             <p className="text-body text-muted-foreground">{t("activity.noVisitors")}</p>
           )}

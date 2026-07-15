@@ -51,6 +51,7 @@
     "uploaded": "已上传",
     "uploadAny": "上传文档",
     "uploading": "上传中...",
+    "processing": "处理中",
     "uploadProgress": "文件上传进度",
     "uploadFailed": "上传失败",
     "noTemplate": "未匹配到模板结构。"
@@ -62,7 +63,7 @@
     "qa": "问答"
   },
   "share": {
-    "title": "分享数据室",
+    "title": "分享",
     "createTitle": "创建分享链接",
     "copyLink": "复制链接",
     "copied": "链接已复制",
@@ -101,7 +102,13 @@
     "inactive": "未激活",
     "disableConfirmTitle": "禁用此链接？",
     "disableConfirmDescription": "现有访客会话将立即失效。",
-    "preview": "以访客身份预览"
+    "preview": "以访客身份预览",
+    "documents": {
+      "title": "文档",
+      "selectDeselectAll": "全选/取消全选",
+      "noSearchResults": "没有匹配的文档。",
+      "noDocumentsInFolders": "这些文件夹中还没有添加文档。"
+    }
   },
   "invite": {
     "title": "邀请",
@@ -429,8 +436,7 @@
     "folder": "文件夹",
     "addSelected": "添加 {{count}} 个文档",
     "noAvailable": "没有可用的工作区文档。",
-    "emptyFolder": "该文件夹暂无文档。",
-    "doubleClickToOpen": "双击打开文档",
+    "clickToOpen": "点击打开文档",
     "moveUp": "上移",
     "moveDown": "下移",
     "moveTo": "移动到文件夹",

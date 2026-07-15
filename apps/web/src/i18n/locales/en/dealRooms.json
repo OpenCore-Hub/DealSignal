@@ -54,6 +54,7 @@
     "uploaded": "Uploaded",
     "uploadAny": "Upload a document",
     "uploading": "Uploading...",
+    "processing": "Processing",
     "uploadProgress": "Upload progress",
     "uploadFailed": "Failed",
     "noTemplate": "No matching template structure."
@@ -65,7 +66,7 @@
     "qa": "Q&A"
   },
   "share": {
-    "title": "Share deal room",
+    "title": "Share",
     "createTitle": "Create share link",
     "copyLink": "Copy link",
     "copied": "Link copied",
@@ -104,7 +105,13 @@
     "inactive": "Inactive",
     "disableConfirmTitle": "Disable this link?",
     "disableConfirmDescription": "Existing viewer sessions will be invalidated immediately.",
-    "preview": "Preview as visitor"
+    "preview": "Preview as visitor",
+    "documents": {
+      "title": "Documents",
+      "selectDeselectAll": "Select/Deselect All",
+      "noSearchResults": "No documents match your search.",
+      "noDocumentsInFolders": "No documents have been added to these folders yet."
+    }
   },
   "invite": {
     "title": "Invite",
@@ -434,8 +441,7 @@
     "addSelected": "Add {{count}} document",
     "addSelected_plural": "Add {{count}} documents",
     "noAvailable": "No available workspace documents.",
-    "emptyFolder": "No documents in this folder yet.",
-    "doubleClickToOpen": "Double-click to open document",
+    "clickToOpen": "Click to open document",
     "moveUp": "Move up",
     "moveDown": "Move down",
     "moveTo": "Move to folder",

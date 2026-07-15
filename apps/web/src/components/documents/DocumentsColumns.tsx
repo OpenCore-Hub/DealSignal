@@ -51,6 +51,8 @@ interface UseDocumentColumnsOptions {
   navigate: NavigateFunction;
   refetch?: () => void;
   onAddToDealRoom?: (doc: DocumentRow) => void;
+  returnTo?: string;
+  returnLabel?: string;
 }
 
 function SortableHeader({ column, label }: { column: Column<DocumentRow>; label: string }) {
@@ -74,7 +76,14 @@ function SortableHeader({ column, label }: { column: Column<DocumentRow>; label:
   );
 }
 
-export function useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDealRoom }: UseDocumentColumnsOptions) {
+export function useDocumentColumns({
+  workspaceSlug,
+  navigate,
+  refetch,
+  onAddToDealRoom,
+  returnTo,
+  returnLabel,
+}: UseDocumentColumnsOptions) {
   const { t } = useTranslation(["documents", "common"]);
 
   return useMemo<ColumnDef<DocumentRow>[]>(
@@ -181,7 +190,9 @@ export function useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDe
                 aria-label={t("common:preview")}
                 onClick={(e) => {
                   e.stopPropagation();
-                  navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                  navigate(`/${workspaceSlug}/documents/${doc.id}`, {
+                    state: returnTo ? { returnTo, returnLabel } : undefined,
+                  });
                 }}
               >
                 <Eye size={16} />
@@ -242,6 +253,6 @@ export function useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDe
         },
       },
     ],
-    [navigate, workspaceSlug, t, refetch, onAddToDealRoom]
+    [navigate, workspaceSlug, t, refetch, onAddToDealRoom, returnTo, returnLabel]
   );
 }

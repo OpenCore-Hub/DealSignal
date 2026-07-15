@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router";
+import { useLocation, useNavigate } from "react-router";
 import { Copy, Link as LinkIcon } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -18,6 +18,7 @@ interface DocumentLinksCardProps {
 
 export function DocumentLinksCard({ doc, links, workspaceSlug }: DocumentLinksCardProps) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation(["documents", "common"]);
 
   return (
@@ -65,7 +66,18 @@ export function DocumentLinksCard({ doc, links, workspaceSlug }: DocumentLinksCa
                   >
                     <Copy size={14} />
                   </Button>
-                  <Button size="sm" variant="outline" onClick={() => navigate(`/${workspaceSlug}/links/${link.id}`)}>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      navigate(`/${workspaceSlug}/links/${link.id}`, {
+                        state: {
+                          returnTo: location.pathname + location.search,
+                          returnLabel: t("documents:detail.back"),
+                        },
+                      })
+                    }
+                  >
                     {t("common:logs")}
                   </Button>
                 </div>

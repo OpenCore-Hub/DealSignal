@@ -148,6 +148,7 @@ export function DealRoomFolderTree({
   onFolderDelete,
   onDocumentsAdd,
   onFolderUpload,
+  onDocumentOpen,
 }: DealRoomFolderTreeProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
@@ -334,7 +335,7 @@ export function DealRoomFolderTree({
             }
           }}
           className={`
-            group flex w-full items-center justify-between gap-2 rounded-md p-2 text-left outline-none
+            group flex w-full items-center justify-between gap-2 rounded-md py-1 px-2 text-left outline-none
             focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
             ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50"}
           `}
@@ -422,21 +423,17 @@ export function DealRoomFolderTree({
         </div>
 
         {!isNavigator && isExpanded && (
-          <div className="py-1">
+          <div>
             {creatingParent === node.folder.path && renderCreateRow(node.folder.path, depth + 1)}
-            {docs.length === 0 && creatingParent !== node.folder.path ? (
-              <p className="py-2 text-sm text-muted-foreground" style={{ marginLeft: `${depth * 16 + 48}px` }}>
-                {t("documents.emptyFolder")}
-              </p>
-            ) : (
+            {docs.length > 0 && (
               <ul className="space-y-0.5">
                 {docs.map((doc) => (
                   <li
                     key={doc.id}
-                    className="group flex items-center justify-between gap-2 rounded-md p-2 hover:bg-muted/30"
+                    className="group flex cursor-pointer items-center justify-between gap-2 rounded-md py-0.5 px-2 hover:bg-muted/30"
                     style={{ marginLeft: `${depth * 16 + 24}px` }}
-                    onDoubleClick={() => {}}
-                    title={t("documents.doubleClickToOpen")}
+                    onClick={() => onDocumentOpen?.(doc.document_id)}
+                    title={t("documents.clickToOpen")}
                   >
                     <div className="flex min-w-0 items-center gap-2">
                       <FileText size={16} className="text-muted-foreground shrink-0" />
@@ -451,7 +448,7 @@ export function DealRoomFolderTree({
         )}
 
         {isNavigator && isExpanded && (
-          <div className="py-1">
+          <div>
             {creatingParent === node.folder.path && renderCreateRow(node.folder.path, depth + 1)}
             {node.children.map((child) => renderFolder(child, depth + 1))}
           </div>
@@ -467,7 +464,7 @@ export function DealRoomFolderTree({
   };
 
   return (
-    <div className="space-y-2" data-testid="folder-tree">
+    <div className="space-y-0.5" data-testid="folder-tree">
       {folders.length === 0 && <p className="text-sm text-muted-foreground">{t("folders.empty")}</p>}
 
       {isNavigator && (

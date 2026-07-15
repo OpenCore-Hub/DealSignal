@@ -55,9 +55,11 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
     <Card>
       <CardHeader className="flex flex-row items-center justify-between">
         <CardTitle>{t("permissions.links.title")}</CardTitle>
-        <DealRoomShareDialog roomId={roomId} onChanged={refetch}>
-          <Button size="sm">{t("permissions.links.createLink")}</Button>
-        </DealRoomShareDialog>
+        {linkList.length > 0 && (
+          <DealRoomShareDialog roomId={roomId} onChanged={refetch}>
+            <Button size="sm">{t("permissions.links.createLink")}</Button>
+          </DealRoomShareDialog>
+        )}
       </CardHeader>
       <CardContent>
         <div className="overflow-hidden rounded-lg border">

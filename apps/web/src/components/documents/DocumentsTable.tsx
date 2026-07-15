@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
   getCoreRowModel,
@@ -44,6 +44,16 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
+
+  const openDocument = (documentId: string) => {
+    navigate(`/${workspaceSlug}/documents/${documentId}`, {
+      state: {
+        returnTo: location.pathname + location.search,
+        returnLabel: t("documents:detail.back"),
+      },
+    });
+  };
   const { t } = useTranslation(["documents", "common"]);
   const [sorting, setSorting] = useState<SortingState>([{ id: "totalViews", desc: true }]);
   const [globalFilter, setGlobalFilter] = useState("");
@@ -79,7 +89,14 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return () => window.removeEventListener("documents:uploaded", handleUploaded);
   }, [refetch]);
 
-  const columns = useDocumentColumns({ workspaceSlug, navigate, refetch, onAddToDealRoom: setDocToAddToRoom });
+  const columns = useDocumentColumns({
+    workspaceSlug,
+    navigate,
+    refetch,
+    onAddToDealRoom: setDocToAddToRoom,
+    returnTo: location.pathname + location.search,
+    returnLabel: t("documents:detail.back"),
+  });
 
   // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
@@ -234,11 +251,11 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                       className="cursor-pointer"
                       role="link"
                       tabIndex={0}
-                      onClick={() => navigate(`/${workspaceSlug}/documents/${row.original.id}`)}
+                      onClick={() => openDocument(row.original.id)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" || e.key === " ") {
                           e.preventDefault();
-                          navigate(`/${workspaceSlug}/documents/${row.original.id}`);
+                          openDocument(row.original.id);
                         }
                       }}
                     >

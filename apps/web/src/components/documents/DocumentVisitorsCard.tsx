@@ -1,5 +1,6 @@
 import { Plus } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VisitorList } from "@/components/common/VisitorList";
 import type { HeatLevel, VisitorSummary } from "@/types";
@@ -36,6 +37,7 @@ interface DocumentVisitorsCardProps {
 
 export function DocumentVisitorsCard({ visitors }: DocumentVisitorsCardProps) {
   const { t } = useTranslation("documents");
+  const location = useLocation();
   const visitorList = toVisitorListItems(visitors);
 
   return (
@@ -47,7 +49,11 @@ export function DocumentVisitorsCard({ visitors }: DocumentVisitorsCardProps) {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        <VisitorList visitors={visitorList} />
+        <VisitorList
+          visitors={visitorList}
+          returnTo={location.pathname + location.search}
+          returnLabel={t("documents:detail.back")}
+        />
       </CardContent>
     </Card>
   );

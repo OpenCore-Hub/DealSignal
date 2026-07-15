@@ -81,6 +81,24 @@ describe("DealRoomShareDialog", () => {
     expect(screen.getByPlaceholderText("Recipient's Organization")).toBeInTheDocument();
   });
 
+  it("renders all four tabs in the correct order", async () => {
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    const tabs = ["Documents", "Share", "Invite", "Access"];
+    tabs.forEach((label) => {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    });
+  });
+
   it("switches to Access tab", async () => {
     render(
       <Wrapper>
@@ -112,7 +130,7 @@ describe("DealRoomShareDialog", () => {
       downloadEnabled: false,
       watermarkEnabled: true,
       aiCopilotEnabled: false,
-      documentIds: [],
+      folderPaths: [],
     } as unknown as Link);
     vi.mocked(api.setLinkAccessRules).mockResolvedValue(undefined);
 
@@ -158,7 +176,7 @@ describe("DealRoomShareDialog", () => {
           downloadEnabled: false,
           watermarkEnabled: false,
           aiCopilotEnabled: false,
-          documentIds: [],
+          folderPaths: [],
           accessCount: 3,
           heatLevel: "warm",
           isBundle: false,

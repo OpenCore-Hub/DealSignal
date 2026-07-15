@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/common/PageHeader";
-import { BackButton } from "@/components/common/BackButton";
+import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { DocumentAnalytics } from "./DocumentAnalytics";
@@ -52,7 +52,7 @@ export function DocumentDetail() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackButton to={`/${workspaceSlug}/documents`} label={t("documents:detail.back")} />
+        <SmartBackButton fallbackTo={`/${workspaceSlug}/documents`} fallbackLabel={t("documents:detail.back")} />
         <div className="rounded-xl border border-border bg-card py-12 text-center">
           <p className="text-body text-destructive mb-4">
             {t("documents:detail.loadFailed", { error })}
@@ -83,7 +83,7 @@ export function DocumentDetail() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/documents`} label={t("documents:detail.back")} />
+      <SmartBackButton fallbackTo={`/${workspaceSlug}/documents`} fallbackLabel={t("documents:detail.back")} />
 
       <PageHeader
         title={doc.title}

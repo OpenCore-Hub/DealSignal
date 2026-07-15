@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Buildings } from "@phosphor-icons/react";
+import { useMemo, useState, type ReactNode } from "react";
+import { Buildings, Folder } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -22,6 +22,7 @@ import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { toast } from "sonner";
 import type { DealRoomFolder, DealRoomFolderDocs } from "@/types";
+import { buildFolderTree, type FolderTreeNode } from "@/lib/folderTree";
 
 interface AddToDealRoomDialogProps {
   documentId: string;
@@ -70,12 +71,13 @@ export function AddToDealRoomDialog({
     return { folders: foldersRes.data, docs: docsRes.data };
   }, [open, effectiveRoomId]);
 
-  const folders = useMemo(() => details?.folders ?? [], [details?.folders]);
+  const folders = useMemo(() => (details?.folders ?? []).filter((f) => f.path !== "/"), [details?.folders]);
+  const folderTree = useMemo(() => buildFolderTree(folders), [folders]);
   const folderDocs = useMemo(() => details?.docs ?? [], [details?.docs]);
 
   const defaultFolder = useMemo(() => {
-    return folders[0]?.path ?? "";
-  }, [folders]);
+    return folderTree[0]?.folder.path ?? "";
+  }, [folderTree]);
 
   const effectiveFolder =
     selectedFolder && folders.some((f) => f.path === selectedFolder)
@@ -122,6 +124,23 @@ export function AddToDealRoomDialog({
     onOpenChange(nextOpen);
   };
 
+  const renderFolderOptions = (
+    nodes: FolderTreeNode<DealRoomFolder>[],
+    depth = 0
+  ): ReactNode[] =>
+    nodes.flatMap((node) => [
+      <SelectItem key={node.folder.path} value={node.folder.path}>
+        <span
+          className="flex items-center gap-2"
+          style={{ paddingLeft: `${depth * 16}px` }}
+        >
+          <Folder size={16} className="text-muted-foreground" />
+          <span>{node.folder.name}</span>
+        </span>
+      </SelectItem>,
+      ...renderFolderOptions(node.children, depth + 1),
+    ]);
+
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-md">
@@ -147,7 +166,13 @@ export function AddToDealRoomDialog({
                 <SelectTrigger id="room-select" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent
+                  side="bottom"
+                  align="start"
+                  alignItemWithTrigger={false}
+                  collisionAvoidance={{ side: "none", align: "none" }}
+                  className="max-h-60"
+                >
                   {rooms.map((room) => (
                     <SelectItem key={room.id} value={room.id}>
                       {room.name}
@@ -170,13 +195,15 @@ export function AddToDealRoomDialog({
                   <SelectTrigger id="folder-select" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    {folders.map((folder) => (
-                      <SelectItem key={folder.path} value={folder.path}>
-                        {folder.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
+                  <SelectContent
+                  side="bottom"
+                  align="start"
+                  alignItemWithTrigger={false}
+                  collisionAvoidance={{ side: "none", align: "none" }}
+                  className="max-h-60"
+                >
+                  {renderFolderOptions(folderTree)}
+                </SelectContent>
                 </Select>
               )}
               {alreadyAdded && (
