@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Server-side PDF watermarking on public downloads (P0 hardening):
+  - Added `pdfcpu`-based watermark engine in `internal/link`.
+  - `PublicDownloadURL` signs a tamper-proof `wm` parameter when `watermark_enabled` is on and the document is a PDF.
+  - `ServeSignedFile` verifies the signed `wm` value and overlays a diagonal, semi-transparent text watermark (visitor email, UTC timestamp, hashed IP) before streaming the PDF.
+  - Non-PDF assets and unsigned requests continue to stream unchanged.
+  - Added unit tests for watermark signing, tamper detection, and PDF application in `internal/link`.
+- Added `internal/auth` unit tests verifying HttpOnly `access_token`/`refresh_token` and readable `auth_session` cookie behavior in development and production.
+- Staging deployment pipeline (production go-live):
+  - Added a multi-stage `apps/web/Dockerfile` (Nginx + Vite build) and `docker-entrypoint.sh` for runtime API proxy configuration.
+  - CI now builds and pushes both `ghcr.io/<owner>/api` and `ghcr.io/<owner>/web` images on every `main` push.
+  - Replaced placeholder `deploy-staging` job with SSH-based rollout: pulls images on the staging host and runs `docker compose up -d`.
+  - Added `docker-compose.staging.yml` that reuses `apps/api/docker-compose.yml` for infrastructure services and overrides API/web to use published images.
+  - Documented required staging secrets in `AGENTS.md`.
+- Observability hardening (production go-live):
+  - Added `/readyz` readiness endpoint for Kubernetes-style probes.
+  - Replaced Gin's default `gin.Recovery()` with a structured JSON panic-recovery middleware that logs the stack trace and request ID and returns a generic 500 response.
+  - Added unit tests for `/readyz` and panic recovery in `internal/server`.
+- Authenticated workspace download watermark (P0 hardening):
+  - Extracted server-side PDF watermark engine into `internal/watermark` so it can be reused by both public links and authenticated workspace downloads.
+  - Added `GET /api/workspaces/:workspaceSlug/documents/:id/download` proxy endpoint that streams the file through the backend and applies a watermark when `workspace.watermark_downloads` is enabled.
+  - `GET /api/workspaces/:workspaceSlug/documents/:id/download-url` now returns the proxy URL for watermarked PDFs and continues to return a direct S3 presigned URL otherwise; no frontend changes required.
+  - Added unit tests for `internal/watermark` and `contentTypeForSourceType`.
+- Fixed React hydration error in `MarketingBatchDialog`: replaced nested `<DialogTrigger><Button>` with base-ui `render` prop so only a single `<button>` is rendered.
+- Removed the "Upload document" button from the top navigation header (`TopNav`) per product feedback; uploads remain available on the Documents page and Deal Room detail page.
+- Improved `LinksTable` truncation: Link and Document columns now truncate with ellipsis and show the full text via a native tooltip on hover.
+- Fixed backend E2E script (`e2e-test.sh`) to use the HttpOnly cookie jar after the auth token migration; it no longer relies on the removed `access_token` JSON field.
+- Reduced noisy ERROR logs for new links: `GetLastAccessLogByLink` returning no rows (expected for links with no visits) is no longer logged as an error.
+
 ## [v2.5.0] - 2026-07-11
 
 ### Added

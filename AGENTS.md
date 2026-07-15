@@ -15,7 +15,8 @@ cp .env.example .env
 docker-compose up --build
 ```
 
-Health check: `curl http://localhost:8080/healthz`
+Health check: `curl http://localhost:8080/healthz`  
+Readiness probe: `curl http://localhost:8080/readyz`
 
 ## Key environment variables
 
@@ -54,7 +55,18 @@ pnpm test:e2e          # MSW mocks
 
 - Use the `docker-compose` binary (not the `docker compose` plugin) in this repo.
 - MinIO and OnlyOffice run with `platform: linux/amd64` for Apple Silicon compatibility.
-- The API image is `FROM scratch`; a writable `/tmp` directory is copied into the final image for document ingestion.
+- The API image is `FROM alpine` and ships `poppler-utils` for PDF rendering.
+- The web image is `FROM nginx:alpine` and proxies `/api` to the backend service configured via `API_HOST`.
+
+## CI / CD
+
+- `ci.yml` builds and pushes both `ghcr.io/<owner>/api` and `ghcr.io/<owner>/web` images on every push to `main`.
+- The `deploy-staging` job is gated on the `staging` GitHub environment and these repository secrets:
+  - `STAGING_HOST` — target server hostname or IP.
+  - `STAGING_SSH_KEY` — private key with Docker/compose access on the host.
+  - `STAGING_COMPOSE_PATH` — absolute path to `docker-compose.staging.yml` on the host.
+  - `STAGING_USER` (optional, defaults to `deploy`).
+- The staging host should have Docker and the Docker Compose plugin installed. `docker-compose.staging.yml` reuses `apps/api/docker-compose.yml` for infrastructure services and overrides the API/web services to use the images pushed by CI.
 
 ## Release version
 
@@ -78,7 +90,7 @@ If you find existing hard-coded strings, convert them to i18n keys and update bo
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **DealSignal** (15561 symbols, 34783 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **DealSignal** (17766 symbols, 40434 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 
