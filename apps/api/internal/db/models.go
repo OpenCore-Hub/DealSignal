@@ -300,6 +300,8 @@ type Link struct {
 	TargetFolderPath            string
 	ScreenshotProtectionEnabled bool
 	LastReminderSentAt          pgtype.Timestamptz
+	HasDocumentScope            bool
+	FolderScopePaths            []string
 }
 
 type LinkAccessRequest struct {

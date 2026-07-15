@@ -71,6 +71,7 @@ type HealthResponse struct {
 
 func (s *Server) registerRoutes() error {
 	s.engine.GET("/healthz", s.handleHealthz)
+	s.engine.GET("/readyz", s.handleReadyz)
 
 	api := s.engine.Group("/api")
 
@@ -161,7 +162,7 @@ func (s *Server) registerRoutes() error {
 			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, s.cfg.OnlyOfficeJWTSecret, storageClient)
 			ingestionSvc := ingestion.NewService(queries, storageClient, converter, ingestionEmbedder)
 			uploadSvc := upload.NewService(queries, storageClient)
-			uploadHandler := upload.NewHandler(uploadSvc, storageClient)
+			uploadHandler := upload.NewHandler(uploadSvc, storageClient, workspaceSvc, s.cfg.AppBaseURL)
 
 			ingestionWorker := ingestion.NewWorker(ingestionSvc, 1*time.Second)
 			s.registerWorker(ingestionWorker)
@@ -292,6 +293,22 @@ func certProvider(name string) domain.CertificateProvider {
 		return domain.SelfSignedProvider{}
 	}
 	return domain.NoopProvider{}
+}
+
+func (s *Server) handleReadyz(c *gin.Context) {
+	status := "ready"
+	code := http.StatusOK
+
+	if s.dbPool != nil {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
+		defer cancel()
+		if err := s.dbPool.Ping(ctx); err != nil {
+			status = "not_ready"
+			code = http.StatusServiceUnavailable
+		}
+	}
+
+	c.JSON(code, HealthResponse{Status: status, Version: s.cfg.Version})
 }
 
 func (s *Server) handleHealthz(c *gin.Context) {

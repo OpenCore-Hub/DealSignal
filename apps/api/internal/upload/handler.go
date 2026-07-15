@@ -1,14 +1,22 @@
 package upload
 
 import (
+	"bytes"
+	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
+	"path"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/watermark"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,15 +25,22 @@ import (
 
 var errInvalidDocumentID = errors.New("invalid document id")
 
+// SecuritySettingsProvider loads workspace security settings for watermark checks.
+type SecuritySettingsProvider interface {
+	GetSecurity(ctx context.Context, workspaceID string) (workspace.SecuritySettings, error)
+}
+
 // Handler exposes document upload HTTP endpoints.
 type Handler struct {
-	uploadService *Service
-	storage       *storage.Client
+	uploadService    *Service
+	workspaceService SecuritySettingsProvider
+	storage          *storage.Client
+	appBaseURL       string
 }
 
 // NewHandler creates an upload handler.
-func NewHandler(u *Service, s *storage.Client) *Handler {
-	return &Handler{uploadService: u, storage: s}
+func NewHandler(u *Service, s *storage.Client, ws SecuritySettingsProvider, appBaseURL string) *Handler {
+	return &Handler{uploadService: u, workspaceService: ws, storage: s, appBaseURL: appBaseURL}
 }
 
 // RegisterRoutes mounts document routes under a workspace-scoped group.
@@ -39,6 +54,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/archive", h.Archive)
 	g.POST("/:id/unarchive", h.Unarchive)
 	g.GET("/:id/download-url", h.DownloadURL)
+	g.GET("/:id/download", h.Download)
 	g.GET("/:id/pages", h.ListPages)
 	g.POST("/:id/pages/signed-url", h.SignedURL)
 	g.PATCH("/:id/category", h.UpdateCategory)
@@ -401,6 +417,9 @@ func (h *Handler) ListPages(c *gin.Context) {
 }
 
 // DownloadURL generates a temporary URL for downloading the original document.
+// If the workspace has watermark_downloads enabled and the document is a PDF,
+// the URL points to the server-side /download proxy so a watermark can be
+// applied during streaming.
 func (h *Handler) DownloadURL(c *gin.Context) {
 	doc, _, err := h.getDocumentAndJob(c)
 	if err != nil {
@@ -408,31 +427,114 @@ func (h *Handler) DownloadURL(c *gin.Context) {
 		return
 	}
 
-	expiry := 15 * time.Minute
-	url, err := h.storage.PresignedGetURL(c.Request.Context(), doc.StorageKey, expiry)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+	ctx := c.Request.Context()
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	watermarkEnabled := false
+	if h.workspaceService != nil {
+		if sec, err := h.workspaceService.GetSecurity(ctx, workspaceID); err == nil {
+			watermarkEnabled = sec.WatermarkDownloads
+		}
+	}
+
+	if watermarkEnabled && doc.SourceType == "pdf" {
+		base := strings.TrimSuffix(h.appBaseURL, "/")
+		proxyURL := fmt.Sprintf("%s/api/workspaces/%s/documents/%s/download", base, c.Param("workspaceSlug"), c.Param("id"))
+		c.JSON(http.StatusOK, gin.H{
+			"download_url": proxyURL,
+			"expires_at":   time.Now().UTC().Format(time.RFC3339),
+			"filename":     doc.Title,
+			"content_type": contentTypeForSourceType(doc.SourceType),
+		})
 		return
 	}
 
-	contentType := "application/octet-stream"
-	switch doc.SourceType {
-	case "pdf":
-		contentType = "application/pdf"
-	case "docx":
-		contentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-	case "pptx":
-		contentType = "application/vnd.openxmlformats-officedocument.presentationml.presentation"
-	case "xlsx":
-		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	expiry := 15 * time.Minute
+	url, err := h.storage.PresignedGetURL(ctx, doc.StorageKey, expiry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"download_url": url,
 		"expires_at":   time.Now().Add(expiry).UTC().Format(time.RFC3339),
 		"filename":     doc.Title,
-		"content_type": contentType,
+		"content_type": contentTypeForSourceType(doc.SourceType),
 	})
+}
+
+func contentTypeForSourceType(sourceType string) string {
+	switch sourceType {
+	case "pdf":
+		return "application/pdf"
+	case "docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case "pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case "xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	}
+	return "application/octet-stream"
+}
+
+// Download streams the original document directly from storage. If the
+// workspace has watermark_downloads enabled and the document is a PDF, a
+// visible watermark (user email + UTC timestamp) is applied before streaming.
+func (h *Handler) Download(c *gin.Context) {
+	doc, _, err := h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+
+	ctx := c.Request.Context()
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	applyWatermark := false
+	if h.workspaceService != nil {
+		if sec, err := h.workspaceService.GetSecurity(ctx, workspaceID); err == nil {
+			applyWatermark = sec.WatermarkDownloads
+		}
+	}
+
+	obj, err := h.storage.GetObject(ctx, doc.StorageKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "storage_error", "message": err.Error()})
+		return
+	}
+	defer obj.Close()
+
+	contentType := contentTypeForSourceType(doc.SourceType)
+	c.Header("Content-Type", contentType)
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, path.Base(doc.Title)))
+
+	if applyWatermark && doc.SourceType == "pdf" {
+		email := h.userEmail(ctx, middleware.UserIDFrom(c))
+		wmText := fmt.Sprintf("%s | %s", email, time.Now().UTC().Format(time.RFC3339))
+
+		var buf bytes.Buffer
+		if err := watermark.ApplyPDF(obj, &buf, wmText); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "watermark_failed", "message": err.Error()})
+			return
+		}
+		c.Header("Content-Length", strconv.Itoa(buf.Len()))
+		c.Status(http.StatusOK)
+		_, _ = buf.WriteTo(c.Writer)
+		return
+	}
+
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, obj)
+}
+
+func (h *Handler) userEmail(ctx context.Context, userID string) string {
+	if userID == "" {
+		return "Unknown"
+	}
+	user, err := h.uploadService.queries.GetUserByID(ctx, pgUUID(userID))
+	if err != nil {
+		return "Unknown"
+	}
+	return user.Email
 }
 
 // SignedURL generates a temporary URL for a page image.

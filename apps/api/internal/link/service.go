@@ -189,6 +189,9 @@ type CreateLinkRequest struct {
 	CustomDomain                string
 	Tags                        []string
 	NotifyOnAccess              bool
+	// FolderPaths scopes a deal-room link to a set of folder paths.
+	// Empty means the whole deal room is exposed.
+	FolderPaths []string
 }
 
 // UpdateLinkRequest is the input for updating an existing link (full replacement).
@@ -219,6 +222,9 @@ type UpdateLinkRequest struct {
 	CustomDomain                string
 	Tags                        []string
 	NotifyOnAccess              bool
+	// FolderPaths scopes a deal-room link to a set of folder paths.
+	// Empty means the whole deal room is exposed.
+	FolderPaths []string
 }
 
 // AccessRule represents a single allow/block rule for a link.
@@ -261,6 +267,9 @@ type DealRoomLinkRequest struct {
 	CustomDomain             string
 	Tags                     []string
 	NotifyOnAccess           bool
+	// FolderPaths optionally scopes the link to a subset of deal-room folders.
+	// When empty, the link exposes all folders in the deal room.
+	FolderPaths []string
 }
 
 // CreateLink creates a smart link for one or more documents.
@@ -274,8 +283,9 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	if !hasDocuments && !hasDealRoom {
 		return db.Link{}, errors.New("either document_id(s) or deal_room_id is required")
 	}
-	if hasDocuments && hasDealRoom {
-		return db.Link{}, errors.New("a link cannot be associated with both documents and a deal room")
+	// Deal-room links use folder paths for scoping, never document IDs.
+	if hasDealRoom && (req.DocumentID != "" || len(req.DocumentIDs) > 0) {
+		return db.Link{}, errors.New("deal-room links cannot use document_id or document_ids")
 	}
 
 	linkType := req.LinkType
@@ -335,6 +345,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	var tenantID pgtype.UUID
 	var primaryDocID pgtype.UUID
 	var dealRoomID pgtype.UUID
+	folderScopePaths := []string{}
 
 	if hasDealRoom {
 		drUUID, err := uuid.Parse(req.DealRoomID)
@@ -356,6 +367,13 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		}
 		tenantID = dealRoom.TenantID
 		dealRoomID = dealRoom.ID
+
+		// If a folder scope is provided, every path must belong to the deal room.
+		if err := s.validateDealRoomFolderPaths(ctx, qtx, workspaceUUID, dealRoomID, req.FolderPaths); err != nil {
+			return db.Link{}, err
+		}
+		folderScopePaths = make([]string, len(req.FolderPaths))
+		copy(folderScopePaths, req.FolderPaths)
 	} else {
 		// Resolve document IDs: use DocumentIDs if provided, else fall back to single DocumentID.
 		documentIDs := req.DocumentIDs
@@ -428,6 +446,8 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		CustomDomain:                pgtype.Text{String: req.CustomDomain, Valid: req.CustomDomain != ""},
 		Tags:                        req.Tags,
 		NotifyOnAccess:              req.NotifyOnAccess,
+		HasDocumentScope:            hasDealRoom && len(folderScopePaths) > 0,
+		FolderScopePaths:            folderScopePaths,
 		Status:                      "active",
 		CreatedBy:                   userUUID,
 	})
@@ -632,6 +652,16 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		targetFolderPath = req.TargetFolderPath
 	}
 
+	folderScopePaths := existing.FolderScopePaths
+	if isDealRoomLink && req.FolderPaths != nil {
+		folderScopePaths = req.FolderPaths
+	}
+
+	hasDocumentScope := existing.HasDocumentScope
+	if isDealRoomLink && req.FolderPaths != nil {
+		hasDocumentScope = len(folderScopePaths) > 0
+	}
+
 	passwordHash, err := s.resolvePasswordHashForUpdate(existing, req.RequirePassword, req.Password)
 	if err != nil {
 		return db.Link{}, err
@@ -643,6 +673,13 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.queries.WithTx(tx)
+
+	// For deal-room links, validate folder paths before writing anything.
+	if isDealRoomLink && req.FolderPaths != nil {
+		if err := s.validateDealRoomFolderPaths(ctx, qtx, workspaceUUID, existing.DealRoomID, folderScopePaths); err != nil {
+			return db.Link{}, err
+		}
+	}
 
 	// Update the link record using the sqlc-generated UpdateLinkFull.
 	_, err = qtx.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
@@ -670,6 +707,8 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		Tags:                        tags,
 		NotifyOnAccess:              req.NotifyOnAccess,
 		SecurityVersion:             existing.SecurityVersion + 1,
+		HasDocumentScope:            hasDocumentScope,
+		FolderScopePaths:            folderScopePaths,
 		ID:                          existing.ID,
 		WorkspaceID:                 workspaceUUID,
 	})
@@ -677,12 +716,13 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		return db.Link{}, fmt.Errorf("update link: %w", err)
 	}
 
-	// Replace all link_documents for document links.
+	// Replace all link_documents for document links only.
 	if isDocumentLink {
 		if len(req.DocumentIDs) == 0 {
 			return db.Link{}, errors.New("at least one document_id is required")
 		}
-		var primaryDocID pgtype.UUID
+
+		var documentUUIDs []uuid.UUID
 		for _, did := range req.DocumentIDs {
 			docUUID, err := uuid.Parse(did)
 			if err != nil {
@@ -701,22 +741,22 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 			if doc.Status != "ready" {
 				return db.Link{}, ErrDocumentNotReady
 			}
-			if primaryDocID.Bytes == uuidParseNil() {
-				primaryDocID = doc.ID
-			}
+		}
+		documentUUIDs = make([]uuid.UUID, len(req.DocumentIDs))
+		for i, did := range req.DocumentIDs {
+			documentUUIDs[i], _ = uuid.Parse(did)
 		}
 
 		if err := qtx.DeleteLinkDocumentsByLink(ctx, existing.ID); err != nil {
 			return db.Link{}, fmt.Errorf("delete link documents: %w", err)
 		}
-		for i, did := range req.DocumentIDs {
-			docUUID, _ := uuid.Parse(did)
+		for i, docUUID := range documentUUIDs {
 			if err := qtx.CreateLinkDocument(ctx, db.CreateLinkDocumentParams{
 				LinkID:     existing.ID,
 				DocumentID: pgtype.UUID{Bytes: docUUID, Valid: true},
 				SortOrder:  int32(i),
 			}); err != nil {
-				return db.Link{}, fmt.Errorf("create link document %s: %w", did, err)
+				return db.Link{}, fmt.Errorf("create link document %s: %w", docUUID, err)
 			}
 		}
 	}
@@ -811,7 +851,72 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		CustomDomain:             req.CustomDomain,
 		Tags:                     req.Tags,
 		NotifyOnAccess:           req.NotifyOnAccess,
+		FolderPaths:              req.FolderPaths,
 	})
+}
+
+// validateDealRoomFolderPaths checks that every provided folder path exists in
+// the deal room's folder structure.
+func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, dealRoomID pgtype.UUID, folderPaths []string) error {
+	if len(folderPaths) == 0 {
+		return nil
+	}
+	foldersJSON, err := qtx.GetDealRoomFolderPaths(ctx, db.GetDealRoomFolderPathsParams{
+		ID:          dealRoomID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		return fmt.Errorf("get deal room folders: %w", err)
+	}
+	var folders []struct {
+		Path string `json:"path"`
+	}
+	if err := json.Unmarshal([]byte(foldersJSON), &folders); err != nil {
+		return fmt.Errorf("parse deal room folders: %w", err)
+	}
+	allowed := make(map[string]bool, len(folders))
+	for _, f := range folders {
+		allowed[f.Path] = true
+	}
+	for _, p := range folderPaths {
+		if !allowed[p] {
+			return fmt.Errorf("folder path not found in deal room: %s", p)
+		}
+	}
+	return nil
+}
+
+// validateDealRoomDocumentIDs checks that every provided document ID belongs to
+// the deal room and is ready. It returns the parsed UUIDs in request order.
+func (s *Service) validateDealRoomDocumentIDs(ctx context.Context, qtx *db.Queries, dealRoomID pgtype.UUID, documentIDs []string) ([]uuid.UUID, error) {
+	if len(documentIDs) == 0 {
+		return nil, nil
+	}
+	roomDocs, err := qtx.ListDealRoomDocumentsWithMeta(ctx, dealRoomID)
+	if err != nil {
+		return nil, fmt.Errorf("list deal room documents: %w", err)
+	}
+	allowed := make(map[string]db.ListDealRoomDocumentsWithMetaRow, len(roomDocs))
+	for _, d := range roomDocs {
+		allowed[uuid.UUID(d.DocumentID.Bytes).String()] = d
+	}
+
+	out := make([]uuid.UUID, 0, len(documentIDs))
+	for _, did := range documentIDs {
+		docUUID, err := uuid.Parse(did)
+		if err != nil {
+			return nil, fmt.Errorf("invalid document id: %s", did)
+		}
+		roomDoc, ok := allowed[did]
+		if !ok {
+			return nil, fmt.Errorf("document not found in deal room: %s", did)
+		}
+		if roomDoc.Status != "ready" {
+			return nil, ErrDocumentNotReady
+		}
+		out = append(out, docUUID)
+	}
+	return out, nil
 }
 
 // ListDealRoomLinks returns active share links for a deal room.
@@ -2454,6 +2559,7 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		FileRequestsEnabled:      link.FileRequestsEnabled,
 		IndexFileEnabled:         link.IndexFileEnabled,
 		SecurityVersion:          newVersion,
+		HasDocumentScope:         link.HasDocumentScope,
 		ID:                       link.ID,
 		WorkspaceID:              link.WorkspaceID,
 	}); err != nil {

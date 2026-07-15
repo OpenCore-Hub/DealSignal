@@ -53,8 +53,18 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/verify-email/:token", h.VerifyEmail)
 }
 
-func (h *Handler) cookieSettings() (secure bool, sameSite http.SameSite) {
-	secure = strings.ToLower(h.cfg.AppEnv) == "production"
+func isRequestSecure(c *gin.Context) bool {
+	if c.Request == nil {
+		return false
+	}
+	if c.Request.TLS != nil {
+		return true
+	}
+	return strings.ToLower(c.GetHeader("X-Forwarded-Proto")) == "https"
+}
+
+func (h *Handler) cookieSettings(c *gin.Context) (secure bool, sameSite http.SameSite) {
+	secure = strings.ToLower(h.cfg.AppEnv) == "production" || isRequestSecure(c)
 	if secure {
 		return true, http.SameSiteNoneMode
 	}
@@ -62,7 +72,7 @@ func (h *Handler) cookieSettings() (secure bool, sameSite http.SameSite) {
 }
 
 func (h *Handler) setAuthCookies(c *gin.Context, pair TokenPair) {
-	secure, sameSite := h.cookieSettings()
+	secure, sameSite := h.cookieSettings(c)
 	c.SetSameSite(sameSite)
 	c.SetCookie(accessTokenCookie, pair.AccessToken, int(pair.ExpiresIn), "/", "", secure, true)
 	c.SetCookie(refreshTokenCookie, pair.RefreshToken, int(refreshTokenDuration.Seconds()), "/", "", secure, true)
@@ -70,7 +80,7 @@ func (h *Handler) setAuthCookies(c *gin.Context, pair TokenPair) {
 }
 
 func (h *Handler) clearAuthCookies(c *gin.Context) {
-	secure, sameSite := h.cookieSettings()
+	secure, sameSite := h.cookieSettings(c)
 	c.SetSameSite(sameSite)
 	c.SetCookie(accessTokenCookie, "", -1, "/", "", secure, true)
 	c.SetCookie(refreshTokenCookie, "", -1, "/", "", secure, true)

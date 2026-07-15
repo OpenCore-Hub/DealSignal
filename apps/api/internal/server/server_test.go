@@ -8,6 +8,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/server"
+	"github.com/gin-gonic/gin"
 )
 
 func setupTestServer(t *testing.T) *server.Server {
@@ -90,5 +91,54 @@ func TestRequestIDEchoed(t *testing.T) {
 
 	if got := w.Header().Get("X-Request-ID"); got != "client-req-123" {
 		t.Fatalf("expected X-Request-ID to be echoed, got %s", got)
+	}
+}
+
+func TestReadyz(t *testing.T) {
+	srv := setupTestServer(t)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/readyz", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp server.HealthResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Status != "ready" {
+		t.Fatalf("expected status ready, got %s", resp.Status)
+	}
+	if resp.Version == "" {
+		t.Fatal("expected non-empty version")
+	}
+}
+
+func TestPanicRecovery(t *testing.T) {
+	srv := setupTestServer(t)
+	srv.Engine().GET("/panic", func(c *gin.Context) {
+		panic("intentional test panic")
+	})
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodGet, "/panic", nil)
+	srv.Engine().ServeHTTP(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", w.Code)
+	}
+
+	var resp server.ErrorResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp.Code != "internal_error" {
+		t.Fatalf("expected code internal_error, got %s", resp.Code)
+	}
+
+	if w.Header().Get("X-Request-ID") == "" {
+		t.Fatal("expected X-Request-ID header to be set after panic")
 	}
 }

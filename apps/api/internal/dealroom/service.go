@@ -813,9 +813,17 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 	if err != nil {
 		return errors.New("invalid document id")
 	}
-	return s.queries.DeleteDealRoomDocument(ctx, db.DeleteDealRoomDocumentParams{
-		ID:     pgtype.UUID{Bytes: id, Valid: true},
-		RoomID: room.ID,
+	if err := s.queries.DeleteDealRoomDocument(ctx, db.DeleteDealRoomDocumentParams{
+		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
+		RoomID:     room.ID,
+	}); err != nil {
+		return err
+	}
+	// Also remove the document from any deal-room share-link scopes so that
+	// scoped links do not continue serving a document that is no longer in the room.
+	return s.queries.DeleteLinkDocumentsByDealRoomDocument(ctx, db.DeleteLinkDocumentsByDealRoomDocumentParams{
+		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
+		DealRoomID: room.ID,
 	})
 }
 
@@ -1212,6 +1220,32 @@ func (s *Service) RenameFolder(ctx context.Context, roomID, workspaceID, userID,
 				return err
 			}
 		}
+
+		// Cascade update deal-room link folder scopes.
+		links, err := q.ListLinksByDealRoomID(ctx, room.ID)
+		if err != nil {
+			return err
+		}
+		for _, link := range links {
+			newScopes := make([]string, len(link.FolderScopePaths))
+			for i, p := range link.FolderScopePaths {
+				if p == oldPath {
+					newScopes[i] = newPath
+				} else if strings.HasPrefix(p, oldPath+"/") {
+					newScopes[i] = newPath + strings.TrimPrefix(p, oldPath)
+				} else {
+					newScopes[i] = p
+				}
+			}
+			if err := q.UpdateLinkFolderScopePaths(ctx, db.UpdateLinkFolderScopePathsParams{
+				FolderScopePaths: newScopes,
+				ID:               link.ID,
+				WorkspaceID:      link.WorkspaceID,
+			}); err != nil {
+				return err
+			}
+		}
+
 		return s.saveFoldersWithQueries(ctx, q, room, folders)
 	}); err != nil {
 		return nil, err
@@ -1268,7 +1302,36 @@ func (s *Service) DeleteFolder(ctx context.Context, roomID, workspaceID, userID,
 		}); err != nil {
 			return err
 		}
-		return s.saveFoldersWithQueries(ctx, q, room, newFolders)
+		if err := s.saveFoldersWithQueries(ctx, q, room, newFolders); err != nil {
+			return err
+		}
+		// Remove the deleted folder (and its descendants) from any deal-room link scopes.
+		links, err := q.ListLinksByDealRoomID(ctx, room.ID)
+		if err != nil {
+			return err
+		}
+		for _, l := range links {
+			if len(l.FolderScopePaths) == 0 {
+				continue
+			}
+			filtered := make([]string, 0, len(l.FolderScopePaths))
+			for _, p := range l.FolderScopePaths {
+				if p == path || strings.HasPrefix(p, path+"/") {
+					continue
+				}
+				filtered = append(filtered, p)
+			}
+			if len(filtered) != len(l.FolderScopePaths) {
+				if err := q.UpdateLinkFolderScopePaths(ctx, db.UpdateLinkFolderScopePathsParams{
+					FolderScopePaths: filtered,
+					ID:               l.ID,
+					WorkspaceID:      l.WorkspaceID,
+				}); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}); err != nil {
 		return nil, err
 	}

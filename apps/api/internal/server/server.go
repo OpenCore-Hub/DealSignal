@@ -7,6 +7,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -103,7 +104,7 @@ func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 	}
 
 	r := gin.New()
-	r.Use(gin.Recovery())
+	r.Use(recoveryMiddleware())
 	r.Use(corsMiddleware(cfg.CORSAllowedOrigins))
 	r.Use(requestIDMiddleware())
 	r.Use(requestLogger())
@@ -249,6 +250,32 @@ func metricsMiddleware() gin.HandlerFunc {
 	}
 }
 
+// recoveryMiddleware recovers from panics in any downstream handler/middleware,
+// logs a structured error with the stack trace, and returns a generic 500
+// response so the process stays alive.
+func recoveryMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		defer func() {
+			if r := recover(); r != nil {
+				requestID := c.GetString("requestID")
+				ctx := logger.WithRequestID(c.Request.Context(), requestID)
+				logger.ErrorCtx(ctx, "panic recovered",
+					fmt.Errorf("%v", r),
+					logger.Attr("request_id", requestID),
+					logger.Attr("method", c.Request.Method),
+					logger.Attr("path", c.Request.URL.Path),
+					logger.Attr("stack", string(debug.Stack())),
+				)
+				c.AbortWithStatusJSON(http.StatusInternalServerError, ErrorResponse{
+					Code:    "internal_error",
+					Message: "internal server error",
+				})
+			}
+		}()
+		c.Next()
+	}
+}
+
 func corsMiddleware(allowedOrigins string) gin.HandlerFunc {
 	origins := parseOrigins(allowedOrigins)
 	return func(c *gin.Context) {
@@ -257,7 +284,7 @@ func corsMiddleware(allowedOrigins string) gin.HandlerFunc {
 			c.Writer.Header().Set("Access-Control-Allow-Origin", origin)
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, Accept-Language, Idempotency-Key, X-Link-Access, X-Link-Session")
+		c.Writer.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID, Accept-Language, X-Idempotency-Key, X-Auth-Session, X-Link-Access, X-Link-Session")
 		c.Writer.Header().Set("Access-Control-Expose-Headers", "X-Request-ID, X-RateLimit-Limit, X-RateLimit-Remaining, Retry-After, X-Idempotency-Key, X-Link-Session-Refresh")
 		c.Writer.Header().Set("Access-Control-Allow-Credentials", "true")
 		if c.Request.Method == "OPTIONS" {

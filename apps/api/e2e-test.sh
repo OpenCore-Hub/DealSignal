@@ -30,21 +30,20 @@ fi
 echo -n "[healthz] "
 curl -fsS "$BASE_URL/healthz" | jq -c .
 
-# 2. Register
+# 2. Register (auth tokens are now issued as HttpOnly cookies)
 echo -n "[register] "
 EMAIL="e2e-$(date +%s)@example.com"
 PASSWORD="Password123!"
-REGISTER=$(curl -fsS -X POST "$BASE_URL/api/auth/register" \
+COOKIE_JAR=$(mktemp)
+REGISTER=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/auth/register" \
   -H "Content-Type: application/json" \
   -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
 echo "$REGISTER" | jq -c '{user_id: .user.id, email: .user.email}'
-TOKEN=$(echo "$REGISTER" | jq -r '.access_token')
 
 # 3. Create workspace
 echo -n "[workspace create] "
 SLUG="e2e-$(date +%s)"
-WORKSPACE=$(curl -fsS -X POST "$BASE_URL/api/workspaces" \
-  -H "Authorization: Bearer $TOKEN" \
+WORKSPACE=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/workspaces" \
   -H "Content-Type: application/json" \
   -d "{\"name\":\"E2E Workspace\",\"slug\":\"$SLUG\",\"brand_color\":\"#0055ff\"}")
 echo "$WORKSPACE" | jq -c '{id: .id, slug: .slug}'
@@ -53,8 +52,7 @@ WORKSPACE_SLUG=$(echo "$WORKSPACE" | jq -r '.slug')
 
 # 4. Upload PDF
 echo -n "[upload document] "
-UPLOAD=$(curl -fsS -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/documents" \
-  -H "Authorization: Bearer $TOKEN" \
+UPLOAD=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/documents" \
   -F "file=@$PDF")
 echo "$UPLOAD" | jq -c '{id: .id, status: .status, job_status: .ingestion_job.status}'
 DOC_ID=$(echo "$UPLOAD" | jq -r '.id')
@@ -63,7 +61,7 @@ DOC_ID=$(echo "$UPLOAD" | jq -r '.id')
 echo -n "[wait ready]"
 for i in $(seq 1 30); do
   sleep 1
-  STATUS=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+  STATUS=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
     "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/documents/$DOC_ID/status" | jq -r '.status')
   echo -n " $STATUS"
   if [[ "$STATUS" == "ready" ]]; then
@@ -73,7 +71,7 @@ for i in $(seq 1 30); do
   if [[ "$STATUS" == "failed" ]]; then
     echo ""
     echo "ERROR: document ingestion failed"
-    curl -fsS -H "Authorization: Bearer $TOKEN" \
+    curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
       "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/documents/$DOC_ID/status" | jq .
     exit 1
   fi
@@ -86,14 +84,13 @@ done
 
 # 6. List pages
 echo -n "[list pages] "
-PAGES=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+PAGES=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/documents/$DOC_ID/pages")
 echo "$PAGES" | jq -c '{total: .total, pages: [.pages[].page_number]}'
 
 # 7. Create link
 echo -n "[create link] "
-LINK=$(curl -fsS -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links" \
-  -H "Authorization: Bearer $TOKEN" \
+LINK=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links" \
   -H "Content-Type: application/json" \
   -d "{\"document_id\":\"$DOC_ID\",\"name\":\"E2E Link\",\"permission_type\":\"public\",\"download_enabled\":true}")
 echo "$LINK" | jq -c '{id: .id, short_url: .shortUrl}'
@@ -117,29 +114,29 @@ curl -fsS -X POST "$BASE_URL/api/v1/public/events" \
 
 # 10. Contacts
 echo -n "[contacts list] "
-CONTACTS=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+CONTACTS=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/contacts")
 echo "$CONTACTS" | jq -c '{count: (.data | length), first: .data[0].email}'
 CONTACT_ID=$(echo "$CONTACTS" | jq -r '.data[0].id')
 
 echo -n "[contacts detail] "
-curl -fsS -H "Authorization: Bearer $TOKEN" \
+curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/contacts/$CONTACT_ID" | jq -c '{id, email, totalVisits, heatLevel}'
 
 echo -n "[contacts activities] "
-curl -fsS -H "Authorization: Bearer $TOKEN" \
+curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/contacts/$CONTACT_ID/activities" | jq -c '{count: (.data | length)}'
 
 # 11. Heat score
 echo -n "[heat score] "
-SCORE=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+SCORE=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/analytics/links/$LINK_ID/score")
 echo "$SCORE" | jq -c '{score: .score, level: .level, trend: .trend}'
 
 # 11. AI search (only when RUN_AI=1)
 if [[ "${RUN_AI:-0}" == "1" ]]; then
   echo -n "[ai search] "
-  SEARCH=$(curl -fsS -H "Authorization: Bearer $TOKEN" \
+  SEARCH=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
     "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/search?q=DealSignal&limit=5")
   EVIDENCE_COUNT=$(echo "$SEARCH" | jq '.evidence | length')
   echo "evidence_count=$EVIDENCE_COUNT"
@@ -149,8 +146,7 @@ if [[ "${RUN_AI:-0}" == "1" ]]; then
   fi
 
   echo -n "[ai assistant] "
-  CHAT=$(curl -fsS -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/assistant/chat" \
-    -H "Authorization: Bearer $TOKEN" \
+  CHAT=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/assistant/chat" \
     -H "Content-Type: application/json" \
     -d '{"message":"What does the document say?"}')
   echo "$CHAT" | jq -c '{session_id: .session_id, answer: .answer, evidence_count: (.evidence | length)}'

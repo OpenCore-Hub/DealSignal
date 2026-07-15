@@ -288,8 +288,9 @@ INSERT INTO links (
     ai_copilot_enabled, require_password, password_hash,
     qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
     link_type, target_folder_path,
-    custom_domain, tags, notify_on_access
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28)
+    custom_domain, tags, notify_on_access,
+    has_document_scope, folder_scope_paths
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
 RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
@@ -360,8 +361,10 @@ UPDATE links SET
     link_type = $22,
     target_folder_path = $23,
     security_version = $24,
+    has_document_scope = $25,
+    folder_scope_paths = $26,
     updated_at = now()
-WHERE id = $25 AND workspace_id = $26
+WHERE id = $27 AND workspace_id = $28
 RETURNING *;
 
 -- name: DeleteLink :execrows
@@ -372,6 +375,16 @@ WHERE id = $1 AND workspace_id = $2;
 -- name: HardDeleteLink :execrows
 DELETE FROM links
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListLinksByDealRoomID :many
+SELECT *
+FROM links
+WHERE deal_room_id = $1;
+
+-- name: UpdateLinkFolderScopePaths :exec
+UPDATE links
+SET folder_scope_paths = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3;
 
 -- name: CreateLinkNDAAgreement :one
 INSERT INTO link_nda_agreements (
@@ -785,7 +798,8 @@ WHERE id = $2 AND workspace_id = $3;
 
 -- name: DeleteDealRoomDocument :exec
 DELETE FROM deal_room_documents
-WHERE id = $1 AND room_id = $2;
+WHERE document_id = $1 AND room_id = $2;
+
 
 -- name: UpdateDealRoomDocumentFolder :exec
 UPDATE deal_room_documents
@@ -857,6 +871,11 @@ LEFT JOIN users u ON u.id = rm.user_id
 WHERE rm.room_id = $1
 ORDER BY rm.created_at DESC;
 
+-- name: GetDealRoomFolderPaths :one
+SELECT COALESCE(settings->'folders', '[]'::jsonb)::text AS folders
+FROM deal_rooms
+WHERE id = $1 AND workspace_id = $2;
+
 -- name: ListDealRoomDocumentsWithMeta :many
 SELECT
     drd.id,
@@ -876,6 +895,24 @@ FROM deal_room_documents drd
 JOIN documents d ON d.id = drd.document_id
 WHERE drd.room_id = $1 AND d.deleted_at IS NULL
 ORDER BY drd.folder_path, drd.sort_order;
+
+-- name: HasDealRoomDocument :one
+SELECT EXISTS(
+    SELECT 1 FROM deal_room_documents drd
+    JOIN documents d ON d.id = drd.document_id
+    WHERE drd.room_id = $1 AND drd.document_id = $2 AND d.deleted_at IS NULL
+) AS exists;
+
+-- name: GetDealRoomDocumentFolderPath :one
+SELECT drd.folder_path
+FROM deal_room_documents drd
+JOIN documents d ON d.id = drd.document_id
+WHERE drd.room_id = $1 AND drd.document_id = $2 AND d.deleted_at IS NULL;
+
+-- name: DeleteLinkDocumentsByDealRoomDocument :exec
+DELETE FROM link_documents ld
+WHERE ld.document_id = $1
+  AND ld.link_id IN (SELECT id FROM links WHERE deal_room_id = $2);
 
 -- name: AddDealRoomDocument :one
 INSERT INTO deal_room_documents (tenant_id, workspace_id, room_id, document_id, folder_path, sort_order)

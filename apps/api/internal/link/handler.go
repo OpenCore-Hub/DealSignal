@@ -2,6 +2,7 @@
 package link
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -265,6 +266,8 @@ type UpdateRequest struct {
 	FileRequestsEnabled      *bool    `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
 	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
+	// FolderPaths scopes a deal-room link to specific folders. Empty means whole room.
+	FolderPaths []string `json:"folder_paths,omitempty"`
 }
 
 // List returns links for the workspace, optionally filtered by document_id.
@@ -417,6 +420,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 
 	link, err := h.service.UpdateLink(c.Request.Context(), linkID, workspaceID, UpdateLinkRequest{
 		DocumentIDs:              req.DocumentIDs,
+		FolderPaths:              req.FolderPaths,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
 		RequireEmail:             req.RequireEmail,
@@ -706,6 +710,9 @@ type CreateDealRoomLinkRequest struct {
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
 	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
+	// FolderPaths optionally scopes the link to a subset of the deal-room folders.
+	// When empty, the link exposes all folders in the deal room.
+	FolderPaths []string `json:"folder_paths,omitempty"`
 }
 
 // CreateDealRoomLink creates a share link scoped to a deal room.
@@ -744,6 +751,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		CustomDomain:             req.CustomDomain,
 		Tags:                     req.Tags,
 		NotifyOnAccess:           req.NotifyOnAccess,
+		FolderPaths:              req.FolderPaths,
 	})
 	if err != nil {
 		switch {
@@ -1128,7 +1136,27 @@ func (h *Handler) documentsForAccessResponse(ctx context.Context, link db.Link, 
 				logger.Attr("deal_room_id", uuidToString(link.DealRoomID)),
 			)
 		} else {
+			// If the link has an explicit folder scope, restrict the exposed
+			// documents to those folders. Otherwise fall back to the whole room.
+			applyScope := len(link.FolderScopePaths) > 0
+			scoped := make(map[string]bool, len(link.FolderScopePaths))
+			for _, p := range link.FolderScopePaths {
+				scoped[p] = true
+			}
+
 			for _, d := range drDocs {
+				if applyScope {
+					inScope := false
+					for _, scopePath := range link.FolderScopePaths {
+						if d.FolderPath == scopePath || strings.HasPrefix(d.FolderPath, scopePath+"/") {
+							inScope = true
+							break
+						}
+					}
+					if !inScope {
+						continue
+					}
+				}
 				documents = append(documents, gin.H{
 					"id":         uuidToString(d.DocumentID),
 					"title":      d.DocumentTitle,
@@ -1201,21 +1229,46 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
-// verifyLinkDocumentAccess checks whether docID belongs to the link
-// (either as the primary document or in the link_documents table).
+// verifyLinkDocumentAccess checks whether docID belongs to the link.
+// For document links it checks the primary document or link_documents.
+// For deal-room links it honors the optional folder scope and verifies the
+// document is still present in the deal room (stale-scope guard).
 func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, docID uuid.UUID) bool {
 	if uuid.UUID(link.DocumentID.Bytes) == docID {
 		return true
 	}
-	// Check link_documents table for bundle documents.
-	exists, err := h.service.queries.HasLinkDocument(ctx, db.HasLinkDocumentParams{
+
+	if link.DealRoomID.Valid {
+		// Stale-scope guard: document must still exist in the room.
+		folderPath, err := h.service.queries.GetDealRoomDocumentFolderPath(ctx, db.GetDealRoomDocumentFolderPathParams{
+			RoomID:     link.DealRoomID,
+			DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
+		})
+		if err != nil {
+			return false
+		}
+		// Unscoped deal-room links expose every document currently in the room.
+		if len(link.FolderScopePaths) == 0 {
+			return true
+		}
+		// Scoped links allow the exact folder or any descendant.
+		for _, scopePath := range link.FolderScopePaths {
+			if folderPath == scopePath || strings.HasPrefix(folderPath, scopePath+"/") {
+				return true
+			}
+		}
+		return false
+	}
+
+	// Document links fall back to link_documents / primary document.
+	inScope, err := h.service.queries.HasLinkDocument(ctx, db.HasLinkDocumentParams{
 		LinkID:     pgtype.UUID{Bytes: link.ID.Bytes, Valid: true},
 		DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
 	})
 	if err != nil {
 		return false
 	}
-	return exists
+	return inScope
 }
 
 // PublicSignedURL returns a presigned image URL for a public link visitor.
@@ -1299,7 +1352,13 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		return
 	}
 
-	url := h.signResourceURL(doc.StorageKey, c.Param("publicToken"), result.VisitorID, doc.Title)
+	var url string
+	if result.Link.WatermarkEnabled && doc.SourceType == "pdf" {
+		wmText := h.watermarkTextFor(result.Email, c.ClientIP())
+		url = SignDownloadResource(h.cfg.URLSigningSecret, doc.StorageKey, c.Param("publicToken"), result.VisitorID, h.cfg.AppBaseURL, 15*time.Minute, wmText)
+	} else {
+		url = h.signResourceURL(doc.StorageKey, c.Param("publicToken"), result.VisitorID, doc.Title)
+	}
 
 	contentType := "application/octet-stream"
 	switch doc.SourceType {
@@ -1367,6 +1426,15 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 		return
 	}
 
+	expires, _ := strconv.ParseInt(c.Query("expires"), 10, 64)
+	watermark := c.Query(watermarkQueryParam)
+	if watermark != "" {
+		if err := VerifyDownloadWatermark(h.cfg.URLSigningSecret, key, c.Query("token"), c.Query("vid"), expires, watermark, c.Query(watermarkSigQueryParam)); err != nil {
+			c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signature", "message": err.Error()})
+			return
+		}
+	}
+
 	ctx := c.Request.Context()
 	obj, err := h.storage.GetObject(ctx, key)
 	if err != nil {
@@ -1384,6 +1452,19 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 	if filename := c.Query("filename"); filename != "" {
 		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, path.Base(filename)))
 	}
+
+	if watermark != "" && shouldApplyServerWatermark(key) {
+		var buf bytes.Buffer
+		if err := applyPDFWatermark(obj, &buf, watermark); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "watermark_failed", "message": err.Error()})
+			return
+		}
+		c.Header("Content-Length", strconv.Itoa(buf.Len()))
+		c.Status(http.StatusOK)
+		_, _ = buf.WriteTo(c.Writer)
+		return
+	}
+
 	c.Status(http.StatusOK)
 	_, _ = io.Copy(c.Writer, obj)
 }
@@ -1818,7 +1899,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	// Fetch link contacts to return contact IDs for edit-mode reconstruction.
 	var contactIDs []string
 	linkContacts, linkContactsErr := h.service.queries.GetLinkContactsByPublicToken(ctx, link.PublicToken)
-	if linkContactsErr != nil {
+	if linkContactsErr != nil && !errors.Is(linkContactsErr, pgx.ErrNoRows) {
 		logger.ErrorCtx(ctx, "get link contacts for link response failed", linkContactsErr,
 			logger.Attr("link_id", uuidToString(link.ID)),
 		)
@@ -1828,13 +1909,13 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	}
 
 	metrics, metricsErr := h.service.queries.GetLinkPageViewMetrics(ctx, link.ID)
-	if metricsErr != nil {
+	if metricsErr != nil && !errors.Is(metricsErr, pgx.ErrNoRows) {
 		logger.ErrorCtx(ctx, "get link page view metrics failed", metricsErr,
 			logger.Attr("link_id", uuidToString(link.ID)),
 		)
 	}
 	lastLog, lastLogErr := h.service.queries.GetLastAccessLogByLink(ctx, link.ID)
-	if lastLogErr != nil {
+	if lastLogErr != nil && !errors.Is(lastLogErr, pgx.ErrNoRows) {
 		logger.ErrorCtx(ctx, "get last access log failed", lastLogErr,
 			logger.Attr("link_id", uuidToString(link.ID)),
 		)
@@ -1859,6 +1940,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"documentId":                  uuidToString(link.DocumentID),
 		"documentTitle":               documentTitle,
 		"documentIds":                 linkDocumentIDs(linkDocs, link),
+		"folderPaths":                 link.FolderScopePaths,
 		"documents":                   documents,
 		"isBundle":                    isBundle,
 		"name":                        textOrNil(link.Name),
