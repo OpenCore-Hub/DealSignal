@@ -40,6 +40,7 @@ describe("edit mode PermissionConfig reconstruction", () => {
     id: "link-1",
     documentId: "doc-1",
     documentIds: ["doc-1"],
+    folderPaths: [],
     documentTitle: "Test Doc",
     shortUrl: "https://example.com/l/abc123",
     accessCount: 5,

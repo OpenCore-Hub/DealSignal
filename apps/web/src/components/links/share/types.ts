@@ -24,4 +24,5 @@ export interface DraftLink extends AccessConfig {
   customDomain: string;
   tags: string[];
   notifyOnAccess: boolean;
+  folderPaths: string[];
 }

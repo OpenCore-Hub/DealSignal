@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
   getCoreRowModel,
@@ -48,6 +48,16 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
+
+  const openLink = (linkId: string) => {
+    navigate(`/${workspaceSlug}/links/${linkId}`, {
+      state: {
+        returnTo: location.pathname + location.search,
+        returnLabel: t("backToLinks"),
+      },
+    });
+  };
   const { t } = useTranslation("links");
   const { t: tc } = useTranslation("common");
   const isFiltered = !!documentId;
@@ -71,7 +81,12 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
           const link = row.original;
           return (
             <div className="flex min-w-0 items-center gap-2">
-              <code className="truncate rounded bg-muted px-1.5 py-0.5 text-caption">{link.shortUrl}</code>
+              <code
+                className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 text-caption"
+                title={link.shortUrl}
+              >
+                {link.shortUrl}
+              </code>
               <Button
                 size="icon-sm"
                 variant="ghost"
@@ -90,7 +105,11 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
       {
         accessorKey: "documentTitle",
         header: t("table.document"),
-        cell: ({ row }) => <span className="truncate text-sm">{row.original.documentTitle}</span>,
+        cell: ({ row }) => (
+          <span className="block max-w-full truncate text-sm" title={row.original.documentTitle}>
+            {row.original.documentTitle}
+          </span>
+        ),
       },
       {
         accessorKey: "accessCount",
@@ -274,11 +293,11 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
                 className="cursor-pointer"
                 role="link"
                 tabIndex={0}
-                onClick={() => navigate(`/${workspaceSlug}/links/${row.original.id}`)}
+                onClick={() => openLink(row.original.id)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" || e.key === " ") {
                     e.preventDefault();
-                    navigate(`/${workspaceSlug}/links/${row.original.id}`);
+                    openLink(row.original.id);
                   }
                 }}
               >

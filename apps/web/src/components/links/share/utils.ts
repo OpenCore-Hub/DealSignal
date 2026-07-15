@@ -52,6 +52,7 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
       customDomain: link.customDomain ?? "",
       tags: link.tags ?? [],
       notifyOnAccess: link.notifyOnAccess ?? false,
+      folderPaths: link.folderPaths ?? [],
     };
   }
 
@@ -65,6 +66,7 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
     customDomain: "",
     tags: [],
     notifyOnAccess: false,
+    folderPaths: [],
   };
 }
 
@@ -92,6 +94,7 @@ export function buildRules(draft: DraftLink): AccessRule[] {
 export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): UpdateLinkPayload {
   return {
     document_ids: existingLink?.documentIds ?? [],
+    folder_paths: draft.folderPaths,
     name: draft.name.trim(),
     permission_type: draft.requireNda ? "nda" : "public",
     require_email: draft.requireEmail,

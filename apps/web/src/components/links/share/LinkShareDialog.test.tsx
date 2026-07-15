@@ -65,7 +65,7 @@ const baseLink: Link = {
   downloadEnabled: false,
   watermarkEnabled: true,
   aiCopilotEnabled: false,
-  documentIds: ["doc-1"],
+  folderPaths: [],
   accessCount: 5,
   heatLevel: "warm",
   isBundle: false,

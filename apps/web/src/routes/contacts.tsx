@@ -1,5 +1,5 @@
 import { useState, useMemo } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { Users, MagnifyingGlass } from "@phosphor-icons/react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,16 @@ export function ContactsPage() {
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
+
+  const openContact = (contactId: string) => {
+    navigate(`/${workspaceSlug}/contacts/${contactId}`, {
+      state: {
+        returnTo: location.pathname + location.search,
+        returnLabel: t("detail.back"),
+      },
+    });
+  };
   const [query, setQuery] = useState("");
   const { data: contacts, loading, error, refetch } = useAsyncData(
     async () => {
@@ -87,11 +97,11 @@ export function ContactsPage() {
               role="link"
               tabIndex={0}
               className="cursor-pointer transition-colors hover:bg-muted/50"
-              onClick={() => navigate(`/${workspaceSlug}/contacts/${contact.id}`)}
+              onClick={() => openContact(contact.id)}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  navigate(`/${workspaceSlug}/contacts/${contact.id}`);
+                  openContact(contact.id);
                 }
               }}
             >

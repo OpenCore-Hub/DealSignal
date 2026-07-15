@@ -55,6 +55,7 @@ function makeBaseLink(overrides?: Partial<Link>): Link {
     id: "b7a00000-0000-0000-0000-000000000001",
     documentId: "d2900000-0000-0000-0000-000000000001",
     documentIds: ["d2900000-0000-0000-0000-000000000001"],
+    folderPaths: [],
     documentTitle: "Test Deck",
     shortUrl: "https://example.com/l/abc123",
     accessCount: 0,

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router";
-import { List, Bell, SignOut, Gear, UploadSimple } from "@phosphor-icons/react";
+import { List, Bell, SignOut, Gear } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -20,10 +20,9 @@ import type { WorkspaceSettings } from "@/types";
 
 export function TopNav() {
   const { t } = useTranslation("layout");
-  const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const { toggleSidebar, reset: resetUI, setUploadDialogOpen } = useUIStore();
+  const { toggleSidebar, reset: resetUI } = useUIStore();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
 
   useEffect(() => {
@@ -62,16 +61,6 @@ export function TopNav() {
 
       {/* Right actions */}
       <div className="ml-auto flex items-center gap-2">
-        <Button
-          size="sm"
-          variant="outline"
-          className="hidden gap-1.5 sm:flex"
-          onClick={() => setUploadDialogOpen(true)}
-        >
-          <UploadSimple size={16} />
-          {tCommon("uploadDocument")}
-        </Button>
-
         <ThemeToggle />
 
         <Button

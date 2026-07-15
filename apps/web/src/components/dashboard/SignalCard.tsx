@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
 import {
   Fire,
@@ -41,6 +41,7 @@ interface SignalCardProps {
 export function SignalCard({ signal, action, onActionStatusChange }: SignalCardProps) {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
   const [expanded, setExpanded] = useState(false);
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
@@ -49,9 +50,10 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const Icon = config.icon;
 
   const handleNavigate = () => {
-    if (signal.documentId) navigate(`/${workspaceSlug}/documents/${signal.documentId}`);
-    else if (signal.linkId) navigate(`/${workspaceSlug}/links/${signal.linkId}`);
-    else if (signal.contactId) navigate(`/${workspaceSlug}/contacts/${signal.contactId}`);
+    const state = { returnTo: location.pathname + location.search, returnLabel: tCommon("back") };
+    if (signal.documentId) navigate(`/${workspaceSlug}/documents/${signal.documentId}`, { state });
+    else if (signal.linkId) navigate(`/${workspaceSlug}/links/${signal.linkId}`, { state });
+    else if (signal.contactId) navigate(`/${workspaceSlug}/contacts/${signal.contactId}`, { state });
   };
 
   const actionIcon = {

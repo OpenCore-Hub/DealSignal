@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import {
   Envelope,
   FileText,
@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/common/PageHeader";
-import { BackButton } from "@/components/common/BackButton";
+import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
 import { HeatBadge } from "@/components/common/HeatBadge";
@@ -50,6 +50,7 @@ export function ContactDetailPage() {
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug, contactId } = useParams<{ workspaceSlug: string; contactId: string }>();
+  const location = useLocation();
   const locale = i18n.language;
 
   const { data, loading, error, refetch } = useAsyncData(async () => {
@@ -105,7 +106,7 @@ export function ContactDetailPage() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/contacts`} label={t("detail.back")} />
+      <SmartBackButton fallbackTo={`/${workspaceSlug}/contacts`} fallbackLabel={t("detail.back")} />
 
       <PageHeader
         title={contact.name}
@@ -185,7 +186,14 @@ export function ContactDetailPage() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => navigate(`/${workspaceSlug}/links/${a.linkId}`)}
+                          onClick={() =>
+                            navigate(`/${workspaceSlug}/links/${a.linkId}`, {
+                              state: {
+                                returnTo: location.pathname + location.search,
+                                returnLabel: t("detail.back"),
+                              },
+                            })
+                          }
                         >
                           {t("detail.view")}
                         </Button>
@@ -230,7 +238,13 @@ export function ContactDetailPage() {
                 ) : (
                   <ul className="space-y-2">
                     {viewedDocuments.map((doc) => {
-                      const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                      const handleClick = () =>
+                        navigate(`/${workspaceSlug}/documents/${doc.id}`, {
+                          state: {
+                            returnTo: location.pathname + location.search,
+                            returnLabel: t("detail.back"),
+                          },
+                        });
                       return (
                         <li
                           key={doc.id}

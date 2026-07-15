@@ -21,9 +21,11 @@ interface Visitor {
 interface VisitorListProps {
   visitors: Visitor[];
   className?: string;
+  returnTo?: string;
+  returnLabel?: string;
 }
 
-export function VisitorList({ visitors, className }: VisitorListProps) {
+export function VisitorList({ visitors, className, returnTo, returnLabel }: VisitorListProps) {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { t } = useTranslation("common");
 
@@ -44,6 +46,7 @@ export function VisitorList({ visitors, className }: VisitorListProps) {
         <li key={visitor.id}>
           <Link
             to={`/${workspaceSlug}/contacts/${visitor.id}`}
+            state={returnTo ? { returnTo, returnLabel } : undefined}
             className="flex items-center gap-3 rounded-lg border border-border bg-card p-3 transition-colors hover:bg-muted/50 focus-ring"
           >
             <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground text-xs font-medium">

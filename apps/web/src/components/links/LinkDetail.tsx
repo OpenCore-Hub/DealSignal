@@ -5,7 +5,7 @@ import { Copy, PencilSimple, ToggleRight, FileText, ShareNetwork } from "@phosph
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
-import { BackButton } from "@/components/common/BackButton";
+import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
 import { ActivityTimeline } from "@/components/common/ActivityTimeline";
@@ -116,7 +116,7 @@ export function LinkDetail() {
   if (error) {
     return (
       <div className="space-y-6">
-        <BackButton to={`/${workspaceSlug}/links`} label={t("backToLinks")} />
+        <SmartBackButton fallbackTo={`/${workspaceSlug}/links`} fallbackLabel={t("backToLinks")} />
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-body text-destructive mb-4">{tc("error.loadFailed")}{error ? `: ${error}` : ""}</p>
@@ -131,7 +131,7 @@ export function LinkDetail() {
 
   return (
     <div className="space-y-6">
-      <BackButton to={`/${workspaceSlug}/links`} label={t("backToLinks")} />
+      <SmartBackButton fallbackTo={`/${workspaceSlug}/links`} fallbackLabel={t("backToLinks")} />
 
       <PageHeader
         title={(link.shortUrl || link.id).split("/").pop() || link.id}

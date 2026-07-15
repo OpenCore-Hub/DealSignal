@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { Fire, Clock, Snowflake, Link as LinkIcon } from "@phosphor-icons/react";
 import type { HeatLevel, Link as LinkType } from "@/types";
 import { useTranslation } from "react-i18next";
@@ -10,6 +10,7 @@ interface HeatMapProps {
 export function HeatMap({ links }: HeatMapProps) {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
 
@@ -42,7 +43,13 @@ export function HeatMap({ links }: HeatMapProps) {
             </div>
             <div className="space-y-2">
               {items.slice(0, 5).map((link) => {
-                const handleClick = () => navigate(`/${workspaceSlug}/links/${link.id}`);
+                const handleClick = () =>
+                  navigate(`/${workspaceSlug}/links/${link.id}`, {
+                    state: {
+                      returnTo: location.pathname + location.search,
+                      returnLabel: tCommon("back"),
+                    },
+                  });
                 return (
                   <div
                     key={link.id}

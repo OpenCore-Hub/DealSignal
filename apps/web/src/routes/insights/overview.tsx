@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { FileText, Link as LinkIcon, Users } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -37,6 +37,7 @@ export function InsightsOverviewPage() {
   const { i18n } = useTranslation();
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
   const locale = i18n.language;
 
   const { data, loading, error, refetch } = useAsyncData(async () => {
@@ -101,7 +102,13 @@ export function InsightsOverviewPage() {
           <CardContent>
             <ul className="space-y-2">
               {overview.topDocuments.map((doc) => {
-                const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                const handleClick = () =>
+                  navigate(`/${workspaceSlug}/documents/${doc.id}`, {
+                    state: {
+                      returnTo: location.pathname + location.search,
+                      returnLabel: tc("back"),
+                    },
+                  });
                 return (
                   <li
                     key={doc.id}
@@ -137,7 +144,13 @@ export function InsightsOverviewPage() {
           <CardContent>
             <ul className="space-y-2">
               {overview.topLinks.map((link) => {
-                const handleClick = () => navigate(`/${workspaceSlug}/links/${link.id}`);
+                const handleClick = () =>
+                  navigate(`/${workspaceSlug}/links/${link.id}`, {
+                    state: {
+                      returnTo: location.pathname + location.search,
+                      returnLabel: tc("back"),
+                    },
+                  });
                 return (
                   <li
                     key={link.id}
@@ -174,7 +187,13 @@ export function InsightsOverviewPage() {
         <CardContent>
           <ul className="space-y-2">
             {overview.topContacts.map((contact) => {
-              const handleClick = () => navigate(`/${workspaceSlug}/contacts/${contact.id}`);
+              const handleClick = () =>
+                navigate(`/${workspaceSlug}/contacts/${contact.id}`, {
+                  state: {
+                    returnTo: location.pathname + location.search,
+                    returnLabel: tc("back"),
+                  },
+                });
               return (
                 <li
                   key={contact.id}

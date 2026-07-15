@@ -73,6 +73,7 @@ const baseDraft: DraftLink = {
   customDomain: "",
   tags: [],
   notifyOnAccess: false,
+  folderPaths: [],
 };
 
 describe("ShareTab", () => {

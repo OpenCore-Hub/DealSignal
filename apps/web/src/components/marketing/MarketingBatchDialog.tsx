@@ -57,12 +57,14 @@ export function MarketingBatchDialog({ contacts }: MarketingBatchDialogProps) {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger>
-        <Button variant="outline" size="sm" disabled={contacts.length === 0}>
-          <Envelope className="mr-2 size-4" />
-          {t("marketingBatch.trigger")}
-        </Button>
-      </DialogTrigger>
+      <DialogTrigger
+        render={
+          <Button variant="outline" size="sm" disabled={contacts.length === 0}>
+            <Envelope className="mr-2 size-4" />
+            {t("marketingBatch.trigger")}
+          </Button>
+        }
+      />
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={handleSubmit}>
           <DialogHeader>

@@ -44,6 +44,7 @@ const mockLinks: Link[] = [
     id: "link-1",
     documentId: "doc-1",
     documentIds: ["doc-1"],
+    folderPaths: [],
     documentTitle: "Q3 Pitch",
     shortUrl: "http://localhost:8080/l/abc",
     accessCount: 12,

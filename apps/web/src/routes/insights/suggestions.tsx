@@ -1,4 +1,4 @@
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { Lightning, Envelope, Lightbulb } from "@phosphor-icons/react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ export function InsightsSuggestionsPage() {
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
 
   const {
     data: suggestions,
@@ -80,7 +81,14 @@ export function InsightsSuggestionsPage() {
                 <div className="flex shrink-0 gap-2">
                   <Button
                     variant="outline"
-                    onClick={() => navigate(`/${workspaceSlug}/contacts/${s.contactId}`)}
+                    onClick={() =>
+                      navigate(`/${workspaceSlug}/contacts/${s.contactId}`, {
+                        state: {
+                          returnTo: location.pathname + location.search,
+                          returnLabel: tc("back"),
+                        },
+                      })
+                    }
                   >
                     {t("suggestions.viewContact")}
                   </Button>

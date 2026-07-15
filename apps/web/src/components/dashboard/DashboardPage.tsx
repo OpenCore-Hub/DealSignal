@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useLocation, useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import {
   Fire,
@@ -71,7 +71,9 @@ function SummaryCards({
 
 function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAlerts"]; workspaceSlug?: string }) {
   const { t } = useTranslation("dashboard");
+  const { t: tCommon } = useTranslation("common");
   const navigate = useNavigate();
+  const location = useLocation();
   if (alerts.length === 0) return null;
 
   return (
@@ -86,8 +88,12 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
         <ul className="space-y-3">
           {alerts.map((alert) => {
             const handleClick = () => {
-              if (alert.documentId) navigate(`/${workspaceSlug}/documents/${alert.documentId}`);
-              else if (alert.linkId) navigate(`/${workspaceSlug}/links/${alert.linkId}`);
+              const state = {
+                returnTo: location.pathname + location.search,
+                returnLabel: tCommon("back"),
+              };
+              if (alert.documentId) navigate(`/${workspaceSlug}/documents/${alert.documentId}`, { state });
+              else if (alert.linkId) navigate(`/${workspaceSlug}/links/${alert.linkId}`, { state });
             };
             return (
               <li
@@ -121,6 +127,7 @@ function RiskAlerts({ alerts, workspaceSlug }: { alerts: DashboardStats["riskAle
 export function DashboardPage() {
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const location = useLocation();
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
@@ -244,7 +251,13 @@ export function DashboardPage() {
                 <div className="space-y-3">
                   <ul className="space-y-3">
                     {stats.recentDocuments.slice(0, 3).map((doc) => {
-                      const handleClick = () => navigate(`/${workspaceSlug}/documents/${doc.id}`);
+                      const handleClick = () =>
+                        navigate(`/${workspaceSlug}/documents/${doc.id}`, {
+                          state: {
+                            returnTo: location.pathname + location.search,
+                            returnLabel: tCommon("back"),
+                          },
+                        });
                       return (
                         <li
                           key={doc.id}
