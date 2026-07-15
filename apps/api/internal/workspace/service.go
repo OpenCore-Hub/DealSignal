@@ -173,6 +173,10 @@ func pgUUID(id string) (pgtype.UUID, error) {
 }
 
 // Create creates a tenant, workspace and makes the user owner.
+// The whole operation runs in a transaction when a database pool is available,
+// so failures like an invalid owner user ID do not leave orphaned tenants/
+// workspaces behind. The non-transactional branch is kept for unit tests that
+// do not provide a pool.
 func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor string) (Workspace, error) {
 	if !slugRegex.MatchString(slug) {
 		return Workspace{}, ErrInvalidSlug
@@ -184,42 +188,65 @@ func (s *Service) Create(ctx context.Context, userID, name, slug, brandColor str
 		return Workspace{}, err
 	}
 
-	tenant, err := s.queries.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: slug, Valid: true}})
-	if err != nil {
-		if isUniqueViolation(err) {
-			// fallback to a unique slug if the workspace slug is already a tenant slug
-			tenant, err = s.queries.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: uuid.NewString(), Valid: true}})
+	create := func(q *db.Queries) (Workspace, error) {
+		tenant, err := q.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: slug, Valid: true}})
+		if err != nil {
+			if isUniqueViolation(err) {
+				// fallback to a unique slug if the workspace slug is already a tenant slug
+				tenant, err = q.CreateTenant(ctx, db.CreateTenantParams{Name: name, Slug: pgtype.Text{String: uuid.NewString(), Valid: true}})
+			}
+			if err != nil {
+				return Workspace{}, err
+			}
 		}
+
+		tenantUUID, _ := pgUUID(uuidToString(tenant.ID))
+		ws, err := q.CreateWorkspace(ctx, db.CreateWorkspaceParams{
+			TenantID:   tenantUUID,
+			Name:       name,
+			Slug:       slug,
+			BrandColor: pgtype.Text{String: brandColor, Valid: brandColor != ""},
+		})
+		if err != nil {
+			if isUniqueViolation(err) {
+				return Workspace{}, ErrSlugExists
+			}
+			return Workspace{}, err
+		}
+
+		wsUUID, _ := pgUUID(uuidToString(ws.ID))
+		_, err = q.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
+			WorkspaceID: wsUUID,
+			UserID:      uid,
+			Role:        RoleOwner,
+		})
 		if err != nil {
 			return Workspace{}, err
 		}
+
+		return workspaceFromRow(ws), nil
 	}
 
-	tenantUUID, _ := pgUUID(uuidToString(tenant.ID))
-	ws, err := s.queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		TenantID:   tenantUUID,
-		Name:       name,
-		Slug:       slug,
-		BrandColor: pgtype.Text{String: brandColor, Valid: brandColor != ""},
-	})
+	if s.dbPool == nil {
+		return create(s.queries)
+	}
+
+	tx, err := s.dbPool.Begin(ctx)
 	if err != nil {
-		if isUniqueViolation(err) {
-			return Workspace{}, ErrSlugExists
-		}
-		return Workspace{}, err
+		return Workspace{}, fmt.Errorf("begin tx: %w", err)
 	}
+	defer func() { _ = tx.Rollback(ctx) }()
 
-	wsUUID, _ := pgUUID(uuidToString(ws.ID))
-	_, err = s.queries.AddWorkspaceMember(ctx, db.AddWorkspaceMemberParams{
-		WorkspaceID: wsUUID,
-		UserID:      uid,
-		Role:        RoleOwner,
-	})
+	ws, err := create(s.queries.WithTx(tx))
 	if err != nil {
 		return Workspace{}, err
 	}
 
-	return workspaceFromRow(ws), nil
+	if err := tx.Commit(ctx); err != nil {
+		return Workspace{}, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return ws, nil
 }
 
 func isUniqueViolation(err error) bool {
