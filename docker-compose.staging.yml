@@ -1,0 +1,28 @@
+# Staging deployment compose.
+# This file is intended to live on the staging host at the path configured
+# in the STAGING_COMPOSE_PATH repository secret. The CI deploy-staging job
+# pulls the latest ghcr.io images and runs:
+#
+#   API_IMAGE=<...> WEB_IMAGE=<...> docker compose -f docker-compose.staging.yml up -d
+#
+# The base infrastructure services are reused from apps/api/docker-compose.yml;
+# only the API and web images are overridden here.
+
+include:
+  - apps/api/docker-compose.yml
+
+services:
+  api:
+    # Use the pre-built image pushed by CI instead of building from source.
+    image: ${API_IMAGE:?API_IMAGE is required}
+    build: !reset null
+
+  web:
+    image: ${WEB_IMAGE:?WEB_IMAGE is required}
+    environment:
+      API_HOST: api
+    ports:
+      - "80:80"
+    depends_on:
+      api:
+        condition: service_started
