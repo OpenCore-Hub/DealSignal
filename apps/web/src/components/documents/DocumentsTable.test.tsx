@@ -146,6 +146,29 @@ describe("DocumentsTable", () => {
     await waitFor(() => expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined));
   });
 
+  it("hides search and top upload button when the library is empty", async () => {
+    getDocumentsMock.mockResolvedValue({ data: [] });
+    await renderTable();
+
+    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    expect(await screen.findByText("Empty library")).toBeInTheDocument();
+
+    expect(screen.queryByPlaceholderText("Search documents...")).not.toBeInTheDocument();
+    // The empty-state call-to-action still offers an upload button.
+    expect(screen.getByRole("button", { name: "Upload Document" })).toBeInTheDocument();
+  });
+
+  it("shows search and upload button when documents exist", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
+    await renderTable();
+
+    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+
+    expect(screen.getByPlaceholderText("Search documents...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Upload Document" })).toBeInTheDocument();
+  });
+
   it("shows a filter-specific empty state when the filtered list is empty", async () => {
     getDocumentsMock.mockImplementation((filter: string | undefined) =>
       Promise.resolve({ data: filter === "archived" ? [] : mockDocs })

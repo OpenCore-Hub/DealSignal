@@ -123,6 +123,8 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return <SkeletonList rows={6} />;
   }
 
+  const hasDocuments = data && data.length > 0;
+
   return (
     <div className="space-y-4">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
@@ -137,52 +139,54 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
             </TabsList>
           </Tabs>
         )}
-        <div className={`flex flex-col gap-3 sm:flex-row sm:items-center${category === "agreement" ? " lg:ml-auto" : ""}`}>
-          <div className="relative max-w-sm flex-1">
-            <MagnifyingGlass
-              size={18}
-              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-            />
-            <Input
-              placeholder={t("documents:table.searchPlaceholder")}
-              value={globalFilter}
-              onChange={(e) => setGlobalFilter(e.target.value)}
-              className="pl-9"
-            />
-          </div>
-          <Button
-            onClick={() =>
-              navigate(
-                `/${workspaceSlug}/documents/upload` +
-                  (category ? `?category=${encodeURIComponent(category)}` : "")
-              )
-            }
-            className="gap-1.5"
-          >
-            <Plus size={16} weight="bold" />
-            {t("documents:table.upload")}
-          </Button>
-          {category === "agreement" && (
-            <DropdownMenu>
-              <DropdownMenuTrigger
-                render={
-                  <Button variant="outline" className="gap-1.5">
-                    <Download size={16} weight="bold" />
-                    {t("documents:table.downloadTemplate")}
-                  </Button>
-                }
+        {hasDocuments && (
+          <div className={`flex flex-col gap-3 sm:flex-row sm:items-center${category === "agreement" ? " lg:ml-auto" : ""}`}>
+            <div className="relative max-w-sm flex-1">
+              <MagnifyingGlass
+                size={18}
+                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
               />
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem onClick={() => window.open("/templates/nda-cn.txt", "_blank")}>
-                  {t("documents:table.templates.ndaCN")}
-                </DropdownMenuItem>
-                <DropdownMenuItem onClick={() => window.open("/templates/nda-en.txt", "_blank")}>
-                  {t("documents:table.templates.ndaEN")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          )}
-        </div>
+              <Input
+                placeholder={t("documents:table.searchPlaceholder")}
+                value={globalFilter}
+                onChange={(e) => setGlobalFilter(e.target.value)}
+                className="pl-9"
+              />
+            </div>
+            <Button
+              onClick={() =>
+                navigate(
+                  `/${workspaceSlug}/documents/upload` +
+                    (category ? `?category=${encodeURIComponent(category)}` : "")
+                )
+              }
+              className="gap-1.5"
+            >
+              <Plus size={16} weight="bold" />
+              {t("documents:table.upload")}
+            </Button>
+            {category === "agreement" && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button variant="outline" className="gap-1.5">
+                      <Download size={16} weight="bold" />
+                      {t("documents:table.downloadTemplate")}
+                    </Button>
+                  }
+                />
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => window.open("/templates/nda-cn.txt", "_blank")}>
+                    {t("documents:table.templates.ndaCN")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => window.open("/templates/nda-en.txt", "_blank")}>
+                    {t("documents:table.templates.ndaEN")}
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </div>
+        )}
       </div>
 
       {!data || data.length === 0 ? (
