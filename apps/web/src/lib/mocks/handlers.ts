@@ -382,6 +382,7 @@ export const handlers = [
     if (!link) return new HttpResponse(null, { status: 404 });
     const payload = (await request.json()) as {
       document_ids?: string[];
+      folder_paths?: string[];
       name?: string;
       permission_type?: string;
       require_email_verification?: boolean;
@@ -399,6 +400,9 @@ export const handlers = [
     };
     // Update the in-memory link to reflect the edited values so subsequent reads
     // (including tests) see the new state.
+    if (payload.folder_paths && payload.folder_paths.length > 0) {
+      link.folderPaths = payload.folder_paths;
+    }
     if (payload.document_ids && payload.document_ids.length > 0) {
       link.documentIds = payload.document_ids;
       link.documentId = payload.document_ids[0];

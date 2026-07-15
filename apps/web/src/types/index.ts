@@ -59,6 +59,7 @@ export interface Link {
   id: string;
   documentId: string;
   documentIds: string[];
+  folderPaths: string[];
   documentTitle: string;
   name?: string;
   shortUrl: string;

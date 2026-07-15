@@ -1,7 +1,8 @@
 import type { IntegrationStatus, PermissionConfig } from "@/types";
 
 export interface CreateLinkPayload {
-  document_ids: string[];
+  document_ids?: string[];
+  folder_paths?: string[];
   name?: string;
   permission_type?: string;
   require_email?: boolean;

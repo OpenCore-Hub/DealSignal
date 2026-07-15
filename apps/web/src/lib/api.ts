@@ -113,6 +113,8 @@ export interface CreateDealRoomLinkPayload {
   custom_domain?: string;
   tags?: string[];
   notify_on_access?: boolean;
+  // Optional folder scope. When provided, the link only exposes these deal-room folders.
+  folder_paths?: string[];
 }
 
 export interface SendMarketingBatchRequest {
