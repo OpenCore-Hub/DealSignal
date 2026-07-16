@@ -29,8 +29,35 @@ const severityConfig = {
   },
 };
 
+function MetadataChips({
+  metadata,
+  t,
+}: {
+  metadata: Record<string, string> | undefined;
+  t: (key: string) => string;
+}) {
+  if (!metadata) return null;
+  const entries = Object.entries(metadata).filter(([, value]) => value !== "");
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="mt-1.5 flex flex-wrap gap-1.5">
+      {entries.map(([key, value]) => (
+        <Badge
+          key={key}
+          variant="secondary"
+          className="text-xs font-normal text-muted-foreground"
+        >
+          {t(`riskAlerts.metadata.${key}`) || key}: {value}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
 export function RiskAlertList({ alerts, workspaceSlug }: RiskAlertListProps) {
   const { t: tCommon } = useTranslation("common");
+  const { t } = useTranslation("dashboard");
   const location = useLocation();
 
   if (alerts.length === 0) return null;
@@ -66,10 +93,14 @@ export function RiskAlertList({ alerts, workspaceSlug }: RiskAlertListProps) {
                 <Badge variant="outline" className={`text-xs ${severity.badge}`}>
                   {tCommon(`priority.${alert.priority}`)}
                 </Badge>
+                <Badge variant="outline" className="text-xs">
+                  {t(`riskAlerts.subtypes.${alert.type}`) || alert.title}
+                </Badge>
               </div>
               <p className="text-caption text-muted-foreground">
                 {alert.description}
               </p>
+              <MetadataChips metadata={alert.metadata} t={t} />
             </div>
             <ArrowRight
               size={16}

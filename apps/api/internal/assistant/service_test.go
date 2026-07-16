@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -82,6 +84,10 @@ func (m *mockQuerier) ListAssistantMessagesBySession(_ context.Context, arg db.L
 		}
 	}
 	return out, nil
+}
+
+func (m *mockQuerier) GetUserByID(_ context.Context, _ pgtype.UUID) (db.User, error) {
+	return db.User{Email: "user@example.com"}, nil
 }
 
 type mockSearcher struct {
@@ -216,7 +222,7 @@ func TestChatInvalidSessionID(t *testing.T) {
 func TestPublicChatDisabled(t *testing.T) {
 	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
 	link := db.Link{AiCopilotEnabled: false}
-	_, err := svc.PublicChat(context.Background(), link, "v1", ChatRequest{Message: "hi"})
+	_, err := svc.PublicChat(context.Background(), link, "v1", "", ChatRequest{Message: "hi"})
 	if !errors.Is(err, ErrAICopilotDisabled) {
 		t.Fatalf("expected ErrAICopilotDisabled, got %v", err)
 	}
@@ -225,7 +231,7 @@ func TestPublicChatDisabled(t *testing.T) {
 func TestPublicChatEmptyMessage(t *testing.T) {
 	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
 	link := db.Link{AiCopilotEnabled: true}
-	_, err := svc.PublicChat(context.Background(), link, "v1", ChatRequest{Message: "   "})
+	_, err := svc.PublicChat(context.Background(), link, "v1", "", ChatRequest{Message: "   "})
 	if !errors.Is(err, ErrMessageRequired) {
 		t.Fatalf("expected ErrMessageRequired, got %v", err)
 	}
@@ -254,7 +260,7 @@ func TestPublicChatCreatesSessionAndUsesDocumentSearch(t *testing.T) {
 		AiCopilotEnabled: true,
 		DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
 	}
-	resp, err := svc.PublicChat(ctx, link, "v1", ChatRequest{Message: "What is this?"})
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "What is this?"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -286,7 +292,7 @@ func TestPublicChatReusesExistingSession(t *testing.T) {
 	svc := NewService(q, s, evidence.NewFormatter(), l)
 
 	link := db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}}
-	resp, err := svc.PublicChat(ctx, link, "v1", ChatRequest{Message: "follow up"})
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "follow up"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,8 +304,77 @@ func TestPublicChatReusesExistingSession(t *testing.T) {
 func TestPublicChatInvalidSessionID(t *testing.T) {
 	svc := NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
 	link := db.Link{AiCopilotEnabled: true}
-	_, err := svc.PublicChat(context.Background(), link, "v1", ChatRequest{SessionID: "bad", Message: "hi"})
+	_, err := svc.PublicChat(context.Background(), link, "v1", "", ChatRequest{SessionID: "bad", Message: "hi"})
 	if !errors.Is(err, ErrInvalidSession) {
 		t.Fatalf("expected ErrInvalidSession, got %v", err)
+	}
+}
+
+type mockSignalCreator struct {
+	called bool
+	input  suggestions.CreateQuestionSignalInput
+}
+
+func (m *mockSignalCreator) CreateQuestionSignal(_ context.Context, arg suggestions.CreateQuestionSignalInput) error {
+	m.called = true
+	m.input = arg
+	return nil
+}
+
+func TestPublicChatCreatesQuestionSignalForHighIntent(t *testing.T) {
+	ctx := context.Background()
+	q := &mockQuerier{publicSessionID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true}}
+	s := &mockSearcher{}
+	l := &mockLLM{answer: "pricing"}
+	creator := &mockSignalCreator{}
+	svc := NewService(q, s, evidence.NewFormatter(), l, creator)
+
+	link := db.Link{
+		ID:               pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
+		WorkspaceID:      pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
+		DocumentID:       pgtype.UUID{Bytes: [16]byte{5}, Valid: true},
+		AiCopilotEnabled: true,
+	}
+
+	if _, err := svc.PublicChat(ctx, link, "v1", "visitor@example.com", ChatRequest{Message: "What is your pricing?"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	// Allow the goroutine to run.
+	time.Sleep(50 * time.Millisecond)
+
+	if !creator.called {
+		t.Fatal("expected signal creator to be called")
+	}
+	if creator.input.Intent != "pricing" {
+		t.Errorf("expected intent pricing, got %q", creator.input.Intent)
+	}
+	if creator.input.VisitorEmail != "visitor@example.com" {
+		t.Errorf("expected visitor email, got %q", creator.input.VisitorEmail)
+	}
+}
+
+func TestPublicChatSkipsSignalForGeneralIntent(t *testing.T) {
+	ctx := context.Background()
+	q := &mockQuerier{publicSessionID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true}}
+	s := &mockSearcher{}
+	l := &mockLLM{answer: "general"}
+	creator := &mockSignalCreator{}
+	svc := NewService(q, s, evidence.NewFormatter(), l, creator)
+
+	link := db.Link{
+		ID:               pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
+		WorkspaceID:      pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
+		AiCopilotEnabled: true,
+	}
+
+	if _, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Hello"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+
+	if creator.called {
+		t.Error("expected signal creator not to be called for general intent")
 	}
 }

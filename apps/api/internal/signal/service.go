@@ -103,7 +103,8 @@ func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Sugges
 			Valid: true,
 		},
 		Type:        suggestion.Type,
-		Title:       titleForType(suggestion.Type, lang),
+		Subtype:     suggestion.Subtype,
+		Title:       titleForSubtype(suggestion.Subtype.String, suggestion.Type, lang),
 		Description: suggestion.Reason,
 		Explanation: suggestion.Reason,
 		Suggestion:  suggestion.Action,
@@ -111,6 +112,8 @@ func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Sugges
 		ContactID:   nullableUUID(suggestion.ContactID),
 		LinkID:      nullableUUID(suggestion.LinkID),
 		Priority:    priorityForType(suggestion.Type),
+		Metadata:    suggestion.Metadata,
+		Context:     suggestion.Context,
 	})
 	if err != nil {
 		return db.Signal{}, db.ActionItem{}, fmt.Errorf("create signal: %w", err)
@@ -150,7 +153,12 @@ func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UU
 	return nil
 }
 
-func titleForType(typ, lang string) string {
+func titleForSubtype(subtype, typ, lang string) string {
+	return suggestions.TitleForSubtype(subtype, typ, lang)
+}
+
+// TitleForType returns the localized title for a signal type.
+func TitleForType(typ, lang string) string {
 	return suggestions.TitleForType(typ, lang)
 }
 

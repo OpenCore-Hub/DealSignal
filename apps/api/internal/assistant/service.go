@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -42,6 +44,11 @@ type ChatCompleter interface {
 	ChatCompletion(ctx context.Context, systemPrompt string, history []llm.Message) (string, error)
 }
 
+// SignalCreator converts a high-intent assistant question into a workspace signal.
+type SignalCreator interface {
+	CreateQuestionSignal(ctx context.Context, arg suggestions.CreateQuestionSignalInput) error
+}
+
 // Querier isolates the database operations required by the assistant service.
 type Querier interface {
 	CreateAssistantSession(ctx context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error)
@@ -51,6 +58,7 @@ type Querier interface {
 	ListLinkDocumentsByLink(ctx context.Context, linkID pgtype.UUID) ([]db.ListLinkDocumentsByLinkRow, error)
 	CreateAssistantMessage(ctx context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error)
 	ListAssistantMessagesBySession(ctx context.Context, arg db.ListAssistantMessagesBySessionParams) ([]db.AssistantMessage, error)
+	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
 }
 
 // Searcher retrieves evidence for a query.
@@ -74,15 +82,20 @@ type ChatResponse struct {
 
 // Service handles assistant conversations.
 type Service struct {
-	queries   Querier
-	search    Searcher
-	formatter *evidence.Formatter
-	llm       ChatCompleter
+	queries        Querier
+	search         Searcher
+	formatter      *evidence.Formatter
+	llm            ChatCompleter
+	signalCreator  SignalCreator
 }
 
 // NewService creates an assistant service.
-func NewService(q Querier, s Searcher, f *evidence.Formatter, l ChatCompleter) *Service {
-	return &Service{queries: q, search: s, formatter: f, llm: l}
+func NewService(q Querier, s Searcher, f *evidence.Formatter, l ChatCompleter, signalCreator ...SignalCreator) *Service {
+	svc := &Service{queries: q, search: s, formatter: f, llm: l}
+	if len(signalCreator) > 0 {
+		svc.signalCreator = signalCreator[0]
+	}
+	return svc
 }
 
 // Chat processes a user message and returns an evidence-backed answer.
@@ -120,12 +133,36 @@ func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req Chat
 		return nil, fmt.Errorf("search evidence: %w", err)
 	}
 
-	return s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	if err != nil {
+		return nil, err
+	}
+
+	linkID := ""
+	if session.LinkID.Valid {
+		linkID = uuid.UUID(session.LinkID.Bytes).String()
+	}
+	docID := ""
+	if session.DocumentID.Valid {
+		docID = uuid.UUID(session.DocumentID.Bytes).String()
+	}
+
+	s.convertQuestionToSignalAsync(ctx, suggestions.CreateQuestionSignalInput{
+		WorkspaceID: workspaceID,
+		LinkID:      linkID,
+		DocumentID:  docID,
+		SessionID:   resp.SessionID,
+		UserID:      userID,
+		Question:    req.Message,
+		Lang:        "en",
+	})
+
+	return resp, nil
 }
 
 // PublicChat processes an anonymous viewer message for a public link.
 // The search scope is restricted to the documents attached to the link.
-func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID string, req ChatRequest) (*ChatResponse, error) {
+func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visitorEmail string, req ChatRequest) (*ChatResponse, error) {
 	if !link.AiCopilotEnabled {
 		return nil, ErrAICopilotDisabled
 	}
@@ -164,7 +201,28 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID string
 		return nil, fmt.Errorf("search evidence: %w", err)
 	}
 
-	return s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	if err != nil {
+		return nil, err
+	}
+
+	docID := ""
+	if link.DocumentID.Valid {
+		docID = uuid.UUID(link.DocumentID.Bytes).String()
+	}
+
+	s.convertQuestionToSignalAsync(ctx, suggestions.CreateQuestionSignalInput{
+		WorkspaceID:  uuid.UUID(link.WorkspaceID.Bytes).String(),
+		LinkID:       uuid.UUID(link.ID.Bytes).String(),
+		DocumentID:   docID,
+		SessionID:    resp.SessionID,
+		VisitorID:    visitorID,
+		VisitorEmail: visitorEmail,
+		Question:     req.Message,
+		Lang:         "en",
+	})
+
+	return resp, nil
 }
 
 func (s *Service) resolveSession(ctx context.Context, workspaceID, userID pgtype.UUID, sessionID, message string) (db.AssistantSession, error) {
@@ -299,6 +357,75 @@ func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUs
 		Answer:    answer,
 		Evidence:  evidenceList,
 	}, nil
+}
+
+func (s *Service) convertQuestionToSignalAsync(ctx context.Context, input suggestions.CreateQuestionSignalInput) {
+	if s.signalCreator == nil || s.llm == nil {
+		return
+	}
+
+	// Detach from the request context so intent classification and signal creation
+	// do not block the chat response.
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+		defer cancel()
+
+		if input.UserEmail == "" && input.UserID != "" {
+			if userUUID, err := uuid.Parse(input.UserID); err == nil {
+				if u, err := s.queries.GetUserByID(bgCtx, pgtype.UUID{Bytes: userUUID, Valid: true}); err == nil {
+					input.UserEmail = u.Email
+				}
+			}
+		}
+
+		intent := s.classifyQuestionIntent(bgCtx, input.Question)
+		if intent == "" {
+			intent = "general"
+		}
+		if !isHighIntentQuestion(intent) {
+			return
+		}
+		input.Intent = intent
+
+		_ = s.signalCreator.CreateQuestionSignal(bgCtx, input)
+	}()
+}
+
+func isHighIntentQuestion(intent string) bool {
+	switch intent {
+	case "pricing", "objection", "timeline", "implementation", "feature_request":
+		return true
+	}
+	return false
+}
+
+func (s *Service) classifyQuestionIntent(ctx context.Context, question string) string {
+	if s.llm == nil {
+		return "general"
+	}
+
+	prompt := "You are an intent classifier for document sharing Q&A. " +
+		"Analyze the question and respond with exactly ONE label from: " +
+		"pricing, security, timeline, implementation, feature_request, support, objection, general. " +
+		"Output only the label, no explanation.\n\nQuestion: " + question
+
+	ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	resp, err := s.llm.ChatCompletion(ctx, "", []llm.Message{{Role: "user", Content: prompt}})
+	if err != nil {
+		return "general"
+	}
+
+	resp = strings.ToLower(strings.TrimSpace(resp))
+	valid := map[string]bool{
+		"pricing": true, "security": true, "timeline": true, "implementation": true,
+		"feature_request": true, "support": true, "objection": true, "general": true,
+	}
+	if valid[resp] {
+		return resp
+	}
+	return "general"
 }
 
 func buildHistory(msgs []db.AssistantMessage, currentUserMessage, evidenceContext string) []llm.Message {

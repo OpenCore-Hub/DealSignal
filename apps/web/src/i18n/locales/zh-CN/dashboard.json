@@ -22,7 +22,24 @@
     }
   },
   "riskAlerts": {
-    "title": "风险提醒"
+    "title": "风险提醒",
+    "subtypes": {
+      "bounce": "跳出风险",
+      "download": "可疑下载",
+      "expired": "过期链接",
+      "access_exhausted": "访问次数耗尽",
+      "access_revoked": "已撤销链接",
+      "blocked_attempt": "被拦截访问",
+      "anomaly": "异常访问",
+      "forward": "可能转发"
+    },
+    "metadata": {
+      "distinct_ips": "不同 IP 数",
+      "total_downloads": "下载次数",
+      "distinct_emails": "不同邮箱数",
+      "bounces": "跳出次数",
+      "avg_duration_minutes": "平均停留（分钟）"
+    }
   },
   "sections": {
     "attention": "今日关注",
@@ -90,6 +107,14 @@
     "aiExplanation": "AI 解释",
     "suggestedAction": "建议行动",
     "markDone": "标记完成",
+    "summary": {
+      "unknownContact": "未知访客",
+      "unknownIntent": "未知意图",
+      "hot_signal": "{{contact}} 打开了 {{opens}} 次，停留 {{duration}}，查看了 {{keyPages}}",
+      "follow_up": "{{contact}} · {{opens}} 次打开 · {{duration}} · {{keyPages}}",
+      "risk_alert": "{{opens}} 次打开 · {{duration}} · {{keyPageCount}} 个关键页",
+      "question": "{{actor}} 提问了 {{intent}}：{{question}}"
+    },
     "types": {
       "hot_signal": "高意向信号",
       "risk_alert": "风险预警",

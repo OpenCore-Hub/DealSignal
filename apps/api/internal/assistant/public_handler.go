@@ -66,7 +66,7 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.PublicChat(c.Request.Context(), linkRow, session.VisitorID, ChatRequest{
+	resp, err := h.service.PublicChat(c.Request.Context(), linkRow, session.VisitorID, session.Email, ChatRequest{
 		SessionID: strings.TrimSpace(body.SessionID),
 		Message:   strings.TrimSpace(body.Message),
 	})

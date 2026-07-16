@@ -689,10 +689,21 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_1",
     type: "hot_signal",
+    subtype: "hot",
     title: "mock.signals.sig_1.title",
     description: "mock.signals.sig_1.description",
     explanation: "mock.signals.sig_1.explanation",
     suggestion: "mock.signals.sig_1.suggestion",
+    context: {
+      opens: 3,
+      uniqueVisitors: 2,
+      durationSeconds: 252,
+      keyPageCount: 2,
+      keyPageTitles: ["Financial Projections", "Team"],
+      contactName: "Sarah Chen",
+      contactEmail: "sarah@example.com",
+      documentTitle: "Seed Round Deck",
+    },
     documentId: "doc_1",
     contactId: "contact_1",
     linkId: "link_1",
@@ -728,6 +739,7 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_4",
     type: "risk_alert",
+    subtype: "download",
     title: "Unidentified email downloaded Pitch Deck",
     description: "An unrecognized visitor downloaded the document outside of the expected recipient list.",
     explanation: "An unrecognized visitor downloaded the document outside of the expected recipient list.",
@@ -740,6 +752,7 @@ export const mockSignals: Signal[] = [
   {
     id: "sig_5",
     type: "risk_alert",
+    subtype: "expired",
     title: "Financial Model link expired",
     description: "The shared link has passed its expiry date and is no longer accessible.",
     explanation: "The shared link has passed its expiry date and is no longer accessible.",
@@ -792,24 +805,22 @@ export const mockActionItems: ActionItem[] = [
 
 const mockRiskAlerts: RiskAlert[] = mockSignals
   .filter((s): s is Signal & { type: "risk_alert" } => s.type === "risk_alert")
-  .map((s) => {
-    const titleLower = s.title.toLowerCase();
-    const alertType: RiskAlert["type"] = titleLower.includes("download")
-      ? "download"
-      : titleLower.includes("expir")
-        ? "expired"
-        : "forward";
-    return {
-      id: s.id,
-      type: alertType,
-      priority: s.priority,
-      title: s.title,
-      description: s.description,
-      linkId: s.linkId,
-      documentId: s.documentId,
-      createdAt: s.createdAt,
-    };
-  });
+  .map((s) => ({
+    id: s.id,
+    type: (s.subtype ?? "forward") as RiskAlert["type"],
+    priority: s.priority,
+    title: s.title,
+    description: s.description,
+    metadata: s.context
+      ? {
+          opens: String(s.context.opens),
+          keyPageCount: String(s.context.keyPageCount),
+        }
+      : undefined,
+    linkId: s.linkId,
+    documentId: s.documentId,
+    createdAt: s.createdAt,
+  }));
 
 export function getMockDashboardStats() {
   return {

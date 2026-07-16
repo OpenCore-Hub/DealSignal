@@ -433,6 +433,32 @@ SELECT
 FROM access_logs
 WHERE link_id = $1;
 
+-- name: CountRecentDistinctIPsByLink :one
+SELECT COUNT(DISTINCT ip)::bigint AS distinct_ips
+FROM access_logs
+WHERE link_id = $1
+  AND event_type = 'link_opened'
+  AND created_at > now() - interval '1 hour';
+
+-- name: CountRecentDownloadAttemptsByLink :one
+SELECT
+    COUNT(*)::bigint AS total_downloads,
+    COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_email <> '')::bigint AS distinct_emails,
+    COUNT(DISTINCT al.visitor_email) FILTER (
+        WHERE al.visitor_email IS NOT NULL
+          AND al.visitor_email <> ''
+          AND NOT EXISTS (
+              SELECT 1 FROM contacts c
+              WHERE c.workspace_id = l.workspace_id
+                AND lower(c.email) = lower(al.visitor_email)
+          )
+    )::bigint AS distinct_unknown_emails
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = $1
+  AND al.event_type = 'download_attempted'
+  AND al.created_at > now() - interval '24 hours';
+
 -- name: GetLinkPageViewMetrics :one
 SELECT
     COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
@@ -456,6 +482,23 @@ JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
+
+-- name: GetLinkKeyPageViewDetails :many
+-- Returns the most-viewed key pages for a link, including their titles.
+SELECT
+    pv.page_number,
+    COALESCE(NULLIF(TRIM(p.title), ''), 'Page ' || pv.page_number)::text AS title,
+    COUNT(*)::bigint AS views,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
+GROUP BY pv.page_number, p.title
+ORDER BY views DESC, avg_duration_seconds DESC
+LIMIT 3;
 
 -- name: GetWorkspaceStorageUsage :one
 SELECT (
@@ -1040,12 +1083,12 @@ WHERE m.user_id = $1 AND w.tenant_id = $2
 ORDER BY w.created_at DESC;
 
 -- name: CreateSuggestion :one
-INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at;
+INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context)
+VALUES ($1, $2, $3, $4, $5, $6, sqlc.arg(subtype), $7, $8, sqlc.arg(metadata)::jsonb, sqlc.arg(context)::jsonb)
+RETURNING *;
 
 -- name: ListSuggestionsByLink :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+SELECT *
 FROM suggestions
 WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
 ORDER BY created_at DESC;
@@ -1054,6 +1097,15 @@ ORDER BY created_at DESC;
 SELECT COUNT(*) AS count
 FROM suggestions
 WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND dismissed = false AND created_at > now() - interval '24 hours';
+
+-- name: CountRecentQuestionSuggestionsBySession :one
+SELECT COUNT(*) AS count
+FROM suggestions
+WHERE workspace_id = $1
+  AND subtype = 'question'
+  AND dismissed = false
+  AND created_at > now() - interval '24 hours'
+  AND metadata @> sqlc.arg(session_metadata)::jsonb;
 
 -- name: DismissSuggestion :exec
 UPDATE suggestions
@@ -1377,21 +1429,18 @@ WHERE id = $2 AND workspace_id = $3;
 
 -- name: CreateSignal :one
 INSERT INTO signals (
-    tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-    document_id, contact_id, link_id, priority
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-          document_id, contact_id, link_id, priority, created_at, updated_at;
+    tenant_id, workspace_id, suggestion_id, type, subtype, title, description, explanation, suggestion,
+    document_id, contact_id, link_id, priority, metadata, context
+) VALUES ($1, $2, $3, $4, sqlc.arg(subtype), $5, $6, $7, $8, $9, $10, $11, $12, sqlc.arg(metadata)::jsonb, sqlc.arg(context)::jsonb)
+RETURNING *;
 
 -- name: GetSignalBySuggestion :one
-SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-       document_id, contact_id, link_id, priority, created_at, updated_at
+SELECT *
 FROM signals
 WHERE suggestion_id = $1 AND workspace_id = $2 LIMIT 1;
 
 -- name: ListSignalsByWorkspace :many
-SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-       document_id, contact_id, link_id, priority, created_at, updated_at
+SELECT *
 FROM signals
 WHERE workspace_id = $1
 ORDER BY created_at DESC;
@@ -1491,7 +1540,7 @@ ORDER BY created_at DESC
 LIMIT $2;
 
 -- name: ListSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+SELECT *
 FROM suggestions
 WHERE workspace_id = $1 AND dismissed = false
 ORDER BY created_at DESC;
@@ -1507,6 +1556,12 @@ SELECT id, workspace_id, email, name, created_at
 FROM contacts
 WHERE workspace_id = $1
 ORDER BY created_at DESC;
+
+-- name: GetContactByEmailAndWorkspace :one
+SELECT id, workspace_id, email, name, created_at
+FROM contacts
+WHERE email = $1 AND workspace_id = $2
+LIMIT 1;
 
 -- name: GetContactAggregatesByWorkspace :many
 SELECT
@@ -1757,6 +1812,13 @@ FROM security_events
 WHERE link_id = $1
 ORDER BY created_at DESC
 LIMIT $2 OFFSET $3;
+
+-- name: ListRecentSecurityEventsByLink :many
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+  AND created_at > now() - interval '24 hours'
+ORDER BY created_at DESC;
 
 -- name: CreateEmailLog :one
 INSERT INTO email_logs (recipient, email_type, provider, status, subject, workspace_id)

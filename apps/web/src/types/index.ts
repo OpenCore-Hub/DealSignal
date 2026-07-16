@@ -481,21 +481,47 @@ export interface AuditLog {
   ip?: string;
 }
 
-// v2.1.1 Signal-First 新增类型
+// Signal-First dashboard types
 
 export type SignalType = "hot_signal" | "risk_alert" | "follow_up";
+export type RiskAlertType =
+  | "bounce"
+  | "download"
+  | "expired"
+  | "access_exhausted"
+  | "access_revoked"
+  | "blocked_attempt"
+  | "anomaly"
+  | "forward";
 export type ActionType = "email" | "call" | "share" | "review";
 export type ActionStatus = "pending" | "done" | "snoozed" | "ignored";
 export type Priority = "high" | "medium" | "low";
 export type Circle = "founder" | "investor_ir" | "sales";
 
+export interface SignalContext {
+  opens: number;
+  uniqueVisitors: number;
+  durationSeconds: number;
+  keyPageCount: number;
+  keyPageTitles: string[];
+  contactName?: string;
+  contactEmail?: string;
+  visitorEmail?: string;
+  documentTitle?: string;
+  question?: string;
+  intent?: string;
+  actor?: string;
+}
+
 export interface Signal {
   id: string;
   type: SignalType;
+  subtype?: string;
   title: string;
   description: string;
   explanation: string;
   suggestion: string;
+  context?: SignalContext;
   documentId?: string;
   contactId?: string;
   linkId?: string;
@@ -580,10 +606,11 @@ export interface AIConversation {
 
 export interface RiskAlert {
   id: string;
-  type: "location" | "expired" | "download" | "forward";
-  priority: "high" | "medium" | "low";
+  type: RiskAlertType;
+  priority: Priority;
   title: string;
   description: string;
+  metadata?: Record<string, string>;
   linkId?: string;
   documentId?: string;
   createdAt: string;

@@ -21,6 +21,12 @@ func makeSignal(id, typ string) db.Signal {
 	}
 }
 
+func makeRiskSignal(id, subtype string) db.Signal {
+	s := makeSignal(id, "risk_alert")
+	s.Subtype = pgtype.Text{String: subtype, Valid: true}
+	return s
+}
+
 func uuidBytes(s string) [16]byte {
 	var b [16]byte
 	copy(b[:], s)
@@ -56,10 +62,8 @@ func TestRiskAlertList(t *testing.T) {
 		t.Errorf("expected default risk type forward, got %v", alerts[0]["type"])
 	}
 
-	download := makeSignal("d", "risk_alert")
-	download.Title = "Unidentified download"
-	expired := makeSignal("e", "risk_alert")
-	expired.Title = "Link expired"
+	download := makeRiskSignal("d", "download")
+	expired := makeRiskSignal("e", "expired")
 	alerts = riskAlertList([]db.Signal{download, expired})
 	if len(alerts) != 2 {
 		t.Fatalf("expected 2 risk alerts, got %d", len(alerts))
@@ -71,8 +75,7 @@ func TestRiskAlertList(t *testing.T) {
 		t.Errorf("expected expired type, got %v", alerts[1]["type"])
 	}
 
-	anomaly := makeSignal("f", "risk_alert")
-	anomaly.Title = "Suspicious access spike detected"
+	anomaly := makeRiskSignal("f", "anomaly")
 	alerts = riskAlertList([]db.Signal{anomaly})
 	if len(alerts) != 1 || alerts[0]["type"] != "anomaly" {
 		t.Errorf("expected anomaly type, got %v", alerts[0]["type"])

@@ -22,7 +22,24 @@
     }
   },
   "riskAlerts": {
-    "title": "Risk alerts"
+    "title": "Risk alerts",
+    "subtypes": {
+      "bounce": "Bounce risk",
+      "download": "Suspicious download",
+      "expired": "Expired link",
+      "access_exhausted": "Access limit reached",
+      "access_revoked": "Revoked link",
+      "blocked_attempt": "Blocked attempt",
+      "anomaly": "Anomaly",
+      "forward": "Possible forward"
+    },
+    "metadata": {
+      "distinct_ips": "Distinct IPs",
+      "total_downloads": "Downloads",
+      "distinct_emails": "Distinct emails",
+      "bounces": "Bounces",
+      "avg_duration_minutes": "Avg duration (min)"
+    }
   },
   "sections": {
     "attention": "Attention",
@@ -93,6 +110,14 @@
     "aiExplanation": "AI insight",
     "suggestedAction": "Suggested action",
     "markDone": "Mark done",
+    "summary": {
+      "unknownContact": "Unknown visitor",
+      "unknownIntent": "Unknown intent",
+      "hot_signal": "{{contact}} opened {{opens}} times, spent {{duration}}, viewed {{keyPages}}",
+      "follow_up": "{{contact}} · {{opens}} opens · {{duration}} · {{keyPages}}",
+      "risk_alert": "{{opens}} opens · {{duration}} · {{keyPageCount}} key pages",
+      "question": "{{actor}} asked about {{intent}}: {{question}}"
+    },
     "types": {
       "hot_signal": "High-intent signal",
       "risk_alert": "Risk alert",

@@ -14,9 +14,10 @@ import {
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import type { Signal, ActionItem } from "@/types";
+import type { Signal, ActionItem, SignalContext } from "@/types";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useTranslation } from "react-i18next";
+import { formatDuration } from "@/lib/formatters";
 
 const typeConfig = {
   hot_signal: { icon: Fire, dot: "bg-hot-500", subtle: "bg-hot-500/8", bar: "bg-hot-500" },
@@ -88,6 +89,11 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
               {priorityLabel}
             </Badge>
           </div>
+          {signal.context && (
+            <p className="text-caption mt-1 text-muted-foreground">
+              {renderSignalSummary(signal.context, signal.type, signal.subtype, t)}
+            </p>
+          )}
           {signal.suggestion && (
             <p className="text-caption mt-1 text-muted-foreground">
               <span className="font-medium text-foreground">{t("signal.suggestedAction")}:</span> {signal.suggestion}
@@ -157,4 +163,43 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
       </AnimatePresence>
     </motion.div>
   );
+}
+
+function summaryKeyForType(type: Signal["type"]): string {
+  switch (type) {
+    case "hot_signal":
+      return "signal.summary.hot_signal";
+    case "risk_alert":
+      return "signal.summary.risk_alert";
+    case "follow_up":
+      return "signal.summary.follow_up";
+    default:
+      return "signal.summary.fallback";
+  }
+}
+
+function renderSignalSummary(
+  ctx: SignalContext,
+  type: Signal["type"],
+  subtype: string | undefined,
+  t: (key: string, options?: Record<string, unknown>) => string
+): string {
+  const contact = ctx.contactName || ctx.contactEmail || ctx.visitorEmail || ctx.actor || t("signal.summary.unknownContact");
+
+  if (subtype === "question") {
+    return t("signal.summary.question", {
+      actor: contact,
+      intent: ctx.intent || t("signal.summary.unknownIntent"),
+      question: ctx.question || "",
+    });
+  }
+
+  return t(summaryKeyForType(type), {
+    defaultValue: "",
+    contact,
+    opens: ctx.opens,
+    duration: formatDuration(ctx.durationSeconds),
+    keyPages: ctx.keyPageTitles.slice(0, 3).join(", "),
+    keyPageCount: ctx.keyPageCount,
+  });
 }

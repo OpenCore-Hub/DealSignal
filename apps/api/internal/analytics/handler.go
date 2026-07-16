@@ -2,6 +2,7 @@
 package analytics
 
 import (
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -311,12 +312,24 @@ func contactScoreList(contacts []ContactScore) []gin.H {
 	return out
 }
 
+func unmarshalJSONB[T any](b []byte) (T, bool) {
+	var v T
+	if len(b) == 0 {
+		return v, false
+	}
+	if err := json.Unmarshal(b, &v); err != nil {
+		return v, false
+	}
+	return v, true
+}
+
 func signalFeedList(signals []db.Signal) []gin.H {
 	out := make([]gin.H, 0, len(signals))
 	for _, s := range signals {
 		item := gin.H{
 			"id":          uuidToString(s.ID),
 			"type":        s.Type,
+			"subtype":     s.Subtype.String,
 			"title":       s.Title,
 			"description": s.Description,
 			"explanation": s.Explanation,
@@ -332,6 +345,12 @@ func signalFeedList(signals []db.Signal) []gin.H {
 		}
 		if s.LinkID.Valid {
 			item["linkId"] = uuidToString(s.LinkID)
+		}
+		if ctx, ok := unmarshalJSONB[map[string]any](s.Context); ok && len(ctx) > 0 {
+			item["context"] = ctx
+		}
+		if md, ok := unmarshalJSONB[map[string]string](s.Metadata); ok && len(md) > 0 {
+			item["metadata"] = md
 		}
 		out = append(out, item)
 	}
@@ -401,14 +420,9 @@ func riskAlertList(signals []db.Signal) []gin.H {
 		if s.Type != "risk_alert" {
 			continue
 		}
-		alertType := "forward"
-		titleLower := strings.ToLower(s.Title)
-		if strings.Contains(titleLower, "download") {
-			alertType = "download"
-		} else if strings.Contains(titleLower, "expir") {
-			alertType = "expired"
-		} else if strings.Contains(titleLower, "anomal") || strings.Contains(titleLower, "suspicious") || strings.Contains(titleLower, "unusual") || strings.Contains(titleLower, "spike") {
-			alertType = "anomaly"
+		alertType := s.Subtype.String
+		if alertType == "" {
+			alertType = "forward"
 		}
 		priority := s.Priority
 		if priority == "" {
@@ -427,6 +441,9 @@ func riskAlertList(signals []db.Signal) []gin.H {
 		}
 		if s.DocumentID.Valid {
 			item["documentId"] = uuidToString(s.DocumentID)
+		}
+		if md, ok := unmarshalJSONB[map[string]string](s.Metadata); ok && len(md) > 0 {
+			item["metadata"] = md
 		}
 		out = append(out, item)
 	}

@@ -17,7 +17,7 @@ func TestBuildCandidatesHotSignal(t *testing.T) {
 		bounces:            0,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	candidates := buildCandidates(result, m, "zh-CN")
+	candidates := buildCandidates(result, m, Context{}, "zh-CN")
 	if len(candidates) == 0 {
 		t.Fatal("expected at least one candidate")
 	}
@@ -40,7 +40,7 @@ func TestBuildCandidatesRiskAlert(t *testing.T) {
 		bounces:            2,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	candidates := buildCandidates(result, m, "zh-CN")
+	candidates := buildCandidates(result, m, Context{}, "zh-CN")
 	found := false
 	for _, c := range candidates {
 		if c.Type == "risk_alert" {

@@ -186,14 +186,22 @@ func (s *Server) registerRoutes() error {
 			searchHandler := search.NewHandler(searchSvc)
 
 			evidenceFormatter := evidence.NewFormatter()
-			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter)
-			assistantHandler := assistant.NewHandler(assistantSvc)
 
 			notificationSvc := notification.NewService(s.dbPool, queries, appMailer, s.cfg)
 			notificationSvc.SetRuleEngine(notification.NewRuleEngine(queries, func(ctx context.Context, wsID, userID, channel, subject, body string, opts ...notification.EnqueueOption) error {
 				_, err := notificationSvc.Enqueue(ctx, wsID, userID, channel, subject, body, opts...)
 				return err
 			}))
+
+			var suggestionEnricher suggestions.Enricher
+			if chatCompleter != nil {
+				suggestionEnricher = suggestions.NewLLMEnricher(chatCompleter)
+			}
+			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc}, suggestionEnricher)
+
+			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc)
+			assistantHandler := assistant.NewHandler(assistantSvc)
+
 			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
@@ -204,7 +212,6 @@ func (s *Server) registerRoutes() error {
 			signalSvc := signal.NewService(queries)
 			signalSyncer := &analyticsSignalSyncer{svc: signalSvc}
 			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg, signalSyncer)
-			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
 			s.registerWorker(analytics.NewRetentionCleaner(s.dbPool, queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays))

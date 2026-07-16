@@ -74,3 +74,15 @@ func TestNullableUUID(t *testing.T) {
 		t.Fatal("expected invalid uuid to remain invalid")
 	}
 }
+
+func TestTitleForSubtype(t *testing.T) {
+	if got := titleForSubtype("bounce", "risk_alert", "en"); got != "Bounce risk" {
+		t.Fatalf("unexpected bounce title: %q", got)
+	}
+	if got := titleForSubtype("expired", "risk_alert", "zh-CN"); got != "过期链接访问" {
+		t.Fatalf("unexpected expired title: %q", got)
+	}
+	if got := titleForSubtype("", "hot_signal", "en"); got != "High-intent signal" {
+		t.Fatalf("unexpected fallback title: %q", got)
+	}
+}

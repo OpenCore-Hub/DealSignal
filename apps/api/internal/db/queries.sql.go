@@ -348,6 +348,76 @@ func (q *Queries) CountPendingQuestionsByWorkspace(ctx context.Context, workspac
 	return pending_count, err
 }
 
+const countRecentDistinctIPsByLink = `-- name: CountRecentDistinctIPsByLink :one
+SELECT COUNT(DISTINCT ip)::bigint AS distinct_ips
+FROM access_logs
+WHERE link_id = $1
+  AND event_type = 'link_opened'
+  AND created_at > now() - interval '1 hour'
+`
+
+func (q *Queries) CountRecentDistinctIPsByLink(ctx context.Context, linkID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentDistinctIPsByLink, linkID)
+	var distinct_ips int64
+	err := row.Scan(&distinct_ips)
+	return distinct_ips, err
+}
+
+const countRecentDownloadAttemptsByLink = `-- name: CountRecentDownloadAttemptsByLink :one
+SELECT
+    COUNT(*)::bigint AS total_downloads,
+    COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_email <> '')::bigint AS distinct_emails,
+    COUNT(DISTINCT al.visitor_email) FILTER (
+        WHERE al.visitor_email IS NOT NULL
+          AND al.visitor_email <> ''
+          AND NOT EXISTS (
+              SELECT 1 FROM contacts c
+              WHERE c.workspace_id = l.workspace_id
+                AND lower(c.email) = lower(al.visitor_email)
+          )
+    )::bigint AS distinct_unknown_emails
+FROM access_logs al
+JOIN links l ON l.id = al.link_id
+WHERE al.link_id = $1
+  AND al.event_type = 'download_attempted'
+  AND al.created_at > now() - interval '24 hours'
+`
+
+type CountRecentDownloadAttemptsByLinkRow struct {
+	TotalDownloads        int64
+	DistinctEmails        int64
+	DistinctUnknownEmails int64
+}
+
+func (q *Queries) CountRecentDownloadAttemptsByLink(ctx context.Context, linkID pgtype.UUID) (CountRecentDownloadAttemptsByLinkRow, error) {
+	row := q.db.QueryRow(ctx, countRecentDownloadAttemptsByLink, linkID)
+	var i CountRecentDownloadAttemptsByLinkRow
+	err := row.Scan(&i.TotalDownloads, &i.DistinctEmails, &i.DistinctUnknownEmails)
+	return i, err
+}
+
+const countRecentQuestionSuggestionsBySession = `-- name: CountRecentQuestionSuggestionsBySession :one
+SELECT COUNT(*) AS count
+FROM suggestions
+WHERE workspace_id = $1
+  AND subtype = 'question'
+  AND dismissed = false
+  AND created_at > now() - interval '24 hours'
+  AND metadata @> $2::jsonb
+`
+
+type CountRecentQuestionSuggestionsBySessionParams struct {
+	WorkspaceID     pgtype.UUID
+	SessionMetadata []byte
+}
+
+func (q *Queries) CountRecentQuestionSuggestionsBySession(ctx context.Context, arg CountRecentQuestionSuggestionsBySessionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentQuestionSuggestionsBySession, arg.WorkspaceID, arg.SessionMetadata)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
 SELECT COUNT(*) AS count
 FROM suggestions
@@ -1826,11 +1896,10 @@ func (q *Queries) CreateSecurityEvent(ctx context.Context, arg CreateSecurityEve
 
 const createSignal = `-- name: CreateSignal :one
 INSERT INTO signals (
-    tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-    document_id, contact_id, link_id, priority
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-RETURNING id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-          document_id, contact_id, link_id, priority, created_at, updated_at
+    tenant_id, workspace_id, suggestion_id, type, subtype, title, description, explanation, suggestion,
+    document_id, contact_id, link_id, priority, metadata, context
+) VALUES ($1, $2, $3, $4, $13, $5, $6, $7, $8, $9, $10, $11, $12, $14::jsonb, $15::jsonb)
+RETURNING id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
 `
 
 type CreateSignalParams struct {
@@ -1846,6 +1915,9 @@ type CreateSignalParams struct {
 	ContactID    pgtype.UUID
 	LinkID       pgtype.UUID
 	Priority     string
+	Subtype      pgtype.Text
+	Metadata     []byte
+	Context      []byte
 }
 
 func (q *Queries) CreateSignal(ctx context.Context, arg CreateSignalParams) (Signal, error) {
@@ -1862,6 +1934,9 @@ func (q *Queries) CreateSignal(ctx context.Context, arg CreateSignalParams) (Sig
 		arg.ContactID,
 		arg.LinkID,
 		arg.Priority,
+		arg.Subtype,
+		arg.Metadata,
+		arg.Context,
 	)
 	var i Signal
 	err := row.Scan(
@@ -1880,14 +1955,17 @@ func (q *Queries) CreateSignal(ctx context.Context, arg CreateSignalParams) (Sig
 		&i.Priority,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Subtype,
+		&i.Metadata,
+		&i.Context,
 	)
 	return i, err
 }
 
 const createSuggestion = `-- name: CreateSuggestion :one
-INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context)
+VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $10::jsonb, $11::jsonb)
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context
 `
 
 type CreateSuggestionParams struct {
@@ -1899,6 +1977,9 @@ type CreateSuggestionParams struct {
 	Type        string
 	Reason      string
 	Action      string
+	Subtype     pgtype.Text
+	Metadata    []byte
+	Context     []byte
 }
 
 func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionParams) (Suggestion, error) {
@@ -1911,6 +1992,9 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		arg.Type,
 		arg.Reason,
 		arg.Action,
+		arg.Subtype,
+		arg.Metadata,
+		arg.Context,
 	)
 	var i Suggestion
 	err := row.Scan(
@@ -1926,6 +2010,9 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		&i.Dismissed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Subtype,
+		&i.Metadata,
+		&i.Context,
 	)
 	return i, err
 }
@@ -2871,6 +2958,31 @@ func (q *Queries) GetContactAggregatesByWorkspace(ctx context.Context, arg GetCo
 		return nil, err
 	}
 	return items, nil
+}
+
+const getContactByEmailAndWorkspace = `-- name: GetContactByEmailAndWorkspace :one
+SELECT id, workspace_id, email, name, created_at
+FROM contacts
+WHERE email = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetContactByEmailAndWorkspaceParams struct {
+	Email       pgtype.Text
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetContactByEmailAndWorkspace(ctx context.Context, arg GetContactByEmailAndWorkspaceParams) (Contact, error) {
+	row := q.db.QueryRow(ctx, getContactByEmailAndWorkspace, arg.Email, arg.WorkspaceID)
+	var i Contact
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Email,
+		&i.Name,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const getContactByID = `-- name: GetContactByID :one
@@ -4361,6 +4473,61 @@ func (q *Queries) GetLinkInvitationByToken(ctx context.Context, tokenHash pgtype
 	return i, err
 }
 
+const getLinkKeyPageViewDetails = `-- name: GetLinkKeyPageViewDetails :many
+SELECT
+    pv.page_number,
+    COALESCE(NULLIF(TRIM(p.title), ''), 'Page ' || pv.page_number)::text AS title,
+    COUNT(*)::bigint AS views,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY ($2::text[])
+GROUP BY pv.page_number, p.title
+ORDER BY views DESC, avg_duration_seconds DESC
+LIMIT 3
+`
+
+type GetLinkKeyPageViewDetailsParams struct {
+	LinkID   pgtype.UUID
+	Patterns []string
+}
+
+type GetLinkKeyPageViewDetailsRow struct {
+	PageNumber         int32
+	Title              string
+	Views              int64
+	AvgDurationSeconds float64
+}
+
+// Returns the most-viewed key pages for a link, including their titles.
+func (q *Queries) GetLinkKeyPageViewDetails(ctx context.Context, arg GetLinkKeyPageViewDetailsParams) ([]GetLinkKeyPageViewDetailsRow, error) {
+	rows, err := q.db.Query(ctx, getLinkKeyPageViewDetails, arg.LinkID, arg.Patterns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkKeyPageViewDetailsRow
+	for rows.Next() {
+		var i GetLinkKeyPageViewDetailsRow
+		if err := rows.Scan(
+			&i.PageNumber,
+			&i.Title,
+			&i.Views,
+			&i.AvgDurationSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLinkKeyPageViewMetrics = `-- name: GetLinkKeyPageViewMetrics :one
 SELECT
     COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_key_page_views,
@@ -4780,8 +4947,7 @@ func (q *Queries) GetRoomMemberByUserID(ctx context.Context, arg GetRoomMemberBy
 }
 
 const getSignalBySuggestion = `-- name: GetSignalBySuggestion :one
-SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-       document_id, contact_id, link_id, priority, created_at, updated_at
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
 FROM signals
 WHERE suggestion_id = $1 AND workspace_id = $2 LIMIT 1
 `
@@ -4810,6 +4976,9 @@ func (q *Queries) GetSignalBySuggestion(ctx context.Context, arg GetSignalBySugg
 		&i.Priority,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Subtype,
+		&i.Metadata,
+		&i.Context,
 	)
 	return i, err
 }
@@ -4826,9 +4995,24 @@ type GetSuggestionByIDParams struct {
 	WorkspaceID pgtype.UUID
 }
 
-func (q *Queries) GetSuggestionByID(ctx context.Context, arg GetSuggestionByIDParams) (Suggestion, error) {
+type GetSuggestionByIDRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	ContactID   pgtype.UUID
+	LinkID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	Type        string
+	Reason      string
+	Action      string
+	Dismissed   bool
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetSuggestionByID(ctx context.Context, arg GetSuggestionByIDParams) (GetSuggestionByIDRow, error) {
 	row := q.db.QueryRow(ctx, getSuggestionByID, arg.ID, arg.WorkspaceID)
-	var i Suggestion
+	var i GetSuggestionByIDRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -7560,6 +7744,56 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 	return items, nil
 }
 
+const listRecentSecurityEventsByLink = `-- name: ListRecentSecurityEventsByLink :many
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+  AND created_at > now() - interval '24 hours'
+ORDER BY created_at DESC
+`
+
+type ListRecentSecurityEventsByLinkRow struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        pgtype.Text
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListRecentSecurityEventsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListRecentSecurityEventsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listRecentSecurityEventsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListRecentSecurityEventsByLinkRow
+	for rows.Next() {
+		var i ListRecentSecurityEventsByLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Ip,
+			&i.UserAgent,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentVisitorsByLink = `-- name: ListRecentVisitorsByLink :many
 SELECT
     visitor_id,
@@ -7843,8 +8077,7 @@ func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurity
 }
 
 const listSignalsByWorkspace = `-- name: ListSignalsByWorkspace :many
-SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion,
-       document_id, contact_id, link_id, priority, created_at, updated_at
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
 FROM signals
 WHERE workspace_id = $1
 ORDER BY created_at DESC
@@ -7875,6 +8108,9 @@ func (q *Queries) ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype
 			&i.Priority,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Subtype,
+			&i.Metadata,
+			&i.Context,
 		); err != nil {
 			return nil, err
 		}
@@ -7887,7 +8123,7 @@ func (q *Queries) ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype
 }
 
 const listSuggestionsByLink = `-- name: ListSuggestionsByLink :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context
 FROM suggestions
 WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
 ORDER BY created_at DESC
@@ -7920,6 +8156,9 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 			&i.Dismissed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Subtype,
+			&i.Metadata,
+			&i.Context,
 		); err != nil {
 			return nil, err
 		}
@@ -7932,7 +8171,7 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 }
 
 const listSuggestionsByWorkspace = `-- name: ListSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context
 FROM suggestions
 WHERE workspace_id = $1 AND dismissed = false
 ORDER BY created_at DESC
@@ -7960,6 +8199,9 @@ func (q *Queries) ListSuggestionsByWorkspace(ctx context.Context, workspaceID pg
 			&i.Dismissed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Subtype,
+			&i.Metadata,
+			&i.Context,
 		); err != nil {
 			return nil, err
 		}

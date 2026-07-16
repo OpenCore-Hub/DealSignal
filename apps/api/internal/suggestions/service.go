@@ -2,6 +2,7 @@ package suggestions
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -26,6 +27,7 @@ type Suggestion struct {
 	LinkID      string `json:"link_id"`
 	DocumentID  string `json:"document_id,omitempty"`
 	Type        string `json:"type"`
+	Subtype     string `json:"subtype,omitempty"`
 	Priority    string `json:"priority"`
 	Title       string `json:"title"`
 	Reason      string `json:"reason"`
@@ -40,15 +42,25 @@ type Notifier interface {
 	Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string) error
 }
 
+// Enricher optionally rewrites a candidate's reason and action via an LLM.
+type Enricher interface {
+	Enrich(ctx context.Context, input EnrichInput) (reason, action string, ok bool)
+}
+
 // Service generates follow-up suggestions from link analytics.
 type Service struct {
-	queries  *db.Queries
-	notifier Notifier
+	queries   *db.Queries
+	notifier  Notifier
+	enricher  Enricher
 }
 
 // NewService creates a suggestion service.
-func NewService(q *db.Queries, n Notifier) *Service {
-	return &Service{queries: q, notifier: n}
+func NewService(q *db.Queries, n Notifier, enricher ...Enricher) *Service {
+	s := &Service{queries: q, notifier: n}
+	if len(enricher) > 0 {
+		s.enricher = enricher[0]
+	}
+	return s
 }
 
 // Generate creates suggestions for a link based on recent access events.
@@ -76,16 +88,59 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 	}
 
 	result := heat.Compute(heat.CircleDefault, metrics.heatInput())
-	candidates := buildCandidates(result, metrics, lang)
 
 	contactIDs, err := s.queries.ListLinkContactsByLinkID(ctx, linkUUID)
 	if err != nil {
 		return nil, fmt.Errorf("list link contacts: %w", err)
 	}
 	var contactID pgtype.UUID
+	var contactName, contactEmail string
 	if len(contactIDs) > 0 {
 		contactID = contactIDs[0]
+		contact, cerr := s.queries.GetContactByID(ctx, db.GetContactByIDParams{ID: contactID, WorkspaceID: link.WorkspaceID})
+		if cerr == nil {
+			contactName = contact.Name.String
+			contactEmail = contact.Email.String
+		}
 	}
+
+	docTitle := ""
+	if link.DocumentID.Valid {
+		doc, derr := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{ID: link.DocumentID, WorkspaceID: link.WorkspaceID})
+		if derr == nil {
+			docTitle = doc.Title
+		}
+	}
+
+	keyPages, _ := s.queries.GetLinkKeyPageViewDetails(ctx, db.GetLinkKeyPageViewDetailsParams{
+		LinkID:   linkUUID,
+		Patterns: heat.KeyPagePatterns(heat.CircleDefault),
+	})
+	keyPageTitles := make([]string, 0, len(keyPages))
+	for _, kp := range keyPages {
+		keyPageTitles = append(keyPageTitles, kp.Title)
+	}
+
+	totalDurationSeconds := 0
+	if metrics.totalPageViews > 0 {
+		totalDurationSeconds = int(metrics.avgDurationMinutes*60.0*float64(metrics.totalPageViews) + 0.5)
+	}
+
+	ctxSnapshot := Context{
+		Opens:           metrics.opens,
+		UniqueVisitors:  metrics.uniqueVisitors,
+		DurationSeconds: totalDurationSeconds,
+		KeyPageCount:    metrics.keyPageViews,
+		KeyPageTitles:   keyPageTitles,
+		ContactName:     contactName,
+		ContactEmail:    contactEmail,
+		DocumentTitle:   docTitle,
+	}
+
+	securityEvents, _ := s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID)
+	candidates := buildCandidates(result, metrics, ctxSnapshot, lang)
+	candidates = append(candidates, buildSecurityCandidates(securityEvents, lang)...)
+	candidates = append(candidates, s.buildBehaviorRiskCandidates(ctx, linkUUID, metrics, ctxSnapshot, lang)...)
 
 	out := make([]Suggestion, 0, len(candidates))
 	for _, c := range candidates {
@@ -96,6 +151,23 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		if exists {
 			continue
 		}
+
+		reason, action := c.Reason, c.Action
+		if s.enricher != nil && shouldEnrich(c.Type, c.Subtype) {
+			if er, ea, ok := s.enricher.Enrich(ctx, EnrichInput{
+				Lang:           lang,
+				Type:           c.Type,
+				Subtype:        c.Subtype,
+				DocumentTitle:  docTitle,
+				Context:        c.Context,
+				HeatResult:     result,
+				OriginalReason: c.Reason,
+				OriginalAction: c.Action,
+			}); ok {
+				reason, action = er, ea
+			}
+		}
+
 		row, err := s.queries.CreateSuggestion(ctx, db.CreateSuggestionParams{
 			TenantID:    link.TenantID,
 			WorkspaceID: link.WorkspaceID,
@@ -103,8 +175,11 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			LinkID:      pgtype.UUID{Bytes: linkUUID.Bytes, Valid: true},
 			DocumentID:  link.DocumentID,
 			Type:        c.Type,
-			Reason:      c.Reason,
-			Action:      c.Action,
+			Subtype:     pgText(c.Subtype),
+			Reason:      reason,
+			Action:      action,
+			Metadata:    metadataToBytes(c.Metadata),
+			Context:     c.Context.ToJSONB(),
 		})
 		if err != nil {
 			return nil, fmt.Errorf("create suggestion: %w", err)
@@ -116,7 +191,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			if link.CreatedBy.Valid {
 				userID = uuid.UUID(link.CreatedBy.Bytes).String()
 			}
-			_ = s.notifier.Enqueue(ctx, workspaceID, userID, "email", titleForType(c.Type, lang), c.Reason+"\n"+c.Action)
+			_ = s.notifier.Enqueue(ctx, workspaceID, userID, "email", titleForSubtype(c.Subtype, c.Type, lang), reason+"\n"+action)
 		}
 	}
 	return out, nil
@@ -338,40 +413,55 @@ func (m suggestionMetrics) heatInput() heat.Input {
 }
 
 type candidate struct {
-	Type   string
-	Reason string
-	Action string
+	Type     string
+	Subtype  string
+	Reason   string
+	Action   string
+	Metadata map[string]string
+	Context  Context
 }
 
-func buildCandidates(result heat.Result, m suggestionMetrics, lang string) []candidate {
+func buildCandidates(result heat.Result, m suggestionMetrics, ctx Context, lang string) []candidate {
 	ls := newLocalizedStrings(lang)
 	var out []candidate
 	if result.Level == "hot" && m.opens >= 2 {
 		out = append(out, candidate{
-			Type:   "hot_signal",
-			Reason: fmt.Sprintf(ls.hotSignalReasonTmpl, result.Score, result.Level, m.opens, m.keyPageViews),
-			Action: ls.hotSignalAction,
+			Type:    "hot_signal",
+			Subtype: SubtypeHot,
+			Reason:  fmt.Sprintf(ls.hotSignalReasonTmpl, result.Score, result.Level, m.opens, m.keyPageViews),
+			Action:  ls.hotSignalAction,
+			Context: ctx,
 		})
 	}
 	if m.downloads > 0 {
 		out = append(out, candidate{
-			Type:   "follow_up",
-			Reason: fmt.Sprintf(ls.downloadReasonTmpl, m.opens),
-			Action: ls.downloadAction,
+			Type:    "follow_up",
+			Subtype: SubtypeDownload,
+			Reason:  fmt.Sprintf(ls.downloadReasonTmpl, m.opens),
+			Action:  ls.downloadAction,
+			Context: ctx,
 		})
 	}
 	if m.revisits > 0 {
 		out = append(out, candidate{
-			Type:   "follow_up",
-			Reason: fmt.Sprintf(ls.revisitReasonTmpl, m.revisits),
-			Action: ls.revisitAction,
+			Type:    "follow_up",
+			Subtype: SubtypeRevisit,
+			Reason:  fmt.Sprintf(ls.revisitReasonTmpl, m.revisits),
+			Action:  ls.revisitAction,
+			Context: ctx,
 		})
 	}
-	if m.bounces > 0 && m.avgDurationMinutes < 0.5 {
+	if m.bounces > 0 && (m.avgDurationMinutes/float64(m.bounces)) < 0.5 {
 		out = append(out, candidate{
-			Type:   "risk_alert",
-			Reason: fmt.Sprintf(ls.riskReasonTmpl, m.bounces, m.avgDurationMinutes),
-			Action: ls.riskAction,
+			Type:    "risk_alert",
+			Subtype: SubtypeBounce,
+			Reason:  fmt.Sprintf(ls.riskReasonTmpl, m.bounces, m.avgDurationMinutes),
+			Action:  ls.riskAction,
+			Metadata: map[string]string{
+				"bounces":              fmt.Sprintf("%d", m.bounces),
+				"avg_duration_minutes": fmt.Sprintf("%.2f", m.avgDurationMinutes),
+			},
+			Context: ctx,
 		})
 	}
 	return out
@@ -385,6 +475,7 @@ func suggestionFromRow(r db.Suggestion, lang string) Suggestion {
 		LinkID:      uuidToString(r.LinkID),
 		DocumentID:  uuidToString(r.DocumentID),
 		Type:        r.Type,
+		Subtype:     r.Subtype.String,
 		Reason:      r.Reason,
 		Action:      r.Action,
 		Dismissed:   r.Dismissed,
@@ -395,7 +486,7 @@ func suggestionFromRow(r db.Suggestion, lang string) Suggestion {
 		s.ContactID = uuidToString(r.ContactID)
 	}
 	s.Priority = priorityForType(r.Type)
-	s.Title = titleForType(r.Type, lang)
+	s.Title = titleForSubtype(r.Subtype.String, r.Type, lang)
 	return s
 }
 
@@ -441,6 +532,95 @@ func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.U
 // TitleForType returns the localized title for a suggestion/signal type.
 func TitleForType(typ, lang string) string {
 	return titleForType(typ, lang)
+}
+
+func buildSecurityCandidates(events []db.ListRecentSecurityEventsByLinkRow, lang string) []candidate {
+	ls := newLocalizedStrings(lang)
+	seen := make(map[string]bool)
+	var out []candidate
+	for _, ev := range events {
+		if seen[ev.EventType] {
+			continue
+		}
+		seen[ev.EventType] = true
+		var sub string
+		switch ev.EventType {
+		case "expired_link_accessed":
+			sub = SubtypeExpired
+		case "max_access_reached":
+			sub = SubtypeAccessExhausted
+		case "revoked_link_accessed":
+			sub = SubtypeAccessRevoked
+		case "blocked_email", "blocked_domain", "not_in_allow_list", "no_allow_match":
+			sub = SubtypeBlockedAttempt
+		case "abnormal_access_pattern":
+			sub = SubtypeAnomaly
+		default:
+			continue
+		}
+		out = append(out, candidate{
+			Type:    "risk_alert",
+			Subtype: sub,
+			Reason:  ev.Reason.String,
+			Action:  ls.riskAction,
+			Metadata: map[string]string{
+				"event_type": ev.EventType,
+			},
+		})
+	}
+	return out
+}
+
+func (s *Service) buildBehaviorRiskCandidates(ctx context.Context, linkID pgtype.UUID, m suggestionMetrics, ctxSnapshot Context, lang string) []candidate {
+	ls := newLocalizedStrings(lang)
+	var out []candidate
+
+	distinctIPs, err := s.queries.CountRecentDistinctIPsByLink(ctx, linkID)
+	if err == nil && distinctIPs >= 3 {
+		out = append(out, candidate{
+			Type:    "risk_alert",
+			Subtype: SubtypeForward,
+			Reason:  fmt.Sprintf("%d distinct IPs opened this link in the last hour", distinctIPs),
+			Action:  ls.riskAction,
+			Metadata: map[string]string{
+				"distinct_ips": fmt.Sprintf("%d", distinctIPs),
+			},
+			Context: ctxSnapshot,
+		})
+	}
+
+	downloads, err := s.queries.CountRecentDownloadAttemptsByLink(ctx, linkID)
+	if err == nil && downloads.TotalDownloads > 0 && (downloads.DistinctEmails > 1 || downloads.DistinctUnknownEmails > 0) {
+		out = append(out, candidate{
+			Type:    "risk_alert",
+			Subtype: SubtypeDownload,
+			Reason:  fmt.Sprintf("%d downloads from %d distinct emails in the last 24 hours", downloads.TotalDownloads, downloads.DistinctEmails),
+			Action:  ls.riskAction,
+			Metadata: map[string]string{
+				"total_downloads":       fmt.Sprintf("%d", downloads.TotalDownloads),
+				"distinct_emails":       fmt.Sprintf("%d", downloads.DistinctEmails),
+				"distinct_unknown_emails": fmt.Sprintf("%d", downloads.DistinctUnknownEmails),
+			},
+			Context: ctxSnapshot,
+		})
+	}
+
+	return out
+}
+
+func shouldEnrich(typ, subtype string) bool {
+	if typ == "hot_signal" {
+		return true
+	}
+	return subtype == SubtypeQuestion
+}
+
+func metadataToBytes(m map[string]string) []byte {
+	if len(m) == 0 {
+		return []byte("{}")
+	}
+	b, _ := json.Marshal(m)
+	return b
 }
 
 func uuidToString(u pgtype.UUID) string {

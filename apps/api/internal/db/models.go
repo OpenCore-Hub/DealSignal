@@ -605,6 +605,9 @@ type Signal struct {
 	Priority     string
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+	Subtype      pgtype.Text
+	Metadata     []byte
+	Context      []byte
 }
 
 type Suggestion struct {
@@ -620,6 +623,9 @@ type Suggestion struct {
 	Dismissed   bool
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	Subtype     pgtype.Text
+	Metadata    []byte
+	Context     []byte
 }
 
 type Tenant struct {
