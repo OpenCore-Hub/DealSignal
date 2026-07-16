@@ -2396,31 +2396,7 @@ func (s *Service) GetByPublicToken(ctx context.Context, publicToken string) (db.
 		}
 		return db.Link{}, fmt.Errorf("get link by public token: %w", err)
 	}
-	return db.Link{
-		ID:                       link.ID,
-		TenantID:                 link.TenantID,
-		WorkspaceID:              link.WorkspaceID,
-		DocumentID:               link.DocumentID,
-		DealRoomID:               link.DealRoomID,
-		PublicToken:              link.PublicToken,
-		Name:                     link.Name,
-		PermissionType:           link.PermissionType,
-		ExpiresAt:                link.ExpiresAt,
-		MaxAccessCount:           link.MaxAccessCount,
-		AccessCount:              link.AccessCount,
-		DownloadEnabled:          link.DownloadEnabled,
-		WatermarkEnabled:         link.WatermarkEnabled,
-		Status:                   link.Status,
-		CreatedBy:                link.CreatedBy,
-		CreatedAt:                link.CreatedAt,
-		UpdatedAt:                link.UpdatedAt,
-		RequireEmail:             link.RequireEmail,
-		RequireNda:               link.RequireNda,
-		RequireEmailVerification: link.RequireEmailVerification,
-		AiCopilotEnabled:         link.AiCopilotEnabled,
-		RequirePassword:          link.RequirePassword,
-		PasswordHash:             link.PasswordHash,
-	}, nil
+	return link, nil
 }
 
 // GetPublicLinkMetadata returns safe metadata for a public link.
@@ -2784,33 +2760,31 @@ func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requireEmailV
 	requireNDA = req.RequireNDA
 
 	// Backward compatibility: legacy permission_type drives flags when explicit
-	// boolean flags are not set.
+	// boolean flags are not set. Modern email-verification links identify the
+	// visitor by access code, so they should not force an email input field.
 	switch req.PermissionType {
 	case "email", "email_required":
-		if !requireEmail {
+		if !requireEmail && !requireEmailVerification {
 			requireEmail = true
 		}
 	case "nda":
 		if !requireNDA {
 			requireNDA = true
 		}
-		if !requireEmail {
+		if !requireEmail && !requireEmailVerification {
 			requireEmail = true
 		}
 	}
 
-	// Email verification implies email collection.
-	if !requireEmail && requireEmailVerification {
+	// NDA without email verification still needs an email for the agreement record.
+	// When email verification is enabled, the contact email is derived from the code.
+	if !requireEmail && requireNDA && !requireEmailVerification {
 		requireEmail = true
 	}
 
-	// NDA requires email collection but not a verification code.
-	if !requireEmail && requireNDA {
-		requireEmail = true
-	}
-
-	// Allow-list rules require email collection so there is an email to evaluate.
-	if !requireEmail && (len(req.AllowedEmails) > 0 || len(req.AllowedDomains) > 0) {
+	// Allow-list rules need an email to evaluate unless email verification is on,
+	// in which case the access code already identifies the allowed contact.
+	if !requireEmail && !requireEmailVerification && (len(req.AllowedEmails) > 0 || len(req.AllowedDomains) > 0) {
 		requireEmail = true
 	}
 
