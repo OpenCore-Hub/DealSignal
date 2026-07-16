@@ -24,8 +24,8 @@
   "reload": "Refresh page",
   "backToHome": "Back to home",
   "overdue": {
-    "days": "{{count}} day overdue",
-    "days_plural": "{{count}} days overdue"
+    "days_one": "{{count}} day overdue",
+    "days_other": "{{count}} days overdue"
   },
   "error": {
     "title": "Something went wrong",
@@ -100,8 +100,8 @@
   },
   "visitor": {
     "unknownOrganization": "Unknown organization",
-    "visitCount": "{{count}} visits",
     "visitCount_one": "{{count}} visit",
+    "visitCount_other": "{{count}} visits",
     "avgDuration": "Avg. time {{duration}}",
     "lastSeen": "Last seen {{time}}",
     "unknown": "Unknown",

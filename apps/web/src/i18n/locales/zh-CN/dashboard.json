@@ -1,31 +1,60 @@
 {
-  "title": "交易雷达",
-  "subtitle": "今日需要关注什么：热度信号、待办行动、风险提醒，一站聚合。",
-  "summary": {
-    "title": "仪表盘摘要",
-    "hotSignals": "高热度信号数",
-    "pendingActions": "待办行动数"
+  "title": "首页",
+  "welcome": {
+    "title": "欢迎回来"
+  },
+  "quickActions": {
+    "createRoom": "新建数据室",
+    "upload": "上传文档",
+    "invite": "邀请访客"
+  },
+  "metrics": {
+    "title": "关键指标",
+    "activeRooms": "活跃数据室",
+    "weeklyVisitors": "本周访客",
+    "pendingQuestions": "待处理 Q&A",
+    "highIntentContacts": "高意向联系人",
+    "aria": {
+      "activeRooms": "{{count}} 个活跃数据室",
+      "weeklyVisitors": "{{count}} 位本周访客",
+      "pendingQuestions": "{{count}} 个待处理问题",
+      "highIntentContacts": "{{count}} 位高意向联系人"
+    }
   },
   "riskAlerts": {
     "title": "风险提醒"
   },
-  "mock": {
-    "risks": {
-      "risk_1": {
-        "title": "未知邮箱下载了 Pitch Deck",
-        "description": "一名未在预期收件人列表中的访客下载了该文档。"
-      },
-      "risk_2": {
-        "title": "Financial Model 链接已过期",
-        "description": "该分享链接已超过有效期，无法再访问。"
-      }
+  "sections": {
+    "attention": "今日关注",
+    "activeRooms": "活跃数据室",
+    "signals": "信号流",
+    "recentVisitors": "最近访客",
+    "actions": "待办行动",
+    "heatMap": "最近访问热度",
+    "activityFeed": "活动时间线"
+  },
+  "attention": {
+    "actions": "待办",
+    "signals": "高意向信号",
+    "risks": "风险"
+  },
+  "room": {
+    "enter": "进入 {{name}}",
+    "pendingApprovals_other": "{{count}} 个待审批",
+    "visitors": "{{count}} 位访客",
+    "unreadQuestions": "{{count}} 条未读问题",
+    "lastAccessed": "最近活跃",
+    "heatLabel": "热度",
+    "viewAllWithCount_one": "查看全部 {{count}} 个数据室",
+    "viewAllWithCount_other": "查看全部 {{count}} 个数据室",
+    "status": {
+      "active": "活跃",
+      "inactive": "未激活"
     }
   },
-  "sections": {
-    "signals": "信号流",
-    "recentDocuments": "最近文档",
-    "actions": "待办行动",
-    "heatMap": "热度地图"
+  "visitor": {
+    "score": "热度 {{score}}",
+    "viewProfile": "查看 {{email}} 的资料"
   },
   "empty": {
     "signals": {
@@ -33,13 +62,26 @@
       "description": "上传并分享文档后，AI 会自动识别高意向投资人/客户并生成信号。",
       "action": "上传第一份文档"
     },
-    "documents": {
-      "title": "暂无文档",
-      "description": "上传第一份融资材料或销售提案，开始追踪热度。"
-    },
     "actions": {
       "title": "暂无待办行动",
       "description": "所有信号都已处理完毕"
+    },
+    "rooms": {
+      "title": "暂无活跃数据室",
+      "description": "创建第一个数据室，安全地向投资人、LP 或客户展示尽调材料。",
+      "action": "新建数据室",
+      "noDescription": "暂无说明"
+    },
+    "visitors": {
+      "description": "当数据室被访问后，访客活动将显示在这里。"
+    },
+    "risks": {
+      "title": "暂无风险提醒",
+      "description": "暂无风险提醒，一切正常。"
+    },
+    "activity": {
+      "title": "暂无近期活动",
+      "description": "最近的访问、下载、提问和上传会显示在这里。"
     }
   },
   "signal": {
@@ -67,12 +109,28 @@
     "reactivate": "重新激活"
   },
   "heatMap": {
-    "linkCount": "{{count}} 个链接",
-    "linkCountAria": "{{tier}} {{count}} 个链接",
-    "accessCount": "{{count}} 次访问",
-    "noLinks": "暂无 {{tier}} 链接"
+    "linkCount_other": "{{count}} 个链接",
+    "accessCount_other": "{{count}} 次访问",
+    "viewAll": "查看全部"
   },
-  "document": {
-    "pageCount": "{{count}} 页"
+  "activity": {
+    "events": {
+      "visit": "访问了",
+      "download": "下载了",
+      "question": "询问了",
+      "upload": "上传了"
+    },
+    "groups": {
+      "today": "今天",
+      "yesterday": "昨天",
+      "older": "更早"
+    },
+    "combined": {
+      "more": "等 {{count}} 项"
+    },
+    "anonymousUser": "匿名用户",
+    "viewAllWithCount": "查看全部 {{count}} 条动态",
+    "viewLess": "收起",
+    "returnToDashboard": "返回"
   }
 }

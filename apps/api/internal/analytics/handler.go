@@ -71,15 +71,18 @@ func (h *Handler) GetDashboardStats(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"hotCount":        stats.HotCount,
-		"warmCount":       stats.WarmCount,
-		"coldCount":       stats.ColdCount,
-		"recentDocuments": documentList(stats.RecentDocuments),
-		"recentLinks":     linkOverviewList(c, h.cfg, stats.RecentLinks),
-		"heatAlerts":      heatAlertList(stats.Signals),
-		"riskAlerts":      riskAlertList(stats.Signals),
-		"signals":         signalFeedList(stats.Signals),
-		"actionItems":     actionItemList(stats.Actions),
+		"hotCount":         stats.HotCount,
+		"warmCount":        stats.WarmCount,
+		"coldCount":        stats.ColdCount,
+		"weeklyVisitors":   stats.WeeklyVisitors,
+		"pendingQuestions": stats.PendingQuestions,
+		"recentDocuments":  documentList(stats.RecentDocuments),
+		"recentLinks":      linkOverviewList(c, h.cfg, stats.RecentLinks),
+		"heatAlerts":       heatAlertList(stats.Signals),
+		"riskAlerts":       riskAlertList(stats.Signals),
+		"signals":          signalFeedList(stats.Signals),
+		"actionItems":      actionItemList(stats.Actions),
+		"recentActivities": activityItemList(stats.RecentActivities),
 	})
 }
 
@@ -295,7 +298,7 @@ func contactScoreList(contacts []ContactScore) []gin.H {
 	out := make([]gin.H, len(contacts))
 	for i, c := range contacts {
 		item := gin.H{
-			"id":        c.Email,
+			"id":        c.ID,
 			"email":     c.Email,
 			"score":     c.Score,
 			"heatLevel": c.Level,
@@ -353,10 +356,26 @@ func actionItemList(actions []db.ActionItem) []gin.H {
 	return out
 }
 
+func activityItemList(activities []ActivityItem) []gin.H {
+	out := make([]gin.H, len(activities))
+	for i, a := range activities {
+		out[i] = gin.H{
+			"id":         a.ID,
+			"eventType":  a.EventType,
+			"actor":      a.Actor,
+			"objectType": a.ObjectType,
+			"objectName": a.ObjectName,
+			"objectId":   a.ObjectID,
+			"createdAt":  a.CreatedAt.Format(time.RFC3339),
+		}
+	}
+	return out
+}
+
 func heatAlertList(signals []db.Signal) []gin.H {
 	out := make([]gin.H, 0)
 	for _, s := range signals {
-		if s.Type != "hot" && s.Type != "warm" {
+		if s.Type != "hot_signal" {
 			continue
 		}
 		item := gin.H{
@@ -379,20 +398,28 @@ func heatAlertList(signals []db.Signal) []gin.H {
 func riskAlertList(signals []db.Signal) []gin.H {
 	out := make([]gin.H, 0)
 	for _, s := range signals {
-		if s.Type != "risk" {
+		if s.Type != "risk_alert" {
 			continue
 		}
 		alertType := "forward"
-		if strings.Contains(strings.ToLower(s.Title), "download") {
+		titleLower := strings.ToLower(s.Title)
+		if strings.Contains(titleLower, "download") {
 			alertType = "download"
-		} else if strings.Contains(strings.ToLower(s.Title), "expir") {
+		} else if strings.Contains(titleLower, "expir") {
 			alertType = "expired"
+		} else if strings.Contains(titleLower, "anomal") || strings.Contains(titleLower, "suspicious") || strings.Contains(titleLower, "unusual") || strings.Contains(titleLower, "spike") {
+			alertType = "anomaly"
+		}
+		priority := s.Priority
+		if priority == "" {
+			priority = "medium"
 		}
 		item := gin.H{
 			"id":          uuidToString(s.ID),
 			"type":        alertType,
 			"title":       s.Title,
 			"description": s.Description,
+			"priority":    priority,
 			"createdAt":   s.CreatedAt.Time.Format(time.RFC3339),
 		}
 		if s.LinkID.Valid {

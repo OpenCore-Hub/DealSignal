@@ -688,7 +688,7 @@ export const mockWorkspaceMembers: WorkspaceMember[] = [
 export const mockSignals: Signal[] = [
   {
     id: "sig_1",
-    type: "hot",
+    type: "hot_signal",
     title: "mock.signals.sig_1.title",
     description: "mock.signals.sig_1.description",
     explanation: "mock.signals.sig_1.explanation",
@@ -701,7 +701,7 @@ export const mockSignals: Signal[] = [
   },
   {
     id: "sig_2",
-    type: "hot",
+    type: "hot_signal",
     title: "mock.signals.sig_2.title",
     description: "mock.signals.sig_2.description",
     explanation: "mock.signals.sig_2.explanation",
@@ -714,7 +714,7 @@ export const mockSignals: Signal[] = [
   },
   {
     id: "sig_3",
-    type: "warm",
+    type: "follow_up",
     title: "mock.signals.sig_3.title",
     description: "mock.signals.sig_3.description",
     explanation: "mock.signals.sig_3.explanation",
@@ -727,13 +727,26 @@ export const mockSignals: Signal[] = [
   },
   {
     id: "sig_4",
-    type: "risk",
-    title: "mock.signals.sig_4.title",
-    description: "mock.signals.sig_4.description",
-    explanation: "mock.signals.sig_4.explanation",
-    suggestion: "mock.signals.sig_4.suggestion",
+    type: "risk_alert",
+    title: "Unidentified email downloaded Pitch Deck",
+    description: "An unrecognized visitor downloaded the document outside of the expected recipient list.",
+    explanation: "An unrecognized visitor downloaded the document outside of the expected recipient list.",
+    suggestion: "Review the access log and revoke the link if necessary.",
     linkId: "link_3",
+    documentId: "doc_1",
     createdAt: "2026-06-18T09:00:00Z",
+    priority: "high",
+  },
+  {
+    id: "sig_5",
+    type: "risk_alert",
+    title: "Financial Model link expired",
+    description: "The shared link has passed its expiry date and is no longer accessible.",
+    explanation: "The shared link has passed its expiry date and is no longer accessible.",
+    suggestion: "Renew the link or notify the recipient.",
+    linkId: "link_2",
+    documentId: "doc_2",
+    createdAt: "2026-06-19T10:00:00Z",
     priority: "medium",
   },
 ];
@@ -777,26 +790,26 @@ export const mockActionItems: ActionItem[] = [
   },
 ];
 
-const mockRiskAlerts: RiskAlert[] = [
-  {
-    id: "risk_1",
-    type: "download",
-    title: "mock.risks.risk_1.title",
-    description: "mock.risks.risk_1.description",
-    linkId: "link_3",
-    documentId: "doc_1",
-    createdAt: "2026-06-18T09:00:00Z",
-  },
-  {
-    id: "risk_2",
-    type: "expired",
-    title: "mock.risks.risk_2.title",
-    description: "mock.risks.risk_2.description",
-    linkId: "link_2",
-    documentId: "doc_2",
-    createdAt: "2026-06-19T10:00:00Z",
-  },
-];
+const mockRiskAlerts: RiskAlert[] = mockSignals
+  .filter((s): s is Signal & { type: "risk_alert" } => s.type === "risk_alert")
+  .map((s) => {
+    const titleLower = s.title.toLowerCase();
+    const alertType: RiskAlert["type"] = titleLower.includes("download")
+      ? "download"
+      : titleLower.includes("expir")
+        ? "expired"
+        : "forward";
+    return {
+      id: s.id,
+      type: alertType,
+      priority: s.priority,
+      title: s.title,
+      description: s.description,
+      linkId: s.linkId,
+      documentId: s.documentId,
+      createdAt: s.createdAt,
+    };
+  });
 
 export function getMockDashboardStats() {
   return {

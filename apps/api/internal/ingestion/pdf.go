@@ -23,6 +23,7 @@ type PageInfo struct {
 	Width  int
 	Height int
 	Text   string
+	Title  string
 	Blocks []TextBlock
 }
 
@@ -44,6 +45,23 @@ type NormalizedBBox struct {
 type Chunk struct {
 	Text string
 	Bbox []byte
+}
+
+const maxPageTitleLen = 200
+
+// truncatePageTitle extracts the first non-empty text block and truncates it for
+// use as a page title. Fallback returns an empty string if no text is found.
+func truncatePageTitle(blocks []TextBlock) string {
+	for _, b := range blocks {
+		if t := strings.TrimSpace(b.Text); t != "" {
+			t = strings.Join(strings.Fields(t), " ")
+			if len(t) > maxPageTitleLen {
+				return t[:maxPageTitleLen]
+			}
+			return t
+		}
+	}
+	return ""
 }
 
 // pageBbox returns a JSON bounding box for the whole page in normalized coordinates (0-1).
@@ -146,6 +164,7 @@ func parseBBoxHTML(data []byte) ([]PageInfo, error) {
 			Width:  pageWi,
 			Height: pageHi,
 			Text:   strings.TrimSpace(fullText.String()),
+			Title:  truncatePageTitle(blocks),
 			Blocks: blocks,
 		})
 	}
@@ -331,6 +350,7 @@ func extractPagesTextOnly(filePath string) ([]PageInfo, error) {
 			Width:  w,
 			Height: h,
 			Text:   text,
+			Title:  truncatePageTitle(blocks),
 			Blocks: blocks,
 		})
 	}

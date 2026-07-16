@@ -42,6 +42,20 @@ type notificationAdapter struct {
 	svc *notification.Service
 }
 
+// analyticsSignalSyncer adapts the signal service to the analytics SignalSyncer
+// interface so that dashboard stats always reflect the latest synced signals.
+type analyticsSignalSyncer struct {
+	svc *signal.Service
+}
+
+func (a *analyticsSignalSyncer) GetFeed(ctx context.Context, workspaceID string) (analytics.SignalFeed, error) {
+	feed, err := a.svc.GetFeed(ctx, workspaceID)
+	if err != nil {
+		return analytics.SignalFeed{}, err
+	}
+	return analytics.SignalFeed{Signals: feed.Signals, Actions: feed.Actions}, nil
+}
+
 // closerWorker releases mailer-held resources (e.g. SMTP connection pool) on
 // server shutdown. It does no background work between Start and Stop.
 type closerWorker struct {
@@ -187,7 +201,9 @@ func (s *Server) registerRoutes() error {
 			} else {
 				dedupChecker = analytics.NewFailoverDedupChecker(nil, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			}
-			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg)
+			signalSvc := signal.NewService(queries)
+			signalSyncer := &analyticsSignalSyncer{svc: signalSvc}
+			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg, signalSyncer)
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
@@ -216,7 +232,6 @@ func (s *Server) registerRoutes() error {
 			complianceHandler := compliance.NewHandler(complianceSvc, workspaceSvc)
 
 			suggestionHandler := suggestions.NewHandler(suggestionSvc)
-			signalSvc := signal.NewService(queries)
 			signalHandler := signal.NewHandler(signalSvc)
 
 			contactSvc := contact.NewService(queries)

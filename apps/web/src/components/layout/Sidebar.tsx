@@ -21,6 +21,17 @@ import { api } from "@/lib/api";
 import type { WorkspaceSettings } from "@/types";
 import { Skeleton } from "@/components/ui/skeleton";
 
+interface NavItem {
+  to: string;
+  labelKey: string;
+  icon: typeof ChartPie;
+}
+
+interface NavGroup {
+  labelKey: string;
+  items: NavItem[];
+}
+
 export function Sidebar() {
   const { t } = useTranslation("layout");
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
@@ -30,16 +41,29 @@ export function Sidebar() {
   const [loading, setLoading] = useState(true);
   const navRef = useRef<HTMLElement>(null);
 
-  const navItems = [
-    { to: "dashboard", labelKey: "sidebar.nav.dashboard", icon: ChartPie },
-    { to: "documents", labelKey: "sidebar.nav.documents", icon: FileText },
-    { to: "links", labelKey: "sidebar.nav.links", icon: LinkIcon },
-    { to: "deal-rooms", labelKey: "sidebar.nav.dealRooms", icon: FolderOpen },
-    { to: "contacts", labelKey: "sidebar.nav.contacts", icon: Users },
-    { to: "insights", labelKey: "sidebar.nav.insights", icon: ChartLineUp },
-    { to: "agreement-documents", labelKey: "sidebar.nav.agreementDocuments", icon: Scales },
-    { to: "settings", labelKey: "sidebar.nav.settings", icon: Gear },
-  ] as const;
+  const navGroups: NavGroup[] = [
+    {
+      labelKey: "sidebar.groups.workspace",
+      items: [
+        { to: "dashboard", labelKey: "sidebar.nav.dashboard", icon: ChartPie },
+        { to: "deal-rooms", labelKey: "sidebar.nav.dealRooms", icon: FolderOpen },
+        { to: "documents", labelKey: "sidebar.nav.documents", icon: FileText },
+        { to: "links", labelKey: "sidebar.nav.links", icon: LinkIcon },
+      ],
+    },
+    {
+      labelKey: "sidebar.groups.relationships",
+      items: [
+        { to: "contacts", labelKey: "sidebar.nav.contacts", icon: Users },
+        { to: "insights", labelKey: "sidebar.nav.insights", icon: ChartLineUp },
+        { to: "agreement-documents", labelKey: "sidebar.nav.agreementDocuments", icon: Scales },
+      ],
+    },
+    {
+      labelKey: "sidebar.groups.admin",
+      items: [{ to: "settings", labelKey: "sidebar.nav.settings", icon: Gear }],
+    },
+  ];
 
   useEffect(() => {
     if (isMobile) {
@@ -124,37 +148,61 @@ export function Sidebar() {
 
         {/* Navigation */}
         <nav ref={navRef} className="flex-1 overflow-y-auto p-3" aria-label={t("sidebar.mainNavigation")}>
-          <ul className="space-y-1">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              return (
-                <li key={item.to}>
-                  <NavLink
-                    to={`/${workspaceSlug}/${item.to}`}
-                    title={t(item.labelKey)}
-                    className={({ isActive }) =>
-                      cn(
-                        "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
-                        isActive
-                          ? "bg-primary text-primary-foreground shadow-[0_1px_3px_rgba(15,23,42,0.12)]"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      )
-                    }
-                  >
-                    <Icon size={20} weight="regular" />
-                    <span
-                      className={cn(
-                        "whitespace-nowrap transition-opacity",
-                        sidebarOpen ? "opacity-100" : "opacity-0 md:hidden"
-                      )}
-                    >
-                      {t(item.labelKey)}
-                    </span>
-                  </NavLink>
-                </li>
-              );
-            })}
-          </ul>
+          <div className="space-y-5">
+            {navGroups.map((group) => (
+              <div key={group.labelKey}>
+                <div
+                  className={cn(
+                    "mb-2 px-3 text-xs font-medium uppercase tracking-wider text-muted-foreground transition-opacity",
+                    sidebarOpen ? "opacity-100" : "opacity-0 md:hidden"
+                  )}
+                >
+                  {t(group.labelKey)}
+                </div>
+                <ul className="space-y-1">
+                  {group.items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <li key={item.to}>
+                        <NavLink
+                          to={`/${workspaceSlug}/${item.to}`}
+                          title={t(item.labelKey)}
+                          className={({ isActive }) =>
+                            cn(
+                              "group relative flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-all duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
+                              isActive
+                                ? "bg-primary/10 text-primary"
+                                : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                            )
+                          }
+                        >
+                          {({ isActive }) => (
+                            <>
+                              <span
+                                className={cn(
+                                  "absolute left-0 top-1/2 h-6 w-1 -translate-y-1/2 rounded-r-full bg-primary transition-opacity",
+                                  isActive ? "opacity-100" : "opacity-0"
+                                )}
+                              />
+                              <Icon size={20} weight={isActive ? "fill" : "regular"} />
+                              <span
+                                className={cn(
+                                  "whitespace-nowrap transition-opacity",
+                                  sidebarOpen ? "opacity-100" : "opacity-0 md:hidden"
+                                )}
+                              >
+                                {t(item.labelKey)}
+                              </span>
+                            </>
+                          )}
+                        </NavLink>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
         </nav>
 
         {/* Workspace Switcher */}

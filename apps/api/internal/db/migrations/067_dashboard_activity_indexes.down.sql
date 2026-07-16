@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_access_logs_workspace_created;
+DROP INDEX IF EXISTS idx_page_views_workspace_created;
+DROP INDEX IF EXISTS idx_link_visitor_questions_workspace_status_created;
+DROP INDEX IF EXISTS idx_documents_workspace_created;

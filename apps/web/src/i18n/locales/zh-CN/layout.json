@@ -6,6 +6,11 @@
       "expand": "展开侧边栏"
     },
     "mainNavigation": "主导航",
+    "groups": {
+      "workspace": "工作区",
+      "relationships": "关系运营",
+      "admin": "管理"
+    },
     "nav": {
       "dashboard": "交易雷达",
       "documents": "文档库",

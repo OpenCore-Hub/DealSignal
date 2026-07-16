@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor, act } from "@testing-library/react";
 import i18next from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { MemoryRouter, Routes, Route } from "react-router";
@@ -76,7 +76,7 @@ async function renderStepSecurity(overrides?: Partial<BundlePipelineState>) {
     config: buildConfigFromPreset("customized"),
     ...overrides,
   });
-  render(
+  const view = render(
     <I18nextProvider i18n={i18n}>
       <MemoryRouter initialEntries={["/"]}>
         <Routes>
@@ -92,6 +92,11 @@ async function renderStepSecurity(overrides?: Partial<BundlePipelineState>) {
       </MemoryRouter>
     </I18nextProvider>,
   );
+  // Flush pending async state updates from the pipeline provider.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  return view;
 }
 
 describe("StepSecurity integration", () => {

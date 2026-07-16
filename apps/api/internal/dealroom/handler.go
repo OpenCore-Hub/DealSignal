@@ -610,6 +610,12 @@ func roomSummaryResponse(r RoomSummary) gin.H {
 	resp["documentCount"] = r.DocumentCount
 	resp["memberCount"] = r.MemberCount
 	resp["pendingApprovals"] = r.PendingApprovals
+	resp["visitorCount"] = r.VisitorCount
+	resp["unreadQuestions"] = r.UnreadQuestions
+	resp["heatScore"] = r.HeatScore
+	if r.LastAccessedAt.Valid {
+		resp["lastAccessedAt"] = r.LastAccessedAt.Time.Format(time.RFC3339)
+	}
 	return resp
 }
 

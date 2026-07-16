@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
+import { I18nextProvider } from "react-i18next";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { PublicViewerPage } from "./PublicViewerPage";
+import { createTestI18n } from "@/i18n/test-utils";
 import { ApiError } from "@/lib/apiClient";
 
 const { accessPublicLinkMock } = vi.hoisted(() => ({
@@ -15,14 +17,22 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-function renderPage(token: string) {
-  return render(
+async function renderPage(token: string) {
+  const i18n = await createTestI18n();
+  const view = render(
     <MemoryRouter initialEntries={[`/l/${token}`]}>
-      <Routes>
-        <Route path="/l/:token" element={<PublicViewerPage />} />
-      </Routes>
+      <I18nextProvider i18n={i18n}>
+        <Routes>
+          <Route path="/l/:token" element={<PublicViewerPage />} />
+        </Routes>
+      </I18nextProvider>
     </MemoryRouter>
   );
+  // Flush async state updates from the access-public-link effect.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  return view;
 }
 
 describe("PublicViewerPage", () => {
@@ -44,7 +54,7 @@ describe("PublicViewerPage", () => {
       })
     );
 
-    renderPage("modern-token");
+    await renderPage("modern-token");
 
     await waitFor(() => {
       expect(document.getElementById("email-code")).toBeInTheDocument();
@@ -68,7 +78,7 @@ describe("PublicViewerPage", () => {
       })
     );
 
-    renderPage("legacy-token");
+    await renderPage("legacy-token");
 
     await waitFor(() => {
       expect(document.getElementById("email")).toBeInTheDocument();

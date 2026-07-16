@@ -41,6 +41,28 @@ export function formatRelativeTime(date?: string, locale?: string): string {
   return formatDate(date, lng);
 }
 
+export function formatCompactNumber(value: number, locale?: string): string {
+  return new Intl.NumberFormat(locale || i18next.language || "zh-CN", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+/**
+ * Format a count using compact notation while preserving the locale's plural suffix.
+ * The count used for plural selection is the raw integer; the displayed number is
+ * compact-formatted (e.g. 1.5K, 1.2万).
+ */
+export function formatCountWithPlural(
+  t: (key: string, options?: { count?: number }) => string,
+  key: string,
+  count: number,
+  locale?: string
+): string {
+  const formatted = formatCompactNumber(count, locale);
+  return t(key, { count }).replace(String(count), formatted);
+}
+
 export function getInitials(name: string | null | undefined): string {
   if (!name) return "?";
   return name

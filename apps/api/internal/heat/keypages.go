@@ -18,6 +18,16 @@ func IsKeyPage(title string, circle Circle) bool {
 	return false
 }
 
+// KeyPagePatterns returns SQL LIKE patterns for the given circle, suitable for
+// PostgreSQL's LIKE ANY operator.
+func KeyPagePatterns(circle Circle) []string {
+	patterns := make([]string, 0, len(KeywordsForCircle(circle)))
+	for _, kw := range KeywordsForCircle(circle) {
+		patterns = append(patterns, "%"+strings.ToLower(kw)+"%")
+	}
+	return patterns
+}
+
 // KeywordsForCircle returns the flattened keyword list for a circle, falling
 // back to the default circle when the requested circle is unknown.
 func KeywordsForCircle(circle Circle) []string {

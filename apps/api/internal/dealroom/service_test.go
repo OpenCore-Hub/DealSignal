@@ -818,6 +818,34 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 		}
 		return &fakeRows{rows: rows}, nil
 
+	case strings.Contains(sqlLower, "from deal_rooms dr") && strings.Contains(sqlLower, "group by dr.id"):
+		rows := make([][]interface{}, 0, len(f.rooms))
+		for _, r := range f.rooms {
+			if r.WorkspaceID != argUUID(args, 0) {
+				continue
+			}
+			var docCount, memberCount, pendingCount int64
+			for _, d := range f.roomDocs {
+				if d.RoomID == r.ID {
+					docCount++
+				}
+			}
+			for _, m := range f.members {
+				if m.RoomID == r.ID {
+					memberCount++
+				}
+			}
+			for _, req := range f.requests {
+				if req.RoomID == r.ID && req.Status == "pending" {
+					pendingCount++
+				}
+			}
+			rows = append(rows, []interface{}{
+				r.ID, docCount, memberCount, pendingCount, int64(0), int64(0), pgtype.Timestamptz{}, int32(0),
+			})
+		}
+		return &fakeRows{rows: rows}, nil
+
 	case strings.Contains(sqlLower, "from room_member_folder_permissions") && strings.Contains(sqlLower, "where room_id = $1 and email"):
 		roomID := argUUID(args, 0)
 		email := argString(args, 1)
@@ -1418,5 +1446,71 @@ func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected general folder docs in response, got %v", payload.Data)
+	}
+}
+
+
+func TestListRoomsReturnsAggregates(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "aggregate-room",
+		Name: "Aggregate Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "Memo",
+		SourceType:  "docx",
+		Status:      "ready",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+
+	fake.requests = append(fake.requests, db.RoomAccessRequest{
+		ID:          newPGUUID(),
+		TenantID:    fake.workspace.TenantID,
+		WorkspaceID: pgUUID(wsID),
+		RoomID:      room.ID,
+		Email:       "pending@example.test",
+		Reason:      pgtype.Text{String: "Please grant access", Valid: true},
+		Status:      "pending",
+		CreatedAt:   nowTs(),
+		UpdatedAt:   nowTs(),
+	})
+
+	summaries, err := svc.ListRooms(context.Background(), wsID)
+	if err != nil {
+		t.Fatalf("list rooms: %v", err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected 1 room summary, got %d", len(summaries))
+	}
+	summary := summaries[0]
+	if summary.DocumentCount != 1 {
+		t.Errorf("documentCount = %d, want 1", summary.DocumentCount)
+	}
+	if summary.MemberCount != 1 {
+		t.Errorf("memberCount = %d, want 1", summary.MemberCount)
+	}
+	if summary.PendingApprovals != 1 {
+		t.Errorf("pendingApprovals = %d, want 1", summary.PendingApprovals)
 	}
 }

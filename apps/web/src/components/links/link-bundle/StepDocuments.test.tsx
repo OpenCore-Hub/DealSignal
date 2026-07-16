@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
@@ -74,7 +74,7 @@ async function renderStepDocuments(
     mode: "create",
     ...overrides,
   });
-  render(
+  const view = render(
     <I18nextProvider i18n={i18nInstance}>
       <MemoryRouter initialEntries={[route]}>
         <Routes>
@@ -90,6 +90,11 @@ async function renderStepDocuments(
       </MemoryRouter>
     </I18nextProvider>
   );
+  // Flush pending async state updates from draft restoration.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  return view;
 }
 
 describe("StepDocuments", () => {

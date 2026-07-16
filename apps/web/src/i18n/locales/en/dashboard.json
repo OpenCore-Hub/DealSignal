@@ -1,31 +1,63 @@
 {
-  "title": "Deal Radar",
-  "subtitle": "Everything that needs your attention today: heat signals, pending actions, and risk alerts, all in one place.",
-  "summary": {
-    "title": "Dashboard summary",
-    "hotSignals": "Hot signals",
-    "pendingActions": "Pending actions"
+  "title": "Home",
+  "welcome": {
+    "title": "Welcome back"
+  },
+  "quickActions": {
+    "createRoom": "New deal room",
+    "upload": "Upload document",
+    "invite": "Invite visitor"
+  },
+  "metrics": {
+    "title": "Key metrics",
+    "activeRooms": "Active rooms",
+    "weeklyVisitors": "Weekly visitors",
+    "pendingQuestions": "Pending Q&A",
+    "highIntentContacts": "High-intent contacts",
+    "aria": {
+      "activeRooms": "{{count}} active rooms",
+      "weeklyVisitors": "{{count}} weekly visitors",
+      "pendingQuestions": "{{count}} pending questions",
+      "highIntentContacts": "{{count}} high-intent contacts"
+    }
   },
   "riskAlerts": {
     "title": "Risk alerts"
   },
-  "mock": {
-    "risks": {
-      "risk_1": {
-        "title": "Unidentified email downloaded Pitch Deck",
-        "description": "An unrecognized visitor downloaded the document outside of the expected recipient list."
-      },
-      "risk_2": {
-        "title": "Financial Model link expired",
-        "description": "The shared link has passed its expiry date and is no longer accessible."
-      }
+  "sections": {
+    "attention": "Attention",
+    "activeRooms": "Active deal rooms",
+    "signals": "Signals",
+    "recentVisitors": "Recent visitors",
+    "actions": "Actions",
+    "heatMap": "Heat map",
+    "activityFeed": "Activity timeline"
+  },
+  "attention": {
+    "actions": "Actions",
+    "signals": "High-intent signals",
+    "risks": "Risks"
+  },
+  "room": {
+    "enter": "Enter {{name}}",
+    "pendingApprovals_one": "{{count}} pending",
+    "pendingApprovals_other": "{{count}} pending",
+    "visitors_one": "{{count}} visitor",
+    "visitors_other": "{{count}} visitors",
+    "unreadQuestions_one": "{{count}} question",
+    "unreadQuestions_other": "{{count}} questions",
+    "lastAccessed": "Last active",
+    "heatLabel": "Engagement",
+    "viewAllWithCount_one": "View all {{count}} room",
+    "viewAllWithCount_other": "View all {{count}} rooms",
+    "status": {
+      "active": "Active",
+      "inactive": "Inactive"
     }
   },
-  "sections": {
-    "signals": "Signals",
-    "recentDocuments": "Recent documents",
-    "actions": "Actions",
-    "heatMap": "Heat map"
+  "visitor": {
+    "score": "Score {{score}}",
+    "viewProfile": "View profile of {{email}}"
   },
   "empty": {
     "signals": {
@@ -33,13 +65,26 @@
       "description": "Upload and share documents, and AI will automatically identify high-intent investors/customers and generate signals.",
       "action": "Upload your first document"
     },
-    "documents": {
-      "title": "No documents yet",
-      "description": "Upload your first pitch deck or sales proposal to start tracking heat."
-    },
     "actions": {
       "title": "No pending actions",
       "description": "All signals have been handled."
+    },
+    "rooms": {
+      "title": "No active deal rooms",
+      "description": "Create your first deal room to start sharing documents securely with investors, LPs, or customers.",
+      "action": "Create deal room",
+      "noDescription": "No description"
+    },
+    "visitors": {
+      "description": "Visitor activity will appear here once your deal rooms are being accessed."
+    },
+    "risks": {
+      "title": "No risk alerts",
+      "description": "No risk alerts right now. Everything looks good."
+    },
+    "activity": {
+      "title": "No recent activity",
+      "description": "Recent visits, downloads, questions, and uploads will appear here."
     }
   },
   "signal": {
@@ -67,15 +112,32 @@
     "reactivate": "Reactivate"
   },
   "heatMap": {
-    "linkCount": "{{count}} link",
-    "linkCount_plural": "{{count}} links",
-    "linkCountAria": "{{tier}} {{count}} links",
-    "accessCount": "{{count}} view",
-    "accessCount_plural": "{{count}} views",
-    "noLinks": "No {{tier}} links yet"
+    "linkCount_one": "{{count}} link",
+    "linkCount_other": "{{count}} links",
+    "accessCount_one": "{{count}} view",
+    "accessCount_other": "{{count}} views",
+    "viewAll": "View all"
   },
-  "document": {
-    "pageCount": "{{count}} page",
-    "pageCount_plural": "{{count}} pages"
+  "activity": {
+    "events": {
+      "visit": "visited",
+      "download": "downloaded",
+      "question": "asked about",
+      "upload": "uploaded"
+    },
+    "groups": {
+      "today": "Today",
+      "yesterday": "Yesterday",
+      "older": "Earlier"
+    },
+    "combined": {
+      "more_one": "and {{count}} more item",
+      "more_other": "and {{count}} more items"
+    },
+    "anonymousUser": "Anonymous user",
+    "viewAllWithCount_one": "View all {{count}} activity",
+    "viewAllWithCount_other": "View all {{count}} activities",
+    "viewLess": "Show less",
+    "returnToDashboard": "Back"
   }
 }

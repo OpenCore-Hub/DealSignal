@@ -396,6 +396,28 @@
   transition: transform 0.1s ease;
 }
 
+/* ── Spotlight hover glow ── */
+.spotlight {
+  position: relative;
+  overflow: hidden;
+}
+.spotlight::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  background: radial-gradient(
+    circle at 50% 0%,
+    color-mix(in oklch, var(--primary) 10%, transparent) 0%,
+    transparent 60%
+  );
+}
+.spotlight:hover::before {
+  opacity: 1;
+}
+
 /* ── Page enter transition ── */
 @keyframes page-enter {
   from { opacity: 0; transform: translateY(8px); }

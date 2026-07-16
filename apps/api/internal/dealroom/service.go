@@ -213,6 +213,10 @@ type RoomSummary struct {
 	DocumentCount    int64
 	MemberCount      int64
 	PendingApprovals int64
+	VisitorCount     int64
+	UnreadQuestions  int64
+	LastAccessedAt   pgtype.Timestamptz
+	HeatScore        int32
 }
 
 // ListRooms returns all rooms in a workspace with computed aggregates.
@@ -245,6 +249,10 @@ func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSumm
 			DocumentCount:    agg.DocumentCount,
 			MemberCount:      agg.MemberCount,
 			PendingApprovals: agg.PendingCount,
+			VisitorCount:     agg.VisitorCount,
+			UnreadQuestions:  agg.PendingQuestionCount,
+			LastAccessedAt:   agg.LastAccessedAt,
+			HeatScore:        agg.HeatScore,
 		}
 	}
 	return out, nil

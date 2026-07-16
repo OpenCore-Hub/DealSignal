@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { UnifiedQAPanel } from "./UnifiedQAPanel";
 import { createTestI18n } from "@/i18n/test-utils";
@@ -55,7 +55,7 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
     },
   });
 
-  return render(
+  const view = render(
     <I18nextProvider i18n={i18n}>
       <UnifiedQAPanel
         token="token-1"
@@ -67,6 +67,13 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
       />
     </I18nextProvider>
   );
+
+  // Flush pending async state updates so tests don't warn about unwrapped act.
+  await act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  return view;
 }
 
 describe("UnifiedQAPanel", () => {

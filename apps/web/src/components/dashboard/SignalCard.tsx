@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "motion/react";
 import {
   Fire,
   Thermometer,
-  Snowflake,
   Warning,
   CaretDown,
   CaretUp,
@@ -20,10 +19,9 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useTranslation } from "react-i18next";
 
 const typeConfig = {
-  hot: { icon: Fire, dot: "bg-hot-500", subtle: "bg-hot-500/8" },
-  warm: { icon: Thermometer, dot: "bg-warm-500", subtle: "bg-warm-500/8" },
-  cold: { icon: Snowflake, dot: "bg-cold-500", subtle: "bg-cold-500/8" },
-  risk: { icon: Warning, dot: "bg-risk-500", subtle: "bg-risk-500/8" },
+  hot_signal: { icon: Fire, dot: "bg-hot-500", subtle: "bg-hot-500/8", bar: "bg-hot-500" },
+  follow_up: { icon: Thermometer, dot: "bg-warm-500", subtle: "bg-warm-500/8", bar: "bg-warm-500" },
+  risk_alert: { icon: Warning, dot: "bg-risk-500", subtle: "bg-risk-500/8", bar: "bg-risk-500" },
 };
 
 const priorityConfig = {
@@ -46,7 +44,7 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon, i18n } = useTranslation("common");
-  const config = typeConfig[signal.type] ?? typeConfig.warm;
+  const config = typeConfig[signal.type] ?? typeConfig.follow_up;
   const Icon = config.icon;
 
   const handleNavigate = () => {
@@ -74,9 +72,10 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   return (
     <motion.div
       layout={!reducedMotion}
-      className="group/signal rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-colors hover:bg-muted/50 hover:border-muted-foreground/20"
+      className="group/signal spotlight relative overflow-hidden rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-colors hover:bg-muted/50 hover:border-muted-foreground/20"
     >
-      <div className="flex items-start gap-3">
+      <div className={`absolute left-0 top-0 h-full w-[3px] ${config.bar}`} />
+      <div className="relative z-10 flex items-start gap-3">
         <div
           className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${config.subtle} text-foreground`}
         >
@@ -89,7 +88,11 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
               {priorityLabel}
             </Badge>
           </div>
-          <p className="text-body mt-1 text-muted-foreground">{signal.description}</p>
+          {signal.suggestion && (
+            <p className="text-caption mt-1 text-muted-foreground">
+              <span className="font-medium text-foreground">{t("signal.suggestedAction")}:</span> {signal.suggestion}
+            </p>
+          )}
           <div className="mt-3 flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={handleNavigate}>
               {tCommon("viewDetails")} <ArrowRight size={14} className="ml-1" />
@@ -105,6 +108,18 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
               {expanded ? t("signal.collapse") : t("signal.expand")}
               {expanded ? <CaretUp size={14} className="ml-1" /> : <CaretDown size={14} className="ml-1" />}
             </Button>
+            {action && (
+              <Button
+                size="sm"
+                variant={action.status === "done" ? "secondary" : "default"}
+                onClick={() =>
+                  onActionStatusChange?.(action.id, action.status === "done" ? "pending" : "done")
+                }
+                className="ml-auto"
+              >
+                {action.status === "done" ? tCommon("status.done") : t("signal.markDone")}
+              </Button>
+            )}
           </div>
         </div>
       </div>
@@ -117,14 +132,11 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
             exit={reducedMotion ? undefined : { height: 0, opacity: 0 }}
             className="overflow-hidden"
           >
-            <div className="mt-4 space-y-3 border-t border-border pt-4">
+            <div className="relative z-10 mt-4 space-y-3 border-t border-border pt-4">
+              <p className="text-body text-muted-foreground">{signal.description}</p>
               <div>
-                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t("signal.aiExplanation")}</p>
-                <p className="text-body mt-1">{signal.explanation}</p>
-              </div>
-              <div>
-                <p className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{t("signal.suggestedAction")}</p>
-                <p className="text-body mt-1">{signal.suggestion}</p>
+                <p className="text-caption font-medium text-foreground">{t("signal.aiExplanation")}</p>
+                <p className="text-body mt-0.5 text-muted-foreground">{signal.explanation}</p>
               </div>
               {action && (
                 <div className="flex items-center gap-3 rounded-lg bg-muted/50 p-3">
@@ -137,15 +149,6 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
                       {tCommon("dueDate")} {new Date(action.dueAt).toLocaleDateString(i18n.language)}
                     </p>
                   </div>
-                  <Button
-                    size="sm"
-                    variant={action.status === "done" ? "secondary" : "default"}
-                    onClick={() =>
-                      onActionStatusChange?.(action.id, action.status === "done" ? "pending" : "done")
-                    }
-                  >
-                    {action.status === "done" ? tCommon("status.done") : t("signal.markDone")}
-                  </Button>
                 </div>
               )}
             </div>

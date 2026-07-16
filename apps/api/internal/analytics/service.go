@@ -28,6 +28,7 @@ type Querier interface {
 	GetLinkByIDAndWorkspace(ctx context.Context, arg db.GetLinkByIDAndWorkspaceParams) (db.Link, error)
 	GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkAccessMetricsRow, error)
 	GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkPageViewMetricsRow, error)
+	GetLinkKeyPageViewMetrics(ctx context.Context, arg db.GetLinkKeyPageViewMetricsParams) (db.GetLinkKeyPageViewMetricsRow, error)
 	GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (int64, error)
 	ListRecentDocumentsByWorkspace(ctx context.Context, arg db.ListRecentDocumentsByWorkspaceParams) ([]db.ListRecentDocumentsByWorkspaceRow, error)
 	ListRecentLinksByWorkspace(ctx context.Context, arg db.ListRecentLinksByWorkspaceParams) ([]db.Link, error)
@@ -50,21 +51,42 @@ type Querier interface {
 	CountSecurityEventsByIPAndWindow(ctx context.Context, arg db.CountSecurityEventsByIPAndWindowParams) (int64, error)
 	GetVisitorFirstAccess(ctx context.Context, arg db.GetVisitorFirstAccessParams) (pgtype.Timestamptz, error)
 	CountVisitorAccesses(ctx context.Context, arg db.CountVisitorAccessesParams) (int32, error)
+	CountWeeklyVisitorsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error)
+	CountPendingQuestionsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error)
+	ListRecentActivitiesByWorkspace(ctx context.Context, arg db.ListRecentActivitiesByWorkspaceParams) ([]db.ListRecentActivitiesByWorkspaceRow, error)
+}
+
+// SignalFeed is the synced signal/action pair used by the dashboard.
+type SignalFeed struct {
+	Signals []db.Signal
+	Actions []db.ActionItem
+}
+
+// SignalSyncer syncs suggestions into signals and returns the current feed.
+type SignalSyncer interface {
+	GetFeed(ctx context.Context, workspaceID string) (SignalFeed, error)
 }
 
 // Service records events and computes heat scores.
 type Service struct {
-	queries Querier
-	dedup   DedupChecker
-	cfg     *config.Config
+	queries      Querier
+	dedup        DedupChecker
+	cfg          *config.Config
+	signalSyncer SignalSyncer
 }
 
 // NewService creates an analytics service.
-func NewService(q Querier, dedup DedupChecker, cfg *config.Config) *Service {
+// signalSyncer is optional; when provided, DashboardStats will sync suggestions
+// before returning signals/actions so the dashboard never shows stale data.
+func NewService(q Querier, dedup DedupChecker, cfg *config.Config, syncer ...SignalSyncer) *Service {
 	if dedup == nil {
 		dedup = NoopDedupChecker{}
 	}
-	return &Service{queries: q, dedup: dedup, cfg: cfg}
+	var signalSyncer SignalSyncer
+	if len(syncer) > 0 {
+		signalSyncer = syncer[0]
+	}
+	return &Service{queries: q, dedup: dedup, cfg: cfg, signalSyncer: signalSyncer}
 }
 
 // RecordLinkOpened atomically increments the link access counter and records the event.
@@ -303,8 +325,16 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat
 	}
 
 	keyPageViews := 0
-	if heat.IsKeyPage(pageViews.DocumentTitle, circle) {
-		keyPageViews = int(pageViews.TotalPageViews)
+	patterns := heat.KeyPagePatterns(circle)
+	if len(patterns) > 0 {
+		keyMetrics, err := s.queries.GetLinkKeyPageViewMetrics(ctx, db.GetLinkKeyPageViewMetricsParams{
+			LinkID:   link.ID,
+			Patterns: patterns,
+		})
+		if err != nil {
+			return heat.Result{}, fmt.Errorf("key page view metrics: %w", err)
+		}
+		keyPageViews = int(keyMetrics.TotalKeyPageViews)
 	}
 
 	decayDays := 0.0
@@ -335,15 +365,29 @@ type LinkOverview struct {
 	LastViewedAt       pgtype.Timestamptz
 }
 
+// ActivityItem is a single event in the dashboard activity feed.
+type ActivityItem struct {
+	ID         string
+	EventType  string
+	Actor      string
+	ObjectType string
+	ObjectName string
+	ObjectID   string
+	CreatedAt  time.Time
+}
+
 // WorkspaceStats is the raw data backing the dashboard response.
 type WorkspaceStats struct {
-	HotCount        int
-	WarmCount       int
-	ColdCount       int
-	RecentDocuments []db.ListRecentDocumentsByWorkspaceRow
-	RecentLinks     []LinkOverview
-	Signals         []db.Signal
-	Actions         []db.ActionItem
+	HotCount         int
+	WarmCount        int
+	ColdCount        int
+	WeeklyVisitors   int
+	PendingQuestions int
+	RecentDocuments  []db.ListRecentDocumentsByWorkspaceRow
+	RecentLinks      []LinkOverview
+	Signals          []db.Signal
+	Actions          []db.ActionItem
+	RecentActivities []ActivityItem
 }
 
 // DashboardStats aggregates high-level workspace metrics.
@@ -461,17 +505,58 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 		})
 	}
 
-	signals, err := s.queries.ListSignalsByWorkspace(ctx, wsUUID)
-	if err != nil {
-		return stats, fmt.Errorf("signals: %w", err)
-	}
-	stats.Signals = signals
+	if s.signalSyncer != nil {
+		feed, err := s.signalSyncer.GetFeed(ctx, workspaceID)
+		if err != nil {
+			return stats, fmt.Errorf("sync signals: %w", err)
+		}
+		stats.Signals = feed.Signals
+		stats.Actions = feed.Actions
+	} else {
+		signals, err := s.queries.ListSignalsByWorkspace(ctx, wsUUID)
+		if err != nil {
+			return stats, fmt.Errorf("signals: %w", err)
+		}
+		stats.Signals = signals
 
-	actions, err := s.queries.ListActionItemsByWorkspace(ctx, wsUUID)
-	if err != nil {
-		return stats, fmt.Errorf("actions: %w", err)
+		actions, err := s.queries.ListActionItemsByWorkspace(ctx, wsUUID)
+		if err != nil {
+			return stats, fmt.Errorf("actions: %w", err)
+		}
+		stats.Actions = actions
 	}
-	stats.Actions = actions
+
+	weeklyVisitors, err := s.queries.CountWeeklyVisitorsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return stats, fmt.Errorf("weekly visitors: %w", err)
+	}
+	stats.WeeklyVisitors = int(weeklyVisitors)
+
+	pendingQuestions, err := s.queries.CountPendingQuestionsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return stats, fmt.Errorf("pending questions: %w", err)
+	}
+	stats.PendingQuestions = int(pendingQuestions)
+
+	activityRows, err := s.queries.ListRecentActivitiesByWorkspace(ctx, db.ListRecentActivitiesByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		Limit:       50,
+	})
+	if err != nil {
+		return stats, fmt.Errorf("recent activities: %w", err)
+	}
+	stats.RecentActivities = make([]ActivityItem, len(activityRows))
+	for i, row := range activityRows {
+		stats.RecentActivities[i] = ActivityItem{
+			ID:         row.ID,
+			EventType:  row.EventType,
+			Actor:      row.Actor,
+			ObjectType: row.ObjectType,
+			ObjectName: row.ObjectName,
+			ObjectID:   row.ObjectID,
+			CreatedAt:  row.CreatedAt.Time,
+		}
+	}
 
 	return stats, nil
 }
@@ -493,6 +578,7 @@ type DocumentScore struct {
 
 // ContactScore pairs a contact aggregate with its computed heat score.
 type ContactScore struct {
+	ID         string
 	Email      string
 	Score      int
 	Level      string
@@ -580,7 +666,12 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 			Downloads:          int(c.Downloads),
 			BouncePenalty:      0,
 		})
+		id := ""
+		if c.ContactID.Valid {
+			id = uuidToString(c.ContactID)
+		}
 		overview.TopContacts = append(overview.TopContacts, ContactScore{
+			ID:         id,
 			Email:      c.Email,
 			Score:      res.Score,
 			Level:      res.Level,

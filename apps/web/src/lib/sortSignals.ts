@@ -1,10 +1,9 @@
 import type { Signal } from "@/types";
 
 const typeOrder: Record<Signal["type"], number> = {
-  hot: 0,
-  risk: 1,
-  warm: 2,
-  cold: 3,
+  hot_signal: 0,
+  risk_alert: 1,
+  follow_up: 2,
 };
 
 const priorityOrder: Record<Signal["priority"], number> = {

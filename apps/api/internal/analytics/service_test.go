@@ -57,6 +57,10 @@ func (m *mockAnalyticsQuerier) GetLinkPageViewMetrics(_ context.Context, _ pgtyp
 	return m.pageViews, nil
 }
 
+func (m *mockAnalyticsQuerier) GetLinkKeyPageViewMetrics(_ context.Context, _ db.GetLinkKeyPageViewMetricsParams) (db.GetLinkKeyPageViewMetricsRow, error) {
+	return db.GetLinkKeyPageViewMetricsRow{TotalKeyPageViews: 0}, nil
+}
+
 func (m *mockAnalyticsQuerier) GetLinkBounceCount(_ context.Context, _ pgtype.UUID) (int64, error) {
 	return m.bounce, nil
 }
@@ -150,6 +154,18 @@ func (m *mockAnalyticsQuerier) GetVisitorFirstAccess(_ context.Context, _ db.Get
 
 func (m *mockAnalyticsQuerier) CountVisitorAccesses(_ context.Context, _ db.CountVisitorAccessesParams) (int32, error) {
 	return 0, nil
+}
+
+func (m *mockAnalyticsQuerier) CountWeeklyVisitorsByWorkspace(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAnalyticsQuerier) CountPendingQuestionsByWorkspace(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAnalyticsQuerier) ListRecentActivitiesByWorkspace(_ context.Context, _ db.ListRecentActivitiesByWorkspaceParams) ([]db.ListRecentActivitiesByWorkspaceRow, error) {
+	return nil, nil
 }
 
 type mockDedupChecker struct {

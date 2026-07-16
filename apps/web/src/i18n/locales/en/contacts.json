@@ -5,8 +5,8 @@
   },
   "searchPlaceholder": "Search contacts...",
   "unknownOrganization": "Unknown organization",
-  "visitCount": "{{count}} visits",
   "visitCount_one": "{{count}} visit",
+  "visitCount_other": "{{count}} visits",
   "totalDuration": "Total {{duration}}",
   "lastSeen": "Last seen {{time}}",
   "empty": {

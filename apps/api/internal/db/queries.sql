@@ -181,9 +181,9 @@ SET status = $1, attempts = $2, error_message = $3, updated_at = now()
 WHERE id = $4;
 
 -- name: CreatePage :one
-INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size, created_at;
+INSERT INTO pages (tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size, title)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, file_size, title, created_at;
 
 -- name: ListPagesByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
@@ -444,6 +444,19 @@ JOIN links ON links.id = page_views.link_id
 LEFT JOIN documents ON documents.id = links.document_id
 WHERE page_views.link_id = $1;
 
+-- name: GetLinkKeyPageViewMetrics :one
+-- Counts page views whose page title matches any of the provided keyword patterns.
+-- Patterns should be lowercase SQL LIKE patterns, e.g. '%financial%'.
+SELECT
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_key_page_views,
+    COUNT(*) AS total_key_page_views
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
+
 -- name: GetWorkspaceStorageUsage :one
 SELECT (
     COALESCE((
@@ -693,7 +706,7 @@ ORDER BY p.page_number;
 -- name: GetPageTitlesByDocument :many
 SELECT
     p.page_number,
-    COALESCE(LEFT(c.text, 80), '')::text AS title
+    COALESCE(NULLIF(TRIM(p.title), ''), LEFT(c.text, 80), '')::text AS title
 FROM pages p
 LEFT JOIN LATERAL (
     SELECT text FROM chunks WHERE page_id = p.id ORDER BY id LIMIT 1
@@ -930,11 +943,26 @@ SELECT
     dr.id AS room_id,
     COUNT(DISTINCT drd.id) AS document_count,
     COUNT(DISTINCT rm.id) AS member_count,
-    COUNT(DISTINCT rar.id) FILTER (WHERE rar.status = 'pending') AS pending_count
+    COUNT(DISTINCT rar.id) FILTER (WHERE rar.status = 'pending') AS pending_count,
+    (COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.visitor_id IS NOT NULL) +
+    COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_id IS NULL))::bigint AS visitor_count,
+    COUNT(DISTINCT q.id) FILTER (WHERE q.status = 'pending') AS pending_question_count,
+    MAX(al.created_at)::timestamptz AS last_accessed_at,
+    COALESCE(
+        LEAST(100,
+            (COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.visitor_id IS NOT NULL) +
+             COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_id IS NULL)) * 5
+            + COUNT(DISTINCT al.id) * 2
+        ),
+        0
+    )::int AS heat_score
 FROM deal_rooms dr
 LEFT JOIN deal_room_documents drd ON drd.room_id = dr.id
 LEFT JOIN room_members rm ON rm.room_id = dr.id
 LEFT JOIN room_access_requests rar ON rar.room_id = dr.id
+LEFT JOIN links l ON l.deal_room_id = dr.id AND l.status NOT IN ('deleted', 'disabled')
+LEFT JOIN access_logs al ON al.link_id = l.id
+LEFT JOIN link_visitor_questions q ON q.link_id = l.id
 WHERE dr.workspace_id = $1 AND dr.deleted_at IS NULL
 GROUP BY dr.id;
 
@@ -1391,6 +1419,77 @@ SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
 RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at;
 
+-- name: CountWeeklyVisitorsByWorkspace :one
+SELECT COUNT(DISTINCT COALESCE(visitor_id, visitor_email)) AS visitor_count
+FROM access_logs
+WHERE workspace_id = $1
+  AND created_at >= now() - interval '7 days';
+
+-- name: CountPendingQuestionsByWorkspace :one
+SELECT COUNT(*) AS pending_count
+FROM link_visitor_questions
+WHERE workspace_id = $1 AND status = 'pending';
+
+-- name: ListRecentActivitiesByWorkspace :many
+SELECT
+    id,
+    event_type,
+    actor,
+    object_type,
+    object_name,
+    object_id,
+    created_at
+FROM (
+    SELECT
+        al.id::text AS id,
+        CASE al.event_type
+            WHEN 'link_opened' THEN 'visit'
+            ELSE 'download'
+        END AS event_type,
+        COALESCE(NULLIF(al.visitor_email, ''), al.visitor_id, 'Unknown') AS actor,
+        CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
+        COALESCE(dr.name, d.title, 'Shared link') AS object_name,
+        COALESCE(dr.id, d.id, l.id)::text AS object_id,
+        al.created_at
+    FROM access_logs al
+    JOIN links l ON l.id = al.link_id
+    LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
+    LEFT JOIN documents d ON d.id = l.document_id
+    WHERE al.workspace_id = $1
+
+    UNION ALL
+
+    SELECT
+        q.id::text AS id,
+        'question' AS event_type,
+        COALESCE(NULLIF(q.visitor_email, ''), q.visitor_id, 'Unknown') AS actor,
+        CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
+        COALESCE(dr.name, d.title, 'Shared link') AS object_name,
+        COALESCE(dr.id, d.id, l.id)::text AS object_id,
+        q.created_at
+    FROM link_visitor_questions q
+    JOIN links l ON l.id = q.link_id
+    LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
+    LEFT JOIN documents d ON d.id = l.document_id
+    WHERE q.workspace_id = $1
+
+    UNION ALL
+
+    SELECT
+        d.id::text AS id,
+        'upload' AS event_type,
+        COALESCE(NULLIF(u.email, ''), 'System') AS actor,
+        'document' AS object_type,
+        d.title AS object_name,
+        d.id::text AS object_id,
+        d.created_at
+    FROM documents d
+    LEFT JOIN users u ON u.id = d.created_by
+    WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+) combined
+ORDER BY created_at DESC
+LIMIT $2;
+
 -- name: ListSuggestionsByWorkspace :many
 SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at
 FROM suggestions
@@ -1411,6 +1510,7 @@ ORDER BY created_at DESC;
 
 -- name: GetContactAggregatesByWorkspace :many
 SELECT
+    c.id AS contact_id,
     LOWER(COALESCE(c.email, al.visitor_email)) AS email,
     COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
     COUNT(DISTINCT al.link_id) AS unique_links,
@@ -1423,7 +1523,7 @@ FROM access_logs al
 LEFT JOIN contacts c ON c.email = al.visitor_email AND c.workspace_id = al.workspace_id
 LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
 WHERE al.workspace_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
-GROUP BY LOWER(COALESCE(c.email, al.visitor_email))
+GROUP BY c.id, LOWER(COALESCE(c.email, al.visitor_email))
 ORDER BY opens DESC
 LIMIT $2;
 
@@ -1559,6 +1659,11 @@ VALUES ($1, $2, $3);
 -- name: DeleteLinkContactsByLink :exec
 DELETE FROM link_contacts
 WHERE link_id = $1;
+
+-- name: ListLinkContactsByLinkID :many
+SELECT lc.contact_id
+FROM link_contacts lc
+WHERE lc.link_id = $1;
 
 -- name: GetLinkContactsByPublicToken :many
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,

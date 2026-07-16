@@ -48,16 +48,29 @@ import {
 } from "@/lib/apiAdapters";
 import { useUIStore } from "@/stores/uiStore";
 
+export interface RecentActivityItem {
+  id: string;
+  eventType: "visit" | "download" | "question" | "upload";
+  actor: string;
+  objectType: "room" | "document" | "question";
+  objectName: string;
+  objectId: string;
+  createdAt: string;
+}
+
 export interface DashboardStats {
   hotCount: number;
   warmCount: number;
   coldCount: number;
+  weeklyVisitors: number;
+  pendingQuestions: number;
   recentDocuments: Document[];
   recentLinks: Link[];
   heatAlerts: HeatAlert[];
   riskAlerts: RiskAlert[];
   signals: Signal[];
   actionItems: ActionItem[];
+  recentActivities: RecentActivityItem[];
 }
 
 export interface InsightsOverview {

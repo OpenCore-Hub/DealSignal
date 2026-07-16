@@ -13,7 +13,7 @@ interface EmptyStateProps {
     onClick: () => void;
   };
   className?: string;
-  size?: "default" | "large";
+  size?: "default" | "large" | "compact";
 }
 
 export function EmptyState({
@@ -34,21 +34,36 @@ export function EmptyState({
       className={cn(
         "flex flex-col items-center justify-center rounded-xl bg-muted/30 px-6 py-10 text-center",
         size === "large" && "py-14",
+        size === "compact" && "py-6",
         className
       )}
     >
       <div
         className={cn(
           "mb-3 text-muted-foreground",
-          size === "large" ? "[&_svg]:size-12" : "[&_svg]:size-10"
+          size === "large" ? "[&_svg]:size-12" : size === "compact" ? "[&_svg]:size-8" : "[&_svg]:size-10"
         )}
       >
         {icon}
       </div>
-      <h3 className={cn("text-h3", size === "large" && "text-h2")}>{title}</h3>
-      <p className="mt-1 max-w-sm text-body text-muted-foreground">{description}</p>
+      <h3
+        className={cn(
+          size === "compact" ? "text-body font-medium" : "text-h3",
+          size === "large" && "text-h2"
+        )}
+      >
+        {title}
+      </h3>
+      <p
+        className={cn(
+          "mt-1 max-w-sm text-muted-foreground",
+          size === "compact" ? "text-caption" : "text-body"
+        )}
+      >
+        {description}
+      </p>
       {action && (
-        <Button className="mt-4" onClick={action.onClick}>
+        <Button className={cn("mt-4", size === "compact" && "h-8 px-3 text-xs")} onClick={action.onClick}>
           {action.label}
         </Button>
       )}

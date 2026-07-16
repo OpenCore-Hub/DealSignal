@@ -116,6 +116,7 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			Width:          pgtype.Int4{Int32: int32(bounds.Dx()), Valid: true},
 			Height:         pgtype.Int4{Int32: int32(bounds.Dy()), Valid: true},
 			FileSize:       pgtype.Int8{Int64: int64(len(img)), Valid: true},
+			Title:          pgtype.Text{String: p.Title, Valid: p.Title != ""},
 		})
 		if err != nil {
 			return fmt.Errorf("create page record: %w", err)

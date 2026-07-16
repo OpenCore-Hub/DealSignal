@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from "motion/react";
 import { Check, Envelope, Phone, ShareNetwork, Warning, Clock, X, ClockCounterClockwise, DotsThree, CaretDown, CaretUp } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { EmptyState } from "@/components/common/EmptyState";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,10 +22,10 @@ const actionConfig = {
   review: { icon: Warning },
 };
 
-const impactConfig = {
-  high: "bg-error-500/10 text-error-500 border-error-500/20",
-  medium: "bg-warning-500/10 text-warning-500 border-warning-500/20",
-  low: "bg-muted text-muted-foreground",
+const impactBarColor = {
+  high: "bg-error-500",
+  medium: "bg-warning-500",
+  low: "bg-muted-foreground/30",
 };
 
 interface ActionListProps {
@@ -45,42 +46,37 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
   return (
     <div className="space-y-3">
       {pending.length === 0 ? (
-        <div className="rounded-xl border border-dashed border-border p-6 text-center">
-          <Check size={32} className="mx-auto text-success-500" />
-          <p className="mt-2 text-sm font-medium">{t("empty.actions.title")}</p>
-          <p className="text-caption text-muted-foreground">{t("empty.actions.description")}</p>
-        </div>
+        <EmptyState
+          size="compact"
+          icon={<Check size={32} />}
+          title={t("empty.actions.title")}
+          description={t("empty.actions.description")}
+        />
       ) : (
-        <AnimatePresence initial={false}>
-          {pending.map((action) => {
+        <div className="max-h-[340px] overflow-y-auto pr-1">
+          <AnimatePresence initial={false}>
+            {pending.map((action) => {
             const config = actionConfig[action.actionType] ?? { icon: Warning };
             const Icon = config.icon;
             const overdue = isOverdue(action.dueAt);
-            const impactLabel =
-              action.impact === "high"
-                ? tCommon("impact.high")
-                : action.impact === "medium"
-                  ? tCommon("impact.medium")
-                  : tCommon("impact.low");
+            const barColor = overdue
+              ? "bg-error-500"
+              : impactBarColor[action.impact];
             return (
               <motion.div
                 key={action.id}
                 layout={!reducedMotion}
                 exit={reducedMotion ? undefined : { opacity: 0, height: 0 }}
-                className="flex items-start gap-3 rounded-xl border border-border bg-card p-(--card-spacing) shadow-card transition-colors hover:bg-muted/50 hover:border-muted-foreground/20"
+                className="group/action relative flex items-center gap-3 overflow-hidden rounded-xl border border-border bg-card p-3 shadow-card transition-colors hover:bg-muted/50"
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                  <Icon size={18} />
+                <div className={`absolute left-0 top-0 h-full w-[3px] ${barColor}`} />
+                <div className="relative z-10 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                  <Icon size={16} />
                 </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <p className="text-sm font-medium">{action.title}</p>
-                    <Badge variant="outline" className={impactConfig[action.impact]}>
-                      {impactLabel}
-                    </Badge>
-                  </div>
+                <div className="relative z-10 min-w-0 flex-1">
+                  <p className="text-sm font-medium">{action.title}</p>
                   <p
-                    className={`text-caption mt-1 flex items-center gap-1 ${
+                    className={`text-caption flex items-center gap-1 ${
                       overdue ? "font-medium text-error-500" : "text-muted-foreground"
                     }`}
                   >
@@ -90,14 +86,19 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                       : `${tCommon("dueDate")} ${new Date(action.dueAt).toLocaleDateString(i18n.language)}`}
                   </p>
                 </div>
-                <div className="flex items-center gap-1">
-                  <Button size="sm" variant="outline" onClick={() => onStatusChange(action.id, "done")}>
-                    {tCommon("complete")}
+                <div className="relative z-10 flex items-center gap-1">
+                  <Button
+                    size="icon-sm"
+                    variant="outline"
+                    aria-label={tCommon("complete")}
+                    onClick={() => onStatusChange(action.id, "done")}
+                  >
+                    <Check size={16} />
                   </Button>
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={(props) => (
-                        <Button size="sm" variant="ghost" aria-label={t("actions.moreOptions")} {...props}>
+                        <Button size="icon-sm" variant="ghost" aria-label={t("actions.moreOptions")} {...props}>
                           <DotsThree size={18} />
                         </Button>
                       )}
@@ -114,10 +115,12 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
+
               </motion.div>
             );
           })}
         </AnimatePresence>
+        </div>
       )}
 
       {done.length > 0 && (

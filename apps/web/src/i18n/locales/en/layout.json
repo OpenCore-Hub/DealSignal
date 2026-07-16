@@ -6,6 +6,11 @@
       "expand": "Expand sidebar"
     },
     "mainNavigation": "Main navigation",
+    "groups": {
+      "workspace": "Workspace",
+      "relationships": "Relationships",
+      "admin": "Admin"
+    },
     "nav": {
       "dashboard": "Deal Radar",
       "documents": "Documents",

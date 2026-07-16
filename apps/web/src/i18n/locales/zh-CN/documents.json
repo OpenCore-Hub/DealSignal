@@ -34,8 +34,8 @@
       "ndaEN": "NDA-EN"
     },
     "searchPlaceholder": "搜索文档...",
-    "documentCount": "{{count}} 个文档",
-    "documentCountFiltered": "{{count}} 个文档 · 筛选后 {{filtered}} 个",
+    "documentCount_other": "{{count}} 个文档",
+    "documentCountFiltered_other": "{{count}} 个文档 · 筛选后 {{filtered}} 个",
     "noMatches": "没有找到匹配的文档",
     "emptyFilter": "当前视图没有文档",
     "clearFilter": "清除筛选"

@@ -1,8 +1,29 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { I18nextProvider } from "react-i18next";
 import { ManagementTab } from "./ManagementTab";
+import { createTestI18n } from "@/i18n/test-utils";
 import type { FileRequest, VisitorQuestion } from "@/types";
+
+async function renderTab(props: {
+  questions?: VisitorQuestion[];
+  fileRequests?: FileRequest[];
+  onAnswer?: (id: string, answer: string) => Promise<void>;
+  onUpdateFileRequest?: (id: string, status: string) => Promise<void>;
+}) {
+  const i18n = await createTestI18n({ linkShare: {} });
+  return render(
+    <I18nextProvider i18n={i18n}>
+      <ManagementTab
+        questions={props.questions ?? []}
+        fileRequests={props.fileRequests ?? []}
+        onAnswer={props.onAnswer ?? vi.fn()}
+        onUpdateFileRequest={props.onUpdateFileRequest ?? vi.fn()}
+      />
+    </I18nextProvider>
+  );
+}
 
 function makeQuestion(overrides: Partial<VisitorQuestion> = {}): VisitorQuestion {
   return {
@@ -33,29 +54,18 @@ function makeFileRequest(overrides: Partial<FileRequest> = {}): FileRequest {
 }
 
 describe("ManagementTab", () => {
-  it("renders questions and file requests", () => {
-    render(
-      <ManagementTab
-        questions={[makeQuestion()]}
-        fileRequests={[makeFileRequest()]}
-        onAnswer={vi.fn()}
-        onUpdateFileRequest={vi.fn()}
-      />
-    );
+  it("renders questions and file requests", async () => {
+    await renderTab({
+      questions: [makeQuestion()],
+      fileRequests: [makeFileRequest()],
+    });
     expect(screen.getByText("What is the pricing?")).toBeInTheDocument();
     expect(screen.getByText("Please send the full report.")).toBeInTheDocument();
   });
 
   it("submits an answer via the onAnswer callback", async () => {
     const onAnswer = vi.fn().mockResolvedValue(undefined);
-    render(
-      <ManagementTab
-        questions={[makeQuestion()]}
-        fileRequests={[]}
-        onAnswer={onAnswer}
-        onUpdateFileRequest={vi.fn()}
-      />
-    );
+    await renderTab({ questions: [makeQuestion()], onAnswer });
 
     const textarea = screen.getByPlaceholderText("management.answerPlaceholder");
     fireEvent.change(textarea, { target: { value: "Pricing starts at $99." } });

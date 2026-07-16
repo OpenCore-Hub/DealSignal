@@ -78,6 +78,15 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 	result := heat.Compute(heat.CircleDefault, metrics.heatInput())
 	candidates := buildCandidates(result, metrics, lang)
 
+	contactIDs, err := s.queries.ListLinkContactsByLinkID(ctx, linkUUID)
+	if err != nil {
+		return nil, fmt.Errorf("list link contacts: %w", err)
+	}
+	var contactID pgtype.UUID
+	if len(contactIDs) > 0 {
+		contactID = contactIDs[0]
+	}
+
 	out := make([]Suggestion, 0, len(candidates))
 	for _, c := range candidates {
 		exists, err := s.recentExists(ctx, link.WorkspaceID, linkUUID, c.Type)
@@ -90,7 +99,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		row, err := s.queries.CreateSuggestion(ctx, db.CreateSuggestionParams{
 			TenantID:    link.TenantID,
 			WorkspaceID: link.WorkspaceID,
-			ContactID:   pgtype.UUID{},
+			ContactID:   contactID,
 			LinkID:      pgtype.UUID{Bytes: linkUUID.Bytes, Valid: true},
 			DocumentID:  link.DocumentID,
 			Type:        c.Type,
@@ -227,9 +236,9 @@ func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.R
 	if revisits < 0 {
 		revisits = 0
 	}
-	keyPageViews := 0
-	if heat.IsKeyPage(pageViews.DocumentTitle, heat.CircleDefault) {
-		keyPageViews = int(pageViews.TotalPageViews)
+	keyPageViews, err := countKeyPageViews(ctx, s.queries, linkID, heat.CircleDefault)
+	if err != nil {
+		return heat.Result{Level: "cold"}
 	}
 	return heat.Compute(heat.CircleDefault, heat.Input{
 		Opens:              int(access.Opens),
@@ -286,9 +295,11 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID) (suggestionMe
 		return m, err
 	}
 	m.avgDurationMinutes = pv.AvgDurationSeconds / 60.0
-	if heat.IsKeyPage(pv.DocumentTitle, heat.CircleDefault) {
-		m.keyPageViews = int(pv.TotalPageViews)
+	keyViews, err := countKeyPageViews(ctx, s.queries, linkID, heat.CircleDefault)
+	if err != nil {
+		return m, fmt.Errorf("key page view metrics: %w", err)
 	}
+	m.keyPageViews = keyViews
 	m.totalPageViews = int(pv.TotalPageViews)
 
 	bounceCount, err := s.queries.GetLinkBounceCount(ctx, linkID)
@@ -409,6 +420,22 @@ func titleForType(typ, lang string) string {
 	default:
 		return ls.followUpTitle
 	}
+}
+
+// countKeyPageViews counts page views whose page title matches the circle's key-page keywords.
+func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.UUID, circle heat.Circle) (int, error) {
+	patterns := heat.KeyPagePatterns(circle)
+	if len(patterns) == 0 {
+		return 0, nil
+	}
+	metrics, err := queries.GetLinkKeyPageViewMetrics(ctx, db.GetLinkKeyPageViewMetricsParams{
+		LinkID:   linkID,
+		Patterns: patterns,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(metrics.TotalKeyPageViews), nil
 }
 
 // TitleForType returns the localized title for a suggestion/signal type.

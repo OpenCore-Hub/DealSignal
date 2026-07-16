@@ -6,6 +6,8 @@ import {
   formatFileSize,
   formatDuration,
   formatRelativeTime,
+  formatCompactNumber,
+  formatCountWithPlural,
   getInitials,
 } from "./formatters";
 
@@ -70,6 +72,45 @@ describe("formatRelativeTime", () => {
   it("returns days ago", () => {
     const date = new Date(Date.now() - 2 * 24 * 60 * 60 * 1000).toISOString();
     expect(formatRelativeTime(date)).toBe("2 天前");
+  });
+});
+
+describe("formatCompactNumber", () => {
+  it("formats small numbers as-is", () => {
+    expect(formatCompactNumber(42, "en")).toBe("42");
+  });
+
+  it("formats thousands with K", () => {
+    expect(formatCompactNumber(1500, "en")).toBe("1.5K");
+  });
+
+  it("formats millions with M", () => {
+    expect(formatCompactNumber(2500000, "en")).toBe("2.5M");
+  });
+
+  it("formats chinese compact numbers", () => {
+    expect(formatCompactNumber(15000, "zh-CN")).toMatch(/万/);
+  });
+});
+
+describe("formatCountWithPlural", () => {
+  const t = (key: string, options?: { count?: number }) => {
+    const count = options?.count ?? 0;
+    if (key === "views") return count === 1 ? `${count} view` : `${count} views`;
+    if (key === "links") return count === 1 ? `${count} link` : `${count} links`;
+    return String(count);
+  };
+
+  it("preserves singular suffix for count of 1", () => {
+    expect(formatCountWithPlural(t, "views", 1, "en")).toBe("1 view");
+  });
+
+  it("uses compact notation while keeping plural suffix", () => {
+    expect(formatCountWithPlural(t, "views", 1500, "en")).toBe("1.5K views");
+  });
+
+  it("uses compact notation for millions", () => {
+    expect(formatCountWithPlural(t, "views", 2500000, "en")).toBe("2.5M views");
   });
 });
 

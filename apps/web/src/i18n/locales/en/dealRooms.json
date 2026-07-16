@@ -9,12 +9,12 @@
     "description": "Create your first deal room to securely present due diligence materials to investors, LPs, or clients.",
     "action": "New deal room"
   },
-  "documentCount": "{{count}} docs",
   "documentCount_one": "{{count}} doc",
-  "memberCount": "{{count}} members",
+  "documentCount_other": "{{count}} docs",
   "memberCount_one": "{{count}} member",
-  "pendingApprovals": "{{count}} pending",
+  "memberCount_other": "{{count}} members",
   "pendingApprovals_one": "{{count}} pending",
+  "pendingApprovals_other": "{{count}} pending",
   "lastAccessed": "Last accessed {{time}}",
   "search": {
     "placeholder": "Search datarooms..."
@@ -361,8 +361,8 @@
     "creating": "Creating...",
     "created": "Deal room created",
     "createFailed": "Failed to create deal room",
-    "folderCount": "{{count}} folders",
     "folderCount_one": "{{count}} folder",
+    "folderCount_other": "{{count}} folders",
     "previousTemplate": "Previous template",
     "nextTemplate": "Next template"
   },
@@ -437,8 +437,8 @@
     "add": "Add",
     "addedSingle": "Added to deal room",
     "folder": "Folder",
-    "addSelected": "Add {{count}} document",
-    "addSelected_plural": "Add {{count}} documents",
+    "addSelected_one": "Add {{count}} document",
+    "addSelected_other": "Add {{count}} documents",
     "noAvailable": "No available workspace documents.",
     "clickToOpen": "Click to open document",
     "moveUp": "Move up",
@@ -453,8 +453,8 @@
     "removeConfirm": "Remove '{{title}}' from this deal room?",
     "removed": "Document removed",
     "removeFailed": "Failed to remove document",
-    "added": "Added {{count}} document",
-    "added_plural": "Added {{count}} documents",
+    "added_one": "Added {{count}} document",
+    "added_other": "Added {{count}} documents",
     "addFailed": "Failed to add documents",
     "uploadedAndAdded": "Uploaded and added '{{title}}'"
   },

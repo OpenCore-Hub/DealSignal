@@ -412,6 +412,12 @@ export interface DealRoom {
   activeLinkCount?: number;
   /** User-defined tags for filtering and organizing deal rooms. */
   tags?: string[];
+  /** Number of unique visitors across all share links for this deal room. */
+  visitorCount?: number;
+  /** Number of unanswered visitor questions on this deal room's links. */
+  unreadQuestions?: number;
+  /** Engagement score (0-100) computed from visitor activity. */
+  heatScore?: number;
 }
 
 export interface WorkspaceMember {
@@ -477,7 +483,7 @@ export interface AuditLog {
 
 // v2.1.1 Signal-First 新增类型
 
-export type SignalType = "hot" | "warm" | "cold" | "risk";
+export type SignalType = "hot_signal" | "risk_alert" | "follow_up";
 export type ActionType = "email" | "call" | "share" | "review";
 export type ActionStatus = "pending" | "done" | "snoozed" | "ignored";
 export type Priority = "high" | "medium" | "low";
@@ -575,6 +581,7 @@ export interface AIConversation {
 export interface RiskAlert {
   id: string;
   type: "location" | "expired" | "download" | "forward";
+  priority: "high" | "medium" | "low";
   title: string;
   description: string;
   linkId?: string;

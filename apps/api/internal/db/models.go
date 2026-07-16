@@ -510,6 +510,7 @@ type Page struct {
 	Height         pgtype.Int4
 	CreatedAt      pgtype.Timestamptz
 	FileSize       pgtype.Int8
+	Title          pgtype.Text
 }
 
 type PageView struct {
