@@ -201,8 +201,7 @@
     "emptyTitle": "No restrictions",
     "emptyDescription": "Anyone with the link can access if authentication gates are disabled.",
     "errors": {
-      "allowRequiresEmail": "Allowed viewers require email verification to be enabled",
-      "verificationRequiresEmail": "Email verification requires email to be required",
+      "allowRequiresEmail": "Allowed viewers require email collection or verification to be enabled",
       "passwordRequired": "Password is required when password protection is enabled",
       "passwordMinLength": "Password must be at least 8 characters",
       "conflict": "{value} cannot be in both allowed and blocked lists",

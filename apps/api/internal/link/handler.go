@@ -757,6 +757,8 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
+		case errors.Is(err, ErrInvalidPermission):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		}

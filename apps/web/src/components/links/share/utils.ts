@@ -140,10 +140,7 @@ export function validateDraft(
   ) {
     errors.customDomain = t("share.customDomainInvalid");
   }
-  if (draft.requireEmailVerification && !draft.requireEmail) {
-    errors.requireEmail = t("accessRules.errors.verificationRequiresEmail");
-  }
-  if (draft.allowedViewers.length > 0 && !draft.requireEmail) {
+  if (draft.allowedViewers.length > 0 && !draft.requireEmail && !draft.requireEmailVerification) {
     errors.allowedViewers = t("accessRules.errors.allowRequiresEmail");
   }
   const conflict = draft.allowedViewers.find((v) => draft.blockedViewers.includes(v));

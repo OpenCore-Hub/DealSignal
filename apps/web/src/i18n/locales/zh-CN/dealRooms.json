@@ -198,8 +198,7 @@
     "emptyTitle": "无限制",
     "emptyDescription": "如果未启用身份验证门控，任何拥有链接的人都可以访问。",
     "errors": {
-      "allowRequiresEmail": "允许列表要求开启邮箱验证",
-      "verificationRequiresEmail": "邮箱验证要求先开启邮箱收集",
+      "allowRequiresEmail": "允许列表要求开启邮箱收集或邮箱验证",
       "passwordRequired": "开启密码保护时必须填写密码",
       "passwordMinLength": "密码至少需要 8 位",
       "conflict": "{value} 不能同时出现在允许和阻止列表中",

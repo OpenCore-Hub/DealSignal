@@ -311,7 +311,10 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		return db.Link{}, err
 	}
 
-	if requireEmailVerification && len(req.ContactIDs) == 0 {
+	// Email verification for document links needs at least one pre-defined contact
+	// so the access code has a destination. Deal-room links skip this requirement;
+	// their access flow uses the code itself to identify the visitor.
+	if requireEmailVerification && !hasDealRoom && len(req.ContactIDs) == 0 {
 		return db.Link{}, fmt.Errorf("%w: at least one contact is required for email verification", ErrInvalidPermission)
 	}
 

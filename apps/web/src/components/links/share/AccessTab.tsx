@@ -91,18 +91,11 @@ export function AccessTab({ draft, updateDraft, errors, highlightedFields = [] }
   const advancedCount = FUNCTIONAL_ADVANCED_KEYS.filter((key) => draft[key]).length;
 
   const handleRequireEmailChange = (checked: boolean) => {
-    updateDraft({
-      requireEmail: checked,
-      requireEmailVerification: checked ? draft.requireEmailVerification : false,
-    });
+    updateDraft({ requireEmail: checked });
   };
 
   const handleRequireVerificationChange = (checked: boolean) => {
-    if (checked) {
-      updateDraft({ requireEmail: true, requireEmailVerification: true });
-    } else {
-      updateDraft({ requireEmailVerification: false });
-    }
+    updateDraft({ requireEmailVerification: checked });
   };
 
   return (
@@ -121,7 +114,6 @@ export function AccessTab({ draft, updateDraft, errors, highlightedFields = [] }
           description={t("accessRules.authentication.requireVerificationDescription")}
           checked={draft.requireEmailVerification}
           onCheckedChange={handleRequireVerificationChange}
-          disabled={!draft.requireEmail}
           highlighted={isHighlighted("requireEmailVerification")}
         />
         <div className={cn("space-y-2 rounded-md p-1", isHighlighted("requirePassword") && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200")}>

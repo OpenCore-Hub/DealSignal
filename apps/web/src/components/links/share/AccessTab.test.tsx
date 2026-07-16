@@ -61,19 +61,19 @@ describe("AccessTab", () => {
   it("toggles require email", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true, requireEmailVerification: false });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true });
   });
 
-  it("enabling verification also enables email", () => {
-    const { updateDraft } = renderAccessTab({ ...baseDraft, requireEmail: true });
+  it("toggles verification independently of email", () => {
+    const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email verification/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true, requireEmailVerification: true });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmailVerification: true });
   });
 
-  it("disabling email also disables verification", () => {
+  it("disabling email leaves verification unchanged", () => {
     const { updateDraft } = renderAccessTab({ ...baseDraft, requireEmail: true, requireEmailVerification: true });
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: false, requireEmailVerification: false });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: false });
   });
 
   it("shows password input when password switch is on", () => {
