@@ -35,6 +35,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 
 	ig := r.Group("/insights")
 	ig.GET("/suggestions", h.ListWorkspace)
+	ig.GET("/signals/rules/performance", h.ListRulePerformance)
 }
 
 func (h *Handler) List(c *gin.Context) {
@@ -77,6 +78,16 @@ func (h *Handler) Dismiss(c *gin.Context) {
 func (h *Handler) ListWorkspace(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	items, err := h.service.ListWorkspace(c.Request.Context(), workspaceID, langFromContext(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": items})
+}
+
+func (h *Handler) ListRulePerformance(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	items, err := h.service.ListRulePerformance(c.Request.Context(), workspaceID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return

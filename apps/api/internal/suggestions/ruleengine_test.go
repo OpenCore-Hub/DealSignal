@@ -42,7 +42,7 @@ expression_rules:
 	if err != nil {
 		t.Fatalf("failed to create engine: %v", err)
 	}
-	matches, err := engine.Evaluate(RuleInput{LinkID: "link-1"})
+	matches, _, _, err := engine.Evaluate(RuleInput{LinkID: "link-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +72,7 @@ expression_rules:
 
 	results := map[bool]int{}
 	for i := 0; i < 100; i++ {
-		matches, err := engine.Evaluate(RuleInput{LinkID: testLinkIDForIndex(i)})
+		matches, _, _, err := engine.Evaluate(RuleInput{LinkID: testLinkIDForIndex(i)})
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -101,12 +101,15 @@ expression_rules:
 	if err != nil {
 		t.Fatalf("failed to create engine: %v", err)
 	}
-	matches, err := engine.Evaluate(RuleInput{WorkspaceID: "ws-1", LinkID: "link-1"})
+	matches, skipped, _, err := engine.Evaluate(RuleInput{WorkspaceID: "ws-1", LinkID: "link-1"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if len(matches) != 0 {
 		t.Fatalf("expected bucket_percent 0 to skip rule, got %v", matches)
+	}
+	if len(skipped) != 1 || skipped[0] != "bucket_rule" {
+		t.Fatalf("expected bucket_rule in skipped list, got %v", skipped)
 	}
 }
 
@@ -122,8 +125,8 @@ func TestRuleEngineHotSignalWithDefaults(t *testing.T) {
 		avgDurationMinutes: 2.5,
 		keyPageViews:       3,
 	}
-	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	matches, err := engine.Evaluate(RuleInput{
+	result := heat.Compute(heat.CircleDefault, m.heatInput(0))
+	matches, _, _, err := engine.Evaluate(RuleInput{
 		Heat:    HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
 		Metrics: m.toMetricsInput(),
 	})
@@ -138,6 +141,66 @@ func TestRuleEngineHotSignalWithDefaults(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected hot_signal match, got %v", matches)
+	}
+}
+
+func TestRuleShadowMode(t *testing.T) {
+	raw := []byte(`
+expression_rules:
+  - id: shadow_rule
+    condition: 'true'
+    shadow: true
+    output:
+      type: hot_signal
+      subtype: hot
+      priority: high
+      reason_template: 'shadow'
+      action_template: 'shadow'
+`)
+	engine, err := newRuleEngineFromBytes(raw)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	matches, _, shadow, err := engine.Evaluate(RuleInput{LinkID: "link-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected shadow rule to produce no matches, got %v", matches)
+	}
+	if len(shadow) != 1 || shadow[0] != "shadow_rule" {
+		t.Fatalf("expected shadow_rule in shadow list, got %v", shadow)
+	}
+}
+
+func TestRuleBucketEmptyKeyExcluded(t *testing.T) {
+	raw := []byte(`
+expression_rules:
+  - id: bucket_rule
+    condition: 'true'
+    bucket_percent: 50
+    bucket_key: workspace_id
+    output:
+      type: hot_signal
+      subtype: hot
+      priority: high
+      reason_template: 'fired'
+      action_template: 'act'
+`)
+	engine, err := newRuleEngineFromBytes(raw)
+	if err != nil {
+		t.Fatalf("failed to create engine: %v", err)
+	}
+	// WorkspaceID is empty, so the rule should be skipped.
+	matches, skipped, _, err := engine.Evaluate(RuleInput{LinkID: "link-1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(matches) != 0 {
+		t.Fatalf("expected empty bucket key to skip rule, got %v", matches)
+	}
+	if len(skipped) != 1 {
+		t.Fatalf("expected rule skipped due to empty key, got %v", skipped)
 	}
 }
 

@@ -35,15 +35,24 @@ type HeatInput struct {
 }
 
 // MetricsInput exposes raw link metrics to rule expressions.
+// Fields suffixed with 24h are rolling 24-hour windows; others are lifetime totals.
 type MetricsInput struct {
-	Opens              int
-	Revisits           int
-	AvgDurationMinutes float64
-	Bounces            int
-	Downloads          int
-	TotalPageViews     int
-	KeyPageViews       int
-	UniqueVisitors     int
+	Opens                  int
+	Revisits               int
+	AvgDurationMinutes     float64
+	Bounces                int
+	Downloads              int
+	TotalPageViews         int
+	KeyPageViews           int
+	UniqueVisitors         int
+	Opens24h               int
+	Revisits24h            int
+	AvgDurationMinutes24h  float64
+	Bounces24h             int
+	Downloads24h           int
+	TotalPageViews24h      int
+	KeyPageViews24h        int
+	UniqueVisitors24h      int
 }
 
 // BehaviorInput exposes behavior-risk features to rule expressions.
@@ -73,6 +82,7 @@ type ExpressionRule struct {
 	Enabled       *bool      `yaml:"enabled,omitempty"`
 	BucketPercent *int       `yaml:"bucket_percent,omitempty"`
 	BucketKey     string     `yaml:"bucket_key,omitempty"`
+	Shadow        bool       `yaml:"shadow,omitempty"`
 	Output        RuleOutput `yaml:"output"`
 }
 
@@ -110,7 +120,7 @@ func (r ExpressionRule) inBucket(input RuleInput) bool {
 		keyValue = input.LinkID
 	}
 	if keyValue == "" {
-		return true
+		return false
 	}
 	return deterministicHash(r.ID+":"+keyValue)%100 < uint32(pct)
 }
@@ -191,9 +201,9 @@ func NewRuleEngine(path string) (*RuleEngine, error) {
 }
 
 // Evaluate runs all enabled rules and returns matched candidates.
-func (e *RuleEngine) Evaluate(input RuleInput) ([]RuleMatch, error) {
-	var matches []RuleMatch
-
+// It also returns rule IDs that were skipped due to A/B bucketing and rule IDs
+// that hit in shadow mode (these are observed but not emitted as candidates).
+func (e *RuleEngine) Evaluate(input RuleInput) (matches []RuleMatch, bucketSkipped []string, shadowMatched []string, err error) {
 	exprInput := e.buildExprInput(input)
 	for _, rule := range e.config.ExpressionRules {
 		if !rule.isEnabled() {
@@ -202,26 +212,34 @@ func (e *RuleEngine) Evaluate(input RuleInput) ([]RuleMatch, error) {
 		}
 		if !rule.inBucket(input) {
 			recordRuleEvaluated(rule.ID, false)
+			recordRuleBucketSkipped(rule.ID, rule.BucketKey)
+			bucketSkipped = append(bucketSkipped, rule.ID)
 			continue
 		}
-		ok, err := e.evalCondition(rule.Condition, exprInput)
-		if err != nil {
+		ok, evalErr := e.evalCondition(rule.Condition, exprInput)
+		if evalErr != nil {
 			recordRuleEvaluated(rule.ID, false)
-			return nil, fmt.Errorf("rule %s: %w", rule.ID, err)
+			return nil, bucketSkipped, shadowMatched, fmt.Errorf("rule %s: %w", rule.ID, evalErr)
 		}
 		recordRuleEvaluated(rule.ID, ok)
 		if !ok {
 			continue
 		}
 
-		reason, action, err := e.renderOutput(rule.Output, exprInput)
-		if err != nil {
-			return nil, fmt.Errorf("rule %s render: %w", rule.ID, err)
+		if rule.Shadow {
+			recordRuleShadowMatched(rule.ID)
+			shadowMatched = append(shadowMatched, rule.ID)
+			continue
 		}
 
-		md, err := e.renderMetadata(rule.Output.Metadata, exprInput)
-		if err != nil {
-			return nil, fmt.Errorf("rule %s metadata: %w", rule.ID, err)
+		reason, action, renderErr := e.renderOutput(rule.Output, exprInput)
+		if renderErr != nil {
+			return nil, bucketSkipped, shadowMatched, fmt.Errorf("rule %s render: %w", rule.ID, renderErr)
+		}
+
+		md, metaErr := e.renderMetadata(rule.Output.Metadata, exprInput)
+		if metaErr != nil {
+			return nil, bucketSkipped, shadowMatched, fmt.Errorf("rule %s metadata: %w", rule.ID, metaErr)
 		}
 
 		matches = append(matches, RuleMatch{
@@ -247,9 +265,9 @@ func (e *RuleEngine) Evaluate(input RuleInput) ([]RuleMatch, error) {
 		}
 		action := renderTemplateString(sr.ActionTemplate, exprInput)
 
-		md, err := e.renderMetadata(sr.Metadata, exprInput)
-		if err != nil {
-			return nil, fmt.Errorf("security event %s metadata: %w", ev.EventType, err)
+		md, metaErr := e.renderMetadata(sr.Metadata, exprInput)
+		if metaErr != nil {
+			return nil, bucketSkipped, shadowMatched, fmt.Errorf("security event %s metadata: %w", ev.EventType, metaErr)
 		}
 
 		matches = append(matches, RuleMatch{
@@ -263,7 +281,7 @@ func (e *RuleEngine) Evaluate(input RuleInput) ([]RuleMatch, error) {
 		})
 	}
 
-	return matches, nil
+	return matches, bucketSkipped, shadowMatched, nil
 }
 
 func (e *RuleEngine) evalCondition(condition string, input map[string]interface{}) (bool, error) {
@@ -321,18 +339,25 @@ func (e *RuleEngine) buildExprInput(input RuleInput) map[string]interface{} {
 			"score": input.Heat.Score,
 			"trend": input.Heat.Trend,
 		},
-		"opens":              input.Metrics.Opens,
-		"revisits":           input.Metrics.Revisits,
-		"avgDurationMinutes": input.Metrics.AvgDurationMinutes,
-		"bounces":            input.Metrics.Bounces,
-		"downloads":          input.Metrics.Downloads,
-		"totalPageViews":     input.Metrics.TotalPageViews,
-		"keyPageViews":       input.Metrics.KeyPageViews,
-		"uniqueVisitors":     input.Metrics.UniqueVisitors,
-		"distinctIPs1h":      input.Behavior.DistinctIPs1h,
-		"distinctEmails24h":  input.Behavior.DistinctEmails24h,
-		"unknownEmails24h":   input.Behavior.UnknownEmails24h,
-		"downloads24h":       input.Behavior.Downloads24h,
+		"opens":                  input.Metrics.Opens,
+		"revisits":               input.Metrics.Revisits,
+		"avgDurationMinutes":     input.Metrics.AvgDurationMinutes,
+		"bounces":                input.Metrics.Bounces,
+		"downloads":              input.Metrics.Downloads,
+		"totalPageViews":         input.Metrics.TotalPageViews,
+		"keyPageViews":           input.Metrics.KeyPageViews,
+		"uniqueVisitors":         input.Metrics.UniqueVisitors,
+		"opens24h":               input.Metrics.Opens24h,
+		"revisits24h":            input.Metrics.Revisits24h,
+		"avgDurationMinutes24h":  input.Metrics.AvgDurationMinutes24h,
+		"bounces24h":             input.Metrics.Bounces24h,
+		"downloads24h":           input.Metrics.Downloads24h,
+		"totalPageViews24h":      input.Metrics.TotalPageViews24h,
+		"keyPageViews24h":        input.Metrics.KeyPageViews24h,
+		"uniqueVisitors24h":      input.Metrics.UniqueVisitors24h,
+		"distinctIPs1h":          input.Behavior.DistinctIPs1h,
+		"distinctEmails24h":      input.Behavior.DistinctEmails24h,
+		"unknownEmails24h":       input.Behavior.UnknownEmails24h,
 	}
 }
 

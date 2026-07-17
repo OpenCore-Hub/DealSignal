@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -137,10 +138,27 @@ func (b *RedisBus) processMessage(ctx context.Context, msg redis.XMessage, handl
 		payload = p
 	}
 
-	if err := handler(ctx, Event{Type: typ, Payload: []byte(payload)}); err != nil {
-		return err
+	event := Event{Type: typ, Payload: []byte(payload)}
+	if err := b.runHandler(ctx, handler, event); err != nil {
+		// Log and record, but ack so a single bad message does not stop the consumer.
+		// The handler (e.g. SignalConsumer) is responsible for its own retry policy.
+		logger.ErrorCtx(ctx, "event handler failed", err,
+			logger.Attr("stream", b.stream),
+			logger.Attr("consumer_group", b.consumerGroup),
+			logger.Attr("event_type", typ),
+		)
+		recordEventHandlerError(b.stream, typ)
 	}
 	return b.client.XAck(ctx, b.stream, b.consumerGroup, msg.ID).Err()
+}
+
+func (b *RedisBus) runHandler(ctx context.Context, handler Handler, event Event) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("panic: %v", r)
+		}
+	}()
+	return handler(ctx, event)
 }
 
 func isConsumerGroupExists(err error) bool {

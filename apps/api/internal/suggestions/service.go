@@ -91,7 +91,7 @@ func (s *Service) ScheduleGenerate(ctx context.Context, link db.Link, lang strin
 }
 
 // Generate creates suggestions for a link based on recent access events.
-func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string) ([]Suggestion, error) {
+func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string) (out []Suggestion, err error) {
 	start := time.Now()
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
@@ -113,13 +113,68 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		return nil, ErrLinkNotFound
 	}
 
-	metrics, err := s.metrics(ctx, linkUUID)
+	// Audit every run, success or failure.
+	var matchedRuleIDs []string
+	var bucketSkippedRuleIDs []string
+	var shadowMatchedRuleIDs []string
+	var generatedIDs []pgtype.UUID
+	var metrics suggestionMetrics
+	var behavior BehaviorInput
+	var result heat.Result
+	var securityEvents []db.ListRecentSecurityEventsByLinkRow
+	defer func() {
+		snapshot, _ := json.Marshal(map[string]any{
+			"heat": map[string]any{
+				"level": result.Level,
+				"score": result.Score,
+				"trend": result.Trend,
+			},
+			"metrics":         metrics,
+			"behavior":        behavior,
+			"security_events": securityEvents,
+		})
+		errStr := ""
+		if err != nil {
+			errStr = err.Error()
+		}
+		_, _ = s.queries.CreateSignalRuleRun(ctx, db.CreateSignalRuleRunParams{
+			TenantID:               link.TenantID,
+			WorkspaceID:            link.WorkspaceID,
+			LinkID:                 pgtype.UUID{Bytes: linkUUID.Bytes, Valid: true},
+			RunStartedAt:           pgtype.Timestamptz{Time: start, Valid: true},
+			DurationMs:             pgtype.Int4{Int32: int32(time.Since(start).Milliseconds()), Valid: true},
+			InputSnapshot:          snapshot,
+			MatchedRuleIds:         matchedRuleIDs,
+			GeneratedSuggestionIds: generatedIDs,
+			BucketSkippedRuleIds:   bucketSkippedRuleIDs,
+			ShadowMatchedRuleIds:   shadowMatchedRuleIDs,
+			Error:                  pgText(errStr),
+		})
+	}()
+
+	// Fetch feature snapshot once per generation so metrics() and behaviorFeatures()
+	// see the same cached state.
+	var snap *FeatureSnapshot
+	if s.featureStore != nil {
+		if fs, serr := s.featureStore.GetForLink(ctx, linkUUID); serr == nil && fs.Found {
+			snap = &fs
+		}
+	}
+
+	metrics, err = s.metrics(ctx, linkUUID, snap)
 	if err != nil {
 		recordSuggestionGenerationError("metrics")
 		return nil, err
 	}
 
-	result := heat.Compute(heat.CircleDefault, metrics.heatInput())
+	// Time-decay the heat score based on the link's last activity.
+	decayDays := 0.0
+	if lastAccess, aerr := s.queries.GetLinkLastAccessAt(ctx, linkUUID); aerr == nil && lastAccess.Valid {
+		decayDays = time.Since(lastAccess.Time).Hours() / 24
+	} else if link.CreatedAt.Valid {
+		decayDays = time.Since(link.CreatedAt.Time).Hours() / 24
+	}
+	result = heat.Compute(heat.CircleDefault, metrics.heatInput(decayDays))
 
 	contactIDs, err := s.queries.ListLinkContactsByLinkID(ctx, linkUUID)
 	if err != nil {
@@ -153,43 +208,45 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		keyPageTitles = append(keyPageTitles, kp.Title)
 	}
 
-	totalDurationSeconds := 0
-	if metrics.totalPageViews > 0 {
-		totalDurationSeconds = int(metrics.avgDurationMinutes*60.0*float64(metrics.totalPageViews) + 0.5)
+	totalDurationSeconds24h := 0
+	if metrics.totalPageViews24h > 0 {
+		totalDurationSeconds24h = int(metrics.avgDurationMinutes24h*60.0*float64(metrics.totalPageViews24h) + 0.5)
 	}
 
+	// Context reflects the same 24-hour window the rules evaluate.
 	ctxSnapshot := Context{
-		Opens:           metrics.opens,
-		UniqueVisitors:  metrics.uniqueVisitors,
-		DurationSeconds: totalDurationSeconds,
-		KeyPageCount:    metrics.keyPageViews,
+		Opens:           metrics.opens24h,
+		UniqueVisitors:  metrics.uniqueVisitors24h,
+		DurationSeconds: totalDurationSeconds24h,
+		KeyPageCount:    metrics.keyPageViews24h,
 		KeyPageTitles:   keyPageTitles,
 		ContactName:     contactName,
 		ContactEmail:    contactEmail,
 		DocumentTitle:   docTitle,
 	}
 
-	securityEvents, _ := s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID)
-	behavior, err := s.behaviorFeatures(ctx, linkUUID)
+	securityEvents, _ = s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID)
+	behavior, err = s.behaviorFeatures(ctx, linkUUID, snap)
 	if err != nil {
 		return nil, err
 	}
 
-	candidates, err := s.evaluateRules(link, result, metrics, behavior, ctxSnapshot, securityEvents)
+	var candidates []candidate
+	candidates, bucketSkippedRuleIDs, shadowMatchedRuleIDs, err = s.evaluateRules(link, result, metrics, behavior, ctxSnapshot, securityEvents)
 	if err != nil {
 		recordSuggestionGenerationError("evaluate_rules")
 		return nil, fmt.Errorf("evaluate rules: %w", err)
 	}
 
-	matchedRuleIDs := make([]string, 0, len(candidates))
+	matchedRuleIDs = make([]string, 0, len(candidates))
 	for _, c := range candidates {
 		if c.RuleID != "" {
 			matchedRuleIDs = append(matchedRuleIDs, c.RuleID)
 		}
 	}
 
-	out := make([]Suggestion, 0, len(candidates))
-	generatedIDs := make([]pgtype.UUID, 0, len(candidates))
+	out = make([]Suggestion, 0, len(candidates))
+	generatedIDs = make([]pgtype.UUID, 0, len(candidates))
 	for _, c := range candidates {
 		exists, err := s.recentExists(ctx, link.WorkspaceID, linkUUID, c.Type, c.Subtype)
 		if err != nil {
@@ -228,6 +285,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			Action:      action,
 			Metadata:    metadataToBytes(c.Metadata),
 			Context:     c.Context.ToJSONB(),
+			RuleID:      pgText(c.RuleID),
 		})
 		if err != nil {
 			recordSuggestionGenerationError("create_suggestion")
@@ -246,35 +304,13 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		}
 	}
 
-	snapshot, _ := json.Marshal(map[string]any{
-		"heat": map[string]any{
-			"level": result.Level,
-			"score": result.Score,
-			"trend": result.Trend,
-		},
-		"metrics":         metrics,
-		"behavior":        behavior,
-		"security_events": securityEvents,
-	})
-
-	_, _ = s.queries.CreateSignalRuleRun(ctx, db.CreateSignalRuleRunParams{
-		TenantID:               link.TenantID,
-		WorkspaceID:            link.WorkspaceID,
-		LinkID:                 pgtype.UUID{Bytes: linkUUID.Bytes, Valid: true},
-		RunStartedAt:           pgtype.Timestamptz{Time: start, Valid: true},
-		DurationMs:             pgtype.Int4{Int32: int32(time.Since(start).Milliseconds()), Valid: true},
-		InputSnapshot:          snapshot,
-		MatchedRuleIds:         matchedRuleIDs,
-		GeneratedSuggestionIds: generatedIDs,
-	})
-
 	observeSuggestionGenerationDuration(workspaceID, start)
 	return out, nil
 }
 
-func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMetrics, behavior BehaviorInput, ctxSnapshot Context, events []db.ListRecentSecurityEventsByLinkRow) ([]candidate, error) {
+func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMetrics, behavior BehaviorInput, ctxSnapshot Context, events []db.ListRecentSecurityEventsByLinkRow) ([]candidate, []string, []string, error) {
 	if s.ruleEngine == nil {
-		return nil, nil
+		return nil, nil, nil, nil
 	}
 
 	sec := make([]SecurityEventInput, 0, len(events))
@@ -285,27 +321,35 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 		})
 	}
 
-	matches, err := s.ruleEngine.Evaluate(RuleInput{
+	matches, bucketSkipped, shadowMatched, err := s.ruleEngine.Evaluate(RuleInput{
 		TenantID:    uuid.UUID(link.TenantID.Bytes).String(),
 		WorkspaceID: uuid.UUID(link.WorkspaceID.Bytes).String(),
 		LinkID:      uuid.UUID(link.ID.Bytes).String(),
 		Heat:        HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
 		Metrics: MetricsInput{
-			Opens:              m.opens,
-			Revisits:           m.revisits,
-			AvgDurationMinutes: m.avgDurationMinutes,
-			Bounces:            m.bounces,
-			Downloads:          m.downloads,
-			TotalPageViews:     m.totalPageViews,
-			KeyPageViews:       m.keyPageViews,
-			UniqueVisitors:     m.uniqueVisitors,
+			Opens:                 m.opens,
+			Revisits:              m.revisits,
+			AvgDurationMinutes:    m.avgDurationMinutes,
+			Bounces:               m.bounces,
+			Downloads:             m.downloads,
+			TotalPageViews:        m.totalPageViews,
+			KeyPageViews:          m.keyPageViews,
+			UniqueVisitors:        m.uniqueVisitors,
+			Opens24h:              m.opens24h,
+			Revisits24h:           m.revisits24h,
+			AvgDurationMinutes24h: m.avgDurationMinutes24h,
+			Bounces24h:            m.bounces24h,
+			Downloads24h:          m.downloads24h,
+			TotalPageViews24h:     m.totalPageViews24h,
+			KeyPageViews24h:       m.keyPageViews24h,
+			UniqueVisitors24h:     m.uniqueVisitors24h,
 		},
 		Behavior:       behavior,
 		Context:        ctxSnapshot,
 		SecurityEvents: sec,
 	})
 	if err != nil {
-		return nil, err
+		return nil, bucketSkipped, shadowMatched, err
 	}
 
 	candidates := make([]candidate, 0, len(matches))
@@ -320,7 +364,7 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 			Context:  ctxSnapshot,
 		})
 	}
-	return candidates, nil
+	return candidates, bucketSkipped, shadowMatched, nil
 }
 
 // List returns active suggestions for a link.
@@ -441,6 +485,11 @@ func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.R
 	if err != nil {
 		return heat.Result{Level: "cold"}
 	}
+	lastAccess, _ := s.queries.GetLinkLastAccessAt(ctx, linkID)
+	decayDays := 0.0
+	if lastAccess.Valid {
+		decayDays = time.Since(lastAccess.Time).Hours() / 24
+	}
 	return heat.Compute(heat.CircleDefault, heat.Input{
 		Opens:              int(access.Opens),
 		Revisits:           revisits,
@@ -449,10 +498,11 @@ func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.R
 		ForwardSignals:     int(access.UniqueVisitors),
 		Downloads:          int(access.Downloads),
 		BouncePenalty:      int(bounce),
+		DecayDays:          decayDays,
 	})
 }
 
-// Dismiss marks a suggestion as dismissed.
+// Dismiss marks a suggestion as dismissed and records user feedback.
 func (s *Service) Dismiss(ctx context.Context, workspaceID, suggestionID string) error {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
@@ -462,11 +512,52 @@ func (s *Service) Dismiss(ctx context.Context, workspaceID, suggestionID string)
 	if err != nil {
 		return err
 	}
-	_, err = s.queries.GetSuggestionByID(ctx, db.GetSuggestionByIDParams{ID: id, WorkspaceID: wsUUID})
+	suggestion, err := s.queries.GetSuggestionByID(ctx, db.GetSuggestionByIDParams{ID: id, WorkspaceID: wsUUID})
 	if err != nil {
 		return ErrSuggestionNotFound
 	}
-	return s.queries.DismissSuggestion(ctx, db.DismissSuggestionParams{ID: id, WorkspaceID: wsUUID})
+	if derr := s.queries.DismissSuggestion(ctx, db.DismissSuggestionParams{ID: id, WorkspaceID: wsUUID}); derr != nil {
+		return derr
+	}
+	_, _ = s.queries.CreateSuggestionFeedback(ctx, db.CreateSuggestionFeedbackParams{
+		TenantID:      suggestion.TenantID,
+		WorkspaceID:   suggestion.WorkspaceID,
+		SuggestionID:  suggestion.ID,
+		FeedbackType:  "dismissed",
+	})
+	return nil
+}
+
+// RulePerformance aggregates per-rule precision/recall signals for a workspace.
+type RulePerformance struct {
+	RuleID         string `json:"rule_id"`
+	GeneratedCount int64  `json:"generated_count"`
+	DismissedCount int64  `json:"dismissed_count"`
+	ActedCount     int64  `json:"acted_count"`
+	SpamCount      int64  `json:"spam_count"`
+}
+
+// ListRulePerformance returns per-rule calibration metrics.
+func (s *Service) ListRulePerformance(ctx context.Context, workspaceID string) ([]RulePerformance, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.GetRulePerformanceSummary(ctx, wsUUID)
+	if err != nil {
+		return nil, fmt.Errorf("list rule performance: %w", err)
+	}
+	out := make([]RulePerformance, len(rows))
+	for i, r := range rows {
+		out[i] = RulePerformance{
+			RuleID:         r.RuleID.String,
+			GeneratedCount: r.GeneratedCount,
+			DismissedCount: r.DismissedCount,
+			ActedCount:     r.ActedCount,
+			SpamCount:      r.SpamCount,
+		}
+	}
+	return out, nil
 }
 
 func (s *Service) recentExists(ctx context.Context, workspaceID, linkID pgtype.UUID, typ, subtype string) (bool, error) {
@@ -482,43 +573,76 @@ func (s *Service) recentExists(ctx context.Context, workspaceID, linkID pgtype.U
 	return count > 0, nil
 }
 
-func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID) (suggestionMetrics, error) {
-	if s.featureStore != nil {
-		if snap, err := s.featureStore.GetForLink(ctx, linkID); err == nil && snap.Found {
-			return snap.toSuggestionMetrics(), nil
+func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *FeatureSnapshot) (suggestionMetrics, error) {
+	var m suggestionMetrics
+
+	// Lifetime metrics: use a fresh feature snapshot if available.
+	if snap != nil && snap.Found {
+		m = snap.toSuggestionMetrics()
+	} else {
+		access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
+		if err != nil {
+			return m, err
+		}
+		m.opens = int(access.Opens)
+		m.uniqueVisitors = int(access.UniqueVisitors)
+		m.downloads = int(access.Downloads)
+
+		pv, err := s.queries.GetLinkPageViewMetrics(ctx, linkID)
+		if err != nil {
+			return m, err
+		}
+		m.avgDurationMinutes = pv.AvgDurationSeconds / 60.0
+		keyViews, err := countKeyPageViews(ctx, s.queries, linkID, heat.CircleDefault)
+		if err != nil {
+			return m, fmt.Errorf("key page view metrics: %w", err)
+		}
+		m.keyPageViews = keyViews
+		m.totalPageViews = int(pv.TotalPageViews)
+
+		bounceCount, err := s.queries.GetLinkBounceCount(ctx, linkID)
+		if err != nil {
+			return m, err
+		}
+		m.bounces = int(bounceCount)
+		m.revisits = m.opens - m.uniqueVisitors
+		if m.revisits < 0 {
+			m.revisits = 0
 		}
 	}
 
-	var m suggestionMetrics
-	access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
+	// Rolling 24-hour metrics are always computed live so rules match their wording.
+	access24h, err := s.queries.GetLinkAccessMetrics24h(ctx, linkID)
 	if err != nil {
-		return m, err
+		return m, fmt.Errorf("access metrics 24h: %w", err)
 	}
-	m.opens = int(access.Opens)
-	m.uniqueVisitors = int(access.UniqueVisitors)
-	m.downloads = int(access.Downloads)
+	m.opens24h = int(access24h.Opens)
+	m.uniqueVisitors24h = int(access24h.UniqueVisitors)
+	m.downloads24h = int(access24h.Downloads)
+	m.revisits24h = m.opens24h - m.uniqueVisitors24h
+	if m.revisits24h < 0 {
+		m.revisits24h = 0
+	}
 
-	pv, err := s.queries.GetLinkPageViewMetrics(ctx, linkID)
+	pv24h, err := s.queries.GetLinkPageViewMetrics24h(ctx, linkID)
 	if err != nil {
-		return m, err
+		return m, fmt.Errorf("page view metrics 24h: %w", err)
 	}
-	m.avgDurationMinutes = pv.AvgDurationSeconds / 60.0
-	keyViews, err := countKeyPageViews(ctx, s.queries, linkID, heat.CircleDefault)
-	if err != nil {
-		return m, fmt.Errorf("key page view metrics: %w", err)
-	}
-	m.keyPageViews = keyViews
-	m.totalPageViews = int(pv.TotalPageViews)
+	m.avgDurationMinutes24h = pv24h.AvgDurationSeconds / 60.0
+	m.totalPageViews24h = int(pv24h.TotalPageViews)
 
-	bounceCount, err := s.queries.GetLinkBounceCount(ctx, linkID)
+	keyViews24h, err := countKeyPageViews24h(ctx, s.queries, linkID, heat.CircleDefault)
 	if err != nil {
-		return m, err
+		return m, fmt.Errorf("key page view metrics 24h: %w", err)
 	}
-	m.bounces = int(bounceCount)
-	m.revisits = m.opens - m.uniqueVisitors
-	if m.revisits < 0 {
-		m.revisits = 0
+	m.keyPageViews24h = keyViews24h
+
+	bounceCount24h, err := s.queries.GetLinkBounceCount24h(ctx, linkID)
+	if err != nil {
+		return m, fmt.Errorf("bounce count 24h: %w", err)
 	}
+	m.bounces24h = int(bounceCount24h)
+
 	return m, nil
 }
 
@@ -531,13 +655,20 @@ type suggestionMetrics struct {
 	totalPageViews     int
 	downloads          int
 	bounces            int
+	// 24h rolling window fields used by expression rules.
+	opens24h              int
+	uniqueVisitors24h     int
+	revisits24h           int
+	avgDurationMinutes24h float64
+	keyPageViews24h       int
+	totalPageViews24h     int
+	downloads24h          int
+	bounces24h            int
 }
 
-func (s *Service) behaviorFeatures(ctx context.Context, linkID pgtype.UUID) (BehaviorInput, error) {
-	if s.featureStore != nil {
-		if snap, err := s.featureStore.GetForLink(ctx, linkID); err == nil && snap.Found {
-			return snap.toBehaviorInput(), nil
-		}
+func (s *Service) behaviorFeatures(ctx context.Context, linkID pgtype.UUID, snap *FeatureSnapshot) (BehaviorInput, error) {
+	if snap != nil && snap.Found {
+		return snap.toBehaviorInput(), nil
 	}
 
 	var out BehaviorInput
@@ -559,7 +690,7 @@ func (s *Service) behaviorFeatures(ctx context.Context, linkID pgtype.UUID) (Beh
 	return out, nil
 }
 
-func (m suggestionMetrics) heatInput() heat.Input {
+func (m suggestionMetrics) heatInput(decayDays float64) heat.Input {
 	return heat.Input{
 		Opens:              m.opens,
 		Revisits:           m.revisits,
@@ -568,6 +699,7 @@ func (m suggestionMetrics) heatInput() heat.Input {
 		ForwardSignals:     m.uniqueVisitors,
 		Downloads:          m.downloads,
 		BouncePenalty:      m.bounces,
+		DecayDays:          decayDays,
 	}
 }
 
@@ -634,6 +766,22 @@ func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.U
 		return 0, nil
 	}
 	metrics, err := queries.GetLinkKeyPageViewMetrics(ctx, db.GetLinkKeyPageViewMetricsParams{
+		LinkID:   linkID,
+		Patterns: patterns,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(metrics.TotalKeyPageViews), nil
+}
+
+// countKeyPageViews24h counts 24-hour key-page views for the circle.
+func countKeyPageViews24h(ctx context.Context, queries *db.Queries, linkID pgtype.UUID, circle heat.Circle) (int, error) {
+	patterns := heat.KeyPagePatterns(circle)
+	if len(patterns) == 0 {
+		return 0, nil
+	}
+	metrics, err := queries.GetLinkKeyPageViewMetrics24h(ctx, db.GetLinkKeyPageViewMetrics24hParams{
 		LinkID:   linkID,
 		Patterns: patterns,
 	})

@@ -15,6 +15,22 @@ var (
 		[]string{"rule_id", "matched"},
 	)
 
+	rulesBucketSkippedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dealsignal_suggestion_rules_bucket_skips_total",
+			Help: "Total number of expression rules skipped due to A/B bucketing.",
+		},
+		[]string{"rule_id", "bucket_key"},
+	)
+
+	rulesShadowMatchedTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "dealsignal_suggestion_rules_shadow_matched_total",
+			Help: "Total number of shadow-mode rule hits (not emitted as suggestions).",
+		},
+		[]string{"rule_id"},
+	)
+
 	suggestionGenerationDuration = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
 			Name:    "dealsignal_suggestion_generation_duration_seconds",
@@ -43,6 +59,8 @@ var (
 
 func init() {
 	_ = prometheus.Register(rulesEvaluatedTotal)
+	_ = prometheus.Register(rulesBucketSkippedTotal)
+	_ = prometheus.Register(rulesShadowMatchedTotal)
 	_ = prometheus.Register(suggestionGenerationDuration)
 	_ = prometheus.Register(suggestionsGeneratedTotal)
 	_ = prometheus.Register(suggestionGenerationErrors)
@@ -54,6 +72,14 @@ func recordRuleEvaluated(ruleID string, matched bool) {
 		m = "true"
 	}
 	rulesEvaluatedTotal.WithLabelValues(ruleID, m).Inc()
+}
+
+func recordRuleBucketSkipped(ruleID, bucketKey string) {
+	rulesBucketSkippedTotal.WithLabelValues(ruleID, bucketKey).Inc()
+}
+
+func recordRuleShadowMatched(ruleID string) {
+	rulesShadowMatchedTotal.WithLabelValues(ruleID).Inc()
 }
 
 func observeSuggestionGenerationDuration(workspaceID string, start time.Time) {

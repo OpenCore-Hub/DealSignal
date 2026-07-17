@@ -26,8 +26,8 @@ func TestRuleEngineHotSignal(t *testing.T) {
 		downloads:          0,
 		bounces:            0,
 	}
-	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	matches, err := engine.Evaluate(RuleInput{
+	result := heat.Compute(heat.CircleDefault, m.heatInput(0))
+	matches, _, _, err := engine.Evaluate(RuleInput{
 		Heat:    HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
 		Metrics: m.toMetricsInput(),
 	})
@@ -53,8 +53,8 @@ func TestRuleEngineBounceRisk(t *testing.T) {
 		avgDurationMinutes: 0.1,
 		bounces:            2,
 	}
-	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	matches, err := engine.Evaluate(RuleInput{
+	result := heat.Compute(heat.CircleDefault, m.heatInput(0))
+	matches, _, _, err := engine.Evaluate(RuleInput{
 		Heat:    HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
 		Metrics: m.toMetricsInput(),
 	})
@@ -74,7 +74,7 @@ func TestRuleEngineBounceRisk(t *testing.T) {
 
 func TestRuleEngineForwardRisk(t *testing.T) {
 	engine := newTestRuleEngine(t)
-	matches, err := engine.Evaluate(RuleInput{
+	matches, _, _, err := engine.Evaluate(RuleInput{
 		Behavior: BehaviorInput{DistinctIPs1h: 3},
 	})
 	if err != nil {
@@ -93,7 +93,7 @@ func TestRuleEngineForwardRisk(t *testing.T) {
 
 func TestRuleEngineSecurityEvent(t *testing.T) {
 	engine := newTestRuleEngine(t)
-	matches, err := engine.Evaluate(RuleInput{
+	matches, _, _, err := engine.Evaluate(RuleInput{
 		SecurityEvents: []SecurityEventInput{
 			{EventType: "expired_link_accessed", Reason: "expired"},
 		},
@@ -129,7 +129,7 @@ func TestPriorityAndTitle(t *testing.T) {
 
 func TestHeatInputUsesUniqueVisitorsAsForwardSignals(t *testing.T) {
 	m := suggestionMetrics{uniqueVisitors: 5}
-	input := m.heatInput()
+	input := m.heatInput(0)
 	if input.ForwardSignals != 5 {
 		t.Fatalf("expected ForwardSignals=5, got %d", input.ForwardSignals)
 	}
@@ -137,13 +137,21 @@ func TestHeatInputUsesUniqueVisitorsAsForwardSignals(t *testing.T) {
 
 func (m suggestionMetrics) toMetricsInput() MetricsInput {
 	return MetricsInput{
-		Opens:              m.opens,
-		Revisits:           m.revisits,
-		AvgDurationMinutes: m.avgDurationMinutes,
-		Bounces:            m.bounces,
-		Downloads:          m.downloads,
-		TotalPageViews:     m.totalPageViews,
-		KeyPageViews:       m.keyPageViews,
-		UniqueVisitors:     m.uniqueVisitors,
+		Opens:                 m.opens,
+		Revisits:              m.revisits,
+		AvgDurationMinutes:    m.avgDurationMinutes,
+		Bounces:               m.bounces,
+		Downloads:             m.downloads,
+		TotalPageViews:        m.totalPageViews,
+		KeyPageViews:          m.keyPageViews,
+		UniqueVisitors:        m.uniqueVisitors,
+		Opens24h:              m.opens,
+		Revisits24h:           m.revisits,
+		AvgDurationMinutes24h: m.avgDurationMinutes,
+		Bounces24h:            m.bounces,
+		Downloads24h:          m.downloads,
+		TotalPageViews24h:     m.totalPageViews,
+		KeyPageViews24h:       m.keyPageViews,
+		UniqueVisitors24h:     m.uniqueVisitors,
 	}
 }

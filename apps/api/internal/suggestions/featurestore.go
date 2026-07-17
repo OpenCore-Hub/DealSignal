@@ -72,11 +72,18 @@ func (f *FeatureStore) ComputeAndStore(ctx context.Context, linkID pgtype.UUID) 
 	return err
 }
 
-// GetForLink returns the latest feature snapshot for a link, or Found=false if missing.
+// maxFeatureStaleness is the longest a cached snapshot is considered fresh enough
+// for rule evaluation. Beyond this we fall back to live queries.
+const maxFeatureStaleness = 15 * time.Minute
+
+// GetForLink returns the latest feature snapshot for a link, or Found=false if missing or stale.
 func (f *FeatureStore) GetForLink(ctx context.Context, linkID pgtype.UUID) (FeatureSnapshot, error) {
 	row, err := f.queries.GetLinkFeature(ctx, linkID)
 	if err != nil {
 		return FeatureSnapshot{}, err
+	}
+	if row.UpdatedAt.Valid && time.Since(row.UpdatedAt.Time) > maxFeatureStaleness {
+		return FeatureSnapshot{}, nil
 	}
 	return FeatureSnapshot{
 		Found:              true,

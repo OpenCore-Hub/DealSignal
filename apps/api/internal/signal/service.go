@@ -75,26 +75,28 @@ func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID,
 	if err != nil {
 		return db.ActionItem{}, fmt.Errorf("update action status: %w", err)
 	}
+
+	if status == "done" && action.SignalID.Valid {
+		sig, serr := s.queries.GetSignalByID(ctx, db.GetSignalByIDParams{
+			ID:          action.SignalID,
+			WorkspaceID: wsUUID,
+		})
+		if serr == nil && sig.SuggestionID.Valid {
+			_, _ = s.queries.CreateSuggestionFeedback(ctx, db.CreateSuggestionFeedbackParams{
+				TenantID:     sig.TenantID,
+				WorkspaceID:  sig.WorkspaceID,
+				SuggestionID: sig.SuggestionID,
+				FeedbackType: "acted",
+			})
+		}
+	}
+
 	return action, nil
 }
 
 // CreateFromSuggestion ensures a signal and action item exist for a suggestion.
+// Uses upserts so concurrent callers do not create duplicates.
 func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Suggestion, lang string) (db.Signal, db.ActionItem, error) {
-	existing, err := s.queries.GetSignalBySuggestion(ctx, db.GetSignalBySuggestionParams{
-		SuggestionID: suggestion.ID,
-		WorkspaceID:  suggestion.WorkspaceID,
-	})
-	if err == nil {
-		action, err := s.ensureActionForSignal(ctx, existing)
-		if err != nil {
-			return db.Signal{}, db.ActionItem{}, err
-		}
-		if err := s.markSynced(ctx, []pgtype.UUID{suggestion.ID}); err != nil {
-			return existing, action, err
-		}
-		return existing, action, nil
-	}
-
 	sig, action, err := s.createSignalAndActionFromSuggestion(ctx, suggestion, lang)
 	if err != nil {
 		return db.Signal{}, db.ActionItem{}, err
@@ -137,14 +139,6 @@ func (s *Service) createSignalAndActionFromSuggestion(ctx context.Context, sugge
 	}
 
 	return sig, action, nil
-}
-
-func (s *Service) ensureActionForSignal(ctx context.Context, sig db.Signal) (db.ActionItem, error) {
-	actions, err := s.queries.ListActionItemsBySignal(ctx, sig.ID)
-	if err != nil || len(actions) == 0 {
-		return s.createActionForSignal(ctx, sig)
-	}
-	return actions[0], nil
 }
 
 func (s *Service) createActionForSignal(ctx context.Context, sig db.Signal) (db.ActionItem, error) {
@@ -199,48 +193,16 @@ func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UU
 		lang = "en"
 	}
 
-	existingBySuggestion, err := s.loadExistingSignalsBySuggestion(ctx, suggestions)
-	if err != nil {
-		return err
-	}
-
 	syncedIDs := make([]pgtype.UUID, 0, len(suggestions))
 	for _, sug := range suggestions {
-		if sig, ok := existingBySuggestion[uuid.UUID(sug.ID.Bytes)]; ok {
-			if _, err := s.ensureActionForSignal(ctx, sig); err != nil {
-				return err
-			}
-		} else {
-			if _, _, err := s.createSignalAndActionFromSuggestion(ctx, sug, lang); err != nil {
-				return err
-			}
+		if _, _, err := s.createSignalAndActionFromSuggestion(ctx, sug, lang); err != nil {
+			return err
 		}
 		syncedIDs = append(syncedIDs, sug.ID)
 	}
 
 	recordSignalsSynced(uuid.UUID(workspaceID.Bytes).String(), len(syncedIDs))
 	return s.markSynced(ctx, syncedIDs)
-}
-
-func (s *Service) loadExistingSignalsBySuggestion(ctx context.Context, suggestions []db.Suggestion) (map[uuid.UUID]db.Signal, error) {
-	ids := make([]pgtype.UUID, 0, len(suggestions))
-	for _, sug := range suggestions {
-		ids = append(ids, sug.ID)
-	}
-
-	existing, err := s.queries.ListSignalsBySuggestionIDs(ctx, ids)
-	if err != nil {
-		return nil, fmt.Errorf("list existing signals: %w", err)
-	}
-
-	out := make(map[uuid.UUID]db.Signal, len(existing))
-	for _, sig := range existing {
-		if !sig.SuggestionID.Valid {
-			continue
-		}
-		out[uuid.UUID(sig.SuggestionID.Bytes)] = sig
-	}
-	return out, nil
 }
 
 func titleForSubtype(subtype, typ, lang string) string {

@@ -2,13 +2,15 @@
 # Each expression rule is evaluated against a RuleInput map. Available fields:
 #   heat.level, heat.score, heat.trend
 #   opens, revisits, avgDurationMinutes, bounces, downloads, totalPageViews,
-#   keyPageViews, uniqueVisitors, distinctIPs1h, distinctEmails24h,
-#   unknownEmails24h, downloads24h
+#   keyPageViews, uniqueVisitors
+#   opens24h, revisits24h, avgDurationMinutes24h, bounces24h, downloads24h,
+#   totalPageViews24h, keyPageViews24h, uniqueVisitors24h
+#   distinctIPs1h, distinctEmails24h, unknownEmails24h
 # Security event rules map an event_type to a risk_alert subtype.
 
 expression_rules:
   - id: hot_signal
-    condition: 'heat.level == "hot" && opens >= 2'
+    condition: 'heat.level == "hot" && opens >= 2 && opens24h >= 1'
     enabled: true
     bucket_percent: 100
     bucket_key: link_id
@@ -16,41 +18,41 @@ expression_rules:
       type: hot_signal
       subtype: hot
       priority: high
-      reason_template: 'High-intent signal (score {{.heat.score}}, level {{.heat.level}}): {{.opens}} opens, {{.keyPageViews}} key page views'
+      reason_template: 'High-intent signal (score {{.heat.score}}, level {{.heat.level}}): {{.opens24h}} opens in the last 24 hours, {{.keyPageViews24h}} key page views'
       action_template: 'Reach out while interest is high'
       metadata:
         score: '{{.heat.score}}'
         level: '{{.heat.level}}'
 
   - id: follow_up_download
-    condition: 'downloads > 0'
+    condition: 'downloads24h > 0'
     output:
       type: follow_up
       subtype: download
       priority: low
-      reason_template: '{{.downloads}} download(s) in the last 24 hours'
+      reason_template: '{{.downloads24h}} download(s) in the last 24 hours'
       action_template: 'Follow up on downloaded content'
 
   - id: follow_up_revisit
-    condition: 'revisits > 0'
+    condition: 'revisits24h > 0'
     output:
       type: follow_up
       subtype: revisit
       priority: low
-      reason_template: '{{.revisits}} return visit(s) in the last 24 hours'
+      reason_template: '{{.revisits24h}} return visit(s) in the last 24 hours'
       action_template: 'Re-engage the returning visitor'
 
   - id: risk_bounce
-    condition: 'bounces > 0 && avgDurationMinutes / bounces < 0.5'
+    condition: 'bounces24h > 0 && avgDurationMinutes24h < 0.5'
     output:
       type: risk_alert
       subtype: bounce
       priority: medium
-      reason_template: '{{.bounces}} bounce(s) with very short average engagement'
+      reason_template: '{{.bounces24h}} bounce(s) in the last 24 hours with very short average engagement ({{.avgDurationMinutes24h}} min)'
       action_template: 'Review whether the content matches visitor intent'
       metadata:
-        bounces: '{{.bounces}}'
-        avg_duration_minutes: '{{.avgDurationMinutes}}'
+        bounces: '{{.bounces24h}}'
+        avg_duration_minutes: '{{.avgDurationMinutes24h}}'
 
   - id: risk_forward
     condition: 'distinctIPs1h >= 3'

@@ -8,14 +8,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/sse"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/crm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/contact"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/crm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
@@ -31,6 +30,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/sse"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
@@ -159,12 +159,13 @@ func (s *Server) registerRoutes() error {
 			var chatCompleter assistant.ChatCompleter
 			if s.cfg.OpenAIAPIKey != "" {
 				llmClient, err = llm.NewClient(llm.Config{
-					APIKey:         s.cfg.OpenAIAPIKey,
-					BaseURL:        s.cfg.OpenAIBaseURL,
-					EmbeddingModel: s.cfg.OpenAIEmbeddingModel,
-					ChatModel:      s.cfg.OpenAIChatModel,
-					Referer:        s.cfg.OpenAIReferer,
-					AppTitle:       s.cfg.OpenAIAppTitle,
+					APIKey:            s.cfg.OpenAIAPIKey,
+					BaseURL:           s.cfg.OpenAIBaseURL,
+					EmbeddingModel:    s.cfg.OpenAIEmbeddingModel,
+					EmbeddingEndpoint: s.cfg.OpenAIEmbeddingEndpoint,
+					ChatModel:         s.cfg.OpenAIChatModel,
+					Referer:           s.cfg.OpenAIReferer,
+					AppTitle:          s.cfg.OpenAIAppTitle,
 				})
 				if err != nil {
 					return fmt.Errorf("llm client: %w", err)
@@ -255,13 +256,12 @@ func (s *Server) registerRoutes() error {
 			ssePublisher := sse.NewLinkPublisher(sseHub)
 			linkHandler.SetEventPublisher(ssePublisher)
 
+			// Register CRM aggregation worker (30min window).
+			s.registerWorker(crm.NewWindowAggregator(queries, 30*time.Minute))
 
-		// Register CRM aggregation worker (30min window).
-		s.registerWorker(crm.NewWindowAggregator(queries, 30*time.Minute))
-
-		// CRM webhook endpoint (CRM → DealSignal deal stage changes).
-		webhookHandler := crm.NewWebhookHandler()
-		public.POST("/webhooks/crm/deal-stage", webhookHandler.HandleDealStageChange)
+			// CRM webhook endpoint (CRM → DealSignal deal stage changes).
+			webhookHandler := crm.NewWebhookHandler()
+			public.POST("/webhooks/crm/deal-stage", webhookHandler.HandleDealStageChange)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
 

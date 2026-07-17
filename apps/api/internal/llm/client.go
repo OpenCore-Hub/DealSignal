@@ -2,10 +2,14 @@
 package llm
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/sashabaranov/go-openai"
@@ -17,15 +21,28 @@ const (
 	DefaultChatModel      = openai.GPT4oMini
 )
 
+// EmbeddingEndpoint selects which HTTP endpoint the embedding client uses.
+type EmbeddingEndpoint string
+
+const (
+	// EmbeddingEndpointEmbeddings uses the standard OpenAI /v1/embeddings endpoint.
+	EmbeddingEndpointEmbeddings EmbeddingEndpoint = "embeddings"
+	// EmbeddingEndpointChatCompletions uses /v1/chat/completions as the path
+	// while keeping the OpenAI embeddings request/response format. Some unified
+	// third-party gateways route all requests through the chat-completions path.
+	EmbeddingEndpointChatCompletions EmbeddingEndpoint = "chat_completions"
+)
+
 // Config holds the client configuration.
 type Config struct {
-	APIKey         string
-	BaseURL        string // optional, for self-hosted / Azure / OpenAI-compatible endpoints
-	EmbeddingModel string
-	ChatModel      string
-	Referer        string       // optional, e.g. HTTP-Referer for OpenRouter
-	AppTitle       string       // optional, e.g. X-Title for OpenRouter
-	HTTPClient     *http.Client // optional, mainly for tests
+	APIKey            string
+	BaseURL           string // optional, for self-hosted / Azure / OpenAI-compatible endpoints
+	EmbeddingModel    string
+	EmbeddingEndpoint string // optional: "embeddings" (default) or "chat_completions"
+	ChatModel         string
+	Referer           string       // optional, e.g. HTTP-Referer for OpenRouter
+	AppTitle          string       // optional, e.g. X-Title for OpenRouter
+	HTTPClient        *http.Client // optional, mainly for tests
 }
 
 // Client wraps the OpenAI SDK.
@@ -44,6 +61,9 @@ func NewClient(cfg Config) (*Client, error) {
 	}
 	if cfg.ChatModel == "" {
 		cfg.ChatModel = DefaultChatModel
+	}
+	if cfg.EmbeddingEndpoint == "" {
+		cfg.EmbeddingEndpoint = string(EmbeddingEndpointEmbeddings)
 	}
 
 	oCfg := openai.DefaultConfig(cfg.APIKey)
@@ -110,6 +130,16 @@ func (c *Client) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 	if len(texts) == 0 {
 		return nil, nil
 	}
+
+	switch EmbeddingEndpoint(c.cfg.EmbeddingEndpoint) {
+	case EmbeddingEndpointChatCompletions:
+		return c.embedBatchChatCompletions(ctx, texts)
+	default:
+		return c.embedBatchEmbeddings(ctx, texts)
+	}
+}
+
+func (c *Client) embedBatchEmbeddings(ctx context.Context, texts []string) ([][]float32, error) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -120,9 +150,79 @@ func (c *Client) EmbedBatch(ctx context.Context, texts []string) ([][]float32, e
 	if err != nil {
 		return nil, fmt.Errorf("create embeddings: %w", err)
 	}
+	data := make([]embeddingData, len(resp.Data))
+	for i, d := range resp.Data {
+		data[i] = embeddingData{Index: d.Index, Embedding: d.Embedding}
+	}
+	return parseEmbeddingsResponse(data, len(texts))
+}
 
-	out := make([][]float32, len(resp.Data))
-	for _, d := range resp.Data {
+// embeddingResponse mirrors the OpenAI embeddings response shape for raw HTTP parsing.
+type embeddingResponse struct {
+	Data []embeddingData `json:"data"`
+}
+
+type embeddingData struct {
+	Index     int       `json:"index"`
+	Embedding []float32 `json:"embedding"`
+}
+
+func (c *Client) embedBatchChatCompletions(ctx context.Context, texts []string) ([][]float32, error) {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	reqBody := map[string]any{
+		"input": texts,
+		"model": c.cfg.EmbeddingModel,
+	}
+	payload, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal embedding request: %w", err)
+	}
+
+	baseURL := c.cfg.BaseURL
+	if baseURL == "" {
+		baseURL = openai.DefaultConfig("").BaseURL
+	}
+	baseURL = strings.TrimRight(baseURL, "/")
+	url := baseURL + "/v1/chat/completions"
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("build chat-completions embedding request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.cfg.APIKey)
+
+	httpClient := c.cfg.HTTPClient
+	if httpClient == nil {
+		httpClient = &http.Client{Timeout: 30 * time.Second}
+	}
+
+	resp, err := httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("chat-completions embedding request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read chat-completions embedding response: %w", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("chat-completions embedding returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var parsed embeddingResponse
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return nil, fmt.Errorf("parse chat-completions embedding response: %w", err)
+	}
+	return parseEmbeddingsResponse(parsed.Data, len(texts))
+}
+
+func parseEmbeddingsResponse(data []embeddingData, expected int) ([][]float32, error) {
+	out := make([][]float32, expected)
+	for _, d := range data {
 		if d.Index < 0 || d.Index >= len(out) {
 			continue
 		}
