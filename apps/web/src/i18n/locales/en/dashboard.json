@@ -134,7 +134,14 @@
     "postpone": "Postpone",
     "ignore": "Ignore",
     "hiddenWithCount": "Hidden ({{count}})",
-    "reactivate": "Reactivate"
+    "reactivate": "Reactivate",
+    "types": {
+      "approve": "Approve",
+      "sign": "Sign NDA",
+      "answer": "Answer",
+      "renew": "Renew",
+      "verify": "Verify"
+    }
   },
   "heatMap": {
     "linkCount_one": "{{count}} link",

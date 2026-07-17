@@ -43,6 +43,8 @@ const action: ActionItem = {
   dueAt: "2026-06-21T18:00:00Z",
   status: "pending",
   actionType: "email",
+  createdAt: "2026-06-20T18:00:00Z",
+  updatedAt: "2026-06-20T18:00:00Z",
 };
 
 async function renderCard(signal: Signal, act?: ActionItem) {

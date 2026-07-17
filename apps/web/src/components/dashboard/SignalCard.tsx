@@ -11,6 +11,11 @@ import {
   Envelope,
   Phone,
   ShareNetwork,
+  HandWaving,
+  Signature,
+  Question,
+  ArrowsClockwise,
+  CheckCircle,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -60,8 +65,13 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
     call: Phone,
     share: ShareNetwork,
     review: Warning,
+    approve: HandWaving,
+    sign: Signature,
+    answer: Question,
+    renew: ArrowsClockwise,
+    verify: CheckCircle,
   }[action?.actionType ?? "email"];
-  const ActionIcon = actionIcon;
+  const ActionIcon = actionIcon ?? Envelope;
 
   const priorityLabel =
     signal.priority === "high"

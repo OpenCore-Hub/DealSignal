@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
-import { Check, Envelope, Phone, ShareNetwork, Warning, Clock, X, ClockCounterClockwise, DotsThree, CaretDown, CaretUp } from "@phosphor-icons/react";
+import { Check, Envelope, Phone, ShareNetwork, Warning, Clock, X, ClockCounterClockwise, DotsThree, CaretDown, CaretUp, HandWaving, Signature, Question, ArrowsClockwise, CheckCircle } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { EmptyState } from "@/components/common/EmptyState";
@@ -20,6 +20,11 @@ const actionConfig = {
   call: { icon: Phone },
   share: { icon: ShareNetwork },
   review: { icon: Warning },
+  approve: { icon: HandWaving },
+  sign: { icon: Signature },
+  answer: { icon: Question },
+  renew: { icon: ArrowsClockwise },
+  verify: { icon: CheckCircle },
 };
 
 const impactBarColor = {
@@ -31,9 +36,10 @@ const impactBarColor = {
 interface ActionListProps {
   actions: ActionItem[];
   onStatusChange: (id: string, status: ActionStatus) => void;
+  onActionClick?: (action: ActionItem) => void;
 }
 
-export function ActionList({ actions, onStatusChange }: ActionListProps) {
+export function ActionList({ actions, onStatusChange, onActionClick }: ActionListProps) {
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon, i18n } = useTranslation("common");
@@ -75,7 +81,10 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
                   <Icon size={16} />
                 </div>
                 <div className="relative z-10 min-w-0 flex-1">
-                  <p className="text-sm font-medium">{action.title}</p>
+                  <p
+                    className={`text-sm font-medium ${onActionClick && action.sourceType ? "cursor-pointer hover:text-primary" : ""}`}
+                    onClick={() => onActionClick?.(action)}
+                  >{action.title}</p>
                   <p
                     className={`text-caption flex items-center gap-1 ${
                       overdue ? "font-medium text-error-500" : "text-muted-foreground"

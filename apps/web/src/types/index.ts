@@ -493,7 +493,7 @@ export type RiskAlertType =
   | "blocked_attempt"
   | "anomaly"
   | "forward";
-export type ActionType = "email" | "call" | "share" | "review";
+export type ActionType = "email" | "call" | "share" | "review" | "approve" | "sign" | "answer" | "renew" | "verify";
 export type ActionStatus = "pending" | "done" | "snoozed" | "ignored";
 export type Priority = "high" | "medium" | "low";
 export type Circle = "founder" | "investor_ir" | "sales";
@@ -531,12 +531,23 @@ export interface Signal {
 
 export interface ActionItem {
   id: string;
-  signalId: string;
+  signalId?: string;
+  sourceType?:
+    | "link_access_request"
+    | "room_access_request"
+    | "room_nda"
+    | "link_question"
+    | "uploaded_file"
+    | "expiring_link"
+    | "expiring_room";
+  sourceId?: string;
   title: string;
   impact: Priority;
   dueAt: string;
   status: ActionStatus;
   actionType: ActionType;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface HeatScoreWeights {

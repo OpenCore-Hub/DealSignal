@@ -15,6 +15,7 @@ interface AttentionZoneProps {
   riskAlerts: RiskAlert[];
   workspaceSlug?: string;
   onActionStatusChange: (id: string, status: ActionStatus) => void;
+  onActionClick?: (action: ActionItem) => void;
 }
 
 function itemTimestamp(item: unknown): number | null {
@@ -44,6 +45,7 @@ export function AttentionZone({
   riskAlerts,
   workspaceSlug,
   onActionStatusChange,
+  onActionClick,
 }: AttentionZoneProps) {
   const { t } = useTranslation("dashboard");
 
@@ -63,13 +65,16 @@ export function AttentionZone({
     [dedupedSignals]
   );
 
-  // Actions are 1:1 with signals, so keep only actions whose signal survived
-  // deduplication and drop any residual duplicates by signalId + title.
+  // Actions are either tied to a signal or sourced from an operational event.
+  // Keep signal-backed actions only when their signal survived deduplication;
+  // operational actions are always retained. Drop residual duplicates by key.
   const dedupedActions = useMemo(() => {
-    const ownedByKeptSignal = actions.filter((a) => keptSignalIds.has(a.signalId));
+    const retained = actions.filter(
+      (a) => a.sourceType || (a.signalId && keptSignalIds.has(a.signalId))
+    );
     return keepLatestByKey(
-      ownedByKeptSignal,
-      (a) => `${a.signalId}|${a.title}`
+      retained,
+      (a) => `${a.signalId ?? a.sourceId ?? a.id}|${a.title}`
     );
   }, [actions, keptSignalIds]);
 
@@ -143,6 +148,7 @@ export function AttentionZone({
             <ActionList
               actions={dedupedActions}
               onStatusChange={onActionStatusChange}
+              onActionClick={onActionClick}
             />
           </TabsContent>
 

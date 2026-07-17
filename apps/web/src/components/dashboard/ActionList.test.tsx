@@ -15,6 +15,8 @@ function makeAction(status: ActionItem["status"] = "pending"): ActionItem {
     dueAt: "2026-06-25T00:00:00Z",
     status,
     actionType: "email",
+    createdAt: "2026-06-20T18:00:00Z",
+    updatedAt: "2026-06-20T18:00:00Z",
   };
 }
 

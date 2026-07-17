@@ -131,7 +131,14 @@
     "postpone": "延后",
     "ignore": "忽略",
     "hiddenWithCount": "已隐藏 ({{count}})",
-    "reactivate": "重新激活"
+    "reactivate": "重新激活",
+    "types": {
+      "approve": "审批",
+      "sign": "签署 NDA",
+      "answer": "回复",
+      "renew": "续期",
+      "verify": "确认"
+    }
   },
   "heatMap": {
     "linkCount_other": "{{count}} 个链接",

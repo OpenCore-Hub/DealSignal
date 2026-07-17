@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useParams } from "react-router";
+import { useParams, useNavigate } from "react-router";
 import { motion } from "motion/react";
 import { ArrowRight } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -11,7 +11,7 @@ import { useAsyncData } from "@/hooks/useAsyncData";
 import { api, type DashboardStats, type InsightsOverview } from "@/lib/api";
 import { useSignalStore } from "@/stores/signalStore";
 import { sortSignals } from "@/lib/sortSignals";
-import type { DealRoom } from "@/types";
+import type { ActionItem, DealRoom } from "@/types";
 import { DashboardHeader } from "./DashboardHeader";
 import { MetricsCards } from "./MetricsCards";
 import { AttentionZone } from "./AttentionZone";
@@ -28,6 +28,7 @@ interface DashboardData {
 
 export function DashboardPage() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  const navigate = useNavigate();
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
@@ -67,6 +68,23 @@ export function DashboardPage() {
   );
 
   const sortedSignals = useMemo(() => sortSignals(signals), [signals]);
+
+  const handleActionClick = (action: ActionItem) => {
+    if (!workspaceSlug || !action.sourceType || !action.sourceId) return;
+    switch (action.sourceType) {
+      case "link_access_request":
+      case "link_question":
+      case "uploaded_file":
+      case "expiring_link":
+        navigate(`/${workspaceSlug}/links/${action.sourceId}`);
+        break;
+      case "room_access_request":
+      case "room_nda":
+      case "expiring_room":
+        navigate(`/${workspaceSlug}/deal-rooms/${action.sourceId}`);
+        break;
+    }
+  };
 
   if (error) {
     return (
@@ -141,6 +159,7 @@ export function DashboardPage() {
             riskAlerts={stats.riskAlerts}
             workspaceSlug={slug}
             onActionStatusChange={updateActionStatus}
+            onActionClick={handleActionClick}
           />
 
           <RecentActivityFeed

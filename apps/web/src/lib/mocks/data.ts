@@ -773,6 +773,8 @@ export const mockActionItems: ActionItem[] = [
     dueAt: "2026-06-21T18:00:00Z",
     status: "pending",
     actionType: "email",
+    createdAt: "2026-06-20T18:00:00Z",
+    updatedAt: "2026-06-20T18:00:00Z",
   },
   {
     id: "act_2",
@@ -782,6 +784,8 @@ export const mockActionItems: ActionItem[] = [
     dueAt: "2026-06-21T12:00:00Z",
     status: "pending",
     actionType: "share",
+    createdAt: "2026-06-20T18:00:00Z",
+    updatedAt: "2026-06-20T18:00:00Z",
   },
   {
     id: "act_3",
@@ -791,6 +795,8 @@ export const mockActionItems: ActionItem[] = [
     dueAt: "2026-06-23T10:00:00Z",
     status: "pending",
     actionType: "call",
+    createdAt: "2026-06-20T18:00:00Z",
+    updatedAt: "2026-06-20T18:00:00Z",
   },
   {
     id: "act_4",
@@ -800,6 +806,8 @@ export const mockActionItems: ActionItem[] = [
     dueAt: "2026-06-21T09:00:00Z",
     status: "pending",
     actionType: "review",
+    createdAt: "2026-06-20T18:00:00Z",
+    updatedAt: "2026-06-20T18:00:00Z",
   },
 ];
 
