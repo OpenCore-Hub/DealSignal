@@ -439,6 +439,16 @@ SELECT
 FROM access_logs
 WHERE link_id = $1;
 
+-- name: GetLinkAccessMetrics24h :one
+-- Rolling 24-hour access metrics used by signal rules.
+SELECT
+    COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
+FROM access_logs
+WHERE link_id = $1
+  AND created_at > now() - interval '24 hours';
+
 -- name: GetLinkLastAccessAt :one
 SELECT MAX(created_at)::timestamptz AS last_access_at
 FROM access_logs
@@ -481,6 +491,15 @@ JOIN links ON links.id = page_views.link_id
 LEFT JOIN documents ON documents.id = links.document_id
 WHERE page_views.link_id = $1;
 
+-- name: GetLinkPageViewMetrics24h :one
+-- Rolling 24-hour page-view metrics used by signal rules.
+SELECT
+    COALESCE(AVG(duration_seconds) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3 AND created_at > now() - interval '24 hours') AS engaged_page_views,
+    COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS total_page_views
+FROM page_views
+WHERE link_id = $1;
+
 -- name: GetLinkKeyPageViewMetrics :one
 -- Counts page views whose page title matches any of the provided keyword patterns.
 -- Patterns should be lowercase SQL LIKE patterns, e.g. '%financial%'.
@@ -492,6 +511,19 @@ JOIN links l ON l.id = pv.link_id
 JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
+
+-- name: GetLinkKeyPageViewMetrics24h :one
+-- Rolling 24-hour key-page metrics used by signal rules.
+SELECT
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_key_page_views,
+    COUNT(*) AS total_key_page_views
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND pv.created_at > now() - interval '24 hours'
   AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
 
 -- name: GetLinkKeyPageViewDetails :many
@@ -532,6 +564,22 @@ WHERE a.link_id = $1
   AND NOT EXISTS (
       SELECT 1 FROM page_views p
       WHERE p.link_id = $1 AND p.visitor_id = a.visitor_id
+  );
+
+-- name: GetLinkBounceCount24h :one
+-- Rolling 24-hour bounce count used by signal rules.
+-- A bounce is a link_opened event with no matching page_view in the same window.
+SELECT COUNT(*) AS bounce_count
+FROM access_logs a
+WHERE a.link_id = $1
+  AND a.event_type = 'link_opened'
+  AND a.visitor_id IS NOT NULL
+  AND a.created_at > now() - interval '24 hours'
+  AND NOT EXISTS (
+      SELECT 1 FROM page_views p
+      WHERE p.link_id = $1
+        AND p.visitor_id = a.visitor_id
+        AND p.created_at > now() - interval '24 hours'
   );
 
 -- name: ListAccessLogsByLink :many
@@ -1094,8 +1142,8 @@ WHERE m.user_id = $1 AND w.tenant_id = $2
 ORDER BY w.created_at DESC;
 
 -- name: CreateSuggestion :one
-INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context)
-VALUES ($1, $2, $3, $4, $5, $6, sqlc.arg(subtype), $7, $8, sqlc.arg(metadata)::jsonb, sqlc.arg(context)::jsonb)
+INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context, rule_id)
+VALUES ($1, $2, $3, $4, $5, $6, sqlc.arg(subtype), $7, $8, sqlc.arg(metadata)::jsonb, sqlc.arg(context)::jsonb, sqlc.arg(rule_id))
 RETURNING *;
 
 -- name: ListSuggestionsByLink :many
@@ -1466,12 +1514,19 @@ INSERT INTO signals (
     tenant_id, workspace_id, suggestion_id, type, subtype, title, description, explanation, suggestion,
     document_id, contact_id, link_id, priority, metadata, context
 ) VALUES ($1, $2, $3, $4, sqlc.arg(subtype), $5, $6, $7, $8, $9, $10, $11, $12, sqlc.arg(metadata)::jsonb, sqlc.arg(context)::jsonb)
+ON CONFLICT (workspace_id, suggestion_id) WHERE suggestion_id IS NOT NULL DO UPDATE SET
+    updated_at = now()
 RETURNING *;
 
 -- name: GetSignalBySuggestion :one
 SELECT *
 FROM signals
 WHERE suggestion_id = $1 AND workspace_id = $2 LIMIT 1;
+
+-- name: GetSignalByID :one
+SELECT *
+FROM signals
+WHERE id = $1 AND workspace_id = $2 LIMIT 1;
 
 -- name: ListSignalsByWorkspace :many
 SELECT *
@@ -1483,6 +1538,8 @@ ORDER BY created_at DESC;
 INSERT INTO action_items (
     tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (signal_id) DO UPDATE SET
+    updated_at = now()
 RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at;
 
 -- name: ListActionItemsByWorkspace :many
@@ -1606,8 +1663,10 @@ INSERT INTO signal_rule_run (
     input_snapshot,
     matched_rule_ids,
     generated_suggestion_ids,
+    bucket_skipped_rule_ids,
+    shadow_matched_rule_ids,
     error
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: UpsertLinkFeature :one
@@ -2344,3 +2403,30 @@ SELECT id, workspace_id, name, created_by, last_active_at, recent_events,
 FROM link_activity
 ORDER BY (peak_daily_events * (1.0 + EXTRACT(DAY FROM NOW() - last_active_at) / 7.0)) DESC
 LIMIT 20;
+
+-- name: CreateSuggestionFeedback :one
+INSERT INTO suggestion_feedback (tenant_id, workspace_id, suggestion_id, feedback_type)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (suggestion_id, feedback_type) DO NOTHING
+RETURNING *;
+
+-- name: GetRulePerformanceSummary :many
+-- Per-rule calibration metrics for a workspace.
+SELECT
+    s.rule_id,
+    COUNT(*) FILTER (WHERE s.id IS NOT NULL) AS generated_count,
+    COUNT(DISTINCT f_dismissed.suggestion_id) AS dismissed_count,
+    COUNT(DISTINCT f_acted.suggestion_id) AS acted_count,
+    COUNT(DISTINCT f_spam.suggestion_id) AS spam_count
+FROM suggestions s
+LEFT JOIN suggestion_feedback f_dismissed
+    ON f_dismissed.suggestion_id = s.id AND f_dismissed.feedback_type = 'dismissed'
+LEFT JOIN suggestion_feedback f_acted
+    ON f_acted.suggestion_id = s.id AND f_acted.feedback_type = 'acted'
+LEFT JOIN suggestion_feedback f_spam
+    ON f_spam.suggestion_id = s.id AND f_spam.feedback_type = 'spam'
+WHERE s.workspace_id = $1
+  AND s.rule_id IS NOT NULL
+  AND s.rule_id <> ''
+GROUP BY s.rule_id
+ORDER BY generated_count DESC;

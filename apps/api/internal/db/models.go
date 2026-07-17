@@ -643,6 +643,8 @@ type SignalRuleRun struct {
 	GeneratedSuggestionIds []pgtype.UUID
 	Error                  pgtype.Text
 	CreatedAt              pgtype.Timestamptz
+	BucketSkippedRuleIds   []string
+	ShadowMatchedRuleIds   []string
 }
 
 type Suggestion struct {
@@ -662,6 +664,16 @@ type Suggestion struct {
 	Metadata    []byte
 	Context     []byte
 	SyncedAt    pgtype.Timestamptz
+	RuleID      pgtype.Text
+}
+
+type SuggestionFeedback struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	SuggestionID pgtype.UUID
+	FeedbackType string
+	CreatedAt    pgtype.Timestamptz
 }
 
 type SuggestionOutbox struct {

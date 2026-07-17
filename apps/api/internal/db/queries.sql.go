@@ -571,6 +571,8 @@ const createActionItem = `-- name: CreateActionItem :one
 INSERT INTO action_items (
     tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (signal_id) DO UPDATE SET
+    updated_at = now()
 RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
 `
 
@@ -1905,6 +1907,8 @@ INSERT INTO signals (
     tenant_id, workspace_id, suggestion_id, type, subtype, title, description, explanation, suggestion,
     document_id, contact_id, link_id, priority, metadata, context
 ) VALUES ($1, $2, $3, $4, $13, $5, $6, $7, $8, $9, $10, $11, $12, $14::jsonb, $15::jsonb)
+ON CONFLICT (workspace_id, suggestion_id) WHERE suggestion_id IS NOT NULL DO UPDATE SET
+    updated_at = now()
 RETURNING id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
 `
 
@@ -1978,9 +1982,11 @@ INSERT INTO signal_rule_run (
     input_snapshot,
     matched_rule_ids,
     generated_suggestion_ids,
+    bucket_skipped_rule_ids,
+    shadow_matched_rule_ids,
     error
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, tenant_id, workspace_id, link_id, run_started_at, duration_ms, input_snapshot, matched_rule_ids, generated_suggestion_ids, error, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+RETURNING id, tenant_id, workspace_id, link_id, run_started_at, duration_ms, input_snapshot, matched_rule_ids, generated_suggestion_ids, error, created_at, bucket_skipped_rule_ids, shadow_matched_rule_ids
 `
 
 type CreateSignalRuleRunParams struct {
@@ -1992,6 +1998,8 @@ type CreateSignalRuleRunParams struct {
 	InputSnapshot          []byte
 	MatchedRuleIds         []string
 	GeneratedSuggestionIds []pgtype.UUID
+	BucketSkippedRuleIds   []string
+	ShadowMatchedRuleIds   []string
 	Error                  pgtype.Text
 }
 
@@ -2005,6 +2013,8 @@ func (q *Queries) CreateSignalRuleRun(ctx context.Context, arg CreateSignalRuleR
 		arg.InputSnapshot,
 		arg.MatchedRuleIds,
 		arg.GeneratedSuggestionIds,
+		arg.BucketSkippedRuleIds,
+		arg.ShadowMatchedRuleIds,
 		arg.Error,
 	)
 	var i SignalRuleRun
@@ -2020,14 +2030,16 @@ func (q *Queries) CreateSignalRuleRun(ctx context.Context, arg CreateSignalRuleR
 		&i.GeneratedSuggestionIds,
 		&i.Error,
 		&i.CreatedAt,
+		&i.BucketSkippedRuleIds,
+		&i.ShadowMatchedRuleIds,
 	)
 	return i, err
 }
 
 const createSuggestion = `-- name: CreateSuggestion :one
-INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context)
-VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $10::jsonb, $11::jsonb)
-RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
+INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context, rule_id)
+VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $10::jsonb, $11::jsonb, $12)
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
 `
 
 type CreateSuggestionParams struct {
@@ -2042,6 +2054,7 @@ type CreateSuggestionParams struct {
 	Subtype     pgtype.Text
 	Metadata    []byte
 	Context     []byte
+	RuleID      pgtype.Text
 }
 
 func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionParams) (Suggestion, error) {
@@ -2057,6 +2070,7 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		arg.Subtype,
 		arg.Metadata,
 		arg.Context,
+		arg.RuleID,
 	)
 	var i Suggestion
 	err := row.Scan(
@@ -2076,6 +2090,40 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		&i.Metadata,
 		&i.Context,
 		&i.SyncedAt,
+		&i.RuleID,
+	)
+	return i, err
+}
+
+const createSuggestionFeedback = `-- name: CreateSuggestionFeedback :one
+INSERT INTO suggestion_feedback (tenant_id, workspace_id, suggestion_id, feedback_type)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (suggestion_id, feedback_type) DO NOTHING
+RETURNING id, tenant_id, workspace_id, suggestion_id, feedback_type, created_at
+`
+
+type CreateSuggestionFeedbackParams struct {
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	SuggestionID pgtype.UUID
+	FeedbackType string
+}
+
+func (q *Queries) CreateSuggestionFeedback(ctx context.Context, arg CreateSuggestionFeedbackParams) (SuggestionFeedback, error) {
+	row := q.db.QueryRow(ctx, createSuggestionFeedback,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.SuggestionID,
+		arg.FeedbackType,
+	)
+	var i SuggestionFeedback
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SuggestionID,
+		&i.FeedbackType,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -3932,6 +3980,30 @@ func (q *Queries) GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) 
 	return i, err
 }
 
+const getLinkAccessMetrics24h = `-- name: GetLinkAccessMetrics24h :one
+SELECT
+    COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
+FROM access_logs
+WHERE link_id = $1
+  AND created_at > now() - interval '24 hours'
+`
+
+type GetLinkAccessMetrics24hRow struct {
+	Opens          int64
+	UniqueVisitors int64
+	Downloads      int64
+}
+
+// Rolling 24-hour access metrics used by signal rules.
+func (q *Queries) GetLinkAccessMetrics24h(ctx context.Context, linkID pgtype.UUID) (GetLinkAccessMetrics24hRow, error) {
+	row := q.db.QueryRow(ctx, getLinkAccessMetrics24h, linkID)
+	var i GetLinkAccessMetrics24hRow
+	err := row.Scan(&i.Opens, &i.UniqueVisitors, &i.Downloads)
+	return i, err
+}
+
 const getLinkAccessMetricsBatch = `-- name: GetLinkAccessMetricsBatch :many
 SELECT
     link_id,
@@ -4091,6 +4163,30 @@ WHERE a.link_id = $1
 
 func (q *Queries) GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (int64, error) {
 	row := q.db.QueryRow(ctx, getLinkBounceCount, linkID)
+	var bounce_count int64
+	err := row.Scan(&bounce_count)
+	return bounce_count, err
+}
+
+const getLinkBounceCount24h = `-- name: GetLinkBounceCount24h :one
+SELECT COUNT(*) AS bounce_count
+FROM access_logs a
+WHERE a.link_id = $1
+  AND a.event_type = 'link_opened'
+  AND a.visitor_id IS NOT NULL
+  AND a.created_at > now() - interval '24 hours'
+  AND NOT EXISTS (
+      SELECT 1 FROM page_views p
+      WHERE p.link_id = $1
+        AND p.visitor_id = a.visitor_id
+        AND p.created_at > now() - interval '24 hours'
+  )
+`
+
+// Rolling 24-hour bounce count used by signal rules.
+// A bounce is a link_opened event with no matching page_view in the same window.
+func (q *Queries) GetLinkBounceCount24h(ctx context.Context, linkID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, getLinkBounceCount24h, linkID)
 	var bounce_count int64
 	err := row.Scan(&bounce_count)
 	return bounce_count, err
@@ -4707,6 +4803,37 @@ func (q *Queries) GetLinkKeyPageViewMetrics(ctx context.Context, arg GetLinkKeyP
 	return i, err
 }
 
+const getLinkKeyPageViewMetrics24h = `-- name: GetLinkKeyPageViewMetrics24h :one
+SELECT
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_key_page_views,
+    COUNT(*) AS total_key_page_views
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND pv.created_at > now() - interval '24 hours'
+  AND lower(p.title) LIKE ANY ($2::text[])
+`
+
+type GetLinkKeyPageViewMetrics24hParams struct {
+	LinkID   pgtype.UUID
+	Patterns []string
+}
+
+type GetLinkKeyPageViewMetrics24hRow struct {
+	EngagedKeyPageViews int64
+	TotalKeyPageViews   int64
+}
+
+// Rolling 24-hour key-page metrics used by signal rules.
+func (q *Queries) GetLinkKeyPageViewMetrics24h(ctx context.Context, arg GetLinkKeyPageViewMetrics24hParams) (GetLinkKeyPageViewMetrics24hRow, error) {
+	row := q.db.QueryRow(ctx, getLinkKeyPageViewMetrics24h, arg.LinkID, arg.Patterns)
+	var i GetLinkKeyPageViewMetrics24hRow
+	err := row.Scan(&i.EngagedKeyPageViews, &i.TotalKeyPageViews)
+	return i, err
+}
+
 const getLinkLastAccessAt = `-- name: GetLinkLastAccessAt :one
 SELECT MAX(created_at)::timestamptz AS last_access_at
 FROM access_logs
@@ -4748,6 +4875,29 @@ func (q *Queries) GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID
 		&i.TotalPageViews,
 		&i.DocumentTitle,
 	)
+	return i, err
+}
+
+const getLinkPageViewMetrics24h = `-- name: GetLinkPageViewMetrics24h :one
+SELECT
+    COALESCE(AVG(duration_seconds) FILTER (WHERE created_at > now() - interval '24 hours'), 0)::float8 AS avg_duration_seconds,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3 AND created_at > now() - interval '24 hours') AS engaged_page_views,
+    COUNT(*) FILTER (WHERE created_at > now() - interval '24 hours') AS total_page_views
+FROM page_views
+WHERE link_id = $1
+`
+
+type GetLinkPageViewMetrics24hRow struct {
+	AvgDurationSeconds float64
+	EngagedPageViews   int64
+	TotalPageViews     int64
+}
+
+// Rolling 24-hour page-view metrics used by signal rules.
+func (q *Queries) GetLinkPageViewMetrics24h(ctx context.Context, linkID pgtype.UUID) (GetLinkPageViewMetrics24hRow, error) {
+	row := q.db.QueryRow(ctx, getLinkPageViewMetrics24h, linkID)
+	var i GetLinkPageViewMetrics24hRow
+	err := row.Scan(&i.AvgDurationSeconds, &i.EngagedPageViews, &i.TotalPageViews)
 	return i, err
 }
 
@@ -5103,6 +5253,99 @@ func (q *Queries) GetRoomMemberByUserID(ctx context.Context, arg GetRoomMemberBy
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getRulePerformanceSummary = `-- name: GetRulePerformanceSummary :many
+SELECT
+    s.rule_id,
+    COUNT(*) FILTER (WHERE s.id IS NOT NULL) AS generated_count,
+    COUNT(DISTINCT f_dismissed.suggestion_id) AS dismissed_count,
+    COUNT(DISTINCT f_acted.suggestion_id) AS acted_count,
+    COUNT(DISTINCT f_spam.suggestion_id) AS spam_count
+FROM suggestions s
+LEFT JOIN suggestion_feedback f_dismissed
+    ON f_dismissed.suggestion_id = s.id AND f_dismissed.feedback_type = 'dismissed'
+LEFT JOIN suggestion_feedback f_acted
+    ON f_acted.suggestion_id = s.id AND f_acted.feedback_type = 'acted'
+LEFT JOIN suggestion_feedback f_spam
+    ON f_spam.suggestion_id = s.id AND f_spam.feedback_type = 'spam'
+WHERE s.workspace_id = $1
+  AND s.rule_id IS NOT NULL
+  AND s.rule_id <> ''
+GROUP BY s.rule_id
+ORDER BY generated_count DESC
+`
+
+type GetRulePerformanceSummaryRow struct {
+	RuleID         pgtype.Text
+	GeneratedCount int64
+	DismissedCount int64
+	ActedCount     int64
+	SpamCount      int64
+}
+
+// Per-rule calibration metrics for a workspace.
+func (q *Queries) GetRulePerformanceSummary(ctx context.Context, workspaceID pgtype.UUID) ([]GetRulePerformanceSummaryRow, error) {
+	rows, err := q.db.Query(ctx, getRulePerformanceSummary, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetRulePerformanceSummaryRow
+	for rows.Next() {
+		var i GetRulePerformanceSummaryRow
+		if err := rows.Scan(
+			&i.RuleID,
+			&i.GeneratedCount,
+			&i.DismissedCount,
+			&i.ActedCount,
+			&i.SpamCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getSignalByID = `-- name: GetSignalByID :one
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
+FROM signals
+WHERE id = $1 AND workspace_id = $2 LIMIT 1
+`
+
+type GetSignalByIDParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetSignalByID(ctx context.Context, arg GetSignalByIDParams) (Signal, error) {
+	row := q.db.QueryRow(ctx, getSignalByID, arg.ID, arg.WorkspaceID)
+	var i Signal
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SuggestionID,
+		&i.Type,
+		&i.Title,
+		&i.Description,
+		&i.Explanation,
+		&i.Suggestion,
+		&i.DocumentID,
+		&i.ContactID,
+		&i.LinkID,
+		&i.Priority,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Subtype,
+		&i.Metadata,
+		&i.Context,
 	)
 	return i, err
 }
@@ -8495,7 +8738,7 @@ func (q *Queries) ListStaleLinkFeatures(ctx context.Context, arg ListStaleLinkFe
 }
 
 const listSuggestionsByLink = `-- name: ListSuggestionsByLink :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
 FROM suggestions
 WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
 ORDER BY created_at DESC
@@ -8532,6 +8775,7 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 			&i.Metadata,
 			&i.Context,
 			&i.SyncedAt,
+			&i.RuleID,
 		); err != nil {
 			return nil, err
 		}
@@ -8544,7 +8788,7 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 }
 
 const listSuggestionsByWorkspace = `-- name: ListSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
 FROM suggestions
 WHERE workspace_id = $1 AND dismissed = false
 ORDER BY created_at DESC
@@ -8576,6 +8820,7 @@ func (q *Queries) ListSuggestionsByWorkspace(ctx context.Context, workspaceID pg
 			&i.Metadata,
 			&i.Context,
 			&i.SyncedAt,
+			&i.RuleID,
 		); err != nil {
 			return nil, err
 		}
@@ -8801,7 +9046,7 @@ func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspac
 }
 
 const listUnsyncedSuggestionsByWorkspace = `-- name: ListUnsyncedSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
 FROM suggestions
 WHERE workspace_id = $1
   AND (synced_at IS NULL OR updated_at > synced_at)
@@ -8834,6 +9079,7 @@ func (q *Queries) ListUnsyncedSuggestionsByWorkspace(ctx context.Context, worksp
 			&i.Metadata,
 			&i.Context,
 			&i.SyncedAt,
+			&i.RuleID,
 		); err != nil {
 			return nil, err
 		}
