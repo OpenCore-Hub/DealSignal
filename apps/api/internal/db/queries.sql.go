@@ -6257,7 +6257,7 @@ FROM action_items
 WHERE workspace_id = $1
   AND (
       status = 'pending'
-      OR (status = 'done' AND updated_at > now() - interval '7 days')
+      OR (status = 'done' AND updated_at > now() - interval '1 day')
       OR (status IN ('snoozed', 'ignored') AND updated_at > now() - interval '30 days')
   )
 ORDER BY created_at DESC
@@ -6265,7 +6265,7 @@ ORDER BY created_at DESC
 
 // Returns pending action items plus recently completed/snoozed/ignored items
 // so the "completed" UI list does not grow indefinitely. Done items are kept
-// for 7 days; snoozed/ignored items are kept for 30 days.
+// for 1 day; snoozed/ignored items are kept for 30 days.
 func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ActionItem, error) {
 	rows, err := q.db.Query(ctx, listActionItemsByWorkspace, workspaceID)
 	if err != nil {
