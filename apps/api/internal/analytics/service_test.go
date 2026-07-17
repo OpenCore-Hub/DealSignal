@@ -22,6 +22,8 @@ type mockAnalyticsQuerier struct {
 	recordLinkOpenedCalled bool
 	createPageViewCalled   bool
 	metrics                db.GetLinkAccessMetricsRow
+	lastAccess             pgtype.Timestamptz
+	lastAccessCalled       bool
 	pageViews              db.GetLinkPageViewMetricsRow
 	bounce                 int64
 	link                   db.Link
@@ -51,6 +53,11 @@ func (m *mockAnalyticsQuerier) GetLinkByIDAndWorkspace(_ context.Context, _ db.G
 
 func (m *mockAnalyticsQuerier) GetLinkAccessMetrics(_ context.Context, _ pgtype.UUID) (db.GetLinkAccessMetricsRow, error) {
 	return m.metrics, nil
+}
+
+func (m *mockAnalyticsQuerier) GetLinkLastAccessAt(_ context.Context, _ pgtype.UUID) (pgtype.Timestamptz, error) {
+	m.lastAccessCalled = true
+	return m.lastAccess, nil
 }
 
 func (m *mockAnalyticsQuerier) GetLinkPageViewMetrics(_ context.Context, _ pgtype.UUID) (db.GetLinkPageViewMetricsRow, error) {
@@ -297,5 +304,31 @@ func TestRecordPageViewSkippedWhenDuplicate(t *testing.T) {
 	}
 	if q.createPageViewCalled {
 		t.Fatal("expected CreatePageView query to be skipped on duplicate")
+	}
+}
+
+func TestGetScoreUsesLastAccessForDecay(t *testing.T) {
+	q := &mockAnalyticsQuerier{
+		metrics: db.GetLinkAccessMetricsRow{Opens: 5, UniqueVisitors: 3, Downloads: 1},
+		pageViews: db.GetLinkPageViewMetricsRow{
+			AvgDurationSeconds: 120,
+			EngagedPageViews:   2,
+			TotalPageViews:     4,
+			DocumentTitle:      "Financials",
+		},
+		bounce:     1,
+		lastAccess: pgtype.Timestamptz{Time: time.Now().Add(-1 * time.Hour), Valid: true},
+		link:       db.Link{ID: pgtype.UUID{Bytes: [16]byte{7}, Valid: true}, CreatedAt: pgtype.Timestamptz{Time: time.Now().Add(-365 * 24 * time.Hour), Valid: true}},
+	}
+	svc := NewService(q, nil, testCfg())
+	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, heat.CircleFounder)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !q.lastAccessCalled {
+		t.Fatal("expected GetLinkLastAccessAt to be called")
+	}
+	if res.Score < 0 || res.Score > 100 {
+		t.Fatalf("score out of range: %d", res.Score)
 	}
 }

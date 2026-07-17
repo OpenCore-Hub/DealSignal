@@ -11,6 +11,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
@@ -219,7 +220,7 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 		VisitorID:    visitorID,
 		VisitorEmail: visitorEmail,
 		Question:     req.Message,
-		Lang:         "en",
+		Lang:         requestLang(ctx),
 	})
 
 	return resp, nil
@@ -452,6 +453,13 @@ func truncateToLength(s string, max int) string {
 		return s
 	}
 	return s[:max]
+}
+
+func requestLang(ctx context.Context) string {
+	if lang := locale.FromContext(ctx); lang != "" {
+		return lang
+	}
+	return "en"
 }
 
 func pgUUID(id string) pgtype.UUID {

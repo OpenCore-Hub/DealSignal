@@ -433,6 +433,11 @@ SELECT
 FROM access_logs
 WHERE link_id = $1;
 
+-- name: GetLinkLastAccessAt :one
+SELECT MAX(created_at)::timestamptz AS last_access_at
+FROM access_logs
+WHERE link_id = $1;
+
 -- name: CountRecentDistinctIPsByLink :one
 SELECT COUNT(DISTINCT ip)::bigint AS distinct_ips
 FROM access_logs
@@ -1093,10 +1098,10 @@ FROM suggestions
 WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
 ORDER BY created_at DESC;
 
--- name: CountRecentSuggestionsByLinkAndType :one
+-- name: CountRecentSuggestionsByLinkTypeSubtype :one
 SELECT COUNT(*) AS count
 FROM suggestions
-WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND dismissed = false AND created_at > now() - interval '24 hours';
+WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND subtype = $4 AND dismissed = false AND created_at > now() - interval '24 hours';
 
 -- name: CountRecentQuestionSuggestionsBySession :one
 SELECT COUNT(*) AS count
@@ -1111,6 +1116,29 @@ WHERE workspace_id = $1
 UPDATE suggestions
 SET dismissed = true, updated_at = now()
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: InsertSuggestionOutbox :execrows
+INSERT INTO suggestion_outbox (tenant_id, workspace_id, link_id, lang)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (link_id, workspace_id) WHERE processed_at IS NULL DO NOTHING;
+
+-- name: ListPendingSuggestionOutbox :many
+SELECT id, tenant_id, workspace_id, link_id, lang, created_at, processed_at, attempts, last_error
+FROM suggestion_outbox
+WHERE processed_at IS NULL AND attempts < $1
+ORDER BY created_at ASC
+LIMIT $2
+FOR UPDATE SKIP LOCKED;
+
+-- name: MarkSuggestionOutboxProcessed :exec
+UPDATE suggestion_outbox
+SET processed_at = now()
+WHERE id = $1;
+
+-- name: IncrementSuggestionOutboxAttempts :exec
+UPDATE suggestion_outbox
+SET attempts = attempts + 1, last_error = $2
+WHERE id = $1;
 
 -- name: GetSuggestionByID :one
 SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at

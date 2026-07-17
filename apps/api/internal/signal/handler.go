@@ -2,12 +2,10 @@ package signal
 
 import (
 	"net/http"
-	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 // Handler exposes signal HTTP endpoints.
@@ -57,58 +55,21 @@ func (h *Handler) UpdateAction(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, actionItem(action))
+	c.JSON(http.StatusOK, ActionItem(action))
 }
 
 func signalList(sigs []db.Signal) []gin.H {
 	out := make([]gin.H, len(sigs))
 	for i, s := range sigs {
-		out[i] = signalItem(s)
+		out[i] = SignalItem(s)
 	}
 	return out
-}
-
-func signalItem(s db.Signal) gin.H {
-	item := gin.H{
-		"id":          uuid.UUID(s.ID.Bytes).String(),
-		"type":        s.Type,
-		"title":       s.Title,
-		"description": s.Description,
-		"explanation": s.Explanation,
-		"suggestion":  s.Suggestion,
-		"priority":    s.Priority,
-		"createdAt":   s.CreatedAt.Time.Format(time.RFC3339),
-	}
-	if s.DocumentID.Valid {
-		item["documentId"] = uuid.UUID(s.DocumentID.Bytes).String()
-	}
-	if s.ContactID.Valid {
-		item["contactId"] = uuid.UUID(s.ContactID.Bytes).String()
-	}
-	if s.LinkID.Valid {
-		item["linkId"] = uuid.UUID(s.LinkID.Bytes).String()
-	}
-	return item
 }
 
 func actionList(actions []db.ActionItem) []gin.H {
 	out := make([]gin.H, len(actions))
 	for i, a := range actions {
-		out[i] = actionItem(a)
+		out[i] = ActionItem(a)
 	}
 	return out
-}
-
-func actionItem(a db.ActionItem) gin.H {
-	return gin.H{
-		"id":         uuid.UUID(a.ID.Bytes).String(),
-		"signalId":   uuid.UUID(a.SignalID.Bytes).String(),
-		"title":      a.Title,
-		"impact":     a.Impact,
-		"dueAt":      a.DueAt.Time.Format(time.RFC3339),
-		"status":     a.Status,
-		"actionType": a.ActionType,
-		"createdAt":  a.CreatedAt.Time.Format(time.RFC3339),
-		"updatedAt":  a.UpdatedAt.Time.Format(time.RFC3339),
-	}
 }

@@ -199,6 +199,10 @@ func (s *Server) registerRoutes() error {
 			}
 			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc}, suggestionEnricher)
 
+			suggestionWorker := suggestions.NewWorker(suggestionSvc, s.dbPool, suggestions.DefaultWorkerConfig())
+			s.registerWorker(suggestionWorker)
+			suggestionWorker.Start(s.shutdownCtx)
+
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 

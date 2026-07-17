@@ -27,6 +27,7 @@ type Querier interface {
 	CreatePageView(ctx context.Context, arg db.CreatePageViewParams) error
 	GetLinkByIDAndWorkspace(ctx context.Context, arg db.GetLinkByIDAndWorkspaceParams) (db.Link, error)
 	GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkAccessMetricsRow, error)
+	GetLinkLastAccessAt(ctx context.Context, linkID pgtype.UUID) (pgtype.Timestamptz, error)
 	GetLinkPageViewMetrics(ctx context.Context, linkID pgtype.UUID) (db.GetLinkPageViewMetricsRow, error)
 	GetLinkKeyPageViewMetrics(ctx context.Context, arg db.GetLinkKeyPageViewMetricsParams) (db.GetLinkKeyPageViewMetricsRow, error)
 	GetLinkBounceCount(ctx context.Context, linkID pgtype.UUID) (int64, error)
@@ -337,8 +338,16 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat
 		keyPageViews = int(keyMetrics.TotalKeyPageViews)
 	}
 
+	lastAccess, err := s.queries.GetLinkLastAccessAt(ctx, link.ID)
+	if err != nil {
+		return heat.Result{}, fmt.Errorf("last access: %w", err)
+	}
+
 	decayDays := 0.0
-	if link.CreatedAt.Valid {
+	if lastAccess.Valid {
+		decayDays = time.Since(lastAccess.Time).Hours() / 24
+	} else if link.CreatedAt.Valid {
+		// Fall back to creation time only when there is no activity at all.
 		decayDays = time.Since(link.CreatedAt.Time).Hours() / 24
 	}
 

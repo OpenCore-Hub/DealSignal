@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -145,8 +146,14 @@ func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UU
 	if err != nil {
 		return fmt.Errorf("list suggestions: %w", err)
 	}
+
+	lang := locale.FromContext(ctx)
+	if lang == "" {
+		lang = "en"
+	}
+
 	for _, sug := range suggestions {
-		if _, _, err := s.CreateFromSuggestion(ctx, sug, "en"); err != nil {
+		if _, _, err := s.CreateFromSuggestion(ctx, sug, lang); err != nil {
 			return err
 		}
 	}

@@ -74,3 +74,27 @@ func TestComputeTimeDecay(t *testing.T) {
 		t.Errorf("expected same score with DecayDays=0, got %d vs %d", same.Score, fresh.Score)
 	}
 }
+
+func TestComputeCapsAvgDuration(t *testing.T) {
+	base := Input{Opens: 1, AvgDurationMinutes: 5}
+	baseScore := Compute(CircleFounder, base).Score
+
+	// An extremely long average duration should not push the score above the
+	// cap, so the score should stay the same once the cap is hit.
+	long := base
+	long.AvgDurationMinutes = MaxAvgDurationMinutes * 2
+	longScore := Compute(CircleFounder, long).Score
+
+	if longScore < baseScore {
+		t.Fatalf("expected long duration score (%d) >= base score (%d)", longScore, baseScore)
+	}
+
+	// Exactly at the cap should equal double the cap (the input is mutated only
+	// inside Compute, so we can compare with the capped value).
+	capped := base
+	capped.AvgDurationMinutes = MaxAvgDurationMinutes
+	cappedScore := Compute(CircleFounder, capped).Score
+	if cappedScore != longScore {
+		t.Errorf("expected capped score (%d) == long score (%d)", cappedScore, longScore)
+	}
+}

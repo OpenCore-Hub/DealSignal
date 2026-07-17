@@ -63,6 +63,18 @@ func NewService(q *db.Queries, n Notifier, enricher ...Enricher) *Service {
 	return s
 }
 
+// ScheduleGenerate writes a suggestion generation request to the outbox table
+// so the HTTP handler can return immediately. A background worker will pick it up.
+func (s *Service) ScheduleGenerate(ctx context.Context, link db.Link, lang string) error {
+	_, err := s.queries.InsertSuggestionOutbox(ctx, db.InsertSuggestionOutboxParams{
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
+		Lang:        lang,
+	})
+	return err
+}
+
 // Generate creates suggestions for a link based on recent access events.
 func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string) ([]Suggestion, error) {
 	wsUUID, err := pgUUID(workspaceID)
@@ -144,7 +156,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 
 	out := make([]Suggestion, 0, len(candidates))
 	for _, c := range candidates {
-		exists, err := s.recentExists(ctx, link.WorkspaceID, linkUUID, c.Type)
+		exists, err := s.recentExists(ctx, link.WorkspaceID, linkUUID, c.Type, c.Subtype)
 		if err != nil {
 			return nil, fmt.Errorf("check recent suggestion: %w", err)
 		}
@@ -343,11 +355,12 @@ func (s *Service) Dismiss(ctx context.Context, workspaceID, suggestionID string)
 	return s.queries.DismissSuggestion(ctx, db.DismissSuggestionParams{ID: id, WorkspaceID: wsUUID})
 }
 
-func (s *Service) recentExists(ctx context.Context, workspaceID, linkID pgtype.UUID, typ string) (bool, error) {
-	count, err := s.queries.CountRecentSuggestionsByLinkAndType(ctx, db.CountRecentSuggestionsByLinkAndTypeParams{
+func (s *Service) recentExists(ctx context.Context, workspaceID, linkID pgtype.UUID, typ, subtype string) (bool, error) {
+	count, err := s.queries.CountRecentSuggestionsByLinkTypeSubtype(ctx, db.CountRecentSuggestionsByLinkTypeSubtypeParams{
 		LinkID:      linkID,
 		WorkspaceID: workspaceID,
 		Type:        typ,
+		Subtype:     pgText(subtype),
 	})
 	if err != nil {
 		return false, err

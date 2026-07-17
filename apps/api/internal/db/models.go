@@ -628,6 +628,18 @@ type Suggestion struct {
 	Context     []byte
 }
 
+type SuggestionOutbox struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Lang        string
+	CreatedAt   pgtype.Timestamptz
+	ProcessedAt pgtype.Timestamptz
+	Attempts    int32
+	LastError   pgtype.Text
+}
+
 type Tenant struct {
 	ID        pgtype.UUID
 	Name      string

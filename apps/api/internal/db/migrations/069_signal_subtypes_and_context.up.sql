@@ -31,17 +31,7 @@ ALTER TABLE signals
 CREATE INDEX IF NOT EXISTS idx_signals_subtype ON signals(workspace_id, subtype);
 
 -- Backfill legacy risk_alert rows using the same heuristics previously in analytics/handler.go.
-UPDATE suggestions
-SET subtype = CASE
-    WHEN type != 'risk_alert' THEN NULL
-    WHEN title ILIKE '%download%' THEN 'download'
-    WHEN title ILIKE '%expir%' THEN 'expired'
-    WHEN title ILIKE '%anomal%' OR title ILIKE '%suspicious%'
-         OR title ILIKE '%unusual%' OR title ILIKE '%spike%' THEN 'anomaly'
-    ELSE 'forward'
-END
-WHERE subtype IS NULL AND type = 'risk_alert';
-
+-- Only signals has a title column; suggestions does not, so only backfill signals here.
 UPDATE signals
 SET subtype = CASE
     WHEN type != 'risk_alert' THEN NULL

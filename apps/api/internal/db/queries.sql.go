@@ -418,20 +418,26 @@ func (q *Queries) CountRecentQuestionSuggestionsBySession(ctx context.Context, a
 	return count, err
 }
 
-const countRecentSuggestionsByLinkAndType = `-- name: CountRecentSuggestionsByLinkAndType :one
+const countRecentSuggestionsByLinkTypeSubtype = `-- name: CountRecentSuggestionsByLinkTypeSubtype :one
 SELECT COUNT(*) AS count
 FROM suggestions
-WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND dismissed = false AND created_at > now() - interval '24 hours'
+WHERE link_id = $1 AND workspace_id = $2 AND type = $3 AND subtype = $4 AND dismissed = false AND created_at > now() - interval '24 hours'
 `
 
-type CountRecentSuggestionsByLinkAndTypeParams struct {
+type CountRecentSuggestionsByLinkTypeSubtypeParams struct {
 	LinkID      pgtype.UUID
 	WorkspaceID pgtype.UUID
 	Type        string
+	Subtype     pgtype.Text
 }
 
-func (q *Queries) CountRecentSuggestionsByLinkAndType(ctx context.Context, arg CountRecentSuggestionsByLinkAndTypeParams) (int64, error) {
-	row := q.db.QueryRow(ctx, countRecentSuggestionsByLinkAndType, arg.LinkID, arg.WorkspaceID, arg.Type)
+func (q *Queries) CountRecentSuggestionsByLinkTypeSubtype(ctx context.Context, arg CountRecentSuggestionsByLinkTypeSubtypeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentSuggestionsByLinkTypeSubtype,
+		arg.LinkID,
+		arg.WorkspaceID,
+		arg.Type,
+		arg.Subtype,
+	)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -4559,6 +4565,19 @@ func (q *Queries) GetLinkKeyPageViewMetrics(ctx context.Context, arg GetLinkKeyP
 	return i, err
 }
 
+const getLinkLastAccessAt = `-- name: GetLinkLastAccessAt :one
+SELECT MAX(created_at)::timestamptz AS last_access_at
+FROM access_logs
+WHERE link_id = $1
+`
+
+func (q *Queries) GetLinkLastAccessAt(ctx context.Context, linkID pgtype.UUID) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getLinkLastAccessAt, linkID)
+	var last_access_at pgtype.Timestamptz
+	err := row.Scan(&last_access_at)
+	return last_access_at, err
+}
+
 const getLinkPageViewMetrics = `-- name: GetLinkPageViewMetrics :one
 SELECT
     COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds,
@@ -5549,6 +5568,22 @@ func (q *Queries) IncrementLinkAccessCount(ctx context.Context, id pgtype.UUID) 
 	return err
 }
 
+const incrementSuggestionOutboxAttempts = `-- name: IncrementSuggestionOutboxAttempts :exec
+UPDATE suggestion_outbox
+SET attempts = attempts + 1, last_error = $2
+WHERE id = $1
+`
+
+type IncrementSuggestionOutboxAttemptsParams struct {
+	ID        pgtype.UUID
+	LastError pgtype.Text
+}
+
+func (q *Queries) IncrementSuggestionOutboxAttempts(ctx context.Context, arg IncrementSuggestionOutboxAttemptsParams) error {
+	_, err := q.db.Exec(ctx, incrementSuggestionOutboxAttempts, arg.ID, arg.LastError)
+	return err
+}
+
 const insertLinkAccessRuleRevision = `-- name: InsertLinkAccessRuleRevision :exec
 INSERT INTO link_access_rule_revisions (
     tenant_id, workspace_id, link_id, changed_by, rules_snapshot
@@ -5572,6 +5607,32 @@ func (q *Queries) InsertLinkAccessRuleRevision(ctx context.Context, arg InsertLi
 		arg.RulesSnapshot,
 	)
 	return err
+}
+
+const insertSuggestionOutbox = `-- name: InsertSuggestionOutbox :execrows
+INSERT INTO suggestion_outbox (tenant_id, workspace_id, link_id, lang)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (link_id, workspace_id) WHERE processed_at IS NULL DO NOTHING
+`
+
+type InsertSuggestionOutboxParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	Lang        string
+}
+
+func (q *Queries) InsertSuggestionOutbox(ctx context.Context, arg InsertSuggestionOutboxParams) (int64, error) {
+	result, err := q.db.Exec(ctx, insertSuggestionOutbox,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.Lang,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const listAccessLogsByLink = `-- name: ListAccessLogsByLink :many
@@ -7439,6 +7500,50 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 	return items, nil
 }
 
+const listPendingSuggestionOutbox = `-- name: ListPendingSuggestionOutbox :many
+SELECT id, tenant_id, workspace_id, link_id, lang, created_at, processed_at, attempts, last_error
+FROM suggestion_outbox
+WHERE processed_at IS NULL AND attempts < $1
+ORDER BY created_at ASC
+LIMIT $2
+FOR UPDATE SKIP LOCKED
+`
+
+type ListPendingSuggestionOutboxParams struct {
+	Attempts int32
+	Limit    int32
+}
+
+func (q *Queries) ListPendingSuggestionOutbox(ctx context.Context, arg ListPendingSuggestionOutboxParams) ([]SuggestionOutbox, error) {
+	rows, err := q.db.Query(ctx, listPendingSuggestionOutbox, arg.Attempts, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SuggestionOutbox
+	for rows.Next() {
+		var i SuggestionOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.Lang,
+			&i.CreatedAt,
+			&i.ProcessedAt,
+			&i.Attempts,
+			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPopularDocumentsByWorkspace = `-- name: ListPopularDocumentsByWorkspace :many
 SELECT
     d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
@@ -8838,6 +8943,17 @@ type MarkNotificationSentParams struct {
 
 func (q *Queries) MarkNotificationSent(ctx context.Context, arg MarkNotificationSentParams) error {
 	_, err := q.db.Exec(ctx, markNotificationSent, arg.ID, arg.ProviderMessageID)
+	return err
+}
+
+const markSuggestionOutboxProcessed = `-- name: MarkSuggestionOutboxProcessed :exec
+UPDATE suggestion_outbox
+SET processed_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) MarkSuggestionOutboxProcessed(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markSuggestionOutboxProcessed, id)
 	return err
 }
 

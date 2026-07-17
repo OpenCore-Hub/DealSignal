@@ -201,9 +201,7 @@ func (h *Handler) triggerSuggestions(ctx context.Context, link db.Link, lang str
 	if h.suggestions == nil {
 		return
 	}
-	workspaceID := uuid.UUID(link.WorkspaceID.Bytes).String()
-	linkID := uuid.UUID(link.ID.Bytes).String()
-	_, _ = h.suggestions.Generate(ctx, workspaceID, linkID, lang)
+	_ = h.suggestions.ScheduleGenerate(ctx, link, lang)
 }
 
 func langFromContext(c *gin.Context) string {

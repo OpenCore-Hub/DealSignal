@@ -56,6 +56,10 @@ type Input struct {
 // DecayHalfLifeDays is the default half-life for time decay (7 days).
 const DecayHalfLifeDays = 7.0
 
+// MaxAvgDurationMinutes caps the duration factor so a single very long session
+// cannot dominate the heat score.
+const MaxAvgDurationMinutes = 15.0
+
 // Result is the computed heat score output.
 type Result struct {
 	Score      int                `json:"score"`
@@ -107,6 +111,10 @@ func Compute(circle Circle, in Input) Result {
 		cfg = configs[CircleDefault]
 	}
 	w := cfg.Weights
+
+	if in.AvgDurationMinutes > MaxAvgDurationMinutes {
+		in.AvgDurationMinutes = MaxAvgDurationMinutes
+	}
 
 	breakdown := map[string]float64{
 		"opens":                component("opens", in, w),

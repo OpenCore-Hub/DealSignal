@@ -13,6 +13,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -326,33 +327,7 @@ func unmarshalJSONB[T any](b []byte) (T, bool) {
 func signalFeedList(signals []db.Signal) []gin.H {
 	out := make([]gin.H, 0, len(signals))
 	for _, s := range signals {
-		item := gin.H{
-			"id":          uuidToString(s.ID),
-			"type":        s.Type,
-			"subtype":     s.Subtype.String,
-			"title":       s.Title,
-			"description": s.Description,
-			"explanation": s.Explanation,
-			"suggestion":  s.Suggestion,
-			"priority":    s.Priority,
-			"createdAt":   s.CreatedAt.Time.Format(time.RFC3339),
-		}
-		if s.DocumentID.Valid {
-			item["documentId"] = uuidToString(s.DocumentID)
-		}
-		if s.ContactID.Valid {
-			item["contactId"] = uuidToString(s.ContactID)
-		}
-		if s.LinkID.Valid {
-			item["linkId"] = uuidToString(s.LinkID)
-		}
-		if ctx, ok := unmarshalJSONB[map[string]any](s.Context); ok && len(ctx) > 0 {
-			item["context"] = ctx
-		}
-		if md, ok := unmarshalJSONB[map[string]string](s.Metadata); ok && len(md) > 0 {
-			item["metadata"] = md
-		}
-		out = append(out, item)
+		out = append(out, signal.SignalItem(s))
 	}
 	return out
 }
@@ -360,17 +335,7 @@ func signalFeedList(signals []db.Signal) []gin.H {
 func actionItemList(actions []db.ActionItem) []gin.H {
 	out := make([]gin.H, len(actions))
 	for i, a := range actions {
-		out[i] = gin.H{
-			"id":         uuidToString(a.ID),
-			"signalId":   uuidToString(a.SignalID),
-			"title":      a.Title,
-			"impact":     a.Impact,
-			"dueAt":      a.DueAt.Time.Format(time.RFC3339),
-			"status":     a.Status,
-			"actionType": a.ActionType,
-			"createdAt":  a.CreatedAt.Time.Format(time.RFC3339),
-			"updatedAt":  a.UpdatedAt.Time.Format(time.RFC3339),
-		}
+		out[i] = signal.ActionItem(a)
 	}
 	return out
 }
