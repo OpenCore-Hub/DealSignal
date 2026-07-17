@@ -44,9 +44,8 @@ func SignalItem(s db.Signal) gin.H {
 
 // ActionItem returns the canonical JSON representation of an action item.
 func ActionItem(a db.ActionItem) gin.H {
-	return gin.H{
+	item := gin.H{
 		"id":         uuid.UUID(a.ID.Bytes).String(),
-		"signalId":   uuid.UUID(a.SignalID.Bytes).String(),
 		"title":      a.Title,
 		"impact":     a.Impact,
 		"dueAt":      a.DueAt.Time.Format(time.RFC3339),
@@ -55,6 +54,16 @@ func ActionItem(a db.ActionItem) gin.H {
 		"createdAt":  a.CreatedAt.Time.Format(time.RFC3339),
 		"updatedAt":  a.UpdatedAt.Time.Format(time.RFC3339),
 	}
+	if a.SignalID.Valid {
+		item["signalId"] = uuid.UUID(a.SignalID.Bytes).String()
+	}
+	if a.SourceType.Valid {
+		item["sourceType"] = a.SourceType.String
+	}
+	if a.SourceID.Valid {
+		item["sourceId"] = a.SourceID.String
+	}
+	return item
 }
 
 func unmarshalJSONB[T any](b []byte) (T, bool) {

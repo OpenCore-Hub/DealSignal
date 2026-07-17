@@ -18,12 +18,30 @@ var ErrActionNotFound = errors.New("action not found")
 
 // Service manages signals and action items.
 type Service struct {
-	queries *db.Queries
+	queries      *db.Queries
+	actionSyncer ActionSyncer
+}
+
+// ActionSyncer synchronizes operational events into action items.
+type ActionSyncer interface {
+	SyncWorkspace(ctx context.Context, workspaceID string) error
+}
+
+// ServiceOption configures a Service.
+type ServiceOption func(*Service)
+
+// WithActionSyncer wires an operational action syncer into the service.
+func WithActionSyncer(a ActionSyncer) ServiceOption {
+	return func(s *Service) { s.actionSyncer = a }
 }
 
 // NewService creates a signal service.
-func NewService(q *db.Queries) *Service {
-	return &Service{queries: q}
+func NewService(q *db.Queries, opts ...ServiceOption) *Service {
+	s := &Service{queries: q}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Feed is the workspace signal feed returned to clients.
@@ -41,6 +59,11 @@ func (s *Service) GetFeed(ctx context.Context, workspaceID string) (Feed, error)
 
 	if err := s.SyncWorkspace(ctx, workspaceID); err != nil {
 		return Feed{}, fmt.Errorf("sync signals: %w", err)
+	}
+	if s.actionSyncer != nil {
+		if err := s.actionSyncer.SyncWorkspace(ctx, workspaceID); err != nil {
+			return Feed{}, fmt.Errorf("sync operational actions: %w", err)
+		}
 	}
 
 	signals, err := s.queries.ListSignalsByWorkspace(ctx, wsUUID)

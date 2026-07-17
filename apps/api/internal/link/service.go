@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -52,16 +53,30 @@ type Notifier interface {
 
 // Service handles smart links.
 type Service struct {
-	queries       *db.Queries
-	pool          Beginner
-	redisClient   *redis.Client
-	mailer        mailer.Mailer
-	notifier      Notifier
-	viewerBaseURL string
-	cfg           *config.Config
-	llm           LLMClient
-	emailSem      chan struct{} // limits concurrent email sends (bounded goroutines)
-	indexGenGroup singleflight.Group
+	queries        *db.Queries
+	pool           Beginner
+	redisClient    *redis.Client
+	mailer         mailer.Mailer
+	notifier       Notifier
+	viewerBaseURL  string
+	cfg            *config.Config
+	llm            LLMClient
+	emailSem       chan struct{} // limits concurrent email sends (bounded goroutines)
+	indexGenGroup  singleflight.Group
+	actionSyncer   ActionSyncer
+}
+
+// ActionSyncer resolves operational action items when link events are handled.
+type ActionSyncer interface {
+	ResolveBySource(ctx context.Context, workspaceID, sourceType, sourceID string)
+}
+
+// ServiceOption configures a Service.
+type ServiceOption func(*Service)
+
+// WithActionSyncer wires an action syncer so link events can resolve action items.
+func WithActionSyncer(a ActionSyncer) ServiceOption {
+	return func(s *Service) { s.actionSyncer = a }
 }
 
 // LLMClient is the subset of llm.Client used by the link service.
@@ -76,13 +91,17 @@ type llmMessage struct {
 }
 
 // NewService creates a link service.
-func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, cfg *config.Config, n Notifier, llm LLMClient) *Service {
-	return &Service{
+func NewService(q *db.Queries, pool Beginner, r *redis.Client, m mailer.Mailer, viewerBaseURL string, cfg *config.Config, n Notifier, llm LLMClient, opts ...ServiceOption) *Service {
+	s := &Service{
 		queries: q, pool: pool, redisClient: r, mailer: m, notifier: n, viewerBaseURL: viewerBaseURL,
 		cfg:      cfg,
 		llm:      llm,
 		emailSem: make(chan struct{}, 8), // cap concurrent email goroutines
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 var (
@@ -1769,6 +1788,7 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 		creatorID = uuid.UUID(link.CreatedBy.Bytes).String()
 	}
 	s.sendInvitationEmail(ctx, inv, wsID, creatorID, link.Name.String, linkURL)
+	s.resolveLinkAccessRequest(workspaceID, requestID)
 
 	return dbAccessRequestToDomain(updated), nil
 }
@@ -1814,6 +1834,7 @@ func (s *Service) RejectAccessRequest(ctx context.Context, workspaceID, linkID, 
 	if err != nil {
 		return LinkAccessRequest{}, fmt.Errorf("reject access request: %w", err)
 	}
+	s.resolveLinkAccessRequest(workspaceID, requestID)
 	return dbAccessRequestToDomain(updated), nil
 }
 
@@ -2491,6 +2512,7 @@ func (s *Service) ArchiveLink(ctx context.Context, workspaceID, linkID string) (
 		return db.Link{}, fmt.Errorf("archive link: %w", err)
 	}
 	s.recordSecurityEvent(ctx, link, "", "", "link_archived", "")
+	s.resolveExpiringLink(workspaceID, linkID)
 	return s.GetByID(ctx, linkID, workspaceID)
 }
 
@@ -2553,6 +2575,7 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		return db.Link{}, fmt.Errorf("reactivate link: %w", err)
 	}
 	s.recordSecurityEvent(ctx, link, "", "", "link_renewed", "")
+	s.resolveExpiringLink(workspaceID, linkID)
 	return s.GetByID(ctx, linkID, workspaceID)
 }
 
@@ -2586,6 +2609,7 @@ func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error 
 			if fallbackErr != nil {
 				return fmt.Errorf("delete link: %w", fallbackErr)
 			}
+			s.resolveExpiringLink(workspaceID, linkID)
 			return nil
 		}
 		return fmt.Errorf("delete link: %w", err)
@@ -2593,6 +2617,7 @@ func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error 
 	if rows == 0 {
 		return ErrNotFoundInWorkspace
 	}
+	s.resolveExpiringLink(workspaceID, linkID)
 	return nil
 }
 
@@ -3017,12 +3042,17 @@ func (s *Service) AnswerVisitorQuestion(ctx context.Context, questionID, workspa
 	if strings.TrimSpace(answer) == "" {
 		return db.LinkVisitorQuestion{}, fmt.Errorf("answer is required")
 	}
-	return s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
+	q, err := s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
 		Answer:      pgtype.Text{String: strings.TrimSpace(answer), Valid: true},
 		AnsweredBy:  userID,
 		ID:          questionID,
 		WorkspaceID: workspaceID,
 	})
+	if err != nil {
+		return db.LinkVisitorQuestion{}, err
+	}
+	s.resolveLinkQuestion(uuid.UUID(workspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
+	return q, nil
 }
 
 const maxPendingFileRequestsPerVisitor = 3
@@ -3398,6 +3428,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 		)
 	}
 
+	s.resolveUploadedFile(uuid.UUID(file.WorkspaceID.Bytes).String(), uuid.UUID(fileID.Bytes).String())
 	return nil
 }
 
@@ -3420,11 +3451,15 @@ func (s *Service) RejectUploadedFile(ctx context.Context, fileID pgtype.UUID, re
 	if uuid.UUID(link.CreatedBy.Bytes) != uuid.UUID(reviewerID.Bytes) {
 		return fmt.Errorf("only the link creator can reject uploads")
 	}
-	return s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
+	if err := s.queries.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
 		Status:     "rejected",
 		ReviewedBy: reviewerID,
 		ID:         fileID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.resolveUploadedFile(uuid.UUID(file.WorkspaceID.Bytes).String(), uuid.UUID(fileID.Bytes).String())
+	return nil
 }
 
 // mimeToSourceType maps uploaded-file MIME types to the document source_type
@@ -3489,4 +3524,32 @@ func hashIPText(key, ip string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: compliance.HashIP(key, ip), Valid: true}
+}
+
+func (s *Service) resolveLinkAccessRequest(workspaceID, requestID string) {
+	if s.actionSyncer == nil {
+		return
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkAccessRequest, requestID)
+}
+
+func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {
+	if s.actionSyncer == nil {
+		return
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkQuestion, questionID)
+}
+
+func (s *Service) resolveExpiringLink(workspaceID, linkID string) {
+	if s.actionSyncer == nil {
+		return
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeExpiringLink, linkID)
+}
+
+func (s *Service) resolveUploadedFile(workspaceID, fileID string) {
+	if s.actionSyncer == nil {
+		return
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeUploadedFile, fileID)
 }

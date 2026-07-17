@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
@@ -45,14 +46,32 @@ type Beginner interface {
 
 // Service handles data rooms.
 type Service struct {
-	queries *db.Queries
-	pool    Beginner
-	cfg     *config.Config
+	queries      *db.Queries
+	pool         Beginner
+	cfg          *config.Config
+	actionSyncer ActionSyncer
+}
+
+// ActionSyncer resolves operational action items when room events are handled.
+type ActionSyncer interface {
+	ResolveBySource(ctx context.Context, workspaceID, sourceType, sourceID string)
+}
+
+// ServiceOption configures a Service.
+type ServiceOption func(*Service)
+
+// WithActionSyncer wires an action syncer so room events can resolve action items.
+func WithActionSyncer(a ActionSyncer) ServiceOption {
+	return func(s *Service) { s.actionSyncer = a }
 }
 
 // NewService creates a deal room service.
-func NewService(q *db.Queries, pool Beginner, cfg *config.Config) *Service {
-	return &Service{queries: q, pool: pool, cfg: cfg}
+func NewService(q *db.Queries, pool Beginner, cfg *config.Config, opts ...ServiceOption) *Service {
+	s := &Service{queries: q, pool: pool, cfg: cfg}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // CreateRoomRequest is the input for creating a room.
@@ -597,6 +616,7 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, requestID, roomID, w
 
 	req.Status = "approved"
 	req.ReviewedBy = approverUUID
+	s.resolveRoomAccessRequest(workspaceID, requestID)
 	return req, nil
 }
 
@@ -634,6 +654,7 @@ func (s *Service) RejectAccessRequest(ctx context.Context, requestID, roomID, wo
 	}
 	req.Status = "rejected"
 	req.ReviewedBy = reviewerUUID
+	s.resolveRoomAccessRequest(workspaceID, requestID)
 	return req, nil
 }
 
@@ -700,6 +721,7 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 			logger.Attr("email", email),
 		)
 	}
+	s.resolveRoomNDA(ctx, uuid.UUID(room.WorkspaceID.Bytes).String(), room.ID, email)
 	return nil
 }
 
@@ -1554,4 +1576,22 @@ func pgUUID(id string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+func (s *Service) resolveRoomAccessRequest(workspaceID, requestID string) {
+	if s.actionSyncer == nil {
+		return
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeRoomAccessRequest, requestID)
+}
+
+func (s *Service) resolveRoomNDA(ctx context.Context, workspaceID string, roomID pgtype.UUID, email string) {
+	if s.actionSyncer == nil {
+		return
+	}
+	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{RoomID: roomID, Email: email})
+	if err != nil || !member.ID.Valid {
+		return
+	}
+	s.actionSyncer.ResolveBySource(ctx, workspaceID, action.SourceTypeRoomNDA, uuid.UUID(member.ID.Bytes).String())
 }

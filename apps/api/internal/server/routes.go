@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
@@ -228,14 +229,16 @@ func (s *Server) registerRoutes() error {
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc)
 			assistantHandler := assistant.NewHandler(assistantSvc)
 
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil)
+			actionSyncer := action.NewSyncer(queries)
+
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil, link.WithActionSyncer(actionSyncer))
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
 				dedupChecker = analytics.NewFailoverDedupChecker(s.redisClient, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			} else {
 				dedupChecker = analytics.NewFailoverDedupChecker(nil, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			}
-			signalSvc := signal.NewService(queries)
+			signalSvc := signal.NewService(queries, signal.WithActionSyncer(actionSyncer))
 
 			if s.cfg.EventsEnabled {
 				signalConsumer := events.NewSignalConsumer(signalSvc)
@@ -271,7 +274,7 @@ func (s *Server) registerRoutes() error {
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
 
-			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg)
+			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg, dealroom.WithActionSyncer(actionSyncer))
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
 
 			complianceSvc := compliance.NewService(queries, s.dbPool, s.cfg)
