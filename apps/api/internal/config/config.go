@@ -101,6 +101,8 @@ type Config struct {
 	PageViewsRetentionDays      int
 	SecurityEventsRetentionDays int
 
+	SignalRulesPath string
+
 	CORSAllowedOrigins string
 	MetricsEnabled     bool
 	PprofEnabled       bool
@@ -195,6 +197,8 @@ func Load() (*Config, error) {
 
 		SecurityAnomalyWindow:    time.Duration(getEnvInt("SECURITY_ANOMALY_WINDOW_MINUTES", 5)) * time.Minute,
 		SecurityAnomalyThreshold: getEnvInt("SECURITY_ANOMALY_THRESHOLD", 5),
+
+		SignalRulesPath:             getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
 
 		AccessLogsRetentionDays:     getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
 		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),

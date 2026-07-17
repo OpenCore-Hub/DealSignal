@@ -197,7 +197,11 @@ func (s *Server) registerRoutes() error {
 			if chatCompleter != nil {
 				suggestionEnricher = suggestions.NewLLMEnricher(chatCompleter)
 			}
-			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc}, suggestionEnricher)
+			suggestionRuleEngine, err := suggestions.NewRuleEngine(s.cfg.SignalRulesPath)
+			if err != nil {
+				return fmt.Errorf("suggestion rule engine: %w", err)
+			}
+			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc}, suggestionRuleEngine, suggestionEnricher)
 
 			suggestionWorker := suggestions.NewWorker(suggestionSvc, s.dbPool, suggestions.DefaultWorkerConfig())
 			s.registerWorker(suggestionWorker)

@@ -49,14 +49,15 @@ type Enricher interface {
 
 // Service generates follow-up suggestions from link analytics.
 type Service struct {
-	queries   *db.Queries
-	notifier  Notifier
-	enricher  Enricher
+	queries     *db.Queries
+	notifier    Notifier
+	enricher    Enricher
+	ruleEngine  *RuleEngine
 }
 
 // NewService creates a suggestion service.
-func NewService(q *db.Queries, n Notifier, enricher ...Enricher) *Service {
-	s := &Service{queries: q, notifier: n}
+func NewService(q *db.Queries, n Notifier, ruleEngine *RuleEngine, enricher ...Enricher) *Service {
+	s := &Service{queries: q, notifier: n, ruleEngine: ruleEngine}
 	if len(enricher) > 0 {
 		s.enricher = enricher[0]
 	}
@@ -150,9 +151,15 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 	}
 
 	securityEvents, _ := s.queries.ListRecentSecurityEventsByLink(ctx, linkUUID)
-	candidates := buildCandidates(result, metrics, ctxSnapshot, lang)
-	candidates = append(candidates, buildSecurityCandidates(securityEvents, lang)...)
-	candidates = append(candidates, s.buildBehaviorRiskCandidates(ctx, linkUUID, metrics, ctxSnapshot, lang)...)
+	behavior, err := s.behaviorFeatures(ctx, linkUUID)
+	if err != nil {
+		return nil, err
+	}
+
+	candidates, err := s.evaluateRules(result, metrics, behavior, ctxSnapshot, securityEvents)
+	if err != nil {
+		return nil, fmt.Errorf("evaluate rules: %w", err)
+	}
 
 	out := make([]Suggestion, 0, len(candidates))
 	for _, c := range candidates {
@@ -207,6 +214,53 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		}
 	}
 	return out, nil
+}
+
+func (s *Service) evaluateRules(result heat.Result, m suggestionMetrics, behavior BehaviorInput, ctxSnapshot Context, events []db.ListRecentSecurityEventsByLinkRow) ([]candidate, error) {
+	if s.ruleEngine == nil {
+		return nil, nil
+	}
+
+	sec := make([]SecurityEventInput, 0, len(events))
+	for _, ev := range events {
+		sec = append(sec, SecurityEventInput{
+			EventType: ev.EventType,
+			Reason:    ev.Reason.String,
+		})
+	}
+
+	matches, err := s.ruleEngine.Evaluate(RuleInput{
+		Heat: HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
+		Metrics: MetricsInput{
+			Opens:              m.opens,
+			Revisits:           m.revisits,
+			AvgDurationMinutes: m.avgDurationMinutes,
+			Bounces:            m.bounces,
+			Downloads:          m.downloads,
+			TotalPageViews:     m.totalPageViews,
+			KeyPageViews:       m.keyPageViews,
+			UniqueVisitors:     m.uniqueVisitors,
+		},
+		Behavior:       behavior,
+		Context:        ctxSnapshot,
+		SecurityEvents: sec,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	candidates := make([]candidate, 0, len(matches))
+	for _, match := range matches {
+		candidates = append(candidates, candidate{
+			Type:     match.Type,
+			Subtype:  match.Subtype,
+			Reason:   match.Reason,
+			Action:   match.Action,
+			Metadata: match.Metadata,
+			Context:  ctxSnapshot,
+		})
+	}
+	return candidates, nil
 }
 
 // List returns active suggestions for a link.
@@ -413,6 +467,26 @@ type suggestionMetrics struct {
 	bounces            int
 }
 
+func (s *Service) behaviorFeatures(ctx context.Context, linkID pgtype.UUID) (BehaviorInput, error) {
+	var out BehaviorInput
+
+	distinctIPs, err := s.queries.CountRecentDistinctIPsByLink(ctx, linkID)
+	if err != nil {
+		return out, fmt.Errorf("count distinct IPs: %w", err)
+	}
+	out.DistinctIPs1h = distinctIPs
+
+	downloads, err := s.queries.CountRecentDownloadAttemptsByLink(ctx, linkID)
+	if err != nil {
+		return out, fmt.Errorf("count downloads: %w", err)
+	}
+	out.Downloads24h = downloads.TotalDownloads
+	out.DistinctEmails24h = downloads.DistinctEmails
+	out.UnknownEmails24h = downloads.DistinctUnknownEmails
+
+	return out, nil
+}
+
 func (m suggestionMetrics) heatInput() heat.Input {
 	return heat.Input{
 		Opens:              m.opens,
@@ -432,52 +506,6 @@ type candidate struct {
 	Action   string
 	Metadata map[string]string
 	Context  Context
-}
-
-func buildCandidates(result heat.Result, m suggestionMetrics, ctx Context, lang string) []candidate {
-	ls := newLocalizedStrings(lang)
-	var out []candidate
-	if result.Level == "hot" && m.opens >= 2 {
-		out = append(out, candidate{
-			Type:    "hot_signal",
-			Subtype: SubtypeHot,
-			Reason:  fmt.Sprintf(ls.hotSignalReasonTmpl, result.Score, result.Level, m.opens, m.keyPageViews),
-			Action:  ls.hotSignalAction,
-			Context: ctx,
-		})
-	}
-	if m.downloads > 0 {
-		out = append(out, candidate{
-			Type:    "follow_up",
-			Subtype: SubtypeDownload,
-			Reason:  fmt.Sprintf(ls.downloadReasonTmpl, m.opens),
-			Action:  ls.downloadAction,
-			Context: ctx,
-		})
-	}
-	if m.revisits > 0 {
-		out = append(out, candidate{
-			Type:    "follow_up",
-			Subtype: SubtypeRevisit,
-			Reason:  fmt.Sprintf(ls.revisitReasonTmpl, m.revisits),
-			Action:  ls.revisitAction,
-			Context: ctx,
-		})
-	}
-	if m.bounces > 0 && (m.avgDurationMinutes/float64(m.bounces)) < 0.5 {
-		out = append(out, candidate{
-			Type:    "risk_alert",
-			Subtype: SubtypeBounce,
-			Reason:  fmt.Sprintf(ls.riskReasonTmpl, m.bounces, m.avgDurationMinutes),
-			Action:  ls.riskAction,
-			Metadata: map[string]string{
-				"bounces":              fmt.Sprintf("%d", m.bounces),
-				"avg_duration_minutes": fmt.Sprintf("%.2f", m.avgDurationMinutes),
-			},
-			Context: ctx,
-		})
-	}
-	return out
 }
 
 func suggestionFromRow(r db.Suggestion, lang string) Suggestion {
@@ -547,79 +575,6 @@ func TitleForType(typ, lang string) string {
 	return titleForType(typ, lang)
 }
 
-func buildSecurityCandidates(events []db.ListRecentSecurityEventsByLinkRow, lang string) []candidate {
-	ls := newLocalizedStrings(lang)
-	seen := make(map[string]bool)
-	var out []candidate
-	for _, ev := range events {
-		if seen[ev.EventType] {
-			continue
-		}
-		seen[ev.EventType] = true
-		var sub string
-		switch ev.EventType {
-		case "expired_link_accessed":
-			sub = SubtypeExpired
-		case "max_access_reached":
-			sub = SubtypeAccessExhausted
-		case "revoked_link_accessed":
-			sub = SubtypeAccessRevoked
-		case "blocked_email", "blocked_domain", "not_in_allow_list", "no_allow_match":
-			sub = SubtypeBlockedAttempt
-		case "abnormal_access_pattern":
-			sub = SubtypeAnomaly
-		default:
-			continue
-		}
-		out = append(out, candidate{
-			Type:    "risk_alert",
-			Subtype: sub,
-			Reason:  ev.Reason.String,
-			Action:  ls.riskAction,
-			Metadata: map[string]string{
-				"event_type": ev.EventType,
-			},
-		})
-	}
-	return out
-}
-
-func (s *Service) buildBehaviorRiskCandidates(ctx context.Context, linkID pgtype.UUID, m suggestionMetrics, ctxSnapshot Context, lang string) []candidate {
-	ls := newLocalizedStrings(lang)
-	var out []candidate
-
-	distinctIPs, err := s.queries.CountRecentDistinctIPsByLink(ctx, linkID)
-	if err == nil && distinctIPs >= 3 {
-		out = append(out, candidate{
-			Type:    "risk_alert",
-			Subtype: SubtypeForward,
-			Reason:  fmt.Sprintf("%d distinct IPs opened this link in the last hour", distinctIPs),
-			Action:  ls.riskAction,
-			Metadata: map[string]string{
-				"distinct_ips": fmt.Sprintf("%d", distinctIPs),
-			},
-			Context: ctxSnapshot,
-		})
-	}
-
-	downloads, err := s.queries.CountRecentDownloadAttemptsByLink(ctx, linkID)
-	if err == nil && downloads.TotalDownloads > 0 && (downloads.DistinctEmails > 1 || downloads.DistinctUnknownEmails > 0) {
-		out = append(out, candidate{
-			Type:    "risk_alert",
-			Subtype: SubtypeDownload,
-			Reason:  fmt.Sprintf("%d downloads from %d distinct emails in the last 24 hours", downloads.TotalDownloads, downloads.DistinctEmails),
-			Action:  ls.riskAction,
-			Metadata: map[string]string{
-				"total_downloads":       fmt.Sprintf("%d", downloads.TotalDownloads),
-				"distinct_emails":       fmt.Sprintf("%d", downloads.DistinctEmails),
-				"distinct_unknown_emails": fmt.Sprintf("%d", downloads.DistinctUnknownEmails),
-			},
-			Context: ctxSnapshot,
-		})
-	}
-
-	return out
-}
 
 func shouldEnrich(typ, subtype string) bool {
 	if typ == "hot_signal" {

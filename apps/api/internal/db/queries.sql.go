@@ -1971,7 +1971,7 @@ func (q *Queries) CreateSignal(ctx context.Context, arg CreateSignalParams) (Sig
 const createSuggestion = `-- name: CreateSuggestion :one
 INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context)
 VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $10::jsonb, $11::jsonb)
-RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
 `
 
 type CreateSuggestionParams struct {
@@ -2019,6 +2019,7 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		&i.Subtype,
 		&i.Metadata,
 		&i.Context,
+		&i.SyncedAt,
 	)
 	return i, err
 }
@@ -8181,6 +8182,51 @@ func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurity
 	return items, nil
 }
 
+const listSignalsBySuggestionIDs = `-- name: ListSignalsBySuggestionIDs :many
+SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
+FROM signals
+WHERE suggestion_id = ANY($1::uuid[])
+`
+
+func (q *Queries) ListSignalsBySuggestionIDs(ctx context.Context, dollar_1 []pgtype.UUID) ([]Signal, error) {
+	rows, err := q.db.Query(ctx, listSignalsBySuggestionIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Signal
+	for rows.Next() {
+		var i Signal
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.SuggestionID,
+			&i.Type,
+			&i.Title,
+			&i.Description,
+			&i.Explanation,
+			&i.Suggestion,
+			&i.DocumentID,
+			&i.ContactID,
+			&i.LinkID,
+			&i.Priority,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Subtype,
+			&i.Metadata,
+			&i.Context,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSignalsByWorkspace = `-- name: ListSignalsByWorkspace :many
 SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
 FROM signals
@@ -8228,7 +8274,7 @@ func (q *Queries) ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype
 }
 
 const listSuggestionsByLink = `-- name: ListSuggestionsByLink :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
 FROM suggestions
 WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
 ORDER BY created_at DESC
@@ -8264,6 +8310,7 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 			&i.Subtype,
 			&i.Metadata,
 			&i.Context,
+			&i.SyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -8276,7 +8323,7 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 }
 
 const listSuggestionsByWorkspace = `-- name: ListSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
 FROM suggestions
 WHERE workspace_id = $1 AND dismissed = false
 ORDER BY created_at DESC
@@ -8307,6 +8354,7 @@ func (q *Queries) ListSuggestionsByWorkspace(ctx context.Context, workspaceID pg
 			&i.Subtype,
 			&i.Metadata,
 			&i.Context,
+			&i.SyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -8520,6 +8568,51 @@ func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspac
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listUnsyncedSuggestionsByWorkspace = `-- name: ListUnsyncedSuggestionsByWorkspace :many
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at
+FROM suggestions
+WHERE workspace_id = $1
+  AND (synced_at IS NULL OR updated_at > synced_at)
+ORDER BY created_at DESC
+`
+
+func (q *Queries) ListUnsyncedSuggestionsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Suggestion, error) {
+	rows, err := q.db.Query(ctx, listUnsyncedSuggestionsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Suggestion
+	for rows.Next() {
+		var i Suggestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.ContactID,
+			&i.LinkID,
+			&i.DocumentID,
+			&i.Type,
+			&i.Reason,
+			&i.Action,
+			&i.Dismissed,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.Subtype,
+			&i.Metadata,
+			&i.Context,
+			&i.SyncedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -8954,6 +9047,17 @@ WHERE id = $1
 
 func (q *Queries) MarkSuggestionOutboxProcessed(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markSuggestionOutboxProcessed, id)
+	return err
+}
+
+const markSuggestionsSynced = `-- name: MarkSuggestionsSynced :exec
+UPDATE suggestions
+SET synced_at = now()
+WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) MarkSuggestionsSynced(ctx context.Context, dollar_1 []pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markSuggestionsSynced, dollar_1)
 	return err
 }
 

@@ -1,0 +1,116 @@
+# Signal generation rules.
+# Each expression rule is evaluated against a RuleInput map. Available fields:
+#   heat.level, heat.score, heat.trend
+#   opens, revisits, avgDurationMinutes, bounces, downloads, totalPageViews,
+#   keyPageViews, uniqueVisitors, distinctIPs1h, distinctEmails24h,
+#   unknownEmails24h, downloads24h
+# Security event rules map an event_type to a risk_alert subtype.
+
+expression_rules:
+  - id: hot_signal
+    condition: 'heat.level == "hot" && opens >= 2'
+    output:
+      type: hot_signal
+      subtype: hot
+      priority: high
+      reason_template: 'High-intent signal (score {{.heat.score}}, level {{.heat.level}}): {{.opens}} opens, {{.keyPageViews}} key page views'
+      action_template: 'Reach out while interest is high'
+      metadata:
+        score: '{{.heat.score}}'
+        level: '{{.heat.level}}'
+
+  - id: follow_up_download
+    condition: 'downloads > 0'
+    output:
+      type: follow_up
+      subtype: download
+      priority: low
+      reason_template: '{{.downloads}} download(s) in the last 24 hours'
+      action_template: 'Follow up on downloaded content'
+
+  - id: follow_up_revisit
+    condition: 'revisits > 0'
+    output:
+      type: follow_up
+      subtype: revisit
+      priority: low
+      reason_template: '{{.revisits}} return visit(s) in the last 24 hours'
+      action_template: 'Re-engage the returning visitor'
+
+  - id: risk_bounce
+    condition: 'bounces > 0 && avgDurationMinutes / bounces < 0.5'
+    output:
+      type: risk_alert
+      subtype: bounce
+      priority: medium
+      reason_template: '{{.bounces}} bounce(s) with very short average engagement'
+      action_template: 'Review whether the content matches visitor intent'
+      metadata:
+        bounces: '{{.bounces}}'
+        avg_duration_minutes: '{{.avgDurationMinutes}}'
+
+  - id: risk_forward
+    condition: 'distinctIPs1h >= 3'
+    output:
+      type: risk_alert
+      subtype: forward
+      priority: medium
+      reason_template: '{{.distinctIPs1h}} distinct IPs opened this link in the last hour'
+      action_template: 'Check for unauthorized forwarding'
+      metadata:
+        distinct_ips: '{{.distinctIPs1h}}'
+
+  - id: risk_suspicious_download
+    condition: 'downloads24h > 0 && (distinctEmails24h > 1 || unknownEmails24h > 0)'
+    output:
+      type: risk_alert
+      subtype: download
+      priority: medium
+      reason_template: '{{.downloads24h}} downloads from {{.distinctEmails24h}} distinct emails in the last 24 hours'
+      action_template: 'Investigate potential leak'
+      metadata:
+        total_downloads: '{{.downloads24h}}'
+        distinct_emails: '{{.distinctEmails24h}}'
+        distinct_unknown_emails: '{{.unknownEmails24h}}'
+
+security_event_rules:
+  expired_link_accessed:
+    subtype: expired
+    priority: medium
+    reason_template: 'Expired link was accessed'
+    action_template: 'Review link expiration policy'
+  max_access_reached:
+    subtype: access_exhausted
+    priority: medium
+    reason_template: 'Link reached its maximum access count'
+    action_template: 'Consider creating a new link'
+  revoked_link_accessed:
+    subtype: access_revoked
+    priority: medium
+    reason_template: 'Revoked link was accessed'
+    action_template: 'Investigate revoked link usage'
+  blocked_email:
+    subtype: blocked_attempt
+    priority: medium
+    reason_template: 'Access attempted from a blocked email'
+    action_template: 'Review blocked email list'
+  blocked_domain:
+    subtype: blocked_attempt
+    priority: medium
+    reason_template: 'Access attempted from a blocked domain'
+    action_template: 'Review blocked domain list'
+  not_in_allow_list:
+    subtype: blocked_attempt
+    priority: medium
+    reason_template: 'Access attempted by an email not in the allow list'
+    action_template: 'Review allow list'
+  no_allow_match:
+    subtype: blocked_attempt
+    priority: medium
+    reason_template: 'Access attempted by an email with no allow-list match'
+    action_template: 'Review allow list'
+  abnormal_access_pattern:
+    subtype: anomaly
+    priority: medium
+    reason_template: 'Abnormal access pattern detected'
+    action_template: 'Investigate anomaly'

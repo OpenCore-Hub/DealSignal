@@ -626,6 +626,7 @@ type Suggestion struct {
 	Subtype     pgtype.Text
 	Metadata    []byte
 	Context     []byte
+	SyncedAt    pgtype.Timestamptz
 }
 
 type SuggestionOutbox struct {

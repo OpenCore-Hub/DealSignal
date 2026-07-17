@@ -1573,6 +1573,23 @@ FROM suggestions
 WHERE workspace_id = $1 AND dismissed = false
 ORDER BY created_at DESC;
 
+-- name: ListUnsyncedSuggestionsByWorkspace :many
+SELECT *
+FROM suggestions
+WHERE workspace_id = $1
+  AND (synced_at IS NULL OR updated_at > synced_at)
+ORDER BY created_at DESC;
+
+-- name: ListSignalsBySuggestionIDs :many
+SELECT *
+FROM signals
+WHERE suggestion_id = ANY($1::uuid[]);
+
+-- name: MarkSuggestionsSynced :exec
+UPDATE suggestions
+SET synced_at = now()
+WHERE id = ANY($1::uuid[]);
+
 -- name: ListActionItemsBySignal :many
 SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
 FROM action_items

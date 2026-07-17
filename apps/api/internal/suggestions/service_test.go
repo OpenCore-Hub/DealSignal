@@ -6,7 +6,17 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 )
 
-func TestBuildCandidatesHotSignal(t *testing.T) {
+func newTestRuleEngine(t *testing.T) *RuleEngine {
+	t.Helper()
+	engine, err := NewRuleEngine("")
+	if err != nil {
+		t.Fatalf("failed to create rule engine: %v", err)
+	}
+	return engine
+}
+
+func TestRuleEngineHotSignal(t *testing.T) {
+	engine := newTestRuleEngine(t)
 	m := suggestionMetrics{
 		opens:              3,
 		uniqueVisitors:     2,
@@ -17,22 +27,26 @@ func TestBuildCandidatesHotSignal(t *testing.T) {
 		bounces:            0,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	candidates := buildCandidates(result, m, Context{}, "zh-CN")
-	if len(candidates) == 0 {
-		t.Fatal("expected at least one candidate")
+	matches, err := engine.Evaluate(RuleInput{
+		Heat:    HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
+		Metrics: m.toMetricsInput(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 	found := false
-	for _, c := range candidates {
-		if c.Type == "hot_signal" {
+	for _, match := range matches {
+		if match.Type == "hot_signal" {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected hot_signal candidate, got %v", candidates)
+		t.Fatalf("expected hot_signal match, got %v", matches)
 	}
 }
 
-func TestBuildCandidatesRiskAlert(t *testing.T) {
+func TestRuleEngineBounceRisk(t *testing.T) {
+	engine := newTestRuleEngine(t)
 	m := suggestionMetrics{
 		opens:              2,
 		uniqueVisitors:     2,
@@ -40,15 +54,61 @@ func TestBuildCandidatesRiskAlert(t *testing.T) {
 		bounces:            2,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput())
-	candidates := buildCandidates(result, m, Context{}, "zh-CN")
+	matches, err := engine.Evaluate(RuleInput{
+		Heat:    HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
+		Metrics: m.toMetricsInput(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	found := false
-	for _, c := range candidates {
-		if c.Type == "risk_alert" {
+	for _, match := range matches {
+		if match.Type == "risk_alert" && match.Subtype == SubtypeBounce {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("expected risk_alert candidate, got %v", candidates)
+		t.Fatalf("expected bounce risk_alert match, got %v", matches)
+	}
+}
+
+func TestRuleEngineForwardRisk(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, err := engine.Evaluate(RuleInput{
+		Behavior: BehaviorInput{DistinctIPs1h: 3},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, match := range matches {
+		if match.Subtype == SubtypeForward {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected forward risk match, got %v", matches)
+	}
+}
+
+func TestRuleEngineSecurityEvent(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, err := engine.Evaluate(RuleInput{
+		SecurityEvents: []SecurityEventInput{
+			{EventType: "expired_link_accessed", Reason: "expired"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, match := range matches {
+		if match.Type == "risk_alert" && match.Subtype == SubtypeExpired {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected expired risk_alert match, got %v", matches)
 	}
 }
 
@@ -72,5 +132,18 @@ func TestHeatInputUsesUniqueVisitorsAsForwardSignals(t *testing.T) {
 	input := m.heatInput()
 	if input.ForwardSignals != 5 {
 		t.Fatalf("expected ForwardSignals=5, got %d", input.ForwardSignals)
+	}
+}
+
+func (m suggestionMetrics) toMetricsInput() MetricsInput {
+	return MetricsInput{
+		Opens:              m.opens,
+		Revisits:           m.revisits,
+		AvgDurationMinutes: m.avgDurationMinutes,
+		Bounces:            m.bounces,
+		Downloads:          m.downloads,
+		TotalPageViews:     m.totalPageViews,
+		KeyPageViews:       m.keyPageViews,
+		UniqueVisitors:     m.uniqueVisitors,
 	}
 }

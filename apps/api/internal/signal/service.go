@@ -85,17 +85,28 @@ func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Sugges
 		WorkspaceID:  suggestion.WorkspaceID,
 	})
 	if err == nil {
-		actions, err := s.queries.ListActionItemsBySignal(ctx, existing.ID)
-		if err != nil || len(actions) == 0 {
-			action, err := s.createActionForSignal(ctx, existing)
-			if err != nil {
-				return db.Signal{}, db.ActionItem{}, err
-			}
-			return existing, action, nil
+		action, err := s.ensureActionForSignal(ctx, existing)
+		if err != nil {
+			return db.Signal{}, db.ActionItem{}, err
 		}
-		return existing, actions[0], nil
+		if err := s.markSynced(ctx, []pgtype.UUID{suggestion.ID}); err != nil {
+			return existing, action, err
+		}
+		return existing, action, nil
 	}
 
+	sig, action, err := s.createSignalAndActionFromSuggestion(ctx, suggestion, lang)
+	if err != nil {
+		return db.Signal{}, db.ActionItem{}, err
+	}
+
+	if err := s.markSynced(ctx, []pgtype.UUID{suggestion.ID}); err != nil {
+		return sig, action, err
+	}
+	return sig, action, nil
+}
+
+func (s *Service) createSignalAndActionFromSuggestion(ctx context.Context, suggestion db.Suggestion, lang string) (db.Signal, db.ActionItem, error) {
 	sig, err := s.queries.CreateSignal(ctx, db.CreateSignalParams{
 		TenantID:    suggestion.TenantID,
 		WorkspaceID: suggestion.WorkspaceID,
@@ -128,6 +139,14 @@ func (s *Service) CreateFromSuggestion(ctx context.Context, suggestion db.Sugges
 	return sig, action, nil
 }
 
+func (s *Service) ensureActionForSignal(ctx context.Context, sig db.Signal) (db.ActionItem, error) {
+	actions, err := s.queries.ListActionItemsBySignal(ctx, sig.ID)
+	if err != nil || len(actions) == 0 {
+		return s.createActionForSignal(ctx, sig)
+	}
+	return actions[0], nil
+}
+
 func (s *Service) createActionForSignal(ctx context.Context, sig db.Signal) (db.ActionItem, error) {
 	return s.queries.CreateActionItem(ctx, db.CreateActionItemParams{
 		TenantID:    sig.TenantID,
@@ -141,10 +160,23 @@ func (s *Service) createActionForSignal(ctx context.Context, sig db.Signal) (db.
 	})
 }
 
+func (s *Service) markSynced(ctx context.Context, ids []pgtype.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	if err := s.queries.MarkSuggestionsSynced(ctx, ids); err != nil {
+		return fmt.Errorf("mark suggestions synced: %w", err)
+	}
+	return nil
+}
+
 func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UUID) error {
-	suggestions, err := s.queries.ListSuggestionsByWorkspace(ctx, workspaceID)
+	suggestions, err := s.queries.ListUnsyncedSuggestionsByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return fmt.Errorf("list suggestions: %w", err)
+		return fmt.Errorf("list unsynced suggestions: %w", err)
+	}
+	if len(suggestions) == 0 {
+		return nil
 	}
 
 	lang := locale.FromContext(ctx)
@@ -152,12 +184,47 @@ func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UU
 		lang = "en"
 	}
 
-	for _, sug := range suggestions {
-		if _, _, err := s.CreateFromSuggestion(ctx, sug, lang); err != nil {
-			return err
-		}
+	existingBySuggestion, err := s.loadExistingSignalsBySuggestion(ctx, suggestions)
+	if err != nil {
+		return err
 	}
-	return nil
+
+	syncedIDs := make([]pgtype.UUID, 0, len(suggestions))
+	for _, sug := range suggestions {
+		if sig, ok := existingBySuggestion[uuid.UUID(sug.ID.Bytes)]; ok {
+			if _, err := s.ensureActionForSignal(ctx, sig); err != nil {
+				return err
+			}
+		} else {
+			if _, _, err := s.createSignalAndActionFromSuggestion(ctx, sug, lang); err != nil {
+				return err
+			}
+		}
+		syncedIDs = append(syncedIDs, sug.ID)
+	}
+
+	return s.markSynced(ctx, syncedIDs)
+}
+
+func (s *Service) loadExistingSignalsBySuggestion(ctx context.Context, suggestions []db.Suggestion) (map[uuid.UUID]db.Signal, error) {
+	ids := make([]pgtype.UUID, 0, len(suggestions))
+	for _, sug := range suggestions {
+		ids = append(ids, sug.ID)
+	}
+
+	existing, err := s.queries.ListSignalsBySuggestionIDs(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("list existing signals: %w", err)
+	}
+
+	out := make(map[uuid.UUID]db.Signal, len(existing))
+	for _, sig := range existing {
+		if !sig.SuggestionID.Valid {
+			continue
+		}
+		out[uuid.UUID(sig.SuggestionID.Bytes)] = sig
+	}
+	return out, nil
 }
 
 func titleForSubtype(subtype, typ, lang string) string {
