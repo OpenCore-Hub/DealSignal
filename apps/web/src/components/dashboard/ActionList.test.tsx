@@ -98,4 +98,22 @@ describe("ActionList", () => {
     fireEvent.click(screen.getByRole("button", { name: /Reactivate/i }));
     expect(onChange).toHaveBeenCalledWith("act_1", "pending");
   });
+
+  it("collapses completed actions by default and expands on click", async () => {
+    const onChange = vi.fn();
+    await renderList([makeAction("done")], onChange);
+    const toggle = screen.getByRole("button", { name: /Completed \(1\)/i });
+    expect(toggle).toBeInTheDocument();
+    expect(screen.queryByText(/Follow up/)).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(screen.getByText(/Follow up/)).toBeInTheDocument();
+    });
+
+    fireEvent.click(toggle);
+    await waitFor(() => {
+      expect(screen.queryByText(/Follow up/)).not.toBeInTheDocument();
+    });
+  });
 });

@@ -38,6 +38,7 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
   const { t } = useTranslation("dashboard");
   const { t: tCommon, i18n } = useTranslation("common");
   const [showHidden, setShowHidden] = useState(false);
+  const [showCompleted, setShowCompleted] = useState(false);
 
   const pending = actions.filter((a) => a.status === "pending");
   const done = actions.filter((a) => a.status === "done");
@@ -125,19 +126,36 @@ export function ActionList({ actions, onStatusChange }: ActionListProps) {
 
       {done.length > 0 && (
         <div className="pt-2">
-          <p className="text-caption mb-2 text-muted-foreground">{t("actions.completedWithCount", { count: done.length })}</p>
-          <div className="space-y-2 opacity-60">
-            {done.map((action) => {
-              const config = actionConfig[action.actionType] ?? { icon: Warning };
-              const Icon = config.icon;
-              return (
-                <div key={action.id} className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3 line-through">
-                  <Icon size={16} className="text-muted-foreground" />
-                  <p className="text-sm text-muted-foreground">{action.title}</p>
-                </div>
-              );
-            })}
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowCompleted((v) => !v)}
+            className="text-caption mb-2 flex items-center gap-1 text-muted-foreground hover:text-foreground"
+            aria-expanded={showCompleted}
+          >
+            {t("actions.completedWithCount", { count: done.length })}
+            {showCompleted ? <CaretUp size={12} /> : <CaretDown size={12} />}
+          </button>
+          <AnimatePresence initial={false}>
+            {showCompleted && (
+              <motion.div
+                initial={reducedMotion ? undefined : { height: 0, opacity: 0 }}
+                animate={{ height: "auto", opacity: 1 }}
+                exit={reducedMotion ? undefined : { height: 0, opacity: 0 }}
+                className="space-y-2 overflow-hidden opacity-60"
+              >
+                {done.map((action) => {
+                  const config = actionConfig[action.actionType] ?? { icon: Warning };
+                  const Icon = config.icon;
+                  return (
+                    <div key={action.id} className="flex items-center gap-3 rounded-lg border bg-muted/50 p-3 line-through">
+                      <Icon size={16} className="text-muted-foreground" />
+                      <p className="text-sm text-muted-foreground">{action.title}</p>
+                    </div>
+                  );
+                })}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
       )}
 

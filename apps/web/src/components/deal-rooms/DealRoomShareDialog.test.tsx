@@ -81,7 +81,7 @@ describe("DealRoomShareDialog", () => {
     expect(screen.getByPlaceholderText("Recipient's Organization")).toBeInTheDocument();
   });
 
-  it("renders all four tabs in the correct order", async () => {
+  it("renders all three tabs in the correct order", async () => {
     render(
       <Wrapper>
         <DealRoomShareDialog roomId="room-1">
@@ -93,7 +93,7 @@ describe("DealRoomShareDialog", () => {
     fireEvent.click(screen.getByText("Open"));
     await waitFor(() => screen.getByText("Create share link"));
 
-    const tabs = ["Documents", "Share", "Invite", "Access"];
+    const tabs = ["Share", "Invite", "Access"];
     tabs.forEach((label) => {
       expect(screen.getByText(label)).toBeInTheDocument();
     });
