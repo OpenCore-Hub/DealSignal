@@ -150,4 +150,44 @@ describe("AttentionZone", () => {
     fireEvent.click(screen.getByRole("button", { name: /Complete/i }));
     expect(onChange).toHaveBeenCalledWith("act-1", "done");
   });
+
+  it("deduplicates signals by link + subtype + title keeping the latest", async () => {
+    const duplicate = makeSignal();
+    duplicate.id = "sig-2";
+    duplicate.createdAt = "2026-06-21T00:00:00Z";
+    await renderZone({ signals: [makeSignal(), duplicate] });
+    fireEvent.click(screen.getByRole("tab", { name: /High-intent signals/i }));
+    await waitFor(() => {
+      // SignalCard renders the translated type label instead of the raw title.
+      expect(screen.getAllByText("High-intent signal")).toHaveLength(1);
+    });
+  });
+
+  it("hides actions whose signal was removed by deduplication", async () => {
+    const duplicateSignal = makeSignal();
+    duplicateSignal.id = "sig-2";
+    duplicateSignal.createdAt = "2026-06-21T00:00:00Z";
+    const orphanAction: ActionItem = {
+      ...makeAction(),
+      id: "act-2",
+      signalId: "sig-1",
+      title: "Orphan action",
+    };
+    await renderZone({
+      signals: [duplicateSignal],
+      actions: [orphanAction],
+    });
+    expect(screen.queryByText("Orphan action")).not.toBeInTheDocument();
+  });
+
+  it("deduplicates risk alerts by link + type + title + description keeping the latest", async () => {
+    const duplicate = makeRisk();
+    duplicate.id = "risk-2";
+    duplicate.createdAt = "2026-06-19T09:00:00Z";
+    await renderZone({ riskAlerts: [makeRisk(), duplicate] });
+    fireEvent.click(screen.getByRole("tab", { name: /Risks/i }));
+    await waitFor(() => {
+      expect(screen.getAllByText("Unidentified download")).toHaveLength(1);
+    });
+  });
 });

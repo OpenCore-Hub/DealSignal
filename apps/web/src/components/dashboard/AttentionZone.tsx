@@ -17,6 +17,27 @@ interface AttentionZoneProps {
   onActionStatusChange: (id: string, status: ActionStatus) => void;
 }
 
+function itemTimestamp(item: unknown): number | null {
+  const createdAt = (item as { createdAt?: string }).createdAt;
+  if (!createdAt) return null;
+  const ts = new Date(createdAt).getTime();
+  return Number.isNaN(ts) ? null : ts;
+}
+
+function keepLatestByKey<T>(items: T[], keyFn: (item: T) => string): T[] {
+  const map = new Map<string, T>();
+  for (const item of items) {
+    const key = keyFn(item);
+    const existing = map.get(key);
+    const itemTs = itemTimestamp(item);
+    const existingTs = existing ? itemTimestamp(existing) : null;
+    if (!existing || (itemTs !== null && (existingTs === null || itemTs > existingTs))) {
+      map.set(key, item);
+    }
+  }
+  return Array.from(map.values());
+}
+
 export function AttentionZone({
   actions,
   signals,
@@ -26,21 +47,55 @@ export function AttentionZone({
 }: AttentionZoneProps) {
   const { t } = useTranslation("dashboard");
 
-  const pendingActions = useMemo(
-    () => actions.filter((a) => a.status === "pending"),
-    [actions]
-  );
-  const hotSignals = useMemo(
-    () => signals.filter((s) => s.type === "hot_signal"),
+  // Deduplicate signals by the business identity of a signal:
+  // same link + same subtype + same title means the same underlying insight.
+  const dedupedSignals = useMemo(
+    () =>
+      keepLatestByKey(
+        signals,
+        (s) => `${s.linkId ?? "no-link"}|${s.subtype ?? "no-subtype"}|${s.title}`
+      ),
     [signals]
   );
 
+  const keptSignalIds = useMemo(
+    () => new Set(dedupedSignals.map((s) => s.id)),
+    [dedupedSignals]
+  );
+
+  // Actions are 1:1 with signals, so keep only actions whose signal survived
+  // deduplication and drop any residual duplicates by signalId + title.
+  const dedupedActions = useMemo(() => {
+    const ownedByKeptSignal = actions.filter((a) => keptSignalIds.has(a.signalId));
+    return keepLatestByKey(
+      ownedByKeptSignal,
+      (a) => `${a.signalId}|${a.title}`
+    );
+  }, [actions, keptSignalIds]);
+
+  const hotSignals = useMemo(
+    () => dedupedSignals.filter((s) => s.type === "hot_signal"),
+    [dedupedSignals]
+  );
+
+  // Risk alerts come from a separate endpoint but represent the same
+  // underlying risk signals; dedupe by link + type + title + description.
+  const dedupedRiskAlerts = useMemo(
+    () =>
+      keepLatestByKey(
+        riskAlerts,
+        (r) =>
+          `${r.linkId ?? "no-link"}|${r.type}|${r.title}|${r.description}`
+      ),
+    [riskAlerts]
+  );
+
   const defaultTab =
-    pendingActions.length > 0
+    dedupedActions.filter((a) => a.status === "pending").length > 0
       ? "actions"
       : hotSignals.length > 0
         ? "signals"
-        : riskAlerts.length > 0
+        : dedupedRiskAlerts.length > 0
           ? "risks"
           : "actions";
 
@@ -58,9 +113,9 @@ export function AttentionZone({
             <TabsTrigger value="actions" title={t("attention.actions")} className="gap-1.5">
               <ListChecks size={16} />
               <span className="truncate">{t("attention.actions")}</span>
-              {pendingActions.length > 0 && (
+              {dedupedActions.filter((a) => a.status === "pending").length > 0 && (
                 <span className="rounded-full bg-primary px-1.5 py-0.5 text-xs text-primary-foreground">
-                  {pendingActions.length}
+                  {dedupedActions.filter((a) => a.status === "pending").length}
                 </span>
               )}
             </TabsTrigger>
@@ -76,9 +131,9 @@ export function AttentionZone({
             <TabsTrigger value="risks" title={t("attention.risks")} className="gap-1.5">
               <Warning size={16} />
               <span className="truncate">{t("attention.risks")}</span>
-              {riskAlerts.length > 0 && (
+              {dedupedRiskAlerts.length > 0 && (
                 <span className="rounded-full bg-risk-500 px-1.5 py-0.5 text-xs text-white">
-                  {riskAlerts.length}
+                  {dedupedRiskAlerts.length}
                 </span>
               )}
             </TabsTrigger>
@@ -86,7 +141,7 @@ export function AttentionZone({
 
           <TabsContent value="actions">
             <ActionList
-              actions={actions}
+              actions={dedupedActions}
               onStatusChange={onActionStatusChange}
             />
           </TabsContent>
@@ -106,7 +161,7 @@ export function AttentionZone({
                     <SignalCard
                       key={signal.id}
                       signal={signal}
-                      action={actions.find((a) => a.signalId === signal.id)}
+                      action={dedupedActions.find((a) => a.signalId === signal.id)}
                       onActionStatusChange={onActionStatusChange}
                     />
                   ))}
@@ -116,7 +171,7 @@ export function AttentionZone({
           </TabsContent>
 
           <TabsContent value="risks">
-            {riskAlerts.length === 0 ? (
+            {dedupedRiskAlerts.length === 0 ? (
               <EmptyState
                 size="compact"
                 icon={<Warning size={32} />}
@@ -124,7 +179,7 @@ export function AttentionZone({
                 description={t("empty.risks.description")}
               />
             ) : (
-              <RiskAlertList alerts={riskAlerts} workspaceSlug={workspaceSlug} />
+              <RiskAlertList alerts={dedupedRiskAlerts} workspaceSlug={workspaceSlug} />
             )}
           </TabsContent>
         </Tabs>
