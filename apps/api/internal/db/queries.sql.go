@@ -573,7 +573,7 @@ INSERT INTO action_items (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (signal_id) DO UPDATE SET
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
 `
 
 type CreateActionItemParams struct {
@@ -611,6 +611,8 @@ func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemPara
 		&i.ActionType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceType,
+		&i.SourceID,
 	)
 	return i, err
 }
@@ -971,8 +973,7 @@ INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
     requires_nda, requires_approval, status, created_by
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-          requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
 `
 
 type CreateDealRoomParams struct {
@@ -1020,6 +1021,7 @@ func (q *Queries) CreateDealRoom(ctx context.Context, arg CreateDealRoomParams) 
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -1779,6 +1781,58 @@ func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStatePara
 		arg.ExpiresAt,
 	)
 	return err
+}
+
+const createOperationalActionItem = `-- name: CreateOperationalActionItem :one
+INSERT INTO action_items (
+    tenant_id, workspace_id, source_type, source_id, title, impact, due_at, status, action_type
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
+    updated_at = now()
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+`
+
+type CreateOperationalActionItemParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	SourceType  pgtype.Text
+	SourceID    pgtype.Text
+	Title       string
+	Impact      string
+	DueAt       pgtype.Timestamptz
+	Status      string
+	ActionType  string
+}
+
+func (q *Queries) CreateOperationalActionItem(ctx context.Context, arg CreateOperationalActionItemParams) (ActionItem, error) {
+	row := q.db.QueryRow(ctx, createOperationalActionItem,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.SourceType,
+		arg.SourceID,
+		arg.Title,
+		arg.Impact,
+		arg.DueAt,
+		arg.Status,
+		arg.ActionType,
+	)
+	var i ActionItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SignalID,
+		&i.Title,
+		&i.Impact,
+		&i.DueAt,
+		&i.Status,
+		&i.ActionType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SourceType,
+		&i.SourceID,
+	)
+	return i, err
 }
 
 const createPage = `-- name: CreatePage :one
@@ -2828,7 +2882,7 @@ func (q *Queries) GetAccessRequestByID(ctx context.Context, arg GetAccessRequest
 }
 
 const getActionItemByID = `-- name: GetActionItemByID :one
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
 FROM action_items
 WHERE id = $1 AND workspace_id = $2 LIMIT 1
 `
@@ -2853,6 +2907,41 @@ func (q *Queries) GetActionItemByID(ctx context.Context, arg GetActionItemByIDPa
 		&i.ActionType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceType,
+		&i.SourceID,
+	)
+	return i, err
+}
+
+const getActionItemBySource = `-- name: GetActionItemBySource :one
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+FROM action_items
+WHERE workspace_id = $1 AND source_type = $2 AND source_id = $3 LIMIT 1
+`
+
+type GetActionItemBySourceParams struct {
+	WorkspaceID pgtype.UUID
+	SourceType  pgtype.Text
+	SourceID    pgtype.Text
+}
+
+func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBySourceParams) (ActionItem, error) {
+	row := q.db.QueryRow(ctx, getActionItemBySource, arg.WorkspaceID, arg.SourceType, arg.SourceID)
+	var i ActionItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.SignalID,
+		&i.Title,
+		&i.Impact,
+		&i.DueAt,
+		&i.Status,
+		&i.ActionType,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SourceType,
+		&i.SourceID,
 	)
 	return i, err
 }
@@ -3222,8 +3311,7 @@ func (q *Queries) GetDealRoomAggregatesByWorkspace(ctx context.Context, workspac
 }
 
 const getDealRoomByID = `-- name: GetDealRoomByID :one
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
 FROM deal_rooms
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1
@@ -3253,13 +3341,13 @@ func (q *Queries) GetDealRoomByID(ctx context.Context, arg GetDealRoomByIDParams
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
 
 const getDealRoomBySlug = `-- name: GetDealRoomBySlug :one
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
 FROM deal_rooms
 WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
 LIMIT 1
@@ -3284,6 +3372,7 @@ func (q *Queries) GetDealRoomBySlug(ctx context.Context, slug string) (DealRoom,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.DeletedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -6265,15 +6354,29 @@ WHERE signal_id = $1
 ORDER BY created_at DESC
 `
 
-func (q *Queries) ListActionItemsBySignal(ctx context.Context, signalID pgtype.UUID) ([]ActionItem, error) {
+type ListActionItemsBySignalRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	SignalID    pgtype.UUID
+	Title       string
+	Impact      string
+	DueAt       pgtype.Timestamptz
+	Status      string
+	ActionType  string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListActionItemsBySignal(ctx context.Context, signalID pgtype.UUID) ([]ListActionItemsBySignalRow, error) {
 	rows, err := q.db.Query(ctx, listActionItemsBySignal, signalID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ActionItem
+	var items []ListActionItemsBySignalRow
 	for rows.Next() {
-		var i ActionItem
+		var i ListActionItemsBySignalRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -6298,7 +6401,7 @@ func (q *Queries) ListActionItemsBySignal(ctx context.Context, signalID pgtype.U
 }
 
 const listActionItemsByWorkspace = `-- name: ListActionItemsByWorkspace :many
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
 FROM action_items
 WHERE workspace_id = $1
   AND (
@@ -6333,6 +6436,8 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 			&i.ActionType,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SourceType,
+			&i.SourceID,
 		); err != nil {
 			return nil, err
 		}
@@ -6770,8 +6875,7 @@ func (q *Queries) ListDealRoomDocumentsWithMeta(ctx context.Context, roomID pgty
 }
 
 const listDealRoomsByWorkspace = `-- name: ListDealRoomsByWorkspace :many
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
 FROM deal_rooms
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC
@@ -6802,6 +6906,7 @@ func (q *Queries) ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgty
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.DeletedAt,
+			&i.ExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -7036,6 +7141,79 @@ func (q *Queries) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID)
 			&i.WasForwarded,
 			&i.HadDownloads,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiringLinksByWorkspace = `-- name: ListExpiringLinksByWorkspace :many
+SELECT l.id, l.name
+FROM links l
+WHERE l.workspace_id = $1
+  AND l.status = 'active'
+  AND l.expires_at IS NOT NULL
+  AND l.expires_at > now()
+  AND l.expires_at <= now() + interval '7 days'
+ORDER BY l.expires_at ASC
+`
+
+type ListExpiringLinksByWorkspaceRow struct {
+	ID   pgtype.UUID
+	Name pgtype.Text
+}
+
+func (q *Queries) ListExpiringLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListExpiringLinksByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listExpiringLinksByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExpiringLinksByWorkspaceRow
+	for rows.Next() {
+		var i ListExpiringLinksByWorkspaceRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listExpiringRoomsByWorkspace = `-- name: ListExpiringRoomsByWorkspace :many
+SELECT dr.id, dr.name
+FROM deal_rooms dr
+WHERE dr.workspace_id = $1
+  AND dr.status = 'active'
+  AND dr.deleted_at IS NULL
+  AND dr.expires_at IS NOT NULL
+  AND dr.expires_at > now()
+  AND dr.expires_at <= now() + interval '7 days'
+ORDER BY dr.expires_at ASC
+`
+
+type ListExpiringRoomsByWorkspaceRow struct {
+	ID   pgtype.UUID
+	Name string
+}
+
+func (q *Queries) ListExpiringRoomsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListExpiringRoomsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listExpiringRoomsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListExpiringRoomsByWorkspaceRow
+	for rows.Next() {
+		var i ListExpiringRoomsByWorkspaceRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -7909,6 +8087,52 @@ func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUI
 	return items, nil
 }
 
+const listPendingActionItemsBySourceType = `-- name: ListPendingActionItemsBySourceType :many
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+FROM action_items
+WHERE workspace_id = $1 AND source_type = $2 AND status = 'pending'
+ORDER BY created_at DESC
+`
+
+type ListPendingActionItemsBySourceTypeParams struct {
+	WorkspaceID pgtype.UUID
+	SourceType  pgtype.Text
+}
+
+func (q *Queries) ListPendingActionItemsBySourceType(ctx context.Context, arg ListPendingActionItemsBySourceTypeParams) ([]ActionItem, error) {
+	rows, err := q.db.Query(ctx, listPendingActionItemsBySourceType, arg.WorkspaceID, arg.SourceType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ActionItem
+	for rows.Next() {
+		var i ActionItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.SignalID,
+			&i.Title,
+			&i.Impact,
+			&i.DueAt,
+			&i.Status,
+			&i.ActionType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SourceType,
+			&i.SourceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingHubSpotSyncJobs = `-- name: ListPendingHubSpotSyncJobs :many
 SELECT id, workspace_id, status, record_type, record_id, direction, attempts, error_message, payload, created_at, updated_at
 FROM hubspot_sync_jobs
@@ -7989,6 +8213,168 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 	return items, nil
 }
 
+const listPendingLinkAccessRequestsByWorkspace = `-- name: ListPendingLinkAccessRequestsByWorkspace :many
+SELECT r.id, r.email, r.link_id, l.name AS link_name
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1 AND r.status = 'pending'
+ORDER BY r.created_at DESC
+`
+
+type ListPendingLinkAccessRequestsByWorkspaceRow struct {
+	ID       pgtype.UUID
+	Email    string
+	LinkID   pgtype.UUID
+	LinkName pgtype.Text
+}
+
+func (q *Queries) ListPendingLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingLinkAccessRequestsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingLinkAccessRequestsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingLinkAccessRequestsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingLinkAccessRequestsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.LinkID,
+			&i.LinkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingLinkQuestionsByWorkspace = `-- name: ListPendingLinkQuestionsByWorkspace :many
+SELECT q.id, q.visitor_email, q.question, q.link_id, l.name AS link_name
+FROM link_visitor_questions q
+JOIN links l ON l.id = q.link_id
+WHERE q.workspace_id = $1 AND q.status = 'pending'
+ORDER BY q.created_at DESC
+`
+
+type ListPendingLinkQuestionsByWorkspaceRow struct {
+	ID           pgtype.UUID
+	VisitorEmail pgtype.Text
+	Question     string
+	LinkID       pgtype.UUID
+	LinkName     pgtype.Text
+}
+
+func (q *Queries) ListPendingLinkQuestionsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingLinkQuestionsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingLinkQuestionsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingLinkQuestionsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingLinkQuestionsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitorEmail,
+			&i.Question,
+			&i.LinkID,
+			&i.LinkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingRoomAccessRequestsByWorkspace = `-- name: ListPendingRoomAccessRequestsByWorkspace :many
+SELECT r.id, r.email, r.room_id, dr.name AS room_name
+FROM room_access_requests r
+JOIN deal_rooms dr ON dr.id = r.room_id
+WHERE r.workspace_id = $1 AND r.status = 'pending'
+ORDER BY r.created_at DESC
+`
+
+type ListPendingRoomAccessRequestsByWorkspaceRow struct {
+	ID       pgtype.UUID
+	Email    string
+	RoomID   pgtype.UUID
+	RoomName string
+}
+
+func (q *Queries) ListPendingRoomAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingRoomAccessRequestsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingRoomAccessRequestsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingRoomAccessRequestsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingRoomAccessRequestsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.RoomID,
+			&i.RoomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingRoomNDAsByWorkspace = `-- name: ListPendingRoomNDAsByWorkspace :many
+SELECT m.id, m.email, m.room_id, dr.name AS room_name
+FROM room_members m
+JOIN deal_rooms dr ON dr.id = m.room_id
+WHERE m.workspace_id = $1 AND m.nda_status = 'pending'
+ORDER BY m.created_at DESC
+`
+
+type ListPendingRoomNDAsByWorkspaceRow struct {
+	ID       pgtype.UUID
+	Email    string
+	RoomID   pgtype.UUID
+	RoomName string
+}
+
+func (q *Queries) ListPendingRoomNDAsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingRoomNDAsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingRoomNDAsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingRoomNDAsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingRoomNDAsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.RoomID,
+			&i.RoomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingSuggestionOutbox = `-- name: ListPendingSuggestionOutbox :many
 SELECT id, tenant_id, workspace_id, link_id, lang, created_at, processed_at, attempts, last_error
 FROM suggestion_outbox
@@ -8022,6 +8408,46 @@ func (q *Queries) ListPendingSuggestionOutbox(ctx context.Context, arg ListPendi
 			&i.ProcessedAt,
 			&i.Attempts,
 			&i.LastError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingUploadedFilesByWorkspace = `-- name: ListPendingUploadedFilesByWorkspace :many
+SELECT f.id, f.original_filename, f.link_id, l.name AS link_name
+FROM link_uploaded_files f
+JOIN links l ON l.id = f.link_id
+WHERE f.workspace_id = $1 AND f.status = 'pending_review'
+ORDER BY f.created_at DESC
+`
+
+type ListPendingUploadedFilesByWorkspaceRow struct {
+	ID               pgtype.UUID
+	OriginalFilename string
+	LinkID           pgtype.UUID
+	LinkName         pgtype.Text
+}
+
+func (q *Queries) ListPendingUploadedFilesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingUploadedFilesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingUploadedFilesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingUploadedFilesByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingUploadedFilesByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.OriginalFilename,
+			&i.LinkID,
+			&i.LinkName,
 		); err != nil {
 			return nil, err
 		}
@@ -10292,7 +10718,7 @@ const updateActionItemStatus = `-- name: UpdateActionItemStatus :one
 UPDATE action_items
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
 `
 
 type UpdateActionItemStatusParams struct {
@@ -10316,6 +10742,8 @@ func (q *Queries) UpdateActionItemStatus(ctx context.Context, arg UpdateActionIt
 		&i.ActionType,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SourceType,
+		&i.SourceID,
 	)
 	return i, err
 }

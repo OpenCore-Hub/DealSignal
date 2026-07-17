@@ -1080,7 +1080,7 @@ func roomRow(r db.DealRoom) []interface{} {
 	return []interface{}{
 		r.ID, r.TenantID, r.WorkspaceID, r.Slug, r.Name, r.Description,
 		r.TemplateType, r.Settings, r.RequiresNda, r.RequiresApproval, r.Status,
-		r.CreatedBy, r.CreatedAt, r.UpdatedAt, r.DeletedAt,
+		r.CreatedBy, r.CreatedAt, r.UpdatedAt, r.DeletedAt, r.ExpiresAt,
 	}
 }
 

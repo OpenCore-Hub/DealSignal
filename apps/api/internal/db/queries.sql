@@ -864,26 +864,22 @@ INSERT INTO deal_rooms (
     tenant_id, workspace_id, slug, name, description, template_type, settings,
     requires_nda, requires_approval, status, created_by
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-RETURNING id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-          requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at;
+RETURNING *;
 
 -- name: GetDealRoomByID :one
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+SELECT *
 FROM deal_rooms
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: GetDealRoomBySlug :one
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+SELECT *
 FROM deal_rooms
 WHERE slug = $1 AND status = 'active' AND deleted_at IS NULL
 LIMIT 1;
 
 -- name: ListDealRoomsByWorkspace :many
-SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings,
-       requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at
+SELECT *
 FROM deal_rooms
 WHERE workspace_id = $1 AND deleted_at IS NULL
 ORDER BY created_at DESC;
@@ -1571,13 +1567,21 @@ INSERT INTO action_items (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (signal_id) DO UPDATE SET
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at;
+RETURNING *;
+
+-- name: CreateOperationalActionItem :one
+INSERT INTO action_items (
+    tenant_id, workspace_id, source_type, source_id, title, impact, due_at, status, action_type
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
+    updated_at = now()
+RETURNING *;
 
 -- name: ListActionItemsByWorkspace :many
 -- Returns pending action items plus recently completed/snoozed/ignored items
 -- so the "completed" UI list does not grow indefinitely. Done items are kept
 -- for 1 day; snoozed/ignored items are kept for 30 days.
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+SELECT *
 FROM action_items
 WHERE workspace_id = $1
   AND (
@@ -1588,15 +1592,82 @@ WHERE workspace_id = $1
 ORDER BY created_at DESC;
 
 -- name: GetActionItemByID :one
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at
+SELECT *
 FROM action_items
 WHERE id = $1 AND workspace_id = $2 LIMIT 1;
+
+-- name: GetActionItemBySource :one
+SELECT *
+FROM action_items
+WHERE workspace_id = $1 AND source_type = $2 AND source_id = $3 LIMIT 1;
+
+-- name: ListPendingActionItemsBySourceType :many
+SELECT *
+FROM action_items
+WHERE workspace_id = $1 AND source_type = $2 AND status = 'pending'
+ORDER BY created_at DESC;
 
 -- name: UpdateActionItemStatus :one
 UPDATE action_items
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at;
+RETURNING *;
+
+-- name: ListPendingLinkAccessRequestsByWorkspace :many
+SELECT r.id, r.email, r.link_id, l.name AS link_name
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1 AND r.status = 'pending'
+ORDER BY r.created_at DESC;
+
+-- name: ListPendingRoomAccessRequestsByWorkspace :many
+SELECT r.id, r.email, r.room_id, dr.name AS room_name
+FROM room_access_requests r
+JOIN deal_rooms dr ON dr.id = r.room_id
+WHERE r.workspace_id = $1 AND r.status = 'pending'
+ORDER BY r.created_at DESC;
+
+-- name: ListPendingRoomNDAsByWorkspace :many
+SELECT m.id, m.email, m.room_id, dr.name AS room_name
+FROM room_members m
+JOIN deal_rooms dr ON dr.id = m.room_id
+WHERE m.workspace_id = $1 AND m.nda_status = 'pending'
+ORDER BY m.created_at DESC;
+
+-- name: ListPendingLinkQuestionsByWorkspace :many
+SELECT q.id, q.visitor_email, q.question, q.link_id, l.name AS link_name
+FROM link_visitor_questions q
+JOIN links l ON l.id = q.link_id
+WHERE q.workspace_id = $1 AND q.status = 'pending'
+ORDER BY q.created_at DESC;
+
+-- name: ListPendingUploadedFilesByWorkspace :many
+SELECT f.id, f.original_filename, f.link_id, l.name AS link_name
+FROM link_uploaded_files f
+JOIN links l ON l.id = f.link_id
+WHERE f.workspace_id = $1 AND f.status = 'pending_review'
+ORDER BY f.created_at DESC;
+
+-- name: ListExpiringLinksByWorkspace :many
+SELECT l.id, l.name
+FROM links l
+WHERE l.workspace_id = $1
+  AND l.status = 'active'
+  AND l.expires_at IS NOT NULL
+  AND l.expires_at > now()
+  AND l.expires_at <= now() + interval '7 days'
+ORDER BY l.expires_at ASC;
+
+-- name: ListExpiringRoomsByWorkspace :many
+SELECT dr.id, dr.name
+FROM deal_rooms dr
+WHERE dr.workspace_id = $1
+  AND dr.status = 'active'
+  AND dr.deleted_at IS NULL
+  AND dr.expires_at IS NOT NULL
+  AND dr.expires_at > now()
+  AND dr.expires_at <= now() + interval '7 days'
+ORDER BY dr.expires_at ASC;
 
 -- name: CountWeeklyVisitorsByWorkspace :one
 SELECT COUNT(DISTINCT COALESCE(visitor_id, visitor_email)) AS visitor_count

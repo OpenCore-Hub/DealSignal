@@ -34,6 +34,8 @@ type ActionItem struct {
 	ActionType  string
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	SourceType  pgtype.Text
+	SourceID    pgtype.Text
 }
 
 type AssistantMessage struct {
@@ -147,6 +149,7 @@ type DealRoom struct {
 	CreatedAt        pgtype.Timestamptz
 	UpdatedAt        pgtype.Timestamptz
 	DeletedAt        pgtype.Timestamptz
+	ExpiresAt        pgtype.Timestamptz
 }
 
 type DealRoomDocument struct {
