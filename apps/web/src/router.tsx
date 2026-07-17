@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, lazy, useEffect } from "react";
-import { createBrowserRouter, Navigate, Outlet, useRouteError, useParams } from "react-router";
+import { createBrowserRouter, Navigate, useOutlet, useRouteError, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -70,10 +70,15 @@ function PageLoader() {
 }
 
 function WorkspaceLayout() {
+  // Capture the matched route element at render time. Using <Outlet /> directly
+  // inside <PageTransition> / <AnimatePresence> causes the exiting page to
+  // re-render the current route while animating out, which can leave the entering
+  // motion.div stuck at opacity:0 and produce a blank page on route changes.
+  const element = useOutlet();
   return (
     <AppShell>
       <Suspense fallback={<PageLoader />}>
-        <Outlet />
+        {element}
       </Suspense>
     </AppShell>
   );
