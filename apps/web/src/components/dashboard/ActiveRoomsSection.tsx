@@ -31,12 +31,12 @@ export function ActiveRoomsSection({
   const activeRooms = rooms
     .filter((room) => room.status === "active")
     .sort((a, b) => {
-      const scoreDiff = (b.heatScore ?? 0) - (a.heatScore ?? 0);
-      if (scoreDiff !== 0) return scoreDiff;
       const aTime = a.lastAccessedAt ? new Date(a.lastAccessedAt).getTime() : 0;
       const bTime = b.lastAccessedAt ? new Date(b.lastAccessedAt).getTime() : 0;
       return bTime - aTime;
     });
+
+  const RECENTLY_ACTIVE_LIMIT = 3;
 
   const openRoom = (roomId: string) =>
     navigate(`/${workspaceSlug}/deal-rooms/${roomId}`, {
@@ -90,7 +90,7 @@ export function ActiveRoomsSection({
         ) : (
           <>
             <div className="grid grid-cols-1 gap-4">
-              {activeRooms.slice(0, 4).map((room) => (
+              {activeRooms.slice(0, RECENTLY_ACTIVE_LIMIT).map((room) => (
                 <div
                   key={room.id}
                   role="link"
@@ -146,8 +146,8 @@ export function ActiveRoomsSection({
                         {room.visitorCount}
                       </span>
                     ) : null}
-                    {room.unreadQuestions ? (
-                      <span className="flex items-center gap-1 text-warning-500">
+                    {room.unreadQuestions !== undefined ? (
+                      <span className="flex items-center gap-1">
                         <ChatTeardropText size={12} />
                         {room.unreadQuestions}
                       </span>
@@ -172,7 +172,7 @@ export function ActiveRoomsSection({
                 </div>
               ))}
             </div>
-            {activeRooms.length > 4 && (
+            {activeRooms.length > RECENTLY_ACTIVE_LIMIT && (
               <div className="mt-4 flex justify-end">
                 <Button
                   variant="ghost"

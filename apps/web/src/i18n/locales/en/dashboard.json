@@ -43,7 +43,7 @@
   },
   "sections": {
     "attention": "Attention",
-    "activeRooms": "Active deal rooms",
+    "activeRooms": "Recently active",
     "signals": "Signals",
     "recentVisitors": "Recent visitors",
     "actions": "Actions",

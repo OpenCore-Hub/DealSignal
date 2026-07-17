@@ -90,10 +90,10 @@ describe("ActiveRoomsSection", () => {
     expect(screen.getByText("2 pending")).toBeInTheDocument();
   });
 
-  it("limits to four rooms and shows view all link", async () => {
-    const rooms = Array.from({ length: 5 }, (_, i) => makeRoom({ id: `room-${i}`, name: `Room ${i}` }));
+  it("limits to three rooms and shows view all link", async () => {
+    const rooms = Array.from({ length: 4 }, (_, i) => makeRoom({ id: `room-${i}`, name: `Room ${i}` }));
     await renderSection(rooms);
-    expect(screen.getAllByRole("link").length).toBeGreaterThanOrEqual(4);
-    expect(screen.getByRole("button", { name: /View all 5 rooms/i })).toBeInTheDocument();
+    expect(screen.getAllByRole("link").length).toBe(3);
+    expect(screen.getByRole("button", { name: /View all 4 rooms/i })).toBeInTheDocument();
   });
 });

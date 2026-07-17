@@ -43,7 +43,7 @@
   },
   "sections": {
     "attention": "今日关注",
-    "activeRooms": "活跃数据室",
+    "activeRooms": "最近活跃",
     "signals": "信号流",
     "recentVisitors": "最近访客",
     "actions": "待办行动",
