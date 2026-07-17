@@ -33,7 +33,6 @@ import {
   getPublicUrl,
 } from "@/components/links/share";
 import type { DraftLink } from "@/components/links/share";
-import { DocumentsTab } from "./DocumentsTab";
 
 const tabTransition = {
   initial: { opacity: 0, x: 8 },
@@ -46,7 +45,7 @@ interface DealRoomShareDialogProps {
   roomId: string;
   linkId?: string;
   slug?: string;
-  defaultTab?: "share" | "documents" | "invite" | "access";
+  defaultTab?: "share" | "invite" | "access";
   children?: React.ReactElement;
   onChanged?: () => void;
 }
@@ -90,7 +89,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
 interface DealRoomShareDialogContentProps {
   roomId: string;
   slug?: string;
-  defaultTab?: "share" | "documents" | "invite" | "access";
+  defaultTab?: "share" | "invite" | "access";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
@@ -113,7 +112,7 @@ function DealRoomShareDialogContent({
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const reducedMotion = useReducedMotion();
-  const [tab, setTab] = useState<"share" | "documents" | "invite" | "access">(defaultTab);
+  const [tab, setTab] = useState<"share" | "invite" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
@@ -200,7 +199,6 @@ function DealRoomShareDialogContent({
           custom_domain: draft.customDomain || undefined,
           tags: draft.tags.length > 0 ? draft.tags : [],
           notify_on_access: draft.notifyOnAccess,
-          folder_paths: draft.folderPaths.length > 0 ? draft.folderPaths : undefined,
         });
       } else {
         await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
@@ -316,7 +314,7 @@ function DealRoomShareDialogContent({
   const publicUrl = getPublicUrl(selectedLink);
 
   const primaryAction =
-    tab === "share" || tab === "documents"
+    tab === "share"
       ? { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
       : tab === "access"
       ? { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
@@ -376,10 +374,10 @@ function DealRoomShareDialogContent({
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex flex-1 flex-col overflow-hidden">
         <TabsList variant="line" className="w-full">
-          <TabsTrigger value="documents">{t("share.documents.title")}</TabsTrigger>
           <TabsTrigger value="share">{t("share.title")}</TabsTrigger>
           <TabsTrigger value="invite">{t("invite.title")}</TabsTrigger>
           <TabsTrigger value="access">{t("accessRules.title")}</TabsTrigger>
+
         </TabsList>
 
         <div className="flex-1 overflow-y-auto py-2">
@@ -391,13 +389,6 @@ function DealRoomShareDialogContent({
             <>
               <AnimatePresence mode="wait" initial={false}>
               <motion.div key={tab} {...(reducedMotion ? {} : tabTransition)}>
-                <TabsContent value="documents">
-                  <DocumentsTab
-                    roomId={roomId}
-                    selectedPaths={draft.folderPaths}
-                    onChange={(paths) => updateDraft({ folderPaths: paths })}
-                  />
-                </TabsContent>
                 <TabsContent value="share">
                   <ShareTab
                     draft={draft}
