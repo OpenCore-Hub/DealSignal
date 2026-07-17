@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/events"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -23,6 +24,7 @@ type DBPool interface {
 type Worker struct {
 	service     *Service
 	dbPool      DBPool
+	publisher   events.Publisher
 	interval    time.Duration
 	batchSize   int32
 	maxAttempts int32
@@ -47,7 +49,7 @@ func DefaultWorkerConfig() WorkerConfig {
 }
 
 // NewWorker creates a suggestion outbox worker.
-func NewWorker(service *Service, dbPool DBPool, cfg WorkerConfig) *Worker {
+func NewWorker(service *Service, dbPool DBPool, publisher events.Publisher, cfg WorkerConfig) *Worker {
 	if cfg.Interval <= 0 {
 		cfg.Interval = DefaultWorkerConfig().Interval
 	}
@@ -57,9 +59,13 @@ func NewWorker(service *Service, dbPool DBPool, cfg WorkerConfig) *Worker {
 	if cfg.MaxAttempts <= 0 {
 		cfg.MaxAttempts = DefaultWorkerConfig().MaxAttempts
 	}
+	if publisher == nil {
+		publisher = events.NewNoOpBus()
+	}
 	return &Worker{
 		service:     service,
 		dbPool:      dbPool,
+		publisher:   publisher,
 		interval:    cfg.Interval,
 		batchSize:   cfg.BatchSize,
 		maxAttempts: cfg.MaxAttempts,
@@ -163,8 +169,28 @@ func (w *Worker) processJob(ctx context.Context, job db.SuggestionOutbox) (err e
 	workspaceID := uuid.UUID(job.WorkspaceID.Bytes).String()
 	linkID := uuid.UUID(job.LinkID.Bytes).String()
 
-	_, err = w.service.Generate(ctx, workspaceID, linkID, job.Lang)
-	return err
+	suggestions, err := w.service.Generate(ctx, workspaceID, linkID, job.Lang)
+	if err != nil {
+		return err
+	}
+
+	ids := make([]string, 0, len(suggestions))
+	for _, s := range suggestions {
+		ids = append(ids, s.ID)
+	}
+	if err := w.publisher.PublishJSON(ctx, "suggestion.generated", events.SuggestionGeneratedEvent{
+		TenantID:      uuid.UUID(job.TenantID.Bytes).String(),
+		WorkspaceID:   workspaceID,
+		LinkID:        linkID,
+		SuggestionIDs: ids,
+		GeneratedAt:   time.Now(),
+	}); err != nil {
+		logger.ErrorCtx(ctx, "suggestion worker: publish event failed", err,
+			logger.Attr("workspace_id", workspaceID),
+			logger.Attr("link_id", linkID),
+		)
+	}
+	return nil
 }
 
 func truncateError(s string) string {

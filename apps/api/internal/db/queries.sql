@@ -299,6 +299,12 @@ FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
 
+-- name: GetLinkByID :one
+SELECT *
+FROM links
+WHERE id = $1
+LIMIT 1;
+
 -- name: GetLinkByPublicToken :one
 SELECT *
 FROM links
@@ -1589,6 +1595,76 @@ WHERE suggestion_id = ANY($1::uuid[]);
 UPDATE suggestions
 SET synced_at = now()
 WHERE id = ANY($1::uuid[]);
+
+-- name: CreateSignalRuleRun :one
+INSERT INTO signal_rule_run (
+    tenant_id,
+    workspace_id,
+    link_id,
+    run_started_at,
+    duration_ms,
+    input_snapshot,
+    matched_rule_ids,
+    generated_suggestion_ids,
+    error
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING *;
+
+-- name: UpsertLinkFeature :one
+INSERT INTO link_features (
+    tenant_id,
+    workspace_id,
+    link_id,
+    window_start,
+    opens,
+    unique_visitors,
+    revisits,
+    avg_duration_seconds,
+    total_page_views,
+    key_page_views,
+    downloads,
+    bounces,
+    distinct_ips_1h,
+    distinct_emails_24h,
+    unknown_emails_24h,
+    downloads_24h
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT (link_id, window_start) DO UPDATE SET
+    opens = EXCLUDED.opens,
+    unique_visitors = EXCLUDED.unique_visitors,
+    revisits = EXCLUDED.revisits,
+    avg_duration_seconds = EXCLUDED.avg_duration_seconds,
+    total_page_views = EXCLUDED.total_page_views,
+    key_page_views = EXCLUDED.key_page_views,
+    downloads = EXCLUDED.downloads,
+    bounces = EXCLUDED.bounces,
+    distinct_ips_1h = EXCLUDED.distinct_ips_1h,
+    distinct_emails_24h = EXCLUDED.distinct_emails_24h,
+    unknown_emails_24h = EXCLUDED.unknown_emails_24h,
+    downloads_24h = EXCLUDED.downloads_24h,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetLinkFeature :one
+SELECT *
+FROM link_features
+WHERE link_id = $1
+ORDER BY window_start DESC
+LIMIT 1;
+
+-- name: ListStaleLinkFeatures :many
+SELECT *
+FROM link_features
+WHERE updated_at < $1
+ORDER BY updated_at ASC
+LIMIT $2;
+
+-- name: ListRecentlyActiveLinkIDs :many
+SELECT DISTINCT link_id
+FROM access_logs
+WHERE created_at > now() - interval '1 hour'
+ORDER BY link_id
+LIMIT $1;
 
 -- name: ListActionItemsBySignal :many
 SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at

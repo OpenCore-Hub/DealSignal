@@ -359,6 +359,27 @@ type LinkDocument struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+type LinkFeature struct {
+	ID                 pgtype.UUID
+	TenantID           pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	LinkID             pgtype.UUID
+	WindowStart        pgtype.Timestamptz
+	Opens              int32
+	UniqueVisitors     int32
+	Revisits           int32
+	AvgDurationSeconds int32
+	TotalPageViews     int32
+	KeyPageViews       int32
+	Downloads          int32
+	Bounces            int32
+	DistinctIps1h      int64
+	DistinctEmails24h  int64
+	UnknownEmails24h   int64
+	Downloads24h       int64
+	UpdatedAt          pgtype.Timestamptz
+}
+
 type LinkFileRequest struct {
 	ID           pgtype.UUID
 	TenantID     pgtype.UUID
@@ -608,6 +629,20 @@ type Signal struct {
 	Subtype      pgtype.Text
 	Metadata     []byte
 	Context      []byte
+}
+
+type SignalRuleRun struct {
+	ID                     pgtype.UUID
+	TenantID               pgtype.UUID
+	WorkspaceID            pgtype.UUID
+	LinkID                 pgtype.UUID
+	RunStartedAt           pgtype.Timestamptz
+	DurationMs             pgtype.Int4
+	InputSnapshot          []byte
+	MatchedRuleIds         []string
+	GeneratedSuggestionIds []pgtype.UUID
+	Error                  pgtype.Text
+	CreatedAt              pgtype.Timestamptz
 }
 
 type Suggestion struct {

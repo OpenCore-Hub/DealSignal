@@ -4,6 +4,7 @@ import (
 	"bytes"
 	_ "embed"
 	"fmt"
+	"hash/fnv"
 	"os"
 	"text/template"
 
@@ -16,10 +17,13 @@ var defaultRulesYAML []byte
 
 // RuleInput is the data available to expression rules.
 type RuleInput struct {
-	Heat       HeatInput       `yaml:"-"`
-	Metrics    MetricsInput    `yaml:"-"`
-	Behavior   BehaviorInput   `yaml:"-"`
-	Context    Context         `yaml:"-"`
+	TenantID       string             `yaml:"-"`
+	WorkspaceID    string             `yaml:"-"`
+	LinkID         string             `yaml:"-"`
+	Heat           HeatInput          `yaml:"-"`
+	Metrics        MetricsInput       `yaml:"-"`
+	Behavior       BehaviorInput      `yaml:"-"`
+	Context        Context            `yaml:"-"`
 	SecurityEvents []SecurityEventInput `yaml:"-"`
 }
 
@@ -64,9 +68,57 @@ type RuleConfig struct {
 
 // ExpressionRule is a condition-based signal rule.
 type ExpressionRule struct {
-	ID        string     `yaml:"id"`
-	Condition string     `yaml:"condition"`
-	Output    RuleOutput `yaml:"output"`
+	ID            string     `yaml:"id"`
+	Condition     string     `yaml:"condition"`
+	Enabled       *bool      `yaml:"enabled,omitempty"`
+	BucketPercent *int       `yaml:"bucket_percent,omitempty"`
+	BucketKey     string     `yaml:"bucket_key,omitempty"`
+	Output        RuleOutput `yaml:"output"`
+}
+
+func (r ExpressionRule) isEnabled() bool {
+	if r.Enabled == nil {
+		return true
+	}
+	return *r.Enabled
+}
+
+func (r ExpressionRule) bucketPercent() int {
+	if r.BucketPercent == nil {
+		return 100
+	}
+	return *r.BucketPercent
+}
+
+func (r ExpressionRule) inBucket(input RuleInput) bool {
+	pct := r.bucketPercent()
+	if pct <= 0 {
+		return false
+	}
+	if pct >= 100 {
+		return true
+	}
+	keyValue := ""
+	switch r.BucketKey {
+	case "link_id":
+		keyValue = input.LinkID
+	case "workspace_id":
+		keyValue = input.WorkspaceID
+	case "tenant_id":
+		keyValue = input.TenantID
+	default:
+		keyValue = input.LinkID
+	}
+	if keyValue == "" {
+		return true
+	}
+	return deterministicHash(r.ID+":"+keyValue)%100 < uint32(pct)
+}
+
+func deterministicHash(s string) uint32 {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(s))
+	return h.Sum32()
 }
 
 // SecurityEventRule maps a security event type to a risk_alert subtype.
@@ -125,6 +177,16 @@ func NewRuleEngine(path string) (*RuleEngine, error) {
 		return nil, err
 	}
 
+	for i := range cfg.ExpressionRules {
+		if cfg.ExpressionRules[i].BucketPercent == nil {
+			defaultPct := 100
+			cfg.ExpressionRules[i].BucketPercent = &defaultPct
+		}
+		if cfg.ExpressionRules[i].BucketKey == "" {
+			cfg.ExpressionRules[i].BucketKey = "link_id"
+		}
+	}
+
 	return &RuleEngine{config: cfg}, nil
 }
 
@@ -134,10 +196,20 @@ func (e *RuleEngine) Evaluate(input RuleInput) ([]RuleMatch, error) {
 
 	exprInput := e.buildExprInput(input)
 	for _, rule := range e.config.ExpressionRules {
+		if !rule.isEnabled() {
+			recordRuleEvaluated(rule.ID, false)
+			continue
+		}
+		if !rule.inBucket(input) {
+			recordRuleEvaluated(rule.ID, false)
+			continue
+		}
 		ok, err := e.evalCondition(rule.Condition, exprInput)
 		if err != nil {
+			recordRuleEvaluated(rule.ID, false)
 			return nil, fmt.Errorf("rule %s: %w", rule.ID, err)
 		}
+		recordRuleEvaluated(rule.ID, ok)
 		if !ok {
 			continue
 		}
@@ -168,6 +240,7 @@ func (e *RuleEngine) Evaluate(input RuleInput) ([]RuleMatch, error) {
 		if !ok {
 			continue
 		}
+		recordRuleEvaluated("security_"+ev.EventType, true)
 		reason := ev.Reason
 		if reason == "" {
 			reason = renderTemplateString(sr.ReasonTemplate, exprInput)
@@ -267,6 +340,8 @@ func (cfg *RuleConfig) validate() error {
 	validTypes := map[string]bool{"hot_signal": true, "risk_alert": true, "follow_up": true}
 	validPriorities := map[string]bool{"high": true, "medium": true, "low": true}
 
+	validBucketKeys := map[string]bool{"link_id": true, "workspace_id": true, "tenant_id": true, "": true}
+
 	for _, r := range cfg.ExpressionRules {
 		if r.ID == "" {
 			return fmt.Errorf("expression rule missing id")
@@ -282,6 +357,12 @@ func (cfg *RuleConfig) validate() error {
 		}
 		if !validPriorities[r.Output.Priority] {
 			return fmt.Errorf("expression rule %s has invalid priority %q", r.ID, r.Output.Priority)
+		}
+		if r.BucketPercent != nil && (*r.BucketPercent < 0 || *r.BucketPercent > 100) {
+			return fmt.Errorf("expression rule %s bucket_percent must be between 0 and 100", r.ID)
+		}
+		if !validBucketKeys[r.BucketKey] {
+			return fmt.Errorf("expression rule %s has invalid bucket_key %q", r.ID, r.BucketKey)
 		}
 	}
 

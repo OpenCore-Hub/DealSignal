@@ -103,6 +103,13 @@ type Config struct {
 
 	SignalRulesPath string
 
+	FeatureWorkerEnabled  bool
+	FeatureWorkerInterval time.Duration
+
+	EventsEnabled      bool
+	EventsStreamName   string
+	EventsConsumerGroup string
+
 	CORSAllowedOrigins string
 	MetricsEnabled     bool
 	PprofEnabled       bool
@@ -199,6 +206,13 @@ func Load() (*Config, error) {
 		SecurityAnomalyThreshold: getEnvInt("SECURITY_ANOMALY_THRESHOLD", 5),
 
 		SignalRulesPath:             getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
+
+		FeatureWorkerEnabled:        strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
+		FeatureWorkerInterval:       time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
+
+		EventsEnabled:               strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
+		EventsStreamName:            getEnv("EVENTS_STREAM_NAME", "events:signal"),
+		EventsConsumerGroup:         getEnv("EVENTS_CONSUMER_GROUP", "signal-sync"),
 
 		AccessLogsRetentionDays:     getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
 		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),

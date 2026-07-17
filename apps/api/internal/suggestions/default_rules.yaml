@@ -9,6 +9,9 @@
 expression_rules:
   - id: hot_signal
     condition: 'heat.level == "hot" && opens >= 2'
+    enabled: true
+    bucket_percent: 100
+    bucket_key: link_id
     output:
       type: hot_signal
       subtype: hot

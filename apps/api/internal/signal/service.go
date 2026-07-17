@@ -39,7 +39,7 @@ func (s *Service) GetFeed(ctx context.Context, workspaceID string) (Feed, error)
 		return Feed{}, err
 	}
 
-	if err := s.syncFromSuggestions(ctx, wsUUID); err != nil {
+	if err := s.SyncWorkspace(ctx, workspaceID); err != nil {
 		return Feed{}, fmt.Errorf("sync signals: %w", err)
 	}
 
@@ -170,6 +170,21 @@ func (s *Service) markSynced(ctx context.Context, ids []pgtype.UUID) error {
 	return nil
 }
 
+// SyncWorkspace synchronizes all unsynced suggestions for a workspace into signals.
+// It is safe to call concurrently and is used by both HTTP polling and the event-driven consumer.
+func (s *Service) SyncWorkspace(ctx context.Context, workspaceID string) error {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return err
+	}
+	start := time.Now()
+	if err := s.syncFromSuggestions(ctx, wsUUID); err != nil {
+		return err
+	}
+	observeSignalSyncDuration(workspaceID, start)
+	return nil
+}
+
 func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UUID) error {
 	suggestions, err := s.queries.ListUnsyncedSuggestionsByWorkspace(ctx, workspaceID)
 	if err != nil {
@@ -203,6 +218,7 @@ func (s *Service) syncFromSuggestions(ctx context.Context, workspaceID pgtype.UU
 		syncedIDs = append(syncedIDs, sug.ID)
 	}
 
+	recordSignalsSynced(uuid.UUID(workspaceID.Bytes).String(), len(syncedIDs))
 	return s.markSynced(ctx, syncedIDs)
 }
 

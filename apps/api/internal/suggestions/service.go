@@ -49,17 +49,31 @@ type Enricher interface {
 
 // Service generates follow-up suggestions from link analytics.
 type Service struct {
-	queries     *db.Queries
-	notifier    Notifier
-	enricher    Enricher
-	ruleEngine  *RuleEngine
+	queries      *db.Queries
+	notifier     Notifier
+	enricher     Enricher
+	ruleEngine   *RuleEngine
+	featureStore *FeatureStore
+}
+
+// ServiceOption configures a suggestion service.
+type ServiceOption func(*Service)
+
+// WithFeatureStore enables the service to read pre-aggregated link features.
+func WithFeatureStore(fs *FeatureStore) ServiceOption {
+	return func(s *Service) { s.featureStore = fs }
+}
+
+// WithEnricher sets the optional LLM enricher.
+func WithEnricher(enricher Enricher) ServiceOption {
+	return func(s *Service) { s.enricher = enricher }
 }
 
 // NewService creates a suggestion service.
-func NewService(q *db.Queries, n Notifier, ruleEngine *RuleEngine, enricher ...Enricher) *Service {
+func NewService(q *db.Queries, n Notifier, ruleEngine *RuleEngine, opts ...ServiceOption) *Service {
 	s := &Service{queries: q, notifier: n, ruleEngine: ruleEngine}
-	if len(enricher) > 0 {
-		s.enricher = enricher[0]
+	for _, opt := range opts {
+		opt(s)
 	}
 	return s
 }
@@ -78,12 +92,15 @@ func (s *Service) ScheduleGenerate(ctx context.Context, link db.Link, lang strin
 
 // Generate creates suggestions for a link based on recent access events.
 func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string) ([]Suggestion, error) {
+	start := time.Now()
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
+		recordSuggestionGenerationError("parse_workspace")
 		return nil, err
 	}
 	linkUUID, err := pgUUID(linkID)
 	if err != nil {
+		recordSuggestionGenerationError("parse_link")
 		return nil, err
 	}
 
@@ -92,11 +109,13 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		WorkspaceID: wsUUID,
 	})
 	if err != nil {
+		recordSuggestionGenerationError("get_link")
 		return nil, ErrLinkNotFound
 	}
 
 	metrics, err := s.metrics(ctx, linkUUID)
 	if err != nil {
+		recordSuggestionGenerationError("metrics")
 		return nil, err
 	}
 
@@ -156,15 +175,25 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 		return nil, err
 	}
 
-	candidates, err := s.evaluateRules(result, metrics, behavior, ctxSnapshot, securityEvents)
+	candidates, err := s.evaluateRules(link, result, metrics, behavior, ctxSnapshot, securityEvents)
 	if err != nil {
+		recordSuggestionGenerationError("evaluate_rules")
 		return nil, fmt.Errorf("evaluate rules: %w", err)
 	}
 
+	matchedRuleIDs := make([]string, 0, len(candidates))
+	for _, c := range candidates {
+		if c.RuleID != "" {
+			matchedRuleIDs = append(matchedRuleIDs, c.RuleID)
+		}
+	}
+
 	out := make([]Suggestion, 0, len(candidates))
+	generatedIDs := make([]pgtype.UUID, 0, len(candidates))
 	for _, c := range candidates {
 		exists, err := s.recentExists(ctx, link.WorkspaceID, linkUUID, c.Type, c.Subtype)
 		if err != nil {
+			recordSuggestionGenerationError("recent_exists")
 			return nil, fmt.Errorf("check recent suggestion: %w", err)
 		}
 		if exists {
@@ -201,9 +230,12 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			Context:     c.Context.ToJSONB(),
 		})
 		if err != nil {
+			recordSuggestionGenerationError("create_suggestion")
 			return nil, fmt.Errorf("create suggestion: %w", err)
 		}
 		out = append(out, suggestionFromRow(row, lang))
+		generatedIDs = append(generatedIDs, row.ID)
+		recordSuggestionGenerated(c.Type, c.Subtype)
 
 		if c.Type == "hot_signal" && s.notifier != nil {
 			userID := ""
@@ -213,10 +245,34 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			_ = s.notifier.Enqueue(ctx, workspaceID, userID, "email", titleForSubtype(c.Subtype, c.Type, lang), reason+"\n"+action)
 		}
 	}
+
+	snapshot, _ := json.Marshal(map[string]any{
+		"heat": map[string]any{
+			"level": result.Level,
+			"score": result.Score,
+			"trend": result.Trend,
+		},
+		"metrics":         metrics,
+		"behavior":        behavior,
+		"security_events": securityEvents,
+	})
+
+	_, _ = s.queries.CreateSignalRuleRun(ctx, db.CreateSignalRuleRunParams{
+		TenantID:               link.TenantID,
+		WorkspaceID:            link.WorkspaceID,
+		LinkID:                 pgtype.UUID{Bytes: linkUUID.Bytes, Valid: true},
+		RunStartedAt:           pgtype.Timestamptz{Time: start, Valid: true},
+		DurationMs:             pgtype.Int4{Int32: int32(time.Since(start).Milliseconds()), Valid: true},
+		InputSnapshot:          snapshot,
+		MatchedRuleIds:         matchedRuleIDs,
+		GeneratedSuggestionIds: generatedIDs,
+	})
+
+	observeSuggestionGenerationDuration(workspaceID, start)
 	return out, nil
 }
 
-func (s *Service) evaluateRules(result heat.Result, m suggestionMetrics, behavior BehaviorInput, ctxSnapshot Context, events []db.ListRecentSecurityEventsByLinkRow) ([]candidate, error) {
+func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMetrics, behavior BehaviorInput, ctxSnapshot Context, events []db.ListRecentSecurityEventsByLinkRow) ([]candidate, error) {
 	if s.ruleEngine == nil {
 		return nil, nil
 	}
@@ -230,7 +286,10 @@ func (s *Service) evaluateRules(result heat.Result, m suggestionMetrics, behavio
 	}
 
 	matches, err := s.ruleEngine.Evaluate(RuleInput{
-		Heat: HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
+		TenantID:    uuid.UUID(link.TenantID.Bytes).String(),
+		WorkspaceID: uuid.UUID(link.WorkspaceID.Bytes).String(),
+		LinkID:      uuid.UUID(link.ID.Bytes).String(),
+		Heat:        HeatInput{Level: result.Level, Score: result.Score, Trend: result.Trend},
 		Metrics: MetricsInput{
 			Opens:              m.opens,
 			Revisits:           m.revisits,
@@ -252,6 +311,7 @@ func (s *Service) evaluateRules(result heat.Result, m suggestionMetrics, behavio
 	candidates := make([]candidate, 0, len(matches))
 	for _, match := range matches {
 		candidates = append(candidates, candidate{
+			RuleID:   match.ID,
 			Type:     match.Type,
 			Subtype:  match.Subtype,
 			Reason:   match.Reason,
@@ -423,6 +483,12 @@ func (s *Service) recentExists(ctx context.Context, workspaceID, linkID pgtype.U
 }
 
 func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID) (suggestionMetrics, error) {
+	if s.featureStore != nil {
+		if snap, err := s.featureStore.GetForLink(ctx, linkID); err == nil && snap.Found {
+			return snap.toSuggestionMetrics(), nil
+		}
+	}
+
 	var m suggestionMetrics
 	access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
 	if err != nil {
@@ -468,6 +534,12 @@ type suggestionMetrics struct {
 }
 
 func (s *Service) behaviorFeatures(ctx context.Context, linkID pgtype.UUID) (BehaviorInput, error) {
+	if s.featureStore != nil {
+		if snap, err := s.featureStore.GetForLink(ctx, linkID); err == nil && snap.Found {
+			return snap.toBehaviorInput(), nil
+		}
+	}
+
 	var out BehaviorInput
 
 	distinctIPs, err := s.queries.CountRecentDistinctIPsByLink(ctx, linkID)
@@ -500,6 +572,7 @@ func (m suggestionMetrics) heatInput() heat.Input {
 }
 
 type candidate struct {
+	RuleID   string
 	Type     string
 	Subtype  string
 	Reason   string

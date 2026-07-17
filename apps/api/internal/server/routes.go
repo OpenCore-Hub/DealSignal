@@ -19,6 +19,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/events"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/integration"
@@ -201,9 +202,25 @@ func (s *Server) registerRoutes() error {
 			if err != nil {
 				return fmt.Errorf("suggestion rule engine: %w", err)
 			}
-			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc}, suggestionRuleEngine, suggestionEnricher)
 
-			suggestionWorker := suggestions.NewWorker(suggestionSvc, s.dbPool, suggestions.DefaultWorkerConfig())
+			featureStore := suggestions.NewFeatureStore(queries)
+			suggestionSvc := suggestions.NewService(queries, &notificationAdapter{notificationSvc}, suggestionRuleEngine,
+				suggestions.WithEnricher(suggestionEnricher),
+				suggestions.WithFeatureStore(featureStore),
+			)
+
+			if s.cfg.FeatureWorkerEnabled {
+				featureWorker := suggestions.NewFeatureWorker(featureStore, s.cfg.FeatureWorkerInterval, 100)
+				s.registerWorker(featureWorker)
+				featureWorker.Start(s.shutdownCtx)
+			}
+
+			var eventBus events.Bus = events.NewNoOpBus()
+			if s.cfg.EventsEnabled && s.redisClient != nil {
+				eventBus = events.NewRedisBus(s.redisClient.GoRedis(), s.cfg.EventsStreamName, s.cfg.EventsConsumerGroup)
+			}
+
+			suggestionWorker := suggestions.NewWorker(suggestionSvc, s.dbPool, eventBus, suggestions.DefaultWorkerConfig())
 			s.registerWorker(suggestionWorker)
 			suggestionWorker.Start(s.shutdownCtx)
 
@@ -218,6 +235,14 @@ func (s *Server) registerRoutes() error {
 				dedupChecker = analytics.NewFailoverDedupChecker(nil, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
 			}
 			signalSvc := signal.NewService(queries)
+
+			if s.cfg.EventsEnabled {
+				signalConsumer := events.NewSignalConsumer(signalSvc)
+				consumerWorker := events.NewConsumerWorker(eventBus, signalConsumer.Handle)
+				s.registerWorker(consumerWorker)
+				consumerWorker.Start(s.shutdownCtx)
+			}
+
 			signalSyncer := &analyticsSignalSyncer{svc: signalSvc}
 			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg, signalSyncer)
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)

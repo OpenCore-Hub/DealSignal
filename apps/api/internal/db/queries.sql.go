@@ -1968,6 +1968,62 @@ func (q *Queries) CreateSignal(ctx context.Context, arg CreateSignalParams) (Sig
 	return i, err
 }
 
+const createSignalRuleRun = `-- name: CreateSignalRuleRun :one
+INSERT INTO signal_rule_run (
+    tenant_id,
+    workspace_id,
+    link_id,
+    run_started_at,
+    duration_ms,
+    input_snapshot,
+    matched_rule_ids,
+    generated_suggestion_ids,
+    error
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+RETURNING id, tenant_id, workspace_id, link_id, run_started_at, duration_ms, input_snapshot, matched_rule_ids, generated_suggestion_ids, error, created_at
+`
+
+type CreateSignalRuleRunParams struct {
+	TenantID               pgtype.UUID
+	WorkspaceID            pgtype.UUID
+	LinkID                 pgtype.UUID
+	RunStartedAt           pgtype.Timestamptz
+	DurationMs             pgtype.Int4
+	InputSnapshot          []byte
+	MatchedRuleIds         []string
+	GeneratedSuggestionIds []pgtype.UUID
+	Error                  pgtype.Text
+}
+
+func (q *Queries) CreateSignalRuleRun(ctx context.Context, arg CreateSignalRuleRunParams) (SignalRuleRun, error) {
+	row := q.db.QueryRow(ctx, createSignalRuleRun,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.RunStartedAt,
+		arg.DurationMs,
+		arg.InputSnapshot,
+		arg.MatchedRuleIds,
+		arg.GeneratedSuggestionIds,
+		arg.Error,
+	)
+	var i SignalRuleRun
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.RunStartedAt,
+		&i.DurationMs,
+		&i.InputSnapshot,
+		&i.MatchedRuleIds,
+		&i.GeneratedSuggestionIds,
+		&i.Error,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createSuggestion = `-- name: CreateSuggestion :one
 INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context)
 VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $10::jsonb, $11::jsonb)
@@ -4078,6 +4134,57 @@ func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtyp
 	return items, nil
 }
 
+const getLinkByID = `-- name: GetLinkByID :one
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+FROM links
+WHERE id = $1
+LIMIT 1
+`
+
+func (q *Queries) GetLinkByID(ctx context.Context, id pgtype.UUID) (Link, error) {
+	row := q.db.QueryRow(ctx, getLinkByID, id)
+	var i Link
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PublicToken,
+		&i.Name,
+		&i.PermissionType,
+		&i.ExpiresAt,
+		&i.MaxAccessCount,
+		&i.AccessCount,
+		&i.DownloadEnabled,
+		&i.WatermarkEnabled,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequireNda,
+		&i.RequireEmailVerification,
+		&i.AiCopilotEnabled,
+		&i.DealRoomID,
+		&i.RequirePassword,
+		&i.PasswordHash,
+		&i.CustomDomain,
+		&i.Tags,
+		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
+		&i.HasDocumentScope,
+		&i.FolderScopePaths,
+	)
+	return i, err
+}
+
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
 FROM links
@@ -4322,6 +4429,40 @@ func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken 
 		return nil, err
 	}
 	return items, nil
+}
+
+const getLinkFeature = `-- name: GetLinkFeature :one
+SELECT id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at
+FROM link_features
+WHERE link_id = $1
+ORDER BY window_start DESC
+LIMIT 1
+`
+
+func (q *Queries) GetLinkFeature(ctx context.Context, linkID pgtype.UUID) (LinkFeature, error) {
+	row := q.db.QueryRow(ctx, getLinkFeature, linkID)
+	var i LinkFeature
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.WindowStart,
+		&i.Opens,
+		&i.UniqueVisitors,
+		&i.Revisits,
+		&i.AvgDurationSeconds,
+		&i.TotalPageViews,
+		&i.KeyPageViews,
+		&i.Downloads,
+		&i.Bounces,
+		&i.DistinctIps1h,
+		&i.DistinctEmails24h,
+		&i.UnknownEmails24h,
+		&i.Downloads24h,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getLinkIndexFileByLink = `-- name: GetLinkIndexFileByLink :one
@@ -8015,6 +8156,34 @@ func (q *Queries) ListRecentlyAccessedDocumentsByWorkspace(ctx context.Context, 
 	return items, nil
 }
 
+const listRecentlyActiveLinkIDs = `-- name: ListRecentlyActiveLinkIDs :many
+SELECT DISTINCT link_id
+FROM access_logs
+WHERE created_at > now() - interval '1 hour'
+ORDER BY link_id
+LIMIT $1
+`
+
+func (q *Queries) ListRecentlyActiveLinkIDs(ctx context.Context, limit int32) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listRecentlyActiveLinkIDs, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var link_id pgtype.UUID
+		if err := rows.Scan(&link_id); err != nil {
+			return nil, err
+		}
+		items = append(items, link_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRoomMembers = `-- name: ListRoomMembers :many
 SELECT id, tenant_id, workspace_id, room_id, email, user_id, role, nda_status, nda_signed_at, status, created_at, updated_at
 FROM room_members
@@ -8262,6 +8431,58 @@ func (q *Queries) ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype
 			&i.Subtype,
 			&i.Metadata,
 			&i.Context,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listStaleLinkFeatures = `-- name: ListStaleLinkFeatures :many
+SELECT id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at
+FROM link_features
+WHERE updated_at < $1
+ORDER BY updated_at ASC
+LIMIT $2
+`
+
+type ListStaleLinkFeaturesParams struct {
+	UpdatedAt pgtype.Timestamptz
+	Limit     int32
+}
+
+func (q *Queries) ListStaleLinkFeatures(ctx context.Context, arg ListStaleLinkFeaturesParams) ([]LinkFeature, error) {
+	rows, err := q.db.Query(ctx, listStaleLinkFeatures, arg.UpdatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkFeature
+	for rows.Next() {
+		var i LinkFeature
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.WindowStart,
+			&i.Opens,
+			&i.UniqueVisitors,
+			&i.Revisits,
+			&i.AvgDurationSeconds,
+			&i.TotalPageViews,
+			&i.KeyPageViews,
+			&i.Downloads,
+			&i.Bounces,
+			&i.DistinctIps1h,
+			&i.DistinctEmails24h,
+			&i.UnknownEmails24h,
+			&i.Downloads24h,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -10627,6 +10848,104 @@ func (q *Queries) UpsertIntegrationToken(ctx context.Context, arg UpsertIntegrat
 		arg.ExternalID,
 	)
 	return err
+}
+
+const upsertLinkFeature = `-- name: UpsertLinkFeature :one
+INSERT INTO link_features (
+    tenant_id,
+    workspace_id,
+    link_id,
+    window_start,
+    opens,
+    unique_visitors,
+    revisits,
+    avg_duration_seconds,
+    total_page_views,
+    key_page_views,
+    downloads,
+    bounces,
+    distinct_ips_1h,
+    distinct_emails_24h,
+    unknown_emails_24h,
+    downloads_24h
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+ON CONFLICT (link_id, window_start) DO UPDATE SET
+    opens = EXCLUDED.opens,
+    unique_visitors = EXCLUDED.unique_visitors,
+    revisits = EXCLUDED.revisits,
+    avg_duration_seconds = EXCLUDED.avg_duration_seconds,
+    total_page_views = EXCLUDED.total_page_views,
+    key_page_views = EXCLUDED.key_page_views,
+    downloads = EXCLUDED.downloads,
+    bounces = EXCLUDED.bounces,
+    distinct_ips_1h = EXCLUDED.distinct_ips_1h,
+    distinct_emails_24h = EXCLUDED.distinct_emails_24h,
+    unknown_emails_24h = EXCLUDED.unknown_emails_24h,
+    downloads_24h = EXCLUDED.downloads_24h,
+    updated_at = now()
+RETURNING id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at
+`
+
+type UpsertLinkFeatureParams struct {
+	TenantID           pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	LinkID             pgtype.UUID
+	WindowStart        pgtype.Timestamptz
+	Opens              int32
+	UniqueVisitors     int32
+	Revisits           int32
+	AvgDurationSeconds int32
+	TotalPageViews     int32
+	KeyPageViews       int32
+	Downloads          int32
+	Bounces            int32
+	DistinctIps1h      int64
+	DistinctEmails24h  int64
+	UnknownEmails24h   int64
+	Downloads24h       int64
+}
+
+func (q *Queries) UpsertLinkFeature(ctx context.Context, arg UpsertLinkFeatureParams) (LinkFeature, error) {
+	row := q.db.QueryRow(ctx, upsertLinkFeature,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.WindowStart,
+		arg.Opens,
+		arg.UniqueVisitors,
+		arg.Revisits,
+		arg.AvgDurationSeconds,
+		arg.TotalPageViews,
+		arg.KeyPageViews,
+		arg.Downloads,
+		arg.Bounces,
+		arg.DistinctIps1h,
+		arg.DistinctEmails24h,
+		arg.UnknownEmails24h,
+		arg.Downloads24h,
+	)
+	var i LinkFeature
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.WindowStart,
+		&i.Opens,
+		&i.UniqueVisitors,
+		&i.Revisits,
+		&i.AvgDurationSeconds,
+		&i.TotalPageViews,
+		&i.KeyPageViews,
+		&i.Downloads,
+		&i.Bounces,
+		&i.DistinctIps1h,
+		&i.DistinctEmails24h,
+		&i.UnknownEmails24h,
+		&i.Downloads24h,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertLinkIndexFile = `-- name: UpsertLinkIndexFile :one

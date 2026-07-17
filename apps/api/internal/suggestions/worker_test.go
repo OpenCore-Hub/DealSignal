@@ -20,7 +20,7 @@ func TestDefaultWorkerConfig(t *testing.T) {
 }
 
 func TestNewWorkerAppliesDefaults(t *testing.T) {
-	w := NewWorker(nil, nil, WorkerConfig{})
+	w := NewWorker(nil, nil, nil, WorkerConfig{})
 	if w.interval != DefaultWorkerConfig().Interval {
 		t.Errorf("interval default mismatch: %v", w.interval)
 	}
