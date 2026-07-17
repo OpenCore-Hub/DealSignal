@@ -65,6 +65,24 @@ class Handler(BaseHTTPRequestHandler):
             })
 
         if self.path == "/v1/chat/completions":
+            # Some unified gateways route embedding requests through /v1/chat/completions.
+            inputs = payload.get("input")
+            if inputs is not None:
+                if isinstance(inputs, str):
+                    inputs = [inputs]
+                data = []
+                for i, text in enumerate(inputs):
+                    data.append({
+                        "object": "embedding",
+                        "index": i,
+                        "embedding": make_vector(text),
+                    })
+                return self._json(200, {
+                    "object": "list",
+                    "data": data,
+                    "model": payload.get("model", "text-embedding-3-small"),
+                    "usage": {"prompt_tokens": len(inputs) * 4, "total_tokens": len(inputs) * 4},
+                })
             return self._json(200, {
                 "id": "chatcmpl-mock",
                 "object": "chat.completion",

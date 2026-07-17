@@ -32,12 +32,13 @@ type Config struct {
 	OnlyOfficeURL       string
 	OnlyOfficeJWTSecret string
 
-	OpenAIAPIKey         string
-	OpenAIBaseURL        string
-	OpenAIEmbeddingModel string
-	OpenAIChatModel      string
-	OpenAIReferer        string // optional, e.g. for OpenRouter
-	OpenAIAppTitle       string // optional, e.g. for OpenRouter
+	OpenAIAPIKey            string
+	OpenAIBaseURL           string
+	OpenAIEmbeddingModel    string
+	OpenAIEmbeddingEndpoint string // "embeddings" (default) or "chat_completions"
+	OpenAIChatModel         string
+	OpenAIReferer           string // optional, e.g. for OpenRouter
+	OpenAIAppTitle          string // optional, e.g. for OpenRouter
 
 	BaseDomain             string
 	CNAMETarget            string
@@ -106,8 +107,8 @@ type Config struct {
 	FeatureWorkerEnabled  bool
 	FeatureWorkerInterval time.Duration
 
-	EventsEnabled      bool
-	EventsStreamName   string
+	EventsEnabled       bool
+	EventsStreamName    string
 	EventsConsumerGroup string
 
 	CORSAllowedOrigins string
@@ -140,12 +141,13 @@ func Load() (*Config, error) {
 		OnlyOfficeURL:       os.Getenv("ONLYOFFICE_URL"),
 		OnlyOfficeJWTSecret: os.Getenv("ONLYOFFICE_JWT_SECRET"),
 
-		OpenAIAPIKey:         os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:        os.Getenv("OPENAI_BASE_URL"),
-		OpenAIEmbeddingModel: os.Getenv("OPENAI_EMBEDDING_MODEL"),
-		OpenAIChatModel:      os.Getenv("OPENAI_CHAT_MODEL"),
-		OpenAIReferer:        os.Getenv("OPENAI_REFERER"),
-		OpenAIAppTitle:       os.Getenv("OPENAI_APP_TITLE"),
+		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:           os.Getenv("OPENAI_BASE_URL"),
+		OpenAIEmbeddingModel:    os.Getenv("OPENAI_EMBEDDING_MODEL"),
+		OpenAIEmbeddingEndpoint: os.Getenv("OPENAI_EMBEDDING_ENDPOINT"),
+		OpenAIChatModel:         os.Getenv("OPENAI_CHAT_MODEL"),
+		OpenAIReferer:           os.Getenv("OPENAI_REFERER"),
+		OpenAIAppTitle:          os.Getenv("OPENAI_APP_TITLE"),
 
 		BaseDomain:             getEnv("BASE_DOMAIN", "dealsignal.com"),
 		CNAMETarget:            getEnv("CNAME_TARGET", "cname.dealsignal.com"),
@@ -205,14 +207,14 @@ func Load() (*Config, error) {
 		SecurityAnomalyWindow:    time.Duration(getEnvInt("SECURITY_ANOMALY_WINDOW_MINUTES", 5)) * time.Minute,
 		SecurityAnomalyThreshold: getEnvInt("SECURITY_ANOMALY_THRESHOLD", 5),
 
-		SignalRulesPath:             getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
+		SignalRulesPath: getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
 
-		FeatureWorkerEnabled:        strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
-		FeatureWorkerInterval:       time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
+		FeatureWorkerEnabled:  strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
+		FeatureWorkerInterval: time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
 
-		EventsEnabled:               strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
-		EventsStreamName:            getEnv("EVENTS_STREAM_NAME", "events:signal"),
-		EventsConsumerGroup:         getEnv("EVENTS_CONSUMER_GROUP", "signal-sync"),
+		EventsEnabled:       strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
+		EventsStreamName:    getEnv("EVENTS_STREAM_NAME", "events:signal"),
+		EventsConsumerGroup: getEnv("EVENTS_CONSUMER_GROUP", "signal-sync"),
 
 		AccessLogsRetentionDays:     getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
 		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
