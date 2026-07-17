@@ -393,6 +393,20 @@ type LinkFileRequest struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type LinkHeatScore struct {
+	LinkID             pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	CreatedAt          pgtype.Timestamptz
+	Opens              int64
+	UniqueVisitors     int64
+	Downloads          int64
+	AvgDurationSeconds float64
+	TotalPageViews     int64
+	EngagedPageViews   int64
+	BounceCount        int64
+	LastAccessAt       pgtype.Timestamptz
+}
+
 type LinkIndexFile struct {
 	ID           pgtype.UUID
 	TenantID     pgtype.UUID

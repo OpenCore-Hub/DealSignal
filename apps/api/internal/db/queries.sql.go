@@ -4834,6 +4834,52 @@ func (q *Queries) GetLinkKeyPageViewMetrics24h(ctx context.Context, arg GetLinkK
 	return i, err
 }
 
+const getLinkKeyPageViewMetricsBatch = `-- name: GetLinkKeyPageViewMetricsBatch :many
+SELECT
+    pv.link_id,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_key_page_views,
+    COUNT(*) AS total_key_page_views
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = ANY($1::uuid[])
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY ($2::text[])
+GROUP BY pv.link_id
+`
+
+type GetLinkKeyPageViewMetricsBatchParams struct {
+	LinkIds  []pgtype.UUID
+	Patterns []string
+}
+
+type GetLinkKeyPageViewMetricsBatchRow struct {
+	LinkID              pgtype.UUID
+	EngagedKeyPageViews int64
+	TotalKeyPageViews   int64
+}
+
+// Batch version of GetLinkKeyPageViewMetrics for O(1) dashboard heat scoring.
+func (q *Queries) GetLinkKeyPageViewMetricsBatch(ctx context.Context, arg GetLinkKeyPageViewMetricsBatchParams) ([]GetLinkKeyPageViewMetricsBatchRow, error) {
+	rows, err := q.db.Query(ctx, getLinkKeyPageViewMetricsBatch, arg.LinkIds, arg.Patterns)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkKeyPageViewMetricsBatchRow
+	for rows.Next() {
+		var i GetLinkKeyPageViewMetricsBatchRow
+		if err := rows.Scan(&i.LinkID, &i.EngagedKeyPageViews, &i.TotalKeyPageViews); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getLinkLastAccessAt = `-- name: GetLinkLastAccessAt :one
 SELECT MAX(created_at)::timestamptz AS last_access_at
 FROM access_logs
@@ -7286,6 +7332,56 @@ func (q *Queries) ListLinkDocumentsByPublicToken(ctx context.Context, publicToke
 			&i.PageCount,
 			&i.Status,
 			&i.FileSize,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinkHeatScoresByWorkspace = `-- name: ListLinkHeatScoresByWorkspace :many
+SELECT
+    link_id,
+    workspace_id,
+    created_at,
+    opens,
+    unique_visitors,
+    downloads,
+    avg_duration_seconds,
+    total_page_views,
+    engaged_page_views,
+    bounce_count,
+    last_access_at
+FROM link_heat_scores
+WHERE workspace_id = $1
+`
+
+// Raw pre-aggregated metrics used by the dashboard heat score computation.
+func (q *Queries) ListLinkHeatScoresByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]LinkHeatScore, error) {
+	rows, err := q.db.Query(ctx, listLinkHeatScoresByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkHeatScore
+	for rows.Next() {
+		var i LinkHeatScore
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.WorkspaceID,
+			&i.CreatedAt,
+			&i.Opens,
+			&i.UniqueVisitors,
+			&i.Downloads,
+			&i.AvgDurationSeconds,
+			&i.TotalPageViews,
+			&i.EngagedPageViews,
+			&i.BounceCount,
+			&i.LastAccessAt,
 		); err != nil {
 			return nil, err
 		}

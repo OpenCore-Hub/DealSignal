@@ -47,6 +47,8 @@ type Querier interface {
 	GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (db.AccessLog, error)
 	GetLastAccessLogsByLinks(ctx context.Context, linkIDs []pgtype.UUID) ([]db.AccessLog, error)
 	GetLinkPageViewMetricsBatch(ctx context.Context, linkIDs []pgtype.UUID) ([]db.GetLinkPageViewMetricsBatchRow, error)
+	GetLinkKeyPageViewMetricsBatch(ctx context.Context, arg db.GetLinkKeyPageViewMetricsBatchParams) ([]db.GetLinkKeyPageViewMetricsBatchRow, error)
+	ListLinkHeatScoresByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.LinkHeatScore, error)
 	ListLinksByDocument(ctx context.Context, arg db.ListLinksByDocumentParams) ([]db.Link, error)
 	CreateSecurityEvent(ctx context.Context, arg db.CreateSecurityEventParams) error
 	CountSecurityEventsByIPAndWindow(ctx context.Context, arg db.CountSecurityEventsByIPAndWindowParams) (int64, error)
@@ -68,12 +70,24 @@ type SignalSyncer interface {
 	GetFeed(ctx context.Context, workspaceID string) (SignalFeed, error)
 }
 
+// Cache is a minimal key/value cache used to avoid recomputing dashboard stats.
+type Cache interface {
+	Get(ctx context.Context, key string, dest interface{}) error
+	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+}
+
 // Service records events and computes heat scores.
 type Service struct {
 	queries      Querier
 	dedup        DedupChecker
 	cfg          *config.Config
 	signalSyncer SignalSyncer
+	cache        Cache
+}
+
+// WithCache enables a cache for DashboardStats.
+func (s *Service) WithCache(c Cache) {
+	s.cache = c
 }
 
 // NewService creates an analytics service.
@@ -305,6 +319,34 @@ func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID,
 	return s.getScoreForLink(ctx, link, circle)
 }
 
+// computeHeatFromScoreRow computes a heat result from a pre-aggregated
+// link_heat_scores row. Decay is applied at request time so the score stays
+// accurate between materialized view refreshes.
+func computeHeatFromScoreRow(row db.LinkHeatScore, keyPageViews int) heat.Result {
+	revisits := int(row.Opens) - int(row.UniqueVisitors)
+	if revisits < 0 {
+		revisits = 0
+	}
+
+	decayDays := 0.0
+	if row.LastAccessAt.Valid {
+		decayDays = time.Since(row.LastAccessAt.Time).Hours() / 24
+	} else if row.CreatedAt.Valid {
+		decayDays = time.Since(row.CreatedAt.Time).Hours() / 24
+	}
+
+	return heat.Compute(heat.CircleDefault, heat.Input{
+		Opens:              int(row.Opens),
+		Revisits:           revisits,
+		AvgDurationMinutes: row.AvgDurationSeconds / 60.0,
+		KeyPageViews:       keyPageViews,
+		ForwardSignals:     int(row.UniqueVisitors),
+		Downloads:          int(row.Downloads),
+		BouncePenalty:      int(row.BounceCount),
+		DecayDays:          decayDays,
+	})
+}
+
 // getScoreForLink computes the heat score without re-fetching the link from DB.
 func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat.Circle) (heat.Result, error) {
 	access, err := s.queries.GetLinkAccessMetrics(ctx, link.ID)
@@ -401,6 +443,14 @@ type WorkspaceStats struct {
 
 // DashboardStats aggregates high-level workspace metrics.
 func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (WorkspaceStats, error) {
+	cacheKey := fmt.Sprintf("dashboard:stats:%s", workspaceID)
+	if s.cache != nil {
+		var cached WorkspaceStats
+		if err := s.cache.Get(ctx, cacheKey, &cached); err == nil {
+			return cached, nil
+		}
+	}
+
 	wsUUID, err := parseUUID(workspaceID)
 	if err != nil {
 		return WorkspaceStats{}, err
@@ -416,27 +466,38 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 	}
 	stats.RecentDocuments = recentDocs
 
-	recentLinks, err := s.queries.ListRecentLinksByWorkspace(ctx, db.ListRecentLinksByWorkspaceParams{
-		WorkspaceID: wsUUID,
-		Limit:       5,
-	})
+	// Load pre-aggregated heat metrics for all links in one query, then compute
+	// scores locally. This replaces the previous 5N per-link queries with a single
+	// materialized-view read plus one batch key-page query.
+	scoreCache := make(map[string]heat.Result)
+	heatRows, err := s.queries.ListLinkHeatScoresByWorkspace(ctx, wsUUID)
 	if err != nil {
-		return stats, fmt.Errorf("recent links: %w", err)
+		return stats, fmt.Errorf("heat scores: %w", err)
 	}
 
-	allLinks, err := s.queries.ListLinksByWorkspace(ctx, wsUUID)
-	if err != nil {
-		return stats, fmt.Errorf("links: %w", err)
+	linkIDs := make([]pgtype.UUID, 0, len(heatRows))
+	for _, row := range heatRows {
+		linkIDs = append(linkIDs, row.LinkID)
 	}
 
-	// Compute scores for all links in one batch pass, caching results for reuse.
-	scoreCache := make(map[string]heat.Result, len(allLinks))
-	for _, link := range allLinks {
-		res, err := s.getScoreForLink(ctx, link, heat.CircleDefault)
-		if err != nil {
-			res = heat.Result{Level: "cold"}
+	keyPageViewsByLink := make(map[string]int64)
+	if len(linkIDs) > 0 {
+		patterns := heat.KeyPagePatterns(heat.CircleDefault)
+		if len(patterns) > 0 {
+			kpRows, _ := s.queries.GetLinkKeyPageViewMetricsBatch(ctx, db.GetLinkKeyPageViewMetricsBatchParams{
+				LinkIds:  linkIDs,
+				Patterns: patterns,
+			})
+			for _, r := range kpRows {
+				keyPageViewsByLink[uuid.UUID(r.LinkID.Bytes).String()] = r.TotalKeyPageViews
+			}
 		}
-		scoreCache[uuid.UUID(link.ID.Bytes).String()] = res
+	}
+
+	for _, row := range heatRows {
+		linkIDStr := uuid.UUID(row.LinkID.Bytes).String()
+		res := computeHeatFromScoreRow(row, int(keyPageViewsByLink[linkIDStr]))
+		scoreCache[linkIDStr] = res
 		switch res.Level {
 		case "hot":
 			stats.HotCount++
@@ -447,8 +508,16 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 		}
 	}
 
+	recentLinks, err := s.queries.ListRecentLinksByWorkspace(ctx, db.ListRecentLinksByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		Limit:       5,
+	})
+	if err != nil {
+		return stats, fmt.Errorf("recent links: %w", err)
+	}
+
 	// Collect link IDs for batch queries.
-	linkIDs := make([]pgtype.UUID, len(recentLinks))
+	linkIDs = make([]pgtype.UUID, len(recentLinks))
 	for i, link := range recentLinks {
 		linkIDs[i] = link.ID
 	}
@@ -567,6 +636,10 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 		}
 	}
 
+	if s.cache != nil {
+		_ = s.cache.Set(ctx, cacheKey, stats, 30*time.Second)
+	}
+
 	return stats, nil
 }
 
@@ -615,11 +688,40 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 		return overview, fmt.Errorf("links: %w", err)
 	}
 
+	// Load pre-aggregated metrics from the materialized view and compute scores
+	// in one batch pass instead of issuing per-link queries.
+	heatRows, err := s.queries.ListLinkHeatScoresByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return overview, fmt.Errorf("heat scores: %w", err)
+	}
+	heatByLink := make(map[string]db.LinkHeatScore, len(heatRows))
+	linkIDs := make([]pgtype.UUID, 0, len(heatRows))
+	for _, row := range heatRows {
+		linkIDStr := uuid.UUID(row.LinkID.Bytes).String()
+		heatByLink[linkIDStr] = row
+		linkIDs = append(linkIDs, row.LinkID)
+	}
+
+	keyPageViewsByLink := make(map[string]int64)
+	if len(linkIDs) > 0 {
+		patterns := heat.KeyPagePatterns(heat.CircleDefault)
+		if len(patterns) > 0 {
+			kpRows, _ := s.queries.GetLinkKeyPageViewMetricsBatch(ctx, db.GetLinkKeyPageViewMetricsBatchParams{
+				LinkIds:  linkIDs,
+				Patterns: patterns,
+			})
+			for _, r := range kpRows {
+				keyPageViewsByLink[uuid.UUID(r.LinkID.Bytes).String()] = r.TotalKeyPageViews
+			}
+		}
+	}
+
 	overview.TopLinks = make([]LinkScore, 0, len(links))
 	for _, link := range links {
-		res, _ := s.getScoreForLink(ctx, link, heat.CircleDefault)
-		if res.Level == "" {
-			res.Level = "cold"
+		linkIDStr := uuid.UUID(link.ID.Bytes).String()
+		res := heat.Result{Level: "cold"}
+		if row, ok := heatByLink[linkIDStr]; ok {
+			res = computeHeatFromScoreRow(row, int(keyPageViewsByLink[linkIDStr]))
 		}
 		overview.TierCounts[res.Level]++
 		overview.TopLinks = append(overview.TopLinks, LinkScore{Link: link, Score: res.Score, Level: res.Level})

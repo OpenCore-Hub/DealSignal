@@ -1,0 +1,1 @@
+DROP MATERIALIZED VIEW IF EXISTS link_heat_scores;

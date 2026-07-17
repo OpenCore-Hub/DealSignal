@@ -136,6 +136,14 @@ func (m *mockAnalyticsQuerier) GetLinkPageViewMetricsBatch(_ context.Context, _ 
 	return nil, nil
 }
 
+func (m *mockAnalyticsQuerier) GetLinkKeyPageViewMetricsBatch(_ context.Context, _ db.GetLinkKeyPageViewMetricsBatchParams) ([]db.GetLinkKeyPageViewMetricsBatchRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListLinkHeatScoresByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.LinkHeatScore, error) {
+	return nil, nil
+}
+
 func (m *mockAnalyticsQuerier) ListLinksByDocument(_ context.Context, _ db.ListLinksByDocumentParams) ([]db.Link, error) {
 	return nil, nil
 }

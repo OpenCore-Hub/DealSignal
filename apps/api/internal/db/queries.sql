@@ -772,6 +772,37 @@ WHERE a.link_id = ANY($1::uuid[])
   )
 GROUP BY a.link_id;
 
+-- name: GetLinkKeyPageViewMetricsBatch :many
+-- Batch version of GetLinkKeyPageViewMetrics for O(1) dashboard heat scoring.
+SELECT
+    pv.link_id,
+    COUNT(*) FILTER (WHERE duration_seconds >= 3) AS engaged_key_page_views,
+    COUNT(*) AS total_key_page_views
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+WHERE pv.link_id = ANY(sqlc.arg(link_ids)::uuid[])
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
+GROUP BY pv.link_id;
+
+-- name: ListLinkHeatScoresByWorkspace :many
+-- Raw pre-aggregated metrics used by the dashboard heat score computation.
+SELECT
+    link_id,
+    workspace_id,
+    created_at,
+    opens,
+    unique_visitors,
+    downloads,
+    avg_duration_seconds,
+    total_page_views,
+    engaged_page_views,
+    bounce_count,
+    last_access_at
+FROM link_heat_scores
+WHERE workspace_id = $1;
+
 -- name: GetLastAccessLogsByLinks :many
 SELECT DISTINCT ON (link_id) id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
 FROM access_logs

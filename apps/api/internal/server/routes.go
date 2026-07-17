@@ -246,9 +246,15 @@ func (s *Server) registerRoutes() error {
 
 			signalSyncer := &analyticsSignalSyncer{svc: signalSvc}
 			analyticsSvc := analytics.NewService(queries, dedupChecker, s.cfg, signalSyncer)
+			if s.redisClient != nil {
+				analyticsSvc.WithCache(analytics.NewRedisCache(s.redisClient))
+			}
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
 			s.registerWorker(analytics.NewRetentionCleaner(s.dbPool, queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays))
+			heatScoreWorker := analytics.NewHeatScoreRefreshWorker(s.dbPool, s.cfg.HeatScoreRefreshInterval)
+			s.registerWorker(heatScoreWorker)
+			heatScoreWorker.Start(s.shutdownCtx)
 
 			// SSE realtime push
 			sseHub := sse.NewHub(s.redisClient.GoRedis())

@@ -42,20 +42,25 @@ export function DashboardPage() {
     refetch,
   } = useAsyncData<DashboardData>(
     async () => {
-      const [stats] = await Promise.all([
+      const [statsRes, signalsRes, roomsRes, insightsRes] = await Promise.allSettled([
         api.getDashboardStats(),
         fetchSignals(),
-      ]);
-      const [roomsRes, insightsRes] = await Promise.allSettled([
         api.getDealRooms(),
         api.getInsightsOverview(),
       ]);
+
+      if (statsRes.status === "rejected") {
+        throw statsRes.reason;
+      }
+      if (signalsRes.status === "rejected") {
+        // fetchSignals mutates the signal store; leave signals as-is on failure.
+        console.error("failed to fetch signals", signalsRes.reason);
+      }
+
       return {
-        stats,
-        rooms:
-          roomsRes.status === "fulfilled" ? roomsRes.value.data : [],
-        insights:
-          insightsRes.status === "fulfilled" ? insightsRes.value : null,
+        stats: statsRes.value,
+        rooms: roomsRes.status === "fulfilled" ? roomsRes.value.data : [],
+        insights: insightsRes.status === "fulfilled" ? insightsRes.value : null,
       };
     },
     [fetchSignals]

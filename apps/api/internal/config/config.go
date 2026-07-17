@@ -107,6 +107,8 @@ type Config struct {
 	FeatureWorkerEnabled  bool
 	FeatureWorkerInterval time.Duration
 
+	HeatScoreRefreshInterval time.Duration
+
 	EventsEnabled       bool
 	EventsStreamName    string
 	EventsConsumerGroup string
@@ -211,6 +213,7 @@ func Load() (*Config, error) {
 
 		FeatureWorkerEnabled:  strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
 		FeatureWorkerInterval: time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
+		HeatScoreRefreshInterval: time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
 
 		EventsEnabled:       strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
 		EventsStreamName:    getEnv("EVENTS_STREAM_NAME", "events:signal"),
