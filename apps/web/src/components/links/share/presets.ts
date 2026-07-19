@@ -42,8 +42,8 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     expiresAt: "",
   },
   standard: {
-    requireEmail: true,
-    requireEmailVerification: false,
+    requireEmail: false,
+    requireEmailVerification: true,
     requirePassword: false,
     watermarkEnabled: true,
     requireNda: false,

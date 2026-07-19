@@ -16,24 +16,21 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { AccessRule, Link } from "@/types";
+import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
   AccessTab,
-  CopyButton,
-  applyPreset,
+  DocumentsTab,
   buildDraft,
   buildRules,
   buildAllowedLists,
   buildLinkPayload,
-  inferPreset,
   toRFC3339,
   validateDraft,
-  getPublicUrl,
 } from "@/components/links/share";
-import type { DraftLink, LinkPreset } from "@/components/links/share";
+import type { DraftLink } from "@/components/links/share";
 
 const tabTransition = {
   initial: { opacity: 0, x: 8 },
@@ -46,7 +43,7 @@ interface DealRoomShareDialogProps {
   roomId: string;
   linkId?: string;
   slug?: string;
-  defaultTab?: "share" | "access";
+  defaultTab?: "share" | "access" | "documents";
   children?: React.ReactElement;
   onChanged?: () => void;
   open?: boolean;
@@ -62,22 +59,22 @@ interface DialogData {
   links: Link[];
   selectedLink: Link | null;
   rules: AccessRule[];
-  documents: { id: string; title: string }[];
+  folders: DealRoomFolder[];
+  documents: DealRoomFolderDocs[];
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
-  const [linksRes, docsRes] = await Promise.all([
+  const [linksRes, docsRes, foldersRes] = await Promise.all([
     api.getDealRoomLinks(roomId),
     api.getDealRoomDocuments(roomId),
+    api.getDealRoomFolders(roomId),
   ]);
   const loadedLinks = linksRes.data;
-
-  const documents = (docsRes.data ?? [])
-    .flatMap((folder) => folder.documents ?? [])
-    .map((d) => ({ id: d.document_id, title: d.title }));
+  const folders = foldersRes.data ?? [];
+  const documents = docsRes.data ?? [];
 
   if (!linkId) {
-    return { links: loadedLinks, selectedLink: null, rules: [], documents };
+    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents };
   }
 
   let selectedLink = loadedLinks.find((l) => l.id === linkId) || null;
@@ -97,7 +94,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
   }
 
   if (!selectedLink) {
-    return { links: loadedLinks, selectedLink: null, rules: [], documents };
+    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents };
   }
 
   const rulesRes = await api.getLinkAccessRules(selectedLink.id);
@@ -106,6 +103,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     links: loadedLinks,
     selectedLink,
     rules: rulesRes.data,
+    folders,
     documents,
   };
 }
@@ -113,7 +111,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
 interface DealRoomShareDialogContentProps {
   roomId: string;
   slug?: string;
-  defaultTab?: "share" | "access";
+  defaultTab?: "share" | "access" | "documents";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
@@ -136,7 +134,7 @@ function DealRoomShareDialogContent({
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const reducedMotion = useReducedMotion();
-  const [tab, setTab] = useState<"share" | "access">(defaultTab);
+  const [tab, setTab] = useState<"share" | "access" | "documents">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -153,8 +151,6 @@ function DealRoomShareDialogContent({
   }, []);
 
   const selectedLink = data?.selectedLink ?? null;
-  const [presetOverride, setPresetOverride] = useState<LinkPreset | null>(null);
-  const preset = presetOverride ?? inferPreset(draft);
   const isNew = !selectedLink;
   const isDealRoomLink = !isNew ? !!selectedLink?.dealRoomId : true;
 
@@ -180,7 +176,6 @@ function DealRoomShareDialogContent({
     if (keyChanged) {
       const nextDraft = buildDraft(data?.selectedLink, data?.rules);
       setDraft(nextDraft);
-      setPresetOverride(null);
       setHighlightedFields([]);
       hasUnsavedChangesRef.current = false;
       loadedKeyRef.current = currentKey;
@@ -188,7 +183,6 @@ function DealRoomShareDialogContent({
       // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
       const nextDraft = buildDraft(data?.selectedLink, data?.rules);
       setDraft(nextDraft);
-      setPresetOverride(null);
       setHighlightedFields([]);
     }
   }, [data]);
@@ -256,6 +250,7 @@ function DealRoomShareDialogContent({
           screenshot_protection_enabled: draft.enableScreenshotProtection,
           custom_domain: draft.customDomain || undefined,
           notify_on_access: draft.notifyOnAccess,
+          folder_paths: draft.folderPaths.length > 0 ? draft.folderPaths : undefined,
         });
       } else {
         await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
@@ -317,12 +312,12 @@ function DealRoomShareDialogContent({
     void doUpdate();
   };
 
-  const publicUrl = getPublicUrl(selectedLink);
-
   const primaryAction =
     tab === "share"
       ? { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
-      : { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave };
+      : tab === "access"
+        ? { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
+        : { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave };
 
   return (
     <>
@@ -333,19 +328,6 @@ function DealRoomShareDialogContent({
               <LinkIcon size={20} />
               {isNew ? t("share.createTitle") : selectedLink?.name}
             </DialogTitle>
-            {!isNew && publicUrl && (
-              <div className="flex items-center gap-2">
-                <span className="truncate text-xs text-muted-foreground">{publicUrl}</span>
-                <CopyButton
-                  value={publicUrl}
-                  label={t("share.copyLink")}
-                  successLabel={t("share.copied")}
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto px-1 py-0"
-                />
-              </div>
-            )}
           </div>
           {!isNew && (
             <div className="flex items-center gap-2">
@@ -361,24 +343,11 @@ function DealRoomShareDialogContent({
         </div>
       </DialogHeader>
 
-      <AnimatePresence>
-        {draft.allowedViewers.length > 0 && (
-          <motion.div
-            initial={reducedMotion ? {} : { opacity: 0, y: -8, height: 0 }}
-            animate={{ opacity: 1, y: 0, height: "auto" }}
-            exit={reducedMotion ? {} : { opacity: 0, y: -8, height: 0 }}
-            className="rounded-md border border-warning-500/20 bg-warning-500/10 px-3 py-2 text-xs text-warning-700"
-          >
-            {t("share.restrictedAlert")}
-          </motion.div>
-        )}
-      </AnimatePresence>
-
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex flex-1 flex-col overflow-hidden">
         <TabsList variant="line" className="w-full">
-          <TabsTrigger value="share">{t("share.title")}</TabsTrigger>
-          <TabsTrigger value="access">{t("accessRules.title")}</TabsTrigger>
-
+          <TabsTrigger value="share">{lt("share.title")}</TabsTrigger>
+          <TabsTrigger value="access">{lt("accessRules.title")}</TabsTrigger>
+          <TabsTrigger value="documents">{lt("documents.title")}</TabsTrigger>
         </TabsList>
 
         <div className="flex-1 overflow-y-auto px-3 py-2" style={{ scrollbarGutter: "stable" }}>
@@ -394,23 +363,12 @@ function DealRoomShareDialogContent({
                   <ShareTab
                     draft={draft}
                     updateDraft={updateDraft}
-                    preset={preset}
-                    setPreset={(name) => {
-                      if (name === "custom") {
-                        setPresetOverride("custom");
-                        return;
-                      }
-                      setPresetOverride(null);
-                      const { patch, changedFields } = applyPreset(name, draft);
-                      updateDraft(patch);
-                      setHighlightedFields(changedFields);
-                      setTimeout(() => setHighlightedFields([]), 200);
-                    }}
                     link={selectedLink}
                     onEditAccess={() => setTab("access")}
                     errors={validationErrors}
                     slug={slug}
                     highlightedFields={highlightedFields}
+                    documents={data?.documents ?? []}
                   />
                 </TabsContent>
                 <TabsContent value="access">
@@ -420,7 +378,17 @@ function DealRoomShareDialogContent({
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
                     isDealRoomLink={isDealRoomLink}
+                    documents={(data?.documents ?? [])
+                      .flatMap((folder) => folder.documents ?? [])
+                      .map((d) => ({ id: d.document_id, title: d.title }))}
+                  />
+                </TabsContent>
+                <TabsContent value="documents">
+                  <DocumentsTab
+                    folders={data?.folders ?? []}
                     documents={data?.documents ?? []}
+                    selectedPaths={draft.folderPaths}
+                    onChange={(paths) => updateDraft({ folderPaths: paths })}
                   />
                 </TabsContent>
 

@@ -4,7 +4,7 @@ import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { ShareTab } from "./ShareTab";
-import type { DraftLink, LinkPreset } from "./types";
+import type { DraftLink } from "./types";
 import enLinkShare from "@/i18n/locales/en/linkShare.json";
 
 const i18nInstance = i18n.createInstance();
@@ -26,13 +26,11 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 function renderShareTab(
   draft: DraftLink,
   options: {
-    preset?: LinkPreset;
     link?: Parameters<typeof ShareTab>[0]["link"];
     slug?: string;
   } = {}
 ) {
   const updateDraft = vi.fn();
-  const setPreset = vi.fn();
   const onEditAccess = vi.fn();
 
   const { rerender } = render(
@@ -40,8 +38,6 @@ function renderShareTab(
       <ShareTab
         draft={draft}
         updateDraft={updateDraft}
-        preset={options.preset ?? "standard"}
-        setPreset={setPreset}
         link={options.link ?? null}
         onEditAccess={onEditAccess}
         errors={{}}
@@ -49,14 +45,14 @@ function renderShareTab(
       />
     </Wrapper>
   );
-  return { updateDraft, setPreset, onEditAccess, rerender };
+  return { updateDraft, onEditAccess, rerender };
 }
 
 const baseDraft: DraftLink = {
   name: "",
   expiresAt: "",
-  requireEmail: true,
-  requireEmailVerification: false,
+  requireEmail: false,
+  requireEmailVerification: true,
   requirePassword: false,
   password: "",
   watermarkEnabled: true,
@@ -85,28 +81,6 @@ describe("ShareTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ name: "Acme DD" });
   });
 
-  it("fires preset change", async () => {
-    const { setPreset } = renderShareTab(baseDraft);
-    const trigger = screen.getByRole("combobox", { name: /link preset/i });
-    fireEvent.pointerDown(trigger);
-    fireEvent.click(trigger);
-    const option = await waitFor(() => screen.getByRole("option", { name: /Confidential/i }));
-    fireEvent.pointerDown(option);
-    fireEvent.click(option);
-    expect(setPreset).toHaveBeenCalledWith("confidential");
-  });
-
-  it("fires custom preset change", async () => {
-    const { setPreset } = renderShareTab(baseDraft);
-    const trigger = screen.getByRole("combobox", { name: /link preset/i });
-    fireEvent.pointerDown(trigger);
-    fireEvent.click(trigger);
-    const option = await waitFor(() => screen.getByRole("option", { name: /Custom/i }));
-    fireEvent.pointerDown(option);
-    fireEvent.click(option);
-    expect(setPreset).toHaveBeenCalledWith("custom");
-  });
-
   it("toggles expiration and updates expiresAt", () => {
     const { updateDraft, rerender } = renderShareTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /expires on/i }));
@@ -121,8 +95,6 @@ describe("ShareTab", () => {
         <ShareTab
           draft={{ ...baseDraft, expiresAt }}
           updateDraft={updateDraft}
-          preset="standard"
-          setPreset={vi.fn()}
           link={null}
           onEditAccess={vi.fn()}
           errors={{}}
@@ -163,14 +135,9 @@ describe("ShareTab", () => {
         shortUrl: "http://localhost/l/abc123",
       } as unknown as Parameters<typeof ShareTab>[0]["link"],
     });
-    fireEvent.click(screen.getByRole("button", { name: /preview as visitor/i }));
+    fireEvent.click(screen.getByRole("button", { name: /preview/i }));
     expect(openSpy).toHaveBeenCalledWith(`${window.location.origin}/l/abc123`, "_blank", "noopener,noreferrer");
     openSpy.mockRestore();
-  });
-
-  it("shows selected preset description", () => {
-    renderShareTab(baseDraft, { preset: "standard" });
-    expect(screen.getByText(/require email, apply watermark, expire in 30 days/i)).toBeInTheDocument();
   });
 
   it("shows custom domain invalid message for malformed domain", async () => {
@@ -198,8 +165,6 @@ describe("ShareTab", () => {
         <ShareTab
           draft={{ ...baseDraft, expiresAt }}
           updateDraft={updateDraft}
-          preset="standard"
-          setPreset={vi.fn()}
           link={null}
           onEditAccess={vi.fn()}
           errors={{}}

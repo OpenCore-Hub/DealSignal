@@ -37,6 +37,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomLinks: vi.fn(),
     getDealRoomDocuments: vi.fn(),
+    getDealRoomFolders: vi.fn(),
     getLinkById: vi.fn(),
     getLinkAccessRules: vi.fn(),
     getContacts: vi.fn(),
@@ -66,6 +67,7 @@ describe("DealRoomShareDialog", () => {
         },
       ],
     });
+    vi.mocked(api.getDealRoomFolders).mockResolvedValue({ data: [] });
     vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
     vi.mocked(api.getContacts).mockResolvedValue({ data: [] });
     vi.mocked(api.getAccessLogs).mockResolvedValue({ data: [] });
@@ -92,7 +94,7 @@ describe("DealRoomShareDialog", () => {
     expect(screen.getByPlaceholderText("Recipient's Organization")).toBeInTheDocument();
   });
 
-  it("renders Share and Access tabs in the correct order", async () => {
+  it("renders Share, Access, and Documents tabs in the correct order", async () => {
     render(
       <Wrapper>
         <DealRoomShareDialog roomId="room-1">
@@ -104,7 +106,7 @@ describe("DealRoomShareDialog", () => {
     fireEvent.click(screen.getByText("Open"));
     await waitFor(() => screen.getByText("Create share link"));
 
-    const tabs = ["Share", "Access"];
+    const tabs = ["Basic configuration", "Access control", "Scope"];
     tabs.forEach((label) => {
       expect(screen.getByText(label)).toBeInTheDocument();
     });
@@ -122,10 +124,33 @@ describe("DealRoomShareDialog", () => {
     fireEvent.click(screen.getByText("Open"));
     await waitFor(() => screen.getByText("Create share link"));
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
 
     await waitFor(() => {
       expect(screen.getByText("Require email to view")).toBeInTheDocument();
+    });
+  });
+
+  it("switches to Documents tab", async () => {
+    vi.mocked(api.getDealRoomFolders).mockResolvedValue({
+      data: [{ path: "/financials", name: "Financials", sort_order: 0 }],
+    });
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    fireEvent.click(screen.getByText("Scope"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Financials")).toBeInTheDocument();
     });
   });
 
@@ -161,7 +186,7 @@ describe("DealRoomShareDialog", () => {
     });
 
     // Add an allowed viewer; email gates now require allowed viewers.
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => screen.getByText("Require email to view"));
     const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
     fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
@@ -215,7 +240,7 @@ describe("DealRoomShareDialog", () => {
       target: { value: "Secure Link" },
     });
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => screen.getByText("Require email to view"));
 
     fireEvent.click(screen.getByRole("switch", { name: /require password to view/i }));
@@ -276,7 +301,7 @@ describe("DealRoomShareDialog", () => {
     });
     expect(createButton).toBeDisabled();
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => screen.getByText("Require email to view"));
     const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
     fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
@@ -301,7 +326,7 @@ describe("DealRoomShareDialog", () => {
       target: { value: "Acme DD" },
     });
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => screen.getByText("Require email to view"));
     const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
     fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
@@ -342,7 +367,7 @@ describe("DealRoomShareDialog", () => {
       target: { value: "Short Password Link" },
     });
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => screen.getByText("Require email to view"));
 
     // Add an allowed viewer so the email gate passes validation while we test password length.
@@ -412,11 +437,13 @@ describe("DealRoomShareDialog", () => {
       expect(screen.getByDisplayValue("Acme DD Edit")).toBeInTheDocument();
     });
 
-    // Share tab should reflect loaded custom domain in the public URL.
-    expect(screen.getByText(/dealroom\.example\.com/)).toBeInTheDocument();
+    // Share tab should reflect loaded custom domain in the public URL input.
+    expect((screen.getByLabelText(/Public link/i) as HTMLInputElement).value).toMatch(
+      /dealroom\.example\.com/
+    );
     expect(screen.getByRole("switch", { name: /Notify on access/i })).toBeChecked();
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => {
       expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
     });
@@ -479,12 +506,7 @@ describe("DealRoomShareDialog", () => {
       expect(screen.getByDisplayValue("Acme DD Edit")).toBeInTheDocument();
     });
 
-    // The updated alert copy should be email-only.
-    expect(
-      screen.getByText("This link is restricted. Only allowed emails can access.")
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => {
       expect(screen.getByText("Require email to view")).toBeInTheDocument();
     });
@@ -563,7 +585,7 @@ describe("DealRoomShareDialog", () => {
 
     expect(api.getLinkById).toHaveBeenCalledWith("link-edit");
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => {
       expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
     });
@@ -616,4 +638,173 @@ describe("DealRoomShareDialog", () => {
     expect(api.getLinkById).toHaveBeenCalledWith("link-edit");
   });
 
+  it("loads deal-room folders on open", async () => {
+    vi.mocked(api.getDealRoomFolders).mockResolvedValue({
+      data: [{ path: "/financials", name: "Financials", sort_order: 0 }],
+    });
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => {
+      expect(screen.getByText("Create share link")).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      expect(api.getDealRoomFolders).toHaveBeenCalledWith("room-1");
+    });
+  });
+
+  it("creates a deal-room link with selected folder scope", async () => {
+    vi.mocked(api.getDealRoomFolders).mockResolvedValue({
+      data: [{ path: "/financials", name: "Financials", sort_order: 0 }],
+    });
+    vi.mocked(api.getDealRoomDocuments).mockResolvedValue({
+      data: [
+        {
+          folder: "/financials",
+          permission: "view" as const,
+          documents: [
+            { id: "doc-2", document_id: "doc-2", title: "P&L", folder_path: "/financials", sort_order: 0, source_type: "pdf", status: "ready", created_at: new Date().toISOString() },
+          ],
+        },
+      ],
+    });
+    vi.mocked(api.createDealRoomLink).mockResolvedValue({
+      id: "link-scoped",
+      name: "Scoped Link",
+      shortUrl: "http://localhost/l/scoped123",
+      requireEmail: true,
+      requireEmailVerification: false,
+      requirePassword: false,
+      requireNda: false,
+      downloadEnabled: false,
+      watermarkEnabled: true,
+      aiCopilotEnabled: false,
+      folderPaths: ["/financials"],
+    } as unknown as Link);
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    fireEvent.change(screen.getByPlaceholderText("Recipient's Organization"), {
+      target: { value: "Scoped Link" },
+    });
+
+    fireEvent.click(screen.getByText("Scope"));
+    await waitFor(() => {
+      expect(screen.getByText("Financials")).toBeInTheDocument();
+    });
+
+    const financialsRow = screen.getByTestId("folder-row-/financials");
+    const checkbox = financialsRow.querySelector('[role="checkbox"]') as HTMLElement;
+    fireEvent.click(checkbox);
+
+    fireEvent.click(screen.getByText("Access control"));
+    await waitFor(() => screen.getByText("Require email to view"));
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(api.createDealRoomLink)).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({
+          name: "Scoped Link",
+          allowed_emails: ["alice@vc.com"],
+          folder_paths: ["/financials"],
+        })
+      );
+    });
+  });
+
+  it("updates a deal-room link with selected folder scope", async () => {
+    const editLink: Link = {
+      id: "link-scoped-edit",
+      name: "Scoped Edit",
+      shortUrl: "http://localhost/l/scoped-edit",
+      documentId: "doc-1",
+      documentTitle: "Acme DD",
+      requireEmail: true,
+      requireEmailVerification: false,
+      requirePassword: false,
+      requireNda: false,
+      downloadEnabled: true,
+      watermarkEnabled: true,
+      aiCopilotEnabled: false,
+      folderPaths: ["/financials"],
+      accessCount: 3,
+      heatLevel: "warm",
+      isBundle: false,
+      documents: [],
+      status: "active",
+      isActive: true,
+      dealRoomId: "room-1",
+      notifyOnAccess: true,
+      createdAt: new Date().toISOString(),
+    } as unknown as Link;
+
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [editLink] });
+    vi.mocked(api.getDealRoomFolders).mockResolvedValue({
+      data: [
+        { path: "/financials", name: "Financials", sort_order: 0 },
+        { path: "/legal", name: "Legal", sort_order: 1 },
+      ],
+    });
+    vi.mocked(api.getLinkAccessRules).mockResolvedValue({
+      data: [{ ruleType: "email", value: "alice@vc.com", action: "allow" }],
+    });
+    vi.mocked(api.updateLinkFull).mockResolvedValue(editLink);
+    vi.mocked(api.setLinkAccessRules).mockResolvedValue(undefined);
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1" linkId="link-scoped-edit">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Scoped Edit")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText("Scope"));
+    await waitFor(() => {
+      expect(screen.getByText("Financials")).toBeInTheDocument();
+      expect(screen.getByText("Legal")).toBeInTheDocument();
+    });
+
+    const legalRow = screen.getByTestId("folder-row-/legal");
+    const legalCheckbox = legalRow.querySelector('[role="checkbox"]') as HTMLElement;
+    fireEvent.click(legalCheckbox);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save link settings" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(api.updateLinkFull)).toHaveBeenCalledWith(
+        "link-scoped-edit",
+        expect.objectContaining({
+          folder_paths: ["/financials", "/legal"],
+        })
+      );
+    });
+  });
 });

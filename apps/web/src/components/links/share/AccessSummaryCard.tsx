@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Lock, Envelope, Shield, Download, Drop, CaretDown } from "@phosphor-icons/react";
+import { Folder, Lock, Envelope, Shield, Download, Drop, CaretDown } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import type { DealRoomFolderDocs } from "@/types";
 
 interface AccessSummaryCardProps {
   requireEmail: boolean;
@@ -14,6 +15,8 @@ interface AccessSummaryCardProps {
   enableScreenshotProtection: boolean;
   allowedViewers: string[];
   blockedViewers: string[];
+  folderPaths?: string[];
+  documents?: DealRoomFolderDocs[];
   onEditAccess: () => void;
 }
 
@@ -27,10 +30,12 @@ export function AccessSummaryCard({
   enableScreenshotProtection,
   allowedViewers,
   blockedViewers,
+  folderPaths = [],
+  documents = [],
   onEditAccess,
 }: AccessSummaryCardProps) {
   const { t } = useTranslation("linkShare");
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
   const toggle = () => setOpen((v) => !v);
 
   const items: { icon: React.ReactNode; label: string }[] = [];
@@ -56,10 +61,30 @@ export function AccessSummaryCard({
     items.push({ icon: <Shield size={14} />, label: t("accessRules.additionalProtections.screenshotProtection") });
   }
 
+  const selectedFolderCount = folderPaths.length;
+  const scopedDocumentCount = useMemo(() => {
+    if (selectedFolderCount === 0) return 0;
+    let count = 0;
+    for (const folder of documents) {
+      const folderPath = folder.folder;
+      if (
+        folderPaths.some(
+          (s) =>
+            s === folderPath ||
+            (folderPath.length > s.length && folderPath.startsWith(`${s}/`))
+        )
+      ) {
+        count += (folder.documents ?? []).length;
+      }
+    }
+    return count;
+  }, [documents, folderPaths, selectedFolderCount]);
+  const isScoped = selectedFolderCount > 0;
+
   const hasRestrictions =
-    items.length > 0 || allowedViewers.length > 0 || blockedViewers.length > 0;
+    items.length > 0 || allowedViewers.length > 0 || blockedViewers.length > 0 || isScoped;
   const restrictionCount =
-    items.length + allowedViewers.length + blockedViewers.length;
+    items.length + allowedViewers.length + blockedViewers.length + (isScoped ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -119,6 +144,15 @@ export function AccessSummaryCard({
                   {item.label}
                 </span>
               ))}
+              {isScoped && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
+                  <Folder size={14} />
+                  {t("share.accessSummaryScope", {
+                    folders: selectedFolderCount,
+                    documents: scopedDocumentCount,
+                  })}
+                </span>
+              )}
               {allowedViewers.slice(0, 3).map((value) => (
                 <span
                   key={value}

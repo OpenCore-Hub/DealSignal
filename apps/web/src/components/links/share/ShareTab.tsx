@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ConfirmDialog } from "@/components/common/ConfirmDialog";
+import { Eye } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,14 +12,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import type { Link } from "@/types";
+import type { Link, DealRoomFolderDocs } from "@/types";
 import { cn } from "@/lib/utils";
 import { AccessSummaryCard } from "./AccessSummaryCard";
 
 import { CopyButton } from "./CopyButton";
-import { PRESET_NAMES } from "./presets";
 import { getPublicUrl, toDateTimeLocal, isValidCustomDomain } from "./utils";
-import type { DraftLink, LinkPreset } from "./types";
+import type { DraftLink } from "./types";
 
 function highlightClass(field: string, fields: string[]) {
   return fields.includes(field)
@@ -30,8 +29,6 @@ function highlightClass(field: string, fields: string[]) {
 interface ShareTabProps {
   draft: DraftLink;
   updateDraft: (patch: Partial<DraftLink>) => void;
-  preset: LinkPreset;
-  setPreset: (preset: LinkPreset) => void;
   link: Link | null;
   onEditAccess: () => void;
   errors: Record<string, string>;
@@ -39,6 +36,8 @@ interface ShareTabProps {
   highlightedFields?: string[];
   /** Workspace-configured custom domains available for this link. */
   availableDomains?: string[];
+  /** Deal-room documents grouped by folder, used for document-scope counting in the summary. */
+  documents?: DealRoomFolderDocs[];
 }
 
 const CUSTOM_DOMAIN_VALUE = "__custom__";
@@ -46,19 +45,17 @@ const CUSTOM_DOMAIN_VALUE = "__custom__";
 export function ShareTab({
   draft,
   updateDraft,
-  preset,
-  setPreset,
   link,
   onEditAccess,
   errors,
   slug,
   highlightedFields = [],
   availableDomains = [],
+  documents = [],
 }: ShareTabProps) {
   const { t } = useTranslation("linkShare");
 
   const publicUrl = getPublicUrl(link);
-  const [pendingPreset, setPendingPreset] = useState<LinkPreset | null>(null);
   const isCustomValue =
     draft.customDomain !== "" && !availableDomains.includes(draft.customDomain);
   const [customDomainMode, setCustomDomainMode] = useState(isCustomValue);
@@ -68,16 +65,6 @@ export function ShareTab({
   const selectedDomainValue = customDomainMode
     ? CUSTOM_DOMAIN_VALUE
     : draft.customDomain;
-
-  const handlePresetChange = (value: string | null) => {
-    if (!value) return;
-    const next = value as LinkPreset;
-    if (preset === "custom" && next !== "custom") {
-      setPendingPreset(next);
-      return;
-    }
-    setPreset(next);
-  };
 
   const expiresEnabled = Boolean(draft.expiresAt);
 
@@ -108,25 +95,31 @@ export function ShareTab({
           <div className="space-y-2">
             <Label>{t("share.publicLink")}</Label>
             <div className="flex items-center gap-2">
-              <Input value={publicUrl} readOnly className="flex-1" />
+              <Input
+                value={publicUrl}
+                readOnly
+                className="flex-1"
+                aria-label={t("share.publicLink")}
+              />
               <CopyButton
                 value={publicUrl}
-                label={t("share.copyLink")}
+                label={t("share.copy")}
                 successLabel={t("share.copied")}
                 disabled={!publicUrl}
               />
+              <Button
+                type="button"
+                variant="outline"
+                className="gap-1.5"
+                onClick={() =>
+                  window.open(publicUrl, "_blank", "noopener,noreferrer")
+                }
+                disabled={!publicUrl}
+              >
+                <Eye size={16} />
+                {t("share.preview")}
+              </Button>
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="w-full"
-              onClick={() =>
-                window.open(publicUrl, "_blank", "noopener,noreferrer")
-              }
-            >
-              {t("share.preview")}
-            </Button>
           </div>
         </div>
       ) : (
@@ -142,34 +135,6 @@ export function ShareTab({
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label>{t("share.linkPreset")}</Label>
-        <Select value={preset} onValueChange={handlePresetChange}>
-          <SelectTrigger aria-label={t("share.linkPreset")} className="w-full">
-            <SelectValue>
-              {PRESET_NAMES.includes(preset as Exclude<LinkPreset, "custom">)
-                ? t(`share.presets.${preset}`)
-                : preset === "custom"
-                  ? t("share.presets.custom")
-                  : ""}
-            </SelectValue>
-          </SelectTrigger>
-          <SelectContent>
-            {PRESET_NAMES.map((p) => (
-              <SelectItem key={p} value={p}>
-                {t(`share.presets.${p}`)}
-              </SelectItem>
-            ))}
-            <SelectItem value="custom">{t("share.presets.custom")}</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          {PRESET_NAMES.includes(preset as Exclude<LinkPreset, "custom">)
-            ? t(`share.presetDescriptions.${preset}`)
-            : t("share.presetHint")}
-        </p>
-      </div>
-
       <AccessSummaryCard
         requireEmail={draft.requireEmail}
         requireEmailVerification={draft.requireEmailVerification}
@@ -180,6 +145,8 @@ export function ShareTab({
         enableScreenshotProtection={draft.enableScreenshotProtection}
         allowedViewers={draft.allowedViewers}
         blockedViewers={draft.blockedViewers}
+        folderPaths={draft.folderPaths}
+        documents={documents}
         onEditAccess={onEditAccess}
       />
 
@@ -267,22 +234,6 @@ export function ShareTab({
         </p>
       )}
 
-      <ConfirmDialog
-        open={pendingPreset !== null}
-        title={t("share.presetOverwriteTitle")}
-        description={
-          pendingPreset
-            ? t("share.presetOverwriteDescription", { preset: t(`share.presets.${pendingPreset}`) })
-            : ""
-        }
-        confirmLabel={t("share.presetOverwriteConfirm")}
-        cancelLabel={t("share.presetOverwriteCancel")}
-        onConfirm={() => {
-          if (pendingPreset) setPreset(pendingPreset);
-          setPendingPreset(null);
-        }}
-        onCancel={() => setPendingPreset(null)}
-      />
     </div>
   );
 }

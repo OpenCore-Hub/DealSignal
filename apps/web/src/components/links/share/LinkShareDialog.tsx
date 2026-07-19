@@ -21,16 +21,12 @@ import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
   AccessTab,
-  CopyButton,
-  applyPreset,
   buildDraft,
   buildRules,
   buildLinkPayload,
-  inferPreset,
   validateDraft,
-  getPublicUrl,
 } from "./";
-import type { DraftLink, LinkPreset } from "./types";
+import type { DraftLink } from "./types";
 
 interface LinkShareDialogProps {
   linkId: string;
@@ -92,8 +88,6 @@ function LinkShareDialogContent({
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
   const link = data?.link ?? null;
-  const [presetOverride, setPresetOverride] = useState<LinkPreset | null>(null);
-  const preset = presetOverride ?? inferPreset(draft);
 
   // 实时校验：所有必填项通过前，保存按钮保持禁用。
   const validationErrors = useMemo(() => {
@@ -124,7 +118,6 @@ function LinkShareDialogContent({
     if (keyChanged) {
       const nextDraft = buildDraft(data?.link, data?.rules);
       setDraft(nextDraft);
-      setPresetOverride(null);
       setHighlightedFields([]);
       hasUnsavedChangesRef.current = false;
       loadedLinkIdRef.current = currentId;
@@ -132,7 +125,6 @@ function LinkShareDialogContent({
       // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
       const nextDraft = buildDraft(data?.link, data?.rules);
       setDraft(nextDraft);
-      setPresetOverride(null);
       setHighlightedFields([]);
     }
   }, [data]);
@@ -225,8 +217,6 @@ function LinkShareDialogContent({
     }
   };
 
-  const publicUrl = getPublicUrl(link);
-
   const primaryAction =
     tab === "share"
       ? { label: saveSuccess ? t("share.savedButtonLabel") : t("share.saveLinkSettings"), onClick: handleSave }
@@ -241,19 +231,6 @@ function LinkShareDialogContent({
               <ShareNetwork size={20} />
               {link?.name || t("share.title")}
             </DialogTitle>
-            {publicUrl && (
-              <div className="flex items-center gap-2">
-                <span className="truncate text-xs text-muted-foreground">{publicUrl}</span>
-                <CopyButton
-                  value={publicUrl}
-                  label={t("share.copyLink")}
-                  successLabel={t("share.copied")}
-                  variant="ghost"
-                  size="sm"
-                  className="h-auto px-1 py-0"
-                />
-              </div>
-            )}
           </div>
           {link && (
             <div className="flex items-center gap-2">
@@ -265,12 +242,6 @@ function LinkShareDialogContent({
           )}
         </div>
       </DialogHeader>
-
-      {draft.allowedViewers.length > 0 && (
-        <div className="rounded-md border border-warning-500/20 bg-warning-500/10 px-3 py-2 text-xs text-warning-700">
-          {t("share.restrictedAlert")}
-        </div>
-      )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex flex-1 flex-col overflow-hidden">
         <TabsList variant="line" className="w-full">
@@ -289,18 +260,6 @@ function LinkShareDialogContent({
                   <ShareTab
                     draft={draft}
                     updateDraft={updateDraft}
-                    preset={preset}
-                    setPreset={(name) => {
-                      if (name === "custom") {
-                        setPresetOverride("custom");
-                        return;
-                      }
-                      setPresetOverride(null);
-                      const { patch, changedFields } = applyPreset(name, draft);
-                      updateDraft(patch);
-                      setHighlightedFields(changedFields);
-                      setTimeout(() => setHighlightedFields([]), 200);
-                    }}
                     link={link}
                     onEditAccess={() => setTab("access")}
                     errors={validationErrors}

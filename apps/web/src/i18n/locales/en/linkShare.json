@@ -1,26 +1,13 @@
 {
   "share": {
-    "title": "Share",
+    "title": "Basic configuration",
     "createTitle": "Create share link",
-    "copyLink": "Copy link",
+    "copy": "Copy",
     "copied": "Link copied",
     "copyFailed": "Failed to copy link",
     "publicLink": "Public link",
     "linkName": "Link name",
     "linkNamePlaceholder": "Recipient's Organization",
-    "linkPreset": "Link preset",
-    "presetHint": "Apply a preset to quickly configure link settings",
-    "presets": {
-      "public": "Public",
-      "standard": "Standard",
-      "confidential": "Confidential",
-      "custom": "Custom"
-    },
-    "presetDescriptions": {
-      "public": "Anyone with the link can access",
-      "standard": "Require email, apply watermark, expire in 30 days",
-      "confidential": "Require verified email + password, watermark, expire in 7 days"
-    },
     "accessSummary": "Access summary",
     "accessSummaryEmpty": "No access restrictions configured",
     "editAccessRules": "Edit access rules",
@@ -43,20 +30,23 @@
     "saveSuccess": "Saved",
     "savedButtonLabel": "Saved",
     "createSuccess": "Link created",
-    "presetOverwriteTitle": "Overwrite custom settings?",
-    "presetOverwriteDescription": "Applying the {{preset}} preset will replace your current access rules.",
-    "presetOverwriteConfirm": "Apply",
-    "presetOverwriteCancel": "Cancel",
-    "restrictedAlert": "This link is restricted. Only allowed emails can access.",
     "active": "Active",
     "inactive": "Inactive",
     "disableConfirmTitle": "Disable this link?",
     "disableConfirmDescription": "Existing viewer sessions will be invalidated immediately.",
-    "preview": "Preview as visitor",
-    "linkNameRequired": "Link name is required"
+    "preview": "Preview",
+    "linkNameRequired": "Link name is required",
+    "documentScope": {
+      "allDocuments": "All documents accessible",
+      "selectedDocuments": "{{folders}} folders / {{documents}} documents",
+      "selectAll": "Select all",
+      "deselectAll": "Deselect",
+      "empty": "No folders available"
+    },
+    "accessSummaryScope": "{{folders}} folders / {{documents}} docs"
   },
   "accessRules": {
-    "title": "Access",
+    "title": "Access control",
     "saveAccessRules": "Save access rules",
     "saved": "Access rules saved",
     "savedDescription": "Changes take effect immediately; existing viewer sessions will be invalidated.",
@@ -130,6 +120,9 @@
       "conflict": "{{value}} cannot be in both allowed and blocked lists",
       "blockPriority": "Block rules always take priority over allow rules"
     }
+  },
+  "documents": {
+    "title": "Scope"
   },
   "emailTagInput": {
     "invalid": "invalid email",

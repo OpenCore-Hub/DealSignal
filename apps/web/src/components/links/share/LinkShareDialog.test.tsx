@@ -117,7 +117,7 @@ describe("LinkShareDialog", () => {
     fireEvent.click(screen.getByText("Open"));
     await waitFor(() => screen.getByText("Acme Corp"));
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
 
     await waitFor(() => {
       expect(screen.getByText("Require email to view")).toBeInTheDocument();
@@ -191,11 +191,13 @@ describe("LinkShareDialog", () => {
       expect(screen.getByDisplayValue("Acme Edit")).toBeInTheDocument();
     });
 
-    // Share tab: custom domain should be reflected in the public URL.
-    expect(screen.getByText(/share\.example\.com/)).toBeInTheDocument();
+    // Share tab: custom domain should be reflected in the public URL input.
+    expect((screen.getByLabelText(/Public link/i) as HTMLInputElement).value).toMatch(
+      /share\.example\.com/
+    );
     expect(screen.getByRole("switch", { name: /Notify on access/i })).toBeChecked();
 
-    fireEvent.click(screen.getByText("Access"));
+    fireEvent.click(screen.getByText("Access control"));
     await waitFor(() => {
       expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
     });
@@ -240,13 +242,7 @@ describe("LinkShareDialog", () => {
       expect(screen.getByDisplayValue("Acme Edit")).toBeInTheDocument();
     });
 
-    // The top alert should use the updated email-only copy.
-    expect(
-      screen.getByText("This link is restricted. Only allowed emails can access.")
-    ).toBeInTheDocument();
-
-    // Expand the Share tab access summary to verify loaded rules.
-    fireEvent.click(screen.getByText("Access summary"));
+    // Share tab access summary is expanded by default; verify loaded rules.
     await waitFor(() => {
       expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
     });
@@ -270,49 +266,6 @@ describe("LinkShareDialog", () => {
     expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
     expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
   });
-
-  it("selects custom preset from the dropdown", async () => {
-    const publicLink: Link = {
-      ...baseLink,
-      name: "Public Link",
-      requireEmail: false,
-      requireEmailVerification: false,
-      requirePassword: false,
-      watermarkEnabled: false,
-      requireNda: false,
-      downloadEnabled: false,
-      screenshotProtectionEnabled: false,
-      aiCopilotEnabled: false,
-      fileRequestsEnabled: false,
-      indexFileEnabled: false,
-      qaEnabled: false,
-    } as unknown as Link;
-
-    vi.mocked(api.getLinkById).mockResolvedValue(publicLink);
-
-    render(
-      <Wrapper>
-        <LinkShareDialog linkId="link-1">
-          <Button>Open</Button>
-        </LinkShareDialog>
-      </Wrapper>
-    );
-
-    fireEvent.click(screen.getByText("Open"));
-    await waitFor(() => screen.getByText("Public Link"));
-
-    const trigger = screen.getByRole("combobox", { name: /link preset/i });
-    expect(trigger).toHaveTextContent("Public");
-
-    fireEvent.pointerDown(trigger);
-    fireEvent.click(trigger);
-    const option = await waitFor(() => screen.getByRole("option", { name: /Custom/i }));
-    fireEvent.pointerDown(option);
-    fireEvent.click(option);
-
-    expect(trigger).toHaveTextContent("Custom");
-  });
-
   it("disables save link settings button when required fields become invalid", async () => {
     render(
       <Wrapper>

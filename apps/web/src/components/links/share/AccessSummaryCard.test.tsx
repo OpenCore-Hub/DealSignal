@@ -15,6 +15,7 @@ i18nInstance.use(initReactI18next).init({
           accessSummary: "Access summary",
           accessSummaryEmpty: "No restrictions",
           editAccessRules: "Edit",
+          accessSummaryScope: "{{folders}} folders / {{documents}} docs",
         },
         accessRules: {
           authentication: {
@@ -59,7 +60,6 @@ describe("AccessSummaryCard", () => {
         <AccessSummaryCard {...baseProps} />
       </Wrapper>
     );
-    fireEvent.click(screen.getByRole("button", { name: /Access summary/i }));
     expect(screen.getByText("No restrictions")).toBeInTheDocument();
   });
 
@@ -74,7 +74,6 @@ describe("AccessSummaryCard", () => {
         />
       </Wrapper>
     );
-    fireEvent.click(screen.getByRole("button", { name: /Access summary/i }));
     expect(screen.getByText("Require password")).toBeInTheDocument();
     expect(screen.getByText("Watermark")).toBeInTheDocument();
     expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
@@ -90,5 +89,26 @@ describe("AccessSummaryCard", () => {
     );
     fireEvent.click(screen.getByText("Edit"));
     expect(onEditAccess).toHaveBeenCalled();
+  });
+
+  it("renders document scope chip when folder paths are selected", () => {
+    render(
+      <Wrapper>
+        <AccessSummaryCard
+          {...baseProps}
+          folderPaths={["/financials"]}
+          documents={[
+            {
+              folder: "/financials",
+              permission: "view",
+              documents: [
+                { id: "doc-1", document_id: "doc-1", title: "P&L", folder_path: "/financials", sort_order: 0, source_type: "pdf", status: "ready", created_at: new Date().toISOString() },
+              ],
+            },
+          ]}
+        />
+      </Wrapper>
+    );
+    expect(screen.getByText("1 folders / 1 docs")).toBeInTheDocument();
   });
 });

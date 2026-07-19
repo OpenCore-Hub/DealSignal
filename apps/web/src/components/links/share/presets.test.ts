@@ -79,7 +79,7 @@ describe("applyPreset", () => {
 
   it("changedFields includes all fields that differ from the preset", () => {
     const draft = makeDraft({
-      requireEmail: false,
+      requireEmail: true,
       watermarkEnabled: false,
       requireNda: true,
     });
