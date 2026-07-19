@@ -49,10 +49,10 @@ function SelectContent({
   children,
   side = "bottom",
   sideOffset = 4,
-  align = "center",
+  align = "start",
   alignOffset = 0,
-  alignItemWithTrigger = true,
-  collisionAvoidance,
+  alignItemWithTrigger = false,
+  collisionAvoidance = { side: "none", align: "none" },
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<

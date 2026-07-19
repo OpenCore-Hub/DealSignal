@@ -61,6 +61,7 @@ const baseDraft: DraftLink = {
   password: "",
   watermarkEnabled: true,
   requireNda: false,
+  ndaDocumentId: "",
   allowDownloading: false,
   aiCopilotEnabled: false,
   enableScreenshotProtection: false,
@@ -69,11 +70,10 @@ const baseDraft: DraftLink = {
   enableQaConversations: false,
   allowedViewers: [],
   blockedViewers: [],
-  autoAddInvited: true,
   customDomain: "",
-  tags: [],
   notifyOnAccess: false,
   folderPaths: [],
+  contactIds: [],
 };
 
 describe("ShareTab", () => {
@@ -94,6 +94,17 @@ describe("ShareTab", () => {
     fireEvent.pointerDown(option);
     fireEvent.click(option);
     expect(setPreset).toHaveBeenCalledWith("confidential");
+  });
+
+  it("fires custom preset change", async () => {
+    const { setPreset } = renderShareTab(baseDraft);
+    const trigger = screen.getByRole("combobox", { name: /link preset/i });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const option = await waitFor(() => screen.getByRole("option", { name: /Custom/i }));
+    fireEvent.pointerDown(option);
+    fireEvent.click(option);
+    expect(setPreset).toHaveBeenCalledWith("custom");
   });
 
   it("toggles expiration and updates expiresAt", () => {
@@ -137,16 +148,6 @@ describe("ShareTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ customDomain: "invest.acme.capital" });
   });
 
-  it("parses tags from comma-separated input", () => {
-    const { updateDraft } = renderShareTab(baseDraft);
-    fireEvent.change(screen.getByPlaceholderText(/investor, q3-2026/i), {
-      target: { value: "investors, lp-report;q2-2026" },
-    });
-    expect(updateDraft).toHaveBeenCalledWith({
-      tags: ["investors", "lp-report", "q2-2026"],
-    });
-  });
-
   it("toggles notify on access", () => {
     const { updateDraft } = renderShareTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /notify on access/i }));
@@ -167,6 +168,47 @@ describe("ShareTab", () => {
     openSpy.mockRestore();
   });
 
+  it("shows selected preset description", () => {
+    renderShareTab(baseDraft, { preset: "standard" });
+    expect(screen.getByText(/require email, apply watermark, expire in 30 days/i)).toBeInTheDocument();
+  });
+
+  it("shows custom domain invalid message for malformed domain", async () => {
+    const { updateDraft } = renderShareTab(baseDraft);
+    const trigger = screen.getByRole("combobox", { name: /custom domain/i });
+    fireEvent.pointerDown(trigger);
+    fireEvent.click(trigger);
+    const customOption = await waitFor(() => screen.getByRole("option", { name: /custom domain\.\.\./i }));
+    fireEvent.pointerDown(customOption);
+    fireEvent.click(customOption);
+
+    fireEvent.change(screen.getByPlaceholderText(/yourdomain\.com/i), {
+      target: { value: "not a valid domain" },
+    });
+    expect(updateDraft).toHaveBeenCalledWith({ customDomain: "not a valid domain" });
+    expect(screen.getByText(/please enter a valid domain/i)).toBeInTheDocument();
+  });
+
+  it("sets min attribute on expiration datetime input", () => {
+    const { updateDraft, rerender } = renderShareTab(baseDraft);
+    fireEvent.click(screen.getByRole("switch", { name: /expires on/i }));
+    const expiresAt = updateDraft.mock.calls[0][0].expiresAt as string;
+    rerender(
+      <Wrapper>
+        <ShareTab
+          draft={{ ...baseDraft, expiresAt }}
+          updateDraft={updateDraft}
+          preset="standard"
+          setPreset={vi.fn()}
+          link={null}
+          onEditAccess={vi.fn()}
+          errors={{}}
+        />
+      </Wrapper>
+    );
+    const input = document.querySelector('input[type="datetime-local"]') as HTMLInputElement;
+    expect(input.min).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+  });
   it("shows old slug hint when slug and link are provided", () => {
     renderShareTab(baseDraft, {
       slug: "acme-room",

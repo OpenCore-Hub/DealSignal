@@ -92,7 +92,6 @@ describe("Preset → CreateLinkPayload mapping", () => {
       expect(payload.require_password).toBe(false);
       expect(payload.password).toBeUndefined();
       expect(payload.allowed_emails).toBeUndefined();
-      expect(payload.allowed_domains).toBeUndefined();
     });
   });
 

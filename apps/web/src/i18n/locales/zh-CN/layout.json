@@ -9,7 +9,8 @@
     "groups": {
       "workspace": "工作区",
       "relationships": "关系运营",
-      "admin": "管理"
+      "admin": "管理",
+      "dealRoom": "当前数据室"
     },
     "nav": {
       "dashboard": "交易雷达",
@@ -24,6 +25,7 @@
   },
   "topNav": {
     "toggleSidebar": "切换侧边栏",
+    "breadcrumb": "面包屑",
     "notifications": {
       "title": "通知",
       "comingSoon": "通知中心即将上线"

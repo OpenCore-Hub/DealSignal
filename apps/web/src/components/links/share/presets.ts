@@ -15,6 +15,7 @@ export interface PresetValues {
   requirePassword: boolean;
   watermarkEnabled: boolean;
   requireNda: boolean;
+  ndaDocumentId: string;
   allowDownloading: boolean;
   enableScreenshotProtection: boolean;
   aiCopilotEnabled: boolean;
@@ -31,6 +32,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     requirePassword: false,
     watermarkEnabled: false,
     requireNda: false,
+    ndaDocumentId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
     aiCopilotEnabled: false,
@@ -45,6 +47,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     requirePassword: false,
     watermarkEnabled: true,
     requireNda: false,
+    ndaDocumentId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
     aiCopilotEnabled: false,
@@ -59,6 +62,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     requirePassword: true,
     watermarkEnabled: true,
     requireNda: false,
+    ndaDocumentId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
     aiCopilotEnabled: false,
@@ -83,6 +87,7 @@ export function applyPreset(
     "requirePassword",
     "watermarkEnabled",
     "requireNda",
+    "ndaDocumentId",
     "allowDownloading",
     "enableScreenshotProtection",
     "aiCopilotEnabled",

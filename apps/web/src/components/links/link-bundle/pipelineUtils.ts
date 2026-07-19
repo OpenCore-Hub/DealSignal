@@ -19,6 +19,7 @@ export function buildConfigFromPreset(
     whitelist: template.whitelist,
     passwordEnabled: template.passwordEnabled,
     ndaEnabled: template.ndaEnabled,
+    ndaDocumentId: "",
     allowDownload: template.allowDownload,
     watermarkEnabled: template.watermarkEnabled,
     aiCopilotEnabled: template.aiCopilotEnabled ?? false,

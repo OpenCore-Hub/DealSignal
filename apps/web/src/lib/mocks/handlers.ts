@@ -389,7 +389,6 @@ export const handlers = [
       require_password?: boolean;
       require_nda?: boolean;
       allowed_emails?: string[];
-      allowed_domains?: string[];
       password?: string;
       contact_ids?: string[];
       expires_at?: string;
@@ -425,7 +424,6 @@ export const handlers = [
     if (typeof payload.require_password === "boolean") link.requirePassword = payload.require_password;
     if (typeof payload.require_nda === "boolean") link.requireNda = payload.require_nda;
     if (payload.allowed_emails) link.allowedEmails = payload.allowed_emails;
-    if (payload.allowed_domains) link.allowedDomains = payload.allowed_domains;
     if (payload.expires_at) link.expiresAt = payload.expires_at;
     if (typeof payload.max_access_count === "number") link.maxAccessCount = payload.max_access_count;
     if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
@@ -464,7 +462,6 @@ export const handlers = [
       require_password?: boolean;
       require_nda?: boolean;
       allowed_emails?: string[];
-      allowed_domains?: string[];
       password?: string;
       expires_at?: string;
       max_access_count?: number;
@@ -475,7 +472,7 @@ export const handlers = [
 
     const requirePassword = body.require_password || body.permission_type === "password" || !!body.password;
     const requireNDA = body.require_nda || body.permission_type === "nda";
-    const hasWhitelist = (body.allowed_emails && body.allowed_emails.length > 0) || (body.allowed_domains && body.allowed_domains.length > 0);
+    const hasWhitelist = body.allowed_emails && body.allowed_emails.length > 0;
     const requireEmailVerification =
       body.require_email_verification ||
       body.permission_type === "email_required" ||
@@ -508,14 +505,12 @@ export const handlers = [
       _requireNDA: requireNDA,
       _password: body.password,
       _allowedEmails: body.allowed_emails ?? [],
-      _allowedDomains: body.allowed_domains ?? [],
     } as Link & {
       _requireEmailVerification?: boolean;
       _requirePassword?: boolean;
       _requireNDA?: boolean;
       _password?: string;
       _allowedEmails?: string[];
-      _allowedDomains?: string[];
     };
     mockLinks.unshift(newLink);
     return HttpResponse.json(newLink, { status: 201 });
@@ -1168,7 +1163,6 @@ export const handlers = [
       _requireNDA?: boolean;
       _password?: string;
       _allowedEmails?: string[];
-      _allowedDomains?: string[];
     };
 
     // The mock permissionType "email" corresponds to the legacy "email_required" type,
@@ -1179,9 +1173,7 @@ export const handlers = [
       extended._requireEmailVerification || isLegacyEmailRequired || extended.permissionType === "nda";
     const requiresPassword = extended._requirePassword || extended.permissionType === "password";
     const requiresNda = extended._requireNDA || extended.permissionType === "nda";
-    const hasWhitelist =
-      (extended._allowedEmails && extended._allowedEmails.length > 0) ||
-      (extended._allowedDomains && extended._allowedDomains.length > 0);
+    const hasWhitelist = extended._allowedEmails && extended._allowedEmails.length > 0;
     // Email is required for legacy email_required, whitelist matching, or NDA records.
     // Modern email verification (code-only) should not ask for email.
     const requiresEmail = isLegacyEmailRequired || hasWhitelist || requiresNda;
@@ -1205,14 +1197,9 @@ export const handlers = [
       );
     }
     if (hasWhitelist) {
-      const domain = body.email!.split("@")[1]?.toLowerCase();
-      const allowed = [
-        ...(extended._allowedEmails ?? []),
-        ...(extended._allowedDomains ?? []),
-      ].some((entry) => {
-        const e = entry.trim().toLowerCase();
-        return e === body.email!.toLowerCase() || (e.startsWith("@") && e.slice(1) === domain);
-      });
+      const allowed = (extended._allowedEmails ?? []).some(
+        (entry) => entry.trim().toLowerCase() === body.email!.toLowerCase()
+      );
       if (!allowed) {
         return HttpResponse.json(
           { code: "whitelist_denied", message: "email not in whitelist", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },

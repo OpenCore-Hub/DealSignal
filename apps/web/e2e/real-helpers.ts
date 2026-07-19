@@ -244,12 +244,27 @@ export async function seedRealBackend(): Promise<SeedResult> {
   const email = `e2e-${ts}@example.com`;
   const password = "Password123!";
 
-  // 1. Register
-  const regRes = await apiFetch("/api/auth/register", {
-    method: "POST",
-    body: JSON.stringify({ email, password }),
-  });
-  if (!regRes.ok) throw new Error(`register failed: ${regRes.status} ${await regRes.text()}`);
+  // 1. Register (with retry/backoff for auth rate limiting in parallel E2E runs)
+  const regBody = JSON.stringify({ email, password });
+  let regRes: Response | undefined;
+  let lastRegError: string | undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    regRes = await apiFetch("/api/auth/register", {
+      method: "POST",
+      body: regBody,
+    });
+    if (regRes.ok) break;
+    lastRegError = await regRes.text();
+    if (regRes.status === 429 && attempt < 4) {
+      const delay = Math.min(1000 * 2 ** attempt + Math.random() * 200, 8000);
+      await sleep(delay);
+      continue;
+    }
+    break;
+  }
+  if (!regRes || !regRes.ok) {
+    throw new Error(`register failed: ${regRes?.status ?? "no response"} ${lastRegError ?? ""}`);
+  }
   const reg = (await regRes.json()) as { user: { id: string } };
   const userId = reg.user.id;
 
@@ -312,9 +327,9 @@ export async function seedLink(
     requireEmailVerification?: boolean;
     requirePassword?: boolean;
     requireNda?: boolean;
+    ndaDocumentId?: string;
     password?: string;
     allowedEmails?: string[];
-    allowedDomains?: string[];
     downloadEnabled?: boolean;
     watermarkEnabled?: boolean;
     expiresAt?: string;
@@ -334,9 +349,9 @@ export async function seedLink(
   if (opts.requireEmailVerification) body.require_email_verification = true;
   if (opts.requirePassword) body.require_password = true;
   if (opts.requireNda) body.require_nda = true;
+  if (opts.requireNda && opts.ndaDocumentId) body.nda_document_id = opts.ndaDocumentId;
   if (opts.password) body.password = opts.password;
   if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
-  if (opts.allowedDomains) body.allowed_domains = opts.allowedDomains;
   if (opts.expiresAt) body.expires_at = opts.expiresAt;
   if (typeof opts.maxAccessCount === "number") body.max_access_count = opts.maxAccessCount;
   if (typeof opts.watermarkEnabled === "boolean") body.watermark_enabled = opts.watermarkEnabled;

@@ -289,8 +289,8 @@ INSERT INTO links (
     qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
     link_type, target_folder_path,
     custom_domain, tags, notify_on_access,
-    has_document_scope, folder_scope_paths
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
+    has_document_scope, folder_scope_paths, nda_document_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
 RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
@@ -354,23 +354,24 @@ UPDATE links SET
     require_email = $9,
     require_email_verification = $10,
     require_nda = $11,
-    ai_copilot_enabled = $12,
-    require_password = $13,
-    password_hash = $14,
-    custom_domain = $15,
-    tags = $16,
-    notify_on_access = $17,
-    qa_enabled = $18,
-    file_requests_enabled = $19,
-    index_file_enabled = $20,
-    screenshot_protection_enabled = $21,
-    link_type = $22,
-    target_folder_path = $23,
-    security_version = $24,
-    has_document_scope = $25,
-    folder_scope_paths = $26,
+    nda_document_id = $12,
+    ai_copilot_enabled = $13,
+    require_password = $14,
+    password_hash = $15,
+    custom_domain = $16,
+    tags = $17,
+    notify_on_access = $18,
+    qa_enabled = $19,
+    file_requests_enabled = $20,
+    index_file_enabled = $21,
+    screenshot_protection_enabled = $22,
+    link_type = $23,
+    target_folder_path = $24,
+    security_version = $25,
+    has_document_scope = $26,
+    folder_scope_paths = $27,
     updated_at = now()
-WHERE id = $27 AND workspace_id = $28
+WHERE id = $28 AND workspace_id = $29
 RETURNING *;
 
 -- name: DeleteLink :execrows

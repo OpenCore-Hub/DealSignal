@@ -1,0 +1,291 @@
+{
+  "title": "DealSignal First Customer Finder",
+  "product": "DealSignal - signal-first document sharing and deal-room intelligence",
+  "product_url": "",
+  "target_customer": "Fundraising founders, VC/PE investor-relations teams, and B2B teams sharing sensitive deal documents",
+  "search_scope": "Public English-language GitHub, Reddit, Hacker News, and job/company pages reviewed on 2026-07-18. Shortlist prioritizes signals from late 2025 through July 2026, with older explicit requests only when strongly aligned.",
+  "generated_at": "2026-07-18",
+  "verdict": "DealSignal has reachable early-customer signals. The strongest wedge is teams comparing DocSend, Papermark, and virtual data-room workflows for investor documents who need page-level analytics, safer permissions, watermarking, audit trails, simpler pricing, and better support.",
+  "prospects": [
+    {
+      "name": "vaisov-gemba / unnamed fintech company",
+      "type": "Company via public GitHub discussion",
+      "stage": "High intent",
+      "score": 93,
+      "pain_signal": "A fintech team publicly said it was exploring Papermark for internal data rooms covering investor presentations and partner due diligence, had self-hosted the AGPL portion, and wanted a license path for the Datarooms feature after outreach by email did not get a reply.",
+      "evidence": "Observed: the discussion explicitly describes a fintech company, internal data-room use, investor presentations, partner due diligence, self-hosting success, and a missing commercial path. Inference: the team is evaluating alternatives or a design-partner path if the current vendor response stays slow.",
+      "why_fit": "DealSignal's secure deal rooms, NDA gating, document permissions, viewer analytics, and AI Q&A map directly to investor and partner diligence rooms.",
+      "why_now": "The GitHub discussion was opened on 2026-04-02 and remained publicly visible as an unresolved buying/support question.",
+      "source_title": "Self-hosting license inquiry - Datarooms feature for internal use",
+      "source_url": "https://github.com/papermark/papermark/discussions/2135",
+      "source_type": "GitHub Discussion",
+      "signal_date": "2026-04-02",
+      "suggested_channel": "Reply to the public GitHub discussion or use the public GitHub profile path; do not scrape or infer private contact details.",
+      "opener": "Saw your GitHub question about self-hosted data rooms for investor presentations and partner due diligence. DealSignal is built around that exact workflow: secure deal rooms, viewer analytics, permissions, NDA gating, and AI Q&A. Would a short self-hosted or concierge pilot be useful to compare against the commercial Papermark path?",
+      "caution": "Confirm they are still evaluating; the company is unnamed and the GitHub handle may not be the final buyer.",
+      "dimensions": {
+        "pain_strength": 5,
+        "product_fit": 5,
+        "timing": 4,
+        "reachability": 4,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "5AM Ventures",
+      "type": "VC firm",
+      "stage": "Trigger present",
+      "score": 89,
+      "pain_signal": "A current Associate Director, Investor Relations posting says the role will own CRM-driven investor data, fundraising pipelines, investor touchpoints, recurring reports, and data rooms for fundraising and investor reporting.",
+      "evidence": "Observed: the public Lever posting lists ongoing setup and management of data rooms, version-controlled materials, investor access, onboarding, permissions, LP usability, pipeline visibility, and follow-up execution. Inference: the IR team is actively investing in its investor communication infrastructure.",
+      "why_fit": "DealSignal can be positioned as a focused pilot for LP-facing rooms: branded document access, permission controls, page-level engagement, heat scoring, and evidence-driven follow-up.",
+      "why_now": "The job was publicly open/crawled on 2026-07-18 and mirrors show it was posted in July 2026, which is a current operational-change trigger.",
+      "source_title": "5AM Ventures - Associate Director, Investor Relations",
+      "source_url": "https://jobs.lever.co/5amventures/dfbcd627-8b1c-4bef-a7c8-7637da628d6b",
+      "source_type": "Public job posting",
+      "signal_date": "2026-07",
+      "suggested_channel": "Official company/careers contact or a public LinkedIn note to the IR/fundraising function; keep it tied to the job-posted workflow.",
+      "opener": "Noticed 5AM is hiring for IR ownership across data rooms, LP access, CRM quality, and fundraising follow-up. DealSignal is a lightweight way to test secure LP rooms with page-level engagement and AI Q&A before changing core systems. Would a narrow pilot around one investor-reporting room be worth pressure-testing?",
+      "caution": "They may already have Dynamo and a data-room vendor; start as a workflow validation offer, not a replacement pitch.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 5,
+        "timing": 5,
+        "reachability": 3,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "Beacon Capital Partners",
+      "type": "Real estate investment firm",
+      "stage": "Trigger present",
+      "score": 89,
+      "pain_signal": "A public Investor Relations Associate posting says Beacon wants support for investor communications, quarterly and annual reporting, data rooms, CRM accuracy, due diligence, investor requests, and workflow improvement.",
+      "evidence": "Observed: the NIRI/LinkedIn-listed job describes managing investor materials, data rooms, and CRM systems for accuracy and accessibility, plus DDQs/RFPs/data inquiries from initial receipt through delivery. Inference: data-room process improvement is currently on the team's operating agenda.",
+      "why_fit": "DealSignal's document rooms, audit logs, page analytics, heat scoring, and controlled access fit Beacon's investor-reporting and diligence-response workflow.",
+      "why_now": "The NIRI job page lists July 10, 2026, and the posting is visible during the current search window.",
+      "source_title": "Investor Relations Associate - Beacon Capital Partners",
+      "source_url": "https://jobs.niri.org/job/5680/investor-relations-associate/",
+      "source_type": "Public job posting",
+      "signal_date": "2026-07-10",
+      "suggested_channel": "Official company site or public professional channel for the IR team; avoid recruiter-only paths unless responding to the job context.",
+      "opener": "Saw Beacon's IR posting calling out investor materials, data rooms, CRM accuracy, and DDQ workflows. DealSignal could be used as a small pilot for one reporting or diligence room to show exactly which investors engaged with which materials. Is improving data-room follow-up a current priority for the IR team?",
+      "caution": "The job source is a public career listing; verify the role is still open and that Beacon can pilot a non-incumbent tool.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 5,
+        "timing": 5,
+        "reachability": 3,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "capocasa",
+      "type": "Self-hosted data-room evaluator",
+      "stage": "Problem aware",
+      "score": 87,
+      "pain_signal": "The user reported that a self-hosted Papermark HTTPS instance completed email login but repeatedly redirected back to login because middleware and auth route cookie naming disagreed.",
+      "evidence": "Observed: the issue includes a reproducible self-host deployment behind HTTPS nginx, exact affected routes, a cookie-name mismatch, and a workaround patched into the Docker image. Inference: this evaluator values a reliable self-hosted or deployable document-sharing stack.",
+      "why_fit": "If DealSignal can be offered as a managed pilot or supported deployment, it can compete on reliability around authentication, document access, and secure share links.",
+      "why_now": "The issue was opened on 2026-07-04, making it one of the freshest alternative-evaluation signals found.",
+      "source_title": "Self-host login bounces back to /login: NextAuth cookie-name mismatch",
+      "source_url": "https://github.com/papermark/papermark/issues/2182",
+      "source_type": "GitHub Issue",
+      "signal_date": "2026-07-04",
+      "suggested_channel": "GitHub issue comment or public GitHub profile path; frame as a reliability comparison, not a bug pile-on.",
+      "opener": "Saw your Papermark self-host issue around auth bouncing behind HTTPS. DealSignal is a separate secure document-sharing and deal-room stack with a Go backend and signed viewer URLs. If you are comparing alternatives, would a quick deployment walkthrough help you judge whether it avoids this class of access problem?",
+      "caution": "This is a technical evaluator signal, not proof of business budget; confirm their actual data-room use case.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 4,
+        "timing": 5,
+        "reachability": 4,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "Hudson Structured Capital Management Ltd.",
+      "type": "Investment adviser",
+      "stage": "Trigger present",
+      "score": 84,
+      "pain_signal": "A public Investor Relations Associate posting asks for CRM maintenance, investor onboarding coordination, tracking fundraising activity, and maintaining data rooms and investor materials for accuracy and organization.",
+      "evidence": "Observed: the LinkedIn/Lensa job content names data rooms, investor materials, CRM interactions, meeting notes, feedback, fundraising pipeline progression, and subscription-document onboarding. Inference: HSCM's IR team has enough process load to justify better engagement and document intelligence.",
+      "why_fit": "DealSignal can focus on investor-material rooms with secure access, audit trails, page-level reading signals, and CRM-ready follow-up context.",
+      "why_now": "LinkedIn shows the role as recent and Lensa lists the job as posted on 2026-07-16.",
+      "source_title": "Investor Relations Associate - Hudson Structured Capital Management Ltd.",
+      "source_url": "https://www.linkedin.com/jobs/view/investor-relations-associate-at-hudson-structured-capital-management-ltd-4430724441",
+      "source_type": "Public job posting",
+      "signal_date": "2026-07-16",
+      "suggested_channel": "Public LinkedIn/company contact for HSCM's investor relations or operations function.",
+      "opener": "Saw HSCM's IR Associate role covering CRM activity, investor onboarding, and maintaining data rooms and investor materials. DealSignal could help test whether page-level engagement and secure viewer analytics make follow-up cleaner for one fundraising or reporting process. Is that workflow being reviewed as part of the hire?",
+      "caution": "This is a hiring trigger, not a public complaint; confirm whether the team wants software help or only staffing coverage.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 4,
+        "timing": 5,
+        "reachability": 3,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "ChristopherWalz",
+      "type": "Data-room user / public GitHub issue reporter",
+      "stage": "Problem aware",
+      "score": 84,
+      "pain_signal": "The user asked why audit logs show single-file downloads but not folder downloads, implying a gap in complete data-room activity tracking.",
+      "evidence": "Observed: the GitHub issue directly asks why folder downloads are missing from the audit log while single-file downloads are tracked. Inference: the user cares about audit completeness and may be dissatisfied if download activity is not captured consistently.",
+      "why_fit": "DealSignal's access logs, page analytics, and document-viewing trail can be positioned around complete activity visibility for sensitive rooms.",
+      "why_now": "The issue was opened on 2025-10-21 and remains a clear feature-gap signal for audit-heavy data-room users.",
+      "source_title": "\"audit log\" not showing download of folder",
+      "source_url": "https://github.com/papermark/papermark/issues/1910",
+      "source_type": "GitHub Issue",
+      "signal_date": "2025-10-21",
+      "suggested_channel": "GitHub issue reply or public GitHub profile path.",
+      "opener": "Saw your question about folder downloads missing from the audit log while single-file downloads are tracked. DealSignal is built around making document-room activity visible, including access and engagement signals. Are you evaluating tools where complete audit coverage is a hard requirement?",
+      "caution": "The signal is a feature complaint, not a stated migration request; validate current status before pitching.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 5,
+        "timing": 3,
+        "reachability": 4,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "gabrielbryk",
+      "type": "Self-hosting evaluator",
+      "stage": "Problem aware",
+      "score": 80,
+      "pain_signal": "The user said they were interested in self-hosting Papermark but could not find the promised step-by-step setup guide and wanted clarity on official support for self-hosted instances.",
+      "evidence": "Observed: the GitHub issue asks where the detailed self-hosting guide is, whether documentation will be created, and what support model applies. Inference: clear setup and support expectations are a meaningful adoption requirement.",
+      "why_fit": "DealSignal can win early evaluators by offering a guided pilot, clear deployment documentation, and a supported path for secure document sharing and deal rooms.",
+      "why_now": "The issue was opened on 2025-03-27 and drew 21 comments, suggesting repeated interest around self-host support.",
+      "source_title": "Self Host Guidance",
+      "source_url": "https://github.com/papermark/papermark/issues/1566",
+      "source_type": "GitHub Issue",
+      "signal_date": "2025-03-27",
+      "suggested_channel": "GitHub issue reply or public GitHub profile path; lead with self-hosting guidance rather than a generic pitch.",
+      "opener": "Saw your Papermark self-hosting question around missing setup docs and support expectations. DealSignal is a secure document-sharing and deal-room product, and we are validating a supported deployment path. Would a short checklist of what you need from self-hosted document sharing be useful?",
+      "caution": "The signal is support/documentation pain, not confirmed budget; qualify their underlying document-room workflow first.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 4,
+        "timing": 3,
+        "reachability": 4,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "Greatz08",
+      "type": "Document analytics evaluator",
+      "stage": "Problem aware",
+      "score": 77,
+      "pain_signal": "The user asked how Papermark planned to implement page-by-page analytics and compared it with self-hosted link tracking tools that can track many user actions but are not document-specific.",
+      "evidence": "Observed: the GitHub discussion explicitly asks about page-by-page analytics implementation and names the gap between generic link tracking and tracking that is specifically for documents. Inference: the user is interested in document-native engagement analytics.",
+      "why_fit": "DealSignal's page-level reading analysis, heat score, signed viewer URLs, and AI-assisted document experience speak directly to document-native analytics.",
+      "why_now": "The discussion is older, opened on 2024-10-14, so timing is weaker; it remains a precise problem-fit signal for a design-partner conversation.",
+      "source_title": "Wanted to understand how are you planning to implement \"page-by-page analytics\" ?",
+      "source_url": "https://github.com/papermark/papermark/discussions/966",
+      "source_type": "GitHub Discussion",
+      "signal_date": "2024-10-14",
+      "suggested_channel": "GitHub discussion reply or public GitHub profile path.",
+      "opener": "Saw your question about page-by-page analytics for document links versus generic self-hosted link tracking. DealSignal is built around document-native engagement signals: page views, reading heat, secure links, and follow-up context. Are you evaluating this for your own document workflow or for a product you are building?",
+      "caution": "Older signal and possibly technical curiosity; validate current use case before treating as a sales lead.",
+      "dimensions": {
+        "pain_strength": 3,
+        "product_fit": 5,
+        "timing": 2,
+        "reachability": 4,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "saadk546",
+      "type": "Self-hosted Papermark deployer",
+      "stage": "Problem aware",
+      "score": 79,
+      "pain_signal": "The user reported a successful Papermark deployment but blocked signup due to an Upstash rate-limit error, plus a custom domain that was not accessible.",
+      "evidence": "Observed: the issue lists signup/auth failure, missing/unclear environment configuration, and custom-domain setup failure after deploying to Vercel. Inference: the user wants a document-sharing/data-room stack with reliable onboarding and branded domain support.",
+      "why_fit": "DealSignal includes branded sharing concepts, signed viewer URLs, and secure document workflows; a supported setup path could address the onboarding and custom-domain anxiety.",
+      "why_now": "The issue was opened on 2025-12-08, a moderately fresh signal from a user actively trying to deploy a DocSend alternative.",
+      "source_title": "Papermark signup fails on Vercel with Upstash rate limit error + custom domain not working",
+      "source_url": "https://github.com/papermark/papermark/issues/1956",
+      "source_type": "GitHub Issue",
+      "signal_date": "2025-12-08",
+      "suggested_channel": "GitHub issue reply or public GitHub profile path; offer setup help or a migration checklist.",
+      "opener": "Saw your Papermark deployment issue around signup, rate-limit config, and custom domains. DealSignal is a secure document-sharing and deal-room stack with branded share workflows. If you are still comparing options, would a minimal deployment checklist help you see whether DealSignal fits your use case?",
+      "caution": "May only need troubleshooting, not a new vendor; confirm they have a real data-room workflow before offering a pilot.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 4,
+        "timing": 4,
+        "reachability": 4,
+        "evidence_quality": 5
+      }
+    },
+    {
+      "name": "kuna1bajaj",
+      "type": "Data-room/link workflow user",
+      "stage": "Problem aware",
+      "score": 78,
+      "pain_signal": "The user requested saved watermark configurations because otherwise users must recreate the watermark for every new data room or link.",
+      "evidence": "Observed: the GitHub issue directly describes repeated manual setup for watermarks across new data rooms/links. Inference: this user values reusable security defaults and faster room/link creation.",
+      "why_fit": "DealSignal's permission, watermark, and secure viewer model can be tested around reusable share policies and faster creation of protected investor/customer links.",
+      "why_now": "The issue was opened on 2025-12-06 and maps to a repeated workflow pain rather than a one-off bug.",
+      "source_title": "Save watermark as a setting",
+      "source_url": "https://github.com/papermark/papermark/issues/1951",
+      "source_type": "GitHub Issue",
+      "signal_date": "2025-12-06",
+      "suggested_channel": "GitHub issue reply or public GitHub profile path.",
+      "opener": "Saw your request to save watermark settings instead of recreating them for every data room or link. DealSignal is designed around secure sharing policies, viewer controls, and engagement signals. Would reusable security defaults be a must-have if you tested another document-sharing tool?",
+      "caution": "Feature-request signal only; validate whether they are a buyer, active user, or contributor before spending much time.",
+      "dimensions": {
+        "pain_strength": 4,
+        "product_fit": 4,
+        "timing": 4,
+        "reachability": 4,
+        "evidence_quality": 4
+      }
+    }
+  ],
+  "patterns": [
+    {
+      "title": "Investor data rooms are becoming an IR operations job",
+      "count": 3,
+      "insight": "5AM, Beacon, and HSCM all have public hiring signals that combine data rooms, CRM hygiene, investor onboarding, reporting, and follow-up. The buyer language is operational, not speculative."
+    },
+    {
+      "title": "DocSend/VDR pricing and bloat create switching windows",
+      "count": 2,
+      "insight": "Public market threads and open-source alternatives show buyers comparing DocSend, Papermark, and VDR tools when pricing, setup, or feature depth no longer matches the job."
+    },
+    {
+      "title": "Self-hosted evaluators need trust and support",
+      "count": 4,
+      "insight": "Papermark users surfaced self-host/licensing, support-doc, auth, and custom-domain blockers. A DealSignal pilot should include clear setup, support expectations, and a believable security posture."
+    },
+    {
+      "title": "Auditability is not optional for serious rooms",
+      "count": 2,
+      "insight": "Audit-log coverage and reusable watermark settings show that users want security controls to be complete, consistent, and easy to apply across rooms and links."
+    },
+    {
+      "title": "Page-level engagement is the recurring hook",
+      "count": 6,
+      "insight": "Across the DealSignal product brief, Reddit VDR questions, and IR job posts, the recurring value is knowing who read what, which documents mattered, and when to follow up."
+    }
+  ],
+  "outreach_plan": {
+    "angle": "Lead with a low-risk workflow audit or concierge pilot, not a broad platform pitch.",
+    "first_step": "Day 1-2: contact only the top five prospects with source-grounded, manual messages and one question about their current data-room bottleneck.",
+    "follow_up": "Day 3-5: for anyone who confirms the pain, share a two-minute demo or sample room using non-sensitive dummy investor materials; ask which security or analytics signal would make it worth a second call.",
+    "success": "By day 7: three qualified conversations, one live pilot using a real but non-sensitive document workflow, and a written list of must-have objections around security, hosting, pricing, and analytics."
+  },
+  "limits": [
+    "These are potential customers based on public signals, not confirmed buyers or consenting leads.",
+    "GitHub handles may represent individuals, contributors, evaluators, or companies; verify buyer role before outreach.",
+    "Job postings are timing signals, not product requests; confirm whether software adoption is possible while the role is open or newly filled.",
+    "DealSignal's current product docs do not position full e-signature as a core capability, so e-signature-heavy requests should stay adjacent, not primary.",
+    "Do not use private email enrichment, scraped phone numbers, data brokers, or scraped personal-contact databases."
+  ]
+}

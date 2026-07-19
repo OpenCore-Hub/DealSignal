@@ -31,10 +31,10 @@ async function createLinkViaApi(
     requireEmail?: boolean;
     requirePassword?: boolean;
     requireNDA?: boolean;
+    ndaDocumentId?: string;
     requireEmailVerification?: boolean;
     password?: string;
     allowedEmails?: string[];
-    allowedDomains?: string[];
     downloadEnabled?: boolean;
     expiresAt?: string;
     maxAccessCount?: number;
@@ -50,6 +50,7 @@ async function createLinkViaApi(
   if (opts.requireEmail) body.require_email = true;
   if (opts.requirePassword) body.require_password = true;
   if (opts.requireNDA) body.require_nda = true;
+  if (opts.requireNDA && opts.ndaDocumentId) body.nda_document_id = opts.ndaDocumentId;
   if (opts.requireEmailVerification) body.require_email_verification = true;
   if (opts.password) body.password = opts.password;
 
@@ -70,9 +71,9 @@ async function createLinkViaApi(
   } else if (permissionType === "nda") {
     body.require_nda = true;
     body.require_email = true;
+    if (opts.ndaDocumentId) body.nda_document_id = opts.ndaDocumentId;
   }
   if (opts.allowedEmails) body.allowed_emails = opts.allowedEmails;
-  if (opts.allowedDomains) body.allowed_domains = opts.allowedDomains;
   if (opts.expiresAt) body.expires_at = opts.expiresAt;
   if (typeof opts.maxAccessCount === "number") body.max_access_count = opts.maxAccessCount;
 
@@ -524,6 +525,7 @@ test.describe("real backend P0 flow", () => {
     const link = await createLinkViaApi(seed.workspaceSlug, sharedDocumentId, undefined, {
       requireEmail: true,
       requireNDA: true,
+      ndaDocumentId: sharedDocumentId,
     });
 
     const visitorPage = await page.context().newPage();
@@ -542,6 +544,7 @@ test.describe("real backend P0 flow", () => {
       requireEmail: true,
       requirePassword: true,
       requireNDA: true,
+      ndaDocumentId: sharedDocumentId,
       password: "Secret123!",
     });
 

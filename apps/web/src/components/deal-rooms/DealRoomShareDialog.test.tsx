@@ -36,15 +36,15 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomLinks: vi.fn(),
+    getDealRoomDocuments: vi.fn(),
+    getLinkById: vi.fn(),
     getLinkAccessRules: vi.fn(),
-    getLinkInvitations: vi.fn(),
+    getContacts: vi.fn(),
     createDealRoomLink: vi.fn(),
     updateLinkFull: vi.fn(),
     setLinkAccessRules: vi.fn(),
     updateLink: vi.fn(),
     getAccessLogs: vi.fn(),
-    inviteLinkViewers: vi.fn(),
-    revokeLinkInvitation: vi.fn(),
   },
 }));
 
@@ -55,8 +55,19 @@ describe("DealRoomShareDialog", () => {
   beforeEach(() => {
     vi.resetAllMocks();
     vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
+    vi.mocked(api.getDealRoomDocuments).mockResolvedValue({
+      data: [
+        {
+          folder: "/",
+          permission: "view" as const,
+          documents: [
+            { id: "doc-1", document_id: "doc-1", title: "NDA Agreement", folder_path: "/", sort_order: 0, source_type: "pdf", status: "ready", created_at: new Date().toISOString() },
+          ],
+        },
+      ],
+    });
     vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
-    vi.mocked(api.getLinkInvitations).mockResolvedValue({ data: [] });
+    vi.mocked(api.getContacts).mockResolvedValue({ data: [] });
     vi.mocked(api.getAccessLogs).mockResolvedValue({ data: [] });
   });
 
@@ -81,7 +92,7 @@ describe("DealRoomShareDialog", () => {
     expect(screen.getByPlaceholderText("Recipient's Organization")).toBeInTheDocument();
   });
 
-  it("renders all three tabs in the correct order", async () => {
+  it("renders Share and Access tabs in the correct order", async () => {
     render(
       <Wrapper>
         <DealRoomShareDialog roomId="room-1">
@@ -93,7 +104,7 @@ describe("DealRoomShareDialog", () => {
     fireEvent.click(screen.getByText("Open"));
     await waitFor(() => screen.getByText("Create share link"));
 
-    const tabs = ["Share", "Invite", "Access"];
+    const tabs = ["Share", "Access"];
     tabs.forEach((label) => {
       expect(screen.getByText(label)).toBeInTheDocument();
     });
@@ -118,7 +129,7 @@ describe("DealRoomShareDialog", () => {
     });
   });
 
-  it("creates a link and persists access rules", async () => {
+  it("creates a link and persists access rules in a single request", async () => {
     vi.mocked(api.createDealRoomLink).mockResolvedValue({
       id: "link-1",
       name: "Acme DD",
@@ -149,6 +160,13 @@ describe("DealRoomShareDialog", () => {
       target: { value: "Acme DD" },
     });
 
+    // Add an allowed viewer; email gates now require allowed viewers.
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => screen.getByText("Require email to view"));
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+
     const dialog = screen.getByRole("dialog");
     const createButtons = within(dialog).getAllByRole("button", { name: "Create link" });
     fireEvent.click(createButtons[createButtons.length - 1]);
@@ -156,65 +174,446 @@ describe("DealRoomShareDialog", () => {
     await waitFor(() => {
       expect(vi.mocked(api.createDealRoomLink)).toHaveBeenCalledWith(
         "room-1",
-        expect.objectContaining({ name: "Acme DD" })
+        expect.objectContaining({
+          name: "Acme DD",
+          allowed_emails: ["alice@vc.com"],
+          blocked_emails: undefined,
+        })
       );
     });
-    expect(vi.mocked(api.setLinkAccessRules)).toHaveBeenCalledWith("link-1", []);
+    // New links persist access rules in the create request; no separate rules call is needed.
+    expect(vi.mocked(api.setLinkAccessRules)).not.toHaveBeenCalled();
   });
 
-  it("lists invitations in edit mode", async () => {
-    vi.mocked(api.getDealRoomLinks).mockResolvedValue({
-      data: [
-        {
-          id: "link-2",
-          name: "Existing link",
-          shortUrl: "http://localhost/l/existing",
-          requireEmail: true,
-          requireEmailVerification: false,
-          requirePassword: false,
-          requireNda: false,
-          downloadEnabled: false,
-          watermarkEnabled: false,
-          aiCopilotEnabled: false,
-          folderPaths: [],
-          accessCount: 3,
-          heatLevel: "warm",
-          isBundle: false,
-          documents: [],
-          status: "active",
-          isActive: true,
-          createdAt: new Date().toISOString(),
-        } as unknown as Link,
-      ],
-    });
-    vi.mocked(api.getLinkInvitations).mockResolvedValue({
-      data: [
-        {
-          id: "inv-1",
-          linkId: "link-2",
-          email: "alice@vc.com",
-          token: "token-1",
-          status: "pending",
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    });
+  it("creates a link with password, allowed viewers, and NDA in a single request", async () => {
+    vi.mocked(api.createDealRoomLink).mockResolvedValue({
+      id: "link-2",
+      name: "Secure Link",
+      shortUrl: "http://localhost/l/secure123",
+      requireEmail: true,
+      requireEmailVerification: false,
+      requirePassword: true,
+      requireNda: true,
+      downloadEnabled: false,
+      watermarkEnabled: true,
+      aiCopilotEnabled: false,
+      folderPaths: [],
+    } as unknown as Link);
 
     render(
       <Wrapper>
-        <DealRoomShareDialog roomId="room-1" linkId="link-2">
+        <DealRoomShareDialog roomId="room-1">
           <Button>Open</Button>
         </DealRoomShareDialog>
       </Wrapper>
     );
 
     fireEvent.click(screen.getByText("Open"));
-    await waitFor(() => screen.getByText("Existing link"));
+    await waitFor(() => screen.getByText("Create share link"));
 
-    fireEvent.click(screen.getByText("Invite"));
+    fireEvent.change(screen.getByPlaceholderText("Recipient's Organization"), {
+      target: { value: "Secure Link" },
+    });
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => screen.getByText("Require email to view"));
+
+    fireEvent.click(screen.getByRole("switch", { name: /require password to view/i }));
+    const passwordInput = await screen.findByPlaceholderText(/enter password/i);
+    fireEvent.change(passwordInput, {
+      target: { value: "strong-pass-123" },
+    });
+
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
+
+    const ndaSelect = screen.getByRole("combobox", { name: /NDA agreement document/i });
+    fireEvent.click(ndaSelect);
+    const ndaOption = await screen.findByRole("option", { name: /NDA Agreement/i });
+    fireEvent.click(ndaOption);
+
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
 
     await waitFor(() => {
-      expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+      expect(vi.mocked(api.createDealRoomLink)).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({
+          name: "Secure Link",
+          require_password: true,
+          password: "strong-pass-123",
+          allowed_emails: ["alice@vc.com"],
+          require_nda: true,
+          nda_document_id: "doc-1",
+        })
+      );
     });
+    expect(vi.mocked(api.setLinkAccessRules)).not.toHaveBeenCalled();
   });
+
+  it("disables create link button until required fields are valid", async () => {
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    const dialog = screen.getByRole("dialog");
+    const createButton = within(dialog).getByRole("button", { name: "Create link" });
+
+    // Initially invalid: empty name and standard preset requires allowed viewers.
+    expect(createButton).toBeDisabled();
+
+    fireEvent.change(screen.getByPlaceholderText("Recipient's Organization"), {
+      target: { value: "Acme DD" },
+    });
+    expect(createButton).toBeDisabled();
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => screen.getByText("Require email to view"));
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+
+    expect(createButton).toBeEnabled();
+  });
+
+  it("disables create link button when NDA is enabled without a selected document", async () => {
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    fireEvent.change(screen.getByPlaceholderText("Recipient's Organization"), {
+      target: { value: "Acme DD" },
+    });
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => screen.getByText("Require email to view"));
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+
+    const dialog = screen.getByRole("dialog");
+    const createButton = within(dialog).getByRole("button", { name: "Create link" });
+    expect(createButton).toBeEnabled();
+
+    fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
+    expect(createButton).toBeDisabled();
+
+    const ndaSelect = await screen.findByRole("combobox", { name: /NDA agreement document/i });
+    fireEvent.click(ndaSelect);
+    const ndaOption = await screen.findByRole("option", { name: /NDA Agreement/i });
+    fireEvent.click(ndaOption);
+
+    expect(createButton).toBeEnabled();
+  });
+
+  it("keeps create link button disabled when password is too short", async () => {
+    vi.mocked(api.createDealRoomLink).mockResolvedValue({
+      id: "link-3",
+    } as unknown as Link);
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    fireEvent.change(screen.getByPlaceholderText("Recipient's Organization"), {
+      target: { value: "Short Password Link" },
+    });
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => screen.getByText("Require email to view"));
+
+    // Add an allowed viewer so the email gate passes validation while we test password length.
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+
+    fireEvent.click(screen.getByRole("switch", { name: /require password to view/i }));
+    const passwordInput = await screen.findByPlaceholderText(/enter password/i);
+    fireEvent.change(passwordInput, {
+      target: { value: "short" },
+    });
+
+    const dialog = screen.getByRole("dialog");
+    const createButton = within(dialog).getByRole("button", { name: "Create link" });
+    expect(createButton).toBeDisabled();
+    expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument();
+    expect(vi.mocked(api.createDealRoomLink)).not.toHaveBeenCalled();
+  });
+
+  it("echoes existing deal-room link settings in Share and Access tabs", async () => {
+    const editLink: Link = {
+      id: "link-edit",
+      name: "Acme DD Edit",
+      shortUrl: "http://localhost/l/ddr123",
+      documentId: "doc-1",
+      documentTitle: "Acme DD",
+      requireEmail: true,
+      requireEmailVerification: true,
+      requirePassword: false,
+      requireNda: true,
+      ndaDocumentId: "doc-1",
+      downloadEnabled: true,
+      watermarkEnabled: true,
+      aiCopilotEnabled: false,
+      folderPaths: [],
+      accessCount: 3,
+      heatLevel: "warm",
+      isBundle: false,
+      documents: [],
+      status: "active",
+      isActive: true,
+      dealRoomId: "room-1",
+      customDomain: "dealroom.example.com",
+      notifyOnAccess: true,
+      createdAt: new Date().toISOString(),
+    } as unknown as Link;
+
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [editLink] });
+    vi.mocked(api.getLinkAccessRules).mockResolvedValue({
+      data: [
+        { ruleType: "email", value: "alice@vc.com", action: "allow" },
+        { ruleType: "email", value: "leaker@bad.com", action: "block" },
+      ],
+    });
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1" linkId="link-edit">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Acme DD Edit")).toBeInTheDocument();
+    });
+
+    // Share tab should reflect loaded custom domain in the public URL.
+    expect(screen.getByText(/dealroom\.example\.com/)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Notify on access/i })).toBeChecked();
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => {
+      expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
+    });
+
+    expect(screen.getByLabelText(/Require email to view/i)).toBeChecked();
+    expect(screen.getByLabelText(/Require email verification/i)).toBeChecked();
+    expect(screen.getByLabelText(/Require NDA to view/i)).toBeChecked();
+    expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+    expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
+    expect(screen.getByLabelText(/Allow downloading/i)).toBeChecked();
+  });
+
+  it("echoes existing deal-room link settings and keeps them after save", async () => {
+    const editLink: Link = {
+      id: "link-edit",
+      name: "Acme DD Edit",
+      shortUrl: "http://localhost/l/ddr123",
+      documentId: "doc-1",
+      documentTitle: "Acme DD",
+      requireEmail: true,
+      requireEmailVerification: false,
+      requirePassword: false,
+      requireNda: false,
+      downloadEnabled: true,
+      watermarkEnabled: true,
+      aiCopilotEnabled: false,
+      folderPaths: [],
+      accessCount: 3,
+      heatLevel: "warm",
+      isBundle: false,
+      documents: [],
+      status: "active",
+      isActive: true,
+      dealRoomId: "room-1",
+      customDomain: "dealroom.example.com",
+      notifyOnAccess: true,
+      createdAt: new Date().toISOString(),
+    } as unknown as Link;
+
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [editLink] });
+    vi.mocked(api.getLinkAccessRules).mockResolvedValue({
+      data: [
+        { ruleType: "email", value: "alice@vc.com", action: "allow" },
+        { ruleType: "email", value: "leaker@bad.com", action: "block" },
+      ],
+    });
+    vi.mocked(api.updateLinkFull).mockResolvedValue(editLink);
+    vi.mocked(api.setLinkAccessRules).mockResolvedValue(undefined);
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1" linkId="link-edit">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Acme DD Edit")).toBeInTheDocument();
+    });
+
+    // The updated alert copy should be email-only.
+    expect(
+      screen.getByText("This link is restricted. Only allowed emails can access.")
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => {
+      expect(screen.getByText("Require email to view")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+    expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save access rules" }));
+
+    await waitFor(() => {
+      expect(vi.mocked(api.setLinkAccessRules)).toHaveBeenCalledWith(
+        "link-edit",
+        expect.arrayContaining([
+          expect.objectContaining({ value: "alice@vc.com", action: "allow" }),
+          expect.objectContaining({ value: "leaker@bad.com", action: "block" }),
+        ])
+      );
+    });
+
+    // After save/refetch the rules should still be echoed in the Access tab.
+    expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+    expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
+  });
+
+  it("falls back to getLinkById when the link is missing from the deal-room list", async () => {
+    const editLink: Link = {
+      id: "link-edit",
+      name: "Acme DD Edit",
+      shortUrl: "http://localhost/l/ddr123",
+      documentId: "doc-1",
+      documentTitle: "Acme DD",
+      requireEmail: true,
+      requireEmailVerification: true,
+      requirePassword: false,
+      requireNda: true,
+      ndaDocumentId: "doc-1",
+      downloadEnabled: true,
+      watermarkEnabled: true,
+      aiCopilotEnabled: false,
+      folderPaths: [],
+      accessCount: 3,
+      heatLevel: "warm",
+      isBundle: false,
+      documents: [],
+      status: "active",
+      isActive: true,
+      dealRoomId: "room-1",
+      customDomain: "dealroom.example.com",
+      notifyOnAccess: true,
+      createdAt: new Date().toISOString(),
+    } as unknown as Link;
+
+    // The link is not present in the deal-room list (e.g. stale cache or
+    // status filtering), so the dialog should fall back to a direct lookup.
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
+    vi.mocked(api.getLinkById).mockResolvedValue(editLink);
+    vi.mocked(api.getLinkAccessRules).mockResolvedValue({
+      data: [
+        { ruleType: "email", value: "alice@vc.com", action: "allow" },
+        { ruleType: "email", value: "leaker@bad.com", action: "block" },
+      ],
+    });
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1" linkId="link-edit">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Acme DD Edit")).toBeInTheDocument();
+    });
+
+    expect(api.getLinkById).toHaveBeenCalledWith("link-edit");
+
+    fireEvent.click(screen.getByText("Access"));
+    await waitFor(() => {
+      expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+    expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
+  });
+
+  it("ignores a direct link lookup that does not belong to the deal room", async () => {
+    const wrongLink: Link = {
+      id: "link-edit",
+      name: "Wrong Room Link",
+      shortUrl: "http://localhost/l/ddr123",
+      documentId: "doc-1",
+      documentTitle: "Acme DD",
+      requireEmail: false,
+      requireEmailVerification: false,
+      requirePassword: false,
+      requireNda: false,
+      downloadEnabled: false,
+      watermarkEnabled: false,
+      aiCopilotEnabled: false,
+      folderPaths: [],
+      accessCount: 0,
+      heatLevel: "cold",
+      isBundle: false,
+      documents: [],
+      status: "active",
+      isActive: true,
+      dealRoomId: "room-other",
+      createdAt: new Date().toISOString(),
+    } as unknown as Link;
+
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
+    vi.mocked(api.getLinkById).mockResolvedValue(wrongLink);
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1" linkId="link-edit">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => {
+      expect(screen.getByText("Create share link")).toBeInTheDocument();
+    });
+
+    expect(api.getLinkById).toHaveBeenCalledWith("link-edit");
+  });
+
 });

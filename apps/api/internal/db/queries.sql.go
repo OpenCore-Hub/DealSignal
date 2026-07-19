@@ -1366,9 +1366,9 @@ INSERT INTO links (
     qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
     link_type, target_folder_path,
     custom_domain, tags, notify_on_access,
-    has_document_scope, folder_scope_paths
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+    has_document_scope, folder_scope_paths, nda_document_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 `
 
 type CreateLinkParams struct {
@@ -1402,6 +1402,7 @@ type CreateLinkParams struct {
 	NotifyOnAccess              bool
 	HasDocumentScope            bool
 	FolderScopePaths            []string
+	NdaDocumentID               pgtype.UUID
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -1436,6 +1437,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.NotifyOnAccess,
 		arg.HasDocumentScope,
 		arg.FolderScopePaths,
+		arg.NdaDocumentID,
 	)
 	var i Link
 	err := row.Scan(
@@ -1475,6 +1477,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.LastReminderSentAt,
 		&i.HasDocumentScope,
 		&i.FolderScopePaths,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
@@ -4320,7 +4323,7 @@ func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtyp
 }
 
 const getLinkByID = `-- name: GetLinkByID :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE id = $1
 LIMIT 1
@@ -4366,12 +4369,13 @@ func (q *Queries) GetLinkByID(ctx context.Context, id pgtype.UUID) (Link, error)
 		&i.LastReminderSentAt,
 		&i.HasDocumentScope,
 		&i.FolderScopePaths,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
 
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -4422,12 +4426,13 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.LastReminderSentAt,
 		&i.HasDocumentScope,
 		&i.FolderScopePaths,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
 
 const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -4473,6 +4478,7 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.LastReminderSentAt,
 		&i.HasDocumentScope,
 		&i.FolderScopePaths,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
@@ -7627,7 +7633,7 @@ func (q *Queries) ListLinkInvitationsByLink(ctx context.Context, linkID pgtype.U
 }
 
 const listLinksByDealRoom = `-- name: ListLinksByDealRoom :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE workspace_id = $1 AND deal_room_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -7684,6 +7690,7 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 			&i.LastReminderSentAt,
 			&i.HasDocumentScope,
 			&i.FolderScopePaths,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -7696,7 +7703,7 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 }
 
 const listLinksByDealRoomID = `-- name: ListLinksByDealRoomID :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE deal_room_id = $1
 `
@@ -7747,6 +7754,7 @@ func (q *Queries) ListLinksByDealRoomID(ctx context.Context, dealRoomID pgtype.U
 			&i.LastReminderSentAt,
 			&i.HasDocumentScope,
 			&i.FolderScopePaths,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -7759,7 +7767,7 @@ func (q *Queries) ListLinksByDealRoomID(ctx context.Context, dealRoomID pgtype.U
 }
 
 const listLinksByDocument = `-- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -7816,6 +7824,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.LastReminderSentAt,
 			&i.HasDocumentScope,
 			&i.FolderScopePaths,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -7828,7 +7837,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 }
 
 const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -7880,6 +7889,7 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.LastReminderSentAt,
 			&i.HasDocumentScope,
 			&i.FolderScopePaths,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -7892,7 +7902,7 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 }
 
 const listLinksExpiringWithin = `-- name: ListLinksExpiringWithin :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths FROM links
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id FROM links
 WHERE status = 'active'
   AND expires_at IS NOT NULL
   AND expires_at > now()
@@ -7947,6 +7957,7 @@ func (q *Queries) ListLinksExpiringWithin(ctx context.Context, dollar_1 pgtype.T
 			&i.LastReminderSentAt,
 			&i.HasDocumentScope,
 			&i.FolderScopePaths,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -8695,7 +8706,7 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 }
 
 const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -8753,6 +8764,7 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.LastReminderSentAt,
 			&i.HasDocumentScope,
 			&i.FolderScopePaths,
+			&i.NdaDocumentID,
 		); err != nil {
 			return nil, err
 		}
@@ -11036,24 +11048,25 @@ UPDATE links SET
     require_email = $9,
     require_email_verification = $10,
     require_nda = $11,
-    ai_copilot_enabled = $12,
-    require_password = $13,
-    password_hash = $14,
-    custom_domain = $15,
-    tags = $16,
-    notify_on_access = $17,
-    qa_enabled = $18,
-    file_requests_enabled = $19,
-    index_file_enabled = $20,
-    screenshot_protection_enabled = $21,
-    link_type = $22,
-    target_folder_path = $23,
-    security_version = $24,
-    has_document_scope = $25,
-    folder_scope_paths = $26,
+    nda_document_id = $12,
+    ai_copilot_enabled = $13,
+    require_password = $14,
+    password_hash = $15,
+    custom_domain = $16,
+    tags = $17,
+    notify_on_access = $18,
+    qa_enabled = $19,
+    file_requests_enabled = $20,
+    index_file_enabled = $21,
+    screenshot_protection_enabled = $22,
+    link_type = $23,
+    target_folder_path = $24,
+    security_version = $25,
+    has_document_scope = $26,
+    folder_scope_paths = $27,
     updated_at = now()
-WHERE id = $27 AND workspace_id = $28
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+WHERE id = $28 AND workspace_id = $29
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 `
 
 type UpdateLinkFullParams struct {
@@ -11068,6 +11081,7 @@ type UpdateLinkFullParams struct {
 	RequireEmail                bool
 	RequireEmailVerification    bool
 	RequireNda                  bool
+	NdaDocumentID               pgtype.UUID
 	AiCopilotEnabled            bool
 	RequirePassword             bool
 	PasswordHash                pgtype.Text
@@ -11100,6 +11114,7 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		arg.RequireEmail,
 		arg.RequireEmailVerification,
 		arg.RequireNda,
+		arg.NdaDocumentID,
 		arg.AiCopilotEnabled,
 		arg.RequirePassword,
 		arg.PasswordHash,
@@ -11156,6 +11171,7 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		&i.LastReminderSentAt,
 		&i.HasDocumentScope,
 		&i.FolderScopePaths,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }
@@ -11272,7 +11288,7 @@ const updateLinkStatus = `-- name: UpdateLinkStatus :one
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id
 `
 
 type UpdateLinkStatusParams struct {
@@ -11321,6 +11337,7 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.LastReminderSentAt,
 		&i.HasDocumentScope,
 		&i.FolderScopePaths,
+		&i.NdaDocumentID,
 	)
 	return i, err
 }

@@ -1,6 +1,8 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Lock, Envelope, Shield, Download, Drop } from "@phosphor-icons/react";
+import { Lock, Envelope, Shield, Download, Drop, CaretDown } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 interface AccessSummaryCardProps {
   requireEmail: boolean;
@@ -28,6 +30,8 @@ export function AccessSummaryCard({
   onEditAccess,
 }: AccessSummaryCardProps) {
   const { t } = useTranslation("linkShare");
+  const [open, setOpen] = useState(false);
+  const toggle = () => setOpen((v) => !v);
 
   const items: { icon: React.ReactNode; label: string }[] = [];
 
@@ -54,54 +58,94 @@ export function AccessSummaryCard({
 
   const hasRestrictions =
     items.length > 0 || allowedViewers.length > 0 || blockedViewers.length > 0;
+  const restrictionCount =
+    items.length + allowedViewers.length + blockedViewers.length;
 
   return (
     <div className="rounded-lg border border-border bg-muted/30 p-4">
-      <div className="flex items-center justify-between">
-        <h4 className="text-sm font-medium">{t("share.accessSummary")}</h4>
-        <Button type="button" variant="link" size="sm" className="h-auto p-0" onClick={onEditAccess}>
-          {t("share.editAccessRules")}
-        </Button>
-      </div>
-
-      {!hasRestrictions ? (
-        <p className="mt-2 text-xs text-muted-foreground">{t("share.accessSummaryEmpty")}</p>
-      ) : (
-        <div className="mt-2 flex flex-wrap gap-2">
-          {items.map((item, idx) => (
-            <span
-              key={idx}
-              className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-1 text-xs"
-            >
-              {item.icon}
-              {item.label}
-            </span>
-          ))}
-          {allowedViewers.slice(0, 3).map((value) => (
-            <span
-              key={value}
-              className="inline-flex items-center rounded-full bg-success-500/10 px-2 py-1 text-xs text-success-600"
-            >
-              {value}
-            </span>
-          ))}
-          {allowedViewers.length > 3 && (
-            <span className="inline-flex items-center rounded-full bg-success-500/10 px-2 py-1 text-xs text-success-600">
-              +{allowedViewers.length - 3}
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          onClick={toggle}
+          className="flex flex-1 items-center gap-2 text-left"
+          aria-expanded={open}
+        >
+          <h4 className="text-sm font-medium">{t("share.accessSummary")}</h4>
+          {restrictionCount > 0 && (
+            <span className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-background px-1.5 text-xs text-muted-foreground">
+              {restrictionCount}
             </span>
           )}
-          {blockedViewers.slice(0, 3).map((value) => (
-            <span
-              key={value}
-              className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-1 text-xs text-destructive"
-            >
-              {value}
-            </span>
-          ))}
-          {blockedViewers.length > 3 && (
-            <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-1 text-xs text-destructive">
-              +{blockedViewers.length - 3}
-            </span>
+        </button>
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="link"
+            size="sm"
+            className="h-auto p-0"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEditAccess();
+            }}
+          >
+            {t("share.editAccessRules")}
+          </Button>
+          <button
+            type="button"
+            onClick={toggle}
+            className="inline-flex items-center justify-center text-muted-foreground hover:text-foreground"
+            aria-label={open ? t("share.collapseAccessSummary") : t("share.expandAccessSummary")}
+          >
+            <CaretDown
+              size={16}
+              className={cn("transition-transform", open && "rotate-180")}
+            />
+          </button>
+        </div>
+      </div>
+
+      {open && (
+        <div className="mt-3">
+          {!hasRestrictions ? (
+            <p className="text-xs text-muted-foreground">{t("share.accessSummaryEmpty")}</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {items.map((item, idx) => (
+                <span
+                  key={idx}
+                  className="inline-flex items-center gap-1 rounded-full bg-background px-2 py-1 text-xs"
+                >
+                  {item.icon}
+                  {item.label}
+                </span>
+              ))}
+              {allowedViewers.slice(0, 3).map((value) => (
+                <span
+                  key={value}
+                  className="inline-flex items-center rounded-full bg-success-500/10 px-2 py-1 text-xs text-success-600"
+                >
+                  {value}
+                </span>
+              ))}
+              {allowedViewers.length > 3 && (
+                <span className="inline-flex items-center rounded-full bg-success-500/10 px-2 py-1 text-xs text-success-600">
+                  +{allowedViewers.length - 3}
+                </span>
+              )}
+              {blockedViewers.slice(0, 3).map((value) => (
+                <span
+                  key={value}
+                  className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-1 text-xs text-destructive"
+                >
+                  {value}
+                </span>
+              ))}
+              {blockedViewers.length > 3 && (
+                <span className="inline-flex items-center rounded-full bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                  +{blockedViewers.length - 3}
+                </span>
+              )}
+            </div>
           )}
         </div>
       )}

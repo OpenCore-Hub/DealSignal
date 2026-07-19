@@ -146,13 +146,13 @@ async function initI18n() {
   return instance;
 }
 
-async function renderPage() {
+async function renderPage(initialEntry = "/acme/deal-rooms/room-1") {
   const i18nInstance = await initI18n();
   let result!: ReturnType<typeof render>;
   await act(async () => {
     result = render(
       <I18nextProvider i18n={i18nInstance}>
-        <MemoryRouter initialEntries={["/acme/deal-rooms/room-1"]}>
+        <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path=":workspaceSlug/deal-rooms/:roomId" element={<DealRoomDetailPage />} />
           </Routes>
@@ -202,29 +202,23 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
 
     expect(screen.getByText("Due diligence materials")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /documents/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /permissions/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /analytics/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /q&a/i })).toBeInTheDocument();
     expect(screen.getByText("01 Pitch Deck")).toBeInTheDocument();
     expect(screen.getByText("02 Financials")).toBeInTheDocument();
     expect(screen.queryByText("Folder structure")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-progress-popup")).not.toBeInTheDocument();
   });
 
-  it("switches to permissions tab and shows links section", async () => {
+  it("switches to participants tab and shows links section", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
-    await renderPage();
+    await renderPage("/acme/deal-rooms/room-1?tab=participants");
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
-
-    fireEvent.click(screen.getByRole("tab", { name: /permissions/i }));
 
     await waitFor(() => {
       expect(screen.getByText("Links")).toBeInTheDocument();
@@ -244,7 +238,7 @@ describe("DealRoomDetailPage", () => {
     fireEvent.click(screen.getByRole("button", { name: /retry/i }));
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
   });
 
@@ -272,7 +266,7 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
 
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
@@ -281,7 +275,10 @@ describe("DealRoomDetailPage", () => {
     // Reveal action icons by hovering the folder row.
     fireEvent.mouseEnter(folderRow);
 
-    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
+    fireEvent.click(actionsButton);
+
+    const uploadButton = screen.getByRole("button", { name: /add file/i });
     expect(uploadButton).toBeInTheDocument();
 
     // Trigger the hidden file input by clicking the upload icon.
@@ -312,7 +309,7 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
 
     const folderRow = screen.getByText("02 Financials").closest("[role='button']") as HTMLElement;
@@ -353,12 +350,13 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
 
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
-    fireEvent.mouseEnter(folderRow);
-    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
+    fireEvent.click(actionsButton);
+    const uploadButton = screen.getByRole("button", { name: /add file/i });
     fireEvent.click(uploadButton);
 
     const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
@@ -410,12 +408,13 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
 
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
-    fireEvent.mouseEnter(folderRow);
-    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
+    fireEvent.click(actionsButton);
+    const uploadButton = screen.getByRole("button", { name: /add file/i });
     fireEvent.click(uploadButton);
 
     const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
@@ -433,7 +432,7 @@ describe("DealRoomDetailPage", () => {
     await waitFor(
       () => {
         expect(document.querySelector("[aria-busy='true']")).not.toBeInTheDocument();
-        expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+        expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
       },
       { timeout: 1_000 }
     );
@@ -476,12 +475,13 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("Series A Data Room")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     });
 
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
-    fireEvent.mouseEnter(folderRow);
-    const uploadButton = within(folderRow).getByRole("button", { name: /add file/i });
+    const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
+    fireEvent.click(actionsButton);
+    const uploadButton = screen.getByRole("button", { name: /add file/i });
     fireEvent.click(uploadButton);
 
     const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;

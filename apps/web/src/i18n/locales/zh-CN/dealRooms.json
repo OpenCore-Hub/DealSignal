@@ -58,13 +58,18 @@
   },
   "tabs": {
     "documents": "文档",
-    "permissions": "权限",
+    "participants": "分享",
+    "qa": "问答",
+    "activity": "活动",
     "analytics": "分析",
-    "qa": "问答"
+    "settings": "设置"
+  },
+  "sidebar": {
+    "label": "数据室导航"
   },
   "share": {
     "title": "分享",
-    "createTitle": "创建分享链接",
+    "createTitle": "创建链接",
     "copyLink": "复制链接",
     "copied": "链接已复制",
     "copyFailed": "复制链接失败",
@@ -97,7 +102,7 @@
     "createLink": "创建链接",
     "saveSuccess": "已保存",
     "createSuccess": "链接已创建",
-    "restrictedAlert": "此链接受限，仅允许指定邮箱或域名访问。",
+    "restrictedAlert": "此链接受限，仅允许指定邮箱访问。",
     "active": "活跃",
     "inactive": "未激活",
     "disableConfirmTitle": "禁用此链接？",
@@ -109,41 +114,6 @@
       "noSearchResults": "没有匹配的文档。",
       "noDocumentsInFolders": "这些文件夹中还没有添加文档。"
     }
-  },
-  "invite": {
-    "title": "邀请",
-    "addViewers": "添加访客",
-    "addViewersPlaceholder": "alice@vc.com, bob@vc.com",
-    "addViewersHint": "输入邮箱地址，用逗号或换行分隔",
-    "invalidEmails": "部分邮箱地址无效：{emails}",
-    "sendInvitations": "发送邀请",
-    "sending": "发送中...",
-    "sent": "邀请已发送",
-    "sentOne": "已向 {email} 发送邀请",
-    "emptyTitle": "暂无邀请",
-    "emptyDescription": "在上方添加访客以发送安全邀请。",
-    "table": {
-      "email": "邮箱",
-      "status": "状态",
-      "sentAt": "发送时间",
-      "actions": "操作"
-    },
-    "status": {
-      "pending": "待处理",
-      "opened": "已打开",
-      "verified": "已验证",
-      "expired": "已过期",
-      "revoked": "已撤销"
-    },
-    "resend": "重发",
-    "resendTooltip": "重新发送邀请邮件，不更换 token",
-    "revoke": "撤销",
-    "revokeConfirmTitle": "撤销 {email} 的访问权限？",
-    "revokeConfirmDescription": "他们将无法再使用此邀请链接。",
-    "revokeConfirmButton": "撤销",
-    "revokeAndRemove": "撤销并从允许列表移除",
-    "revokedMessage": "邀请已撤销，邮箱已从允许列表移除",
-    "createLinkFirst": "先保存链接，再开始邀请访客"
   },
   "accessRules": {
     "title": "访问",
@@ -162,15 +132,13 @@
     },
     "allowedViewers": {
       "title": "允许访问的访客",
-      "placeholder": "alice@vc.com 或 *@vc.com",
-      "hint": "输入完整邮箱或 *@vc.com 形式的域名通配符",
-      "autoAddInvited": "自动添加受邀访客",
-      "autoAddInvitedDescription": "发送邀请时会自动将邮箱加入允许列表"
+      "placeholder": "alice@vc.com",
+      "hint": "输入完整邮箱地址，用逗号分隔"
     },
     "blockedViewers": {
       "title": "阻止访问的访客",
-      "placeholder": "leaker@bad.com 或 *@competitor.com",
-      "hint": "阻止特定邮箱或整个域名"
+      "placeholder": "leaker@bad.com",
+      "hint": "阻止特定邮箱地址"
     },
     "additionalProtections": {
       "title": "额外保护",
@@ -211,7 +179,7 @@
     "addFolder": "添加文件夹",
     "reorder": "排序",
     "download": "下载",
-    "share": "分享"
+    "share": "创建链接"
   },
   "documentList": {
     "title": "文档",
@@ -227,7 +195,16 @@
   },
   "activity": {
     "documents": "文档",
-    "noVisitors": "暂无访客"
+    "noVisitors": "暂无访客",
+    "title": "活动",
+    "comingSoon": "详细活动日志功能即将上线。"
+  },
+  "settings": {
+    "title": "数据室设置",
+    "comingSoon": "数据室设置功能即将上线。"
+  },
+  "participants": {
+    "title": "访客"
   },
   "permissions": {
     "title": "权限",
@@ -245,7 +222,7 @@
     },
     "links": {
       "title": "链接",
-      "createLink": "创建分享链接",
+      "createLink": "创建链接",
       "emptyTitle": "未找到该数据室的链接",
       "table": {
         "name": "名称",
@@ -253,62 +230,34 @@
         "views": "浏览量",
         "lastViewed": "最近查看",
         "active": "活跃",
-        "activity": "活动"
+        "actions": "操作"
+      },
+      "actions": {
+        "view": "查看活动",
+        "edit": "编辑",
+        "sendCode": "发送验证码",
+        "delete": "删除"
+      },
+      "sendCode": {
+        "title": "发送验证码",
+        "description": "向访客邮箱发送一次性访问验证码。",
+        "emailLabel": "邮箱",
+        "emailPlaceholder": "visitor@example.com",
+        "send": "发送验证码",
+        "sending": "发送中...",
+        "success": "验证码已发送",
+        "error": "发送验证码失败"
+      },
+      "delete": {
+        "title": "删除链接",
+        "description": "确定要删除分享链接 \"{{name}}\" 吗？删除后该链接将失效，访客无法再访问。",
+        "loading": "删除中...",
+        "success": "链接已删除",
+        "error": "删除链接失败"
       }
     },
     "emptyLinksTitle": "未找到该数据室的链接",
-    "createLink": "创建分享链接",
-    "createLinkSheet": {
-      "title": "创建新链接",
-      "linkName": "链接名称",
-      "linkNamePlaceholder": "接收方组织",
-      "domain": "域名",
-      "linkPreset": "链接预设",
-      "manage": "管理",
-      "selectPreset": "选择预设",
-      "presetHint": "应用预设以快速配置链接设置",
-      "presets": {
-        "public": "公开",
-        "standard": "标准",
-        "confidential": "保密"
-      },
-      "linkOptions": "链接选项",
-      "receiveEmailNotification": "接收邮件通知",
-      "requireEmailToView": "要求邮箱查看",
-      "requireEmailVerification": "要求邮箱验证",
-      "allowDownloading": "允许下载",
-      "allowSpecifiedViewers": "允许指定访客",
-      "blockSpecifiedViewers": "阻止指定访客",
-      "securityControls": "安全控制",
-      "requirePassword": "要求密码查看",
-      "expirationDate": "过期日期",
-      "enableScreenshotProtection": "启用截图保护",
-      "applyWatermark": "应用水印",
-      "requireNda": "要求签署 NDA 查看",
-      "customFormFields": "自定义表单字段",
-      "advancedControls": "高级控制",
-      "aiAgents": "AI 助手",
-      "enableFileRequests": "启用文件请求",
-      "enableIndexFileGeneration": "启用索引文件生成",
-      "enableQaConversations": "启用问答对话",
-      "tags": "标签",
-      "selectTags": "选择标签...",
-      "preview": "预览",
-      "saveLink": "保存链接",
-      "manageFilePermissions": "管理文件权限",
-      "linkNameRequired": "链接名称不能为空",
-      "passwordRequired": "请输入密码",
-      "passwordPlaceholder": "输入密码",
-      "created": "链接已创建",
-      "createdTitle": "链接已创建",
-      "createdHint": "将此链接分享给您的受众。您可以在权限标签页管理访问规则和邀请。",
-      "createError": "创建链接失败",
-      "shortUrl": "分享链接",
-      "copyLink": "复制链接",
-      "copied": "链接已复制",
-      "manageDisabled": "管理功能需后端支持",
-      "previewDisabled": "预览功能需后端支持"
-    },
+    "createLink": "创建链接",
     "emptyTitle": "暂无文件夹",
     "emptyDescription": "添加到该数据室的文件夹将在此处显示。",
     "folder": "文件夹",
@@ -410,6 +359,12 @@
     "rename": "重命名",
     "renameTitle": "重命名文件夹",
     "actions": "{{name}} 的操作",
+    "expand": "展开文件夹",
+    "collapse": "收起文件夹",
+    "documentsCount_one": "{{count}} 个文档",
+    "documentsCount_other": "{{count}} 个文档",
+    "foldersCount_one": "{{count}} 个文件夹",
+    "foldersCount_other": "{{count}} 个文件夹",
     "created": "文件夹 '{{name}}' 已创建",
     "renamed": "文件夹已重命名",
     "deleted": "文件夹已删除",
@@ -454,7 +409,7 @@
   },
   "members": {
     "inviteTitle": "邀请成员",
-    "inviteDescription": "邀请某人访问该数据室。",
+    "inviteDescription": "邀请成员访问该数据室。",
     "email": "邮箱",
     "emailPlaceholder": "investor@example.com",
     "role": "角色",
@@ -466,6 +421,12 @@
     },
     "inviting": "邀请中...",
     "invited": "已邀请 {{email}}",
+    "invitedCount": "已邀请 {{count}} 位成员",
+    "invitedSomeFailed": "已邀请 {{invited}}/{{total}} 位成员，{{failed}} 位失败",
+    "addEmail": "添加邮箱",
+    "removeEmail": "移除邮箱",
+    "invalidEmails": "部分邮箱地址无效：{{emails}}",
+    "emailInvalid": "邮箱格式不正确",
     "remove": "移除 {{email}}",
     "removeConfirm": "将 {{email}} 从该数据室移除？",
     "removed": "已移除 {{email}}",

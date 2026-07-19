@@ -5,9 +5,7 @@
     "copyLink": "复制链接",
     "copied": "链接已复制",
     "copyFailed": "复制链接失败",
-    "copyInviteLink": "复制邀请链接",
     "publicLink": "公开链接",
-    "inviteLink": "邀请链接",
     "linkName": "链接名称",
     "linkNamePlaceholder": "接收方组织",
     "linkPreset": "链接预设",
@@ -26,6 +24,8 @@
     "accessSummary": "访问摘要",
     "accessSummaryEmpty": "未配置访问限制",
     "editAccessRules": "编辑访问规则",
+    "expandAccessSummary": "展开访问摘要",
+    "collapseAccessSummary": "折叠访问摘要",
     "expiresOn": "过期时间",
     "expiresOnHint": "链接将在该日期后失效",
     "expiresAtFuture": "过期时间必须是未来时间",
@@ -35,9 +35,6 @@
     "customDomainCustom": "自定义域名...",
     "customDomainPlaceholder": "links.yourdomain.com",
     "customDomainHint": "配置后公开链接将从此域名提供",
-    "tags": "标签",
-    "tagsPlaceholder": "investor, q3-2026",
-    "tagsHint": "用逗号分隔多个标签",
     "notifyOnAccess": "访问时通知",
     "notifyOnAccessHint": "有人打开此链接时向链接创建者发送邮件",
     "customDomainInvalid": "请输入有效的域名",
@@ -50,51 +47,13 @@
     "presetOverwriteDescription": "应用 {{preset}} 预设将替换当前的访问规则。",
     "presetOverwriteConfirm": "应用",
     "presetOverwriteCancel": "取消",
-    "restrictedAlert": "此链接受限，仅允许指定邮箱或域名访问。",
+    "restrictedAlert": "此链接受限，仅允许指定邮箱访问。",
     "active": "活跃",
     "inactive": "未激活",
     "disableConfirmTitle": "禁用此链接？",
     "disableConfirmDescription": "现有访客会话将立即失效。",
     "preview": "以访客身份预览",
     "linkNameRequired": "链接名称不能为空"
-  },
-  "invite": {
-    "title": "邀请",
-    "addViewers": "添加访客",
-    "addViewersPlaceholder": "alice@vc.com, bob@vc.com",
-    "addViewersHint": "输入邮箱地址，用逗号或换行分隔",
-    "invalidEmails": "部分邮箱地址无效：{emails}",
-    "sendInvitations": "发送邀请",
-    "sending": "发送中...",
-    "sent": "邀请已发送",
-    "sentOne": "已向 {email} 发送邀请",
-    "emptyTitle": "暂无邀请",
-    "emptyDescription": "在上方添加访客以发送安全邀请。",
-    "table": {
-      "email": "邮箱",
-      "status": "状态",
-      "sentAt": "发送时间",
-      "actions": "操作"
-    },
-    "status": {
-      "pending": "待处理",
-      "opened": "已打开",
-      "verified": "已验证",
-      "expired": "已过期",
-      "revoked": "已撤销"
-    },
-    "resend": "重发",
-    "resendTooltip": "重新发送邀请邮件，不更换 token",
-    "resendSuccess": "已向 {email} 重发邀请",
-    "revoke": "撤销",
-    "revokeConfirmTitle": "撤销 {email} 的访问权限？",
-    "revokeConfirmDescription": "他们将无法再使用此邀请链接。",
-    "revokeConfirmButton": "撤销",
-    "revokeAndRemove": "撤销并从允许列表移除",
-    "revokedMessage": "邀请已撤销，邮箱已从允许列表移除",
-    "createLinkFirst": "先保存链接，再开始邀请访客",
-    "copyInviteLink": "复制邀请链接",
-    "copied": "邀请链接已复制"
   },
   "accessRules": {
     "title": "访问",
@@ -107,6 +66,7 @@
       "requireEmailDescription": "仅验证过的邮箱可访问",
       "requireVerification": "要求邮箱验证",
       "requireVerificationDescription": "向访客邮箱发送一次性验证码",
+      "verificationDisabledForDocuments": "邮箱验证需要指定联系人，且仅适用于数据室链接",
       "requirePassword": "要求密码查看",
       "requirePasswordDescription": "访客必须输入密码",
       "passwordPlaceholder": "输入密码",
@@ -115,15 +75,13 @@
     },
     "allowedViewers": {
       "title": "允许访问的访客",
-      "placeholder": "alice@vc.com 或 *@vc.com",
-      "hint": "输入完整邮箱或 *@vc.com 形式的域名通配符",
-      "autoAddInvited": "自动添加受邀访客",
-      "autoAddInvitedDescription": "发送邀请时会自动将邮箱加入允许列表"
+      "placeholder": "alice@vc.com",
+      "hint": "输入完整邮箱地址，用逗号分隔"
     },
     "blockedViewers": {
       "title": "阻止访问的访客",
-      "placeholder": "leaker@bad.com 或 *@competitor.com",
-      "hint": "阻止特定邮箱或整个域名"
+      "placeholder": "leaker@bad.com",
+      "hint": "阻止特定邮箱地址"
     },
     "additionalProtections": {
       "title": "额外保护",
@@ -131,6 +89,8 @@
       "watermarkDescription": "在文档上叠加访客邮箱水印",
       "requireNda": "要求签署 NDA 查看",
       "requireNdaDescription": "访客必须先同意 NDA 才能访问",
+      "ndaDocument": "NDA 保密协议文档",
+      "ndaDocumentPlaceholder": "选择文档",
       "allowDownloading": "允许下载",
       "allowDownloadingDescription": "允许访客下载文档",
       "screenshotProtection": "启用截图保护",
@@ -152,17 +112,45 @@
     },
     "emptyTitle": "无限制",
     "emptyDescription": "如果未启用身份验证门控，任何拥有链接的人都可以访问。",
+    "passwordStrength": {
+      "label": "强度：{{level}}",
+      "level0": "无",
+      "level1": "弱",
+      "level2": "一般",
+      "level3": "良好",
+      "level4": "强"
+    },
     "errors": {
       "allowRequiresEmail": "允许列表要求开启邮箱收集或邮箱验证",
+      "allowedViewersRequired": "开启邮箱查看或邮箱验证时，必须填写允许访问的访客",
+      "requireVerificationContacts": "文档链接开启邮箱验证时至少需要指定一位联系人",
       "passwordRequired": "开启密码保护时必须填写密码",
       "passwordMinLength": "密码至少需要 8 位",
-      "conflict": "{value} 不能同时出现在允许和阻止列表中",
+      "ndaDocumentRequired": "请选择 NDA 保密协议文档",
+      "conflict": "{{value}} 不能同时出现在允许和阻止列表中",
       "blockPriority": "阻止规则始终优先于允许规则"
     }
   },
   "emailTagInput": {
-    "invalid": "无效的邮箱或域名",
+    "invalid": "无效的邮箱",
     "remove": "移除 {{value}}"
+  },
+  "contactPicker": {
+    "menuLabel": "从联系人添加",
+    "contactList": "联系人列表",
+    "addContact": "添加联系人",
+    "contactListTitle": "选择联系人",
+    "addContactTitle": "添加联系人",
+    "searchContacts": "搜索联系人...",
+    "loading": "正在加载联系人...",
+    "noContacts": "暂无联系人",
+    "noSearchResults": "未找到联系人",
+    "email": "邮箱",
+    "emailPlaceholder": "contact@example.com",
+    "name": "姓名（可选）",
+    "namePlaceholder": "联系人姓名",
+    "create": "创建",
+    "creating": "创建中..."
   },
   "management": {
     "title": "管理",

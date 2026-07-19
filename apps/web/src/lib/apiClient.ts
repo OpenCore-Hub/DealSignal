@@ -26,6 +26,7 @@ export interface GateErrorFlags {
   requiresEmailVerification?: boolean;
   requiresPassword?: boolean;
   requiresNda?: boolean;
+  isDealRoom?: boolean;
 }
 
 export class ApiError extends Error {
@@ -37,6 +38,7 @@ export class ApiError extends Error {
   requiresEmailVerification?: boolean;
   requiresPassword?: boolean;
   requiresNda?: boolean;
+  isDealRoom?: boolean;
 
   constructor({
     status,
@@ -48,6 +50,7 @@ export class ApiError extends Error {
     requiresEmailVerification,
     requiresPassword,
     requiresNda,
+    isDealRoom,
   }: {
     status: number;
     code: string;
@@ -65,6 +68,7 @@ export class ApiError extends Error {
     this.requiresEmailVerification = requiresEmailVerification;
     this.requiresPassword = requiresPassword;
     this.requiresNda = requiresNda;
+    this.isDealRoom = isDealRoom;
   }
 }
 
@@ -229,6 +233,7 @@ export async function request<T>(
       requiresEmailVerification: gateFlags?.requiresEmailVerification,
       requiresPassword: gateFlags?.requiresPassword,
       requiresNda: gateFlags?.requiresNda,
+      isDealRoom: gateFlags?.isDealRoom,
     });
   }
 

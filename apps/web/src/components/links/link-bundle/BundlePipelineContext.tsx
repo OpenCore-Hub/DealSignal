@@ -13,6 +13,7 @@ const DEFAULT_SECURITY_CONFIG: PermissionConfig = {
   whitelist: [],
   passwordEnabled: false,
   ndaEnabled: false,
+  ndaDocumentId: "",
   allowDownload: true,
   watermarkEnabled: true,
   aiCopilotEnabled: false,

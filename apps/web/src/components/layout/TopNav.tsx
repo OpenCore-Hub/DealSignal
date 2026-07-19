@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useNavigate, useParams } from "react-router";
-import { List, Bell, SignOut, Gear } from "@phosphor-icons/react";
+import { Link, useNavigate, useParams } from "react-router";
+import { List, Bell, SignOut, Gear, CaretRight } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ export function TopNav() {
   const { t } = useTranslation("layout");
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const { toggleSidebar, reset: resetUI } = useUIStore();
+  const { toggleSidebar, reset: resetUI, breadcrumbs } = useUIStore();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
 
   useEffect(() => {
@@ -58,6 +58,35 @@ export function TopNav() {
       <div className="md:hidden">
         <span className="text-h3">DealSignal</span>
       </div>
+
+      {/* Page breadcrumb */}
+      {breadcrumbs.length > 0 && (
+        <nav
+          aria-label={t("topNav.breadcrumb")}
+          className="hidden items-center gap-1.5 text-sm md:inline-flex"
+        >
+          {breadcrumbs.map((item, index) => {
+            const isLast = index === breadcrumbs.length - 1;
+            return (
+              <span key={`${item.label}-${index}`} className="flex items-center gap-1.5">
+                {item.to ? (
+                  <Link
+                    to={item.to}
+                    className="text-muted-foreground/80 transition-colors duration-200 hover:text-foreground"
+                  >
+                    {item.label}
+                  </Link>
+                ) : (
+                  <span className="font-semibold text-foreground">{item.label}</span>
+                )}
+                {!isLast && (
+                  <CaretRight weight="regular" className="text-muted-foreground/40" size={14} />
+                )}
+              </span>
+            );
+          })}
+        </nav>
+      )}
 
       {/* Right actions */}
       <div className="ml-auto flex items-center gap-2">

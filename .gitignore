@@ -1,3 +1,5 @@
 # CodeBuddy local artifacts
 .codebuddy/
 .gstack/
+# Added by code-review-graph
+.code-review-graph/

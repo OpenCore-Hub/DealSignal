@@ -47,7 +47,6 @@ describe("toCreateLinkPayload — business rules", () => {
     expect(payload.permission_type).toBe("public");
     expect(payload.require_email_verification).toBe(true);
     expect(payload.allowed_emails).toBeUndefined();
-    expect(payload.allowed_domains).toBeUndefined();
   });
 });
 
@@ -81,7 +80,7 @@ describe("toCreateLinkPayload — edge cases", () => {
     expect(payload.password).toBeUndefined();
   });
 
-  it("ignores whitelist values and always omits allowed_emails/allowed_domains", () => {
+  it("ignores whitelist values and always omits allowed_emails", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("standard"),
       whitelistEnabled: true,
@@ -89,7 +88,6 @@ describe("toCreateLinkPayload — edge cases", () => {
     };
     const payload = toCreateLinkPayload(["doc-1"], config);
     expect(payload.allowed_emails).toBeUndefined();
-    expect(payload.allowed_domains).toBeUndefined();
   });
 
   it("does not include contact_ids when contactIds is empty", () => {

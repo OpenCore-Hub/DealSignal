@@ -149,6 +149,7 @@ function BundlePipelineInner() {
           password: undefined,
           // Use explicit boolean flags when available (v2.6+), fall back to permissionType.
           ndaEnabled: link.requireNda === true || link.permissionType === "nda",
+          ndaDocumentId: link.ndaDocumentId ?? "",
           allowDownload: link.downloadEnabled ?? true,
           watermarkEnabled: link.watermarkEnabled ?? true,
           aiCopilotEnabled: link.aiCopilotEnabled ?? false,

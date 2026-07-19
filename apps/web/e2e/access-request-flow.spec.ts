@@ -22,13 +22,13 @@ test.describe("link access request flow (real backend)", () => {
     shortUrl = link.shortUrl;
     linkId = link.id;
 
-    // Restrict the link to a single allowed domain so the visitor is denied.
+    // Restrict the link to a single allowed email so the visitor is denied.
     const rulesRes = await apiFetch(
       `/api/workspaces/${seed.workspaceSlug}/links/${linkId}/access-rules`,
       {
         method: "POST",
         body: JSON.stringify({
-          rules: [{ ruleType: "domain", value: "allowed.com", action: "allow" }],
+          rules: [{ ruleType: "email", value: "allowed@example.com", action: "allow" }],
         }),
       }
     );

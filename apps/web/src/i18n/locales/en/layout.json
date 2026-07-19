@@ -9,7 +9,8 @@
     "groups": {
       "workspace": "Workspace",
       "relationships": "Relationships",
-      "admin": "Admin"
+      "admin": "Admin",
+      "dealRoom": "Deal Room"
     },
     "nav": {
       "dashboard": "Deal Radar",
@@ -24,6 +25,7 @@
   },
   "topNav": {
     "toggleSidebar": "Toggle sidebar",
+    "breadcrumb": "Breadcrumb",
     "notifications": {
       "title": "Notifications",
       "comingSoon": "Notification center coming soon"

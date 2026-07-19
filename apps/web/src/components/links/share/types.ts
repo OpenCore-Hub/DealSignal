@@ -7,6 +7,7 @@ export interface AccessConfig {
   password: string;
   watermarkEnabled: boolean;
   requireNda: boolean;
+  ndaDocumentId: string;
   allowDownloading: boolean;
   enableScreenshotProtection: boolean;
   aiCopilotEnabled: boolean;
@@ -20,9 +21,8 @@ export interface DraftLink extends AccessConfig {
   expiresAt: string;
   allowedViewers: string[];
   blockedViewers: string[];
-  autoAddInvited: boolean;
   customDomain: string;
-  tags: string[];
   notifyOnAccess: boolean;
   folderPaths: string[];
+  contactIds: string[];
 }

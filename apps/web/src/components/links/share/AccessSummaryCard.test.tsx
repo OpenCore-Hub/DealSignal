@@ -59,6 +59,7 @@ describe("AccessSummaryCard", () => {
         <AccessSummaryCard {...baseProps} />
       </Wrapper>
     );
+    fireEvent.click(screen.getByRole("button", { name: /Access summary/i }));
     expect(screen.getByText("No restrictions")).toBeInTheDocument();
   });
 
@@ -69,14 +70,15 @@ describe("AccessSummaryCard", () => {
           {...baseProps}
           requirePassword
           watermarkEnabled
-          allowedViewers={["alice@vc.com", "*@vc.com"]}
+          allowedViewers={["alice@vc.com", "bob@vc.com"]}
         />
       </Wrapper>
     );
+    fireEvent.click(screen.getByRole("button", { name: /Access summary/i }));
     expect(screen.getByText("Require password")).toBeInTheDocument();
     expect(screen.getByText("Watermark")).toBeInTheDocument();
     expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
-    expect(screen.getByText("*@vc.com")).toBeInTheDocument();
+    expect(screen.getByText("bob@vc.com")).toBeInTheDocument();
   });
 
   it("calls onEditAccess when edit clicked", () => {

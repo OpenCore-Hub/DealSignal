@@ -89,22 +89,20 @@ export interface Link {
   maxAccessCount?: number;
   /** Allowed emails for whitelist (available from v2.5+ backend). */
   allowedEmails?: string[];
-  /** Allowed domains for whitelist (available from v2.5+ backend). */
-  allowedDomains?: string[];
   /** Contact IDs attached to this link for email verification (available from v2.5+ backend). */
   contactIds?: string[];
   /** Explicit email collection requirement flag (available from v2.6+ backend). */
   requireEmail?: boolean;
   /** Explicit NDA requirement flag (available from v2.6+ backend). */
   requireNda?: boolean;
+  /** NDA agreement document ID when requireNda is enabled. */
+  ndaDocumentId?: string;
   /** Explicit password requirement flag (available from v2.6+ backend). */
   requirePassword?: boolean;
   /** Deal room ID when this is a deal-room share link (available from v2.6+ backend). */
   dealRoomId?: string;
   /** Custom hostname used for the public link URL. */
   customDomain?: string;
-  /** Tags attached to the link for organization. */
-  tags?: string[];
   /** Link type: "share" or "file_request" (available from v2.8+ backend). */
   linkType?: "share" | "file_request";
   /** Target folder path for file-request links (available from v2.8+ backend). */
@@ -148,20 +146,9 @@ export interface LinkAccessRequest {
 }
 
 export interface AccessRule {
-  ruleType: "email" | "domain";
+  ruleType: "email";
   value: string;
   action: "allow" | "block";
-}
-
-export interface LinkInvitation {
-  id: string;
-  linkId: string;
-  email: string;
-  token: string;
-  status: "pending" | "opened" | "verified" | "expired" | "revoked";
-  createdAt?: string;
-  expiresAt?: string;
-  usedAt?: string;
 }
 
 export interface HeatAlert {
@@ -189,6 +176,8 @@ export interface PermissionFields {
   passwordEnabled: boolean;
   password?: string;
   ndaEnabled: boolean;
+  /** NDA agreement document ID for bundle/pipeline links. */
+  ndaDocumentId?: string;
   allowDownload: boolean;
   watermarkEnabled: boolean;
   aiCopilotEnabled: boolean;

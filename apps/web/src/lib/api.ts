@@ -21,7 +21,6 @@ import type {
   Link,
   LinkAccessRequest,
   LinkAnalytics,
-  LinkInvitation,
   PageAnalytics,
   PermissionConfig,
   RiskAlert,
@@ -117,12 +116,19 @@ export interface CreateDealRoomLinkPayload {
   require_email?: boolean;
   require_email_verification?: boolean;
   require_nda?: boolean;
+  nda_document_id?: string;
   require_password?: boolean;
   password?: string;
+  allowed_emails?: string[];
+  blocked_emails?: string[];
   expires_at?: string;
   download_enabled?: boolean;
   watermark_enabled?: boolean;
   ai_copilot_enabled?: boolean;
+  qa_enabled?: boolean;
+  file_requests_enabled?: boolean;
+  index_file_enabled?: boolean;
+  screenshot_protection_enabled?: boolean;
   custom_domain?: string;
   tags?: string[];
   notify_on_access?: boolean;
@@ -493,28 +499,6 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rules }),
     }),
-
-  // Link invitations.
-  getLinkInvitations: (linkId: string) =>
-    request<{ data: LinkInvitation[] }>(getWorkspaceSlug(), `/links/${linkId}/invitations`),
-  inviteLinkViewers: (linkId: string, emails: string[]) =>
-    request<{ data: LinkInvitation[] }>(getWorkspaceSlug(), `/links/${linkId}/invitations`, {
-      method: "POST",
-      body: JSON.stringify({ emails }),
-    }),
-  revokeLinkInvitation: (
-    linkId: string,
-    invitationId: string,
-    removeFromAllowList = true
-  ) =>
-    request<void>(
-      getWorkspaceSlug(),
-      `/links/${linkId}/invitations/${invitationId}/revoke`,
-      {
-        method: "POST",
-        body: JSON.stringify({ removeFromAllowList }),
-      }
-    ),
 
   // Visitor Q&A
   listLinkQuestions: (linkId: string) =>

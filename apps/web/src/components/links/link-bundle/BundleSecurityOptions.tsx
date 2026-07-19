@@ -175,7 +175,7 @@ export function BundleSecurityOptions({
                 <SelectTrigger data-testid="security-expiry-select">
                   <SelectValue placeholder={t("creator.expiryPlaceholder")} />
                 </SelectTrigger>
-                <SelectContent side="top" alignItemWithTrigger={false}>
+                <SelectContent side="bottom" alignItemWithTrigger={false}>
                   <SelectItem value="7">{t("creator.expiryDays.7")}</SelectItem>
                   <SelectItem value="30">{t("creator.expiryDays.30")}</SelectItem>
                   <SelectItem value="90">{t("creator.expiryDays.90")}</SelectItem>

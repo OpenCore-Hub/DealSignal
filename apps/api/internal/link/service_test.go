@@ -1,15 +1,18 @@
 package link
 
 import (
+	"errors"
 	"testing"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 func TestNormalizeSecurityConfig(t *testing.T) {
 	cases := []struct {
-		name                                           string
-		req                                            CreateLinkRequest
-		wantEmailVerification, wantNDA bool
-		wantPerm                                       string
+		name                                       string
+		req                                        CreateLinkRequest
+		wantEmail, wantEmailVerification, wantNDA bool
+		wantPerm                                   string
 	}{
 		{
 			name:     "empty defaults to public",
@@ -25,8 +28,9 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 		{
 			name:     "nda implies email collection",
 			req:      CreateLinkRequest{RequireNDA: true},
-			wantNDA:  true,
-			wantPerm: "nda",
+			wantEmail: true,
+			wantNDA:   true,
+			wantPerm:  "nda",
 		},
 		{
 			name:                  "email verification + nda",
@@ -35,16 +39,40 @@ func TestNormalizeSecurityConfig(t *testing.T) {
 			wantNDA:               true,
 			wantPerm:              "nda",
 		},
+		{
+			name:      "allowed viewers without email gates auto-enable requireEmail",
+			req:       CreateLinkRequest{AllowedEmails: []string{"alice@vc.com"}},
+			wantEmail: true,
+			wantPerm:  "email_required",
+		},
+		{
+			name:                  "allowed viewers with email verification keep requireEmail false",
+			req:                   CreateLinkRequest{RequireEmailVerification: true, AllowedEmails: []string{"alice@vc.com"}},
+			wantEmailVerification: true,
+			wantPerm:              "email_required",
+		},
+		{
+			name:      "blocked viewers without email do not auto-enable requireEmail",
+			req:       CreateLinkRequest{BlockedEmails: []string{"leaker@bad.com"}},
+			wantPerm:  "public",
+		},
+		{
+			name:      "nda without email gates auto-enable requireEmail",
+			req:       CreateLinkRequest{RequireNDA: true, AllowedEmails: []string{"alice@vc.com"}},
+			wantEmail: true,
+			wantNDA:   true,
+			wantPerm:  "nda",
+		},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			_, gotEmailVerification, gotNDA, gotPerm, err := normalizeSecurityConfig(tc.req)
+			gotEmail, gotEmailVerification, gotNDA, gotPerm, err := normalizeSecurityConfig(tc.req)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if gotEmailVerification != tc.wantEmailVerification || gotNDA != tc.wantNDA || gotPerm != tc.wantPerm {
-				t.Fatalf("got emailVerification=%v nda=%v perm=%q, want emailVerification=%v nda=%v perm=%q",
-					gotEmailVerification, gotNDA, gotPerm, tc.wantEmailVerification, tc.wantNDA, tc.wantPerm)
+			if gotEmail != tc.wantEmail || gotEmailVerification != tc.wantEmailVerification || gotNDA != tc.wantNDA || gotPerm != tc.wantPerm {
+				t.Fatalf("got email=%v emailVerification=%v nda=%v perm=%q, want email=%v emailVerification=%v nda=%v perm=%q",
+					gotEmail, gotEmailVerification, gotNDA, gotPerm, tc.wantEmail, tc.wantEmailVerification, tc.wantNDA, tc.wantPerm)
 			}
 		})
 	}
@@ -155,7 +183,55 @@ func TestUpdateLinkEmptyDocumentIDs(t *testing.T) {
 	}
 }
 
-// TestGenerateToken produces a 32-char hex string.
+func TestHashPasswordIfRequired(t *testing.T) {
+	s := &Service{}
+
+	t.Run("disabled returns empty", func(t *testing.T) {
+		hash, err := s.hashPasswordIfRequired(false, "")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if hash.Valid {
+			t.Error("expected empty hash when password disabled")
+		}
+	})
+
+	t.Run("required but empty returns error", func(t *testing.T) {
+		_, err := s.hashPasswordIfRequired(true, "")
+		if !errors.Is(err, ErrRequiresPassword) {
+			t.Fatalf("expected ErrRequiresPassword, got %v", err)
+		}
+	})
+
+	t.Run("required but whitespace-only returns error", func(t *testing.T) {
+		_, err := s.hashPasswordIfRequired(true, "   ")
+		if !errors.Is(err, ErrRequiresPassword) {
+			t.Fatalf("expected ErrRequiresPassword, got %v", err)
+		}
+	})
+
+	t.Run("short password returns error", func(t *testing.T) {
+		_, err := s.hashPasswordIfRequired(true, "short")
+		if !errors.Is(err, ErrInvalidPassword) {
+			t.Fatalf("expected ErrInvalidPassword, got %v", err)
+		}
+	})
+
+	t.Run("valid password returns bcrypt hash", func(t *testing.T) {
+		hash, err := s.hashPasswordIfRequired(true, "strong-pass-123")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !hash.Valid {
+			t.Fatal("expected valid hash")
+		}
+		if err := bcrypt.CompareHashAndPassword([]byte(hash.String), []byte("strong-pass-123")); err != nil {
+			t.Fatalf("hash does not verify: %v", err)
+		}
+	})
+}
+
+// TestMakeVisitorID produces a 32-char hex string.
 func TestGenerateToken(t *testing.T) {
 	tokens := make(map[string]bool)
 	for i := 0; i < 100; i++ {
@@ -284,11 +360,12 @@ func TestMakeVisitorIDConsistency(t *testing.T) {
 
 func TestEvaluateAccessRules(t *testing.T) {
 	cases := []struct {
-		name   string
-		rules  []AccessRule
-		email  string
-		want   bool
-		reason string
+		name            string
+		rules           []AccessRule
+		email           string
+		want            bool
+		reason          string
+		wantMatchedRule *AccessRule
 	}{
 		{
 			name:   "no rules allows any email",
@@ -312,15 +389,7 @@ func TestEvaluateAccessRules(t *testing.T) {
 			email:  "leaker@bad.com",
 			want:   false,
 			reason: "blocked_email",
-		},
-		{
-			name: "block domain denies any matching email",
-			rules: []AccessRule{
-				{RuleType: "domain", Value: "competitor.com", Action: "block"},
-			},
-			email:  "spy@competitor.com",
-			want:   false,
-			reason: "blocked_domain",
+			wantMatchedRule: &AccessRule{RuleType: "email", Value: "leaker@bad.com", Action: "block"},
 		},
 		{
 			name: "allow email permits only matched address",
@@ -330,6 +399,7 @@ func TestEvaluateAccessRules(t *testing.T) {
 			email:  "alice@vc.com",
 			want:   true,
 			reason: "allowed_email",
+			wantMatchedRule: &AccessRule{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
 		},
 		{
 			name: "allow email denies non-matched address",
@@ -338,45 +408,27 @@ func TestEvaluateAccessRules(t *testing.T) {
 			},
 			email:  "bob@vc.com",
 			want:   false,
-			reason: "no_allow_match",
-		},
-		{
-			name: "allow domain permits matching domain",
-			rules: []AccessRule{
-				{RuleType: "domain", Value: "vc.com", Action: "allow"},
-			},
-			email:  "bob@vc.com",
-			want:   true,
-			reason: "allowed_domain",
+			reason: "no_allow_email_match",
 		},
 		{
 			name: "block takes priority over allow",
 			rules: []AccessRule{
-				{RuleType: "domain", Value: "vc.com", Action: "allow"},
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
 				{RuleType: "email", Value: "leaker@vc.com", Action: "block"},
 			},
 			email:  "leaker@vc.com",
 			want:   false,
 			reason: "blocked_email",
-		},
-		{
-			name: "email block takes priority over domain block",
-			rules: []AccessRule{
-				{RuleType: "domain", Value: "vc.com", Action: "block"},
-				{RuleType: "email", Value: "alice@vc.com", Action: "block"},
-			},
-			email:  "alice@vc.com",
-			want:   false,
-			reason: "blocked_email",
+			wantMatchedRule: &AccessRule{RuleType: "email", Value: "leaker@vc.com", Action: "block"},
 		},
 		{
 			name: "empty email with allow rules denied",
 			rules: []AccessRule{
-				{RuleType: "domain", Value: "vc.com", Action: "allow"},
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
 			},
 			email:  "",
 			want:   false,
-			reason: "no_allow_match",
+			reason: "no_allow_email_match",
 		},
 		{
 			name: "empty email with only block rules allowed",
@@ -395,6 +447,46 @@ func TestEvaluateAccessRules(t *testing.T) {
 			email:  "ALICE@vc.com",
 			want:   true,
 			reason: "allowed_email",
+			wantMatchedRule: &AccessRule{RuleType: "email", Value: "Alice@VC.com", Action: "allow"},
+		},
+		{
+			name: "email allow-only denies non-matched email",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+			},
+			email:  "bob@other.com",
+			want:   false,
+			reason: "no_allow_email_match",
+		},
+		{
+			name: "multiple allow rules match one",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+				{RuleType: "email", Value: "bob@vc.com", Action: "allow"},
+			},
+			email:  "bob@vc.com",
+			want:   true,
+			reason: "allowed_email",
+			wantMatchedRule: &AccessRule{RuleType: "email", Value: "bob@vc.com", Action: "allow"},
+		},
+		{
+			name: "block-only rules allow non-matching email",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "leaker@bad.com", Action: "block"},
+			},
+			email:  "alice@vc.com",
+			want:   true,
+			reason: "no_rules",
+		},
+		{
+			name: "email with leading and trailing whitespace is normalized",
+			rules: []AccessRule{
+				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+			},
+			email:  "  ALICE@vc.com  ",
+			want:   true,
+			reason: "allowed_email",
+			wantMatchedRule: &AccessRule{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
 		},
 	}
 
@@ -406,6 +498,16 @@ func TestEvaluateAccessRules(t *testing.T) {
 			}
 			if got.Reason != tc.reason {
 				t.Errorf("reason = %q, want %q", got.Reason, tc.reason)
+			}
+			if tc.wantMatchedRule != nil {
+				if got.MatchedRule == nil {
+					t.Fatalf("expected matched rule, got nil")
+				}
+				if got.MatchedRule.RuleType != tc.wantMatchedRule.RuleType ||
+					got.MatchedRule.Action != tc.wantMatchedRule.Action ||
+					got.MatchedRule.Value != tc.wantMatchedRule.Value {
+					t.Errorf("matchedRule = %+v, want %+v", got.MatchedRule, tc.wantMatchedRule)
+				}
 			}
 		})
 	}
@@ -426,14 +528,14 @@ func TestValidateAccessRules(t *testing.T) {
 			name: "valid allow and block rules",
 			rules: []AccessRule{
 				{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
-				{RuleType: "domain", Value: "competitor.com", Action: "block"},
+				{RuleType: "email", Value: "leaker@bad.com", Action: "block"},
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid rule type",
 			rules: []AccessRule{
-				{RuleType: "ip", Value: "10.0.0.1", Action: "allow"},
+				{RuleType: "domain", Value: "vc.com", Action: "allow"},
 			},
 			wantErr: true,
 		},
@@ -448,13 +550,6 @@ func TestValidateAccessRules(t *testing.T) {
 			name: "empty value",
 			rules: []AccessRule{
 				{RuleType: "email", Value: "  ", Action: "allow"},
-			},
-			wantErr: true,
-		},
-		{
-			name: "domain rule contains @",
-			rules: []AccessRule{
-				{RuleType: "domain", Value: "user@vc.com", Action: "allow"},
 			},
 			wantErr: true,
 		},

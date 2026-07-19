@@ -13,7 +13,6 @@ import (
 	"fmt"
 	"io"
 	"net/url"
-	"sort"
 	"strings"
 	"time"
 
@@ -123,9 +122,7 @@ var (
 	// Deal-room sharing / access-rule errors.
 	ErrDealRoomNotFound      = errors.New("deal room not found")
 	ErrBlockedEmail          = errors.New("email is blocked")
-	ErrBlockedDomain         = errors.New("domain is blocked")
 	ErrNotAllowedEmail       = errors.New("email is not allowed")
-	ErrNotAllowedDomain      = errors.New("domain is not allowed")
 	ErrRequiresPassword      = errors.New("password required")
 	ErrInvalidPassword       = errors.New("invalid password")
 	ErrInviteExpired         = errors.New("invitation expired")
@@ -189,10 +186,11 @@ type CreateLinkRequest struct {
 	RequireEmail                bool
 	RequireEmailVerification    bool
 	RequireNDA                  bool
+	NDADocumentID               string
 	RequirePassword             bool
 	Password                    string // plaintext; stored as bcrypt hash
 	AllowedEmails               []string
-	AllowedDomains              []string
+	BlockedEmails               []string
 	ExpiresAt                   *time.Time
 	MaxAccessCount              *int32
 	DownloadEnabled             bool
@@ -222,10 +220,10 @@ type UpdateLinkRequest struct {
 	RequireEmail                bool
 	RequireEmailVerification    bool
 	RequireNDA                  bool
+	NDADocumentID               string
 	RequirePassword             bool
 	Password                    string // plaintext; if empty and require_password unchanged, keep existing hash
 	AllowedEmails               []string
-	AllowedDomains              []string
 	ExpiresAt                   *time.Time
 	MaxAccessCount              *int32
 	DownloadEnabled             bool
@@ -248,9 +246,9 @@ type UpdateLinkRequest struct {
 
 // AccessRule represents a single allow/block rule for a link.
 type AccessRule struct {
-	RuleType string // "email" or "domain"
-	Value    string
-	Action   string // "allow" or "block"
+	RuleType string `json:"ruleType"` // "email"
+	Value    string `json:"value"`
+	Action   string `json:"action"` // "allow" or "block"
 }
 
 // AccessEvaluation is the result of evaluating access rules for an email.
@@ -277,12 +275,19 @@ type DealRoomLinkRequest struct {
 	RequireEmail             bool
 	RequireEmailVerification bool
 	RequireNDA               bool
+	NDADocumentID            string
 	RequirePassword          bool
 	Password                 string
+	AllowedEmails            []string
+	BlockedEmails            []string
 	ExpiresAt                *time.Time
 	DownloadEnabled          bool
 	WatermarkEnabled         bool
 	AICopilotEnabled         bool
+	QaEnabled                bool
+	FileRequestsEnabled      bool
+	IndexFileEnabled         bool
+	ScreenshotProtectionEnabled bool
 	CustomDomain             string
 	Tags                     []string
 	NotifyOnAccess           bool
@@ -368,6 +373,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	var primaryDocID pgtype.UUID
 	var dealRoomID pgtype.UUID
 	folderScopePaths := []string{}
+	linkDocumentIDs := []string{}
 
 	if hasDealRoom {
 		drUUID, err := uuid.Parse(req.DealRoomID)
@@ -398,16 +404,16 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		copy(folderScopePaths, req.FolderPaths)
 	} else {
 		// Resolve document IDs: use DocumentIDs if provided, else fall back to single DocumentID.
-		documentIDs := req.DocumentIDs
-		if len(documentIDs) == 0 && req.DocumentID != "" {
-			documentIDs = []string{req.DocumentID}
+		linkDocumentIDs = req.DocumentIDs
+		if len(linkDocumentIDs) == 0 && req.DocumentID != "" {
+			linkDocumentIDs = []string{req.DocumentID}
 		}
-		if len(documentIDs) == 0 {
+		if len(linkDocumentIDs) == 0 {
 			return db.Link{}, errors.New("at least one document_id is required")
 		}
 
 		// Validate all documents exist and are ready.
-		for _, did := range documentIDs {
+		for _, did := range linkDocumentIDs {
 			docUUID, err := uuid.Parse(did)
 			if err != nil {
 				return db.Link{}, fmt.Errorf("invalid document id: %s", did)
@@ -441,6 +447,11 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		tenantID = primaryDoc.TenantID
 	}
 
+	ndaDocumentID, err := s.resolveNdaDocumentID(ctx, qtx, workspaceUUID, dealRoomID, linkDocumentIDs, req.NDADocumentID, requireNDA)
+	if err != nil {
+		return db.Link{}, err
+	}
+
 	link, err := qtx.CreateLink(ctx, db.CreateLinkParams{
 		TenantID:                    tenantID,
 		WorkspaceID:                 workspaceUUID,
@@ -460,6 +471,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
 		LinkType:                    linkType,
 		TargetFolderPath:            targetFolderPath,
+		NdaDocumentID:               ndaDocumentID,
 		RequireEmail:                requireEmail,
 		RequireEmailVerification:    requireEmailVerification,
 		RequireNda:                  requireNDA,
@@ -530,42 +542,47 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		}
 	}
 
-	// Create allow-list rules from allowed_emails / allowed_domains.
-	allowRules := make([]AccessRule, 0, len(req.AllowedEmails)+len(req.AllowedDomains))
+	// Create allow-list and block-list rules from *_emails.
+	rules := make([]AccessRule, 0, len(req.AllowedEmails)+len(req.BlockedEmails))
 	seenRules := make(map[string]struct{})
 	for _, email := range req.AllowedEmails {
 		v := strings.TrimSpace(strings.ToLower(email))
 		if v == "" {
 			continue
 		}
-		key := "email:" + v
+		key := "allow:email:" + v
 		if _, ok := seenRules[key]; ok {
 			continue
 		}
 		seenRules[key] = struct{}{}
-		allowRules = append(allowRules, AccessRule{RuleType: "email", Value: v, Action: "allow"})
+		rules = append(rules, AccessRule{RuleType: "email", Value: v, Action: "allow"})
 	}
-	for _, domain := range req.AllowedDomains {
-		v := strings.TrimSpace(strings.ToLower(domain))
+	for _, email := range req.BlockedEmails {
+		v := strings.TrimSpace(strings.ToLower(email))
 		if v == "" {
 			continue
 		}
-		v = strings.TrimPrefix(v, "@")
-		if strings.Contains(v, "@") {
-			return db.Link{}, fmt.Errorf("%w: invalid allowed domain %q", ErrInvalidAccessRule, domain)
-		}
-		key := "domain:" + v
+		key := "block:email:" + v
 		if _, ok := seenRules[key]; ok {
 			continue
 		}
 		seenRules[key] = struct{}{}
-		allowRules = append(allowRules, AccessRule{RuleType: "domain", Value: v, Action: "allow"})
+		rules = append(rules, AccessRule{RuleType: "email", Value: v, Action: "block"})
 	}
-	if len(allowRules) > 0 {
-		if err := validateAccessRules(allowRules); err != nil {
+	if len(rules) > 0 {
+		if err := validateAccessRules(rules); err != nil {
 			return db.Link{}, err
 		}
-		for _, r := range allowRules {
+		// Disallow the same email being both allowed and blocked.
+		conflict := make(map[string]string)
+		for _, r := range rules {
+			k := r.Value
+			if existing, ok := conflict[k]; ok && existing != r.Action {
+				return db.Link{}, fmt.Errorf("%w: %s cannot be both allowed and blocked", ErrConflictingAccessRule, k)
+			}
+			conflict[k] = r.Action
+		}
+		for i, r := range rules {
 			if err := qtx.CreateLinkAccessRule(ctx, db.CreateLinkAccessRuleParams{
 				TenantID:    tenantID,
 				WorkspaceID: workspaceUUID,
@@ -573,7 +590,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 				RuleType:    r.RuleType,
 				Value:       r.Value,
 				Action:      r.Action,
-				SortOrder:   0,
+				SortOrder:   int32(i),
 			}); err != nil {
 				return db.Link{}, fmt.Errorf("create access rule: %w", err)
 			}
@@ -617,6 +634,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
+		NDADocumentID:            req.NDADocumentID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
 		ExpiresAt:                req.ExpiresAt,
@@ -703,6 +721,16 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		}
 	}
 
+	// Validate NDA document when required.
+	linkDocumentIDs := []string{}
+	if isDocumentLink {
+		linkDocumentIDs = req.DocumentIDs
+	}
+	ndaDocumentID, err := s.resolveNdaDocumentID(ctx, qtx, workspaceUUID, existing.DealRoomID, linkDocumentIDs, req.NDADocumentID, requireNDA)
+	if err != nil {
+		return db.Link{}, err
+	}
+
 	// Update the link record using the sqlc-generated UpdateLinkFull.
 	_, err = qtx.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
 		Name:                        name,
@@ -713,6 +741,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		MaxAccessCount:              maxAccess,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
+		NdaDocumentID:               ndaDocumentID,
 		RequireEmail:                requireEmail,
 		RequireEmailVerification:    requireEmailVerification,
 		RequireNda:                  requireNDA,
@@ -864,16 +893,23 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
+		NDADocumentID:            req.NDADocumentID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
+		AllowedEmails:            req.AllowedEmails,
+		BlockedEmails:            req.BlockedEmails,
 		ExpiresAt:                req.ExpiresAt,
-		DownloadEnabled:          req.DownloadEnabled,
-		WatermarkEnabled:         req.WatermarkEnabled,
-		AICopilotEnabled:         req.AICopilotEnabled,
-		CustomDomain:             req.CustomDomain,
-		Tags:                     req.Tags,
-		NotifyOnAccess:           req.NotifyOnAccess,
-		FolderPaths:              req.FolderPaths,
+		DownloadEnabled:             req.DownloadEnabled,
+		WatermarkEnabled:            req.WatermarkEnabled,
+		AICopilotEnabled:            req.AICopilotEnabled,
+		QaEnabled:                   req.QaEnabled,
+		FileRequestsEnabled:         req.FileRequestsEnabled,
+		IndexFileEnabled:            req.IndexFileEnabled,
+		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
+		CustomDomain:                req.CustomDomain,
+		Tags:                        req.Tags,
+		NotifyOnAccess:              req.NotifyOnAccess,
+		FolderPaths:                 req.FolderPaths,
 	})
 }
 
@@ -939,6 +975,50 @@ func (s *Service) validateDealRoomDocumentIDs(ctx context.Context, qtx *db.Queri
 		out = append(out, docUUID)
 	}
 	return out, nil
+}
+
+func (s *Service) resolveNdaDocumentID(
+	ctx context.Context,
+	qtx *db.Queries,
+	workspaceID pgtype.UUID,
+	dealRoomID pgtype.UUID,
+	documentIDs []string,
+	ndaDocumentID string,
+	requireNDA bool,
+) (pgtype.UUID, error) {
+	if !requireNDA {
+		return pgtype.UUID{}, nil
+	}
+	if strings.TrimSpace(ndaDocumentID) == "" {
+		return pgtype.UUID{}, fmt.Errorf("%w: NDA document is required when NDA is enabled", ErrInvalidPermission)
+	}
+	ndaUUID, err := uuid.Parse(ndaDocumentID)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("%w: invalid NDA document id: %s", ErrInvalidInput, ndaDocumentID)
+	}
+	ndaUUIDPG := pgtype.UUID{Bytes: ndaUUID, Valid: true}
+
+	if dealRoomID.Valid {
+		if _, err := s.validateDealRoomDocumentIDs(ctx, qtx, dealRoomID, []string{ndaDocumentID}); err != nil {
+			return pgtype.UUID{}, err
+		}
+		return ndaUUIDPG, nil
+	}
+
+	allowed := make(map[string]bool, len(documentIDs))
+	for _, did := range documentIDs {
+		allowed[did] = true
+	}
+	if len(allowed) > 0 && !allowed[ndaDocumentID] {
+		return pgtype.UUID{}, fmt.Errorf("%w: NDA document must be one of the linked documents", ErrInvalidPermission)
+	}
+	if _, err := qtx.GetDocumentByID(ctx, db.GetDocumentByIDParams{ID: ndaUUIDPG, WorkspaceID: workspaceID}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return pgtype.UUID{}, fmt.Errorf("%w: NDA document not found: %s", ErrInvalidPermission, ndaDocumentID)
+		}
+		return pgtype.UUID{}, fmt.Errorf("get NDA document: %w", err)
+	}
+	return ndaUUIDPG, nil
 }
 
 // ListDealRoomLinks returns active share links for a deal room.
@@ -1008,24 +1088,9 @@ func (s *Service) EvaluateAccessRules(ctx context.Context, linkID, email string)
 //
 // Evaluation order:
 //  1. Block rules take priority over allow rules.
-//  2. Email rules take priority over domain rules.
-//  3. If any allow rule exists and none match, access is denied.
-//  4. If no rules exist, access is allowed.
+//  2. If any allow rule exists and none match, access is denied.
+//  3. If no rules exist, access is allowed.
 func evaluateAccessRules(rules []AccessRule, email string) AccessEvaluation {
-	// Work on a copy so the evaluation order (block before allow, email before
-	// domain) matches the documented semantics regardless of storage order.
-	if len(rules) > 0 {
-		rules = append([]AccessRule(nil), rules...)
-		sort.SliceStable(rules, func(i, j int) bool {
-			if rules[i].Action != rules[j].Action {
-				// block sorts before allow.
-				return rules[i].Action == "block"
-			}
-			// email sorts before domain.
-			return rules[i].RuleType == "email" && rules[j].RuleType == "domain"
-		})
-	}
-
 	if len(rules) == 0 {
 		return AccessEvaluation{Allowed: true, Reason: "no_rules"}
 	}
@@ -1035,15 +1100,10 @@ func evaluateAccessRules(rules []AccessRule, email string) AccessEvaluation {
 		// If there are any allow rules, empty email cannot satisfy them.
 		for _, r := range rules {
 			if r.Action == "allow" {
-				return AccessEvaluation{Allowed: false, Reason: "no_allow_match"}
+				return AccessEvaluation{Allowed: false, Reason: "no_allow_email_match"}
 			}
 		}
 		return AccessEvaluation{Allowed: true, Reason: "no_rules"}
-	}
-
-	domain := ""
-	if at := strings.LastIndex(email, "@"); at >= 0 {
-		domain = email[at+1:]
 	}
 
 	var allowExists bool
@@ -1053,60 +1113,46 @@ func evaluateAccessRules(rules []AccessRule, email string) AccessEvaluation {
 		}
 	}
 
-	// First pass: block rules (email then domain).
+	// First pass: block rules.
 	for _, r := range rules {
 		if r.Action != "block" {
 			continue
 		}
-		if r.RuleType == "email" && constantTimeEmailCompare(r.Value, email) {
+		if constantTimeEmailCompare(r.Value, email) {
 			return AccessEvaluation{
 				Allowed:     false,
 				Reason:      "blocked_email",
 				MatchedRule: &AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action},
 			}
 		}
-		if r.RuleType == "domain" && domain != "" && strings.EqualFold(r.Value, domain) {
-			return AccessEvaluation{
-				Allowed:     false,
-				Reason:      "blocked_domain",
-				MatchedRule: &AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action},
-			}
-		}
 	}
 
-	// Second pass: allow rules (email then domain).
+	// Second pass: allow rules.
 	for _, r := range rules {
 		if r.Action != "allow" {
 			continue
 		}
-		if r.RuleType == "email" && constantTimeEmailCompare(r.Value, email) {
+		if constantTimeEmailCompare(r.Value, email) {
 			return AccessEvaluation{
 				Allowed:     true,
 				Reason:      "allowed_email",
 				MatchedRule: &AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action},
 			}
 		}
-		if r.RuleType == "domain" && domain != "" && strings.EqualFold(r.Value, domain) {
-			return AccessEvaluation{
-				Allowed:     true,
-				Reason:      "allowed_domain",
-				MatchedRule: &AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action},
-			}
-		}
 	}
 
 	if allowExists {
-		return AccessEvaluation{Allowed: false, Reason: "no_allow_match"}
+		return AccessEvaluation{Allowed: false, Reason: "no_allow_email_match"}
 	}
-	return AccessEvaluation{Allowed: true, Reason: "no_allow_rules"}
+	return AccessEvaluation{Allowed: true, Reason: "no_rules"}
 }
 
 // validateAccessRules checks that a set of rules is internally consistent.
 func validateAccessRules(rules []AccessRule) error {
 	seen := make(map[string]struct{}, len(rules))
 	for _, r := range rules {
-		if r.RuleType != "email" && r.RuleType != "domain" {
-			return fmt.Errorf("%w: rule_type must be email or domain", ErrInvalidAccessRule)
+		if r.RuleType != "email" {
+			return fmt.Errorf("%w: rule_type must be email", ErrInvalidAccessRule)
 		}
 		if r.Action != "allow" && r.Action != "block" {
 			return fmt.Errorf("%w: action must be allow or block", ErrInvalidAccessRule)
@@ -1115,14 +1161,10 @@ func validateAccessRules(rules []AccessRule) error {
 		if value == "" {
 			return fmt.Errorf("%w: rule value cannot be empty", ErrInvalidAccessRule)
 		}
-		if r.RuleType == "domain" && strings.Contains(value, "@") {
-			return fmt.Errorf("%w: domain rule cannot contain @", ErrInvalidAccessRule)
-		}
-		key := r.RuleType + ":" + value
-		if _, ok := seen[key]; ok {
+		if _, ok := seen[value]; ok {
 			return fmt.Errorf("%w: duplicate rule for %s", ErrConflictingAccessRule, value)
 		}
-		seen[key] = struct{}{}
+		seen[value] = struct{}{}
 	}
 	return nil
 }
@@ -1149,10 +1191,12 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 		return ErrNotFoundInWorkspace
 	}
 
-	// If any allow rule exists, email must be required.
+	// If any allow rule exists, an email identity is required so the rule can be
+	// evaluated. Either explicit email collection or email verification satisfies this,
+	// because verification links still identify the visitor by their email address.
 	for _, r := range rules {
-		if r.Action == "allow" && !link.RequireEmail {
-			return fmt.Errorf("%w: require_email must be enabled when allow rules exist", ErrInvalidAccessRule)
+		if r.Action == "allow" && !link.RequireEmail && !link.RequireEmailVerification {
+			return fmt.Errorf("%w: require_email or require_email_verification must be enabled when allow rules exist", ErrInvalidAccessRule)
 		}
 	}
 
@@ -1652,7 +1696,7 @@ func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason
 	if err != nil {
 		return LinkAccessRequest{}, fmt.Errorf("evaluate access rules: %w", err)
 	}
-	if !ev.Allowed && (ev.Reason == "blocked_email" || ev.Reason == "blocked_domain") {
+	if !ev.Allowed && ev.Reason == "blocked_email" {
 		return LinkAccessRequest{}, ErrAccessRequestBlocked
 	}
 
@@ -2114,6 +2158,11 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		if strings.TrimSpace(req.EmailCode) == "" {
 			return AccessResult{}, ErrRequiresEmailCode
 		}
+		// Deal-room links verify the email that requested the code, not just the
+		// code itself, so a forwarded code cannot be reused with a different email.
+		if link.DealRoomID.Valid && effectiveEmail == "" {
+			return AccessResult{}, ErrRequiresEmail
+		}
 	}
 	if requiresNDA {
 		if !req.NDAAgreed {
@@ -2123,7 +2172,8 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	var verifiedEmail string
 	if requiresEmailVerification {
-		lc, err := s.verifyLinkContactCode(ctx, token, "", req.EmailCode, true)
+		modern := !link.DealRoomID.Valid
+		lc, err := s.verifyLinkContactCode(ctx, token, effectiveEmail, req.EmailCode, modern)
 		if err != nil {
 			if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresEmailCode) {
 				return AccessResult{}, err
@@ -2196,12 +2246,10 @@ func mapRuleError(reason string) error {
 	switch reason {
 	case "blocked_email":
 		return ErrBlockedEmail
-	case "blocked_domain":
-		return ErrBlockedDomain
+	case "no_allow_email_match":
+		return ErrNotAllowedEmail
 	case "no_allow_match":
-		if strings.Contains(reason, "domain") {
-			return ErrNotAllowedDomain
-		}
+		// Fallback for any caller still producing the legacy reason.
 		return ErrNotAllowedEmail
 	default:
 		return ErrNotAllowedEmail
@@ -2234,13 +2282,20 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 		return ErrRequiresEmail
 	}
 
+	// Deal-room links generate contacts on demand so unknown visitors can still
+	// receive a code, provided their email passes the link's access rules.
+	if link.DealRoomID.Valid {
+		return s.sendDealRoomEmailVerificationCode(ctx, link, email, viewerBaseURL)
+	}
+
+	// Document links use pre-defined contacts only; silently fail to avoid
+	// leaking which emails are valid contacts.
 	lc, err := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
 		PublicToken: token,
 		Email:       pgtype.Text{String: email, Valid: true},
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			// Silently succeed to avoid leaking valid addresses.
 			return nil
 		}
 		return fmt.Errorf("get link contact: %w", err)
@@ -2255,6 +2310,94 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
+		return fmt.Errorf("send email: %w", err)
+	}
+	return nil
+}
+
+// sendDealRoomEmailVerificationCode creates or refreshes a contact for the
+// given email, evaluates the link's access rules, and sends a one-time code.
+// It runs in a transaction so the contact and link_contact are only persisted
+// if the email is sent (or at least queued).
+func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db.Link, email, viewerBaseURL string) error {
+	linkID := uuid.UUID(link.ID.Bytes).String()
+
+	eval, err := s.EvaluateAccessRules(ctx, linkID, email)
+	if err != nil {
+		return fmt.Errorf("evaluate access rules: %w", err)
+	}
+	if !eval.Allowed {
+		// Mirror the access endpoint behaviour: return the mapped rule error so
+		// the visitor knows the email is blocked or not allowed.
+		return mapRuleError(eval.Reason)
+	}
+
+	allowed, err := s.allowEmailCodeSend(ctx, link.PublicToken, email)
+	if err != nil {
+		return fmt.Errorf("rate limit check: %w", err)
+	}
+	if !allowed {
+		return nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	workspaceUUID := link.WorkspaceID
+	contact, err := qtx.GetContactByEmailAndWorkspace(ctx, db.GetContactByEmailAndWorkspaceParams{
+		Email:       pgtype.Text{String: strings.ToLower(email), Valid: true},
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return fmt.Errorf("get contact: %w", err)
+		}
+		contact, err = qtx.CreateContact(ctx, db.CreateContactParams{
+			WorkspaceID: workspaceUUID,
+			Email:       pgtype.Text{String: strings.ToLower(email), Valid: true},
+		})
+		if err != nil {
+			return fmt.Errorf("create contact: %w", err)
+		}
+	}
+
+	lc, lcErr := qtx.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+		PublicToken: link.PublicToken,
+		Email:       contact.Email,
+	})
+	code, err := generateNumericCode(6)
+	if err != nil {
+		return fmt.Errorf("generate access code: %w", err)
+	}
+	if lcErr == nil {
+		if err := qtx.UpdateLinkContactAccessCode(ctx, db.UpdateLinkContactAccessCodeParams{
+			ID:         lc.ID,
+			AccessCode: code,
+		}); err != nil {
+			return fmt.Errorf("update link contact code: %w", err)
+		}
+	} else if errors.Is(lcErr, pgx.ErrNoRows) {
+		if err := qtx.CreateLinkContact(ctx, db.CreateLinkContactParams{
+			LinkID:     link.ID,
+			ContactID:  contact.ID,
+			AccessCode: code,
+		}); err != nil {
+			return fmt.Errorf("create link contact: %w", err)
+		}
+	} else {
+		return fmt.Errorf("get link contact: %w", lcErr)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, link.Name.String, linkURL); err != nil {
 		return fmt.Errorf("send email: %w", err)
 	}
 	return nil
@@ -2284,7 +2427,8 @@ func resendRateLimitKey(token, email string) string {
 
 func (s *Service) allowEmailCodeSend(ctx context.Context, token, email string) (bool, error) {
 	if s.redisClient == nil {
-		return false, errors.New("redis is required for email code resend rate limiting")
+		logger.InfoCtx(ctx, "redis unavailable for email code resend rate limiting; allowing send")
+		return true, nil
 	}
 	return s.redisClient.AllowEmailCodeSend(ctx, resendRateLimitKey(token, email), 3, time.Minute)
 }
@@ -2401,6 +2545,7 @@ type PublicLinkMetadata struct {
 	RequireEmailVerification    bool
 	RequirePassword             bool
 	RequireNda                  bool
+	NdaDocumentID               pgtype.UUID
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
 	ScreenshotProtectionEnabled bool
@@ -2440,6 +2585,7 @@ func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string)
 		RequireEmailVerification:    link.RequireEmailVerification,
 		RequirePassword:             link.RequirePassword,
 		RequireNda:                  link.RequireNda,
+		NdaDocumentID:               link.NdaDocumentID,
 		DownloadEnabled:             link.DownloadEnabled,
 		WatermarkEnabled:            link.WatermarkEnabled,
 		ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
@@ -2812,7 +2958,7 @@ func normalizeSecurityConfig(req CreateLinkRequest) (requireEmail, requireEmailV
 
 	// Allow-list rules need an email to evaluate unless email verification is on,
 	// in which case the access code already identifies the allowed contact.
-	if !requireEmail && !requireEmailVerification && (len(req.AllowedEmails) > 0 || len(req.AllowedDomains) > 0) {
+	if !requireEmail && !requireEmailVerification && len(req.AllowedEmails) > 0 {
 		requireEmail = true
 	}
 
@@ -2957,6 +3103,10 @@ func (s *Service) hashPasswordIfRequired(requirePassword bool, password string) 
 	}
 	if strings.TrimSpace(password) == "" {
 		return pgtype.Text{}, ErrRequiresPassword
+	}
+	const minPasswordLength = 8
+	if len(password) < minPasswordLength {
+		return pgtype.Text{}, fmt.Errorf("%w: password must be at least %d characters", ErrInvalidPassword, minPasswordLength)
 	}
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 	if err != nil {

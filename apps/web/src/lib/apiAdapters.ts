@@ -9,8 +9,8 @@ export interface CreateLinkPayload {
   require_email_verification?: boolean;
   require_password?: boolean;
   require_nda?: boolean;
+  nda_document_id?: string;
   allowed_emails?: string[];
-  allowed_domains?: string[];
   password?: string;
   contact_ids?: string[];
   expires_at?: string;
@@ -25,7 +25,6 @@ export interface CreateLinkPayload {
   link_type?: "share" | "file_request";
   target_folder_path?: string;
   custom_domain?: string;
-  tags?: string[];
   notify_on_access?: boolean;
 }
 
@@ -65,8 +64,10 @@ export function toCreateLinkPayload(
     require_email_verification: requireEmailVerification,
     require_password: false,
     require_nda: config.ndaEnabled,
+    nda_document_id: config.ndaEnabled
+      ? (config.ndaDocumentId || documentIds[0])
+      : undefined,
     allowed_emails: undefined,
-    allowed_domains: undefined,
     password: undefined,
     contact_ids:
       requireEmailVerification && config.contactIds.length > 0

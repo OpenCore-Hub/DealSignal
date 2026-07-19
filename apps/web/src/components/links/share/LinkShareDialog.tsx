@@ -15,12 +15,11 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { AccessRule, Link, LinkInvitation } from "@/types";
+import type { AccessRule, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
-  InviteTab,
   AccessTab,
   CopyButton,
   applyPreset,
@@ -31,11 +30,11 @@ import {
   validateDraft,
   getPublicUrl,
 } from "./";
-import type { DraftLink } from "./types";
+import type { DraftLink, LinkPreset } from "./types";
 
 interface LinkShareDialogProps {
   linkId: string;
-  defaultTab?: "share" | "invite" | "access";
+  defaultTab?: "share" | "access";
   children?: React.ReactElement;
   onChanged?: () => void;
 }
@@ -54,20 +53,17 @@ const tabTransition = {
 interface DialogData {
   link: Link;
   rules: AccessRule[];
-  invitations: LinkInvitation[];
 }
 
 async function fetchDialogData(linkId: string): Promise<DialogData | null> {
-  const [link, rulesRes, invitationsRes] = await Promise.all([
+  const [link, rulesRes] = await Promise.all([
     api.getLinkById(linkId),
     api.getLinkAccessRules(linkId),
-    api.getLinkInvitations(linkId),
   ]);
   if (!link) return null;
   return {
     link,
     rules: rulesRes.data,
-    invitations: invitationsRes.data,
   };
 }
 
@@ -80,7 +76,7 @@ function LinkShareDialogContent({
   onClose,
   registerCloseGuard,
 }: {
-  defaultTab?: "share" | "invite" | "access";
+  defaultTab?: "share" | "access";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
@@ -89,45 +85,69 @@ function LinkShareDialogContent({
   registerCloseGuard: (guard: () => boolean) => void;
 }) {
   const { t } = useTranslation("linkShare");
-  const [tab, setTab] = useState<"share" | "invite" | "access">(defaultTab);
+  const [tab, setTab] = useState<"share" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.link, data?.rules));
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
-  const [inviteEmails, setInviteEmails] = useState<string[]>([]);
-  const [inviteSending, setInviteSending] = useState(false);
+  const link = data?.link ?? null;
+  const [presetOverride, setPresetOverride] = useState<LinkPreset | null>(null);
+  const preset = presetOverride ?? inferPreset(draft);
 
-  // Unsaved-changes tracking.
-  const initialDraftRef = useRef<DraftLink>(draft);
+  // 实时校验：所有必填项通过前，保存按钮保持禁用。
+  const validationErrors = useMemo(() => {
+    if (loadingData || !data || !link) return {};
+    return validateDraft(draft, link, t, now(), !!link?.dealRoomId);
+  }, [draft, link, t, loadingData, data]);
+
+  // Unsaved-changes tracking. We use a mutable ref instead of a callback so
+  // the data-sync effect does not depend on the comparison function, which
+  // would otherwise read draft/initialDraft and create a feedback loop.
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
-  const hasUnsavedChanges = useCallback(() => {
-    return (
-      JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current) ||
-      inviteEmails.length > 0
-    );
-  }, [draft, inviteEmails]);
+  const hasUnsavedChangesRef = useRef(false);
   const markClean = useCallback(() => {
-    initialDraftRef.current = { ...draft };
-    setInviteEmails([]);
-  }, [draft]);
+    hasUnsavedChangesRef.current = false;
+  }, []);
+
+  // Rebuild draft when the underlying link data changes (e.g., first load or
+  // switching to a different link). The key on the parent already remounts the
+  // component in most cases, but this effect defends against stale state if
+  // data arrives after mount without a key change, and also resets the unsaved-
+  // changes baseline so the user is not warned about the loaded data itself.
+  // It also re-echoes server state after a successful save/refetch when there are
+  // no pending user edits.
+  const loadedLinkIdRef = useRef<string | undefined>(data?.link?.id);
+  useEffect(() => {
+    const currentId = data?.link?.id;
+    const keyChanged = currentId !== loadedLinkIdRef.current;
+    if (keyChanged) {
+      const nextDraft = buildDraft(data?.link, data?.rules);
+      setDraft(nextDraft);
+      setPresetOverride(null);
+      setHighlightedFields([]);
+      hasUnsavedChangesRef.current = false;
+      loadedLinkIdRef.current = currentId;
+    } else if (currentId && !hasUnsavedChangesRef.current) {
+      // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
+      const nextDraft = buildDraft(data?.link, data?.rules);
+      setDraft(nextDraft);
+      setPresetOverride(null);
+      setHighlightedFields([]);
+    }
+  }, [data]);
 
   const handleConditionalClose = useCallback(() => {
-    if (hasUnsavedChanges()) {
+    if (hasUnsavedChangesRef.current) {
       setCloseConfirmOpen(true);
       return true;
     }
     onClose();
     return false;
-  }, [hasUnsavedChanges, onClose]);
+  }, [onClose]);
   useEffect(() => {
     registerCloseGuard(handleConditionalClose);
   }, [registerCloseGuard, handleConditionalClose]);
-
-  const link = data?.link ?? null;
-  const invitations = data?.invitations ?? [];
-  const preset = useMemo(() => inferPreset(draft), [draft]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -139,7 +159,7 @@ function LinkShareDialogContent({
 
   const updateDraft = (patch: Partial<DraftLink>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
-    if (Object.keys(errors).length > 0) setErrors({});
+    hasUnsavedChangesRef.current = true;
   };
 
   const saveLinkAndRules = async (): Promise<boolean> => {
@@ -153,8 +173,10 @@ function LinkShareDialogContent({
       await refetch();
       onChanged?.();
       return true;
-    } catch {
-      toast.error(t("common:error.saveFailed"));
+    } catch (err) {
+      console.error("saveLinkAndRules failed:", err);
+      const message = err instanceof Error ? err.message : "";
+      toast.error(message || t("common:error.saveFailed"));
       return false;
     } finally {
       setSaving(false);
@@ -163,9 +185,8 @@ function LinkShareDialogContent({
 
   const handleSave = async () => {
     if (!link) return;
-    const validationErrors = validateDraft(draft, link, t, now());
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
+    const currentErrors = validateDraft(draft, link, t, now(), !!link?.dealRoomId);
+    if (Object.keys(currentErrors).length > 0) {
       return;
     }
     const ok = await saveLinkAndRules();
@@ -204,62 +225,12 @@ function LinkShareDialogContent({
     }
   };
 
-  const handleInviteSend = async () => {
-    if (!link || inviteEmails.length === 0) return;
-
-    setInviteSending(true);
-    try {
-      await api.inviteLinkViewers(link.id, inviteEmails);
-      setInviteEmails([]);
-      await refetch();
-      onChanged?.();
-    } finally {
-      setInviteSending(false);
-    }
-  };
-
-  const handleInviteResend = async (email: string) => {
-    if (!link) return;
-    setInviteSending(true);
-    try {
-      await api.inviteLinkViewers(link.id, [email]);
-      toast.success(t("invite.resendSuccess", { email }));
-      await refetch();
-    } finally {
-      setInviteSending(false);
-    }
-  };
-
-  const handleInviteRevoke = async (invitation: LinkInvitation) => {
-    if (!link) return;
-    setConfirmDialog({
-      open: true,
-      title: t("invite.revokeConfirmTitle", { email: invitation.email }),
-      description: t("invite.revokeConfirmDescription"),
-      destructive: true,
-      onConfirm: async () => {
-        setConfirmDialog((prev) => ({ ...prev, open: false }));
-        try {
-          await api.revokeLinkInvitation(link.id, invitation.id, true);
-          await refetch();
-          onChanged?.();
-        } catch {
-          // error toast handled by api client
-        }
-      },
-    });
-  };
-
   const publicUrl = getPublicUrl(link);
 
   const primaryAction =
     tab === "share"
       ? { label: saveSuccess ? t("share.savedButtonLabel") : t("share.saveLinkSettings"), onClick: handleSave }
-      : tab === "access"
-      ? { label: saveSuccess ? t("accessRules.saved") : t("accessRules.saveAccessRules"), onClick: handleSave }
-      : { label: t("invite.sendInvitations"), onClick: handleInviteSend };
-
-  const inviteHasInput = inviteEmails.length > 0;
+      : { label: saveSuccess ? t("accessRules.saved") : t("accessRules.saveAccessRules"), onClick: handleSave };
 
   return (
     <>
@@ -304,12 +275,11 @@ function LinkShareDialogContent({
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex flex-1 flex-col overflow-hidden">
         <TabsList variant="line" className="w-full">
           <TabsTrigger value="share">{t("share.title")}</TabsTrigger>
-          <TabsTrigger value="invite">{t("invite.title")}</TabsTrigger>
           <TabsTrigger value="access">{t("accessRules.title")}</TabsTrigger>
 
         </TabsList>
 
-        <div className="flex-1 overflow-y-auto py-2">
+        <div className="flex-1 overflow-y-auto py-2 pr-4">
           {loadingData || !data ? (
             <div className="py-10 text-center text-sm text-muted-foreground">{t("common:loading")}</div>
           ) : (
@@ -321,34 +291,31 @@ function LinkShareDialogContent({
                     updateDraft={updateDraft}
                     preset={preset}
                     setPreset={(name) => {
-                      if (name === "custom") return;
+                      if (name === "custom") {
+                        setPresetOverride("custom");
+                        return;
+                      }
+                      setPresetOverride(null);
                       const { patch, changedFields } = applyPreset(name, draft);
                       updateDraft(patch);
                       setHighlightedFields(changedFields);
-                      const timer = setTimeout(() => setHighlightedFields([]), 200);
-                      return () => clearTimeout(timer);
+                      setTimeout(() => setHighlightedFields([]), 200);
                     }}
                     link={link}
                     onEditAccess={() => setTab("access")}
-                    errors={errors}
+                    errors={validationErrors}
                     highlightedFields={highlightedFields}
                   />
                 </TabsContent>
-                <TabsContent value="invite">
-                  <InviteTab
-                    linkId={link?.id}
-                    emails={inviteEmails}
-                    setEmails={setInviteEmails}
-                    sending={inviteSending}
-                    invitations={invitations}
-                    loading={loadingData}
-                    onSend={handleInviteSend}
-                    onResend={handleInviteResend}
-                    onRevoke={handleInviteRevoke}
-                  />
-                </TabsContent>
                 <TabsContent value="access">
-                  <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} highlightedFields={highlightedFields} />
+                  <AccessTab
+                    draft={draft}
+                    updateDraft={updateDraft}
+                    errors={validationErrors}
+                    highlightedFields={highlightedFields}
+                    isDealRoomLink={!!link?.dealRoomId}
+                    documents={link?.documents.map((d) => ({ id: d.id, title: d.title })) ?? []}
+                  />
                 </TabsContent>
 
               </motion.div>
@@ -365,12 +332,10 @@ function LinkShareDialogContent({
           onClick={primaryAction.onClick}
           disabled={
             saving ||
-            inviteSending ||
-            (tab === "invite" && (!inviteHasInput || inviteSending)) ||
-            ((tab === "share" || tab === "access") && Object.keys(errors).length > 0)
+            Object.keys(validationErrors).length > 0
           }
         >
-          {saving || inviteSending ? (
+          {saving ? (
             t("common:saving")
           ) : saveSuccess ? (
             <span className="flex items-center gap-1.5">
@@ -442,7 +407,7 @@ export function LinkShareDialog({
       <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-xl">
         {open && (
           <LinkShareDialogContent
-            key={linkId}
+            key={data?.link?.id ?? "loading"}
             defaultTab={defaultTab}
             data={data}
             loadingData={loading}

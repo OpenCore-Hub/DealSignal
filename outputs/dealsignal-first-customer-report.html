@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>DealSignal First Customer Finder</title>
+  <style>
+    :root{--bg:#090b0f;--panel:#12161d;--panel2:#191f28;--ink:#f5f2ea;--muted:#9ca6b5;--line:#2b3340;--acid:#d9ff63;--blue:#69b7ff;--orange:#ff8f5a;--cyan:#5ee8d0;--radius:18px;--shadow:0 24px 80px rgba(0,0,0,.38)}
+    *{box-sizing:border-box}html{scroll-behavior:smooth}body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,ui-sans-serif,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;line-height:1.55}body:before{content:"";position:fixed;inset:0;pointer-events:none;opacity:.3;background:repeating-linear-gradient(135deg,rgba(255,255,255,.018) 0 1px,transparent 1px 12px);mask-image:linear-gradient(#000,transparent 82%)}a{color:inherit}.skip{position:absolute;left:-9999px}.skip:focus{left:16px;top:16px;z-index:9;background:var(--acid);color:#111;padding:10px}
+    .shell{width:min(1180px,calc(100% - 40px));margin:auto;position:relative}.top{display:flex;justify-content:space-between;align-items:center;padding:22px 0;border-bottom:1px solid var(--line)}.brand{font-weight:850;display:flex;align-items:center;gap:10px}.brand i{width:12px;height:12px;border-radius:50%;background:var(--acid);box-shadow:0 0 22px var(--acid)}.meta{display:flex;gap:8px;align-items:center}.chip,.stage{border:1px solid var(--line);border-radius:999px;padding:7px 10px;color:var(--muted);font:750 11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.07em}button{background:var(--ink);color:#111;border:0;border-radius:999px;padding:9px 14px;font:800 13px inherit;cursor:pointer}button:focus-visible,summary:focus-visible,a:focus-visible{outline:3px solid var(--blue);outline-offset:3px}
+    .hero{display:grid;grid-template-columns:1.45fr .55fr;gap:36px;align-items:end;padding:72px 0 42px}.eyebrow{color:var(--acid);font:750 11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.11em}h1{font-size:clamp(48px,7vw,92px);line-height:.92;letter-spacing:-.065em;margin:13px 0 24px}.verdict{font-size:clamp(18px,2.1vw,25px);color:#dce1e9;max-width:820px;margin:0}.hero-card{background:var(--acid);color:#10120d;padding:26px;border-radius:var(--radius);box-shadow:var(--shadow);transform:rotate(1deg)}.hero-card span{font:800 11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em}.hero-card strong{display:block;font-size:64px;line-height:1;letter-spacing:-.08em;margin:15px 0 6px}.hero-card p{margin:0;font-weight:700;font-size:13px}
+    .stats{display:grid;grid-template-columns:repeat(4,1fr);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;margin-bottom:28px}.stats>div{padding:18px;background:var(--panel)}.stats>div+div{border-left:1px solid var(--line)}.stats span,.prospect-grid span,.signal span,.evidence span,blockquote span{display:block;color:var(--muted);font:700 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.08em;margin-bottom:6px}.stats strong{font-size:17px}
+    .best{display:grid;grid-template-columns:180px 1fr auto;gap:24px;align-items:center;padding:25px;background:var(--orange);color:#1b0f09;border-radius:var(--radius);box-shadow:var(--shadow);margin:0 0 72px}.best-label{font:800 11px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.1em}.best h2{font-size:clamp(28px,4vw,46px);letter-spacing:-.045em;line-height:1;margin:0 0 8px}.best p{margin:0}.best strong{font-size:44px}
+    .section-head{display:flex;justify-content:space-between;align-items:end;gap:24px;padding-bottom:18px;border-bottom:1px solid var(--line);margin-bottom:18px}.section-head h2{font-size:clamp(34px,5vw,62px);line-height:.98;letter-spacing:-.055em;margin:0}.section-head p{color:var(--muted);max-width:470px;margin:0}
+    .prospects{display:grid;gap:16px;margin-bottom:76px}.prospect{background:linear-gradient(135deg,var(--panel),#0f1319);border:1px solid var(--line);border-radius:var(--radius);padding:25px;box-shadow:0 12px 38px rgba(0,0,0,.18)}.prospect-head{display:grid;grid-template-columns:54px 1fr 92px;gap:17px;align-items:start}.rank{font:850 24px ui-monospace,monospace;color:var(--acid);padding-top:8px}.identity h3{font-size:29px;letter-spacing:-.04em;margin:6px 0 10px}.stage{display:inline-block}.stage.hot{color:var(--orange);border-color:rgba(255,143,90,.5)}.stage.warm{color:var(--cyan);border-color:rgba(94,232,208,.45)}.score{--score:0;width:88px;height:88px;border-radius:50%;display:grid;place-content:center;text-align:center;background:radial-gradient(circle,var(--panel) 58%,transparent 60%),conic-gradient(var(--acid) calc(var(--score)*1%),var(--line) 0)}.score strong{font-size:26px;line-height:1}.score small{color:var(--muted)}
+    .signal{margin:21px 0 12px;padding:16px;background:var(--panel2);border-left:4px solid var(--acid)}.signal p{font-size:17px;margin:0}.prospect-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.prospect-grid>div,.evidence>div{border:1px solid var(--line);border-radius:12px;padding:15px;background:rgba(255,255,255,.018)}.prospect-grid p,.evidence p{margin:0}blockquote{margin:12px 0 0;padding:16px;border:1px dashed rgba(217,255,99,.55);border-radius:12px;color:#eaf6c6}details{margin-top:10px}summary{cursor:pointer;color:var(--acid);font-weight:800;padding:10px 0}.evidence{display:grid;grid-template-columns:1fr 1fr;gap:9px}.evidence a{display:inline-block;color:var(--blue);margin-top:8px;word-break:break-word}.metrics{display:grid;gap:8px;margin-top:14px}.metric{display:grid;grid-template-columns:145px 1fr 40px;gap:12px;align-items:center;font-size:13px}.track{height:8px;background:var(--line);border-radius:8px;overflow:hidden}.track i{display:block;height:100%;background:linear-gradient(90deg,var(--blue),var(--acid))}
+    .patterns{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:76px}.pattern{display:grid;grid-template-columns:42px 1fr auto;gap:15px;align-items:start;padding:20px;border:1px solid var(--line);border-radius:14px;background:var(--panel)}.pattern-num{color:var(--acid);font:800 13px ui-monospace,monospace}.pattern h3{margin:0 0 5px}.pattern p{margin:0;color:var(--muted)}.pattern>strong{font-size:30px;color:var(--acid)}
+    .plan{display:grid;grid-template-columns:.8fr 1.2fr;gap:28px;background:var(--acid);color:#111;padding:29px;border-radius:var(--radius);margin-bottom:30px}.plan h2{font-size:38px;line-height:1;letter-spacing:-.045em;margin:10px 0}.plan-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}.plan-grid>div{border:1px solid rgba(0,0,0,.24);border-radius:11px;padding:13px}.plan-grid span{display:block;font:750 10px ui-monospace,monospace;text-transform:uppercase;letter-spacing:.07em;margin-bottom:5px}.plan-grid p{margin:0}.limits{border:1px solid var(--line);border-radius:var(--radius);padding:24px;color:var(--muted);margin-bottom:60px}.limits h2{color:var(--ink);margin-top:0}footer{display:flex;justify-content:space-between;gap:20px;border-top:1px solid var(--line);padding:22px 0 40px;color:var(--muted);font-size:12px}.reveal{animation:rise .4s ease both}@keyframes rise{from{opacity:0;transform:translateY(12px)}}
+    @media(max-width:820px){.shell{width:min(100% - 24px,1180px)}.hero,.plan{grid-template-columns:1fr}.hero{padding-top:44px}.hero-card{transform:none}.stats{grid-template-columns:1fr 1fr}.stats>div+div{border-left:0;border-top:1px solid var(--line)}.best{grid-template-columns:1fr}.prospect-head{grid-template-columns:38px 1fr}.score{grid-column:1/-1}.prospect-grid,.evidence,.patterns,.plan-grid{grid-template-columns:1fr}.meta .chip{display:none}}
+    @media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important;scroll-behavior:auto!important}}@media print{body{background:#fff;color:#111}body:before,.top button{display:none}.shell{width:100%}.prospect,.pattern,.limits{background:#fff;color:#111;break-inside:avoid}.prospect-grid span,.signal span,.evidence span,blockquote span{color:#444}}
+  </style>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to report</a>
+  <div class="shell">
+    <header class="top"><div class="brand"><i></i> First Customer Finder</div><div class="meta"><span class="chip">Public signals only</span><button type="button" onclick="window.print()">Print / Save PDF</button></div></header>
+    <main id="main">
+      <section class="hero"><div><span class="eyebrow">Early-customer report · 2026-07-18</span><h1>DealSignal First Customer Finder</h1><p class="verdict">DealSignal has reachable early-customer signals. The strongest wedge is teams comparing DocSend, Papermark, and virtual data-room workflows for investor documents who need page-level analytics, safer permissions, watermarking, audit trails, simpler pricing, and better support.</p></div><aside class="hero-card"><span>Qualified prospects</span><strong>10</strong><p>Potential customers based on public signals.</p></aside></section>
+      <section class="stats"><div><span>Product</span><strong><a href="#" target="_blank" rel="noreferrer">DealSignal - signal-first document sharing and deal-room intelligence</a></strong></div><div><span>Target customer</span><strong>Fundraising founders, VC/PE investor-relations teams, and B2B teams sharing sensitive deal documents</strong></div><div><span>High intent</span><strong>1</strong></div><div><span>Average fit score</span><strong>84/100</strong></div></section>
+      <section class="best"><div class="best-label">Highest-confidence prospect</div><div><h2>vaisov-gemba / unnamed fintech company</h2><p>The GitHub discussion was opened on 2026-04-02 and remained publicly visible as an unresolved buying/support question.</p></div><strong>93</strong></section>
+      <section><header class="section-head"><h2>People with a reason<br>to care now.</h2><p>Every primary prospect is tied to a public pain, demand, or timing signal. Open the evidence before considering outreach.</p></header><div class="prospects">
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">01</div>
+        <div class="identity">
+          <span class="eyebrow">Company via public GitHub discussion</span>
+          <h3>vaisov-gemba / unnamed fintech company</h3>
+          <span class="stage hot">High intent</span>
+        </div>
+        <div class="score" style="--score:93" aria-label="Fit score 93 out of 100"><strong>93</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>A fintech team publicly said it was exploring Papermark for internal data rooms covering investor presentations and partner due diligence, had self-hosted the AGPL portion, and wanted a license path for the Datarooms feature after outreach by email did not get a reply.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal&#x27;s secure deal rooms, NDA gating, document permissions, viewer analytics, and AI Q&amp;A map directly to investor and partner diligence rooms.</p></div>
+        <div><span>Why now</span><p>The GitHub discussion was opened on 2026-04-02 and remained publicly visible as an unresolved buying/support question.</p></div>
+        <div><span>Suggested channel</span><p>Reply to the public GitHub discussion or use the public GitHub profile path; do not scrape or infer private contact details.</p></div>
+        <div><span>Caution</span><p>Confirm they are still evaluating; the company is unnamed and the GitHub handle may not be the final buyer.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your GitHub question about self-hosted data rooms for investor presentations and partner due diligence. DealSignal is built around that exact workflow: secure deal rooms, viewer analytics, permissions, NDA gating, and AI Q&amp;A. Would a short self-hosted or concierge pilot be useful to compare against the commercial Papermark path?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the discussion explicitly describes a fintech company, internal data-room use, investor presentations, partner due diligence, self-hosting success, and a missing commercial path. Inference: the team is evaluating alternatives or a design-partner path if the current vendor response stays slow.</p></div><div><span>Source</span><p>GitHub Discussion · 2026-04-02</p><a href="https://github.com/papermark/papermark/discussions/2135" target="_blank" rel="noreferrer">Self-hosting license inquiry - Datarooms feature for internal use ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">02</div>
+        <div class="identity">
+          <span class="eyebrow">VC firm</span>
+          <h3>5AM Ventures</h3>
+          <span class="stage warm">Trigger present</span>
+        </div>
+        <div class="score" style="--score:89" aria-label="Fit score 89 out of 100"><strong>89</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>A current Associate Director, Investor Relations posting says the role will own CRM-driven investor data, fundraising pipelines, investor touchpoints, recurring reports, and data rooms for fundraising and investor reporting.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal can be positioned as a focused pilot for LP-facing rooms: branded document access, permission controls, page-level engagement, heat scoring, and evidence-driven follow-up.</p></div>
+        <div><span>Why now</span><p>The job was publicly open/crawled on 2026-07-18 and mirrors show it was posted in July 2026, which is a current operational-change trigger.</p></div>
+        <div><span>Suggested channel</span><p>Official company/careers contact or a public LinkedIn note to the IR/fundraising function; keep it tied to the job-posted workflow.</p></div>
+        <div><span>Caution</span><p>They may already have Dynamo and a data-room vendor; start as a workflow validation offer, not a replacement pitch.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Noticed 5AM is hiring for IR ownership across data rooms, LP access, CRM quality, and fundraising follow-up. DealSignal is a lightweight way to test secure LP rooms with page-level engagement and AI Q&amp;A before changing core systems. Would a narrow pilot around one investor-reporting room be worth pressure-testing?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the public Lever posting lists ongoing setup and management of data rooms, version-controlled materials, investor access, onboarding, permissions, LP usability, pipeline visibility, and follow-up execution. Inference: the IR team is actively investing in its investor communication infrastructure.</p></div><div><span>Source</span><p>Public job posting · 2026-07</p><a href="https://jobs.lever.co/5amventures/dfbcd627-8b1c-4bef-a7c8-7637da628d6b" target="_blank" rel="noreferrer">5AM Ventures - Associate Director, Investor Relations ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:60%"></i></div><b>3/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">03</div>
+        <div class="identity">
+          <span class="eyebrow">Real estate investment firm</span>
+          <h3>Beacon Capital Partners</h3>
+          <span class="stage warm">Trigger present</span>
+        </div>
+        <div class="score" style="--score:89" aria-label="Fit score 89 out of 100"><strong>89</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>A public Investor Relations Associate posting says Beacon wants support for investor communications, quarterly and annual reporting, data rooms, CRM accuracy, due diligence, investor requests, and workflow improvement.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal&#x27;s document rooms, audit logs, page analytics, heat scoring, and controlled access fit Beacon&#x27;s investor-reporting and diligence-response workflow.</p></div>
+        <div><span>Why now</span><p>The NIRI job page lists July 10, 2026, and the posting is visible during the current search window.</p></div>
+        <div><span>Suggested channel</span><p>Official company site or public professional channel for the IR team; avoid recruiter-only paths unless responding to the job context.</p></div>
+        <div><span>Caution</span><p>The job source is a public career listing; verify the role is still open and that Beacon can pilot a non-incumbent tool.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw Beacon&#x27;s IR posting calling out investor materials, data rooms, CRM accuracy, and DDQ workflows. DealSignal could be used as a small pilot for one reporting or diligence room to show exactly which investors engaged with which materials. Is improving data-room follow-up a current priority for the IR team?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the NIRI/LinkedIn-listed job describes managing investor materials, data rooms, and CRM systems for accuracy and accessibility, plus DDQs/RFPs/data inquiries from initial receipt through delivery. Inference: data-room process improvement is currently on the team&#x27;s operating agenda.</p></div><div><span>Source</span><p>Public job posting · 2026-07-10</p><a href="https://jobs.niri.org/job/5680/investor-relations-associate/" target="_blank" rel="noreferrer">Investor Relations Associate - Beacon Capital Partners ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:60%"></i></div><b>3/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">04</div>
+        <div class="identity">
+          <span class="eyebrow">Self-hosted data-room evaluator</span>
+          <h3>capocasa</h3>
+          <span class="stage warm">Problem aware</span>
+        </div>
+        <div class="score" style="--score:87" aria-label="Fit score 87 out of 100"><strong>87</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>The user reported that a self-hosted Papermark HTTPS instance completed email login but repeatedly redirected back to login because middleware and auth route cookie naming disagreed.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>If DealSignal can be offered as a managed pilot or supported deployment, it can compete on reliability around authentication, document access, and secure share links.</p></div>
+        <div><span>Why now</span><p>The issue was opened on 2026-07-04, making it one of the freshest alternative-evaluation signals found.</p></div>
+        <div><span>Suggested channel</span><p>GitHub issue comment or public GitHub profile path; frame as a reliability comparison, not a bug pile-on.</p></div>
+        <div><span>Caution</span><p>This is a technical evaluator signal, not proof of business budget; confirm their actual data-room use case.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your Papermark self-host issue around auth bouncing behind HTTPS. DealSignal is a separate secure document-sharing and deal-room stack with a Go backend and signed viewer URLs. If you are comparing alternatives, would a quick deployment walkthrough help you judge whether it avoids this class of access problem?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the issue includes a reproducible self-host deployment behind HTTPS nginx, exact affected routes, a cookie-name mismatch, and a workaround patched into the Docker image. Inference: this evaluator values a reliable self-hosted or deployable document-sharing stack.</p></div><div><span>Source</span><p>GitHub Issue · 2026-07-04</p><a href="https://github.com/papermark/papermark/issues/2182" target="_blank" rel="noreferrer">Self-host login bounces back to /login: NextAuth cookie-name mismatch ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">05</div>
+        <div class="identity">
+          <span class="eyebrow">Investment adviser</span>
+          <h3>Hudson Structured Capital Management Ltd.</h3>
+          <span class="stage warm">Trigger present</span>
+        </div>
+        <div class="score" style="--score:84" aria-label="Fit score 84 out of 100"><strong>84</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>A public Investor Relations Associate posting asks for CRM maintenance, investor onboarding coordination, tracking fundraising activity, and maintaining data rooms and investor materials for accuracy and organization.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal can focus on investor-material rooms with secure access, audit trails, page-level reading signals, and CRM-ready follow-up context.</p></div>
+        <div><span>Why now</span><p>LinkedIn shows the role as recent and Lensa lists the job as posted on 2026-07-16.</p></div>
+        <div><span>Suggested channel</span><p>Public LinkedIn/company contact for HSCM&#x27;s investor relations or operations function.</p></div>
+        <div><span>Caution</span><p>This is a hiring trigger, not a public complaint; confirm whether the team wants software help or only staffing coverage.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw HSCM&#x27;s IR Associate role covering CRM activity, investor onboarding, and maintaining data rooms and investor materials. DealSignal could help test whether page-level engagement and secure viewer analytics make follow-up cleaner for one fundraising or reporting process. Is that workflow being reviewed as part of the hire?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the LinkedIn/Lensa job content names data rooms, investor materials, CRM interactions, meeting notes, feedback, fundraising pipeline progression, and subscription-document onboarding. Inference: HSCM&#x27;s IR team has enough process load to justify better engagement and document intelligence.</p></div><div><span>Source</span><p>Public job posting · 2026-07-16</p><a href="https://www.linkedin.com/jobs/view/investor-relations-associate-at-hudson-structured-capital-management-ltd-4430724441" target="_blank" rel="noreferrer">Investor Relations Associate - Hudson Structured Capital Management Ltd. ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:60%"></i></div><b>3/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">06</div>
+        <div class="identity">
+          <span class="eyebrow">Data-room user / public GitHub issue reporter</span>
+          <h3>ChristopherWalz</h3>
+          <span class="stage warm">Problem aware</span>
+        </div>
+        <div class="score" style="--score:84" aria-label="Fit score 84 out of 100"><strong>84</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>The user asked why audit logs show single-file downloads but not folder downloads, implying a gap in complete data-room activity tracking.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal&#x27;s access logs, page analytics, and document-viewing trail can be positioned around complete activity visibility for sensitive rooms.</p></div>
+        <div><span>Why now</span><p>The issue was opened on 2025-10-21 and remains a clear feature-gap signal for audit-heavy data-room users.</p></div>
+        <div><span>Suggested channel</span><p>GitHub issue reply or public GitHub profile path.</p></div>
+        <div><span>Caution</span><p>The signal is a feature complaint, not a stated migration request; validate current status before pitching.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your question about folder downloads missing from the audit log while single-file downloads are tracked. DealSignal is built around making document-room activity visible, including access and engagement signals. Are you evaluating tools where complete audit coverage is a hard requirement?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the GitHub issue directly asks why folder downloads are missing from the audit log while single-file downloads are tracked. Inference: the user cares about audit completeness and may be dissatisfied if download activity is not captured consistently.</p></div><div><span>Source</span><p>GitHub Issue · 2025-10-21</p><a href="https://github.com/papermark/papermark/issues/1910" target="_blank" rel="noreferrer">&quot;audit log&quot; not showing download of folder ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:60%"></i></div><b>3/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">07</div>
+        <div class="identity">
+          <span class="eyebrow">Self-hosting evaluator</span>
+          <h3>gabrielbryk</h3>
+          <span class="stage warm">Problem aware</span>
+        </div>
+        <div class="score" style="--score:80" aria-label="Fit score 80 out of 100"><strong>80</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>The user said they were interested in self-hosting Papermark but could not find the promised step-by-step setup guide and wanted clarity on official support for self-hosted instances.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal can win early evaluators by offering a guided pilot, clear deployment documentation, and a supported path for secure document sharing and deal rooms.</p></div>
+        <div><span>Why now</span><p>The issue was opened on 2025-03-27 and drew 21 comments, suggesting repeated interest around self-host support.</p></div>
+        <div><span>Suggested channel</span><p>GitHub issue reply or public GitHub profile path; lead with self-hosting guidance rather than a generic pitch.</p></div>
+        <div><span>Caution</span><p>The signal is support/documentation pain, not confirmed budget; qualify their underlying document-room workflow first.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your Papermark self-hosting question around missing setup docs and support expectations. DealSignal is a secure document-sharing and deal-room product, and we are validating a supported deployment path. Would a short checklist of what you need from self-hosted document sharing be useful?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the GitHub issue asks where the detailed self-hosting guide is, whether documentation will be created, and what support model applies. Inference: clear setup and support expectations are a meaningful adoption requirement.</p></div><div><span>Source</span><p>GitHub Issue · 2025-03-27</p><a href="https://github.com/papermark/papermark/issues/1566" target="_blank" rel="noreferrer">Self Host Guidance ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:60%"></i></div><b>3/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">08</div>
+        <div class="identity">
+          <span class="eyebrow">Document analytics evaluator</span>
+          <h3>Greatz08</h3>
+          <span class="stage warm">Problem aware</span>
+        </div>
+        <div class="score" style="--score:77" aria-label="Fit score 77 out of 100"><strong>77</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>The user asked how Papermark planned to implement page-by-page analytics and compared it with self-hosted link tracking tools that can track many user actions but are not document-specific.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal&#x27;s page-level reading analysis, heat score, signed viewer URLs, and AI-assisted document experience speak directly to document-native analytics.</p></div>
+        <div><span>Why now</span><p>The discussion is older, opened on 2024-10-14, so timing is weaker; it remains a precise problem-fit signal for a design-partner conversation.</p></div>
+        <div><span>Suggested channel</span><p>GitHub discussion reply or public GitHub profile path.</p></div>
+        <div><span>Caution</span><p>Older signal and possibly technical curiosity; validate current use case before treating as a sales lead.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your question about page-by-page analytics for document links versus generic self-hosted link tracking. DealSignal is built around document-native engagement signals: page views, reading heat, secure links, and follow-up context. Are you evaluating this for your own document workflow or for a product you are building?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the GitHub discussion explicitly asks about page-by-page analytics implementation and names the gap between generic link tracking and tracking that is specifically for documents. Inference: the user is interested in document-native engagement analytics.</p></div><div><span>Source</span><p>GitHub Discussion · 2024-10-14</p><a href="https://github.com/papermark/papermark/discussions/966" target="_blank" rel="noreferrer">Wanted to understand how are you planning to implement &quot;page-by-page analytics&quot; ? ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:60%"></i></div><b>3/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:40%"></i></div><b>2/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">09</div>
+        <div class="identity">
+          <span class="eyebrow">Self-hosted Papermark deployer</span>
+          <h3>saadk546</h3>
+          <span class="stage warm">Problem aware</span>
+        </div>
+        <div class="score" style="--score:79" aria-label="Fit score 79 out of 100"><strong>79</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>The user reported a successful Papermark deployment but blocked signup due to an Upstash rate-limit error, plus a custom domain that was not accessible.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal includes branded sharing concepts, signed viewer URLs, and secure document workflows; a supported setup path could address the onboarding and custom-domain anxiety.</p></div>
+        <div><span>Why now</span><p>The issue was opened on 2025-12-08, a moderately fresh signal from a user actively trying to deploy a DocSend alternative.</p></div>
+        <div><span>Suggested channel</span><p>GitHub issue reply or public GitHub profile path; offer setup help or a migration checklist.</p></div>
+        <div><span>Caution</span><p>May only need troubleshooting, not a new vendor; confirm they have a real data-room workflow before offering a pilot.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your Papermark deployment issue around signup, rate-limit config, and custom domains. DealSignal is a secure document-sharing and deal-room stack with branded share workflows. If you are still comparing options, would a minimal deployment checklist help you see whether DealSignal fits your use case?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the issue lists signup/auth failure, missing/unclear environment configuration, and custom-domain setup failure after deploying to Vercel. Inference: the user wants a document-sharing/data-room stack with reliable onboarding and branded domain support.</p></div><div><span>Source</span><p>GitHub Issue · 2025-12-08</p><a href="https://github.com/papermark/papermark/issues/1956" target="_blank" rel="noreferrer">Papermark signup fails on Vercel with Upstash rate limit error + custom domain not working ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:100%"></i></div><b>5/5</b></div></div>
+      </details>
+    </article>
+    <article class="prospect reveal">
+      <header class="prospect-head">
+        <div class="rank">10</div>
+        <div class="identity">
+          <span class="eyebrow">Data-room/link workflow user</span>
+          <h3>kuna1bajaj</h3>
+          <span class="stage warm">Problem aware</span>
+        </div>
+        <div class="score" style="--score:78" aria-label="Fit score 78 out of 100"><strong>78</strong><small>/100</small></div>
+      </header>
+      <div class="signal"><span>Public signal</span><p>The user requested saved watermark configurations because otherwise users must recreate the watermark for every new data room or link.</p></div>
+      <div class="prospect-grid">
+        <div><span>Why it fits</span><p>DealSignal&#x27;s permission, watermark, and secure viewer model can be tested around reusable share policies and faster creation of protected investor/customer links.</p></div>
+        <div><span>Why now</span><p>The issue was opened on 2025-12-06 and maps to a repeated workflow pain rather than a one-off bug.</p></div>
+        <div><span>Suggested channel</span><p>GitHub issue reply or public GitHub profile path.</p></div>
+        <div><span>Caution</span><p>Feature-request signal only; validate whether they are a buyer, active user, or contributor before spending much time.</p></div>
+      </div>
+      <blockquote><span>Suggested opener</span>Saw your request to save watermark settings instead of recreating them for every data room or link. DealSignal is designed around secure sharing policies, viewer controls, and engagement signals. Would reusable security defaults be a must-have if you tested another document-sharing tool?</blockquote>
+      <details>
+        <summary>Evidence and score breakdown</summary>
+        <div class="evidence"><div><span>Evidence</span><p>Observed: the GitHub issue directly describes repeated manual setup for watermarks across new data rooms/links. Inference: this user values reusable security defaults and faster room/link creation.</p></div><div><span>Source</span><p>GitHub Issue · 2025-12-06</p><a href="https://github.com/papermark/papermark/issues/1951" target="_blank" rel="noreferrer">Save watermark as a setting ↗</a></div></div>
+        <div class="metrics"><div class="metric"><span>Pain strength</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Product fit</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Timing</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Reachability</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div><div class="metric"><span>Evidence quality</span><div class="track"><i style="width:80%"></i></div><b>4/5</b></div></div>
+      </details>
+    </article></div></section>
+      <section><header class="section-head"><h2>Signals that repeat.</h2><p>Patterns across prospects reveal the strongest positioning, workflow, and outreach angles.</p></header><div class="patterns">
+    <article class="pattern reveal"><span class="pattern-num">01</span><div><h3>Investor data rooms are becoming an IR operations job</h3><p>5AM, Beacon, and HSCM all have public hiring signals that combine data rooms, CRM hygiene, investor onboarding, reporting, and follow-up. The buyer language is operational, not speculative.</p></div><strong>3×</strong></article>
+    <article class="pattern reveal"><span class="pattern-num">02</span><div><h3>DocSend/VDR pricing and bloat create switching windows</h3><p>Public market threads and open-source alternatives show buyers comparing DocSend, Papermark, and VDR tools when pricing, setup, or feature depth no longer matches the job.</p></div><strong>2×</strong></article>
+    <article class="pattern reveal"><span class="pattern-num">03</span><div><h3>Self-hosted evaluators need trust and support</h3><p>Papermark users surfaced self-host/licensing, support-doc, auth, and custom-domain blockers. A DealSignal pilot should include clear setup, support expectations, and a believable security posture.</p></div><strong>4×</strong></article>
+    <article class="pattern reveal"><span class="pattern-num">04</span><div><h3>Auditability is not optional for serious rooms</h3><p>Audit-log coverage and reusable watermark settings show that users want security controls to be complete, consistent, and easy to apply across rooms and links.</p></div><strong>2×</strong></article>
+    <article class="pattern reveal"><span class="pattern-num">05</span><div><h3>Page-level engagement is the recurring hook</h3><p>Across the DealSignal product brief, Reddit VDR questions, and IR job posts, the recurring value is knowing who read what, which documents mattered, and when to follow up.</p></div><strong>6×</strong></article></div></section>
+      <section class="plan"><div><span class="eyebrow" style="color:#111">Seven-day manual plan</span><h2>Lead with a low-risk workflow audit or concierge pilot, not a broad platform pitch.</h2></div><div class="plan-grid"><div><span>First step</span><p>Day 1-2: contact only the top five prospects with source-grounded, manual messages and one question about their current data-room bottleneck.</p></div><div><span>Follow-up</span><p>Day 3-5: for anyone who confirms the pain, share a two-minute demo or sample room using non-sensitive dummy investor materials; ask which security or analytics signal would make it worth a second call.</p></div><div><span>Success signal</span><p>By day 7: three qualified conversations, one live pilot using a real but non-sensitive document workflow, and a written list of must-have objections around security, hosting, pricing, and analytics.</p></div><div><span>Research scope</span><p>Public English-language GitHub, Reddit, Hacker News, and job/company pages reviewed on 2026-07-18. Shortlist prioritizes signals from late 2025 through July 2026, with older explicit requests only when strongly aligned.</p></div></div></section>
+      <section class="limits"><h2>Use this shortlist responsibly</h2><ul><li>These are potential customers based on public signals, not confirmed buyers or consenting leads.</li><li>GitHub handles may represent individuals, contributors, evaluators, or companies; verify buyer role before outreach.</li><li>Job postings are timing signals, not product requests; confirm whether software adoption is possible while the role is open or newly filled.</li><li>DealSignal&#x27;s current product docs do not position full e-signature as a core capability, so e-signature-heavy requests should stay adjacent, not primary.</li><li>Do not use private email enrichment, scraped phone numbers, data brokers, or scraped personal-contact databases.</li></ul></section>
+    </main>
+    <footer><span>Generated by $first-customer-finder</span><span>Outreach is never sent automatically.</span></footer>
+  </div>
+</body>
+</html>

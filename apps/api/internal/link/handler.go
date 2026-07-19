@@ -221,10 +221,10 @@ type CreateRequest struct {
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
+	NDADocumentID            string   `json:"nda_document_id,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
 	AllowedEmails            []string `json:"allowed_emails,omitempty"`
-	AllowedDomains           []string `json:"allowed_domains,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
@@ -249,6 +249,7 @@ type UpdateRequest struct {
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
+	NDADocumentID            string   `json:"nda_document_id,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
@@ -263,6 +264,7 @@ type UpdateRequest struct {
 	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled      *bool    `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
+	ScreenshotProtectionEnabled *bool `json:"screenshot_protection_enabled,omitempty"`
 	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
 	// FolderPaths scopes a deal-room link to specific folders. Empty means whole room.
 	FolderPaths []string `json:"folder_paths,omitempty"`
@@ -359,6 +361,20 @@ func (h *Handler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, item)
 }
 
+// parseExpiresAt parses an ISO 8601 / RFC3339 string into a time pointer.
+// It returns nil when the input is empty or absent, and an error when the
+// input is present but not a valid RFC3339 timestamp.
+func parseExpiresAt(s *string) (*time.Time, error) {
+	if s == nil || *s == "" {
+		return nil, nil
+	}
+	t, err := time.Parse(time.RFC3339, *s)
+	if err != nil {
+		return nil, err
+	}
+	return &t, nil
+}
+
 // UpdateFull fully replaces a link's document set and security configuration.
 func (h *Handler) UpdateFull(c *gin.Context) {
 	var req UpdateRequest
@@ -367,14 +383,10 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		return
 	}
 
-	var expiresAt *time.Time
-	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
-			return
-		}
-		expiresAt = &t
+	expiresAt, err := parseExpiresAt(req.ExpiresAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
+		return
 	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)
@@ -415,6 +427,10 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.IndexFileEnabled != nil {
 		indexFileEnabled = *req.IndexFileEnabled
 	}
+	screenshotProtectionEnabled := existing.ScreenshotProtectionEnabled
+	if req.ScreenshotProtectionEnabled != nil {
+		screenshotProtectionEnabled = *req.ScreenshotProtectionEnabled
+	}
 
 	link, err := h.service.UpdateLink(c.Request.Context(), linkID, workspaceID, UpdateLinkRequest{
 		DocumentIDs:              req.DocumentIDs,
@@ -423,8 +439,9 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		PermissionType:           req.PermissionType,
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
-		RequireNDA:               req.RequireNDA,
-		RequirePassword:          req.RequirePassword,
+		RequireNDA:                  req.RequireNDA,
+		NDADocumentID:               req.NDADocumentID,
+		RequirePassword:             req.RequirePassword,
 		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
 		MaxAccessCount:           req.MaxAccessCount,
@@ -433,12 +450,13 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		AICopilotEnabled:         aiCopilotEnabled,
 		QaEnabled:                qaEnabled,
 		FileRequestsEnabled:      fileRequestsEnabled,
-		IndexFileEnabled:         indexFileEnabled,
-		TargetFolderPath:         req.TargetFolderPath,
-		ContactIDs:               req.ContactIDs,
-		CustomDomain:             req.CustomDomain,
-		Tags:                     req.Tags,
-		NotifyOnAccess:           req.NotifyOnAccess,
+		IndexFileEnabled:            indexFileEnabled,
+		ScreenshotProtectionEnabled: screenshotProtectionEnabled,
+		TargetFolderPath:            req.TargetFolderPath,
+		ContactIDs:                  req.ContactIDs,
+		CustomDomain:                req.CustomDomain,
+		Tags:                        req.Tags,
+		NotifyOnAccess:              req.NotifyOnAccess,
 	})
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
@@ -464,7 +482,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 // AccessRulesRequest is the JSON body for replacing a link's access rules.
 type AccessRulesRequest struct {
 	Rules []struct {
-		RuleType string `json:"ruleType" binding:"required,oneof=email domain"`
+		RuleType string `json:"ruleType" binding:"required,oneof=email"`
 		Value    string `json:"value" binding:"required"`
 		Action   string `json:"action" binding:"required,oneof=allow block"`
 	} `json:"rules" binding:"required,dive"`
@@ -699,12 +717,19 @@ type CreateDealRoomLinkRequest struct {
 	RequireEmail             bool     `json:"require_email,omitempty"`
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
+	NDADocumentID            string   `json:"nda_document_id,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
+	AllowedEmails            []string `json:"allowed_emails,omitempty"`
+	BlockedEmails            []string `json:"blocked_emails,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
+	QaEnabled                bool     `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
+	ScreenshotProtectionEnabled bool  `json:"screenshot_protection_enabled,omitempty"`
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
 	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
@@ -721,14 +746,10 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		return
 	}
 
-	var expiresAt *time.Time
-	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
-			return
-		}
-		expiresAt = &t
+	expiresAt, err := parseExpiresAt(req.ExpiresAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
+		return
 	}
 
 	userID := middleware.UserIDFrom(c)
@@ -740,23 +761,30 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
+		NDADocumentID:            req.NDADocumentID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
+		AllowedEmails:            req.AllowedEmails,
+		BlockedEmails:            req.BlockedEmails,
 		ExpiresAt:                expiresAt,
 		DownloadEnabled:          req.DownloadEnabled,
-		WatermarkEnabled:         req.WatermarkEnabled,
-		AICopilotEnabled:         req.AICopilotEnabled,
-		CustomDomain:             req.CustomDomain,
-		Tags:                     req.Tags,
-		NotifyOnAccess:           req.NotifyOnAccess,
-		FolderPaths:              req.FolderPaths,
+		WatermarkEnabled:            req.WatermarkEnabled,
+		AICopilotEnabled:            req.AICopilotEnabled,
+		QaEnabled:                   req.QaEnabled,
+		FileRequestsEnabled:         req.FileRequestsEnabled,
+		IndexFileEnabled:            req.IndexFileEnabled,
+		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
+		CustomDomain:                req.CustomDomain,
+		Tags:                        req.Tags,
+		NotifyOnAccess:              req.NotifyOnAccess,
+		FolderPaths:                 req.FolderPaths,
 	})
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
-		case errors.Is(err, ErrInvalidPermission):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
+		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		}
@@ -853,14 +881,10 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 
-	var expiresAt *time.Time
-	if req.ExpiresAt != nil && *req.ExpiresAt != "" {
-		t, err := time.Parse(time.RFC3339, *req.ExpiresAt)
-		if err != nil {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
-			return
-		}
-		expiresAt = &t
+	expiresAt, err := parseExpiresAt(req.ExpiresAt)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "expires_at must be ISO 8601"})
+		return
 	}
 
 	userID := middleware.UserIDFrom(c)
@@ -875,6 +899,7 @@ func (h *Handler) Create(c *gin.Context) {
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
+		NDADocumentID:            req.NDADocumentID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
@@ -889,7 +914,6 @@ func (h *Handler) Create(c *gin.Context) {
 		TargetFolderPath:         req.TargetFolderPath,
 		ContactIDs:               req.ContactIDs,
 		AllowedEmails:            req.AllowedEmails,
-		AllowedDomains:           req.AllowedDomains,
 		CustomDomain:             req.CustomDomain,
 		Tags:                     req.Tags,
 		NotifyOnAccess:           req.NotifyOnAccess,
@@ -924,7 +948,7 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"id":                            uuidToString(meta.ID),
 		"public_token":                  meta.PublicToken,
 		"name":                          meta.Name,
@@ -943,7 +967,11 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		"qa_enabled":                    meta.QaEnabled,
 		"file_requests_enabled":         meta.FileRequestsEnabled,
 		"index_file_enabled":            meta.IndexFileEnabled,
-	})
+	}
+	if meta.NdaDocumentID.Valid {
+		resp["nda_document_id"] = uuidToString(meta.NdaDocumentID)
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // Access handles public link access.
@@ -1036,7 +1064,7 @@ func (h *Handler) Access(c *gin.Context) {
 
 			// For credential-gate errors, include the link's security flags so the
 			// UI can render all required fields on the first attempt.
-			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrBlockedDomain) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrNotAllowedDomain) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
+			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
 				requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
 				if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrInvalidPassword) {
@@ -1052,6 +1080,7 @@ func (h *Handler) Access(c *gin.Context) {
 					"requiresEmailVerification": requiresEmailVerification,
 					"requiresPassword":          link.RequirePassword,
 					"requiresNda":               requiresNda,
+					"isDealRoom":                link.DealRoomID.Valid,
 				})
 				return
 			}
@@ -1669,9 +1698,7 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_password", "message": err.Error()})
 	case errors.Is(err, ErrBlockedEmail):
 		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": err.Error()})
-	case errors.Is(err, ErrBlockedDomain):
-		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_domain", "message": err.Error()})
-	case errors.Is(err, ErrNotAllowedEmail), errors.Is(err, ErrNotAllowedDomain):
+	case errors.Is(err, ErrNotAllowedEmail):
 		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
 	case errors.Is(err, ErrInviteExpired):
 		c.JSON(http.StatusGone, gin.H{"code": "invite_expired", "message": err.Error()})
@@ -1707,9 +1734,7 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "security_gate_failed", "password", true
 	case errors.Is(err, ErrBlockedEmail):
 		return "blocked_email", "", true
-	case errors.Is(err, ErrBlockedDomain):
-		return "blocked_domain", "", true
-	case errors.Is(err, ErrNotAllowedEmail), errors.Is(err, ErrNotAllowedDomain):
+	case errors.Is(err, ErrNotAllowedEmail):
 		return "not_in_allow_list", "", true
 	case errors.Is(err, ErrInviteExpired):
 		return "invite_token_expired", "", false
@@ -1791,9 +1816,7 @@ func accessErrorCode(err error) string {
 		return "invalid_password"
 	case errors.Is(err, ErrBlockedEmail):
 		return "blocked_email"
-	case errors.Is(err, ErrBlockedDomain):
-		return "blocked_domain"
-	case errors.Is(err, ErrNotAllowedEmail), errors.Is(err, ErrNotAllowedDomain):
+	case errors.Is(err, ErrNotAllowedEmail):
 		return "not_allowed"
 	case errors.Is(err, ErrInviteExpired):
 		return "invite_expired"
@@ -1970,6 +1993,9 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	}
 	if link.DealRoomID.Valid {
 		item["dealRoomId"] = uuidToString(link.DealRoomID)
+	}
+	if link.NdaDocumentID.Valid {
+		item["ndaDocumentId"] = uuidToString(link.NdaDocumentID)
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)

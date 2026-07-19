@@ -49,11 +49,12 @@ export function PublicViewerPage() {
   const [password, setPassword] = useState("");
   const [ndaAgreed, setNdaAgreed] = useState(true);
   const [accessCredentials, setAccessCredentials] = useState<PublicLinkCredentials>({});
-  const [security, setSecurity] = useState<{ email: boolean; emailVerification: boolean; password: boolean; nda: boolean }>({
+  const [security, setSecurity] = useState<{ email: boolean; emailVerification: boolean; password: boolean; nda: boolean; isDealRoom: boolean }>({
     email: false,
     emailVerification: false,
     password: false,
     nda: false,
+    isDealRoom: false,
   });
   const [gateError, setGateError] = useState<string | null>(null);
   const [gateErrorCode, setGateErrorCode] = useState<string | null>(null);
@@ -61,6 +62,8 @@ export function PublicViewerPage() {
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
   const [folderView, setFolderView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sendingCode, setSendingCode] = useState(false);
+  const [codeSent, setCodeSent] = useState(false);
   const [requestEmail, setRequestEmail] = useState(prefilledEmail);
   const [requestReason, setRequestReason] = useState("");
   const [requestLoading, setRequestLoading] = useState(false);
@@ -106,6 +109,7 @@ export function PublicViewerPage() {
         emailVerification: res.requiresEmailVerification,
         password: res.requiresPassword,
         nda: res.requiresNda,
+        isDealRoom: Boolean(res.link.dealRoomId),
       });
     } catch (e) {
       const err = e as ApiError;
@@ -123,6 +127,7 @@ export function PublicViewerPage() {
         emailVerification: err.requiresEmailVerification ?? false,
         password: err.requiresPassword ?? false,
         nda: err.requiresNda ?? false,
+        isDealRoom: err.isDealRoom ?? false,
       });
       const unavailableCodes = new Set([
         "link_not_found",
@@ -131,7 +136,6 @@ export function PublicViewerPage() {
         "link_disabled",
         "link_max_access_reached",
         "blocked_email",
-        "blocked_domain",
         "invite_expired",
         "invite_revoked",
         "invite_already_used",
@@ -233,7 +237,7 @@ export function PublicViewerPage() {
   }
 
   if (linkErrorCode) {
-    const requestableErrorCodes = new Set(["blocked_email", "blocked_domain", "not_allowed"]);
+    const requestableErrorCodes = new Set(["blocked_email", "not_allowed"]);
     const canRequestAccess = requestableErrorCodes.has(linkErrorCode);
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
@@ -455,7 +459,7 @@ export function PublicViewerPage() {
                   : t("viewer.inviteVerification")}
               </div>
             )}
-            {security.email && !inviteToken && (
+            {security.emailVerification && security.isDealRoom && (
               <div className="space-y-2">
                 <Label htmlFor="email">{t("viewer.emailLabel")}</Label>
                 <Input
@@ -465,6 +469,41 @@ export function PublicViewerPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder={t("viewer.emailPlaceholder")}
                 />
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="w-full"
+                  disabled={sendingCode || !email.trim()}
+                  onClick={() => {
+                    setGateError(null);
+                    const trimmed = email.trim();
+                    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
+                      setGateError(t("viewer.emailRequired"));
+                      return;
+                    }
+                    if (!token) return;
+                    setSendingCode(true);
+                    api
+                      .sendEmailVerificationCode(token, trimmed)
+                      .then(() => {
+                        setCodeSent(true);
+                        toast.success(t("viewer.codeSent"));
+                      })
+                      .catch((e: ApiError) => {
+                        setGateError(e.message ?? t("viewer.sendCodeFailed"));
+                      })
+                      .finally(() => setSendingCode(false));
+                  }}
+                >
+                  {sendingCode
+                    ? t("common:loading")
+                    : codeSent
+                      ? t("viewer.sendCodeAgain")
+                      : t("viewer.sendCode")}
+                </Button>
+                {codeSent && (
+                  <p className="text-xs text-muted-foreground">{t("viewer.codeSent")}</p>
+                )}
               </div>
             )}
             {security.emailVerification && (
@@ -477,6 +516,18 @@ export function PublicViewerPage() {
                   value={emailCode}
                   onChange={(e) => setEmailCode(e.target.value)}
                   placeholder={t("viewer.codePlaceholder")}
+                />
+              </div>
+            )}
+            {security.email && !security.emailVerification && !inviteToken && (
+              <div className="space-y-2">
+                <Label htmlFor="email">{t("viewer.emailLabel")}</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder={t("viewer.emailPlaceholder")}
                 />
               </div>
             )}
@@ -507,7 +558,7 @@ export function PublicViewerPage() {
               onClick={() => {
                 setGateError(null);
                 const accessEmail = prefilledEmail || email;
-                if (security.email && !inviteToken && !accessEmail.trim()) {
+                if ((security.email || (security.emailVerification && security.isDealRoom)) && !inviteToken && !accessEmail.trim()) {
                   setGateError(t("viewer.emailRequired"));
                   return;
                 }
@@ -524,7 +575,7 @@ export function PublicViewerPage() {
                   return;
                 }
                 void tryAccess({
-                  email: security.email ? accessEmail : undefined,
+                  email: security.email || (security.emailVerification && security.isDealRoom) ? accessEmail : undefined,
                   emailCode: security.emailVerification ? emailCode : undefined,
                   password: security.password ? password : undefined,
                   ndaAgreed: security.nda ? ndaAgreed : undefined,

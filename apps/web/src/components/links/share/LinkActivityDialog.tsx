@@ -15,12 +15,19 @@ import type { Link } from "@/types";
 
 interface LinkActivityDialogProps {
   link: Link;
-  children: React.ReactElement;
+  children?: React.ReactElement;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
-export function LinkActivityDialog({ link, children }: LinkActivityDialogProps) {
+export function LinkActivityDialog({ link, children, open: openProp, onOpenChange }: LinkActivityDialogProps) {
   const { t } = useTranslation("linkShare");
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = (value: boolean) => {
+    setOpenState(value);
+    onOpenChange?.(value);
+  };
   const { logs, loading: logsLoading } = useAccessLogs(link.id, open);
 
   return (

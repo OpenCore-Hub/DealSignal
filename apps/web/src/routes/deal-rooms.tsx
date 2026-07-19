@@ -88,6 +88,45 @@ export function DealRoomsPage() {
   return (
     <div className="flex h-full flex-col gap-6">
       <PageHeader title={t("page.title")} description={t("page.description")}>
+        <div className="relative w-44">
+          <MagnifyingGlass
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+          />
+          <Input
+            type="search"
+            placeholder={t("search.placeholder")}
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            aria-label={t("search.placeholder")}
+          />
+        </div>
+        <Select value={selectedTag} onValueChange={(value) => setSelectedTag(value ?? "all")}>
+          <SelectTrigger
+            className="w-44 gap-1.5 pl-3"
+            aria-label={t("tags.label")}
+          >
+            <Tag size={16} className="text-muted-foreground" />
+            <span className="line-clamp-1 flex-1 text-left">
+              {selectedTag === "all" ? t("tags.all") : selectedTag}
+            </span>
+          </SelectTrigger>
+          <SelectContent
+            side="bottom"
+            align="start"
+            alignItemWithTrigger={false}
+            collisionAvoidance={{ side: "none", align: "none" }}
+            className="max-h-60"
+          >
+            <SelectItem value="all">{t("tags.all")}</SelectItem>
+            {allTags.map((tag) => (
+              <SelectItem key={tag} value={tag}>
+                {tag}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}>
           <Plus size={16} weight="bold" />
           {t("page.create")}
@@ -100,19 +139,13 @@ export function DealRoomsPage() {
           <Button onClick={refetch}>{tc("retry")}</Button>
         </div>
       ) : loading ? (
-        <div className="flex flex-1 flex-col gap-4 overflow-y-auto">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <Skeleton className="h-10 w-full sm:w-80" />
-            <Skeleton className="h-10 w-full sm:w-44" />
-          </div>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <Skeleton className="h-64" />
-            <Skeleton className="h-64" />
-            <Skeleton className="h-64" />
-            <Skeleton className="h-64" />
-            <Skeleton className="h-64" />
-            <Skeleton className="h-64" />
-          </div>
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
+          <Skeleton className="h-64" />
         </div>
       ) : rooms?.length === 0 ? (
         <div className="flex flex-1 flex-col items-center justify-center">
@@ -126,48 +159,6 @@ export function DealRoomsPage() {
         </div>
       ) : (
         <>
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
-            <div className="relative w-full sm:w-44">
-              <MagnifyingGlass
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                type="search"
-                placeholder={t("search.placeholder")}
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
-                aria-label={t("search.placeholder")}
-              />
-            </div>
-            <Select value={selectedTag} onValueChange={(value) => setSelectedTag(value ?? "all")}>
-              <SelectTrigger
-                className="w-full gap-1.5 pl-3 sm:w-44"
-                aria-label={t("tags.label")}
-              >
-                <Tag size={16} className="text-muted-foreground" />
-                <span className="line-clamp-1 flex-1 text-left">
-                  {selectedTag === "all" ? t("tags.all") : selectedTag}
-                </span>
-              </SelectTrigger>
-              <SelectContent
-                side="bottom"
-                align="start"
-                alignItemWithTrigger={false}
-                collisionAvoidance={{ side: "none", align: "none" }}
-                className="max-h-60"
-              >
-                <SelectItem value="all">{t("tags.all")}</SelectItem>
-                {allTags.map((tag) => (
-                  <SelectItem key={tag} value={tag}>
-                    {tag}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
           <div className="min-h-0 flex-1 overflow-y-auto">
             {filteredRooms.length === 0 ? (
               <div className="flex h-full flex-col items-center justify-center gap-2 rounded-lg border border-border bg-card p-12 text-center">

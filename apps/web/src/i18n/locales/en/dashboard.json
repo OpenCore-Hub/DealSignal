@@ -3,11 +3,6 @@
   "welcome": {
     "title": "Welcome back"
   },
-  "quickActions": {
-    "createRoom": "New deal room",
-    "upload": "Upload document",
-    "invite": "Invite visitor"
-  },
   "metrics": {
     "title": "Key metrics",
     "activeRooms": "Active rooms",

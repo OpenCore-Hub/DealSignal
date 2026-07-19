@@ -519,3 +519,48 @@ func TestSecurityEventFromErrorMapping(t *testing.T) {
 		})
 	}
 }
+
+func TestParseExpiresAt(t *testing.T) {
+	cases := []struct {
+		name    string
+		input   *string
+		wantNil bool
+		wantErr bool
+	}{
+		{"nil returns nil", nil, true, false},
+		{"empty returns nil", strPtr(""), true, false},
+		{"valid RFC3339", strPtr("2026-08-17T08:41:00+08:00"), false, false},
+		{"valid RFC3339 with Z", strPtr("2026-08-17T00:41:00Z"), false, false},
+		{"datetime-local rejected", strPtr("2026-08-17T08:41"), false, true},
+		{"arbitrary string rejected", strPtr("not-a-date"), false, true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := parseExpiresAt(tc.input)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected error, got nil")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if tc.wantNil {
+				if got != nil {
+					t.Fatalf("expected nil, got %v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatal("expected non-nil time, got nil")
+			}
+			if got.IsZero() {
+				t.Fatal("expected non-zero time")
+			}
+		})
+	}
+}
+
+func strPtr(s string) *string { return &s }

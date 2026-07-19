@@ -3,9 +3,8 @@ import { useLocation, useNavigate, useParams, useSearchParams } from "react-rout
 import { motion, AnimatePresence } from "motion/react";
 import { Envelope } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
-import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
@@ -15,12 +14,12 @@ import { toast } from "sonner";
 import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
-import { DealRoomTabs } from "@/components/deal-rooms/DealRoomTabs";
 import { useDealRoomTab } from "@/hooks/useDealRoomTab";
 import { DealRoomShareButton } from "@/components/deal-rooms/DealRoomShareButton";
 import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissionsSection";
 import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsTab";
 import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
+import { useUIStore, type BreadcrumbItem } from "@/stores/uiStore";
 import type { DealRoomFolderDocs } from "@/types";
 
 function normalizeText(value: string): string {
@@ -78,6 +77,10 @@ export function DealRoomDetailPage() {
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const { tab } = useDealRoomTab();
   const reducedMotion = useReducedMotion();
+  const currentWorkspace = useUIStore((state) => state.currentWorkspace);
+  const setBreadcrumbs = useUIStore((state) => state.setBreadcrumbs);
+
+  const workspaceName = currentWorkspace?.name || workspaceSlug;
 
   // Cleanup all progress intervals and document-status polls on unmount to
   // prevent state updates on an unmounted component.
@@ -130,6 +133,20 @@ export function DealRoomDetailPage() {
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
 
   const room = data?.room ?? null;
+
+  // Sync page breadcrumb to the global header.
+  useEffect(() => {
+    if (!workspaceSlug) return;
+    const items: BreadcrumbItem[] = [
+      { label: workspaceName ?? workspaceSlug, to: `/${workspaceSlug}/dashboard` },
+      { label: t("page.title"), to: `/${workspaceSlug}/deal-rooms` },
+    ];
+    if (room?.name) {
+      items.push({ label: room.name });
+    }
+    setBreadcrumbs(items);
+    return () => setBreadcrumbs([]);
+  }, [workspaceSlug, workspaceName, room?.name, t, setBreadcrumbs]);
 
   const allRoomDocuments = useMemo(
     () => (room?.documents ?? []).flatMap((fd: DealRoomFolderDocs) => fd.documents),
@@ -402,7 +419,6 @@ export function DealRoomDetailPage() {
   if (error && !room) {
     return (
       <div className="space-y-6">
-        <SmartBackButton fallbackTo={`/${workspaceSlug}/deal-rooms`} fallbackLabel={t("detail.back")} />
         <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-border p-12 text-center">
           <p className="text-muted-foreground">{error}</p>
           <Button onClick={refetch}>{tc("retry")}</Button>
@@ -421,8 +437,6 @@ export function DealRoomDetailPage() {
 
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
-      <SmartBackButton fallbackTo={`/${workspaceSlug}/deal-rooms`} fallbackLabel={t("detail.back")} />
-
       <PageHeader title={room.name} description={room.description}>
         <div className="flex flex-wrap items-center gap-2">
           <DealRoomShareButton roomId={room.id} slug={room.slug} />
@@ -434,8 +448,6 @@ export function DealRoomDetailPage() {
           </InviteMemberDialog>
         </div>
       </PageHeader>
-
-      <DealRoomTabs />
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -469,14 +481,26 @@ export function DealRoomDetailPage() {
                   />
                 </CardContent>
               </Card>
-
             </div>
           )}
 
-          {tab === "permissions" && (
+          {tab === "participants" && (
             <div className="grid grid-cols-1 gap-4">
               <FolderPermissionsSection roomId={room.id} />
             </div>
+          )}
+
+          {tab === "qa" && <DealRoomQATab />}
+
+          {tab === "activity" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("activity.title")}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-body text-muted-foreground">{t("activity.comingSoon")}</p>
+              </CardContent>
+            </Card>
           )}
 
           {tab === "analytics" && (
@@ -488,7 +512,16 @@ export function DealRoomDetailPage() {
             />
           )}
 
-          {tab === "qa" && <DealRoomQATab />}
+          {tab === "settings" && (
+            <Card>
+              <CardHeader>
+                <CardTitle>{t("settings.title")}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-body text-muted-foreground">{t("settings.comingSoon")}</p>
+              </CardContent>
+            </Card>
+          )}
         </motion.div>
       </AnimatePresence>
 

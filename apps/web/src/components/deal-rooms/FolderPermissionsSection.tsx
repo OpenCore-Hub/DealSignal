@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Link as LinkIcon } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,11 +11,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { LinkActivityDialog } from "@/components/links/share";
+import { RowActions } from "@/components/common/RowActions";
+import type { Link } from "@/types";
 
 interface FolderPermissionsSectionProps {
   roomId: string;
@@ -29,6 +43,10 @@ function formatLastViewed(value?: string): string {
   }
 }
 
+function extractLinkToken(shortUrl: string): string {
+  return shortUrl.split("/").pop() ?? shortUrl;
+}
+
 export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionProps) {
   const { t } = useTranslation("dealRooms");
   const {
@@ -40,12 +58,54 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
     return res.data;
   }, [roomId]);
 
+  const [viewLink, setViewLink] = useState<Link | null>(null);
+  const [editLink, setEditLink] = useState<Link | null>(null);
+  const [sendCodeLink, setSendCodeLink] = useState<Link | null>(null);
+  const [sendCodeEmail, setSendCodeEmail] = useState("");
+  const [sendCodeLoading, setSendCodeLoading] = useState(false);
+  const [deleteLink, setDeleteLink] = useState<Link | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
   const handleActiveChange = async (linkId: string, checked: boolean) => {
     try {
       await api.updateLink(linkId, { status: checked ? "active" : "revoked" });
       await refetch();
     } catch {
       // error toast handled by api client
+    }
+  };
+
+  const handleSendCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sendCodeLink || !sendCodeEmail.trim()) return;
+    setSendCodeLoading(true);
+    try {
+      const token = extractLinkToken(sendCodeLink.shortUrl);
+      await api.sendEmailVerificationCode(token, sendCodeEmail.trim());
+      toast.success(t("permissions.links.sendCode.success"));
+      setSendCodeLink(null);
+      setSendCodeEmail("");
+    } catch (err) {
+      toast.error(
+        err instanceof Error ? err.message : t("permissions.links.sendCode.error")
+      );
+    } finally {
+      setSendCodeLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteLink) return;
+    setDeleteLoading(true);
+    try {
+      await api.deleteLink(deleteLink.id);
+      toast.success(t("permissions.links.delete.success"));
+      setDeleteLink(null);
+      await refetch();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t("permissions.links.delete.error"));
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
@@ -82,7 +142,7 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
                   {t("permissions.links.table.active")}
                 </TableHead>
                 <TableHead className="text-right text-muted-foreground">
-                  {t("permissions.links.table.activity")}
+                  {t("permissions.links.table.actions")}
                 </TableHead>
               </TableRow>
             </TableHeader>
@@ -136,11 +196,34 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
                       />
                     </TableCell>
                     <TableCell className="text-right">
-                      <LinkActivityDialog link={link}>
-                        <Button variant="ghost" size="sm">
-                          {t("permissions.links.table.activity")}
-                        </Button>
-                      </LinkActivityDialog>
+                      <RowActions
+                        actions={[
+                          {
+                            label: t("permissions.links.actions.view"),
+                            onClick: () => setViewLink(link),
+                          },
+                          {
+                            label: t("permissions.links.actions.edit"),
+                            onClick: () => setEditLink(link),
+                          },
+                          ...(link.requireEmailVerification
+                            ? [
+                                {
+                                  label: t("permissions.links.actions.sendCode"),
+                                  onClick: () => {
+                                    setSendCodeLink(link);
+                                    setSendCodeEmail("");
+                                  },
+                                },
+                              ]
+                            : []),
+                          {
+                            label: t("permissions.links.actions.delete"),
+                            destructive: true,
+                            onClick: () => setDeleteLink(link),
+                          },
+                        ]}
+                      />
                     </TableCell>
                   </TableRow>
                 ))
@@ -149,6 +232,91 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
           </Table>
         </div>
       </CardContent>
+
+      {viewLink && (
+        <LinkActivityDialog
+          link={viewLink}
+          open
+          onOpenChange={(open) => !open && setViewLink(null)}
+        />
+      )}
+
+      {editLink && (
+        <DealRoomShareDialog
+          roomId={roomId}
+          linkId={editLink.id}
+          open
+          onChanged={refetch}
+          onOpenChange={(open) => !open && setEditLink(null)}
+        />
+      )}
+
+      <Dialog open={!!sendCodeLink} onOpenChange={(open) => !open && setSendCodeLink(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("permissions.links.sendCode.title")}</DialogTitle>
+            <DialogDescription>
+              {t("permissions.links.sendCode.description")}
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleSendCode} className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="send-code-email">{t("permissions.links.sendCode.emailLabel")}</Label>
+              <Input
+                id="send-code-email"
+                type="email"
+                placeholder={t("permissions.links.sendCode.emailPlaceholder")}
+                value={sendCodeEmail}
+                onChange={(e) => setSendCodeEmail(e.target.value)}
+                required
+                disabled={sendCodeLoading}
+              />
+            </div>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setSendCodeLink(null)}
+                disabled={sendCodeLoading}
+              >
+                {t("common:cancel")}
+              </Button>
+              <Button type="submit" disabled={sendCodeLoading || !sendCodeEmail.trim()}>
+                {sendCodeLoading ? t("permissions.links.sendCode.sending") : t("permissions.links.sendCode.send")}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteLink} onOpenChange={(open) => !open && setDeleteLink(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("permissions.links.delete.title")}</DialogTitle>
+            <DialogDescription className="break-words">
+              {t("permissions.links.delete.description", {
+                name: deleteLink?.name || deleteLink?.shortUrl.split("/").pop(),
+              })}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDeleteLink(null)}
+              disabled={deleteLoading}
+            >
+              {t("common:cancel")}
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={deleteLoading}
+              onClick={handleDelete}
+            >
+              {deleteLoading ? t("permissions.links.delete.loading") : t("common:delete")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

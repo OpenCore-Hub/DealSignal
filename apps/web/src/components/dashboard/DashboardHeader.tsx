@@ -1,7 +1,4 @@
-import { useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Plus, Upload, UserPlus } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
 import { useUIStore } from "@/stores/uiStore";
 
 interface DashboardHeaderProps {
@@ -18,7 +15,6 @@ function displayWorkspaceName(slug: string, name?: string | null): string {
 
 export function DashboardHeader({ workspaceSlug }: DashboardHeaderProps) {
   const { t, i18n } = useTranslation("dashboard");
-  const navigate = useNavigate();
   const currentWorkspace = useUIStore((state) => state.currentWorkspace);
 
   const today = new Date().toLocaleDateString(i18n.language, {
@@ -42,26 +38,6 @@ export function DashboardHeader({ workspaceSlug }: DashboardHeaderProps) {
           <span className="mx-2">·</span>
           <span>{today}</span>
         </p>
-      </div>
-      <div className="flex flex-wrap items-center gap-2">
-        <Button onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}>
-          <Plus size={16} className="mr-1.5" />
-          {t("quickActions.createRoom")}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => navigate(`/${workspaceSlug}/documents/upload`)}
-        >
-          <Upload size={16} className="mr-1.5" />
-          {t("quickActions.upload")}
-        </Button>
-        <Button
-          variant="outline"
-          onClick={() => navigate(`/${workspaceSlug}/contacts/new`)}
-        >
-          <UserPlus size={16} className="mr-1.5" />
-          {t("quickActions.invite")}
-        </Button>
       </div>
     </div>
   );

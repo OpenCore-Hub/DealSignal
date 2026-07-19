@@ -23,6 +23,7 @@
   "addToDealRoom": "Add to Deal Room",
   "reload": "Refresh page",
   "backToHome": "Back to home",
+  "breadcrumb": "Breadcrumb",
   "overdue": {
     "days_one": "{{count}} day overdue",
     "days_other": "{{count}} days overdue"

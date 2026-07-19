@@ -23,6 +23,7 @@
   "addToDealRoom": "加入数据室",
   "reload": "刷新页面",
   "backToHome": "返回首页",
+  "breadcrumb": "面包屑",
   "overdue": {
     "days": "已逾期 {{count}} 天"
   },

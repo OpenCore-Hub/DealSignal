@@ -17,8 +17,8 @@ import { cn } from "@/lib/utils";
 import { AccessSummaryCard } from "./AccessSummaryCard";
 
 import { CopyButton } from "./CopyButton";
-import { PRESETS, PRESET_NAMES } from "./presets";
-import { getPublicUrl } from "./utils";
+import { PRESET_NAMES } from "./presets";
+import { getPublicUrl, toDateTimeLocal, isValidCustomDomain } from "./utils";
 import type { DraftLink, LinkPreset } from "./types";
 
 function highlightClass(field: string, fields: string[]) {
@@ -81,16 +81,28 @@ export function ShareTab({
 
   const expiresEnabled = Boolean(draft.expiresAt);
 
+  const expiresMin = toDateTimeLocal(new Date().toISOString());
+
+  const defaultExpiresAt = () => {
+    const d = new Date();
+    d.setDate(d.getDate() + 30);
+    return toDateTimeLocal(d.toISOString());
+  };
+
+  const customDomainInvalid =
+    customDomainMode && customDomainInput.length > 0 && !isValidCustomDomain(customDomainInput);
+
   return (
     <div className="space-y-6 py-2">
       {link ? (
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>{t("share.linkName")}</Label>
+            <Label>{t("share.linkName")}<span className="ml-1 text-destructive">*</span></Label>
             <Input
               value={draft.name}
               onChange={(e) => updateDraft({ name: e.target.value })}
               placeholder={t("share.linkNamePlaceholder")}
+              aria-required="true"
             />
           </div>
           <div className="space-y-2">
@@ -119,11 +131,12 @@ export function ShareTab({
         </div>
       ) : (
         <div className="space-y-2">
-          <Label>{t("share.linkName")}</Label>
+          <Label>{t("share.linkName")}<span className="ml-1 text-destructive">*</span></Label>
           <Input
             value={draft.name}
             onChange={(e) => updateDraft({ name: e.target.value })}
             placeholder={t("share.linkNamePlaceholder")}
+            aria-required="true"
           />
           {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
         </div>
@@ -133,7 +146,13 @@ export function ShareTab({
         <Label>{t("share.linkPreset")}</Label>
         <Select value={preset} onValueChange={handlePresetChange}>
           <SelectTrigger aria-label={t("share.linkPreset")} className="w-full">
-            <SelectValue />
+            <SelectValue>
+              {PRESET_NAMES.includes(preset as Exclude<LinkPreset, "custom">)
+                ? t(`share.presets.${preset}`)
+                : preset === "custom"
+                  ? t("share.presets.custom")
+                  : ""}
+            </SelectValue>
           </SelectTrigger>
           <SelectContent>
             {PRESET_NAMES.map((p) => (
@@ -144,7 +163,11 @@ export function ShareTab({
             <SelectItem value="custom">{t("share.presets.custom")}</SelectItem>
           </SelectContent>
         </Select>
-        <p className="text-xs text-muted-foreground">{t("share.presetHint")}</p>
+        <p className="text-xs text-muted-foreground">
+          {PRESET_NAMES.includes(preset as Exclude<LinkPreset, "custom">)
+            ? t(`share.presetDescriptions.${preset}`)
+            : t("share.presetHint")}
+        </p>
       </div>
 
       <AccessSummaryCard
@@ -167,7 +190,7 @@ export function ShareTab({
             aria-label={t("share.expiresOn")}
             checked={expiresEnabled}
             onCheckedChange={(checked) =>
-              updateDraft({ expiresAt: checked ? PRESETS.standard.expiresAt : "" })
+              updateDraft({ expiresAt: checked ? defaultExpiresAt() : "" })
             }
           />
         </div>
@@ -175,6 +198,7 @@ export function ShareTab({
           <Input
             type="datetime-local"
             value={draft.expiresAt}
+            min={expiresMin}
             onChange={(e) => updateDraft({ expiresAt: e.target.value })}
           />
         )}
@@ -219,24 +243,10 @@ export function ShareTab({
           />
         )}
         {errors.customDomain && <p className="text-xs text-destructive">{errors.customDomain}</p>}
+        {customDomainInvalid && !errors.customDomain && (
+          <p className="text-xs text-destructive">{t("share.customDomainInvalid")}</p>
+        )}
         <p className="text-xs text-muted-foreground">{t("share.customDomainHint")}</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label>{t("share.tags")}</Label>
-        <Input
-          value={draft.tags.join(", ")}
-          onChange={(e) =>
-            updateDraft({
-              tags: e.target.value
-                .split(/[,;\n]+/)
-                .map((s) => s.trim())
-                .filter(Boolean),
-            })
-          }
-          placeholder={t("share.tagsPlaceholder")}
-        />
-        <p className="text-xs text-muted-foreground">{t("share.tagsHint")}</p>
       </div>
 
       <div className="flex items-center justify-between gap-4">

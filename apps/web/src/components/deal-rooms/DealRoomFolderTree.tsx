@@ -7,11 +7,10 @@ import {
   UploadSimple,
   PencilSimple,
   Trash,
-  CaretRight,
-  CaretDown,
   X,
+  DotsThreeVertical,
 } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
   Dialog,
@@ -21,8 +20,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 import { DocumentPicker } from "./DocumentPicker";
 import type { DealRoomDocumentItem, DealRoomFolder, DealRoomFolderDocs, Document } from "@/types";
 
@@ -288,11 +299,10 @@ export function DealRoomFolderTree({
     onSelectFolder?.(null);
   };
 
-  const renderCreateRow = (parentPath: string, depth: number) => (
+  const renderCreateRow = (parentPath: string) => (
     <div
       key={`create-${parentPath}`}
-      className="flex items-center gap-2 rounded-md border border-border p-2"
-      style={{ marginLeft: `${depth * 16 + 24}px` }}
+      className="flex items-center gap-3 rounded-lg bg-muted/30 p-2.5"
     >
       <Folder size={16} className="text-muted-foreground" />
       <Input
@@ -320,6 +330,16 @@ export function DealRoomFolderTree({
     const docs = node.documents;
     const isSelected = isNavigator && selectedFolderPath === node.folder.path;
 
+    const documentCount = docs.length;
+    const subfolderCount = node.children.length;
+    const metadata: string[] = [];
+    if (documentCount > 0 || subfolderCount === 0) {
+      metadata.push(t("folders.documentsCount", { count: documentCount }));
+    }
+    if (subfolderCount > 0) {
+      metadata.push(t("folders.foldersCount", { count: subfolderCount }));
+    }
+
     return (
       <div key={node.folder.path} className="select-none">
         <div
@@ -334,123 +354,171 @@ export function DealRoomFolderTree({
               handleFolderClick(node.folder.path);
             }
           }}
-          className={`
-            group flex w-full items-center justify-between gap-2 rounded-md py-1 px-2 text-left outline-none
-            focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background
-            ${isSelected ? "bg-primary/10 text-primary" : "hover:bg-muted/50"}
-          `}
-          style={{ paddingLeft: `${depth * 16 + 8}px` }}
+          className={cn(
+            "group flex w-full items-center justify-between gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors duration-150 ease-out hover:bg-muted/50 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            isSelected && "bg-primary/[0.04] border-primary/20 hover:border-primary/30 hover:bg-primary/[0.06]"
+          )}
         >
-          <div className="flex min-w-0 items-center gap-2">
-            {isNavigator ? (
-              isSelected ? (
-                <FolderOpen size={18} className="text-primary shrink-0" />
+          <div className="flex min-w-0 items-center gap-3">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-muted/40">
+              {isSelected || isExpanded ? (
+                <FolderOpen size={18} className={cn("text-primary", !isSelected && "text-foreground")} />
               ) : (
-                <Folder size={18} className="text-muted-foreground shrink-0" />
-              )
-            ) : isExpanded ? (
-              <CaretDown size={16} className="text-muted-foreground shrink-0" />
-            ) : (
-              <CaretRight size={16} className="text-muted-foreground shrink-0" />
-            )}
-            {!isNavigator && isExpanded ? (
-              <FolderOpen size={18} className="text-primary shrink-0" />
-            ) : !isNavigator ? (
-              <Folder size={18} className="text-muted-foreground shrink-0" />
-            ) : null}
-            <span className="truncate text-sm font-medium">{node.folder.name}</span>
-            {node.folder.description && (
-              <span className="hidden text-caption text-muted-foreground sm:inline">{node.folder.description}</span>
-            )}
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {isAdmin && (
-              <div
-                className="flex items-center gap-0.5"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => startCreate(node.folder.path)}
-                  aria-label={t("folders.newSubfolder")}
-                >
-                  <Plus size={14} />
-                </Button>
-                {onFolderUpload && (
-                  <>
-                    <input
-                      ref={(el) => {
-                        if (el) fileInputRefs.current.set(node.folder.path, el);
-                      }}
-                      type="file"
-                      accept={td("upload.supportedTypes")}
-                      data-testid={`folder-upload-input-${node.folder.path}`}
-                      tabIndex={-1}
-                      aria-hidden
-                      className="sr-only"
-                      onChange={(e) => void handleFolderUploadChange(e, node.folder.path)}
-                    />
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      onClick={() => fileInputRefs.current.get(node.folder.path)?.click()}
-                      aria-label={t("folders.addFile")}
-                    >
-                      <UploadSimple size={14} />
-                    </Button>
-                  </>
+                <Folder size={18} className="text-muted-foreground" />
+              )}
+            </div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                <span className="truncate text-sm font-medium text-foreground">
+                  {node.folder.name}
+                </span>
+                {node.folder.description && (
+                  <span className="hidden text-xs text-muted-foreground/80 sm:inline">
+                    {node.folder.description}
+                  </span>
                 )}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => startRename(node.folder)}
-                  aria-label={t("folders.rename")}
-                >
-                  <PencilSimple size={14} />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => void handleDelete(node.folder)}
-                  aria-label={tc("delete")}
-                >
-                  <Trash size={14} />
-                </Button>
               </div>
+              {metadata.length > 0 && (
+                <div className="mt-0.5 text-xs text-muted-foreground/70">
+                  {metadata.join(" • ")}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="flex shrink-0 items-center gap-0.5">
+            {isAdmin && (
+              <>
+                {onFolderUpload && (
+                  <input
+                    ref={(el) => {
+                      if (el) fileInputRefs.current.set(node.folder.path, el);
+                    }}
+                    type="file"
+                    accept={td("upload.supportedTypes")}
+                    data-testid={`folder-upload-input-${node.folder.path}`}
+                    tabIndex={-1}
+                    aria-hidden
+                    className="sr-only"
+                    onChange={(e) => void handleFolderUploadChange(e, node.folder.path)}
+                  />
+                )}
+                <Popover>
+                  <PopoverTrigger
+                    className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label={t("folders.actions", { name: node.folder.name })}
+                  >
+                    <DotsThreeVertical size={18} />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" side="bottom" sideOffset={4} className="w-auto min-w-[3.5rem] p-2">
+                    <TooltipProvider delay={100}>
+                      <div className="flex flex-col gap-1">
+                        <Tooltip>
+                          <TooltipTrigger
+                            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startCreate(node.folder.path);
+                            }}
+                            aria-label={t("folders.newSubfolder")}
+                          >
+                            <Plus size={18} />
+                          </TooltipTrigger>
+                          <TooltipContent side="right">
+                            {t("folders.newSubfolder")}
+                          </TooltipContent>
+                        </Tooltip>
+
+                        {onFolderUpload && (
+                          <Tooltip>
+                            <TooltipTrigger
+                              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                fileInputRefs.current.get(node.folder.path)?.click();
+                              }}
+                              aria-label={t("folders.addFile")}
+                            >
+                              <UploadSimple size={18} />
+                            </TooltipTrigger>
+                            <TooltipContent side="right">
+                              {t("folders.addFile")}
+                            </TooltipContent>
+                          </Tooltip>
+                        )}
+
+                        <Tooltip>
+                          <TooltipTrigger
+                            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              startRename(node.folder);
+                            }}
+                            aria-label={t("folders.rename")}
+                          >
+                            <PencilSimple size={18} />
+                          </TooltipTrigger>
+                          <TooltipContent side="right">
+                            {t("folders.rename")}
+                          </TooltipContent>
+                        </Tooltip>
+
+                        <Tooltip>
+                          <TooltipTrigger
+                            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              void handleDelete(node.folder);
+                            }}
+                            aria-label={tc("delete")}
+                          >
+                            <Trash size={18} className="text-destructive" />
+                          </TooltipTrigger>
+                          <TooltipContent side="right">
+                            {tc("delete")}
+                          </TooltipContent>
+                        </Tooltip>
+                      </div>
+                    </TooltipProvider>
+                  </PopoverContent>
+                </Popover>
+              </>
             )}
           </div>
         </div>
 
         {!isNavigator && isExpanded && (
-          <div>
-            {creatingParent === node.folder.path && renderCreateRow(node.folder.path, depth + 1)}
+          <div className="relative mt-0.5 ml-3 border-l border-border/30 pl-3">
+            {creatingParent === node.folder.path && renderCreateRow(node.folder.path)}
             {docs.length > 0 && (
-              <ul className="space-y-0.5">
+              <ul className="py-1">
                 {docs.map((doc) => (
                   <li
                     key={doc.id}
-                    className="group flex cursor-pointer items-center justify-between gap-2 rounded-md py-0.5 px-2 hover:bg-muted/30"
-                    style={{ marginLeft: `${depth * 16 + 24}px` }}
+                    className="group flex cursor-pointer items-center gap-3 rounded-md px-2.5 py-1.5 text-sm text-foreground hover:bg-muted/40"
                     onClick={() => onDocumentOpen?.(doc.document_id)}
                     title={t("documents.clickToOpen")}
                   >
-                    <div className="flex min-w-0 items-center gap-2">
-                      <FileText size={16} className="text-muted-foreground shrink-0" />
-                      <span className="cursor-pointer truncate text-sm hover:text-primary">{doc.title}</span>
+                    <div className="flex h-5 w-8 shrink-0 items-center justify-center">
+                      <FileText size={15} className="text-muted-foreground/80" />
                     </div>
+                    <span className="truncate hover:text-foreground">{doc.title}</span>
                   </li>
                 ))}
               </ul>
             )}
-            {node.children.map((child) => renderFolder(child, depth + 1))}
+            <div className="space-y-0.5">
+              {node.children.map((child) => renderFolder(child, depth + 1))}
+            </div>
           </div>
         )}
 
         {isNavigator && isExpanded && (
-          <div>
-            {creatingParent === node.folder.path && renderCreateRow(node.folder.path, depth + 1)}
-            {node.children.map((child) => renderFolder(child, depth + 1))}
+          <div className="relative mt-0.5 ml-3 border-l border-border/30 pl-3">
+            {creatingParent === node.folder.path && renderCreateRow(node.folder.path)}
+            <div className="space-y-0.5">
+              {node.children.map((child) => renderFolder(child, depth + 1))}
+            </div>
           </div>
         )}
       </div>
@@ -464,7 +532,7 @@ export function DealRoomFolderTree({
   };
 
   return (
-    <div className="space-y-0.5" data-testid="folder-tree">
+    <div className="space-y-1" data-testid="folder-tree">
       {folders.length === 0 && <p className="text-sm text-muted-foreground">{t("folders.empty")}</p>}
 
       {isNavigator && (
@@ -482,7 +550,7 @@ export function DealRoomFolderTree({
         </button>
       )}
 
-      <div className="space-y-0.5">{roots.map((root) => renderFolder(root, 0))}</div>
+      <div className="space-y-1">{roots.map((root) => renderFolder(root, 0))}</div>
 
       {contextMenu && (
         <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)}>

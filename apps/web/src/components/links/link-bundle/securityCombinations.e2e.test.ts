@@ -195,7 +195,6 @@ describe("Exact JSON output (toCreateLinkPayload → JSON → backend parse)", (
     expect(payload.require_password).toBe(false);
     expect(payload.require_nda).toBe(false);
     expect(payload.allowed_emails).toBeUndefined();
-    expect(payload.allowed_domains).toBeUndefined();
     expect(payload.password).toBeUndefined();
     expect(payload.contact_ids).toBeUndefined();
     expect(payload.download_enabled).toBe(true);

@@ -60,8 +60,40 @@ if (typeof window !== "undefined") {
     }),
   });
 
-  // Mock scrollTo for jsdom
-  window.scrollTo = () => {};
+  // Mock localStorage for zustand persist middleware in jsdom.
+  const store: Record<string, string> = {};
+  Object.defineProperty(window, "localStorage", {
+    writable: true,
+    value: {
+      getItem: (key: string) => store[key] ?? null,
+      setItem: (key: string, value: string) => {
+        store[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete store[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(store)) {
+          delete store[key];
+        }
+      },
+      length: 0,
+      key: () => null,
+    },
+  });
+
+  // Mock sessionStorage too so auth/session-dependent code behaves consistently.
+  Object.defineProperty(window, "sessionStorage", {
+    writable: true,
+    value: {
+      getItem: () => null,
+      setItem: () => {},
+      removeItem: () => {},
+      clear: () => {},
+      length: 0,
+      key: () => null,
+    },
+  });
 
   // Mock ResizeObserver for @base-ui/react and @radix-ui components
   // Must be a constructor function, not a factory.

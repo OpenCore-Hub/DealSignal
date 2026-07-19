@@ -305,6 +305,7 @@ type Link struct {
 	LastReminderSentAt          pgtype.Timestamptz
 	HasDocumentScope            bool
 	FolderScopePaths            []string
+	NdaDocumentID               pgtype.UUID
 }
 
 type LinkAccessRequest struct {

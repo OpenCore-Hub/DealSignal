@@ -2,6 +2,11 @@ import { create } from "zustand";
 import { persist } from "zustand/middleware";
 import type { Workspace } from "@/types";
 
+export interface BreadcrumbItem {
+  label: string;
+  to?: string;
+}
+
 interface UIState {
   sidebarOpen: boolean;
   toggleSidebar: () => void;
@@ -15,6 +20,9 @@ interface UIState {
 
   uploadDialogOpen: boolean;
   setUploadDialogOpen: (open: boolean) => void;
+
+  breadcrumbs: BreadcrumbItem[];
+  setBreadcrumbs: (items: BreadcrumbItem[]) => void;
 
   reset: () => void;
 }
@@ -35,7 +43,10 @@ export const useUIStore = create<UIState>()(
       uploadDialogOpen: false,
       setUploadDialogOpen: (open) => set({ uploadDialogOpen: open }),
 
-      reset: () => set({ currentWorkspace: null, uploadDialogOpen: false }),
+      breadcrumbs: [],
+      setBreadcrumbs: (items) => set({ breadcrumbs: items }),
+
+      reset: () => set({ currentWorkspace: null, uploadDialogOpen: false, breadcrumbs: [] }),
     }),
     {
       name: "dealsignal-ui",

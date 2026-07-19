@@ -1,12 +1,11 @@
 export { ShareTab } from "./ShareTab";
-export { InviteTab } from "./InviteTab";
 export { AccessTab } from "./AccessTab";
 export { AnalyticsTab } from "./AnalyticsTab";
 export { ManagementTab } from "./ManagementTab";
 export { LinkShareDialog } from "./LinkShareDialog";
 export { LinkActivityDialog } from "./LinkActivityDialog";
 export { AccessSummaryCard } from "./AccessSummaryCard";
-export { EmailTagInput } from "./EmailTagInput";
+export { ContactEmailTagInput } from "./ContactEmailTagInput";
 export { CopyButton } from "./CopyButton";
 export { CollapsibleSection } from "./CollapsibleSection";
 export { PRESETS, isPresetMatch, PRESET_NAMES, applyPreset } from "./presets";
@@ -15,8 +14,10 @@ export {
   buildDraft,
   buildRules,
   buildLinkPayload,
+  buildAllowedLists,
   inferPreset,
   toAccessRule,
+  toRFC3339,
   validateDraft,
   getPublicUrl,
 } from "./utils";

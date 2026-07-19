@@ -23,11 +23,16 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>;
 }
 
-function renderAccessTab(draft: DraftLink, errors: Record<string, string> = {}) {
+function renderAccessTab(
+  draft: DraftLink,
+  errors: Record<string, string> = {},
+  isDealRoomLink = true,
+  documents: { id: string; title: string }[] = []
+) {
   const updateDraft = vi.fn();
   const { rerender } = render(
     <Wrapper>
-      <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} />
+      <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} isDealRoomLink={isDealRoomLink} documents={documents} />
     </Wrapper>
   );
   return { updateDraft, rerender };
@@ -42,6 +47,7 @@ const baseDraft: DraftLink = {
   password: "",
   watermarkEnabled: false,
   requireNda: false,
+  ndaDocumentId: "",
   allowDownloading: false,
   aiCopilotEnabled: false,
   enableScreenshotProtection: false,
@@ -50,30 +56,34 @@ const baseDraft: DraftLink = {
   enableQaConversations: false,
   allowedViewers: [],
   blockedViewers: [],
-  autoAddInvited: true,
   customDomain: "",
-  tags: [],
   notifyOnAccess: false,
   folderPaths: [],
+  contactIds: [],
 };
 
 describe("AccessTab", () => {
   it("toggles require email", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true, requireEmailVerification: false });
   });
 
   it("toggles verification independently of email", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email verification/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmailVerification: true });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmailVerification: true, requireEmail: true });
   });
 
-  it("disabling email leaves verification unchanged", () => {
+  it("disabling email also disables verification", () => {
     const { updateDraft } = renderAccessTab({ ...baseDraft, requireEmail: true, requireEmailVerification: true });
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: false });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: false, requireEmailVerification: false });
+  });
+
+  it("disables verification toggle for non-deal-room links", () => {
+    renderAccessTab(baseDraft, {}, false);
+    expect(screen.getByRole("switch", { name: /require email verification/i })).toBeDisabled();
   });
 
   it("shows password input when password switch is on", () => {
@@ -83,18 +93,74 @@ describe("AccessTab", () => {
 
     rerender(
       <Wrapper>
-        <AccessTab draft={{ ...baseDraft, requirePassword: true }} updateDraft={updateDraft} errors={{}} />
+        <AccessTab
+          draft={{ ...baseDraft, requirePassword: true }}
+          updateDraft={updateDraft}
+          errors={{}}
+          isDealRoomLink={true}
+        />
       </Wrapper>
     );
     expect(screen.getByPlaceholderText(/enter password/i)).toBeInTheDocument();
   });
 
-  it("updates allowed and blocked viewers", () => {
+  it("updates allowed viewers and auto-enables email when missing", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
     fireEvent.change(allowedInput, { target: { value: "alice@vc.com, bob@vc.com" } });
     fireEvent.keyDown(allowedInput, { key: "Enter" });
-    expect(updateDraft).toHaveBeenCalledWith({ allowedViewers: ["alice@vc.com", "bob@vc.com"] });
+    expect(updateDraft).toHaveBeenCalledWith({ allowedViewers: ["alice@vc.com", "bob@vc.com"], requireEmail: true });
+  });
+
+  it("does not re-enable email when adding allowed viewers with verification already on", () => {
+    const { updateDraft } = renderAccessTab({
+      ...baseDraft,
+      requireEmailVerification: true,
+    });
+    const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
+    fireEvent.change(allowedInput, { target: { value: "alice@vc.com" } });
+    fireEvent.keyDown(allowedInput, { key: "Enter" });
+    expect(updateDraft).toHaveBeenCalledWith({ allowedViewers: ["alice@vc.com"] });
+  });
+
+  it("shows password strength hint and min-length warning", () => {
+    const { rerender } = renderAccessTab({ ...baseDraft, requirePassword: true, password: "" });
+    expect(screen.queryByText(/Strength:/i)).not.toBeInTheDocument();
+
+    rerender(
+      <Wrapper>
+        <AccessTab
+          draft={{ ...baseDraft, requirePassword: true, password: "short" }}
+          updateDraft={vi.fn()}
+          errors={{}}
+          isDealRoomLink={true}
+        />
+      </Wrapper>
+    );
+    expect(screen.getByText(/Strength: Weak/i)).toBeInTheDocument();
+    expect(screen.getByText(/Password must be at least 8 characters/i)).toBeInTheDocument();
+
+    rerender(
+      <Wrapper>
+        <AccessTab
+          draft={{ ...baseDraft, requirePassword: true, password: "StrongP@ssw0rd!" }}
+          updateDraft={vi.fn()}
+          errors={{}}
+          isDealRoomLink={true}
+        />
+      </Wrapper>
+    );
+    expect(screen.getByText(/Strength: Strong/i)).toBeInTheDocument();
+  });
+
+  it("shows real-time conflict error when value is in both lists", () => {
+    renderAccessTab({
+      ...baseDraft,
+      requireEmail: true,
+      allowedViewers: ["alice@vc.com"],
+      blockedViewers: ["alice@vc.com"],
+    });
+    expect(screen.getByText(/alice@vc\.com cannot be in both allowed and blocked lists/i)).toBeInTheDocument();
   });
 
   it("toggles watermark, NDA, download", () => {
@@ -103,7 +169,7 @@ describe("AccessTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ watermarkEnabled: true });
 
     fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireNda: true });
+    expect(updateDraft).toHaveBeenCalledWith({ requireNda: true, ndaDocumentId: "" });
 
     fireEvent.click(screen.getByRole("switch", { name: /allow downloading/i }));
     expect(updateDraft).toHaveBeenCalledWith({ allowDownloading: true });
@@ -151,11 +217,49 @@ describe("AccessTab", () => {
   });
 
   it("displays validation errors", () => {
-    renderAccessTab(baseDraft, {
+    renderAccessTab({
+      ...baseDraft,
+      requirePassword: true,
+      password: "short",
+    }, {
       password: "Password must be at least 8 characters",
-      conflict: "alice@vc.com cannot be in both allowed and blocked lists",
     });
     expect(screen.getByText(/at least 8 characters/i)).toBeInTheDocument();
-    expect(screen.getByText(/cannot be in both allowed and blocked lists/i)).toBeInTheDocument();
+  });
+
+  it("shows NDA document selector when NDA is enabled", () => {
+    renderAccessTab(
+      { ...baseDraft, requireNda: true },
+      {},
+      true,
+      [
+        { id: "doc-1", title: "NDA v1" },
+        { id: "doc-2", title: "NDA v2" },
+      ]
+    );
+    const select = screen.getByRole("combobox", { name: /NDA agreement document/i });
+    expect(select).toBeInTheDocument();
+    expect(screen.getByText(/Select a document/i)).toBeInTheDocument();
+  });
+
+  it("shows NDA document required error", () => {
+    renderAccessTab(
+      { ...baseDraft, requireNda: true },
+      { ndaDocumentId: "Please select an NDA agreement document" },
+      true,
+      [{ id: "doc-1", title: "NDA v1" }]
+    );
+    expect(screen.getByText(/Please select an NDA agreement document/i)).toBeInTheDocument();
+  });
+
+  it("clears NDA document when NDA is disabled", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, requireNda: true, ndaDocumentId: "doc-1" },
+      {},
+      true,
+      [{ id: "doc-1", title: "NDA v1" }]
+    );
+    fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
+    expect(updateDraft).toHaveBeenCalledWith({ requireNda: false, ndaDocumentId: "" });
   });
 });

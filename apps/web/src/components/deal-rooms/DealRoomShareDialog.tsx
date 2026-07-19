@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useReducedMotion } from "motion/react";
 import { motion, AnimatePresence } from "motion/react";
-import { ShareNetwork, Check } from "@phosphor-icons/react";
+import { Link as LinkIcon, Check } from "@phosphor-icons/react";
 import {
   Dialog,
   DialogContent,
@@ -16,23 +16,24 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
-import type { AccessRule, Link, LinkInvitation } from "@/types";
+import type { AccessRule, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
-  InviteTab,
   AccessTab,
   CopyButton,
   applyPreset,
   buildDraft,
   buildRules,
+  buildAllowedLists,
   buildLinkPayload,
   inferPreset,
+  toRFC3339,
   validateDraft,
   getPublicUrl,
 } from "@/components/links/share";
-import type { DraftLink } from "@/components/links/share";
+import type { DraftLink, LinkPreset } from "@/components/links/share";
 
 const tabTransition = {
   initial: { opacity: 0, x: 8 },
@@ -45,9 +46,11 @@ interface DealRoomShareDialogProps {
   roomId: string;
   linkId?: string;
   slug?: string;
-  defaultTab?: "share" | "invite" | "access";
+  defaultTab?: "share" | "access";
   children?: React.ReactElement;
   onChanged?: () => void;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }
 
 
@@ -59,37 +62,58 @@ interface DialogData {
   links: Link[];
   selectedLink: Link | null;
   rules: AccessRule[];
-  invitations: LinkInvitation[];
+  documents: { id: string; title: string }[];
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
-  const linksRes = await api.getDealRoomLinks(roomId);
+  const [linksRes, docsRes] = await Promise.all([
+    api.getDealRoomLinks(roomId),
+    api.getDealRoomDocuments(roomId),
+  ]);
   const loadedLinks = linksRes.data;
-  const selectedLink = linkId
-    ? loadedLinks.find((l) => l.id === linkId) || null
-    : loadedLinks.find((l) => l.status === "active" || l.isActive) || null;
 
-  if (!selectedLink) {
-    return { links: loadedLinks, selectedLink: null, rules: [], invitations: [] };
+  const documents = (docsRes.data ?? [])
+    .flatMap((folder) => folder.documents ?? [])
+    .map((d) => ({ id: d.document_id, title: d.title }));
+
+  if (!linkId) {
+    return { links: loadedLinks, selectedLink: null, rules: [], documents };
   }
 
-  const [rulesRes, invitationsRes] = await Promise.all([
-    api.getLinkAccessRules(selectedLink.id),
-    api.getLinkInvitations(selectedLink.id),
-  ]);
+  let selectedLink = loadedLinks.find((l) => l.id === linkId) || null;
+
+  // Edit mode must not depend solely on the deal-room link list. The list can
+  // be stale after creation, filtered by status, or cached; if the link is
+  // missing, fall back to a direct lookup so saved rules are still loaded.
+  if (!selectedLink) {
+    try {
+      const directLink = await api.getLinkById(linkId);
+      if (directLink.dealRoomId === roomId) {
+        selectedLink = directLink;
+      }
+    } catch {
+      selectedLink = null;
+    }
+  }
+
+  if (!selectedLink) {
+    return { links: loadedLinks, selectedLink: null, rules: [], documents };
+  }
+
+  const rulesRes = await api.getLinkAccessRules(selectedLink.id);
 
   return {
     links: loadedLinks,
     selectedLink,
     rules: rulesRes.data,
-    invitations: invitationsRes.data,
+    documents,
   };
 }
 
 interface DealRoomShareDialogContentProps {
   roomId: string;
   slug?: string;
-  defaultTab?: "share" | "invite" | "access";
+  defaultTab?: "share" | "access";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
@@ -112,36 +136,62 @@ function DealRoomShareDialogContent({
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const reducedMotion = useReducedMotion();
-  const [tab, setTab] = useState<"share" | "invite" | "access">(defaultTab);
+  const [tab, setTab] = useState<"share" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
-  const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
-  const [inviteEmails, setInviteEmails] = useState<string[]>([]);
-  const [inviteSending, setInviteSending] = useState(false);
-
-  // Unsaved-changes tracking.
-  const initialDraftRef = useRef<DraftLink>(draft);
+  // Unsaved-changes tracking. We use a mutable ref instead of a callback so
+  // the data-sync effect does not depend on the comparison function, which
+  // would otherwise read draft/initialDraft and create a feedback loop.
   const [closeConfirmOpen, setCloseConfirmOpen] = useState(false);
-  const hasUnsavedChanges = useCallback(() => {
-    return (
-      JSON.stringify(draft) !== JSON.stringify(initialDraftRef.current) ||
-      inviteEmails.length > 0
-    );
-  }, [draft, inviteEmails]);
+  const hasUnsavedChangesRef = useRef(false);
 
-  // Resync baseline after save.
   const markClean = useCallback(() => {
-    initialDraftRef.current = { ...draft };
-    setInviteEmails([]);
-  }, [draft]);
+    hasUnsavedChangesRef.current = false;
+  }, []);
 
   const selectedLink = data?.selectedLink ?? null;
-  const invitations = data?.invitations ?? [];
-  const preset = useMemo(() => inferPreset(draft), [draft]);
+  const [presetOverride, setPresetOverride] = useState<LinkPreset | null>(null);
+  const preset = presetOverride ?? inferPreset(draft);
   const isNew = !selectedLink;
+  const isDealRoomLink = !isNew ? !!selectedLink?.dealRoomId : true;
+
+  // 实时校验：所有必填项通过前，创建/保存按钮保持禁用。
+  const validationErrors = useMemo(() => {
+    if (loadingData || !data) return {};
+    return validateDraft(draft, selectedLink, lt, now(), isDealRoomLink);
+  }, [draft, selectedLink, lt, isDealRoomLink, loadingData, data]);
+
+  // Rebuild draft when the underlying link data changes (first load, create vs
+  // edit, or switching to a different link). The parent key already remounts the
+  // component in most cases, but this effect defends against stale state if the
+  // data arrives after mount without a key change, and resets the unsaved-
+  // changes baseline so the loaded data itself is not treated as a modification.
+  // It also re-echoes server state after a successful save/refetch when there are
+  // no pending user edits.
+  const loadedKeyRef = useRef<string | undefined>(
+    data ? (data.selectedLink?.id ?? "new") : undefined
+  );
+  useEffect(() => {
+    const currentKey = data ? (data.selectedLink?.id ?? "new") : undefined;
+    const keyChanged = currentKey !== loadedKeyRef.current;
+    if (keyChanged) {
+      const nextDraft = buildDraft(data?.selectedLink, data?.rules);
+      setDraft(nextDraft);
+      setPresetOverride(null);
+      setHighlightedFields([]);
+      hasUnsavedChangesRef.current = false;
+      loadedKeyRef.current = currentKey;
+    } else if (currentKey && !hasUnsavedChangesRef.current) {
+      // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
+      const nextDraft = buildDraft(data?.selectedLink, data?.rules);
+      setDraft(nextDraft);
+      setPresetOverride(null);
+      setHighlightedFields([]);
+    }
+  }, [data]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -164,20 +214,20 @@ function DealRoomShareDialogContent({
   // this function is called. Returns true when unsaved changes exist,
   // triggering the confirm dialog instead of closing.
   const handleConditionalClose = useCallback(() => {
-    if (hasUnsavedChanges()) {
+    if (hasUnsavedChangesRef.current) {
       setCloseConfirmOpen(true);
       return true; // blocked — content will show confirm
     }
     onClose();
     return false; // proceed with close
-  }, [hasUnsavedChanges, onClose]);
+  }, [onClose]);
   useEffect(() => {
     registerCloseGuard(handleConditionalClose);
   }, [registerCloseGuard, handleConditionalClose]);
 
   const updateDraft = (patch: Partial<DraftLink>) => {
     setDraft((prev) => ({ ...prev, ...patch }));
-    if (Object.keys(errors).length > 0) setErrors({});
+    hasUnsavedChangesRef.current = true;
   };
 
   const saveLinkAndRules = async (): Promise<Link | null> => {
@@ -185,26 +235,33 @@ function DealRoomShareDialogContent({
     try {
       let link = selectedLink;
       if (!link) {
+        const { allowedEmails, blockedEmails } = buildAllowedLists(draft);
         link = await api.createDealRoomLink(roomId, {
           name: draft.name.trim(),
           require_email: draft.requireEmail,
           require_email_verification: draft.requireEmailVerification,
           require_nda: draft.requireNda,
+          nda_document_id: draft.requireNda ? draft.ndaDocumentId : undefined,
           require_password: draft.requirePassword,
           password: draft.requirePassword && draft.password ? draft.password : undefined,
-          expires_at: draft.expiresAt || undefined,
+          allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
+          blocked_emails: blockedEmails.length > 0 ? blockedEmails : undefined,
+          expires_at: toRFC3339(draft.expiresAt) || undefined,
           download_enabled: draft.allowDownloading,
           watermark_enabled: draft.watermarkEnabled,
           ai_copilot_enabled: draft.aiCopilotEnabled,
+          qa_enabled: draft.enableQaConversations,
+          file_requests_enabled: draft.enableFileRequests,
+          index_file_enabled: draft.enableIndexFileGeneration,
+          screenshot_protection_enabled: draft.enableScreenshotProtection,
           custom_domain: draft.customDomain || undefined,
-          tags: draft.tags.length > 0 ? draft.tags : [],
           notify_on_access: draft.notifyOnAccess,
         });
       } else {
         await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
+        await api.setLinkAccessRules(link.id, buildRules(draft));
       }
 
-      await api.setLinkAccessRules(link.id, buildRules(draft));
       markClean();
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 1500);
@@ -221,15 +278,13 @@ function DealRoomShareDialogContent({
   };
 
   const handleSave = async () => {
-    const validationErrors = validateDraft(draft, selectedLink, lt, now());
-    if (Object.keys(validationErrors).length > 0) {
-      setErrors(validationErrors);
+    const currentErrors = validateDraft(draft, selectedLink, lt, now(), isDealRoomLink);
+    if (Object.keys(currentErrors).length > 0) {
       return;
     }
     const link = await saveLinkAndRules();
     if (link && isNew) {
-      setSaveSuccess(false);
-      setTab("invite");
+      onClose();
     }
   };
 
@@ -262,65 +317,12 @@ function DealRoomShareDialogContent({
     void doUpdate();
   };
 
-  const handleInviteSend = async () => {
-    if (!selectedLink || inviteEmails.length === 0) return;
-
-    setInviteSending(true);
-    try {
-      await api.inviteLinkViewers(selectedLink.id, inviteEmails);
-      toast.success(lt("invite.sent", { count: inviteEmails.length }));
-      setInviteEmails([]);
-      await refetch();
-      onChanged?.();
-    } finally {
-      setInviteSending(false);
-    }
-  };
-
-  const handleInviteResend = async (email: string) => {
-    if (!selectedLink) return;
-    setInviteSending(true);
-    try {
-      await api.inviteLinkViewers(selectedLink.id, [email]);
-      toast.success(lt("invite.resendSuccess", { email }));
-      await refetch();
-    } finally {
-      setInviteSending(false);
-    }
-  };
-
-  const handleInviteRevoke = (invitation: LinkInvitation) => {
-    if (!selectedLink) return;
-    setConfirmDialog({
-      open: true,
-      title: t("invite.revokeConfirmTitle", { email: invitation.email }),
-      description: t("invite.revokeConfirmDescription"),
-      confirmLabel: t("invite.revokeConfirmButton"),
-      cancelLabel: t("common:cancel"),
-      destructive: true,
-      onConfirm: async () => {
-        setConfirmDialog((prev) => ({ ...prev, open: false }));
-        try {
-          await api.revokeLinkInvitation(selectedLink.id, invitation.id, true);
-          await refetch();
-          onChanged?.();
-        } catch {
-          // error toast handled by api client
-        }
-      },
-    });
-  };
-
   const publicUrl = getPublicUrl(selectedLink);
 
   const primaryAction =
     tab === "share"
       ? { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
-      : tab === "access"
-      ? { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
-      : { label: t("invite.sendInvitations"), onClick: handleInviteSend };
-
-  const inviteHasInput = inviteEmails.length > 0;
+      : { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave };
 
   return (
     <>
@@ -328,7 +330,7 @@ function DealRoomShareDialogContent({
         <div className="flex items-start justify-between gap-4">
           <div className="min-w-0 flex-1 space-y-1">
             <DialogTitle className="flex items-center gap-2">
-              <ShareNetwork size={20} />
+              <LinkIcon size={20} />
               {isNew ? t("share.createTitle") : selectedLink?.name}
             </DialogTitle>
             {!isNew && publicUrl && (
@@ -375,12 +377,11 @@ function DealRoomShareDialogContent({
       <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex flex-1 flex-col overflow-hidden">
         <TabsList variant="line" className="w-full">
           <TabsTrigger value="share">{t("share.title")}</TabsTrigger>
-          <TabsTrigger value="invite">{t("invite.title")}</TabsTrigger>
           <TabsTrigger value="access">{t("accessRules.title")}</TabsTrigger>
 
         </TabsList>
 
-        <div className="flex-1 overflow-y-auto py-2">
+        <div className="flex-1 overflow-y-auto px-3 py-2" style={{ scrollbarGutter: "stable" }}>
           {loadingData || !data ? (
             <div className="py-10 text-center text-sm text-muted-foreground">
               {t("common:loading")}
@@ -395,36 +396,32 @@ function DealRoomShareDialogContent({
                     updateDraft={updateDraft}
                     preset={preset}
                     setPreset={(name) => {
-                      if (name === "custom") return;
+                      if (name === "custom") {
+                        setPresetOverride("custom");
+                        return;
+                      }
+                      setPresetOverride(null);
                       const { patch, changedFields } = applyPreset(name, draft);
                       updateDraft(patch);
                       setHighlightedFields(changedFields);
-                      const timer = setTimeout(() => setHighlightedFields([]), 200);
-                      return () => clearTimeout(timer);
+                      setTimeout(() => setHighlightedFields([]), 200);
                     }}
                     link={selectedLink}
                     onEditAccess={() => setTab("access")}
-                    errors={errors}
+                    errors={validationErrors}
                     slug={slug}
                     highlightedFields={highlightedFields}
                   />
                 </TabsContent>
-                <TabsContent value="invite">
-                  <InviteTab
-                    linkId={selectedLink?.id}
-                    publicUrl={publicUrl}
-                    emails={inviteEmails}
-                    setEmails={setInviteEmails}
-                    sending={inviteSending}
-                    invitations={invitations}
-                    loading={loadingData}
-                    onSend={handleInviteSend}
-                    onResend={handleInviteResend}
-                    onRevoke={handleInviteRevoke}
-                  />
-                </TabsContent>
                 <TabsContent value="access">
-                  <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} highlightedFields={highlightedFields} />
+                  <AccessTab
+                    draft={draft}
+                    updateDraft={updateDraft}
+                    errors={validationErrors}
+                    highlightedFields={highlightedFields}
+                    isDealRoomLink={isDealRoomLink}
+                    documents={data?.documents ?? []}
+                  />
                 </TabsContent>
 
               </motion.div>
@@ -443,11 +440,10 @@ function DealRoomShareDialogContent({
           onClick={primaryAction.onClick}
           disabled={
             saving ||
-            (tab === "invite" && (!inviteHasInput || inviteSending)) ||
-            ((tab === "share" || tab === "access") && Object.keys(errors).length > 0)
+            Object.keys(validationErrors).length > 0
           }
         >
-          {saving || inviteSending ? (
+          {saving ? (
             t("common:saving")
           ) : saveSuccess ? (
             <span className="flex items-center gap-1.5">
@@ -496,8 +492,18 @@ export function DealRoomShareDialog({
   defaultTab,
   children,
   onChanged,
+  open: openProp,
+  onOpenChange,
 }: DealRoomShareDialogProps) {
-  const [open, setOpen] = useState(false);
+  const [openState, setOpenState] = useState(false);
+  const open = openProp ?? openState;
+  const setOpen = useCallback(
+    (value: boolean) => {
+      setOpenState(value);
+      onOpenChange?.(value);
+    },
+    [onOpenChange]
+  );
   const { data, loading, refetch } = useAsyncData(
     () => (open ? fetchDialogData(roomId, linkId) : Promise.resolve(null)),
     [open, roomId, linkId]
@@ -512,17 +518,20 @@ export function DealRoomShareDialog({
     closeGuardRef.current = guard;
   }, []);
 
-  const handleOpenChange = useCallback((isOpen: boolean) => {
-    if (!isOpen && closeGuardRef.current?.()) {
-      return; // content handles confirmation
-    }
-    setOpen(isOpen);
-  }, []);
+  const handleOpenChange = useCallback(
+    (isOpen: boolean) => {
+      if (!isOpen && closeGuardRef.current?.()) {
+        return; // content handles confirmation
+      }
+      setOpen(isOpen);
+    },
+    [setOpen]
+  );
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
       {children && <DialogTrigger render={children} />}
-      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-xl">
+      <DialogContent className="flex max-h-[90vh] flex-col sm:max-w-2xl">
         {open && (
           <DealRoomShareDialogContent
             key={dataKey}

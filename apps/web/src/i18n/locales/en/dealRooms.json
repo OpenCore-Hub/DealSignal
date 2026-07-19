@@ -61,9 +61,14 @@
   },
   "tabs": {
     "documents": "Documents",
-    "permissions": "Permissions",
+    "participants": "Share",
+    "qa": "Q&A",
+    "activity": "Activity",
     "analytics": "Analytics",
-    "qa": "Q&A"
+    "settings": "Settings"
+  },
+  "sidebar": {
+    "label": "Deal room navigation"
   },
   "share": {
     "title": "Share",
@@ -100,7 +105,7 @@
     "createLink": "Create link",
     "saveSuccess": "Saved",
     "createSuccess": "Link created",
-    "restrictedAlert": "This link is restricted. Only allowed emails or domains can access.",
+    "restrictedAlert": "This link is restricted. Only allowed emails can access.",
     "active": "Active",
     "inactive": "Inactive",
     "disableConfirmTitle": "Disable this link?",
@@ -112,41 +117,6 @@
       "noSearchResults": "No documents match your search.",
       "noDocumentsInFolders": "No documents have been added to these folders yet."
     }
-  },
-  "invite": {
-    "title": "Invite",
-    "addViewers": "Add viewers",
-    "addViewersPlaceholder": "alice@vc.com, bob@vc.com",
-    "addViewersHint": "Add email addresses separated by commas or new lines",
-    "invalidEmails": "Some email addresses are invalid: {emails}",
-    "sendInvitations": "Send invitations",
-    "sending": "Sending...",
-    "sent": "Invitations sent",
-    "sentOne": "Invitation sent to {email}",
-    "emptyTitle": "No invitations yet",
-    "emptyDescription": "Add viewers above to send secure invites.",
-    "table": {
-      "email": "Email",
-      "status": "Status",
-      "sentAt": "Sent at",
-      "actions": "Actions"
-    },
-    "status": {
-      "pending": "Pending",
-      "opened": "Opened",
-      "verified": "Verified",
-      "expired": "Expired",
-      "revoked": "Revoked"
-    },
-    "resend": "Resend",
-    "resendTooltip": "Resend invitation email without changing token",
-    "revoke": "Revoke",
-    "revokeConfirmTitle": "Revoke access for {email}?",
-    "revokeConfirmDescription": "They will no longer be able to use this invitation link.",
-    "revokeConfirmButton": "Revoke",
-    "revokeAndRemove": "Revoke and remove from allowed list",
-    "revokedMessage": "Invitation revoked and email removed from allowed list",
-    "createLinkFirst": "Save the link to start inviting viewers"
   },
   "accessRules": {
     "title": "Access",
@@ -165,15 +135,13 @@
     },
     "allowedViewers": {
       "title": "Allowed viewers",
-      "placeholder": "alice@vc.com or *@vc.com",
-      "hint": "Add full emails or domain wildcards like *@vc.com",
-      "autoAddInvited": "Auto-add invited viewers",
-      "autoAddInvitedDescription": "Sending an invite automatically adds the email to allowed list"
+      "placeholder": "alice@vc.com",
+      "hint": "Add full email addresses separated by commas"
     },
     "blockedViewers": {
       "title": "Blocked viewers",
-      "placeholder": "leaker@bad.com or *@competitor.com",
-      "hint": "Block specific emails or entire domains"
+      "placeholder": "leaker@bad.com",
+      "hint": "Block specific email addresses"
     },
     "additionalProtections": {
       "title": "Additional protections",
@@ -214,7 +182,7 @@
     "addFolder": "Add folder",
     "reorder": "Reorder",
     "download": "Download",
-    "share": "Share"
+    "share": "Create link"
   },
   "documentList": {
     "title": "Documents",
@@ -230,7 +198,16 @@
   },
   "activity": {
     "documents": "Documents",
-    "noVisitors": "No visitors yet"
+    "noVisitors": "No visitors yet",
+    "title": "Activity",
+    "comingSoon": "Detailed activity logs are coming soon."
+  },
+  "settings": {
+    "title": "Room Settings",
+    "comingSoon": "Room settings are coming soon."
+  },
+  "participants": {
+    "title": "Participants"
   },
   "permissions": {
     "title": "Permissions",
@@ -248,7 +225,7 @@
     },
     "links": {
       "title": "Links",
-      "createLink": "Create link to share",
+      "createLink": "Create link",
       "emptyTitle": "No links found for this dataroom",
       "table": {
         "name": "Name",
@@ -256,62 +233,34 @@
         "views": "Views",
         "lastViewed": "Last viewed",
         "active": "Active",
-        "activity": "Activity"
+        "actions": "Actions"
+      },
+      "actions": {
+        "view": "View activity",
+        "edit": "Edit",
+        "sendCode": "Send verification code",
+        "delete": "Delete"
+      },
+      "sendCode": {
+        "title": "Send verification code",
+        "description": "Send a one-time access code to the visitor's email.",
+        "emailLabel": "Email",
+        "emailPlaceholder": "visitor@example.com",
+        "send": "Send code",
+        "sending": "Sending...",
+        "success": "Verification code sent",
+        "error": "Failed to send verification code"
+      },
+      "delete": {
+        "title": "Delete link",
+        "description": "Are you sure you want to delete the share link \"{{name}}\"? This link will stop working and visitors will no longer be able to access.",
+        "loading": "Deleting...",
+        "success": "Link deleted",
+        "error": "Failed to delete link"
       }
     },
     "emptyLinksTitle": "No links found for this dataroom",
-    "createLink": "Create link to share",
-    "createLinkSheet": {
-      "title": "Create a new link",
-      "linkName": "Link Name",
-      "linkNamePlaceholder": "Recipient's Organization",
-      "domain": "Domain",
-      "linkPreset": "Link Preset",
-      "manage": "Manage",
-      "selectPreset": "Select a preset",
-      "presetHint": "Apply a preset to quickly configure link settings",
-      "presets": {
-        "public": "Public",
-        "standard": "Standard",
-        "confidential": "Confidential"
-      },
-      "linkOptions": "Link Options",
-      "receiveEmailNotification": "Receive email notification",
-      "requireEmailToView": "Require email to view",
-      "requireEmailVerification": "Require email verification",
-      "allowDownloading": "Allow downloading",
-      "allowSpecifiedViewers": "Allow specified viewers",
-      "blockSpecifiedViewers": "Block specified viewers",
-      "securityControls": "Security Controls",
-      "requirePassword": "Require password to view",
-      "expirationDate": "Expiration Date",
-      "enableScreenshotProtection": "Enable screenshot protection",
-      "applyWatermark": "Apply Watermark",
-      "requireNda": "Require NDA to view",
-      "customFormFields": "Custom Form Fields",
-      "advancedControls": "Advanced Controls",
-      "aiAgents": "AI Agents",
-      "enableFileRequests": "Enable file requests",
-      "enableIndexFileGeneration": "Enable index file generation",
-      "enableQaConversations": "Enable Q&A Conversations",
-      "tags": "Tags",
-      "selectTags": "Select tags...",
-      "preview": "Preview",
-      "saveLink": "Save Link",
-      "manageFilePermissions": "Manage File Permissions",
-      "linkNameRequired": "Link name is required",
-      "passwordRequired": "Please enter a password",
-      "passwordPlaceholder": "Enter password",
-      "created": "Link created",
-      "createdTitle": "Link created",
-      "createdHint": "Share this link with your audience. You can manage access rules and invitations from the Permissions tab.",
-      "createError": "Failed to create link",
-      "shortUrl": "Share link",
-      "copyLink": "Copy link",
-      "copied": "Link copied",
-      "manageDisabled": "Management requires backend support",
-      "previewDisabled": "Preview requires backend support"
-    },
+    "createLink": "Create link",
     "emptyTitle": "No folders yet",
     "emptyDescription": "Folders added to this deal room will appear here.",
     "folder": "Folder",
@@ -414,6 +363,12 @@
     "rename": "Rename",
     "renameTitle": "Rename folder",
     "actions": "Actions for {{name}}",
+    "expand": "Expand folder",
+    "collapse": "Collapse folder",
+    "documentsCount_one": "{{count}} Document",
+    "documentsCount_other": "{{count}} Documents",
+    "foldersCount_one": "{{count}} Folder",
+    "foldersCount_other": "{{count}} Folders",
     "created": "Folder '{{name}}' created",
     "renamed": "Folder renamed",
     "deleted": "Folder deleted",
@@ -459,8 +414,8 @@
     "uploadedAndAdded": "Uploaded and added '{{title}}'"
   },
   "members": {
-    "inviteTitle": "Invite member",
-    "inviteDescription": "Invite someone to access this deal room.",
+    "inviteTitle": "Invite members",
+    "inviteDescription": "Invite people to access this deal room.",
     "email": "Email",
     "emailPlaceholder": "investor@example.com",
     "role": "Role",
@@ -468,10 +423,16 @@
       "owner": "Owner",
       "admin": "Admin",
       "member": "Member",
-      "viewer": "Viewer"
+      "viewer": "Visitor"
     },
     "inviting": "Inviting...",
     "invited": "Invited {{email}}",
+    "invitedCount": "Invited {{count}} members",
+    "invitedSomeFailed": "Invited {{invited}} of {{total}} members; {{failed}} failed",
+    "addEmail": "Add email",
+    "removeEmail": "Remove email",
+    "invalidEmails": "Some email addresses are invalid: {{emails}}",
+    "emailInvalid": "Invalid email format",
     "remove": "Remove {{email}}",
     "removeConfirm": "Remove {{email}} from this deal room?",
     "removed": "Removed {{email}}",
