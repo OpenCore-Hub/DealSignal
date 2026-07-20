@@ -388,6 +388,45 @@ describe("DealRoomShareDialog", () => {
     expect(vi.mocked(api.createDealRoomLink)).not.toHaveBeenCalled();
   });
 
+  it("blocks create when link name already exists and does not show success", async () => {
+    const { toast } = await import("sonner");
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({
+      data: [
+        {
+          id: "link-existing",
+          name: "Acme DD",
+          shortUrl: "http://localhost/l/existing",
+          dealRoomId: "room-1",
+          status: "active",
+          isActive: true,
+        } as unknown as Link,
+      ],
+    });
+
+    render(
+      <Wrapper>
+        <DealRoomShareDialog roomId="room-1">
+          <Button>Open</Button>
+        </DealRoomShareDialog>
+      </Wrapper>
+    );
+
+    fireEvent.click(screen.getByText("Open"));
+    await waitFor(() => screen.getByText("Create share link"));
+
+    fireEvent.change(screen.getByPlaceholderText("Recipient's Organization"), {
+      target: { value: "acme dd" },
+    });
+
+    expect(screen.getByText("A link with this name already exists")).toBeInTheDocument();
+
+    const dialog = screen.getByRole("dialog");
+    const createButton = within(dialog).getByRole("button", { name: "Create link" });
+    expect(createButton).toBeDisabled();
+    expect(vi.mocked(api.createDealRoomLink)).not.toHaveBeenCalled();
+    expect(toast.success).not.toHaveBeenCalled();
+  });
+
   it("echoes existing deal-room link settings in Share and Access tabs", async () => {
     const editLink: Link = {
       id: "link-edit",

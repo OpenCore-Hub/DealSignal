@@ -144,15 +144,13 @@ async function visitGatedLink(
   await page.goto(url);
   await page.waitForTimeout(1000);
 
+  // Email-verification gates no longer collect email / send codes on the
+  // visitor page; owners issue codes out-of-band. Keep optional email fill for
+  // require-email-only links.
   if (opts.email) {
     const emailInput = page.locator("#email");
     if (await emailInput.isVisible({ timeout: 5000 }).catch(() => false)) {
       await emailInput.fill(opts.email);
-      const sendCodeBtn = page.getByRole("button", { name: /Send code/i });
-      if (await sendCodeBtn.isVisible({ timeout: 2000 }).catch(() => false)) {
-        await sendCodeBtn.click();
-        await page.waitForTimeout(500);
-      }
     }
   }
 
@@ -567,25 +565,3 @@ test("applies expiration, custom domain and notify-on-access, and manages the li
   await expiredPage.close();
 });
 
-test("blocked visitor can request access from the public gate", async ({ page }) => {
-  const allowedEmail = `allowed-req-${Date.now()}@example.com`;
-  const link = await createDealRoomLinkViaApi({ name: "Request Access Target", require_email: true });
-
-  await apiFetch(`/api/workspaces/${seed.workspaceSlug}/links/${link.id}/access-rules`, {
-    method: "POST",
-    body: JSON.stringify({ rules: [{ ruleType: "email", value: allowedEmail, action: "allow" }] }),
-  });
-
-  const visitorPage = await page.context().newPage();
-  attachDebug(visitorPage);
-  await visitorPage.goto(link.shortUrl);
-  await visitorPage.locator("#email").fill(`request-${Date.now()}@example.com`);
-  await visitorPage.getByRole("button", { name: /Continue/i }).click();
-
-  await expect(visitorPage.getByText(/Access denied|not allowed/i)).toBeVisible({ timeout: 10000 });
-  await visitorPage.getByRole("button", { name: /Request access/i }).click();
-  await visitorPage.getByLabel("Email").fill(`request-${Date.now()}@example.com`);
-  await visitorPage.getByRole("button", { name: /Submit request/i }).click();
-  await expect(visitorPage.getByText(/Your access request has been submitted/i).first()).toBeVisible({ timeout: 10000 });
-  await visitorPage.close();
-});

@@ -388,6 +388,34 @@ SELECT *
 FROM links
 WHERE deal_room_id = $1;
 
+-- name: ExistsLinkNameInDealRoom :one
+-- Case-insensitive uniqueness among non-deleted links in a deal room.
+-- exclude_id may be NULL when creating a new link.
+SELECT EXISTS (
+  SELECT 1
+  FROM links
+  WHERE deal_room_id = sqlc.arg(deal_room_id)
+    AND status <> 'deleted'
+    AND name IS NOT NULL
+    AND btrim(name) <> ''
+    AND lower(btrim(name)) = lower(btrim(sqlc.arg(name)))
+    AND (sqlc.narg(exclude_id)::uuid IS NULL OR id <> sqlc.narg(exclude_id))
+) AS exists;
+
+-- name: ExistsLinkNameInWorkspace :one
+-- Case-insensitive uniqueness among non-deleted document links in a workspace.
+SELECT EXISTS (
+  SELECT 1
+  FROM links
+  WHERE workspace_id = sqlc.arg(workspace_id)
+    AND deal_room_id IS NULL
+    AND status <> 'deleted'
+    AND name IS NOT NULL
+    AND btrim(name) <> ''
+    AND lower(btrim(name)) = lower(btrim(sqlc.arg(name)))
+    AND (sqlc.narg(exclude_id)::uuid IS NULL OR id <> sqlc.narg(exclude_id))
+) AS exists;
+
 -- name: UpdateLinkFolderScopePaths :exec
 UPDATE links
 SET folder_scope_paths = $1, updated_at = now()
@@ -1999,8 +2027,21 @@ VALUES (sqlc.arg(workspace_id), sqlc.arg(email), NULLIF(sqlc.arg(name), ''))
 RETURNING id, workspace_id, email, name, created_at;
 
 -- name: CreateLinkContact :exec
-INSERT INTO link_contacts (link_id, contact_id, access_code)
-VALUES ($1, $2, $3);
+INSERT INTO link_contacts (link_id, contact_id, access_code, code_send_status)
+VALUES ($1, $2, $3, 'pending');
+
+-- name: CreateLinkContactWithDelivery :exec
+-- Preserves delivery metadata when recreating link_contacts (e.g. document link update).
+INSERT INTO link_contacts (
+    link_id, contact_id, access_code,
+    code_send_status, code_send_error, code_sent_at, used_at
+) VALUES (
+    $1, $2, $3,
+    sqlc.arg(code_send_status),
+    NULLIF(sqlc.arg(code_send_error), ''),
+    sqlc.narg(code_sent_at),
+    sqlc.narg(used_at)
+);
 
 -- name: DeleteLinkContactsByLink :exec
 DELETE FROM link_contacts
@@ -2013,6 +2054,7 @@ WHERE lc.link_id = $1;
 
 -- name: GetLinkContactsByPublicToken :many
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       lc.code_send_status, lc.code_send_error,
        c.email AS contact_email, c.name AS contact_name
 FROM link_contacts lc
 JOIN links l ON l.id = lc.link_id
@@ -2021,6 +2063,7 @@ WHERE l.public_token = $1;
 
 -- name: GetLinkContactByEmail :one
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       lc.code_send_status, lc.code_send_error,
        c.email AS contact_email, c.name AS contact_name
 FROM link_contacts lc
 JOIN links l ON l.id = lc.link_id
@@ -2030,6 +2073,7 @@ LIMIT 1;
 
 -- name: GetLinkContactByCode :one
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       lc.code_send_status, lc.code_send_error,
        c.email AS contact_email, c.name AS contact_name
 FROM link_contacts lc
 JOIN links l ON l.id = lc.link_id
@@ -2039,8 +2083,36 @@ LIMIT 1;
 
 -- name: UpdateLinkContactAccessCode :exec
 UPDATE link_contacts
-SET access_code = $2, code_sent_at = now(), used_at = NULL
+SET access_code = $2,
+    code_sent_at = now(),
+    used_at = NULL,
+    code_send_status = 'pending',
+    code_send_error = NULL
 WHERE id = $1;
+
+-- name: UpdateLinkContactSendStatusByEmail :exec
+UPDATE link_contacts lc
+SET code_send_status = sqlc.arg(status),
+    code_send_error = NULLIF(sqlc.arg(error_message), '')
+FROM links l, contacts c
+WHERE lc.link_id = l.id
+  AND lc.contact_id = c.id
+  AND l.public_token = sqlc.arg(public_token)
+  AND lower(c.email) = lower(sqlc.arg(email));
+
+-- name: ListLinkAccessCodeContactsByLink :many
+SELECT
+    c.email::text AS contact_email,
+    COALESCE(c.name, '')::text AS contact_name,
+    lc.code_sent_at,
+    lc.code_send_status,
+    COALESCE(lc.code_send_error, '')::text AS code_send_error,
+    lc.used_at,
+    lc.created_at
+FROM link_contacts lc
+JOIN contacts c ON c.id = lc.contact_id
+WHERE lc.link_id = $1
+ORDER BY lc.code_sent_at DESC NULLS LAST, c.email ASC;
 
 -- name: CreateLinkDocument :exec
 INSERT INTO link_documents (link_id, document_id, sort_order)

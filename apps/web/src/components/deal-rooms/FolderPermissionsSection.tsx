@@ -1,6 +1,12 @@
 import { useState } from "react";
-import { Link as LinkIcon } from "@phosphor-icons/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  ChartLine,
+  EnvelopeSimple,
+  Link as LinkIcon,
+  PencilSimple,
+  Trash,
+} from "@phosphor-icons/react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -19,19 +25,20 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
+import { SendVerificationCodeDialog } from "./SendVerificationCodeDialog";
 import { LinkActivityDialog } from "@/components/links/share";
 import { RowActions } from "@/components/common/RowActions";
 import type { Link } from "@/types";
 
 interface FolderPermissionsSectionProps {
   roomId: string;
+  /** Bump to force-reload links after creates from outside this section (e.g. toolbar). */
+  refreshKey?: number;
 }
 
 function formatLastViewed(value?: string): string {
@@ -43,11 +50,10 @@ function formatLastViewed(value?: string): string {
   }
 }
 
-function extractLinkToken(shortUrl: string): string {
-  return shortUrl.split("/").pop() ?? shortUrl;
-}
-
-export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionProps) {
+export function FolderPermissionsSection({
+  roomId,
+  refreshKey = 0,
+}: FolderPermissionsSectionProps) {
   const { t } = useTranslation("dealRooms");
   const {
     data: links,
@@ -56,13 +62,11 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
   } = useAsyncData(async () => {
     const res = await api.getDealRoomLinks(roomId);
     return res.data;
-  }, [roomId]);
+  }, [roomId, refreshKey]);
 
   const [viewLink, setViewLink] = useState<Link | null>(null);
   const [editLink, setEditLink] = useState<Link | null>(null);
   const [sendCodeLink, setSendCodeLink] = useState<Link | null>(null);
-  const [sendCodeEmail, setSendCodeEmail] = useState("");
-  const [sendCodeLoading, setSendCodeLoading] = useState(false);
   const [deleteLink, setDeleteLink] = useState<Link | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
@@ -72,25 +76,6 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
       await refetch();
     } catch {
       // error toast handled by api client
-    }
-  };
-
-  const handleSendCode = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!sendCodeLink || !sendCodeEmail.trim()) return;
-    setSendCodeLoading(true);
-    try {
-      const token = extractLinkToken(sendCodeLink.shortUrl);
-      await api.sendEmailVerificationCode(token, sendCodeEmail.trim());
-      toast.success(t("permissions.links.sendCode.success"));
-      setSendCodeLink(null);
-      setSendCodeEmail("");
-    } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : t("permissions.links.sendCode.error")
-      );
-    } finally {
-      setSendCodeLoading(false);
     }
   };
 
@@ -113,15 +98,7 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
 
   return (
     <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>{t("permissions.links.title")}</CardTitle>
-        {linkList.length > 0 && (
-          <DealRoomShareDialog roomId={roomId} onChanged={refetch}>
-            <Button size="sm">{t("permissions.links.createLink")}</Button>
-          </DealRoomShareDialog>
-        )}
-      </CardHeader>
-      <CardContent>
+      <CardContent className="pt-6">
         <div className="overflow-hidden rounded-lg border">
           <Table>
             <TableHeader>
@@ -200,25 +177,26 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
                         actions={[
                           {
                             label: t("permissions.links.actions.view"),
+                            icon: <ChartLine size={16} />,
                             onClick: () => setViewLink(link),
                           },
                           {
                             label: t("permissions.links.actions.edit"),
+                            icon: <PencilSimple size={16} />,
                             onClick: () => setEditLink(link),
                           },
                           ...(link.requireEmailVerification
                             ? [
                                 {
                                   label: t("permissions.links.actions.sendCode"),
-                                  onClick: () => {
-                                    setSendCodeLink(link);
-                                    setSendCodeEmail("");
-                                  },
+                                  icon: <EnvelopeSimple size={16} />,
+                                  onClick: () => setSendCodeLink(link),
                                 },
                               ]
                             : []),
                           {
                             label: t("permissions.links.actions.delete"),
+                            icon: <Trash size={16} />,
                             destructive: true,
                             onClick: () => setDeleteLink(link),
                           },
@@ -251,43 +229,11 @@ export function FolderPermissionsSection({ roomId }: FolderPermissionsSectionPro
         />
       )}
 
-      <Dialog open={!!sendCodeLink} onOpenChange={(open) => !open && setSendCodeLink(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("permissions.links.sendCode.title")}</DialogTitle>
-            <DialogDescription>
-              {t("permissions.links.sendCode.description")}
-            </DialogDescription>
-          </DialogHeader>
-          <form onSubmit={handleSendCode} className="space-y-4 py-2">
-            <div className="space-y-2">
-              <Label htmlFor="send-code-email">{t("permissions.links.sendCode.emailLabel")}</Label>
-              <Input
-                id="send-code-email"
-                type="email"
-                placeholder={t("permissions.links.sendCode.emailPlaceholder")}
-                value={sendCodeEmail}
-                onChange={(e) => setSendCodeEmail(e.target.value)}
-                required
-                disabled={sendCodeLoading}
-              />
-            </div>
-            <DialogFooter>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => setSendCodeLink(null)}
-                disabled={sendCodeLoading}
-              >
-                {t("common:cancel")}
-              </Button>
-              <Button type="submit" disabled={sendCodeLoading || !sendCodeEmail.trim()}>
-                {sendCodeLoading ? t("permissions.links.sendCode.sending") : t("permissions.links.sendCode.send")}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      <SendVerificationCodeDialog
+        link={sendCodeLink}
+        open={!!sendCodeLink}
+        onOpenChange={(open) => !open && setSendCodeLink(null)}
+      />
 
       <Dialog open={!!deleteLink} onOpenChange={(open) => !open && setDeleteLink(null)}>
         <DialogContent className="sm:max-w-md">

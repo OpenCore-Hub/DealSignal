@@ -19,7 +19,6 @@ import type {
   HeatLevel,
   IntegrationStatus,
   Link,
-  LinkAccessRequest,
   LinkAnalytics,
   PageAnalytics,
   PermissionConfig,
@@ -346,14 +345,6 @@ export const api = {
       headers: publicAccessHeaders(creds),
     }),
 
-  // Public access requests
-  createLinkAccessRequest: (token: string, payload: { email: string; reason?: string }) =>
-    request<{ data: LinkAccessRequest }>(undefined, `/v1/public/links/${token}/access-requests`, {
-      method: "POST",
-      skipAuth: true,
-      body: JSON.stringify(payload),
-    }),
-
   sendEmailVerificationCode: (token: string, email: string) =>
     request<void>(undefined, `/v1/public/links/${token}/send-email-code`, {
       method: "POST",
@@ -481,6 +472,25 @@ export const api = {
     ),
   getLinkAnalytics: (linkId: string) =>
     request<{ data: LinkAnalytics }>(getWorkspaceSlug(), `/links/${linkId}/analytics`),
+
+  resendLinkAccessCode: (linkId: string, email: string, force = false) =>
+    request<void>(getWorkspaceSlug(), `/links/${linkId}/access-codes/resend`, {
+      method: "POST",
+      body: JSON.stringify({ email, force }),
+    }),
+
+  resendFailedLinkAccessCodes: (linkId: string) =>
+    request<{
+      data: {
+        attempted: number;
+        sent: number;
+        failed: number;
+        skipped: number;
+        errors?: string[];
+      };
+    }>(getWorkspaceSlug(), `/links/${linkId}/access-codes/resend-failed`, {
+      method: "POST",
+    }),
 
   // Deal-room share links.
   createDealRoomLink: (roomId: string, payload: CreateDealRoomLinkPayload) =>
@@ -625,12 +635,6 @@ export const api = {
   // Public deal room
   getPublicDealRoom: (slug: string, email?: string) =>
     request<PublicDealRoomView>(undefined, `/v1/public/deal-rooms/${slug}${email ? `?email=${encodeURIComponent(email)}` : ""}`, {
-      skipAuth: true,
-    }),
-  requestDealRoomAccess: (slug: string, payload: { email: string; reason?: string }) =>
-    request<{ request_id: string }>(undefined, `/v1/public/deal-rooms/${slug}/access-requests`, {
-      method: "POST",
-      body: JSON.stringify(payload),
       skipAuth: true,
     }),
   signDealRoomNDA: (slug: string, payload: { email: string }) =>

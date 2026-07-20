@@ -4,6 +4,7 @@ package link
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -47,7 +49,22 @@ func TestDealRoomEmailVerification_OnDemand(t *testing.T) {
 
 	ctx := context.Background()
 
-	// 1. A visitor whose email is on the allow list requests a code.
+	// 1. Create already sent one access-code email to the allow-listed visitor.
+	deadline := time.Now().Add(2 * time.Second)
+	var createJobs []mailer.EmailJob
+	for time.Now().Before(deadline) {
+		createJobs = f.mailer.snapshotJobs()
+		if len(createJobs) >= 1 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(createJobs) != 1 {
+		t.Fatalf("expected 1 create-time mailer job, got %d", len(createJobs))
+	}
+	createCode := createJobs[0].Code
+
+	// 2. Visitor requests a fresh code (on-demand resend).
 	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "alice@example.com", "http://viewer.example.com"); err != nil {
 		t.Fatalf("send email verification code: %v", err)
 	}
@@ -76,17 +93,21 @@ func TestDealRoomEmailVerification_OnDemand(t *testing.T) {
 		t.Fatalf("expected 6-digit code, got %q", lc.AccessCode)
 	}
 
-	if len(f.mailer.jobs) != 1 {
-		t.Fatalf("expected 1 mailer job, got %d", len(f.mailer.jobs))
+	jobs := f.mailer.snapshotJobs()
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 mailer jobs (create + resend), got %d", len(jobs))
 	}
-	if f.mailer.jobs[0].EmailType != "access_code" {
-		t.Fatalf("expected access_code email type, got %q", f.mailer.jobs[0].EmailType)
+	if jobs[1].EmailType != mailer.EmailTypeAccessCode {
+		t.Fatalf("expected access_code email type, got %q", jobs[1].EmailType)
 	}
-	if f.mailer.jobs[0].Recipient != "alice@example.com" {
-		t.Fatalf("unexpected recipient: %s", f.mailer.jobs[0].Recipient)
+	if jobs[1].Recipient != "alice@example.com" {
+		t.Fatalf("unexpected recipient: %s", jobs[1].Recipient)
 	}
-	if f.mailer.jobs[0].Code != lc.AccessCode {
-		t.Fatalf("expected mailer code %q to match link_contact code %q", f.mailer.jobs[0].Code, lc.AccessCode)
+	if jobs[1].Code != lc.AccessCode {
+		t.Fatalf("expected mailer code %q to match link_contact code %q", jobs[1].Code, lc.AccessCode)
+	}
+	if jobs[1].Code == createCode {
+		t.Fatal("expected resend to issue a new code")
 	}
 
 	// 2. Access with the correct email + code succeeds.
@@ -156,14 +177,14 @@ func TestDealRoomEmailVerification_AccessRules(t *testing.T) {
 
 	ctx := context.Background()
 
-	// Blocked email should be rejected.
-	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "leaker@bad.com", "http://viewer.example.com"); err == nil {
-		t.Fatal("expected blocked email to be rejected")
+	// Blocked email should be rejected with a typed error.
+	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "leaker@bad.com", "http://viewer.example.com"); !errors.Is(err, ErrBlockedEmail) {
+		t.Fatalf("expected ErrBlockedEmail, got %v", err)
 	}
 
-	// Email not on the allow list should be rejected.
-	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "stranger@example.com", "http://viewer.example.com"); err == nil {
-		t.Fatal("expected not-allowed email to be rejected")
+	// Email not on the allow list should be rejected with a typed error.
+	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "stranger@example.com", "http://viewer.example.com"); !errors.Is(err, ErrNotAllowedEmail) {
+		t.Fatalf("expected ErrNotAllowedEmail, got %v", err)
 	}
 
 	// Allowed email should succeed.
@@ -205,7 +226,8 @@ func TestDealRoomEmailVerification_Resend(t *testing.T) {
 	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "alice@example.com", "http://viewer.example.com"); err != nil {
 		t.Fatalf("first send: %v", err)
 	}
-	firstCode := f.mailer.jobs[len(f.mailer.jobs)-1].Code
+	jobs := f.mailer.snapshotJobs()
+	firstCode := jobs[len(jobs)-1].Code
 
 	// Rate limit window is 1 minute; without Redis the helper fail-opens, so
 	// resend immediately should succeed.
@@ -213,7 +235,8 @@ func TestDealRoomEmailVerification_Resend(t *testing.T) {
 	if err := f.svc.SendEmailVerificationCode(ctx, link.PublicToken, "alice@example.com", "http://viewer.example.com"); err != nil {
 		t.Fatalf("resend: %v", err)
 	}
-	secondCode := f.mailer.jobs[len(f.mailer.jobs)-1].Code
+	jobs = f.mailer.snapshotJobs()
+	secondCode := jobs[len(jobs)-1].Code
 
 	if firstCode == secondCode {
 		t.Fatal("expected code to be refreshed on resend")
@@ -240,4 +263,73 @@ func TestDealRoomEmailVerification_Resend(t *testing.T) {
 
 func pgtypeText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
+}
+
+// TestDealRoomEmailVerification_SendsCodesOnCreate ensures create-time
+// allowed_emails receive access-code emails immediately when verification is on.
+func TestDealRoomEmailVerification_SendsCodesOnCreate(t *testing.T) {
+	f := newFixture(t)
+	defer f.tx.Rollback(f.ctx)
+
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{})
+	room, err := drSvc.CreateRoom(f.ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug:         "room-" + uuid.NewString(),
+		Name:         "Create-time Code Room",
+		TemplateType: "custom",
+	})
+	if err != nil {
+		t.Fatalf("create deal room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	link, err := f.svc.CreateDealRoomLink(f.ctx, userID, wsID, roomID, DealRoomLinkRequest{
+		Name:                     "Create-time verified link",
+		RequireEmailVerification: true,
+		AllowedEmails:            []string{"alice@example.com", "bob@example.com"},
+		NotifyOnAccess:           true,
+	})
+	if err != nil {
+		t.Fatalf("create deal room link: %v", err)
+	}
+
+	// Wait for async create-time sends.
+	deadline := time.Now().Add(2 * time.Second)
+	var jobs []mailer.EmailJob
+	for time.Now().Before(deadline) {
+		jobs = f.mailer.snapshotJobs()
+		if len(jobs) >= 2 {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 access-code emails on create, got %d", len(jobs))
+	}
+
+	recipients := map[string]bool{}
+	for _, job := range jobs {
+		if job.EmailType != mailer.EmailTypeAccessCode {
+			t.Fatalf("expected access_code email type, got %q", job.EmailType)
+		}
+		recipients[job.Recipient] = true
+	}
+	if !recipients["alice@example.com"] || !recipients["bob@example.com"] {
+		t.Fatalf("expected alice and bob to receive codes, got %#v", recipients)
+	}
+
+	for _, email := range []string{"alice@example.com", "bob@example.com"} {
+		lc, err := f.q.GetLinkContactByEmail(f.ctx, db.GetLinkContactByEmailParams{
+			PublicToken: link.PublicToken,
+			Email:       pgtypeText(email),
+		})
+		if err != nil {
+			t.Fatalf("get link contact for %s: %v", email, err)
+		}
+		if len(lc.AccessCode) != 6 {
+			t.Fatalf("expected 6-digit code for %s, got %q", email, lc.AccessCode)
+		}
+	}
 }

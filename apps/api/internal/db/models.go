@@ -346,13 +346,15 @@ type LinkAccessRuleRevision struct {
 }
 
 type LinkContact struct {
-	ID         pgtype.UUID
-	LinkID     pgtype.UUID
-	ContactID  pgtype.UUID
-	AccessCode string
-	CodeSentAt pgtype.Timestamptz
-	UsedAt     pgtype.Timestamptz
-	CreatedAt  pgtype.Timestamptz
+	ID             pgtype.UUID
+	LinkID         pgtype.UUID
+	ContactID      pgtype.UUID
+	AccessCode     string
+	CodeSentAt     pgtype.Timestamptz
+	UsedAt         pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	CodeSendStatus string
+	CodeSendError  pgtype.Text
 }
 
 type LinkDocument struct {

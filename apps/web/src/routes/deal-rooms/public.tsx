@@ -19,7 +19,6 @@ import type { PublicDealRoomView } from "@/lib/api";
 
 type ViewState =
   | { stage: "email"; loading: boolean; error: string | null }
-  | { stage: "request"; loading: boolean; error: string | null }
   | { stage: "nda"; loading: boolean; error: string | null }
   | { stage: "room"; loading: boolean; error: string | null };
 
@@ -27,7 +26,6 @@ export function PublicDealRoomPage() {
   const { slug } = useParams<{ slug: string }>();
   const { t } = useTranslation("dealRooms");
   const [email, setEmail] = useState("");
-  const [reason, setReason] = useState("");
   const [view, setView] = useState<PublicDealRoomView | null>(null);
   const [state, setState] = useState<ViewState>({ stage: "email", loading: false, error: null });
 
@@ -42,29 +40,16 @@ export function PublicDealRoomPage() {
       const res = await api.getPublicDealRoom(slug, email.trim());
       setView(res);
       if (!res.member) {
-        setStage("request");
+        setStage("email", { error: t("public.accessDenied") });
       } else if (res.room.ndaEnabled && res.member.ndaStatus !== "signed") {
         setStage("nda");
       } else if (res.member.status !== "active") {
-        setStage("request");
+        setStage("email", { error: t("public.accessPending") });
       } else {
         setStage("room");
       }
     } catch (e) {
       setStage("email", { error: e instanceof Error ? e.message : t("public.loadFailed") });
-    }
-  };
-
-  const handleRequestAccess = async () => {
-    if (!slug || !email.trim()) return;
-    setStage("request", { loading: true });
-    try {
-      await api.requestDealRoomAccess(slug, { email: email.trim(), reason: reason.trim() });
-      setStage("request", { error: null });
-      // Re-check status after request.
-      await handleLookup();
-    } catch (e) {
-      setStage("request", { error: e instanceof Error ? e.message : t("public.requestFailed") });
     }
   };
 
@@ -119,23 +104,6 @@ export function PublicDealRoomPage() {
               <Button className="w-full gap-1" onClick={() => void handleLookup()} disabled={state.loading || !email.trim()}>
                 {t("public.continue")}
                 <ArrowRight size={16} />
-              </Button>
-            </>
-          )}
-          {state.stage === "request" && (
-            <>
-              <p className="text-body text-muted-foreground">{t("public.requestDescription")}</p>
-              <div className="space-y-2">
-                <Label htmlFor="request-reason">{t("public.reason")}</Label>
-                <Input
-                  id="request-reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder={t("public.reasonPlaceholder")}
-                />
-              </div>
-              <Button className="w-full" onClick={() => void handleRequestAccess()} disabled={state.loading}>
-                {t("public.requestAccess")}
               </Button>
             </>
           )}

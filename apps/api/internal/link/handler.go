@@ -68,6 +68,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.DELETE("/:id", h.Delete)
 	g.GET("/:id/access-logs", h.AccessLogs)
 	g.GET("/:id/analytics", h.LinkAnalytics)
+	g.POST("/:id/access-codes/resend", h.OwnerResendAccessCode)
+	g.POST("/:id/access-codes/resend-failed", h.OwnerResendFailedAccessCodes)
 	g.GET("/:id/access-rules", h.GetAccessRules)
 	g.POST("/:id/access-rules", h.SetAccessRules)
 	g.GET("/:id/invitations", h.ListInvitations)
@@ -467,6 +469,10 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
 			return
 		}
+		if errors.Is(err, ErrDuplicateName) {
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -783,6 +789,8 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
+		case errors.Is(err, ErrDuplicateName):
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
 		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		default:
@@ -870,7 +878,59 @@ func (h *Handler) LinkAnalytics(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, analytics)
+	c.JSON(http.StatusOK, gin.H{"data": analytics})
+}
+
+// OwnerResendAccessCode remediates delivery for one invitee (workspace auth).
+func (h *Handler) OwnerResendAccessCode(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	var body struct {
+		Email string `json:"email" binding:"required,email"`
+		Force bool   `json:"force"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+
+	if err := h.service.OwnerResendAccessCode(c.Request.Context(), c.Param("id"), workspaceID, body.Email, body.Force); err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		case errors.Is(err, ErrAccessCodeContactNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": err.Error()})
+		case errors.Is(err, ErrEmailVerificationDisabled):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": err.Error()})
+		case errors.Is(err, ErrAccessCodeResendNotNeeded):
+			c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": err.Error()})
+		case errors.Is(err, ErrEmailCodeRateLimited):
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": err.Error()})
+		case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
+			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access code"})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
+// OwnerResendFailedAccessCodes remediates all failed / stuck-pending invitees.
+func (h *Handler) OwnerResendFailedAccessCodes(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	summary, err := h.service.OwnerResendFailedAccessCodes(c.Request.Context(), c.Param("id"), workspaceID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		case errors.Is(err, ErrEmailVerificationDisabled):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access codes"})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": summary})
 }
 
 // Create handles smart-link creation.
@@ -922,6 +982,8 @@ func (h *Handler) Create(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrDocumentNotReady):
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
+		case errors.Is(err, ErrDuplicateName):
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
 		case errors.Is(err, ErrInvalidPermission):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
 		default:
@@ -1244,15 +1306,20 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 	}
 
 	if err := h.service.SendEmailVerificationCode(c.Request.Context(), token, body.Email, h.cfg.ViewerBaseURL); err != nil {
-		if errors.Is(err, ErrLinkNotFound) {
+		switch {
+		case errors.Is(err, ErrLinkNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
-			return
-		}
-		if errors.Is(err, ErrRequiresEmail) {
+		case errors.Is(err, ErrRequiresEmail):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": err.Error()})
-			return
+		case errors.Is(err, ErrBlockedEmail):
+			c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": err.Error()})
+		case errors.Is(err, ErrNotAllowedEmail):
+			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+		case errors.Is(err, ErrEmailCodeRateLimited):
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
 		return
 	}
 	c.Status(http.StatusNoContent)

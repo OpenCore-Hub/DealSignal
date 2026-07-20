@@ -1,9 +1,12 @@
 package link
 
 import (
+	"context"
 	"errors"
 	"testing"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -574,4 +577,52 @@ func TestValidateAccessRules(t *testing.T) {
 			}
 		})
 	}
+}
+
+type mockLinkNameQuerier struct {
+	dealRoomExists  bool
+	workspaceExists bool
+	err             error
+}
+
+func (m mockLinkNameQuerier) ExistsLinkNameInDealRoom(ctx context.Context, arg db.ExistsLinkNameInDealRoomParams) (bool, error) {
+	return m.dealRoomExists, m.err
+}
+
+func (m mockLinkNameQuerier) ExistsLinkNameInWorkspace(ctx context.Context, arg db.ExistsLinkNameInWorkspaceParams) (bool, error) {
+	return m.workspaceExists, m.err
+}
+
+func TestEnsureUniqueLinkName(t *testing.T) {
+	svc := &Service{}
+	dealRoomID := pgtype.UUID{Valid: true}
+	workspaceID := pgtype.UUID{Valid: true}
+
+	t.Run("allows unique deal-room name", func(t *testing.T) {
+		err := svc.ensureUniqueLinkName(context.Background(), mockLinkNameQuerier{}, workspaceID, dealRoomID, "Acme DD", pgtype.UUID{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("rejects duplicate deal-room name", func(t *testing.T) {
+		err := svc.ensureUniqueLinkName(context.Background(), mockLinkNameQuerier{dealRoomExists: true}, workspaceID, dealRoomID, "Acme DD", pgtype.UUID{})
+		if !errors.Is(err, ErrDuplicateName) {
+			t.Fatalf("expected ErrDuplicateName, got %v", err)
+		}
+	})
+
+	t.Run("rejects duplicate workspace document-link name", func(t *testing.T) {
+		err := svc.ensureUniqueLinkName(context.Background(), mockLinkNameQuerier{workspaceExists: true}, workspaceID, pgtype.UUID{}, "Acme DD", pgtype.UUID{})
+		if !errors.Is(err, ErrDuplicateName) {
+			t.Fatalf("expected ErrDuplicateName, got %v", err)
+		}
+	})
+
+	t.Run("skips empty names", func(t *testing.T) {
+		err := svc.ensureUniqueLinkName(context.Background(), mockLinkNameQuerier{dealRoomExists: true}, workspaceID, dealRoomID, "  ", pgtype.UUID{})
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
 }

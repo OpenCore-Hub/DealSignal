@@ -14,6 +14,8 @@ import (
 	"io"
 	"net/url"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
@@ -39,9 +41,12 @@ type Beginner interface {
 }
 
 // emailCode holds an email address and its access code for async delivery.
+// epoch ties the outbound message to the latest code rotation for that
+// recipient so a delayed create-time send cannot overwrite a newer manual resend.
 type emailCode struct {
 	email string
 	code  string
+	epoch uint64
 }
 
 // Notifier is the subset of notification.Service needed by link.Service.
@@ -63,6 +68,10 @@ type Service struct {
 	emailSem       chan struct{} // limits concurrent email sends (bounded goroutines)
 	indexGenGroup  singleflight.Group
 	actionSyncer   ActionSyncer
+	// accessCodeEpoch tracks the latest code-rotation generation per
+	// publicToken+email so async sends can detect superseded codes without
+	// touching the DB (safe under the integration-test shared-tx fixture).
+	accessCodeEpoch sync.Map // map[string]*uint64
 }
 
 // ActionSyncer resolves operational action items when link events are handled.
@@ -130,7 +139,17 @@ var (
 	ErrInviteAlreadyUsed     = errors.New("invitation already used")
 	ErrInvalidAccessRule     = errors.New("invalid access rule")
 	ErrConflictingAccessRule = errors.New("conflicting access rule")
+	ErrDuplicateName             = errors.New("a link with this name already exists")
+	ErrEmailCodeRateLimited      = errors.New("too many verification code requests, please try again later")
+	ErrAccessCodeContactNotFound = errors.New("access code contact not found")
+	ErrAccessCodeResendNotNeeded = errors.New("access code already delivered; pass force=true to resend")
+	ErrEmailVerificationDisabled = errors.New("email verification is not enabled for this link")
 )
+
+// ownerResendPendingStale is how long a contact may stay "pending" before the
+// owner remediates UI treats it as stuck (async send likely lost). Shorter
+// windows would encourage duplicate sends while the background job is in flight.
+const ownerResendPendingStale = 2 * time.Minute
 
 // ResolvePublicLink validates a public token and returns the active link.
 // It checks status, expiry, and max access limits. It is intended for
@@ -452,6 +471,10 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		return db.Link{}, err
 	}
 
+	if err := s.ensureUniqueLinkName(ctx, qtx, workspaceUUID, dealRoomID, req.Name, pgtype.UUID{}); err != nil {
+		return db.Link{}, err
+	}
+
 	link, err := qtx.CreateLink(ctx, db.CreateLinkParams{
 		TenantID:                    tenantID,
 		WorkspaceID:                 workspaceUUID,
@@ -538,7 +561,26 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 			}); err != nil {
 				return db.Link{}, fmt.Errorf("create link contact: %w", err)
 			}
-			emailCodes = append(emailCodes, emailCode{email: contact.Email.String, code: code})
+			emailCodes = append(emailCodes, emailCode{
+				email: contact.Email.String,
+				code:  code,
+				epoch: s.bumpAccessCodeEpoch(token, contact.Email.String),
+			})
+		}
+
+		// Deal-room share links identify visitors via allowed_emails rather than
+		// pre-selected contact IDs. Provision contacts + access codes at create
+		// time so recipients receive verification emails immediately.
+		if hasDealRoom {
+			seenEmails := make(map[string]struct{}, len(emailCodes)+len(req.AllowedEmails))
+			for _, ec := range emailCodes {
+				seenEmails[strings.ToLower(strings.TrimSpace(ec.email))] = struct{}{}
+			}
+			provisioned, err := s.upsertDealRoomAccessCodes(ctx, qtx, link, req.AllowedEmails, seenEmails)
+			if err != nil {
+				return db.Link{}, err
+			}
+			emailCodes = append(emailCodes, provisioned...)
 		}
 	}
 
@@ -606,7 +648,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	// not block the create-link response. Bounded by a semaphore to avoid
 	// unbounded goroutine creation when links are created with many contacts.
 	linkURL := publicLinkURL(s.viewerBaseURL, token, req.CustomDomain)
-	s.sendAccessCodeEmails(ctx, emailCodes, req.Name, linkURL)
+	s.sendAccessCodeEmails(ctx, token, emailCodes, req.Name, linkURL)
 	return link, nil
 }
 
@@ -627,6 +669,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	isDealRoomLink := existing.DealRoomID.Valid
 	isDocumentLink := existing.DocumentID.Valid
+	wasEmailVerification := existing.RequireEmailVerification
 
 	createReq := CreateLinkRequest{
 		Name:                     req.Name,
@@ -731,6 +774,12 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		return db.Link{}, err
 	}
 
+	if name.Valid {
+		if err := s.ensureUniqueLinkName(ctx, qtx, workspaceUUID, existing.DealRoomID, name.String, existing.ID); err != nil {
+			return db.Link{}, err
+		}
+	}
+
 	// Update the link record using the sqlc-generated UpdateLinkFull.
 	_, err = qtx.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
 		Name:                        name,
@@ -812,63 +861,105 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		}
 	}
 
-	// Fetch existing link contacts before deletion for diff-based email sending.
-	// We only send new verification codes to contacts that are being added in
-	// this update, not to contacts that were already on the link.
-	var existingContactIDs map[string]string // contactID -> accessCode
-	if requireEmailVerification {
-		existingContacts, _ := qtx.GetLinkContactsByPublicToken(ctx, existing.PublicToken)
-		existingContactIDs = make(map[string]string, len(existingContacts))
-		for _, lc := range existingContacts {
-			existingContactIDs[uuid.UUID(lc.ContactID.Bytes).String()] = lc.AccessCode
-		}
-	}
-
-	// Replace link_contacts. Always clean up existing; only re-create if email
-	// verification is still enabled.
+	// Document links replace link_contacts from ContactIDs. Deal-room links gate
+	// visitors via access rules (allowed_emails); their link_contacts are owned by
+	// CreateLink / UpdateAccessRules / SendEmailVerificationCode. Wiping them on
+	// every UpdateLink would destroy create-time auto-sent codes on the next save.
 	var emailCodes []emailCode
-	if err := qtx.DeleteLinkContactsByLink(ctx, existing.ID); err != nil {
-		return db.Link{}, fmt.Errorf("delete link contacts: %w", err)
-	}
-	if requireEmailVerification {
-		contacts, err := qtx.ListContactsByWorkspace(ctx, workspaceUUID)
-		if err != nil {
-			return db.Link{}, fmt.Errorf("list contacts: %w", err)
-		}
-		contactMap := make(map[string]db.Contact, len(contacts))
-		for _, c := range contacts {
-			contactMap[uuid.UUID(c.ID.Bytes).String()] = c
-		}
-		for _, cid := range req.ContactIDs {
-			contact, ok := contactMap[cid]
-			if !ok {
-				return db.Link{}, fmt.Errorf("%w: contact %s not found in workspace", ErrInvalidPermission, cid)
+	if isDealRoomLink {
+		if !requireEmailVerification {
+			if err := qtx.DeleteLinkContactsByLink(ctx, existing.ID); err != nil {
+				return db.Link{}, fmt.Errorf("delete link contacts: %w", err)
 			}
-			contactUUID := pgUUID(cid)
-			if !contactUUID.Valid {
-				return db.Link{}, fmt.Errorf("invalid contact id: %s", cid)
+		}
+	} else {
+		// Fetch existing link contacts before deletion so we can:
+		//  - reuse codes for contacts that remain (不骚扰 — no re-mail)
+		//  - preserve delivery status metadata (不漏信息 — status must stay truthful)
+		//  - email only newly added contacts
+		type contactDeliverySnapshot struct {
+			AccessCode     string
+			CodeSendStatus string
+			CodeSendError  string
+			CodeSentAt     pgtype.Timestamptz
+			UsedAt         pgtype.Timestamptz
+		}
+		var existingByContactID map[string]contactDeliverySnapshot
+		if requireEmailVerification {
+			existingContacts, _ := qtx.GetLinkContactsByPublicToken(ctx, existing.PublicToken)
+			existingByContactID = make(map[string]contactDeliverySnapshot, len(existingContacts))
+			for _, lc := range existingContacts {
+				errMsg := ""
+				if lc.CodeSendError.Valid {
+					errMsg = lc.CodeSendError.String
+				}
+				status := lc.CodeSendStatus
+				if status == "" {
+					status = "pending"
+				}
+				existingByContactID[uuid.UUID(lc.ContactID.Bytes).String()] = contactDeliverySnapshot{
+					AccessCode:     lc.AccessCode,
+					CodeSendStatus: status,
+					CodeSendError:  errMsg,
+					CodeSentAt:     lc.CodeSentAt,
+					UsedAt:         lc.UsedAt,
+				}
 			}
+		}
 
-			// Reuse existing access code if the contact was already on this link,
-			// and only send a new email to newly added contacts.
-			var code string
-			if existingCode, existed := existingContactIDs[cid]; existed {
-				code = existingCode
-			} else {
-				var err error
-				code, err = generateNumericCode(6)
+		if err := qtx.DeleteLinkContactsByLink(ctx, existing.ID); err != nil {
+			return db.Link{}, fmt.Errorf("delete link contacts: %w", err)
+		}
+		if requireEmailVerification {
+			contacts, err := qtx.ListContactsByWorkspace(ctx, workspaceUUID)
+			if err != nil {
+				return db.Link{}, fmt.Errorf("list contacts: %w", err)
+			}
+			contactMap := make(map[string]db.Contact, len(contacts))
+			for _, c := range contacts {
+				contactMap[uuid.UUID(c.ID.Bytes).String()] = c
+			}
+			for _, cid := range req.ContactIDs {
+				contact, ok := contactMap[cid]
+				if !ok {
+					return db.Link{}, fmt.Errorf("%w: contact %s not found in workspace", ErrInvalidPermission, cid)
+				}
+				contactUUID := pgUUID(cid)
+				if !contactUUID.Valid {
+					return db.Link{}, fmt.Errorf("invalid contact id: %s", cid)
+				}
+
+				if snap, existed := existingByContactID[cid]; existed {
+					if err := qtx.CreateLinkContactWithDelivery(ctx, db.CreateLinkContactWithDeliveryParams{
+						LinkID:         existing.ID,
+						ContactID:      contactUUID,
+						AccessCode:     snap.AccessCode,
+						CodeSendStatus: snap.CodeSendStatus,
+						CodeSendError:  snap.CodeSendError,
+						CodeSentAt:     snap.CodeSentAt,
+						UsedAt:         snap.UsedAt,
+					}); err != nil {
+						return db.Link{}, fmt.Errorf("create link contact: %w", err)
+					}
+					continue
+				}
+
+				code, err := generateNumericCode(6)
 				if err != nil {
 					return db.Link{}, fmt.Errorf("generate access code: %w", err)
 				}
-				emailCodes = append(emailCodes, emailCode{email: contact.Email.String, code: code})
-			}
-
-			if err := qtx.CreateLinkContact(ctx, db.CreateLinkContactParams{
-				LinkID:     existing.ID,
-				ContactID:  contactUUID,
-				AccessCode: code,
-			}); err != nil {
-				return db.Link{}, fmt.Errorf("create link contact: %w", err)
+				emailCodes = append(emailCodes, emailCode{
+					email: contact.Email.String,
+					code:  code,
+					epoch: s.bumpAccessCodeEpoch(existing.PublicToken, contact.Email.String),
+				})
+				if err := qtx.CreateLinkContact(ctx, db.CreateLinkContactParams{
+					LinkID:     existing.ID,
+					ContactID:  contactUUID,
+					AccessCode: code,
+				}); err != nil {
+					return db.Link{}, fmt.Errorf("create link contact: %w", err)
+				}
 			}
 		}
 	}
@@ -879,10 +970,26 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	// Send verification emails after commit for updated contacts.
 	linkURL := publicLinkURL(s.viewerBaseURL, existing.PublicToken, req.CustomDomain)
-	s.sendAccessCodeEmails(ctx, emailCodes, req.Name, linkURL)
+	s.sendAccessCodeEmails(ctx, existing.PublicToken, emailCodes, req.Name, linkURL)
 
 	// Re-fetch to get the updated record.
-	return s.GetByID(ctx, linkID, workspaceID)
+	updated, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return db.Link{}, err
+	}
+
+	// Deal-room: turning email verification on must provision codes for the
+	// current allow list (不漏发). Subsequent UpdateAccessRules with the same
+	// allows will see existing link_contacts and skip (不重复发).
+	if isDealRoomLink && requireEmailVerification && !wasEmailVerification {
+		if syncErr := s.syncDealRoomAccessCodeEmails(ctx, updated, nil); syncErr != nil {
+			logger.ErrorCtx(ctx, "failed to auto-send access codes after enabling email verification", syncErr,
+				logger.Attr("link_id", linkID),
+			)
+		}
+	}
+
+	return updated, nil
 }
 
 // CreateDealRoomLink creates a share link scoped to a deal room.
@@ -1266,6 +1373,30 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("commit transaction: %w", err)
+	}
+
+	// Auto-send access codes only for recipients that need them:
+	//  - newly allow-listed emails, or
+	//  - allow-listed emails still missing a link_contact.
+	// Already-allow-listed contacts with an existing code are skipped (不重复发).
+	// Refresh link flags so a preceding UpdateLink that just enabled verification
+	// is visible here.
+	fresh, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if fresh.RequireEmailVerification && fresh.DealRoomID.Valid {
+		oldAllow := make(map[string]struct{}, len(snapshot))
+		for _, r := range snapshot {
+			if r.Action == "allow" {
+				oldAllow[strings.ToLower(strings.TrimSpace(r.Value))] = struct{}{}
+			}
+		}
+		if syncErr := s.syncDealRoomAccessCodeEmails(ctx, fresh, oldAllow); syncErr != nil {
+			logger.ErrorCtx(ctx, "failed to sync access codes after access rules update", syncErr,
+				logger.Attr("link_id", linkID),
+			)
+		}
 	}
 
 	// Audit log.
@@ -2130,6 +2261,37 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		effectiveEmail = strings.TrimSpace(req.Email)
 	}
 
+	// Email-verification links: visitors enter only the one-time code (owners
+	// send codes out-of-band). Resolve the contact email from the code before
+	// evaluating allow/block rules so the visitor page does not collect email.
+	if requiresEmailVerification && effectiveEmail == "" {
+		code := strings.TrimSpace(req.EmailCode)
+		if code == "" {
+			return AccessResult{}, ErrRequiresEmailCode
+		}
+		lc, err := s.queries.GetLinkContactByCode(ctx, db.GetLinkContactByCodeParams{
+			PublicToken: token,
+			AccessCode:  code,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return AccessResult{}, ErrInvalidEmailCode
+			}
+			return AccessResult{}, fmt.Errorf("get link contact by code: %w", err)
+		}
+		effectiveEmail = strings.TrimSpace(lc.ContactEmail.String)
+		if effectiveEmail == "" {
+			return AccessResult{}, ErrInvalidEmailCode
+		}
+	}
+
+	// If email is required but not provided yet, ask for it before evaluating
+	// access rules so the first visit doesn't show an "email not allowed" error
+	// on an empty input.
+	if requiresEmail && effectiveEmail == "" {
+		return AccessResult{}, ErrRequiresEmail
+	}
+
 	// Evaluate access rules before any gate checks.
 	eval, err := s.EvaluateAccessRules(ctx, uuid.UUID(link.ID.Bytes).String(), effectiveEmail)
 	if err != nil {
@@ -2158,11 +2320,6 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		if strings.TrimSpace(req.EmailCode) == "" {
 			return AccessResult{}, ErrRequiresEmailCode
 		}
-		// Deal-room links verify the email that requested the code, not just the
-		// code itself, so a forwarded code cannot be reused with a different email.
-		if link.DealRoomID.Valid && effectiveEmail == "" {
-			return AccessResult{}, ErrRequiresEmail
-		}
 	}
 	if requiresNDA {
 		if !req.NDAAgreed {
@@ -2172,8 +2329,14 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	var verifiedEmail string
 	if requiresEmailVerification {
-		modern := !link.DealRoomID.Valid
-		lc, err := s.verifyLinkContactCode(ctx, token, effectiveEmail, req.EmailCode, modern)
+		// Explicit visitor email → bind code to that address. Code-only → look up
+		// by code (email was already resolved above for rule evaluation).
+		modern := strings.TrimSpace(req.Email) == ""
+		verifyEmail := effectiveEmail
+		if !modern {
+			verifyEmail = strings.TrimSpace(req.Email)
+		}
+		lc, err := s.verifyLinkContactCode(ctx, token, verifyEmail, req.EmailCode, modern)
 		if err != nil {
 			if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresEmailCode) {
 				return AccessResult{}, err
@@ -2277,13 +2440,13 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 		return nil
 	}
 
-	email = strings.TrimSpace(email)
+	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" {
 		return ErrRequiresEmail
 	}
 
-	// Deal-room links generate contacts on demand so unknown visitors can still
-	// receive a code, provided their email passes the link's access rules.
+	// Deal-room links generate contacts on demand so allow-listed recipients can
+	// receive a code (owner resend or legacy public callers).
 	if link.DealRoomID.Valid {
 		return s.sendDealRoomEmailVerificationCode(ctx, link, email, viewerBaseURL)
 	}
@@ -2305,22 +2468,25 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 		return fmt.Errorf("rate limit check: %w", err)
 	}
 	if !allowed {
-		return nil
+		return ErrEmailCodeRateLimited
 	}
 
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
+		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
 		return fmt.Errorf("send email: %w", err)
 	}
+	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
 }
 
 // sendDealRoomEmailVerificationCode creates or refreshes a contact for the
-// given email, evaluates the link's access rules, and sends a one-time code.
-// It runs in a transaction so the contact and link_contact are only persisted
-// if the email is sent (or at least queued).
+// given email, evaluates the link's access rules, rotates the one-time code,
+// then attempts delivery. The code is committed before send so a delivery
+// failure still leaves a durable (rotated) code that a retry can email.
 func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db.Link, email, viewerBaseURL string) error {
 	linkID := uuid.UUID(link.ID.Bytes).String()
+	email = strings.TrimSpace(strings.ToLower(email))
 
 	eval, err := s.EvaluateAccessRules(ctx, linkID, email)
 	if err != nil {
@@ -2328,7 +2494,7 @@ func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db
 	}
 	if !eval.Allowed {
 		// Mirror the access endpoint behaviour: return the mapped rule error so
-		// the visitor knows the email is blocked or not allowed.
+		// the caller knows the email is blocked or not allowed.
 		return mapRuleError(eval.Reason)
 	}
 
@@ -2337,70 +2503,148 @@ func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db
 		return fmt.Errorf("rate limit check: %w", err)
 	}
 	if !allowed {
-		return nil
+		return ErrEmailCodeRateLimited
 	}
 
-	tx, err := s.pool.Begin(ctx)
+	codes, err := s.provisionDealRoomAccessCodes(ctx, link, []string{email})
 	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+		return err
 	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := s.queries.WithTx(tx)
+	if len(codes) != 1 {
+		return fmt.Errorf("provision access code: unexpected count %d", len(codes))
+	}
 
-	workspaceUUID := link.WorkspaceID
-	contact, err := qtx.GetContactByEmailAndWorkspace(ctx, db.GetContactByEmailAndWorkspaceParams{
-		Email:       pgtype.Text{String: strings.ToLower(email), Valid: true},
-		WorkspaceID: workspaceUUID,
-	})
+	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, codes[0].code, link.Name.String, linkURL); err != nil {
+		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
+		return fmt.Errorf("send email: %w", err)
+	}
+	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
+	return nil
+}
+
+// OwnerResendSummary is returned by OwnerResendFailedAccessCodes.
+type OwnerResendSummary struct {
+	Attempted int      `json:"attempted"`
+	Sent      int      `json:"sent"`
+	Failed    int      `json:"failed"`
+	Skipped   int      `json:"skipped"`
+	Errors    []string `json:"errors,omitempty"`
+}
+
+// OwnerResendAccessCode rotates and emails a verification code for one contact
+// on a workspace-owned link.
+//
+// Dual constraint:
+//   - 不漏发: failed / stuck-pending contacts can always be remediates by the owner
+//   - 不骚扰: status "sent" is refused unless force=true (explicit owner intent)
+func (s *Service) OwnerResendAccessCode(ctx context.Context, linkID, workspaceID, email string, force bool) error {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
 	if err != nil {
-		if !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("get contact: %w", err)
-		}
-		contact, err = qtx.CreateContact(ctx, db.CreateContactParams{
-			WorkspaceID: workspaceUUID,
-			Email:       pgtype.Text{String: strings.ToLower(email), Valid: true},
-		})
-		if err != nil {
-			return fmt.Errorf("create contact: %w", err)
-		}
+		return err
+	}
+	if !link.RequireEmailVerification {
+		return ErrEmailVerificationDisabled
+	}
+	email = strings.TrimSpace(strings.ToLower(email))
+	if email == "" {
+		return ErrRequiresEmail
 	}
 
-	lc, lcErr := qtx.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+	lc, err := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
 		PublicToken: link.PublicToken,
-		Email:       contact.Email,
+		Email:       pgtype.Text{String: email, Valid: true},
 	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrAccessCodeContactNotFound
+		}
+		return fmt.Errorf("get link contact: %w", err)
+	}
+
+	if !force && !accessCodeNeedsRemediation(lc.CodeSendStatus, lc.CreatedAt.Time, time.Now()) {
+		return ErrAccessCodeResendNotNeeded
+	}
+
+	if link.DealRoomID.Valid {
+		return s.sendDealRoomEmailVerificationCode(ctx, link, email, s.viewerBaseURL)
+	}
+
+	allowed, err := s.allowEmailCodeSend(ctx, link.PublicToken, email)
+	if err != nil {
+		return fmt.Errorf("rate limit check: %w", err)
+	}
+	if !allowed {
+		return ErrEmailCodeRateLimited
+	}
+
 	code, err := generateNumericCode(6)
 	if err != nil {
 		return fmt.Errorf("generate access code: %w", err)
 	}
-	if lcErr == nil {
-		if err := qtx.UpdateLinkContactAccessCode(ctx, db.UpdateLinkContactAccessCodeParams{
-			ID:         lc.ID,
-			AccessCode: code,
-		}); err != nil {
-			return fmt.Errorf("update link contact code: %w", err)
-		}
-	} else if errors.Is(lcErr, pgx.ErrNoRows) {
-		if err := qtx.CreateLinkContact(ctx, db.CreateLinkContactParams{
-			LinkID:     link.ID,
-			ContactID:  contact.ID,
-			AccessCode: code,
-		}); err != nil {
-			return fmt.Errorf("create link contact: %w", err)
-		}
-	} else {
-		return fmt.Errorf("get link contact: %w", lcErr)
+	if err := s.queries.UpdateLinkContactAccessCode(ctx, db.UpdateLinkContactAccessCodeParams{
+		ID:         lc.ID,
+		AccessCode: code,
+	}); err != nil {
+		return fmt.Errorf("update access code: %w", err)
 	}
+	_ = s.bumpAccessCodeEpoch(link.PublicToken, email)
 
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-
-	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, link.Name.String, linkURL); err != nil {
+		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
 		return fmt.Errorf("send email: %w", err)
 	}
+	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
+}
+
+// OwnerResendFailedAccessCodes remediates only failed and stuck-pending contacts.
+// Delivered ("sent") contacts are never included — 不骚扰.
+func (s *Service) OwnerResendFailedAccessCodes(ctx context.Context, linkID, workspaceID string) (OwnerResendSummary, error) {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
+		return OwnerResendSummary{}, err
+	}
+	if !link.RequireEmailVerification {
+		return OwnerResendSummary{}, ErrEmailVerificationDisabled
+	}
+
+	rows, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, link.ID)
+	if err != nil {
+		return OwnerResendSummary{}, fmt.Errorf("list access code contacts: %w", err)
+	}
+
+	now := time.Now()
+	summary := OwnerResendSummary{}
+	for _, row := range rows {
+		if !accessCodeNeedsRemediation(row.CodeSendStatus, row.CreatedAt.Time, now) {
+			summary.Skipped++
+			continue
+		}
+		summary.Attempted++
+		if err := s.OwnerResendAccessCode(ctx, linkID, workspaceID, row.ContactEmail, false); err != nil {
+			summary.Failed++
+			summary.Errors = append(summary.Errors, row.ContactEmail+": "+err.Error())
+			continue
+		}
+		summary.Sent++
+	}
+	return summary, nil
+}
+
+func accessCodeNeedsRemediation(status string, createdAt, now time.Time) bool {
+	switch status {
+	case "failed":
+		return true
+	case "pending":
+		if createdAt.IsZero() {
+			return true
+		}
+		return now.Sub(createdAt) >= ownerResendPendingStale
+	default:
+		return false
+	}
 }
 
 func publicLinkURL(baseURL, token, customDomain string) string {
@@ -2418,6 +2662,33 @@ func publicLinkURL(baseURL, token, customDomain string) string {
 		return "/l/" + token
 	}
 	return strings.TrimRight(baseURL, "/") + "/l/" + token
+}
+
+type contactWriter interface {
+	GetContactByEmailAndWorkspace(ctx context.Context, arg db.GetContactByEmailAndWorkspaceParams) (db.Contact, error)
+	CreateContact(ctx context.Context, arg db.CreateContactParams) (db.Contact, error)
+}
+
+func (s *Service) getOrCreateContactByEmail(ctx context.Context, q contactWriter, workspaceID pgtype.UUID, email string) (db.Contact, error) {
+	normalized := strings.TrimSpace(strings.ToLower(email))
+	contact, err := q.GetContactByEmailAndWorkspace(ctx, db.GetContactByEmailAndWorkspaceParams{
+		Email:       pgtype.Text{String: normalized, Valid: true},
+		WorkspaceID: workspaceID,
+	})
+	if err == nil {
+		return contact, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.Contact{}, fmt.Errorf("get contact: %w", err)
+	}
+	contact, err = q.CreateContact(ctx, db.CreateContactParams{
+		WorkspaceID: workspaceID,
+		Email:       pgtype.Text{String: normalized, Valid: true},
+	})
+	if err != nil {
+		return db.Contact{}, fmt.Errorf("create contact: %w", err)
+	}
+	return contact, nil
 }
 
 func resendRateLimitKey(token, email string) string {
@@ -2786,16 +3057,30 @@ func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string
 
 // LinkAnalytics aggregates access metrics for a single link.
 type LinkAnalytics struct {
-	TotalViews             int64           `json:"total_views"`
-	UniqueVisitors         int64           `json:"unique_visitors"`
-	DownloadAttempts       int64           `json:"download_attempts"`
-	FirstAccessAt          *time.Time      `json:"first_access_at,omitempty"`
-	LastAccessAt           *time.Time      `json:"last_access_at,omitempty"`
-	ViewsOverTime          []DailyView     `json:"views_over_time"`
-	AverageDurationSeconds float64         `json:"average_duration_seconds"`
-	RecentVisitors         []RecentVisitor `json:"recent_visitors"`
-	KeyPages               []KeyPage       `json:"key_pages"`
-	QARecords              []QARecord      `json:"qa_records"`
+	TotalViews             int64                 `json:"total_views"`
+	UniqueVisitors         int64                 `json:"unique_visitors"`
+	DownloadAttempts       int64                 `json:"download_attempts"`
+	FirstAccessAt          *time.Time            `json:"first_access_at,omitempty"`
+	LastAccessAt           *time.Time            `json:"last_access_at,omitempty"`
+	ViewsOverTime          []DailyView           `json:"views_over_time"`
+	AverageDurationSeconds float64               `json:"average_duration_seconds"`
+	RecentVisitors         []RecentVisitor       `json:"recent_visitors"`
+	KeyPages               []KeyPage             `json:"key_pages"`
+	QARecords              []QARecord            `json:"qa_records"`
+	AccessCodeContacts     []AccessCodeContact   `json:"access_code_contacts"`
+}
+
+// AccessCodeContact is a link-scoped contact with verification-code delivery status.
+type AccessCodeContact struct {
+	Email      string     `json:"email"`
+	Name       string     `json:"name,omitempty"`
+	SendStatus string     `json:"send_status"` // pending | sent | failed
+	SendError  string     `json:"send_error,omitempty"`
+	CodeSentAt *time.Time `json:"code_sent_at,omitempty"`
+	UsedAt     *time.Time `json:"used_at,omitempty"`
+	// CanResend is true for failed or stuck-pending contacts. Delivered contacts
+	// stay false so the UI does not invite accidental re-mails (不骚扰).
+	CanResend bool `json:"can_resend"`
 }
 
 // DailyView is a single day in the views-over-time series.
@@ -2845,10 +3130,14 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 	}
 
 	analytics := LinkAnalytics{
-		TotalViews:       row.TotalViews,
-		UniqueVisitors:   row.UniqueVisitors,
-		DownloadAttempts: row.DownloadAttempts,
-		ViewsOverTime:    []DailyView{},
+		TotalViews:         row.TotalViews,
+		UniqueVisitors:     row.UniqueVisitors,
+		DownloadAttempts:   row.DownloadAttempts,
+		ViewsOverTime:      []DailyView{},
+		RecentVisitors:     []RecentVisitor{},
+		KeyPages:           []KeyPage{},
+		QARecords:          []QARecord{},
+		AccessCodeContacts: []AccessCodeContact{},
 	}
 	if row.FirstAccessAt.Valid {
 		t := row.FirstAccessAt.Time
@@ -2919,6 +3208,32 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 				record.Answer = q.Answer.String
 			}
 			analytics.QARecords = append(analytics.QARecords, record)
+		}
+	}
+
+	codeContacts, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		logger.ErrorCtx(ctx, "failed to list access code contacts", err)
+	} else {
+		now := time.Now()
+		analytics.AccessCodeContacts = make([]AccessCodeContact, 0, len(codeContacts))
+		for _, c := range codeContacts {
+			item := AccessCodeContact{
+				Email:      c.ContactEmail,
+				Name:       c.ContactName,
+				SendStatus: c.CodeSendStatus,
+				SendError:  c.CodeSendError,
+				CanResend:  accessCodeNeedsRemediation(c.CodeSendStatus, c.CreatedAt.Time, now),
+			}
+			if c.CodeSentAt.Valid {
+				t := c.CodeSentAt.Time
+				item.CodeSentAt = &t
+			}
+			if c.UsedAt.Valid {
+				t := c.UsedAt.Time
+				item.UsedAt = &t
+			}
+			analytics.AccessCodeContacts = append(analytics.AccessCodeContacts, item)
 		}
 	}
 
@@ -2999,11 +3314,15 @@ func generateToken() (string, error) {
 }
 
 // sendAccessCodeEmails sends verification emails for the given contacts.
+// The entire operation runs asynchronously (detached from the request context)
+// so create/update responses are never blocked by SMTP/provider latency.
 // When the underlying mailer supports batching and there are multiple
-// recipients, it sends them in one provider batch to reduce round-trips.
-// Otherwise it falls back to asynchronous per-email sends bounded by the
-// email semaphore.
-func (s *Service) sendAccessCodeEmails(ctx context.Context, emailCodes []emailCode, linkName, linkURL string) {
+// recipients, it prefers one provider batch, then falls back to per-email sends.
+//
+// Each emailCode carries an epoch from bumpAccessCodeEpoch. If a manual resend
+// rotates the code first, the older epoch is dropped and the stale message is
+// never delivered.
+func (s *Service) sendAccessCodeEmails(_ context.Context, publicToken string, emailCodes []emailCode, linkName, linkURL string) {
 	if len(emailCodes) == 0 {
 		return
 	}
@@ -3012,70 +3331,365 @@ func (s *Service) sendAccessCodeEmails(ctx context.Context, emailCodes []emailCo
 	if name == "" {
 		name = "A shared document"
 	}
+	// Copy so the caller can mutate / return without racing the background send.
+	codes := append([]emailCode(nil), emailCodes...)
+	token := publicToken
 
-	// Try batch path first if the mailer supports it.
-	if bm, ok := s.mailer.(mailer.BatchSender); ok && len(emailCodes) > 1 {
-		batchCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	go func() {
+		batchCtx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
-		jobs := make([]mailer.EmailJob, 0, len(emailCodes))
-		for _, ec := range emailCodes {
-			jobs = append(jobs, mailer.EmailJob{
-				EmailType: mailer.EmailTypeAccessCode,
-				Recipient: ec.email,
-				Code:      ec.code,
-				LinkName:  name,
-				LinkURL:   linkURL,
-				TemplateVariables: map[string]string{
-					"Code":     ec.code,
-					"LinkName": name,
-					"LinkURL":  linkURL,
-				},
-			})
-		}
-		result, err := bm.SendBatch(batchCtx, jobs)
-		if err == nil && result.AllSucceeded() {
+
+		codes = filterCurrentAccessCodeEpochs(s, token, codes)
+		if len(codes) == 0 {
 			return
 		}
-		if err != nil {
-			logger.ErrorCtx(batchCtx, "batch send access code emails failed, falling back to individual sends", err)
-		} else {
-			logger.ErrorCtx(batchCtx, "batch send access code emails had partial failures, falling back to individual sends", nil,
-				logger.Attr("failed_count", len(result.Failed)),
-			)
-		}
-		// Fall through to individual sends for any failed jobs.
-		failedSet := make(map[int]struct{}, len(result.Failed))
-		for _, f := range result.Failed {
-			if f.Index >= 0 && f.Index < len(emailCodes) {
-				failedSet[f.Index] = struct{}{}
+
+		retryCodes := codes
+		if bm, ok := s.mailer.(mailer.BatchSender); ok && len(codes) > 1 {
+			jobs := make([]mailer.EmailJob, 0, len(codes))
+			for _, ec := range codes {
+				jobs = append(jobs, mailer.EmailJob{
+					EmailType: mailer.EmailTypeAccessCode,
+					Recipient: ec.email,
+					Code:      ec.code,
+					LinkName:  name,
+					LinkURL:   linkURL,
+					TemplateVariables: map[string]string{
+						"Code":     ec.code,
+						"LinkName": name,
+						"LinkURL":  linkURL,
+					},
+				})
+			}
+			result, err := bm.SendBatch(batchCtx, jobs)
+			if err == nil && batchAcceptedAll(result, len(jobs)) {
+				for _, ec := range codes {
+					s.markAccessCodeSendStatus(batchCtx, token, ec.email, "sent", "")
+				}
+				return
+			}
+			if err != nil {
+				// Hard batch failure often returns an empty Failed slice — retry all.
+				logger.ErrorCtx(batchCtx, "batch send access code emails failed, falling back to individual sends", err)
+				retryCodes = codes
+			} else {
+				logger.ErrorCtx(batchCtx, "batch send access code emails had partial failures, falling back to individual sends", nil,
+					logger.Attr("failed_count", len(result.Failed)),
+				)
+				failedSet := make(map[int]struct{}, len(result.Failed))
+				for _, f := range result.Failed {
+					if f.Index >= 0 && f.Index < len(codes) {
+						failedSet[f.Index] = struct{}{}
+					}
+				}
+				// Mark successes from the partial batch so the activity page reflects them.
+				for i, ec := range codes {
+					if _, failed := failedSet[i]; !failed {
+						s.markAccessCodeSendStatus(batchCtx, token, ec.email, "sent", "")
+					}
+				}
+				retryCodes = make([]emailCode, 0, len(failedSet))
+				for i, ec := range codes {
+					if _, failed := failedSet[i]; failed {
+						retryCodes = append(retryCodes, ec)
+					}
+				}
 			}
 		}
-		retryCodes := make([]emailCode, 0, len(failedSet))
-		for i, ec := range emailCodes {
-			if _, failed := failedSet[i]; failed {
-				retryCodes = append(retryCodes, ec)
-			}
+
+		retryCodes = filterCurrentAccessCodeEpochs(s, token, retryCodes)
+		for _, ec := range retryCodes {
+			email, code := ec.email, ec.code
+			s.emailSem <- struct{}{} // blocks until a slot is available
+			go func() {
+				defer func() { <-s.emailSem }()
+				sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+				defer cancel()
+				if _, err := s.mailer.SendLinkAccessCodeEmail(sendCtx, email, code, name, linkURL); err != nil {
+					logger.ErrorCtx(sendCtx, "failed to send link access code email", err,
+						logger.Attr("email_local", localPart(email)),
+					)
+					s.markAccessCodeSendStatus(sendCtx, token, email, "failed", err.Error())
+					return
+				}
+				s.markAccessCodeSendStatus(sendCtx, token, email, "sent", "")
+			}()
 		}
-		emailCodes = retryCodes
+	}()
+}
+
+func (s *Service) markAccessCodeSendStatus(ctx context.Context, publicToken, email, status, errMsg string) {
+	if publicToken == "" || email == "" {
+		return
+	}
+	if err := s.queries.UpdateLinkContactSendStatusByEmail(ctx, db.UpdateLinkContactSendStatusByEmailParams{
+		PublicToken:  publicToken,
+		Email:        strings.ToLower(strings.TrimSpace(email)),
+		Status:       status,
+		ErrorMessage: errMsg,
+	}); err != nil {
+		logger.ErrorCtx(ctx, "failed to update access code send status", err,
+			logger.Attr("email_local", localPart(email)),
+			logger.Attr("status", status),
+		)
+	}
+}
+
+func accessCodeEpochKey(publicToken, email string) string {
+	return publicToken + "\x00" + strings.ToLower(strings.TrimSpace(email))
+}
+
+// bumpAccessCodeEpoch records a new code rotation for token+email and returns
+// the generation that outbound mail for this rotation must carry.
+func (s *Service) bumpAccessCodeEpoch(publicToken, email string) uint64 {
+	key := accessCodeEpochKey(publicToken, email)
+	for {
+		fresh := new(uint64)
+		atomic.StoreUint64(fresh, 1)
+		val, loaded := s.accessCodeEpoch.LoadOrStore(key, fresh)
+		if !loaded {
+			return 1
+		}
+		ptr := val.(*uint64)
+		old := atomic.LoadUint64(ptr)
+		if atomic.CompareAndSwapUint64(ptr, old, old+1) {
+			return old + 1
+		}
+	}
+}
+
+func (s *Service) accessCodeEpochCurrent(publicToken, email string, epoch uint64) bool {
+	key := accessCodeEpochKey(publicToken, email)
+	val, ok := s.accessCodeEpoch.Load(key)
+	if !ok {
+		return epoch == 0
+	}
+	return atomic.LoadUint64(val.(*uint64)) == epoch
+}
+
+func filterCurrentAccessCodeEpochs(s *Service, publicToken string, codes []emailCode) []emailCode {
+	if len(codes) == 0 {
+		return nil
+	}
+	out := make([]emailCode, 0, len(codes))
+	for _, ec := range codes {
+		if s.accessCodeEpochCurrent(publicToken, ec.email, ec.epoch) {
+			out = append(out, ec)
+		}
+	}
+	return out
+}
+
+// batchAcceptedAll reports whether a batch result accounts for every input job.
+// AllSucceeded alone is insufficient: an empty Failed slice with no MessageIDs
+// would otherwise look like success and drop emails (漏发).
+func batchAcceptedAll(result mailer.BatchResult, jobCount int) bool {
+	if !result.AllSucceeded() || jobCount == 0 {
+		return false
+	}
+	accepted := len(result.MessageIDs)
+	if len(result.SuccessIndexes) > accepted {
+		accepted = len(result.SuccessIndexes)
+	}
+	return accepted >= jobCount
+}
+
+// syncDealRoomAccessCodeEmails provisions and async-sends access codes for allow
+// recipients that need an outbound message.
+//
+// Dual constraint (不漏发 / 不骚扰):
+//   - Send only for newly allow-listed emails OR allow emails still missing a
+//     link_contact (first delivery).
+//   - Never auto-resend when a link_contact already exists — including failed.
+//     Failed / stuck-pending remediates is owner-driven via OwnerResendAccessCode
+//     so a routine rules save cannot spam invitees.
+//
+// previousAllow:
+//   - nil  → verification just enabled; only fill missing link_contacts for the
+//     current allow list (不漏发). Existing contacts are left untouched (不重复发).
+//   - set → rules update; send for newly allow-listed emails OR missing contacts.
+func (s *Service) syncDealRoomAccessCodeEmails(ctx context.Context, link db.Link, previousAllow map[string]struct{}) error {
+	if !link.RequireEmailVerification || !link.DealRoomID.Valid {
+		return nil
 	}
 
-	for _, ec := range emailCodes {
-		email, code := ec.email, ec.code
-		s.emailSem <- struct{}{} // blocks until a slot is available
-		go func() {
-			defer func() { <-s.emailSem }()
-			// Detach from the request context: this goroutine outlives the HTTP
-			// handler, and using the request context causes CreateEmailLog to fail
-			// with context.Canceled as soon as the create/update response is sent.
-			sendCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			if _, err := s.mailer.SendLinkAccessCodeEmail(sendCtx, email, code, name, linkURL); err != nil {
-				logger.ErrorCtx(sendCtx, "failed to send link access code email", err,
-					logger.Attr("email_local", localPart(email)),
-				)
-			}
-		}()
+	rules, err := s.queries.ListLinkAccessRulesByLink(ctx, link.ID)
+	if err != nil {
+		return fmt.Errorf("list access rules: %w", err)
 	}
+
+	blocked := make(map[string]struct{})
+	var allows []string
+	seenAllow := make(map[string]struct{})
+	for _, r := range rules {
+		email := strings.TrimSpace(strings.ToLower(r.Value))
+		if email == "" || r.RuleType != "email" {
+			continue
+		}
+		if r.Action == "block" {
+			blocked[email] = struct{}{}
+			continue
+		}
+		if r.Action != "allow" {
+			continue
+		}
+		if _, ok := seenAllow[email]; ok {
+			continue
+		}
+		seenAllow[email] = struct{}{}
+		allows = append(allows, email)
+	}
+
+	need := make([]string, 0, len(allows))
+	for _, email := range allows {
+		if _, isBlocked := blocked[email]; isBlocked {
+			continue
+		}
+
+		if previousAllow != nil {
+			if _, existed := previousAllow[email]; !existed {
+				need = append(need, email)
+				continue
+			}
+		}
+
+		exists, lookupErr := s.hasDealRoomLinkContact(ctx, link.PublicToken, email)
+		if lookupErr != nil {
+			// 不漏发: treat lookup failures as missing and provision.
+			logger.ErrorCtx(ctx, "link contact lookup failed during access-code sync; provisioning", lookupErr,
+				logger.Attr("email_local", localPart(email)),
+			)
+			need = append(need, email)
+			continue
+		}
+		if !exists {
+			need = append(need, email)
+		}
+	}
+
+	if len(need) == 0 {
+		return nil
+	}
+
+	emailCodes, err := s.provisionDealRoomAccessCodes(ctx, link, need)
+	if err != nil {
+		return err
+	}
+	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
+	s.sendAccessCodeEmails(ctx, link.PublicToken, emailCodes, link.Name.String, linkURL)
+	return nil
+}
+
+func (s *Service) hasDealRoomLinkContact(ctx context.Context, publicToken, email string) (bool, error) {
+	_, err := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+		PublicToken: publicToken,
+		Email:       pgtype.Text{String: strings.ToLower(strings.TrimSpace(email)), Valid: true},
+	})
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	return false, err
+}
+
+// linkContactProvisioner is the query surface needed to upsert deal-room access codes.
+type linkContactProvisioner interface {
+	contactWriter
+	GetLinkContactByEmail(ctx context.Context, arg db.GetLinkContactByEmailParams) (db.GetLinkContactByEmailRow, error)
+	CreateLinkContact(ctx context.Context, arg db.CreateLinkContactParams) error
+	UpdateLinkContactAccessCode(ctx context.Context, arg db.UpdateLinkContactAccessCodeParams) error
+}
+
+// upsertDealRoomAccessCodes creates or rotates link_contacts for the given emails.
+// Emails already present in skip are ignored. Returns codes that should be emailed.
+func (s *Service) upsertDealRoomAccessCodes(
+	ctx context.Context,
+	q linkContactProvisioner,
+	link db.Link,
+	emails []string,
+	skip map[string]struct{},
+) ([]emailCode, error) {
+	if skip == nil {
+		skip = make(map[string]struct{})
+	}
+	out := make([]emailCode, 0, len(emails))
+	for _, raw := range emails {
+		email := strings.TrimSpace(strings.ToLower(raw))
+		if email == "" {
+			continue
+		}
+		if _, ok := skip[email]; ok {
+			continue
+		}
+		skip[email] = struct{}{}
+
+		contact, err := s.getOrCreateContactByEmail(ctx, q, link.WorkspaceID, email)
+		if err != nil {
+			return nil, err
+		}
+		code, err := generateNumericCode(6)
+		if err != nil {
+			return nil, fmt.Errorf("generate access code: %w", err)
+		}
+
+		lc, lcErr := q.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+			PublicToken: link.PublicToken,
+			Email:       pgtype.Text{String: email, Valid: true},
+		})
+		switch {
+		case lcErr == nil:
+			if err := q.UpdateLinkContactAccessCode(ctx, db.UpdateLinkContactAccessCodeParams{
+				ID:         lc.ID,
+				AccessCode: code,
+			}); err != nil {
+				return nil, fmt.Errorf("update link contact code: %w", err)
+			}
+		case errors.Is(lcErr, pgx.ErrNoRows):
+			if err := q.CreateLinkContact(ctx, db.CreateLinkContactParams{
+				LinkID:     link.ID,
+				ContactID:  contact.ID,
+				AccessCode: code,
+			}); err != nil {
+				return nil, fmt.Errorf("create link contact: %w", err)
+			}
+		default:
+			return nil, fmt.Errorf("get link contact: %w", lcErr)
+		}
+		out = append(out, emailCode{
+			email: email,
+			code:  code,
+			epoch: s.bumpAccessCodeEpoch(link.PublicToken, email),
+		})
+	}
+	return out, nil
+}
+
+// provisionDealRoomAccessCodes creates workspace contacts + link_contacts with
+// fresh access codes for the given emails. It returns the codes that should be
+// emailed. Callers must only pass emails that need a new outbound message.
+func (s *Service) provisionDealRoomAccessCodes(ctx context.Context, link db.Link, emails []string) ([]emailCode, error) {
+	if len(emails) == 0 {
+		return nil, nil
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.queries.WithTx(tx)
+
+	out, err := s.upsertDealRoomAccessCodes(ctx, qtx, link, emails, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit transaction: %w", err)
+	}
+	return out, nil
 }
 
 // localPart extracts the part before "@" from an email address (for safe logging).
@@ -3093,6 +3707,50 @@ func pgUUID(id string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+// ensureUniqueLinkName rejects duplicate link names within the relevant scope.
+// Deal-room links are unique per deal room; document links are unique per workspace.
+type linkNameQuerier interface {
+	ExistsLinkNameInDealRoom(ctx context.Context, arg db.ExistsLinkNameInDealRoomParams) (bool, error)
+	ExistsLinkNameInWorkspace(ctx context.Context, arg db.ExistsLinkNameInWorkspaceParams) (bool, error)
+}
+
+func (s *Service) ensureUniqueLinkName(
+	ctx context.Context,
+	q linkNameQuerier,
+	workspaceID, dealRoomID pgtype.UUID,
+	name string,
+	excludeID pgtype.UUID,
+) error {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return nil
+	}
+	var (
+		exists bool
+		err    error
+	)
+	if dealRoomID.Valid {
+		exists, err = q.ExistsLinkNameInDealRoom(ctx, db.ExistsLinkNameInDealRoomParams{
+			DealRoomID: dealRoomID,
+			Name:       trimmed,
+			ExcludeID:  excludeID,
+		})
+	} else {
+		exists, err = q.ExistsLinkNameInWorkspace(ctx, db.ExistsLinkNameInWorkspaceParams{
+			WorkspaceID: workspaceID,
+			Name:        trimmed,
+			ExcludeID:   excludeID,
+		})
+	}
+	if err != nil {
+		return fmt.Errorf("check link name uniqueness: %w", err)
+	}
+	if exists {
+		return ErrDuplicateName
+	}
+	return nil
 }
 
 // hashPasswordIfRequired hashes a plaintext password when password protection is enabled.

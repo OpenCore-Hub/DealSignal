@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import type { AccessRule, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
@@ -167,8 +168,12 @@ function LinkShareDialogContent({
       return true;
     } catch (err) {
       console.error("saveLinkAndRules failed:", err);
-      const message = err instanceof Error ? err.message : "";
-      toast.error(message || t("common:error.saveFailed"));
+      if (err instanceof ApiError && err.code === "duplicate_name") {
+        toast.error(t("share.linkNameDuplicate"));
+      } else {
+        const message = err instanceof Error ? err.message : "";
+        toast.error(message || t("common:error.saveFailed"));
+      }
       return false;
     } finally {
       setSaving(false);

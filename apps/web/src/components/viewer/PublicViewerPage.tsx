@@ -3,7 +3,6 @@ import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Prohibit } from "@phosphor-icons/react";
-import { toast } from "sonner";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -62,14 +61,6 @@ export function PublicViewerPage() {
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
   const [folderView, setFolderView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [sendingCode, setSendingCode] = useState(false);
-  const [codeSent, setCodeSent] = useState(false);
-  const [requestEmail, setRequestEmail] = useState(prefilledEmail);
-  const [requestReason, setRequestReason] = useState("");
-  const [requestLoading, setRequestLoading] = useState(false);
-  const [requestSubmitted, setRequestSubmitted] = useState(false);
-  const [showAccessRequestForm, setShowAccessRequestForm] = useState(false);
-  const [requestError, setRequestError] = useState<string | null>(null);
   const accessingRef = useRef(false);
   const sessionCheckedRef = useRef(false);
 
@@ -121,14 +112,17 @@ export function PublicViewerPage() {
         } catch { /* ignore */ }
       }
       // The backend enriches gate errors with the link's full security config.
-      // Render every configured control on the first response.
-      setSecurity({
-        email: err.requiresEmail ?? false,
-        emailVerification: err.requiresEmailVerification ?? false,
-        password: err.requiresPassword ?? false,
-        nda: err.requiresNda ?? false,
-        isDealRoom: err.isDealRoom ?? false,
-      });
+      // Render every configured control on the first response. When a later
+      // error response omits those flags (e.g. an internal_error or an unknown
+      // code from the edge), preserve the previously known gates so inputs do
+      // not vanish from the visitor.
+      setSecurity((prev) => ({
+        email: err.requiresEmail ?? prev.email,
+        emailVerification: err.requiresEmailVerification ?? prev.emailVerification,
+        password: err.requiresPassword ?? prev.password,
+        nda: err.requiresNda ?? prev.nda,
+        isDealRoom: err.isDealRoom ?? prev.isDealRoom,
+      }));
       const unavailableCodes = new Set([
         "link_not_found",
         "link_expired",
@@ -149,9 +143,19 @@ export function PublicViewerPage() {
       if (unavailableCodes.has(err.code)) {
         setLinkErrorCode(err.code);
       } else if (gateErrorCodes.has(err.code)) {
-        // Only show raw backend messages for actual validation failures.
-        // Missing required fields are handled by client-side checks on Continue.
         setGateErrorCode(err.code);
+        setGateError(
+          err.code === "not_allowed"
+            ? t("viewer.emailNotAllowed")
+            : (err.message ?? t("common:error.loadFailed"))
+        );
+      } else if (err.code === "requires_email" || err.code === "requires_email_code") {
+        // Normal gate prompts: keep the credential form visible but don't show
+        // an error message on the first visit when the visitor hasn't typed yet.
+        setGateErrorCode(err.code);
+      } else {
+        // Unknown error codes (e.g. internal_error / network_error) still need
+        // a visible message instead of the generic "load failed" fallback.
         setGateError(err.message ?? t("common:error.loadFailed"));
       }
     } finally {
@@ -237,8 +241,6 @@ export function PublicViewerPage() {
   }
 
   if (linkErrorCode) {
-    const requestableErrorCodes = new Set(["blocked_email", "not_allowed"]);
-    const canRequestAccess = requestableErrorCodes.has(linkErrorCode);
     return (
       <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
         <Card className="w-full max-w-md">
@@ -250,89 +252,6 @@ export function PublicViewerPage() {
           </CardHeader>
           <CardContent className="space-y-4 text-center">
             <p className="text-muted-foreground">{t(`viewer.${linkErrorCode}Description`)}</p>
-
-            {canRequestAccess && !requestSubmitted && !showAccessRequestForm && (
-              <Button
-                className="w-full"
-                onClick={() => {
-                  setShowAccessRequestForm(true);
-                  setRequestError(null);
-                }}
-              >
-                {t("viewer.requestAccess")}
-              </Button>
-            )}
-
-            {canRequestAccess && showAccessRequestForm && !requestSubmitted && (
-              <div className="space-y-4 text-left">
-                <p className="text-sm text-muted-foreground">{t("viewer.requestAccessDescription")}</p>
-                {requestError && (
-                  <p className="text-sm text-destructive" role="alert">
-                    {requestError}
-                  </p>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="request-email">{t("viewer.requestAccessEmailLabel")}</Label>
-                  <Input
-                    id="request-email"
-                    type="email"
-                    value={requestEmail}
-                    onChange={(e) => setRequestEmail(e.target.value)}
-                    placeholder={t("viewer.requestAccessEmailPlaceholder")}
-                    disabled={requestLoading}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="request-reason">{t("viewer.requestAccessReasonLabel")}</Label>
-                  <Input
-                    id="request-reason"
-                    type="text"
-                    value={requestReason}
-                    onChange={(e) => setRequestReason(e.target.value)}
-                    placeholder={t("viewer.requestAccessReasonPlaceholder")}
-                    disabled={requestLoading}
-                  />
-                </div>
-                <Button
-                  className="w-full"
-                  disabled={requestLoading}
-                  onClick={() => {
-                    setRequestError(null);
-                    const trimmed = requestEmail.trim();
-                    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-                      setRequestError(t("viewer.requestAccessEmailRequired"));
-                      return;
-                    }
-                    if (!token) return;
-                    setRequestLoading(true);
-                    api
-                      .createLinkAccessRequest(token, { email: trimmed, reason: requestReason.trim() || undefined })
-                      .then(() => {
-                        setRequestSubmitted(true);
-                        setShowAccessRequestForm(false);
-                        toast.success(t("viewer.requestAccessSubmitted"));
-                      })
-                      .catch((e: ApiError) => {
-                        if (e.code === "access_request_exists") {
-                          setRequestError(t("viewer.requestAccessExists"));
-                        } else {
-                          setRequestError(t("viewer.requestAccessFailed"));
-                        }
-                      })
-                      .finally(() => setRequestLoading(false));
-                  }}
-                >
-                  {requestLoading ? t("common:loading") : t("viewer.requestAccessSubmit")}
-                </Button>
-              </div>
-            )}
-
-            {canRequestAccess && requestSubmitted && (
-              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
-                {t("viewer.requestAccessSubmitted")}
-              </div>
-            )}
-
             <Button variant="outline" className="w-full" onClick={() => navigate("/")}>
               {t("common:backToHome")}
             </Button>
@@ -367,143 +286,16 @@ export function PublicViewerPage() {
             <CardTitle>{t("viewer.gateTitle")}</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {gateError && (
+            {hasGates && gateError && (
               <p className="text-sm text-destructive" role="alert">
                 {gateError}
               </p>
-            )}
-            {gateErrorCode === "not_allowed" && !requestSubmitted && !showAccessRequestForm && (
-              <Button
-                className="w-full"
-                onClick={() => {
-                  setShowAccessRequestForm(true);
-                  setRequestError(null);
-                  setRequestEmail(email);
-                }}
-              >
-                {t("viewer.requestAccess")}
-              </Button>
-            )}
-            {gateErrorCode === "not_allowed" && showAccessRequestForm && !requestSubmitted && (
-              <div className="space-y-4 text-left">
-                <p className="text-sm text-muted-foreground">{t("viewer.requestAccessDescription")}</p>
-                {requestError && (
-                  <p className="text-sm text-destructive" role="alert">
-                    {requestError}
-                  </p>
-                )}
-                <div className="space-y-2">
-                  <Label htmlFor="request-email">{t("viewer.requestAccessEmailLabel")}</Label>
-                  <Input
-                    id="request-email"
-                    type="email"
-                    value={requestEmail}
-                    onChange={(e) => setRequestEmail(e.target.value)}
-                    placeholder={t("viewer.requestAccessEmailPlaceholder")}
-                    disabled={requestLoading}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="request-reason">{t("viewer.requestAccessReasonLabel")}</Label>
-                  <Input
-                    id="request-reason"
-                    type="text"
-                    value={requestReason}
-                    onChange={(e) => setRequestReason(e.target.value)}
-                    placeholder={t("viewer.requestAccessReasonPlaceholder")}
-                    disabled={requestLoading}
-                  />
-                </div>
-                <Button
-                  className="w-full"
-                  disabled={requestLoading}
-                  onClick={() => {
-                    setRequestError(null);
-                    const trimmed = requestEmail.trim();
-                    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-                      setRequestError(t("viewer.requestAccessEmailRequired"));
-                      return;
-                    }
-                    if (!token) return;
-                    setRequestLoading(true);
-                    api
-                      .createLinkAccessRequest(token, { email: trimmed, reason: requestReason.trim() || undefined })
-                      .then(() => {
-                        setRequestSubmitted(true);
-                        setShowAccessRequestForm(false);
-                        toast.success(t("viewer.requestAccessSubmitted"));
-                      })
-                      .catch((e: ApiError) => {
-                        if (e.code === "access_request_exists") {
-                          setRequestError(t("viewer.requestAccessExists"));
-                        } else {
-                          setRequestError(t("viewer.requestAccessFailed"));
-                        }
-                      })
-                      .finally(() => setRequestLoading(false));
-                  }}
-                >
-                  {requestLoading ? t("common:loading") : t("viewer.requestAccessSubmit")}
-                </Button>
-              </div>
-            )}
-            {gateErrorCode === "not_allowed" && requestSubmitted && (
-              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm text-muted-foreground">
-                {t("viewer.requestAccessSubmitted")}
-              </div>
             )}
             {inviteToken && (
               <div className="rounded-md border border-border bg-muted/50 p-3 text-sm">
                 {prefilledEmail
                   ? t("viewer.inviteVerificationFor", { email: prefilledEmail })
                   : t("viewer.inviteVerification")}
-              </div>
-            )}
-            {security.emailVerification && security.isDealRoom && (
-              <div className="space-y-2">
-                <Label htmlFor="email">{t("viewer.emailLabel")}</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={t("viewer.emailPlaceholder")}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full"
-                  disabled={sendingCode || !email.trim()}
-                  onClick={() => {
-                    setGateError(null);
-                    const trimmed = email.trim();
-                    if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) {
-                      setGateError(t("viewer.emailRequired"));
-                      return;
-                    }
-                    if (!token) return;
-                    setSendingCode(true);
-                    api
-                      .sendEmailVerificationCode(token, trimmed)
-                      .then(() => {
-                        setCodeSent(true);
-                        toast.success(t("viewer.codeSent"));
-                      })
-                      .catch((e: ApiError) => {
-                        setGateError(e.message ?? t("viewer.sendCodeFailed"));
-                      })
-                      .finally(() => setSendingCode(false));
-                  }}
-                >
-                  {sendingCode
-                    ? t("common:loading")
-                    : codeSent
-                      ? t("viewer.sendCodeAgain")
-                      : t("viewer.sendCode")}
-                </Button>
-                {codeSent && (
-                  <p className="text-xs text-muted-foreground">{t("viewer.codeSent")}</p>
-                )}
               </div>
             )}
             {security.emailVerification && (
@@ -557,8 +349,9 @@ export function PublicViewerPage() {
               className="w-full"
               onClick={() => {
                 setGateError(null);
+                setGateErrorCode(null);
                 const accessEmail = prefilledEmail || email;
-                if ((security.email || (security.emailVerification && security.isDealRoom)) && !inviteToken && !accessEmail.trim()) {
+                if (security.email && !security.emailVerification && !inviteToken && !accessEmail.trim()) {
                   setGateError(t("viewer.emailRequired"));
                   return;
                 }
@@ -575,7 +368,7 @@ export function PublicViewerPage() {
                   return;
                 }
                 void tryAccess({
-                  email: security.email || (security.emailVerification && security.isDealRoom) ? accessEmail : undefined,
+                  email: security.email && !security.emailVerification ? accessEmail : undefined,
                   emailCode: security.emailVerification ? emailCode : undefined,
                   password: security.password ? password : undefined,
                   ndaAgreed: security.nda ? ndaAgreed : undefined,
@@ -583,10 +376,12 @@ export function PublicViewerPage() {
                 });
               }}
             >
-              {t("viewer.continue")}
+              {gateErrorCode === "not_allowed" ? t("common:retry") : t("viewer.continue")}
             </Button>
             {!hasGates && (
-              <p className="text-sm text-muted-foreground">{t("common:error.loadFailed")}</p>
+              <p className="text-sm text-muted-foreground">
+                {gateError ?? t("common:error.loadFailed")}
+              </p>
             )}
           </CardContent>
         </Card>

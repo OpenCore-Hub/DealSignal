@@ -165,11 +165,17 @@ export function validateDraft(
   selectedLink: Link | null,
   t: (key: string, options?: Record<string, unknown>) => string,
   now: number,
-  isDealRoomLink?: boolean
+  isDealRoomLink?: boolean,
+  existingNames?: string[]
 ): Record<string, string> {
   const errors: Record<string, string> = {};
-  if (!draft.name.trim()) {
+  const trimmedName = draft.name.trim();
+  if (!trimmedName) {
     errors.name = t("share.linkNameRequired");
+  } else if (
+    existingNames?.some((name) => name.trim().toLowerCase() === trimmedName.toLowerCase())
+  ) {
+    errors.name = t("share.linkNameDuplicate");
   }
   const expiresAtRFC = toRFC3339(draft.expiresAt);
   if (expiresAtRFC && new Date(expiresAtRFC).getTime() <= now) {

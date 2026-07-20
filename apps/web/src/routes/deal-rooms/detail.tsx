@@ -75,6 +75,10 @@ export function DealRoomDetailPage() {
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const activePollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
+  const [linksRevision, setLinksRevision] = useState(0);
+  const bumpLinksRevision = useCallback(() => {
+    setLinksRevision((n) => n + 1);
+  }, []);
   const { tab } = useDealRoomTab();
   const reducedMotion = useReducedMotion();
   const currentWorkspace = useUIStore((state) => state.currentWorkspace);
@@ -439,7 +443,11 @@ export function DealRoomDetailPage() {
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
       <PageHeader title={room.name} description={room.description}>
         <div className="flex flex-wrap items-center gap-2">
-          <DealRoomShareButton roomId={room.id} slug={room.slug} />
+          <DealRoomShareButton
+            roomId={room.id}
+            slug={room.slug}
+            onChanged={bumpLinksRevision}
+          />
           <InviteMemberDialog roomId={room.id} onInvited={refetch}>
             <Button variant="outline" className="gap-1.5">
               <Envelope size={16} />
@@ -486,7 +494,7 @@ export function DealRoomDetailPage() {
 
           {tab === "participants" && (
             <div className="grid grid-cols-1 gap-4">
-              <FolderPermissionsSection roomId={room.id} />
+              <FolderPermissionsSection roomId={room.id} refreshKey={linksRevision} />
             </div>
           )}
 

@@ -24,7 +24,7 @@ export function useAsyncData<T>(
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
-  const cancelledRef = useRef(false);
+  const generationRef = useRef(0);
   const pendingResolvesRef = useRef<((value: void | PromiseLike<void>) => void)[]>([]);
 
   const refetch = useCallback(() => {
@@ -36,29 +36,36 @@ export function useAsyncData<T>(
 
   useEffect(() => {
     const controller = new AbortController();
-    cancelledRef.current = false;
+    const generation = ++generationRef.current;
 
     async function load() {
       setLoading(true);
       setError(null);
       try {
         const result = await fetcher(controller.signal);
-        if (!cancelledRef.current && !controller.signal.aborted) {
-          setData(result);
+        if (generation !== generationRef.current || controller.signal.aborted) {
+          return;
         }
+        setData(result);
       } catch (e) {
-        if (cancelledRef.current || controller.signal.aborted || isAbortError(e)) {
+        if (
+          generation !== generationRef.current ||
+          controller.signal.aborted ||
+          isAbortError(e)
+        ) {
           return;
         }
         setError(e instanceof Error ? e.message : "Failed to load");
       } finally {
-        if (!cancelledRef.current && !controller.signal.aborted) {
+        if (generation === generationRef.current && !controller.signal.aborted) {
           setLoading(false);
         }
-        const resolves = pendingResolvesRef.current;
-        pendingResolvesRef.current = [];
-        for (const resolve of resolves) {
-          resolve();
+        if (generation === generationRef.current) {
+          const resolves = pendingResolvesRef.current;
+          pendingResolvesRef.current = [];
+          for (const resolve of resolves) {
+            resolve();
+          }
         }
       }
     }
@@ -66,7 +73,6 @@ export function useAsyncData<T>(
     load();
 
     return () => {
-      cancelledRef.current = true;
       controller.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps

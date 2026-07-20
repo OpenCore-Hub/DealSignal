@@ -381,4 +381,22 @@ describe("validateDraft", () => {
     const errors = validateDraft(draft, null, t, Date.now());
     expect(errors.conflict).toBe("accessRules.errors.conflict");
   });
+
+  it("errors when link name already exists (case-insensitive)", () => {
+    const draft: DraftLink = {
+      ...baseDraft,
+      name: "Acme DD",
+    };
+    const errors = validateDraft(draft, null, t, Date.now(), true, ["acme dd", "Other"]);
+    expect(errors.name).toBe("share.linkNameDuplicate");
+  });
+
+  it("allows renaming to the same name when existing names exclude self", () => {
+    const draft: DraftLink = {
+      ...baseDraft,
+      name: "Acme DD",
+    };
+    const errors = validateDraft(draft, null, t, Date.now(), true, ["Other"]);
+    expect(errors.name).toBeUndefined();
+  });
 });

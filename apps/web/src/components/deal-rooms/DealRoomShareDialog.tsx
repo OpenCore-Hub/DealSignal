@@ -15,6 +15,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
 import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -45,7 +46,7 @@ interface DealRoomShareDialogProps {
   slug?: string;
   defaultTab?: "share" | "access" | "documents";
   children?: React.ReactElement;
-  onChanged?: () => void;
+  onChanged?: () => void | Promise<void>;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
@@ -115,7 +116,7 @@ interface DealRoomShareDialogContentProps {
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
-  onChanged?: () => void;
+  onChanged?: () => void | Promise<void>;
   onClose: () => void;
   registerCloseGuard: (guard: () => boolean) => void;
 }
@@ -153,12 +154,20 @@ function DealRoomShareDialogContent({
   const selectedLink = data?.selectedLink ?? null;
   const isNew = !selectedLink;
   const isDealRoomLink = !isNew ? !!selectedLink?.dealRoomId : true;
+  const existingNames = useMemo(
+    () =>
+      (data?.links ?? [])
+        .filter((link) => link.id !== selectedLink?.id)
+        .map((link) => link.name ?? "")
+        .filter((name) => name.trim().length > 0),
+    [data?.links, selectedLink?.id]
+  );
 
   // 实时校验：所有必填项通过前，创建/保存按钮保持禁用。
   const validationErrors = useMemo(() => {
     if (loadingData || !data) return {};
-    return validateDraft(draft, selectedLink, lt, now(), isDealRoomLink);
-  }, [draft, selectedLink, lt, isDealRoomLink, loadingData, data]);
+    return validateDraft(draft, selectedLink, lt, now(), isDealRoomLink, existingNames);
+  }, [draft, selectedLink, lt, isDealRoomLink, loadingData, data, existingNames]);
 
   // Rebuild draft when the underlying link data changes (first load, create vs
   // edit, or switching to a different link). The parent key already remounts the
@@ -262,10 +271,14 @@ function DealRoomShareDialogContent({
       setTimeout(() => setSaveSuccess(false), 1500);
       toast.success(t(selectedLink ? "share.saveSuccess" : "share.createSuccess"));
       await refetch();
-      onChanged?.();
+      await onChanged?.();
       return link;
-    } catch {
-      toast.error(t("common:error.saveFailed"));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "duplicate_name") {
+        toast.error(lt("share.linkNameDuplicate"));
+      } else {
+        toast.error(t("common:error.saveFailed"));
+      }
       return null;
     } finally {
       setSaving(false);
@@ -273,7 +286,7 @@ function DealRoomShareDialogContent({
   };
 
   const handleSave = async () => {
-    const currentErrors = validateDraft(draft, selectedLink, lt, now(), isDealRoomLink);
+    const currentErrors = validateDraft(draft, selectedLink, lt, now(), isDealRoomLink, existingNames);
     if (Object.keys(currentErrors).length > 0) {
       return;
     }
@@ -289,7 +302,7 @@ function DealRoomShareDialogContent({
       try {
         await api.updateLink(selectedLink.id, { status: checked ? "active" : "revoked" });
         await refetch();
-        onChanged?.();
+        await onChanged?.();
       } catch {
         toast.error(t("common:error.saveFailed"));
       }

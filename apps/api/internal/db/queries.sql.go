@@ -1553,8 +1553,8 @@ func (q *Queries) CreateLinkAccessRule(ctx context.Context, arg CreateLinkAccess
 }
 
 const createLinkContact = `-- name: CreateLinkContact :exec
-INSERT INTO link_contacts (link_id, contact_id, access_code)
-VALUES ($1, $2, $3)
+INSERT INTO link_contacts (link_id, contact_id, access_code, code_send_status)
+VALUES ($1, $2, $3, 'pending')
 `
 
 type CreateLinkContactParams struct {
@@ -1565,6 +1565,43 @@ type CreateLinkContactParams struct {
 
 func (q *Queries) CreateLinkContact(ctx context.Context, arg CreateLinkContactParams) error {
 	_, err := q.db.Exec(ctx, createLinkContact, arg.LinkID, arg.ContactID, arg.AccessCode)
+	return err
+}
+
+const createLinkContactWithDelivery = `-- name: CreateLinkContactWithDelivery :exec
+INSERT INTO link_contacts (
+    link_id, contact_id, access_code,
+    code_send_status, code_send_error, code_sent_at, used_at
+) VALUES (
+    $1, $2, $3,
+    $4,
+    NULLIF($5, ''),
+    $6,
+    $7
+)
+`
+
+type CreateLinkContactWithDeliveryParams struct {
+	LinkID         pgtype.UUID
+	ContactID      pgtype.UUID
+	AccessCode     string
+	CodeSendStatus string
+	CodeSendError  interface{}
+	CodeSentAt     pgtype.Timestamptz
+	UsedAt         pgtype.Timestamptz
+}
+
+// Preserves delivery metadata when recreating link_contacts (e.g. document link update).
+func (q *Queries) CreateLinkContactWithDelivery(ctx context.Context, arg CreateLinkContactWithDeliveryParams) error {
+	_, err := q.db.Exec(ctx, createLinkContactWithDelivery,
+		arg.LinkID,
+		arg.ContactID,
+		arg.AccessCode,
+		arg.CodeSendStatus,
+		arg.CodeSendError,
+		arg.CodeSentAt,
+		arg.UsedAt,
+	)
 	return err
 }
 
@@ -2769,6 +2806,62 @@ type DismissSuggestionParams struct {
 func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionParams) error {
 	_, err := q.db.Exec(ctx, dismissSuggestion, arg.ID, arg.WorkspaceID)
 	return err
+}
+
+const existsLinkNameInDealRoom = `-- name: ExistsLinkNameInDealRoom :one
+SELECT EXISTS (
+  SELECT 1
+  FROM links
+  WHERE deal_room_id = $1
+    AND status <> 'deleted'
+    AND name IS NOT NULL
+    AND btrim(name) <> ''
+    AND lower(btrim(name)) = lower(btrim($2))
+    AND ($3::uuid IS NULL OR id <> $3)
+) AS exists
+`
+
+type ExistsLinkNameInDealRoomParams struct {
+	DealRoomID pgtype.UUID
+	Name       string
+	ExcludeID  pgtype.UUID
+}
+
+// Case-insensitive uniqueness among non-deleted links in a deal room.
+// exclude_id may be NULL when creating a new link.
+func (q *Queries) ExistsLinkNameInDealRoom(ctx context.Context, arg ExistsLinkNameInDealRoomParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsLinkNameInDealRoom, arg.DealRoomID, arg.Name, arg.ExcludeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
+const existsLinkNameInWorkspace = `-- name: ExistsLinkNameInWorkspace :one
+SELECT EXISTS (
+  SELECT 1
+  FROM links
+  WHERE workspace_id = $1
+    AND deal_room_id IS NULL
+    AND status <> 'deleted'
+    AND name IS NOT NULL
+    AND btrim(name) <> ''
+    AND lower(btrim(name)) = lower(btrim($2))
+    AND ($3::uuid IS NULL OR id <> $3)
+) AS exists
+`
+
+type ExistsLinkNameInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Name        string
+	ExcludeID   pgtype.UUID
+}
+
+// Case-insensitive uniqueness among non-deleted document links in a workspace.
+func (q *Queries) ExistsLinkNameInWorkspace(ctx context.Context, arg ExistsLinkNameInWorkspaceParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsLinkNameInWorkspace, arg.WorkspaceID, arg.Name, arg.ExcludeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const findMergeableNotification = `-- name: FindMergeableNotification :one
@@ -4485,6 +4578,7 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 
 const getLinkContactByCode = `-- name: GetLinkContactByCode :one
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       lc.code_send_status, lc.code_send_error,
        c.email AS contact_email, c.name AS contact_name
 FROM link_contacts lc
 JOIN links l ON l.id = lc.link_id
@@ -4499,15 +4593,17 @@ type GetLinkContactByCodeParams struct {
 }
 
 type GetLinkContactByCodeRow struct {
-	ID           pgtype.UUID
-	LinkID       pgtype.UUID
-	ContactID    pgtype.UUID
-	AccessCode   string
-	CodeSentAt   pgtype.Timestamptz
-	UsedAt       pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-	ContactEmail pgtype.Text
-	ContactName  pgtype.Text
+	ID             pgtype.UUID
+	LinkID         pgtype.UUID
+	ContactID      pgtype.UUID
+	AccessCode     string
+	CodeSentAt     pgtype.Timestamptz
+	UsedAt         pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	CodeSendStatus string
+	CodeSendError  pgtype.Text
+	ContactEmail   pgtype.Text
+	ContactName    pgtype.Text
 }
 
 func (q *Queries) GetLinkContactByCode(ctx context.Context, arg GetLinkContactByCodeParams) (GetLinkContactByCodeRow, error) {
@@ -4521,6 +4617,8 @@ func (q *Queries) GetLinkContactByCode(ctx context.Context, arg GetLinkContactBy
 		&i.CodeSentAt,
 		&i.UsedAt,
 		&i.CreatedAt,
+		&i.CodeSendStatus,
+		&i.CodeSendError,
 		&i.ContactEmail,
 		&i.ContactName,
 	)
@@ -4529,6 +4627,7 @@ func (q *Queries) GetLinkContactByCode(ctx context.Context, arg GetLinkContactBy
 
 const getLinkContactByEmail = `-- name: GetLinkContactByEmail :one
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       lc.code_send_status, lc.code_send_error,
        c.email AS contact_email, c.name AS contact_name
 FROM link_contacts lc
 JOIN links l ON l.id = lc.link_id
@@ -4543,15 +4642,17 @@ type GetLinkContactByEmailParams struct {
 }
 
 type GetLinkContactByEmailRow struct {
-	ID           pgtype.UUID
-	LinkID       pgtype.UUID
-	ContactID    pgtype.UUID
-	AccessCode   string
-	CodeSentAt   pgtype.Timestamptz
-	UsedAt       pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-	ContactEmail pgtype.Text
-	ContactName  pgtype.Text
+	ID             pgtype.UUID
+	LinkID         pgtype.UUID
+	ContactID      pgtype.UUID
+	AccessCode     string
+	CodeSentAt     pgtype.Timestamptz
+	UsedAt         pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	CodeSendStatus string
+	CodeSendError  pgtype.Text
+	ContactEmail   pgtype.Text
+	ContactName    pgtype.Text
 }
 
 func (q *Queries) GetLinkContactByEmail(ctx context.Context, arg GetLinkContactByEmailParams) (GetLinkContactByEmailRow, error) {
@@ -4565,6 +4666,8 @@ func (q *Queries) GetLinkContactByEmail(ctx context.Context, arg GetLinkContactB
 		&i.CodeSentAt,
 		&i.UsedAt,
 		&i.CreatedAt,
+		&i.CodeSendStatus,
+		&i.CodeSendError,
 		&i.ContactEmail,
 		&i.ContactName,
 	)
@@ -4573,6 +4676,7 @@ func (q *Queries) GetLinkContactByEmail(ctx context.Context, arg GetLinkContactB
 
 const getLinkContactsByPublicToken = `-- name: GetLinkContactsByPublicToken :many
 SELECT lc.id, lc.link_id, lc.contact_id, lc.access_code, lc.code_sent_at, lc.used_at, lc.created_at,
+       lc.code_send_status, lc.code_send_error,
        c.email AS contact_email, c.name AS contact_name
 FROM link_contacts lc
 JOIN links l ON l.id = lc.link_id
@@ -4581,15 +4685,17 @@ WHERE l.public_token = $1
 `
 
 type GetLinkContactsByPublicTokenRow struct {
-	ID           pgtype.UUID
-	LinkID       pgtype.UUID
-	ContactID    pgtype.UUID
-	AccessCode   string
-	CodeSentAt   pgtype.Timestamptz
-	UsedAt       pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-	ContactEmail pgtype.Text
-	ContactName  pgtype.Text
+	ID             pgtype.UUID
+	LinkID         pgtype.UUID
+	ContactID      pgtype.UUID
+	AccessCode     string
+	CodeSentAt     pgtype.Timestamptz
+	UsedAt         pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+	CodeSendStatus string
+	CodeSendError  pgtype.Text
+	ContactEmail   pgtype.Text
+	ContactName    pgtype.Text
 }
 
 func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken string) ([]GetLinkContactsByPublicTokenRow, error) {
@@ -4609,6 +4715,8 @@ func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken 
 			&i.CodeSentAt,
 			&i.UsedAt,
 			&i.CreatedAt,
+			&i.CodeSendStatus,
+			&i.CodeSendError,
 			&i.ContactEmail,
 			&i.ContactName,
 		); err != nil {
@@ -7298,6 +7406,59 @@ func (q *Queries) ListFileRequestsByVisitor(ctx context.Context, arg ListFileReq
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLinkAccessCodeContactsByLink = `-- name: ListLinkAccessCodeContactsByLink :many
+SELECT
+    c.email::text AS contact_email,
+    COALESCE(c.name, '')::text AS contact_name,
+    lc.code_sent_at,
+    lc.code_send_status,
+    COALESCE(lc.code_send_error, '')::text AS code_send_error,
+    lc.used_at,
+    lc.created_at
+FROM link_contacts lc
+JOIN contacts c ON c.id = lc.contact_id
+WHERE lc.link_id = $1
+ORDER BY lc.code_sent_at DESC NULLS LAST, c.email ASC
+`
+
+type ListLinkAccessCodeContactsByLinkRow struct {
+	ContactEmail   string
+	ContactName    string
+	CodeSentAt     pgtype.Timestamptz
+	CodeSendStatus string
+	CodeSendError  string
+	UsedAt         pgtype.Timestamptz
+	CreatedAt      pgtype.Timestamptz
+}
+
+func (q *Queries) ListLinkAccessCodeContactsByLink(ctx context.Context, linkID pgtype.UUID) ([]ListLinkAccessCodeContactsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listLinkAccessCodeContactsByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLinkAccessCodeContactsByLinkRow
+	for rows.Next() {
+		var i ListLinkAccessCodeContactsByLinkRow
+		if err := rows.Scan(
+			&i.ContactEmail,
+			&i.ContactName,
+			&i.CodeSentAt,
+			&i.CodeSendStatus,
+			&i.CodeSendError,
+			&i.UsedAt,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -11004,7 +11165,11 @@ func (q *Queries) UpdateLinkAccessRequestStatus(ctx context.Context, arg UpdateL
 
 const updateLinkContactAccessCode = `-- name: UpdateLinkContactAccessCode :exec
 UPDATE link_contacts
-SET access_code = $2, code_sent_at = now(), used_at = NULL
+SET access_code = $2,
+    code_sent_at = now(),
+    used_at = NULL,
+    code_send_status = 'pending',
+    code_send_error = NULL
 WHERE id = $1
 `
 
@@ -11015,6 +11180,34 @@ type UpdateLinkContactAccessCodeParams struct {
 
 func (q *Queries) UpdateLinkContactAccessCode(ctx context.Context, arg UpdateLinkContactAccessCodeParams) error {
 	_, err := q.db.Exec(ctx, updateLinkContactAccessCode, arg.ID, arg.AccessCode)
+	return err
+}
+
+const updateLinkContactSendStatusByEmail = `-- name: UpdateLinkContactSendStatusByEmail :exec
+UPDATE link_contacts lc
+SET code_send_status = $1,
+    code_send_error = NULLIF($2, '')
+FROM links l, contacts c
+WHERE lc.link_id = l.id
+  AND lc.contact_id = c.id
+  AND l.public_token = $3
+  AND lower(c.email) = lower($4)
+`
+
+type UpdateLinkContactSendStatusByEmailParams struct {
+	Status       string
+	ErrorMessage interface{}
+	PublicToken  string
+	Email        string
+}
+
+func (q *Queries) UpdateLinkContactSendStatusByEmail(ctx context.Context, arg UpdateLinkContactSendStatusByEmailParams) error {
+	_, err := q.db.Exec(ctx, updateLinkContactSendStatusByEmail,
+		arg.Status,
+		arg.ErrorMessage,
+		arg.PublicToken,
+		arg.Email,
+	)
 	return err
 }
 

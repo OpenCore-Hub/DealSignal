@@ -36,6 +36,7 @@
     "disableConfirmDescription": "Existing viewer sessions will be invalidated immediately.",
     "preview": "Preview",
     "linkNameRequired": "Link name is required",
+    "linkNameDuplicate": "A link with this name already exists",
     "documentScope": {
       "allDocuments": "All documents accessible",
       "selectedDocuments": "{{folders}} folders / {{documents}} documents",
@@ -178,7 +179,12 @@
     }
   },
   "activity": {
-    "title": "Link activity"
+    "title": "Link activity",
+    "windowControls": "Window size",
+    "shrink": "Shrink window",
+    "enlarge": "Enlarge window",
+    "fullscreen": "Enter fullscreen",
+    "exitFullscreen": "Exit fullscreen"
   },
   "analytics": {
     "views": "Views",
@@ -192,6 +198,25 @@
     "recentVisitors": "Recent visitors",
     "noRecentVisitors": "No recent visitors yet.",
     "visitorViews": "{{count}} views",
+    "accessCodeContacts": "Verification code delivery",
+    "noAccessCodeContacts": "No verification codes have been sent for this link yet.",
+    "codeSendStatus": {
+      "pending": "Pending",
+      "sent": "Sent",
+      "failed": "Failed"
+    },
+    "codeSentAt": "Sent {{time}}",
+    "codeUsed": "Used",
+    "resend": "Resend",
+    "resending": "Sending…",
+    "resendSuccess": "Verification code resent",
+    "resendFailed": "Failed to resend verification code",
+    "resendRateLimited": "Too many resend attempts. Please wait and try again.",
+    "resendNotNeeded": "Already delivered. Resend skipped to avoid spam.",
+    "resendAllFailed": "Resend undelivered",
+    "resendAllSuccess": "Resent {{sent}} of {{attempted}} codes",
+    "resendAllPartial": "Resent {{sent}} of {{attempted}}; {{failed}} still failing",
+    "resendAllNone": "No undelivered codes to resend",
     "keyPages": "Key pages",
     "noKeyPages": "No key pages yet.",
     "pageLabel": "Page {{pageNumber}}",

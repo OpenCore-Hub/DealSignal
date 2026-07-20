@@ -36,6 +36,7 @@
     "disableConfirmDescription": "现有访客会话将立即失效。",
     "preview": "预览",
     "linkNameRequired": "链接名称不能为空",
+    "linkNameDuplicate": "链接名称已存在",
     "documentScope": {
       "allDocuments": "全部文档可访问",
       "selectedDocuments": "{{folders}} 个文件夹 / {{documents}} 个文档",
@@ -178,7 +179,12 @@
     }
   },
   "activity": {
-    "title": "链接活动"
+    "title": "链接活动",
+    "windowControls": "窗口大小",
+    "shrink": "缩小窗口",
+    "enlarge": "放大窗口",
+    "fullscreen": "全屏",
+    "exitFullscreen": "退出全屏"
   },
   "analytics": {
     "views": "访问次数",
@@ -196,6 +202,25 @@
     "noKeyPages": "暂无关键页面。",
     "pageLabel": "第 {{pageNumber}} 页",
     "qaRecords": "问答记录",
-    "noQARecords": "暂无问题。"
+    "noQARecords": "暂无问题。",
+    "accessCodeContacts": "验证码发送",
+    "noAccessCodeContacts": "暂无验证码联系人。",
+    "codeSendStatus": {
+      "pending": "待发送",
+      "sent": "发送成功",
+      "failed": "发送失败"
+    },
+    "codeSentAt": "发送于 {{time}}",
+    "codeUsed": "已使用",
+    "resend": "重新发送",
+    "resending": "发送中…",
+    "resendSuccess": "验证码已重新发送",
+    "resendFailed": "重新发送失败",
+    "resendRateLimited": "发送过于频繁，请稍后再试。",
+    "resendNotNeeded": "已成功送达，已跳过以免打扰受邀人。",
+    "resendAllFailed": "重发未送达",
+    "resendAllSuccess": "已重发 {{sent}} / {{attempted}}",
+    "resendAllPartial": "已重发 {{sent}} / {{attempted}}，仍有 {{failed}} 失败",
+    "resendAllNone": "没有需要重发的未送达项"
   }
 }

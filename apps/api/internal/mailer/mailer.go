@@ -47,6 +47,11 @@ func New(cfg *config.Config) Mailer {
 		return newResendMailer(cfg, templates, tracker)
 	}
 	if cfg.SMTPHost != "" {
+		host := strings.ToLower(cfg.SMTPHost)
+		if strings.Contains(host, "sandbox") || strings.Contains(host, "mailtrap") || strings.Contains(host, "ethereal") {
+			slog.Warn("SMTP host looks like a mail sandbox; messages may be accepted without delivering to real inboxes",
+				"smtp_host", cfg.SMTPHost)
+		}
 		return newSMTPMailer(cfg, templates, tracker)
 	}
 	return &logMailer{

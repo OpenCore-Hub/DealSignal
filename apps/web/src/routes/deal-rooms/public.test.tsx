@@ -12,16 +12,14 @@ import type { PublicDealRoomView } from "@/lib/api";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getPublicDealRoomMock, requestDealRoomAccessMock, signDealRoomNDAMock } = vi.hoisted(() => ({
+const { getPublicDealRoomMock, signDealRoomNDAMock } = vi.hoisted(() => ({
   getPublicDealRoomMock: vi.fn(),
-  requestDealRoomAccessMock: vi.fn(),
   signDealRoomNDAMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     getPublicDealRoom: getPublicDealRoomMock,
-    requestDealRoomAccess: requestDealRoomAccessMock,
     signDealRoomNDA: signDealRoomNDAMock,
   },
 }));
@@ -101,7 +99,6 @@ async function renderPage() {
 describe("PublicDealRoomPage", () => {
   beforeEach(() => {
     getPublicDealRoomMock.mockReset();
-    requestDealRoomAccessMock.mockReset();
     signDealRoomNDAMock.mockReset();
   });
 
@@ -120,19 +117,18 @@ describe("PublicDealRoomPage", () => {
     expect(screen.getByText("Acme Seed Round Pitch Deck")).toBeInTheDocument();
   });
 
-  it("shows access request form when not a member", async () => {
+  it("shows access denied message when not a member", async () => {
     getPublicDealRoomMock.mockResolvedValue({
       ...mockView,
       member: null,
     });
-    requestDealRoomAccessMock.mockResolvedValue({ request_id: "ra_new" });
     await renderPage();
 
     fireEvent.change(screen.getByLabelText(/email/i), { target: { value: "new@example.com" } });
     fireEvent.click(screen.getByRole("button", { name: /continue/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/request access/i)).toBeInTheDocument();
+      expect(screen.getByText(/not authorized/i)).toBeInTheDocument();
     });
   });
 

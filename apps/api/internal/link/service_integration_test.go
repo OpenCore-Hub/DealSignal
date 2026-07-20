@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
@@ -106,6 +107,7 @@ func applyMigrations(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 type recordingMailer struct {
+	mu       sync.Mutex
 	jobs     []mailer.EmailJob
 	received chan mailer.EmailJob
 }
@@ -115,6 +117,7 @@ func newRecordingMailer() *recordingMailer {
 }
 
 type recordingNotifier struct {
+	mu       sync.Mutex
 	enqueued []notification.Notification
 }
 
@@ -124,8 +127,18 @@ func newRecordingNotifier() *recordingNotifier {
 
 func (n *recordingNotifier) Enqueue(ctx context.Context, workspaceID, userID, channel, subject, body string, opts ...notification.EnqueueOption) (notification.Notification, error) {
 	ev := notification.Notification{WorkspaceID: workspaceID, UserID: userID, Channel: channel, Subject: subject, Body: body}
+	n.mu.Lock()
 	n.enqueued = append(n.enqueued, ev)
+	n.mu.Unlock()
 	return ev, nil
+}
+
+func (n *recordingNotifier) snapshot() []notification.Notification {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+	out := make([]notification.Notification, len(n.enqueued))
+	copy(out, n.enqueued)
+	return out
 }
 
 func (n *recordingNotifier) Evaluate(ctx context.Context, ev notification.Event) error {
@@ -133,7 +146,9 @@ func (n *recordingNotifier) Evaluate(ctx context.Context, ev notification.Event)
 }
 
 func (m *recordingMailer) SendEmail(ctx context.Context, job mailer.EmailJob) (string, error) {
+	m.mu.Lock()
 	m.jobs = append(m.jobs, job)
+	m.mu.Unlock()
 	select {
 	case m.received <- job:
 	default:
@@ -153,12 +168,22 @@ func (m *recordingMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code,
 		LinkName:  linkName,
 		LinkURL:   linkURL,
 	}
+	m.mu.Lock()
 	m.jobs = append(m.jobs, job)
+	m.mu.Unlock()
 	select {
 	case m.received <- job:
 	default:
 	}
 	return "msg-id", nil
+}
+
+func (m *recordingMailer) snapshotJobs() []mailer.EmailJob {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	out := make([]mailer.EmailJob, len(m.jobs))
+	copy(out, m.jobs)
+	return out
 }
 
 type testFixture struct {
