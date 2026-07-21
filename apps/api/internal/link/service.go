@@ -24,6 +24,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/nda"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
 	"github.com/google/uuid"
@@ -68,6 +69,7 @@ type Service struct {
 	emailSem       chan struct{} // limits concurrent email sends (bounded goroutines)
 	indexGenGroup  singleflight.Group
 	actionSyncer   ActionSyncer
+	ndaSvc         *nda.Service
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
@@ -85,6 +87,11 @@ type ServiceOption func(*Service)
 // WithActionSyncer wires an action syncer so link events can resolve action items.
 func WithActionSyncer(a ActionSyncer) ServiceOption {
 	return func(s *Service) { s.actionSyncer = a }
+}
+
+// WithNDAService wires One-Click NDA sealing and notifications.
+func WithNDAService(n *nda.Service) ServiceOption {
+	return func(s *Service) { s.ndaSvc = n }
 }
 
 // LLMClient is the subset of llm.Client used by the link service.
@@ -124,6 +131,7 @@ var (
 	ErrLinkMaxAccessReached = errors.New("link max access reached")
 	ErrRequiresEmail        = errors.New("email required")
 	ErrRequiresNDA          = errors.New("nda agreement required")
+	ErrInvalidSignerName    = errors.New("signer name is required")
 	ErrRequiresEmailCode    = errors.New("email verification code required")
 	ErrInvalidEmailCode     = errors.New("invalid email verification code")
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
@@ -132,6 +140,10 @@ var (
 	ErrDealRoomNotFound      = errors.New("deal room not found")
 	ErrBlockedEmail          = errors.New("email is blocked")
 	ErrNotAllowedEmail       = errors.New("email is not allowed")
+	// ErrDeliveryEmailMismatch means the visitor submitted an email that does not
+	// match the address bound to a valid verification code. Handlers MUST NOT
+	// expose AuthorizedEmail to clients (privacy); it is audit-only.
+	ErrDeliveryEmailMismatch = errors.New("delivery email does not match verified email")
 	ErrRequiresPassword      = errors.New("password required")
 	ErrInvalidPassword       = errors.New("invalid password")
 	ErrInviteExpired         = errors.New("invitation expired")
@@ -144,6 +156,11 @@ var (
 	ErrAccessCodeContactNotFound = errors.New("access code contact not found")
 	ErrAccessCodeResendNotNeeded = errors.New("access code already delivered; pass force=true to resend")
 	ErrEmailVerificationDisabled = errors.New("email verification is not enabled for this link")
+	// ErrAccessCodeSendFailed means the access request was approved (allow rule
+	// committed) but the verification-code email could not be delivered. Callers
+	// should surface this so the owner can retry via resend.
+	ErrAccessCodeSendFailed = errors.New("access approved but verification code could not be sent")
+	ErrAccessAlreadyAllowed = errors.New("email already has access")
 )
 
 // ownerResendPendingStale is how long a contact may stay "pending" before the
@@ -167,6 +184,9 @@ func (s *Service) ResolvePublicLink(ctx context.Context, publicToken string) (db
 	}
 	if link.Status == "disabled" || link.Status == "revoked" {
 		return db.Link{}, ErrLinkDisabled
+	}
+	if link.Status == "archived" {
+		return db.Link{}, ErrLinkArchived
 	}
 	if link.ExpiresAt.Valid && link.ExpiresAt.Time.Before(time.Now()) {
 		return db.Link{}, ErrLinkExpired
@@ -206,6 +226,7 @@ type CreateLinkRequest struct {
 	RequireEmailVerification    bool
 	RequireNDA                  bool
 	NDADocumentID               string
+	NDATemplateID               string
 	RequirePassword             bool
 	Password                    string // plaintext; stored as bcrypt hash
 	AllowedEmails               []string
@@ -225,9 +246,13 @@ type CreateLinkRequest struct {
 	CustomDomain                string
 	Tags                        []string
 	NotifyOnAccess              bool
-	// FolderPaths scopes a deal-room link to a set of folder paths.
-	// Empty means the whole deal room is exposed.
+	// FolderPaths scopes a deal-room link to a set of folder paths when the
+	// link uses allowlist mode. Empty allowlist denies all documents.
 	FolderPaths []string
+	// FolderScopeMode is "full" (legacy whole-room) or "allowlist".
+	// Deal-room creates always persist allowlist. Omit on update to leave unchanged
+	// unless FolderPaths is provided (which forces allowlist).
+	FolderScopeMode string
 }
 
 // UpdateLinkRequest is the input for updating an existing link (full replacement).
@@ -240,6 +265,7 @@ type UpdateLinkRequest struct {
 	RequireEmailVerification    bool
 	RequireNDA                  bool
 	NDADocumentID               string
+	NDATemplateID               string
 	RequirePassword             bool
 	Password                    string // plaintext; if empty and require_password unchanged, keep existing hash
 	AllowedEmails               []string
@@ -258,9 +284,13 @@ type UpdateLinkRequest struct {
 	CustomDomain                string
 	Tags                        []string
 	NotifyOnAccess              bool
-	// FolderPaths scopes a deal-room link to a set of folder paths.
-	// Empty means the whole deal room is exposed.
+	// FolderPaths scopes a deal-room link to a set of folder paths when the
+	// link uses allowlist mode. Empty allowlist denies all documents.
 	FolderPaths []string
+	// FolderScopeMode is "full" (legacy whole-room) or "allowlist".
+	// Deal-room creates always persist allowlist. Omit on update to leave unchanged
+	// unless FolderPaths is provided (which forces allowlist).
+	FolderScopeMode string
 }
 
 // AccessRule represents a single allow/block rule for a link.
@@ -295,6 +325,7 @@ type DealRoomLinkRequest struct {
 	RequireEmailVerification bool
 	RequireNDA               bool
 	NDADocumentID            string
+	NDATemplateID            string
 	RequirePassword          bool
 	Password                 string
 	AllowedEmails            []string
@@ -310,8 +341,8 @@ type DealRoomLinkRequest struct {
 	CustomDomain             string
 	Tags                     []string
 	NotifyOnAccess           bool
-	// FolderPaths optionally scopes the link to a subset of deal-room folders.
-	// When empty, the link exposes all folders in the deal room.
+	// FolderPaths is the allowlist of deal-room folders. Empty deny-all.
+	// New deal-room links always persist folder_scope_mode=allowlist.
 	FolderPaths []string
 }
 
@@ -415,7 +446,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		tenantID = dealRoom.TenantID
 		dealRoomID = dealRoom.ID
 
-		// If a folder scope is provided, every path must belong to the deal room.
+		// Deal-room links always use allowlist mode (empty = deny-all).
 		if err := s.validateDealRoomFolderPaths(ctx, qtx, workspaceUUID, dealRoomID, req.FolderPaths); err != nil {
 			return db.Link{}, err
 		}
@@ -466,13 +497,21 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		tenantID = primaryDoc.TenantID
 	}
 
-	ndaDocumentID, err := s.resolveNdaDocumentID(ctx, qtx, workspaceUUID, dealRoomID, linkDocumentIDs, req.NDADocumentID, requireNDA)
+	ndaDocumentID, ndaTemplateID, err := s.resolveNdaBinding(ctx, qtx, tenantID, workspaceUUID, userUUID, req.NDATemplateID, req.NDADocumentID, requireNDA)
 	if err != nil {
 		return db.Link{}, err
 	}
 
 	if err := s.ensureUniqueLinkName(ctx, qtx, workspaceUUID, dealRoomID, req.Name, pgtype.UUID{}); err != nil {
 		return db.Link{}, err
+	}
+
+	folderScopeMode := FolderScopeModeFull
+	hasDocumentScope := false
+	if hasDealRoom {
+		// Secure default: deal-room links are allowlists (empty = deny-all).
+		folderScopeMode = FolderScopeModeAllowlist
+		hasDocumentScope = true
 	}
 
 	link, err := qtx.CreateLink(ctx, db.CreateLinkParams{
@@ -495,6 +534,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		LinkType:                    linkType,
 		TargetFolderPath:            targetFolderPath,
 		NdaDocumentID:               ndaDocumentID,
+		NdaTemplateID:               ndaTemplateID,
 		RequireEmail:                requireEmail,
 		RequireEmailVerification:    requireEmailVerification,
 		RequireNda:                  requireNDA,
@@ -503,8 +543,9 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		CustomDomain:                pgtype.Text{String: req.CustomDomain, Valid: req.CustomDomain != ""},
 		Tags:                        req.Tags,
 		NotifyOnAccess:              req.NotifyOnAccess,
-		HasDocumentScope:            hasDealRoom && len(folderScopePaths) > 0,
+		HasDocumentScope:            hasDocumentScope,
 		FolderScopePaths:            folderScopePaths,
+		FolderScopeMode:             folderScopeMode,
 		Status:                      "active",
 		CreatedBy:                   userUUID,
 	})
@@ -736,13 +777,30 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 	}
 
 	folderScopePaths := existing.FolderScopePaths
-	if isDealRoomLink && req.FolderPaths != nil {
-		folderScopePaths = req.FolderPaths
+	folderScopeMode := existing.FolderScopeMode
+	if normalizeFolderScopeMode(folderScopeMode) == "" {
+		if len(folderScopePaths) > 0 {
+			folderScopeMode = FolderScopeModeAllowlist
+		} else {
+			folderScopeMode = FolderScopeModeFull
+		}
 	}
-
 	hasDocumentScope := existing.HasDocumentScope
 	if isDealRoomLink && req.FolderPaths != nil {
-		hasDocumentScope = len(folderScopePaths) > 0
+		// Any explicit path update (including empty) locks into allowlist.
+		folderScopePaths = req.FolderPaths
+		folderScopeMode = FolderScopeModeAllowlist
+		hasDocumentScope = true
+	} else if isDealRoomLink && normalizeFolderScopeMode(req.FolderScopeMode) == FolderScopeModeFull {
+		// Preserve legacy whole-room links when FE re-saves without touching scope.
+		// Do not allow widening an allowlist link back to full.
+		if !dealRoomUsesFolderAllowlist(existing) {
+			folderScopeMode = FolderScopeModeFull
+			hasDocumentScope = false
+		}
+	} else if isDealRoomLink && normalizeFolderScopeMode(req.FolderScopeMode) == FolderScopeModeAllowlist {
+		folderScopeMode = FolderScopeModeAllowlist
+		hasDocumentScope = true
 	}
 
 	passwordHash, err := s.resolvePasswordHashForUpdate(existing, req.RequirePassword, req.Password)
@@ -764,12 +822,8 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		}
 	}
 
-	// Validate NDA document when required.
-	linkDocumentIDs := []string{}
-	if isDocumentLink {
-		linkDocumentIDs = req.DocumentIDs
-	}
-	ndaDocumentID, err := s.resolveNdaDocumentID(ctx, qtx, workspaceUUID, existing.DealRoomID, linkDocumentIDs, req.NDADocumentID, requireNDA)
+	// Validate NDA template/document when required.
+	ndaDocumentID, ndaTemplateID, err := s.resolveNdaBinding(ctx, qtx, existing.TenantID, workspaceUUID, existing.CreatedBy, req.NDATemplateID, req.NDADocumentID, requireNDA)
 	if err != nil {
 		return db.Link{}, err
 	}
@@ -778,6 +832,26 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		if err := s.ensureUniqueLinkName(ctx, qtx, workspaceUUID, existing.DealRoomID, name.String, existing.ID); err != nil {
 			return db.Link{}, err
 		}
+	}
+
+	// Folder-scope (and other live-enforced) edits must not invalidate visitor
+	// sessions: Access re-reads documents from DB on every refresh. Gate/password
+	// /expiry changes still bump security_version so sessions re-authenticate.
+	securityVersion := existing.SecurityVersion
+	if linkSessionInvalidatingChange(
+		existing,
+		requireEmail,
+		requireEmailVerification,
+		requireNDA,
+		req.RequirePassword,
+		passwordHash,
+		perm,
+		expiresAt,
+		maxAccess,
+		ndaDocumentID,
+		ndaTemplateID,
+	) {
+		securityVersion = existing.SecurityVersion + 1
 	}
 
 	// Update the link record using the sqlc-generated UpdateLinkFull.
@@ -806,14 +880,23 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		CustomDomain:                customDomain,
 		Tags:                        tags,
 		NotifyOnAccess:              req.NotifyOnAccess,
-		SecurityVersion:             existing.SecurityVersion + 1,
+		SecurityVersion:             securityVersion,
 		HasDocumentScope:            hasDocumentScope,
 		FolderScopePaths:            folderScopePaths,
+		FolderScopeMode:             folderScopeMode,
 		ID:                          existing.ID,
 		WorkspaceID:                 workspaceUUID,
 	})
 	if err != nil {
 		return db.Link{}, fmt.Errorf("update link: %w", err)
+	}
+	if err := qtx.SetLinkNDABinding(ctx, db.SetLinkNDABindingParams{
+		NdaTemplateID: ndaTemplateID,
+		NdaDocumentID: ndaDocumentID,
+		ID:            existing.ID,
+		WorkspaceID:   workspaceUUID,
+	}); err != nil {
+		return db.Link{}, fmt.Errorf("set link NDA binding: %w", err)
 	}
 
 	// Replace all link_documents for document links only.
@@ -1001,6 +1084,7 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
 		NDADocumentID:            req.NDADocumentID,
+		NDATemplateID:            req.NDATemplateID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
 		AllowedEmails:            req.AllowedEmails,
@@ -1084,6 +1168,98 @@ func (s *Service) validateDealRoomDocumentIDs(ctx context.Context, qtx *db.Queri
 	return out, nil
 }
 
+func (s *Service) resolveNdaBinding(
+	ctx context.Context,
+	qtx *db.Queries,
+	tenantID, workspaceID, createdBy pgtype.UUID,
+	ndaTemplateID, ndaDocumentID string,
+	requireNDA bool,
+) (docID pgtype.UUID, templateID pgtype.UUID, err error) {
+	if !requireNDA {
+		return pgtype.UUID{}, pgtype.UUID{}, nil
+	}
+
+	templateIDStr := strings.TrimSpace(ndaTemplateID)
+	documentIDStr := strings.TrimSpace(ndaDocumentID)
+
+	if templateIDStr == "" && documentIDStr == "" {
+		return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA template is required when NDA is enabled", ErrInvalidPermission)
+	}
+
+	var tpl db.NdaTemplate
+	if templateIDStr != "" {
+		tid, perr := uuid.Parse(templateIDStr)
+		if perr != nil {
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: invalid NDA template id: %s", ErrInvalidInput, templateIDStr)
+		}
+		tpl, err = qtx.GetNDATemplateByID(ctx, db.GetNDATemplateByIDParams{
+			ID:          pgtype.UUID{Bytes: tid, Valid: true},
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA template not found", ErrInvalidPermission)
+			}
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA template: %w", err)
+		}
+		if tpl.Status != "active" {
+			return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA template is archived", ErrInvalidPermission)
+		}
+	} else {
+		// Compat / ensure: create-or-get template from a workspace document.
+		if s.ndaSvc == nil {
+			// Fallback without sealer: validate document exists and create template via queries.
+			docUUID, perr := uuid.Parse(documentIDStr)
+			if perr != nil {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: invalid NDA document id: %s", ErrInvalidInput, documentIDStr)
+			}
+			docPG := pgtype.UUID{Bytes: docUUID, Valid: true}
+			doc, derr := qtx.GetDocumentByID(ctx, db.GetDocumentByIDParams{ID: docPG, WorkspaceID: workspaceID})
+			if derr != nil {
+				if errors.Is(derr, pgx.ErrNoRows) {
+					return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: NDA document not found: %s", ErrInvalidPermission, documentIDStr)
+				}
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA document: %w", derr)
+			}
+			existing, gerr := qtx.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
+				WorkspaceID:      workspaceID,
+				SourceDocumentID: docPG,
+			})
+			if gerr == nil {
+				tpl = existing
+			} else if errors.Is(gerr, pgx.ErrNoRows) {
+				name := strings.TrimSpace(doc.Title)
+				if name == "" {
+					name = "NDA Agreement"
+				}
+				tpl, err = qtx.CreateNDATemplate(ctx, db.CreateNDATemplateParams{
+					TenantID:          tenantID,
+					WorkspaceID:       workspaceID,
+					Name:              name,
+					SourceDocumentID:  docPG,
+					ContentSha256:     "",
+					RequireSignerName: true,
+					Status:            "active",
+					CreatedBy:         createdBy,
+				})
+				if err != nil {
+					return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("create NDA template: %w", err)
+				}
+			} else {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("get NDA template by document: %w", gerr)
+			}
+		} else {
+			tpl, err = s.ndaSvc.EnsureTemplateFromDocument(ctx, tenantID, workspaceID, documentIDStr, createdBy, "")
+			if err != nil {
+				return pgtype.UUID{}, pgtype.UUID{}, fmt.Errorf("%w: %v", ErrInvalidPermission, err)
+			}
+		}
+	}
+
+	return tpl.SourceDocumentID, tpl.ID, nil
+}
+
+// resolveNdaDocumentID is retained for tests; prefer resolveNdaBinding.
 func (s *Service) resolveNdaDocumentID(
 	ctx context.Context,
 	qtx *db.Queries,
@@ -1093,39 +1269,10 @@ func (s *Service) resolveNdaDocumentID(
 	ndaDocumentID string,
 	requireNDA bool,
 ) (pgtype.UUID, error) {
-	if !requireNDA {
-		return pgtype.UUID{}, nil
-	}
-	if strings.TrimSpace(ndaDocumentID) == "" {
-		return pgtype.UUID{}, fmt.Errorf("%w: NDA document is required when NDA is enabled", ErrInvalidPermission)
-	}
-	ndaUUID, err := uuid.Parse(ndaDocumentID)
-	if err != nil {
-		return pgtype.UUID{}, fmt.Errorf("%w: invalid NDA document id: %s", ErrInvalidInput, ndaDocumentID)
-	}
-	ndaUUIDPG := pgtype.UUID{Bytes: ndaUUID, Valid: true}
-
-	if dealRoomID.Valid {
-		if _, err := s.validateDealRoomDocumentIDs(ctx, qtx, dealRoomID, []string{ndaDocumentID}); err != nil {
-			return pgtype.UUID{}, err
-		}
-		return ndaUUIDPG, nil
-	}
-
-	allowed := make(map[string]bool, len(documentIDs))
-	for _, did := range documentIDs {
-		allowed[did] = true
-	}
-	if len(allowed) > 0 && !allowed[ndaDocumentID] {
-		return pgtype.UUID{}, fmt.Errorf("%w: NDA document must be one of the linked documents", ErrInvalidPermission)
-	}
-	if _, err := qtx.GetDocumentByID(ctx, db.GetDocumentByIDParams{ID: ndaUUIDPG, WorkspaceID: workspaceID}); err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return pgtype.UUID{}, fmt.Errorf("%w: NDA document not found: %s", ErrInvalidPermission, ndaDocumentID)
-		}
-		return pgtype.UUID{}, fmt.Errorf("get NDA document: %w", err)
-	}
-	return ndaUUIDPG, nil
+	docID, _, err := s.resolveNdaBinding(ctx, qtx, pgtype.UUID{}, workspaceID, pgtype.UUID{}, "", ndaDocumentID, requireNDA)
+	_ = dealRoomID
+	_ = documentIDs
+	return docID, err
 }
 
 // ListDealRoomLinks returns active share links for a deal room.
@@ -1767,6 +1914,7 @@ func dbAccessRequestToDomain(r db.LinkAccessRequest) LinkAccessRequest {
 		LinkID:     uuid.UUID(r.LinkID.Bytes).String(),
 		Email:      r.Email,
 		Reason:     r.Reason.String,
+		SignerName: r.SignerName.String,
 		Status:     r.Status,
 		ReviewedBy: reviewedBy,
 		ReviewedAt: reviewedAt,
@@ -1811,8 +1959,36 @@ func (s *Service) AllowAccessRequest(ctx context.Context, clientIP, publicToken 
 	return allowed, err
 }
 
+// CheckPublicEmail evaluates whether the given email is allowed by the link's
+// access rules (allow/block). Used by the NDA sign step before entering review,
+// so visitors who are not on the allowlist never spend time on the 30s preview.
+// It does not consume max_access_count or create sessions.
+func (s *Service) CheckPublicEmail(ctx context.Context, publicToken, email, clientIP string) (db.Link, error) {
+	link, err := s.ResolvePublicLink(ctx, publicToken)
+	if err != nil {
+		return db.Link{}, err
+	}
+	if err := s.checkAccessAttemptRateLimit(ctx, publicToken, clientIP); err != nil {
+		return link, err
+	}
+	email = strings.TrimSpace(strings.ToLower(email))
+	if !isValidEmail(email) {
+		return link, ErrRequiresEmail
+	}
+	eval, err := s.EvaluateAccessRules(ctx, uuid.UUID(link.ID.Bytes).String(), email)
+	if err != nil {
+		return link, fmt.Errorf("evaluate access rules: %w", err)
+	}
+	if !eval.Allowed {
+		return link, mapRuleError(eval.Reason)
+	}
+	return link, nil
+}
+
 // RequestAccess lets a blocked or not-allowed visitor request access to a link.
-func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason string) (LinkAccessRequest, error) {
+// signerName is optional; when provided it is stored on the request and used to
+// name the workspace contact on approval.
+func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason, signerName string) (LinkAccessRequest, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if !isValidEmail(email) {
 		return LinkAccessRequest{}, errors.New("invalid email address")
@@ -1821,13 +1997,20 @@ func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason
 	if len(reason) > 500 {
 		return LinkAccessRequest{}, errors.New("reason must be 500 characters or less")
 	}
+	signerName = strings.TrimSpace(signerName)
+	if len(signerName) > 200 {
+		return LinkAccessRequest{}, errors.New("signer name must be 200 characters or less")
+	}
 
 	linkID := uuid.UUID(link.ID.Bytes).String()
 	ev, err := s.EvaluateAccessRules(ctx, linkID, email)
 	if err != nil {
 		return LinkAccessRequest{}, fmt.Errorf("evaluate access rules: %w", err)
 	}
-	if !ev.Allowed && ev.Reason == "blocked_email" {
+	if ev.Allowed {
+		return LinkAccessRequest{}, ErrAccessAlreadyAllowed
+	}
+	if ev.Reason == "blocked_email" {
 		return LinkAccessRequest{}, ErrAccessRequestBlocked
 	}
 
@@ -1851,6 +2034,7 @@ func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason
 		LinkID:      link.ID,
 		Email:       email,
 		Reason:      pgtype.Text{String: reason, Valid: reason != ""},
+		SignerName:  pgtype.Text{String: signerName, Valid: signerName != ""},
 	})
 	if err != nil {
 		return LinkAccessRequest{}, fmt.Errorf("create access request: %w", err)
@@ -1863,6 +2047,9 @@ func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason
 		body := fmt.Sprintf("A visitor (%s) requested access to \"%s\". Reason: %s. Review the request in the share dialog.", email, link.Name.String, reason)
 		if reason == "" {
 			body = fmt.Sprintf("A visitor (%s) requested access to \"%s\". Review the request in the share dialog.", email, link.Name.String)
+		}
+		if signerName != "" {
+			body = fmt.Sprintf("%s Signer name: %s.", body, signerName)
 		}
 		if _, notifyErr := s.notifier.Enqueue(ctx, wsID, creatorID, "email", subject, body); notifyErr != nil {
 			logger.ErrorCtx(ctx, "failed to enqueue access request notification", notifyErr,
@@ -1941,12 +2128,25 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 		ID:         pgtype.UUID{Bytes: reqUUID, Valid: true},
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return LinkAccessRequest{}, errors.New("access request is not pending")
+		}
 		return LinkAccessRequest{}, fmt.Errorf("approve access request: %w", err)
 	}
 
 	inv, err := s.createInvitationForRequest(ctx, qtx, link, reqRow.Email, pgtype.UUID{Bytes: reviewerUUID, Valid: true})
 	if err != nil {
 		return LinkAccessRequest{}, fmt.Errorf("create invitation: %w", err)
+	}
+
+	// Persist applicant on the workspace contacts list (reject does not).
+	contactName := strings.TrimSpace(reqRow.SignerName.String)
+	if _, err := qtx.UpsertContactByEmail(ctx, db.UpsertContactByEmailParams{
+		WorkspaceID: link.WorkspaceID,
+		Email:       pgtype.Text{String: strings.TrimSpace(strings.ToLower(reqRow.Email)), Valid: true},
+		Name:        contactName,
+	}); err != nil {
+		return LinkAccessRequest{}, fmt.Errorf("upsert contact from access request: %w", err)
 	}
 
 	if err := tx.Commit(ctx); err != nil {
@@ -1963,7 +2163,21 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 		creatorID = uuid.UUID(link.CreatedBy.Bytes).String()
 	}
 	s.sendInvitationEmail(ctx, inv, wsID, creatorID, link.Name.String, linkURL)
-	s.resolveLinkAccessRequest(workspaceID, requestID)
+	s.resolveLinkAccessRequest(workspaceID, linkID)
+
+	// When email verification is enabled, provision + send an access code so the
+	// approved visitor can complete Access after refresh (NDA intent is short-stored
+	// client-side; seal still happens only on successful Access). Approval is already
+	// committed; surface send failures so the owner can retry via resend.
+	if link.RequireEmailVerification {
+		if codeErr := s.sendDealRoomEmailVerificationCode(ctx, link, reqRow.Email, s.viewerBaseURL); codeErr != nil {
+			logger.ErrorCtx(ctx, "send access code after approval failed", codeErr,
+				logger.Attr("link_id", linkID),
+				logger.Attr("email", reqRow.Email),
+			)
+			return LinkAccessRequest{}, fmt.Errorf("%w: %v", ErrAccessCodeSendFailed, codeErr)
+		}
+	}
 
 	return dbAccessRequestToDomain(updated), nil
 }
@@ -2007,74 +2221,92 @@ func (s *Service) RejectAccessRequest(ctx context.Context, workspaceID, linkID, 
 		ID:         pgtype.UUID{Bytes: reqUUID, Valid: true},
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return LinkAccessRequest{}, errors.New("access request is not pending")
+		}
 		return LinkAccessRequest{}, fmt.Errorf("reject access request: %w", err)
 	}
-	s.resolveLinkAccessRequest(workspaceID, requestID)
+	s.resolveLinkAccessRequest(workspaceID, linkID)
 	return dbAccessRequestToDomain(updated), nil
 }
 
 func (s *Service) createInvitationForRequest(ctx context.Context, qtx *db.Queries, link db.Link, email string, createdBy pgtype.UUID) (LinkInvitation, error) {
 	workspaceUUID := link.WorkspaceID
-	existing, err := qtx.GetLinkInvitationByLinkAndEmail(ctx, db.GetLinkInvitationByLinkAndEmailParams{
-		LinkID: link.ID,
-		Email:  email,
-	})
-	if err == nil {
-		if existing.Status != "revoked" {
-			return dbInvitationToDomain(existing), nil
-		}
-		token, err := generateToken()
-		if err != nil {
-			return LinkInvitation{}, fmt.Errorf("generate invite token: %w", err)
-		}
-		expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
-		if _, err := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
-			Token:     pgtype.Text{String: "", Valid: false},
-			TokenHash: pgtype.Text{String: s.hashToken(token), Valid: true},
-			ExpiresAt: expiresAt,
-			ID:        existing.ID,
-		}); err != nil {
-			return LinkInvitation{}, fmt.Errorf("reset invitation: %w", err)
-		}
-		return invitationFromRaw(token, existing.ID, link.ID, email, "pending", expiresAt, pgtype.Timestamptz{}), nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return LinkInvitation{}, fmt.Errorf("get invitation by email: %w", err)
-	}
-
+	email = strings.TrimSpace(strings.ToLower(email))
 	token, err := generateToken()
 	if err != nil {
 		return LinkInvitation{}, fmt.Errorf("generate invite token: %w", err)
 	}
 	expiresAt := pgtype.Timestamptz{Valid: true, Time: time.Now().Add(7 * 24 * time.Hour)}
-	inv, err := qtx.CreateLinkInvitation(ctx, db.CreateLinkInvitationParams{
-		TenantID:    link.TenantID,
-		WorkspaceID: workspaceUUID,
-		LinkID:      link.ID,
-		Email:       email,
-		Token:       pgtype.Text{String: "", Valid: false},
-		TokenHash:   pgtype.Text{String: s.hashToken(token), Valid: true},
-		Status:      "pending",
-		ExpiresAt:   expiresAt,
-		CreatedBy:   createdBy,
+
+	existing, err := qtx.GetLinkInvitationByLinkAndEmail(ctx, db.GetLinkInvitationByLinkAndEmailParams{
+		LinkID: link.ID,
+		Email:  email,
 	})
-	if err != nil {
-		return LinkInvitation{}, fmt.Errorf("create invitation: %w", err)
+	var invID pgtype.UUID
+	if err == nil {
+		// Existing rows store only the token hash; plaintext cannot be recovered.
+		// Always reissue so the approval email contains a usable inviteToken,
+		// including when the prior invite was used/expired/pending.
+		if _, resetErr := qtx.ResetLinkInvitation(ctx, db.ResetLinkInvitationParams{
+			Token:     pgtype.Text{String: "", Valid: false},
+			TokenHash: pgtype.Text{String: s.hashToken(token), Valid: true},
+			ExpiresAt: expiresAt,
+			ID:        existing.ID,
+		}); resetErr != nil {
+			return LinkInvitation{}, fmt.Errorf("reset invitation: %w", resetErr)
+		}
+		invID = existing.ID
+	} else if errors.Is(err, pgx.ErrNoRows) {
+		inv, createErr := qtx.CreateLinkInvitation(ctx, db.CreateLinkInvitationParams{
+			TenantID:    link.TenantID,
+			WorkspaceID: workspaceUUID,
+			LinkID:      link.ID,
+			Email:       email,
+			Token:       pgtype.Text{String: "", Valid: false},
+			TokenHash:   pgtype.Text{String: s.hashToken(token), Valid: true},
+			Status:      "pending",
+			ExpiresAt:   expiresAt,
+			CreatedBy:   createdBy,
+		})
+		if createErr != nil {
+			return LinkInvitation{}, fmt.Errorf("create invitation: %w", createErr)
+		}
+		invID = inv.ID
+	} else {
+		return LinkInvitation{}, fmt.Errorf("get invitation by email: %w", err)
 	}
 
+	if err := s.ensureEmailAllowRule(ctx, qtx, link, email); err != nil {
+		return LinkInvitation{}, err
+	}
+
+	return invitationFromRaw(token, invID, link.ID, email, "pending", expiresAt, pgtype.Timestamptz{}), nil
+}
+
+// ensureEmailAllowRule inserts an allow rule for email when missing (idempotent).
+func (s *Service) ensureEmailAllowRule(ctx context.Context, qtx *db.Queries, link db.Link, email string) error {
+	rules, err := qtx.ListLinkAccessRulesByLink(ctx, link.ID)
+	if err != nil {
+		return fmt.Errorf("list access rules: %w", err)
+	}
+	for _, r := range rules {
+		if r.Action == "allow" && r.RuleType == "email" && strings.EqualFold(r.Value, email) {
+			return nil
+		}
+	}
 	if err := qtx.CreateLinkAccessRule(ctx, db.CreateLinkAccessRuleParams{
 		TenantID:    link.TenantID,
-		WorkspaceID: workspaceUUID,
+		WorkspaceID: link.WorkspaceID,
 		LinkID:      link.ID,
 		RuleType:    "email",
 		Value:       email,
 		Action:      "allow",
 		SortOrder:   0,
 	}); err != nil {
-		return LinkInvitation{}, fmt.Errorf("create allow rule: %w", err)
+		return fmt.Errorf("create allow rule: %w", err)
 	}
-
-	return invitationFromRaw(token, inv.ID, link.ID, email, inv.Status, expiresAt, pgtype.Timestamptz{}), nil
+	return nil
 }
 
 // hashToken returns the HMAC-SHA256 hash (hex) of an invite token.
@@ -2179,6 +2411,7 @@ type AccessRequest struct {
 	EmailCode   string
 	Password    string
 	NDAAgreed   bool
+	SignerName  string
 	InviteToken string
 	IP          string
 	UA          string
@@ -2186,30 +2419,48 @@ type AccessRequest struct {
 
 // AccessResult is returned after a successful access check.
 type AccessResult struct {
-	Link          db.Link
-	VisitorID     string
-	Email         string
-	EmailVerified bool
-	SessionToken  string // refreshed session token for sliding expiry; empty if no session was used
+	Link             db.Link
+	VisitorID        string
+	Email            string
+	EmailVerified    bool
+	SessionToken     string // refreshed session token for sliding expiry; empty if no session was used
+	NDAResponseID    string
+	NDACertificateID string
 }
 
 // LinkAccessRequest is the domain representation of a visitor access request.
 type LinkAccessRequest struct {
-	ID         string
-	LinkID     string
-	Email      string
-	Reason     string
-	Status     string
-	ReviewedBy *string
-	ReviewedAt *time.Time
-	CreatedAt  time.Time
-	UpdatedAt  time.Time
+	ID         string     `json:"id"`
+	LinkID     string     `json:"link_id"`
+	Email      string     `json:"email"`
+	Reason     string     `json:"reason,omitempty"`
+	SignerName string     `json:"signer_name,omitempty"`
+	Status     string     `json:"status"`
+	ReviewedBy *string    `json:"reviewed_by,omitempty"`
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt  time.Time  `json:"created_at"`
+	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
 var (
 	ErrAccessRequestBlocked = errors.New("this email is blocked from requesting access")
 	ErrAccessRequestExists  = errors.New("an access request from this email is already pending")
 )
+
+// DeliveryEmailMismatchError is returned when a submitted email differs from the
+// email bound to a valid verification code. AuthorizedEmail is for internal audit
+// only and must never be serialized to public API clients.
+type DeliveryEmailMismatchError struct {
+	AuthorizedEmail string
+}
+
+func (e *DeliveryEmailMismatchError) Error() string {
+	return ErrDeliveryEmailMismatch.Error()
+}
+
+func (e *DeliveryEmailMismatchError) Is(target error) bool {
+	return target == ErrDeliveryEmailMismatch
+}
 
 // Access validates a public token and returns the link if access is granted.
 func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (AccessResult, error) {
@@ -2244,27 +2495,42 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	// to compute gate requirements identically with the handler's response formatting.
 	requiresEmail, requiresEmailVerification, requiresNDA := linkSecurityFlags(link)
 
+	// Submitted email is treated as NDA delivery / explicit claim only. For
+	// email-verification links, allowlist identity always comes from the code
+	// (or invite), never from this field — otherwise a reserved delivery address
+	// that differs from the authorized mailbox fails allowlist before mismatch UX.
+	submittedEmail := strings.TrimSpace(req.Email)
+
 	// Resolve effective email: invite token takes priority and is immutable.
+	// Consume the invitation atomically here so concurrent Access calls cannot
+	// both succeed with the same single-use token. A later gate failure burns
+	// the invite (owner can re-issue); that is preferred over double-grant.
 	var effectiveEmail string
 	if req.InviteToken != "" {
 		inv, err := s.ResolveInviteToken(ctx, req.InviteToken)
 		if err != nil {
-			s.recordSecurityEvent(ctx, link, "", req.Email, "invite_token_failed", err.Error())
+			s.recordSecurityEvent(ctx, link, "", submittedEmail, "invite_token_failed", err.Error())
 			return AccessResult{}, err
 		}
 		if inv.LinkID != uuid.UUID(link.ID.Bytes).String() {
-			s.recordSecurityEvent(ctx, link, "", req.Email, "invite_token_failed", "invitation does not belong to link")
+			s.recordSecurityEvent(ctx, link, "", submittedEmail, "invite_token_failed", "invitation does not belong to link")
 			return AccessResult{}, ErrLinkNotFound
 		}
+		invUUID, parseErr := uuid.Parse(inv.ID)
+		if parseErr != nil {
+			return AccessResult{}, fmt.Errorf("parse invitation id: %w", parseErr)
+		}
+		if _, err := s.queries.ConsumeLinkInvitation(ctx, pgtype.UUID{Bytes: invUUID, Valid: true}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				s.recordSecurityEvent(ctx, link, "", submittedEmail, "invite_token_failed", "invitation already used or expired")
+				return AccessResult{}, ErrInviteAlreadyUsed
+			}
+			return AccessResult{}, fmt.Errorf("consume invitation: %w", err)
+		}
 		effectiveEmail = inv.Email
-	} else {
-		effectiveEmail = strings.TrimSpace(req.Email)
-	}
-
-	// Email-verification links: visitors enter only the one-time code (owners
-	// send codes out-of-band). Resolve the contact email from the code before
-	// evaluating allow/block rules so the visitor page does not collect email.
-	if requiresEmailVerification && effectiveEmail == "" {
+	} else if requiresEmailVerification {
+		// Code owns identity. Resolve before allowlist so NDA delivery ≠ authorized
+		// does not surface as a generic not_allowed / invalid_code against D.
 		code := strings.TrimSpace(req.EmailCode)
 		if code == "" {
 			return AccessResult{}, ErrRequiresEmailCode
@@ -2283,6 +2549,8 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		if effectiveEmail == "" {
 			return AccessResult{}, ErrInvalidEmailCode
 		}
+	} else {
+		effectiveEmail = submittedEmail
 	}
 
 	// If email is required but not provided yet, ask for it before evaluating
@@ -2316,11 +2584,6 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		}
 	}
 
-	if requiresEmailVerification {
-		if strings.TrimSpace(req.EmailCode) == "" {
-			return AccessResult{}, ErrRequiresEmailCode
-		}
-	}
 	if requiresNDA {
 		if !req.NDAAgreed {
 			return AccessResult{}, ErrRequiresNDA
@@ -2329,14 +2592,8 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 
 	var verifiedEmail string
 	if requiresEmailVerification {
-		// Explicit visitor email → bind code to that address. Code-only → look up
-		// by code (email was already resolved above for rule evaluation).
-		modern := strings.TrimSpace(req.Email) == ""
-		verifyEmail := effectiveEmail
-		if !modern {
-			verifyEmail = strings.TrimSpace(req.Email)
-		}
-		lc, err := s.verifyLinkContactCode(ctx, token, verifyEmail, req.EmailCode, modern)
+		// Identity already resolved from the code above; re-verify via code lookup.
+		lc, err := s.verifyLinkContactCode(ctx, token, effectiveEmail, req.EmailCode, true)
 		if err != nil {
 			if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresEmailCode) {
 				return AccessResult{}, err
@@ -2353,41 +2610,93 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		emailForRecords = effectiveEmail
 	}
 
-	visitorID := makeVisitorID(emailForRecords, req.UA)
+	// P2-strict: NDA + email verification requires an explicit delivery email that
+	// matches the code-authorized mailbox (no silent fall-through to A).
+	if requiresNDA && requiresEmailVerification {
+		if submittedEmail == "" || !isValidEmail(submittedEmail) {
+			return AccessResult{}, ErrRequiresEmail
+		}
+		if emailForRecords == "" || !strings.EqualFold(submittedEmail, emailForRecords) {
+			s.recordSecurityEvent(ctx, link, "", emailForRecords, "delivery_email_mismatch", submittedEmail)
+			return AccessResult{}, &DeliveryEmailMismatchError{AuthorizedEmail: emailForRecords}
+		}
+	} else if submittedEmail != "" && emailForRecords != "" && !strings.EqualFold(submittedEmail, emailForRecords) {
+		// Non-NDA verification: submitted claim must still match the code mailbox.
+		s.recordSecurityEvent(ctx, link, "", emailForRecords, "delivery_email_mismatch", submittedEmail)
+		return AccessResult{}, &DeliveryEmailMismatchError{AuthorizedEmail: emailForRecords}
+	}
 
+	// NDA delivery email is required so the sealed PDF can be sent to the visitor.
+	// Prefer the verified/authorized email; otherwise accept the email submitted with NDA.
 	if requiresNDA {
-		_, ndaErr := s.queries.CreateLinkNDAAgreement(ctx, db.CreateLinkNDAAgreementParams{
-			TenantID:    link.TenantID,
-			WorkspaceID: link.WorkspaceID,
-			LinkID:      link.ID,
-			VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
-			Email:       pgtype.Text{String: emailForRecords, Valid: emailForRecords != ""},
-			Ip:          hashIPText(s.cfg.IPHashKey, req.IP),
-			UserAgent:   pgtype.Text{String: req.UA, Valid: req.UA != ""},
-		})
-		if ndaErr != nil {
-			logger.ErrorCtx(ctx, "create link NDA agreement failed", ndaErr,
-				logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
-			)
+		if emailForRecords == "" {
+			emailForRecords = submittedEmail
+		}
+		if emailForRecords == "" || !isValidEmail(emailForRecords) {
+			return AccessResult{}, ErrRequiresEmail
 		}
 	}
 
-	// Mark invitation as used if present. Invitations are single-use: once a
-	// visitor successfully accesses the link through an invite token, the token
-	// is consumed and cannot be reused.
-	if req.InviteToken != "" {
-		inv, invErr := s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: s.hashToken(req.InviteToken), Valid: true})
-		if errors.Is(invErr, pgx.ErrNoRows) {
-			inv, invErr = s.queries.GetLinkInvitationByToken(ctx, pgtype.Text{String: s.legacyHashToken(req.InviteToken), Valid: true})
+	visitorID := makeVisitorID(emailForRecords, req.UA)
+
+	var ndaResponseID, ndaCertificateID string
+	if requiresNDA {
+		tpl, tplErr := s.resolveLinkNDATemplate(ctx, link)
+		if tplErr != nil {
+			return AccessResult{}, tplErr
 		}
-		if invErr == nil {
-			usedAt := pgtype.Timestamptz{Valid: true, Time: time.Now()}
-			if _, err := s.queries.UpdateLinkInvitationStatus(ctx, db.UpdateLinkInvitationStatusParams{
-				Status: "used",
-				UsedAt: usedAt,
-				ID:     inv.ID,
-			}); err != nil {
-				logger.ErrorCtx(ctx, "update invitation status failed", err)
+		signerName, snErr := nda.NormalizeSignerName(req.SignerName, tpl.RequireSignerName)
+		if snErr != nil {
+			return AccessResult{}, ErrInvalidSignerName
+		}
+
+		// Idempotent: reuse an existing signed response for this visitor+template.
+		if existing, gerr := s.queries.GetLinkNDAAgreementByLinkVisitorTemplate(ctx, db.GetLinkNDAAgreementByLinkVisitorTemplateParams{
+			LinkID:        link.ID,
+			VisitorID:     pgtype.Text{String: visitorID, Valid: visitorID != ""},
+			NdaTemplateID: tpl.ID,
+		}); gerr == nil {
+			ndaResponseID = uuid.UUID(existing.ID.Bytes).String()
+			ndaCertificateID = existing.CertificateID
+		} else if !errors.Is(gerr, pgx.ErrNoRows) {
+			return AccessResult{}, fmt.Errorf("lookup NDA agreement: %w", gerr)
+		} else {
+			certID := uuid.NewString()
+			contentHash := tpl.ContentSha256
+			if contentHash == "" && s.ndaSvc != nil {
+				if doc, derr := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+					ID:          tpl.SourceDocumentID,
+					WorkspaceID: link.WorkspaceID,
+				}); derr == nil {
+					if h, herr := s.ndaSvc.HashDocumentContent(ctx, doc.StorageKey); herr == nil {
+						contentHash = h
+					}
+				}
+			}
+			agreement, ndaErr := s.queries.CreateLinkNDAAgreement(ctx, db.CreateLinkNDAAgreementParams{
+				TenantID:      link.TenantID,
+				WorkspaceID:   link.WorkspaceID,
+				LinkID:        link.ID,
+				VisitorID:     pgtype.Text{String: visitorID, Valid: visitorID != ""},
+				Email:         pgtype.Text{String: emailForRecords, Valid: emailForRecords != ""},
+				Ip:            hashIPText(s.cfg.IPHashKey, req.IP),
+				UserAgent:     pgtype.Text{String: req.UA, Valid: req.UA != ""},
+				NdaTemplateID: tpl.ID,
+				ContentSha256: contentHash,
+				SignerName:    signerName,
+				CertificateID: certID,
+				SignedFileKey: "",
+				Status:        "signed",
+			})
+			if ndaErr != nil {
+				return AccessResult{}, fmt.Errorf("create link NDA agreement: %w", ndaErr)
+			}
+			ndaResponseID = uuid.UUID(agreement.ID.Bytes).String()
+			ndaCertificateID = certID
+
+			// Best-effort seal + notify; agreement row is already fail-closed.
+			if s.ndaSvc != nil {
+				go s.sealAndNotifyNDA(context.WithoutCancel(ctx), link, tpl, agreement, signerName, emailForRecords, req.UA)
 			}
 		}
 	}
@@ -2401,7 +2710,97 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		s.sendAccessNotificationEmail(ctx, wsID, creatorID, link.Name.String, emailForRecords, publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String))
 	}
 
-	return AccessResult{Link: link, VisitorID: visitorID, Email: emailForRecords, EmailVerified: requiresEmailVerification}, nil
+	return AccessResult{
+		Link:             link,
+		VisitorID:        visitorID,
+		Email:            emailForRecords,
+		EmailVerified:    requiresEmailVerification,
+		NDAResponseID:    ndaResponseID,
+		NDACertificateID: ndaCertificateID,
+	}, nil
+}
+
+func (s *Service) resolveLinkNDATemplate(ctx context.Context, link db.Link) (db.NdaTemplate, error) {
+	if link.NdaTemplateID.Valid {
+		tpl, err := s.queries.GetNDATemplateByID(ctx, db.GetNDATemplateByIDParams{
+			ID:          link.NdaTemplateID,
+			WorkspaceID: link.WorkspaceID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.NdaTemplate{}, ErrRequiresNDA
+			}
+			return db.NdaTemplate{}, fmt.Errorf("get NDA template: %w", err)
+		}
+		if tpl.Status != "active" {
+			return db.NdaTemplate{}, ErrRequiresNDA
+		}
+		return tpl, nil
+	}
+	if link.NdaDocumentID.Valid {
+		tpl, err := s.queries.GetNDATemplateBySourceDocument(ctx, db.GetNDATemplateBySourceDocumentParams{
+			WorkspaceID:      link.WorkspaceID,
+			SourceDocumentID: link.NdaDocumentID,
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.NdaTemplate{}, ErrRequiresNDA
+			}
+			return db.NdaTemplate{}, fmt.Errorf("get NDA template by document: %w", err)
+		}
+		if tpl.Status != "active" {
+			return db.NdaTemplate{}, ErrRequiresNDA
+		}
+		return tpl, nil
+	}
+	return db.NdaTemplate{}, ErrRequiresNDA
+}
+
+func (s *Service) sealAndNotifyNDA(ctx context.Context, link db.Link, tpl db.NdaTemplate, agreement db.LinkNdaAgreement, signerName, email, ua string) {
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          tpl.SourceDocumentID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if err != nil {
+		logger.ErrorCtx(ctx, "nda seal: get document failed", err)
+		return
+	}
+	signedAt := time.Now().UTC()
+	if agreement.SignedAt.Valid {
+		signedAt = agreement.SignedAt.Time.UTC()
+	}
+	signedKey, err := s.ndaSvc.SealAgreementPDF(
+		ctx,
+		uuid.UUID(link.TenantID.Bytes).String(),
+		uuid.UUID(link.WorkspaceID.Bytes).String(),
+		uuid.UUID(agreement.ID.Bytes).String(),
+		doc.StorageKey,
+		nda.SealParams{
+			TemplateName:  tpl.Name,
+			CertificateID: agreement.CertificateID,
+			SignerName:    signerName,
+			SignerEmail:   email,
+			ContentSHA256: agreement.ContentSha256,
+			LinkID:        uuid.UUID(link.ID.Bytes).String(),
+			IPHash:        agreement.Ip.String,
+			UserAgent:     ua,
+			SignedAt:      signedAt,
+		},
+	)
+	if err != nil {
+		logger.ErrorCtx(ctx, "nda seal failed", err,
+			logger.Attr("agreement_id", uuid.UUID(agreement.ID.Bytes).String()),
+		)
+		return
+	}
+
+	ownerEmail := ""
+	if link.CreatedBy.Valid {
+		if u, uerr := s.queries.GetUserByID(ctx, link.CreatedBy); uerr == nil {
+			ownerEmail = u.Email
+		}
+	}
+	s.ndaSvc.NotifySigned(ctx, email, ownerEmail, tpl.Name, agreement.CertificateID, link.Name.String, signedKey)
 }
 
 // mapRuleError maps an access rule evaluation reason to a public error.
@@ -2610,7 +3009,11 @@ func (s *Service) OwnerResendFailedAccessCodes(ctx context.Context, linkID, work
 		return OwnerResendSummary{}, ErrEmailVerificationDisabled
 	}
 
-	rows, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, link.ID)
+	rows, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, db.ListLinkAccessCodeContactsByLinkParams{
+		LinkID: link.ID,
+		Limit:  int32(accessCodeContactsResendLimit),
+		Offset: 0,
+	})
 	if err != nil {
 		return OwnerResendSummary{}, fmt.Errorf("list access code contacts: %w", err)
 	}
@@ -2978,6 +3381,8 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		IndexFileEnabled:         link.IndexFileEnabled,
 		SecurityVersion:          newVersion,
 		HasDocumentScope:         link.HasDocumentScope,
+		FolderScopePaths:         link.FolderScopePaths,
+		FolderScopeMode:          link.FolderScopeMode,
 		ID:                       link.ID,
 		WorkspaceID:              link.WorkspaceID,
 	}); err != nil {
@@ -3038,21 +3443,63 @@ func (s *Service) Delete(ctx context.Context, linkID, workspaceID string) error 
 	return nil
 }
 
-// ListAccessLogs returns access events for a link, including both raw access logs
-// and per-page views with their durations.
-func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string) ([]db.ListAccessLogsByLinkRow, error) {
+// ListAccessLogs returns a page of access events for a link, including both raw
+// access logs and per-page views with their durations.
+func (s *Service) ListAccessLogs(ctx context.Context, linkID, workspaceID string, limit, offset int) (AccessLogsPage, error) {
 	id, err := uuid.Parse(linkID)
 	if err != nil {
-		return nil, errors.New("invalid link id")
+		return AccessLogsPage{}, errors.New("invalid link id")
 	}
 	// Verify link exists in workspace.
 	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
-		return nil, err
+		return AccessLogsPage{}, err
 	}
-	return s.queries.ListAccessLogsByLink(ctx, db.ListAccessLogsByLinkParams{
+
+	limit = clampAccessLogsLimit(limit)
+	offset = clampAccessLogsOffset(offset)
+
+	rows, err := s.queries.ListAccessLogsByLink(ctx, db.ListAccessLogsByLinkParams{
 		LinkID: pgtype.UUID{Bytes: id, Valid: true},
-		Limit:  200,
+		Limit:  int32(limit + 1),
+		Offset: int32(offset),
 	})
+	if err != nil {
+		return AccessLogsPage{}, err
+	}
+
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return AccessLogsPage{Items: rows, HasMore: hasMore}, nil
+}
+
+// AccessLogsPage is one page of link access events.
+type AccessLogsPage struct {
+	Items   []db.ListAccessLogsByLinkRow
+	HasMore bool
+}
+
+const (
+	accessLogsDefaultLimit = 200
+	accessLogsMaxLimit     = 200
+)
+
+func clampAccessLogsLimit(limit int) int {
+	if limit <= 0 {
+		return accessLogsDefaultLimit
+	}
+	if limit > accessLogsMaxLimit {
+		return accessLogsMaxLimit
+	}
+	return limit
+}
+
+func clampAccessLogsOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
 }
 
 // LinkAnalytics aggregates access metrics for a single link.
@@ -3065,9 +3512,17 @@ type LinkAnalytics struct {
 	ViewsOverTime          []DailyView           `json:"views_over_time"`
 	AverageDurationSeconds float64               `json:"average_duration_seconds"`
 	RecentVisitors         []RecentVisitor       `json:"recent_visitors"`
-	KeyPages               []KeyPage             `json:"key_pages"`
-	QARecords              []QARecord            `json:"qa_records"`
-	AccessCodeContacts     []AccessCodeContact   `json:"access_code_contacts"`
+	// RecentVisitorsHasMore is true when more visitors exist beyond the first page.
+	RecentVisitorsHasMore bool                 `json:"recent_visitors_has_more"`
+	KeyPages              []KeyPage            `json:"key_pages"`
+	QARecords             []QARecord           `json:"qa_records"`
+	AccessCodeContacts    []AccessCodeContact  `json:"access_code_contacts"`
+	// AccessCodeContactsHasMore is true when more contacts exist beyond the first page.
+	AccessCodeContactsHasMore bool `json:"access_code_contacts_has_more"`
+	// AccessCodeFailedCount is the total failed deliveries (for nav badges).
+	AccessCodeFailedCount int64 `json:"access_code_failed_count"`
+	// AccessCodeRemediableCount is failed + stale-pending contacts (for resend UI).
+	AccessCodeRemediableCount int64 `json:"access_code_remediable_count"`
 }
 
 // AccessCodeContact is a link-scoped contact with verification-code delivery status.
@@ -3096,6 +3551,109 @@ type RecentVisitor struct {
 	FirstAccessAt time.Time `json:"first_access_at"`
 	LastAccessAt  time.Time `json:"last_access_at"`
 	TotalViews    int64     `json:"total_views"`
+}
+
+// RecentVisitorsPage is one page of aggregated visitors for a link.
+type RecentVisitorsPage struct {
+	Items   []RecentVisitor `json:"items"`
+	HasMore bool            `json:"has_more"`
+}
+
+const (
+	recentVisitorsPageSize    = 10
+	recentVisitorsMaxPageSize = 50
+	accessCodeContactsPageSize    = 10
+	accessCodeContactsMaxPageSize = 100
+	accessCodeContactsResendLimit = 1000
+)
+
+func clampAccessCodeContactsLimit(limit int) int {
+	if limit <= 0 {
+		return accessCodeContactsPageSize
+	}
+	if limit > accessCodeContactsMaxPageSize {
+		return accessCodeContactsMaxPageSize
+	}
+	return limit
+}
+
+func clampAccessCodeContactsOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func mapAccessCodeContactRows(rows []db.ListLinkAccessCodeContactsByLinkRow, now time.Time) []AccessCodeContact {
+	out := make([]AccessCodeContact, 0, len(rows))
+	for _, c := range rows {
+		item := AccessCodeContact{
+			Email:      c.ContactEmail,
+			Name:       c.ContactName,
+			SendStatus: c.CodeSendStatus,
+			SendError:  c.CodeSendError,
+			CanResend:  accessCodeNeedsRemediation(c.CodeSendStatus, c.CreatedAt.Time, now),
+		}
+		if c.CodeSentAt.Valid {
+			t := c.CodeSentAt.Time
+			item.CodeSentAt = &t
+		}
+		if c.UsedAt.Valid {
+			t := c.UsedAt.Time
+			item.UsedAt = &t
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func trimAccessCodeContactsPage(rows []db.ListLinkAccessCodeContactsByLinkRow, limit int, now time.Time) ([]AccessCodeContact, bool) {
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return mapAccessCodeContactRows(rows, now), hasMore
+}
+
+func clampRecentVisitorsLimit(limit int) int {
+	if limit <= 0 {
+		return recentVisitorsPageSize
+	}
+	if limit > recentVisitorsMaxPageSize {
+		return recentVisitorsMaxPageSize
+	}
+	return limit
+}
+
+func clampRecentVisitorsOffset(offset int) int {
+	if offset < 0 {
+		return 0
+	}
+	return offset
+}
+
+func mapRecentVisitorRows(rows []db.ListRecentVisitorsByLinkRow) []RecentVisitor {
+	out := make([]RecentVisitor, 0, len(rows))
+	for _, v := range rows {
+		out = append(out, RecentVisitor{
+			VisitorID:     v.VisitorID.String,
+			TotalViews:    v.TotalViews,
+			FirstAccessAt: v.FirstAccessAt.Time,
+			LastAccessAt:  v.LastAccessAt.Time,
+			VisitorEmail:  v.VisitorEmail,
+		})
+	}
+	return out
+}
+
+// trimRecentVisitorsPage applies the limit+1 pattern: request limit+1 rows,
+// return at most limit, and report whether another page exists.
+func trimRecentVisitorsPage(rows []db.ListRecentVisitorsByLinkRow, limit int) ([]RecentVisitor, bool) {
+	hasMore := len(rows) > limit
+	if hasMore {
+		rows = rows[:limit]
+	}
+	return mapRecentVisitorRows(rows), hasMore
 }
 
 // KeyPage is a page that received meaningful attention.
@@ -3160,21 +3718,17 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 		analytics.AverageDurationSeconds = avgDur
 	}
 
-	visitors, err := s.queries.ListRecentVisitorsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	visitors, err := s.queries.ListRecentVisitorsByLink(ctx, db.ListRecentVisitorsByLinkParams{
+		LinkID: pgtype.UUID{Bytes: id, Valid: true},
+		Limit:  int32(recentVisitorsPageSize + 1),
+		Offset: 0,
+	})
 	if err != nil {
 		logger.ErrorCtx(ctx, "failed to list recent visitors", err)
 	} else {
-		analytics.RecentVisitors = make([]RecentVisitor, 0, len(visitors))
-		for _, v := range visitors {
-			rv := RecentVisitor{
-				VisitorID:     v.VisitorID.String,
-				TotalViews:    v.TotalViews,
-				FirstAccessAt: v.FirstAccessAt.Time,
-				LastAccessAt:  v.LastAccessAt.Time,
-				VisitorEmail:  v.VisitorEmail,
-			}
-			analytics.RecentVisitors = append(analytics.RecentVisitors, rv)
-		}
+		page, hasMore := trimRecentVisitorsPage(visitors, recentVisitorsPageSize)
+		analytics.RecentVisitors = page
+		analytics.RecentVisitorsHasMore = hasMore
 	}
 
 	pages, err := s.queries.ListTopPagesByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
@@ -3211,33 +3765,89 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 		}
 	}
 
-	codeContacts, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	codeContacts, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, db.ListLinkAccessCodeContactsByLinkParams{
+		LinkID: pgtype.UUID{Bytes: id, Valid: true},
+		Limit:  int32(accessCodeContactsPageSize + 1),
+		Offset: 0,
+	})
 	if err != nil {
 		logger.ErrorCtx(ctx, "failed to list access code contacts", err)
 	} else {
-		now := time.Now()
-		analytics.AccessCodeContacts = make([]AccessCodeContact, 0, len(codeContacts))
-		for _, c := range codeContacts {
-			item := AccessCodeContact{
-				Email:      c.ContactEmail,
-				Name:       c.ContactName,
-				SendStatus: c.CodeSendStatus,
-				SendError:  c.CodeSendError,
-				CanResend:  accessCodeNeedsRemediation(c.CodeSendStatus, c.CreatedAt.Time, now),
-			}
-			if c.CodeSentAt.Valid {
-				t := c.CodeSentAt.Time
-				item.CodeSentAt = &t
-			}
-			if c.UsedAt.Valid {
-				t := c.UsedAt.Time
-				item.UsedAt = &t
-			}
-			analytics.AccessCodeContacts = append(analytics.AccessCodeContacts, item)
-		}
+		page, hasMore := trimAccessCodeContactsPage(codeContacts, accessCodeContactsPageSize, time.Now())
+		analytics.AccessCodeContacts = page
+		analytics.AccessCodeContactsHasMore = hasMore
+	}
+
+	if failedCount, err := s.queries.CountLinkAccessCodeFailedByLink(ctx, pgtype.UUID{Bytes: id, Valid: true}); err != nil {
+		logger.ErrorCtx(ctx, "failed to count failed access code contacts", err)
+	} else {
+		analytics.AccessCodeFailedCount = failedCount
+	}
+	if remediableCount, err := s.queries.CountLinkAccessCodeRemediableByLink(ctx, pgtype.UUID{Bytes: id, Valid: true}); err != nil {
+		logger.ErrorCtx(ctx, "failed to count remediable access code contacts", err)
+	} else {
+		analytics.AccessCodeRemediableCount = remediableCount
 	}
 
 	return analytics, nil
+}
+
+// ListRecentVisitors returns a paginated page of aggregated visitors for a link.
+func (s *Service) ListRecentVisitors(ctx context.Context, linkID, workspaceID string, limit, offset int) (RecentVisitorsPage, error) {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return RecentVisitorsPage{}, errors.New("invalid link id")
+	}
+	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
+		return RecentVisitorsPage{}, err
+	}
+
+	limit = clampRecentVisitorsLimit(limit)
+	offset = clampRecentVisitorsOffset(offset)
+
+	rows, err := s.queries.ListRecentVisitorsByLink(ctx, db.ListRecentVisitorsByLinkParams{
+		LinkID: pgtype.UUID{Bytes: id, Valid: true},
+		Limit:  int32(limit + 1),
+		Offset: int32(offset),
+	})
+	if err != nil {
+		return RecentVisitorsPage{}, fmt.Errorf("list recent visitors: %w", err)
+	}
+
+	items, hasMore := trimRecentVisitorsPage(rows, limit)
+	return RecentVisitorsPage{Items: items, HasMore: hasMore}, nil
+}
+
+// AccessCodeContactsPage is one page of verification-code delivery contacts.
+type AccessCodeContactsPage struct {
+	Items   []AccessCodeContact `json:"items"`
+	HasMore bool                `json:"has_more"`
+}
+
+// ListAccessCodeContacts returns a paginated page of access-code contacts for a link.
+func (s *Service) ListAccessCodeContacts(ctx context.Context, linkID, workspaceID string, limit, offset int) (AccessCodeContactsPage, error) {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return AccessCodeContactsPage{}, errors.New("invalid link id")
+	}
+	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
+		return AccessCodeContactsPage{}, err
+	}
+
+	limit = clampAccessCodeContactsLimit(limit)
+	offset = clampAccessCodeContactsOffset(offset)
+
+	rows, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, db.ListLinkAccessCodeContactsByLinkParams{
+		LinkID: pgtype.UUID{Bytes: id, Valid: true},
+		Limit:  int32(limit + 1),
+		Offset: int32(offset),
+	})
+	if err != nil {
+		return AccessCodeContactsPage{}, fmt.Errorf("list access code contacts: %w", err)
+	}
+
+	items, hasMore := trimAccessCodeContactsPage(rows, limit, time.Now())
+	return AccessCodeContactsPage{Items: items, HasMore: hasMore}, nil
 }
 
 // normalizeSecurityConfig resolves the security configuration from the modern
@@ -4334,11 +4944,26 @@ func hashIPText(key, ip string) pgtype.Text {
 	return pgtype.Text{String: compliance.HashIP(key, ip), Valid: true}
 }
 
-func (s *Service) resolveLinkAccessRequest(workspaceID, requestID string) {
+func (s *Service) resolveLinkAccessRequest(workspaceID, linkID string) {
 	if s.actionSyncer == nil {
 		return
 	}
-	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkAccessRequest, requestID)
+	// Actions are keyed by link ID (see syncLinkAccessRequests). Only clear when
+	// no pending requests remain for this link.
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return
+	}
+	rows, err := s.queries.ListLinkAccessRequestsByLink(context.Background(), pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		if r.Status == "pending" {
+			return
+		}
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkAccessRequest, linkID)
 }
 
 func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {

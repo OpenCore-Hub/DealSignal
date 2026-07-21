@@ -15,6 +15,8 @@ i18nInstance.use(initReactI18next).init({
         share: {
           documentScope: {
             allDocuments: "All documents accessible",
+            legacyAllDocuments: "All documents accessible (legacy)",
+            noneAuthorized: "No folders authorized — visitors cannot preview any files",
             selectedDocuments: "{{folders}} folders / {{documents}} documents",
             selectAll: "Select all",
             deselectAll: "Deselect",
@@ -64,29 +66,38 @@ const documents: DealRoomFolderDocs[] = [
 
 function renderSection(props: {
   selectedPaths?: string[];
+  scopeMode?: "full" | "allowlist";
   folders?: DealRoomFolder[];
   documents?: DealRoomFolderDocs[];
 }) {
   const onChange = vi.fn();
-  const { rerender } = render(
+  render(
     <Wrapper>
       <DocumentScopeSection
         folders={props.folders ?? folders}
         documents={props.documents ?? documents}
         selectedPaths={props.selectedPaths ?? []}
+        scopeMode={props.scopeMode ?? "allowlist"}
         onChange={onChange}
       />
     </Wrapper>
   );
-  return { onChange, rerender };
+  return { onChange };
 }
 
 describe("DocumentScopeSection", () => {
-  it("renders folder tree and all-documents hint", () => {
+  it("renders deny-all hint when allowlist is empty", () => {
     renderSection({});
-    expect(screen.getByText("All documents accessible")).toBeInTheDocument();
+    expect(
+      screen.getByText("No folders authorized — visitors cannot preview any files")
+    ).toBeInTheDocument();
     expect(screen.getByText("Financials")).toBeInTheDocument();
     expect(screen.getByText("Legal")).toBeInTheDocument();
+  });
+
+  it("renders legacy full-room hint", () => {
+    renderSection({ scopeMode: "full" });
+    expect(screen.getByText("All documents accessible (legacy)")).toBeInTheDocument();
   });
 
   it("toggles a top-level folder on and off", () => {
@@ -95,7 +106,10 @@ describe("DocumentScopeSection", () => {
     const checkbox = row.querySelector('[role="checkbox"]') as HTMLElement;
 
     fireEvent.click(checkbox);
-    expect(onChange).toHaveBeenCalledWith(["/financials"]);
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials"],
+    });
   });
 
   it("selecting a parent folder removes redundant child selections", () => {
@@ -104,7 +118,10 @@ describe("DocumentScopeSection", () => {
     const checkbox = row.querySelector('[role="checkbox"]') as HTMLElement;
 
     fireEvent.click(checkbox);
-    expect(onChange).toHaveBeenCalledWith(["/financials"]);
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials"],
+    });
   });
 
   it("shows indeterminate state when a child is selected", () => {
@@ -129,17 +146,29 @@ describe("DocumentScopeSection", () => {
   it("selects all root folders when select all is clicked", () => {
     const { onChange } = renderSection({});
     fireEvent.click(screen.getByText("Select all"));
-    expect(onChange).toHaveBeenCalledWith(["/financials", "/legal"]);
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials", "/legal"],
+    });
   });
 
-  it("deselects all folders when deselect is clicked", () => {
+  it("clears selection to deny-all when deselect is clicked", () => {
     const { onChange } = renderSection({ selectedPaths: ["/financials"] });
     fireEvent.click(screen.getByText("Deselect"));
-    expect(onChange).toHaveBeenCalledWith([]);
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: [],
+    });
   });
 
-  it("renders empty state when no folders", () => {
-    renderSection({ folders: [], documents: [] });
-    expect(screen.getByText("No folders available")).toBeInTheDocument();
+  it("converts legacy full mode to allowlist on first edit", () => {
+    const { onChange } = renderSection({ scopeMode: "full" });
+    const row = screen.getByTestId("folder-row-/legal");
+    const checkbox = row.querySelector('[role="checkbox"]') as HTMLElement;
+    fireEvent.click(checkbox);
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials"],
+    });
   });
 });

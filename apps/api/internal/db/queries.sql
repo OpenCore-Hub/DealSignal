@@ -289,8 +289,8 @@ INSERT INTO links (
     qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
     link_type, target_folder_path,
     custom_domain, tags, notify_on_access,
-    has_document_scope, folder_scope_paths, nda_document_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31)
+    has_document_scope, folder_scope_paths, folder_scope_mode, nda_document_id, nda_template_id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
 RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
@@ -370,9 +370,17 @@ UPDATE links SET
     security_version = $25,
     has_document_scope = $26,
     folder_scope_paths = $27,
+    folder_scope_mode = $28,
     updated_at = now()
-WHERE id = $28 AND workspace_id = $29
+WHERE id = $29 AND workspace_id = $30
 RETURNING *;
+
+-- name: SetLinkNDABinding :exec
+UPDATE links
+SET nda_template_id = $1,
+    nda_document_id = $2,
+    updated_at = now()
+WHERE id = $3 AND workspace_id = $4;
 
 -- name: DeleteLink :execrows
 UPDATE links
@@ -421,11 +429,111 @@ UPDATE links
 SET folder_scope_paths = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3;
 
+-- name: UpdateLinkFolderScopeMode :exec
+UPDATE links
+SET folder_scope_mode = $1, has_document_scope = $2, updated_at = now()
+WHERE id = $3 AND workspace_id = $4;
+
 -- name: CreateLinkNDAAgreement :one
 INSERT INTO link_nda_agreements (
-    tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent, nda_agreed, signed_at;
+    tenant_id, workspace_id, link_id, visitor_id, email, ip, user_agent,
+    nda_template_id, content_sha256, signer_name, certificate_id, signed_file_key, status
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+RETURNING *;
+
+-- name: GetLinkNDAAgreementByLinkVisitorTemplate :one
+SELECT *
+FROM link_nda_agreements
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND nda_template_id = $3
+  AND status = 'signed'
+LIMIT 1;
+
+-- name: GetLinkNDAAgreementByCertificate :one
+SELECT *
+FROM link_nda_agreements
+WHERE certificate_id = $1
+LIMIT 1;
+
+-- name: GetLinkNDAAgreementByID :one
+SELECT *
+FROM link_nda_agreements
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
+
+-- name: UpdateLinkNDAAgreementSignedFile :one
+UPDATE link_nda_agreements
+SET signed_file_key = $1
+WHERE id = $2
+RETURNING *;
+
+-- name: ListLinkNDAAgreementsByTemplate :many
+SELECT *
+FROM link_nda_agreements
+WHERE workspace_id = $1 AND nda_template_id = $2
+ORDER BY signed_at DESC;
+
+-- name: ListLinkNDAAgreementsByLink :many
+SELECT *
+FROM link_nda_agreements
+WHERE workspace_id = $1 AND link_id = $2
+ORDER BY signed_at DESC;
+
+-- name: CreateNDATemplate :one
+INSERT INTO nda_templates (
+    tenant_id, workspace_id, name, source_document_id, content_sha256,
+    require_signer_name, status, created_by
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+RETURNING *;
+
+-- name: GetNDATemplateByID :one
+SELECT *
+FROM nda_templates
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
+
+-- name: GetNDATemplateBySourceDocument :one
+SELECT *
+FROM nda_templates
+WHERE workspace_id = $1 AND source_document_id = $2
+LIMIT 1;
+
+-- name: ListNDATemplatesByWorkspace :many
+SELECT *
+FROM nda_templates
+WHERE workspace_id = $1 AND status = $2
+ORDER BY updated_at DESC;
+
+-- name: ListAllNDATemplatesByWorkspace :many
+SELECT *
+FROM nda_templates
+WHERE workspace_id = $1
+ORDER BY updated_at DESC;
+
+-- name: UpdateNDATemplate :one
+UPDATE nda_templates
+SET name = $1,
+    require_signer_name = $2,
+    updated_at = now()
+WHERE id = $3 AND workspace_id = $4 AND status = 'active'
+RETURNING *;
+
+-- name: ArchiveNDATemplate :one
+UPDATE nda_templates
+SET status = 'archived', updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: CountNDATemplateResponses :one
+SELECT COUNT(*)::bigint
+FROM link_nda_agreements
+WHERE nda_template_id = $1;
+
+-- name: CountNDATemplateLinks :one
+SELECT COUNT(*)::bigint
+FROM links
+WHERE nda_template_id = $1 AND status NOT IN ('deleted');
 
 -- name: GetDocumentViewMetrics :many
 SELECT
@@ -663,8 +771,8 @@ FROM (
     WHERE access_logs.link_id = $1
 ) e
 LEFT JOIN visitor_emails ve ON ve.visitor_id = e.visitor_id
-ORDER BY e.created_at DESC
-LIMIT $2;
+ORDER BY e.created_at DESC, e.id ASC
+LIMIT $2 OFFSET $3;
 
 -- name: GetLinkAnalytics :one
 WITH link_access AS (
@@ -697,8 +805,8 @@ SELECT
 FROM access_logs
 WHERE link_id = $1 AND visitor_id IS NOT NULL AND visitor_id <> ''
 GROUP BY visitor_id
-ORDER BY last_access_at DESC
-LIMIT 10;
+ORDER BY last_access_at DESC, visitor_id ASC
+LIMIT $2 OFFSET $3;
 
 -- name: GetAverageDurationByLink :one
 SELECT COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds
@@ -931,7 +1039,10 @@ WHERE room_id = $2 AND email = $3;
 
 -- name: UpdateRoomMemberNDA :exec
 UPDATE room_members
-SET nda_status = 'signed', nda_signed_at = now(), updated_at = now()
+SET nda_status = 'signed',
+    nda_signed_at = now(),
+    status = 'active',
+    updated_at = now()
 WHERE room_id = $1 AND email = $2;
 
 -- name: ListRoomMembers :many
@@ -944,6 +1055,12 @@ ORDER BY created_at DESC;
 INSERT INTO room_access_requests (tenant_id, workspace_id, room_id, email, reason, status)
 VALUES ($1, $2, $3, $4, $5, $6)
 RETURNING id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at;
+
+-- name: GetPendingAccessRequestByRoomAndEmail :one
+SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
+FROM room_access_requests
+WHERE room_id = $1 AND email = $2 AND status = 'pending'
+LIMIT 1;
 
 -- name: GetAccessRequestByID :one
 SELECT id, tenant_id, workspace_id, room_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at
@@ -1909,7 +2026,7 @@ LIMIT 1;
 
 -- name: UpsertContactByEmail :one
 INSERT INTO contacts (workspace_id, email, name)
-VALUES ($1, $2, NULLIF($3, ''))
+VALUES (sqlc.arg(workspace_id), sqlc.arg(email), NULLIF(sqlc.arg(name), ''))
 ON CONFLICT (workspace_id, email) DO UPDATE SET
     name = COALESCE(EXCLUDED.name, contacts.name)
 RETURNING id, workspace_id, email, name, created_at;
@@ -2112,7 +2229,25 @@ SELECT
 FROM link_contacts lc
 JOIN contacts c ON c.id = lc.contact_id
 WHERE lc.link_id = $1
-ORDER BY lc.code_sent_at DESC NULLS LAST, c.email ASC;
+ORDER BY lc.code_sent_at DESC NULLS LAST, c.email ASC
+LIMIT $2 OFFSET $3;
+
+-- name: CountLinkAccessCodeFailedByLink :one
+SELECT COUNT(*)::bigint AS count
+FROM link_contacts
+WHERE link_id = $1 AND code_send_status = 'failed';
+
+-- name: CountLinkAccessCodeRemediableByLink :one
+SELECT COUNT(*)::bigint AS count
+FROM link_contacts
+WHERE link_id = $1
+  AND (
+    code_send_status = 'failed'
+    OR (
+      code_send_status = 'pending'
+      AND created_at <= now() - interval '2 minutes'
+    )
+  );
 
 -- name: CreateLinkDocument :exec
 INSERT INTO link_documents (link_id, document_id, sort_order)
@@ -2272,6 +2407,18 @@ SET status = $1, used_at = $2, updated_at = now()
 WHERE id = $3
 RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
 
+-- name: ConsumeLinkInvitation :one
+-- Atomically mark a pending invitation as used. Concurrent Access calls race
+-- here; only one RETURNING row wins and may proceed.
+UPDATE link_invitations
+SET status = 'used',
+    used_at = now(),
+    updated_at = now()
+WHERE id = $1
+  AND status = 'pending'
+  AND (expires_at IS NULL OR expires_at > now())
+RETURNING id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at;
+
 -- name: ListLinkInvitationsByLink :many
 SELECT id, tenant_id, workspace_id, link_id, email, token, status, expires_at, used_at, created_by, created_at, updated_at
 FROM link_invitations
@@ -2306,8 +2453,8 @@ RETURNING id, tenant_id, workspace_id, link_id, email, token, token_hash, status
 
 -- name: CreateLinkAccessRequest :one
 INSERT INTO link_access_requests (
-    tenant_id, workspace_id, link_id, email, reason, status
-) VALUES ($1, $2, $3, $4, $5, 'pending')
+    tenant_id, workspace_id, link_id, email, reason, signer_name, status
+) VALUES ($1, $2, $3, $4, $5, $6, 'pending')
 RETURNING *;
 
 -- name: GetLinkAccessRequestByID :one
@@ -2339,7 +2486,7 @@ SET status = $1,
     reviewed_by = $2,
     reviewed_at = now(),
     updated_at = now()
-WHERE id = $3
+WHERE id = $3 AND status = 'pending'
 RETURNING *;
 
 -- name: CreateVisitorQuestion :one

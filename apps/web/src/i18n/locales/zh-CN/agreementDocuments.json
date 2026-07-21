@@ -1,8 +1,23 @@
 {
   "page": {
     "title": "协议文档",
-    "description": "管理与跟踪所有协议类文档，包括投资协议、保密协议、条款清单等。",
+    "description": "管理 NDA 模板与协议文件。分享链接开启「要求签署 NDA」时绑定模板。",
     "setAsAgreement": "设为协议文档",
-    "unsetAsAgreement": "取消协议标记"
+    "unsetAsAgreement": "取消协议标记",
+    "templatesTitle": "NDA 模板库",
+    "documentsTitle": "协议文件",
+    "documentsHint": "在此上传 PDF 协议。创建分享链接并开启「要求签署 NDA」时，会从所选文件注册为可用模板。",
+    "templatesEmpty": "暂无 NDA 模板。请在分享链接开启「要求签署 NDA」，或先上传协议文档。",
+    "loading": "正在加载模板…",
+    "loadError": "无法加载 NDA 模板",
+    "refresh": "刷新",
+    "colName": "名称",
+    "colLinks": "链接数",
+    "colSignatures": "签署数",
+    "colActions": "操作",
+    "viewSignatures": "查看签署",
+    "signaturesTitle": "已签署记录",
+    "signaturesEmpty": "该模板尚无签署记录。",
+    "downloadSigned": "下载已签 PDF"
   }
 }

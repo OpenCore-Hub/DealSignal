@@ -492,13 +492,13 @@ func TestUpdateAccessRules_Integration(t *testing.T) {
 		}
 
 		// A blocked email should be rejected when requesting access.
-		_, err = f.svc.RequestAccess(f.ctx, publicLink, "leaker@bad.com", "")
+		_, err = f.svc.RequestAccess(f.ctx, publicLink, "leaker@bad.com", "", "")
 		if !errors.Is(err, ErrAccessRequestBlocked) {
 			t.Fatalf("expected ErrAccessRequestBlocked, got %v", err)
 		}
 
 		// A non-blocked email is allowed to request access.
-		req, err := f.svc.RequestAccess(f.ctx, publicLink, "visitor@other.com", "Please grant access")
+		req, err := f.svc.RequestAccess(f.ctx, publicLink, "visitor@other.com", "Please grant access", "")
 		if err != nil {
 			t.Fatalf("RequestAccess failed: %v", err)
 		}
@@ -830,7 +830,7 @@ func TestRequestAccess(t *testing.T) {
 			t.Fatalf("create allow rule: %v", err)
 		}
 
-		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "Please grant access")
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "Please grant access", "")
 		if err != nil {
 			t.Fatalf("request access: %v", err)
 		}
@@ -861,11 +861,11 @@ func TestRequestAccess(t *testing.T) {
 			t.Fatalf("create allow rule: %v", err)
 		}
 
-		first, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		first, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "", "")
 		if err != nil {
 			t.Fatalf("first request: %v", err)
 		}
-		second, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "updated reason")
+		second, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "updated reason", "")
 		if err != nil {
 			t.Fatalf("second request: %v", err)
 		}
@@ -890,7 +890,7 @@ func TestRequestAccess(t *testing.T) {
 			t.Fatalf("create block rule: %v", err)
 		}
 
-		_, err := f.svc.RequestAccess(f.ctx, f.link, "blocked@example.com", "")
+		_, err := f.svc.RequestAccess(f.ctx, f.link, "blocked@example.com", "", "")
 		if !errors.Is(err, ErrAccessRequestBlocked) {
 			t.Fatalf("expected ErrAccessRequestBlocked, got %v", err)
 		}
@@ -912,7 +912,7 @@ func TestRequestAccess(t *testing.T) {
 			t.Fatalf("create allow rule: %v", err)
 		}
 
-		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "", "")
 		if err != nil {
 			t.Fatalf("request access: %v", err)
 		}
@@ -927,7 +927,7 @@ func TestRequestAccess(t *testing.T) {
 			t.Fatalf("reject access request: %v", err)
 		}
 
-		_, err = f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		_, err = f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "", "")
 		if !errors.Is(err, ErrAccessRequestExists) {
 			t.Fatalf("expected ErrAccessRequestExists, got %v", err)
 		}
@@ -951,9 +951,12 @@ func TestApproveAccessRequest(t *testing.T) {
 			t.Fatalf("create allow rule: %v", err)
 		}
 
-		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "Please grant access")
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "Please grant access", "Alex Visitor")
 		if err != nil {
 			t.Fatalf("request access: %v", err)
+		}
+		if req.SignerName != "Alex Visitor" {
+			t.Fatalf("expected signer name on request, got %q", req.SignerName)
 		}
 
 		approved, err := f.svc.ApproveAccessRequest(f.ctx,
@@ -998,6 +1001,60 @@ func TestApproveAccessRequest(t *testing.T) {
 		if !foundInvite {
 			t.Fatal("expected invitation for approved email")
 		}
+
+		contact, err := f.q.GetContactByEmailAndWorkspace(f.ctx, db.GetContactByEmailAndWorkspaceParams{
+			Email:       pgtype.Text{String: "visitor@other.com", Valid: true},
+			WorkspaceID: f.workspace.ID,
+		})
+		if err != nil {
+			t.Fatalf("expected workspace contact after approval: %v", err)
+		}
+		if !contact.Name.Valid || contact.Name.String != "Alex Visitor" {
+			t.Fatalf("expected contact name Alex Visitor, got %#v", contact.Name)
+		}
+	})
+
+	t.Run("reject does not create workspace contact", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "allowed@example.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "rejected@other.com", "Please grant access", "Rejected Visitor")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		rejected, err := f.svc.RejectAccessRequest(f.ctx,
+			uuid.UUID(f.workspace.ID.Bytes).String(),
+			uuid.UUID(f.link.ID.Bytes).String(),
+			req.ID,
+			uuid.UUID(f.user.ID.Bytes).String(),
+		)
+		if err != nil {
+			t.Fatalf("reject access request: %v", err)
+		}
+		if rejected.Status != "rejected" {
+			t.Fatalf("expected rejected status, got %s", rejected.Status)
+		}
+
+		_, err = f.q.GetContactByEmailAndWorkspace(f.ctx, db.GetContactByEmailAndWorkspaceParams{
+			Email:       pgtype.Text{String: "rejected@other.com", Valid: true},
+			WorkspaceID: f.workspace.ID,
+		})
+		if !errors.Is(err, pgx.ErrNoRows) {
+			t.Fatalf("expected no contact after reject, got err=%v", err)
+		}
 	})
 
 	t.Run("non-creator cannot approve", func(t *testing.T) {
@@ -1024,7 +1081,7 @@ func TestApproveAccessRequest(t *testing.T) {
 			t.Fatalf("create allow rule: %v", err)
 		}
 
-		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "")
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "", "")
 		if err != nil {
 			t.Fatalf("request access: %v", err)
 		}

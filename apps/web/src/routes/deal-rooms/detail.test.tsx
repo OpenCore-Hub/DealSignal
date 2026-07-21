@@ -12,7 +12,7 @@ import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, Deal
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocumentByIdMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock } = vi.hoisted(() => ({
+const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocumentByIdMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock, getDealRoomLinksMock, getLinkAnalyticsMock, listLinkQuestionsMock } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
@@ -20,6 +20,9 @@ const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocu
   uploadDocumentMock: vi.fn(),
   addDealRoomDocumentMock: vi.fn(),
   createDealRoomFolderMock: vi.fn(),
+  getDealRoomLinksMock: vi.fn(),
+  getLinkAnalyticsMock: vi.fn(),
+  listLinkQuestionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -31,6 +34,9 @@ vi.mock("@/lib/api", () => ({
     uploadDocument: uploadDocumentMock,
     addDealRoomDocument: addDealRoomDocumentMock,
     createDealRoomFolder: createDealRoomFolderMock,
+    getDealRoomLinks: getDealRoomLinksMock,
+    getLinkAnalytics: getLinkAnalyticsMock,
+    listLinkQuestions: listLinkQuestionsMock,
   },
 }));
 
@@ -187,8 +193,14 @@ describe("DealRoomDetailPage", () => {
     addDealRoomDocumentMock.mockReset();
     createDealRoomFolderMock.mockReset();
     getDocumentByIdMock.mockReset();
+    getDealRoomLinksMock.mockReset();
+    getLinkAnalyticsMock.mockReset();
+    listLinkQuestionsMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
+    getDealRoomLinksMock.mockResolvedValue({ data: [] });
+    getLinkAnalyticsMock.mockResolvedValue({ data: { access_code_contacts: [] } });
+    listLinkQuestionsMock.mockResolvedValue({ data: [] });
   });
 
   it("renders loading skeleton", async () => {
@@ -208,6 +220,8 @@ describe("DealRoomDetailPage", () => {
     expect(screen.getByText("Due diligence materials")).toBeInTheDocument();
     expect(screen.getByText("01 Pitch Deck")).toBeInTheDocument();
     expect(screen.getByText("02 Financials")).toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-command-strip")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-readiness")).not.toBeInTheDocument();
     expect(screen.queryByText("Folder structure")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-progress-popup")).not.toBeInTheDocument();
   });
@@ -217,12 +231,10 @@ describe("DealRoomDetailPage", () => {
     await renderPage("/acme/deal-rooms/room-1?tab=participants");
 
     await waitFor(() => {
-      expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
+      expect(screen.getByText(/no links found/i)).toBeInTheDocument();
     });
-
-    await waitFor(() => {
-      expect(screen.getByText("Links")).toBeInTheDocument();
-    });
+    expect(screen.queryByRole("heading", { name: "Series A Data Room" })).not.toBeInTheDocument();
+    expect(screen.queryByText("Due diligence materials")).not.toBeInTheDocument();
     expect(screen.queryByText("Invitees")).not.toBeInTheDocument();
   });
 
@@ -278,7 +290,7 @@ describe("DealRoomDetailPage", () => {
     const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
     fireEvent.click(actionsButton);
 
-    const uploadButton = screen.getByRole("button", { name: /add file/i });
+    const uploadButton = screen.getByText(/^add file$/i);
     expect(uploadButton).toBeInTheDocument();
 
     // Trigger the hidden file input by clicking the upload icon.
@@ -356,7 +368,7 @@ describe("DealRoomDetailPage", () => {
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
     const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
     fireEvent.click(actionsButton);
-    const uploadButton = screen.getByRole("button", { name: /add file/i });
+    const uploadButton = screen.getByText(/^add file$/i);
     fireEvent.click(uploadButton);
 
     const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
@@ -414,7 +426,7 @@ describe("DealRoomDetailPage", () => {
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
     const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
     fireEvent.click(actionsButton);
-    const uploadButton = screen.getByRole("button", { name: /add file/i });
+    const uploadButton = screen.getByText(/^add file$/i);
     fireEvent.click(uploadButton);
 
     const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;
@@ -481,7 +493,7 @@ describe("DealRoomDetailPage", () => {
     const folderRow = screen.getByText("01 Pitch Deck").closest("[role='button']") as HTMLElement;
     const actionsButton = within(folderRow).getByRole("button", { name: /actions for 01 pitch deck/i });
     fireEvent.click(actionsButton);
-    const uploadButton = screen.getByRole("button", { name: /add file/i });
+    const uploadButton = screen.getByText(/^add file$/i);
     fireEvent.click(uploadButton);
 
     const fileInput = document.querySelector("[data-testid='folder-upload-input-/pitch']") as HTMLInputElement;

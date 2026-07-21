@@ -1,8 +1,23 @@
 {
   "page": {
     "title": "Agreement Documents",
-    "description": "Manage and track all agreement documents, including investment agreements, NDAs, term sheets, etc.",
+    "description": "Manage NDA templates and agreement documents. Bind a template when sharing links with Require NDA.",
     "setAsAgreement": "Mark as Agreement",
-    "unsetAsAgreement": "Unmark Agreement"
+    "unsetAsAgreement": "Unmark Agreement",
+    "templatesTitle": "NDA templates",
+    "documentsTitle": "Agreement files",
+    "documentsHint": "Upload PDF agreements here. Creating a share link with Require NDA will register an active template from the selected file.",
+    "templatesEmpty": "No NDA templates yet. Enable Require NDA on a share link, or upload an agreement document and share it once.",
+    "loading": "Loading templates…",
+    "loadError": "Could not load NDA templates",
+    "refresh": "Refresh",
+    "colName": "Name",
+    "colLinks": "Links",
+    "colSignatures": "Signatures",
+    "colActions": "Actions",
+    "viewSignatures": "View signatures",
+    "signaturesTitle": "Signed responses",
+    "signaturesEmpty": "No signatures yet for this template.",
+    "downloadSigned": "Download signed PDF"
   }
 }

@@ -68,6 +68,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.DELETE("/:id", h.Delete)
 	g.GET("/:id/access-logs", h.AccessLogs)
 	g.GET("/:id/analytics", h.LinkAnalytics)
+	g.GET("/:id/analytics/visitors", h.LinkAnalyticsVisitors)
+	g.GET("/:id/analytics/access-code-contacts", h.LinkAnalyticsAccessCodeContacts)
 	g.POST("/:id/access-codes/resend", h.OwnerResendAccessCode)
 	g.POST("/:id/access-codes/resend-failed", h.OwnerResendFailedAccessCodes)
 	g.GET("/:id/access-rules", h.GetAccessRules)
@@ -100,9 +102,12 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/links/:publicToken", h.PublicLinkMetadata)
 	r.POST("/links/:publicToken", h.Access)
+	r.GET("/links/:publicToken/nda", h.PublicNDAPreview)
+	r.GET("/links/:publicToken/nda/signed", h.PublicNDASignedDownload)
 	r.POST("/links/:publicToken/send-email-code", h.SendEmailVerificationCode)
 	r.POST("/links/:publicToken/resend-code", h.SendEmailVerificationCode)
 	r.POST("/links/:publicToken/access-requests", h.CreateAccessRequest)
+	r.POST("/links/:publicToken/check-email", h.CheckPublicEmail)
 	r.POST("/events", h.RecordEvent)
 	r.GET("/documents/:documentId/pages", h.PublicDocumentPages)
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
@@ -224,6 +229,7 @@ type CreateRequest struct {
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
 	NDADocumentID            string   `json:"nda_document_id,omitempty"`
+	NDATemplateID            string   `json:"nda_template_id,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
 	AllowedEmails            []string `json:"allowed_emails,omitempty"`
@@ -252,6 +258,7 @@ type UpdateRequest struct {
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
 	NDADocumentID            string   `json:"nda_document_id,omitempty"`
+	NDATemplateID            string   `json:"nda_template_id,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
 	ExpiresAt                *string  `json:"expires_at,omitempty"`
@@ -268,8 +275,13 @@ type UpdateRequest struct {
 	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
 	ScreenshotProtectionEnabled *bool `json:"screenshot_protection_enabled,omitempty"`
 	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
-	// FolderPaths scopes a deal-room link to specific folders. Empty means whole room.
+	// FolderPaths is the allowlist of deal-room folders when mode is allowlist.
+	// Empty allowlist denies all documents. Omit to leave unchanged.
 	FolderPaths []string `json:"folder_paths,omitempty"`
+	// FolderScopeMode is "full" (legacy whole-room) or "allowlist".
+	// Sending folder_paths always forces allowlist. "full" only preserves
+	// existing legacy whole-room links (cannot widen allowlist → full).
+	FolderScopeMode string `json:"folder_scope_mode,omitempty"`
 }
 
 // List returns links for the workspace, optionally filtered by document_id.
@@ -437,12 +449,14 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	link, err := h.service.UpdateLink(c.Request.Context(), linkID, workspaceID, UpdateLinkRequest{
 		DocumentIDs:              req.DocumentIDs,
 		FolderPaths:              req.FolderPaths,
+		FolderScopeMode:          req.FolderScopeMode,
 		Name:                     req.Name,
 		PermissionType:           req.PermissionType,
 		RequireEmail:             req.RequireEmail,
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:                  req.RequireNDA,
 		NDADocumentID:               req.NDADocumentID,
+		NDATemplateID:               req.NDATemplateID,
 		RequirePassword:             req.RequirePassword,
 		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
@@ -588,8 +602,10 @@ func (h *Handler) CreateInvitations(c *gin.Context) {
 }
 
 // RevokeInvitationRequest is the JSON body for revoking an invitation.
+// Omit removeFromAllowList (or send null) to remove the allow rule — the safe default.
+// Pass false only when the owner explicitly wants to keep allowlist access.
 type RevokeInvitationRequest struct {
-	RemoveFromAllowList bool `json:"removeFromAllowList"`
+	RemoveFromAllowList *bool `json:"removeFromAllowList"`
 }
 
 // RevokeInvitation revokes a single invitation.
@@ -597,9 +613,13 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 	var req RevokeInvitationRequest
 	// Body is optional; default to removing from allow list.
 	_ = c.ShouldBindJSON(&req)
+	removeFromAllowList := true
+	if req.RemoveFromAllowList != nil {
+		removeFromAllowList = *req.RemoveFromAllowList
+	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	if err := h.service.RevokeInvitation(c.Request.Context(), workspaceID, c.Param("invitationId"), req.RemoveFromAllowList); err != nil {
+	if err := h.service.RevokeInvitation(c.Request.Context(), workspaceID, c.Param("invitationId"), removeFromAllowList); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
 			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": err.Error()})
@@ -613,8 +633,9 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 
 // CreateAccessRequestRequest is the JSON body for requesting access to a link.
 type CreateAccessRequestRequest struct {
-	Email  string `json:"email" binding:"required,email"`
-	Reason string `json:"reason,omitempty"`
+	Email      string `json:"email" binding:"required,email"`
+	Reason     string `json:"reason,omitempty"`
+	SignerName string `json:"signer_name,omitempty"`
 }
 
 // CreateAccessRequest allows a blocked or not-allowed visitor to request access.
@@ -651,19 +672,92 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 		return
 	}
 
-	ar, err := h.service.RequestAccess(ctx, link, req.Email, req.Reason)
+	ar, err := h.service.RequestAccess(ctx, link, req.Email, req.Reason, req.SignerName)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAccessRequestBlocked):
 			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": err.Error()})
 		case errors.Is(err, ErrAccessRequestExists):
 			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": err.Error()})
+		case errors.Is(err, ErrAccessAlreadyAllowed):
+			c.JSON(http.StatusConflict, gin.H{"code": "access_already_allowed", "message": err.Error()})
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		}
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"data": ar})
+}
+
+// CheckPublicEmail verifies whether an email is allowed by the link's access
+// rules before the visitor enters the NDA review step.
+func (h *Handler) CheckPublicEmail(c *gin.Context) {
+	ctx := c.Request.Context()
+	token := c.Param("publicToken")
+	var req struct {
+		Email string `json:"email" binding:"required,email"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	link, err := h.service.CheckPublicEmail(ctx, token, req.Email, c.ClientIP())
+	if err != nil {
+		requiresEmail, requiresEmailVerification, requiresNda := false, false, false
+		requiresPassword := false
+		isDealRoom := false
+		if link.ID.Valid {
+			requiresEmail, requiresEmailVerification, requiresNda = linkSecurityFlags(link)
+			requiresPassword = link.RequirePassword
+			isDealRoom = link.DealRoomID.Valid
+		}
+		switch {
+		case errors.Is(err, ErrLinkNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		case errors.Is(err, ErrLinkExpired):
+			c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": err.Error()})
+		case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
+			c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": err.Error()})
+		case errors.Is(err, ErrLinkMaxAccessReached):
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": err.Error()})
+		case errors.Is(err, ErrRequiresEmail):
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":                      "requires_email",
+				"message":                   err.Error(),
+				"requiresEmail":             requiresEmail,
+				"requiresEmailVerification": requiresEmailVerification,
+				"requiresPassword":          requiresPassword,
+				"requiresNda":               requiresNda,
+				"isDealRoom":                isDealRoom,
+			})
+		case errors.Is(err, ErrBlockedEmail):
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":                      "blocked_email",
+				"message":                   err.Error(),
+				"requiresEmail":             requiresEmail,
+				"requiresEmailVerification": requiresEmailVerification,
+				"requiresPassword":          requiresPassword,
+				"requiresNda":               requiresNda,
+				"isDealRoom":                isDealRoom,
+			})
+		case errors.Is(err, ErrNotAllowedEmail):
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":                      "not_allowed",
+				"message":                   err.Error(),
+				"requiresEmail":             requiresEmail,
+				"requiresEmailVerification": requiresEmailVerification,
+				"requiresPassword":          requiresPassword,
+				"requiresNda":               requiresNda,
+				"isDealRoom":                isDealRoom,
+			})
+		case err.Error() == "rate limit exceeded":
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "too_many_attempts", "message": "Too many attempts. Please try again later."})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
 // ListAccessRequests returns all access requests for a link.
@@ -692,6 +786,9 @@ func (h *Handler) ApproveAccessRequest(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
 		case errors.Is(err, ErrAccessRequestBlocked):
 			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": err.Error()})
+		case errors.Is(err, ErrAccessCodeSendFailed):
+			// Approval already committed; owner should resend the access code.
+			c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": err.Error()})
 		default:
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
 		}
@@ -724,6 +821,7 @@ type CreateDealRoomLinkRequest struct {
 	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
 	RequireNDA               bool     `json:"require_nda,omitempty"`
 	NDADocumentID            string   `json:"nda_document_id,omitempty"`
+	NDATemplateID            string   `json:"nda_template_id,omitempty"`
 	RequirePassword          bool     `json:"require_password,omitempty"`
 	Password                 string   `json:"password,omitempty"`
 	AllowedEmails            []string `json:"allowed_emails,omitempty"`
@@ -739,8 +837,8 @@ type CreateDealRoomLinkRequest struct {
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
 	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
-	// FolderPaths optionally scopes the link to a subset of the deal-room folders.
-	// When empty, the link exposes all folders in the deal room.
+	// FolderPaths is the allowlist of deal-room folders. Empty deny-all.
+	// Creates always persist folder_scope_mode=allowlist.
 	FolderPaths []string `json:"folder_paths,omitempty"`
 }
 
@@ -768,6 +866,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
 		NDADocumentID:            req.NDADocumentID,
+		NDATemplateID:            req.NDATemplateID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
 		AllowedEmails:            req.AllowedEmails,
@@ -854,7 +953,20 @@ func (h *Handler) Delete(c *gin.Context) {
 // AccessLogs returns access logs for a link.
 func (h *Handler) AccessLogs(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	logs, err := h.service.ListAccessLogs(c.Request.Context(), c.Param("id"), workspaceID)
+	limit := accessLogsDefaultLimit
+	offset := 0
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			limit = n
+		}
+	}
+	if raw := c.Query("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			offset = n
+		}
+	}
+
+	page, err := h.service.ListAccessLogs(c.Request.Context(), c.Param("id"), workspaceID, limit, offset)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
@@ -863,7 +975,10 @@ func (h *Handler) AccessLogs(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": accessLogList(logs)})
+	c.JSON(http.StatusOK, gin.H{
+		"data":     accessLogList(page.Items),
+		"has_more": page.HasMore,
+	})
 }
 
 // LinkAnalytics returns aggregated analytics for a link.
@@ -879,6 +994,68 @@ func (h *Handler) LinkAnalytics(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": analytics})
+}
+
+// LinkAnalyticsVisitors returns a paginated page of recent visitors for a link.
+func (h *Handler) LinkAnalyticsVisitors(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	limit := recentVisitorsPageSize
+	offset := 0
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			limit = n
+		}
+	}
+	if raw := c.Query("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			offset = n
+		}
+	}
+
+	page, err := h.service.ListRecentVisitors(c.Request.Context(), c.Param("id"), workspaceID, limit, offset)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data":     page.Items,
+		"has_more": page.HasMore,
+	})
+}
+
+// LinkAnalyticsAccessCodeContacts returns a paginated page of verification-code contacts.
+func (h *Handler) LinkAnalyticsAccessCodeContacts(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	limit := accessCodeContactsPageSize
+	offset := 0
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			limit = n
+		}
+	}
+	if raw := c.Query("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			offset = n
+		}
+	}
+
+	page, err := h.service.ListAccessCodeContacts(c.Request.Context(), c.Param("id"), workspaceID, limit, offset)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"data":     page.Items,
+		"has_more": page.HasMore,
+	})
 }
 
 // OwnerResendAccessCode remediates delivery for one invitee (workspace auth).
@@ -960,6 +1137,7 @@ func (h *Handler) Create(c *gin.Context) {
 		RequireEmailVerification: req.RequireEmailVerification,
 		RequireNDA:               req.RequireNDA,
 		NDADocumentID:            req.NDADocumentID,
+		NDATemplateID:            req.NDATemplateID,
 		RequirePassword:          req.RequirePassword,
 		Password:                 req.Password,
 		ExpiresAt:                expiresAt,
@@ -1048,14 +1226,13 @@ func (h *Handler) Access(c *gin.Context) {
 			link, err := h.service.GetByPublicToken(c.Request.Context(), token)
 			if err == nil {
 				// Invalidate session if link security config changed since session was issued.
-				configChanged := session.SecurityVersion > 0 &&
-					link.SecurityVersion != session.SecurityVersion
+				configChanged := sessionSecurityConfigChanged(link, session)
 				if !configChanged {
 					switch link.Status {
 					case "deleted":
 						c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": ErrLinkNotFound.Error()})
 						return
-					case "disabled", "revoked":
+					case "disabled", "revoked", "archived":
 						h.recordSecurityEventFromAccessError(c.Request.Context(), link, ErrLinkDisabled, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
 						c.JSON(http.StatusForbidden, gin.H{"code": "link_disabled", "message": ErrLinkDisabled.Error()})
 						return
@@ -1067,15 +1244,12 @@ func (h *Handler) Access(c *gin.Context) {
 					}
 					// Explicit security-gate check: if the link now requires NDA
 					// or email verification that the session does not prove, force
-					// re-authentication. The timestamp check above catches most
-					// config changes, but sub-second churn (remove+readd NDA) can
-					// land on the same timestamp.
-					securityChanged := (link.RequireNda && !session.NDAAgreed) ||
-						(link.RequireEmailVerification && !session.EmailVerified && session.Email == "")
+					// re-authentication.
+					securityChanged := sessionSecurityGatesUnsatisfied(link, session)
 					if securityChanged {
 						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
 					} else {
-						h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified, session.PasswordVerified)
+						h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified, session.PasswordVerified, "", "")
 						return
 					}
 				}
@@ -1089,6 +1263,7 @@ func (h *Handler) Access(c *gin.Context) {
 		EmailCode   string `json:"email_code"`
 		Password    string `json:"password"`
 		NDAAgreed   bool   `json:"nda_agreed"`
+		SignerName  string `json:"signer_name"`
 		InviteToken string `json:"invite_token"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
@@ -1115,18 +1290,25 @@ func (h *Handler) Access(c *gin.Context) {
 		EmailCode:   body.EmailCode,
 		Password:    body.Password,
 		NDAAgreed:   body.NDAAgreed,
+		SignerName:  body.SignerName,
 		InviteToken: body.InviteToken,
 		IP:          c.ClientIP(),
 		UA:          c.Request.UserAgent(),
 	})
 	if err != nil {
+		auditEmail := body.Email
+		var mismatch *DeliveryEmailMismatchError
+		if errors.As(err, &mismatch) && mismatch.AuthorizedEmail != "" {
+			auditEmail = mismatch.AuthorizedEmail
+			visitorID = makeVisitorID(auditEmail, c.Request.UserAgent())
+		}
 		// Record security audit event for access failures.
 		if link, lerr := h.service.GetByPublicToken(c.Request.Context(), token); lerr == nil {
-			h.recordSecurityEventFromAccessError(c.Request.Context(), link, err, visitorID, body.Email, c.ClientIP(), c.Request.UserAgent())
+			h.recordSecurityEventFromAccessError(c.Request.Context(), link, err, visitorID, auditEmail, c.ClientIP(), c.Request.UserAgent())
 
 			// For credential-gate errors, include the link's security flags so the
 			// UI can render all required fields on the first attempt.
-			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
+			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidSignerName) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrDeliveryEmailMismatch) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
 				requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
 				if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrInvalidPassword) {
@@ -1135,7 +1317,7 @@ func (h *Handler) Access(c *gin.Context) {
 				if errors.Is(err, ErrInviteExpired) {
 					status = http.StatusGone
 				}
-				c.JSON(status, gin.H{
+				payload := gin.H{
 					"code":                      accessErrorCode(err),
 					"message":                   err.Error(),
 					"requiresEmail":             requiresEmail,
@@ -1143,7 +1325,13 @@ func (h *Handler) Access(c *gin.Context) {
 					"requiresPassword":          link.RequirePassword,
 					"requiresNda":               requiresNda,
 					"isDealRoom":                link.DealRoomID.Valid,
-				})
+				}
+				if requiresNda {
+					if meta := h.ndaTemplateMeta(c.Request.Context(), link); meta != nil {
+						payload["ndaTemplate"] = meta
+					}
+				}
+				c.JSON(status, payload)
 				return
 			}
 		}
@@ -1159,7 +1347,7 @@ func (h *Handler) Access(c *gin.Context) {
 	h.triggerSuggestions(c.Request.Context(), result.Link, langFromContext(c))
 
 	passwordVerified := !result.Link.RequirePassword || body.Password != ""
-	h.respondAccessSuccess(c, result.Link, token, result.Email, body.NDAAgreed, result.VisitorID, result.EmailVerified, passwordVerified)
+	h.respondAccessSuccess(c, result.Link, token, result.Email, body.NDAAgreed || result.NDAResponseID != "", result.VisitorID, result.EmailVerified, passwordVerified, result.NDAResponseID, result.NDACertificateID)
 }
 
 // respondAccessSuccess builds the access response payload (documents, security
@@ -1168,7 +1356,7 @@ func (h *Handler) Access(c *gin.Context) {
 //
 // SecurityVersion is stored so sessions are invalidated when link security
 // config changes.
-func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool, passwordVerified bool) {
+func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, email string, ndaAgreed bool, visitorID string, emailVerified bool, passwordVerified bool, ndaResponseID, ndaCertificateID string) {
 	documents := h.documentsForAccessResponse(c.Request.Context(), link, token)
 
 	session, err := signLinkSession(LinkSession{
@@ -1203,15 +1391,168 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 	if link.DealRoomID.Valid {
 		linkPayload["dealRoomId"] = uuidToString(link.DealRoomID)
 	}
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"link":                      linkPayload,
 		"documents":                 documents,
 		"visitorId":                 visitorID,
 		"requiresEmail":             requiresEmail,
 		"requiresNda":               requiresNda,
 		"requiresEmailVerification": requiresEmailVerification,
+		"requiresPassword":          link.RequirePassword,
 		"sessionToken":              session,
+	}
+	if ndaResponseID != "" {
+		resp["ndaResponseId"] = ndaResponseID
+	}
+	if ndaCertificateID != "" {
+		resp["ndaCertificateId"] = ndaCertificateID
+	}
+	if requiresNda {
+		if meta := h.ndaTemplateMeta(c.Request.Context(), link); meta != nil {
+			resp["ndaTemplate"] = meta
+		}
+	}
+	c.JSON(http.StatusOK, resp)
+}
+
+func (h *Handler) ndaTemplateMeta(ctx context.Context, link db.Link) gin.H {
+	tpl, err := h.service.resolveLinkNDATemplate(ctx, link)
+	if err != nil {
+		return nil
+	}
+	return gin.H{
+		"id":                  uuidToString(tpl.ID),
+		"name":                tpl.Name,
+		"requireSignerName":   tpl.RequireSignerName,
+		"sourceDocumentId":    uuidToString(tpl.SourceDocumentID),
+		"contentSha256":       tpl.ContentSha256,
+	}
+}
+
+// PublicNDAPreview returns metadata for the link's NDA document so visitors can
+// review it before One-Click acceptance. Preview is gated like Access:
+// active link lifecycle + allow/block rules (pass ?email= when allowlisted).
+func (h *Handler) PublicNDAPreview(c *gin.Context) {
+	token := c.Param("publicToken")
+	ctx := c.Request.Context()
+	link, err := h.service.ResolvePublicLink(ctx, token)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	if !link.RequireNda {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda not required"})
+		return
+	}
+	email := strings.TrimSpace(strings.ToLower(c.Query("email")))
+	eval, evalErr := h.service.EvaluateAccessRules(ctx, uuid.UUID(link.ID.Bytes).String(), email)
+	if evalErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to evaluate access rules"})
+		return
+	}
+	if !eval.Allowed {
+		mapAccessError(c, mapRuleError(eval.Reason))
+		return
+	}
+	meta := h.ndaTemplateMeta(ctx, link)
+	if meta == nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda template not found"})
+		return
+	}
+	docID := meta["sourceDocumentId"].(string)
+	docUUID, err := uuid.Parse(docID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "invalid nda document"})
+		return
+	}
+	doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          pgtype.UUID{Bytes: docUUID, Valid: true},
+		WorkspaceID: link.WorkspaceID,
 	})
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda document not found"})
+		return
+	}
+	// Prefer rendered page images for in-page preview (safe for <img>).
+	// Never return an attachment-disposition PDF URL as the preview — browsers
+	// will download it when loaded in an iframe instead of rendering.
+	const maxNDAPreviewPages = 50
+	previewPageURLs := make([]string, 0, 8)
+	pages, pagesErr := h.service.queries.ListPagesByDocument(ctx, pgtype.UUID{Bytes: docUUID, Valid: true})
+	if pagesErr == nil {
+		for _, page := range pages {
+			if !page.ImageObjectKey.Valid || page.ImageObjectKey.String == "" {
+				continue
+			}
+			previewPageURLs = append(previewPageURLs, h.signResourceURL(page.ImageObjectKey.String, token, "nda-preview", ""))
+			if len(previewPageURLs) >= maxNDAPreviewPages {
+				break
+			}
+		}
+	}
+	previewImageURL := ""
+	if len(previewPageURLs) > 0 {
+		previewImageURL = previewPageURLs[0]
+	}
+	documentURL := h.signResourceURL(doc.StorageKey, token, "nda-preview", doc.Title) + "&disposition=inline"
+
+	previewURL := previewImageURL
+	if previewURL == "" {
+		previewURL = documentURL
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"ndaTemplate": meta,
+		"document": gin.H{
+			"id":         docID,
+			"title":      doc.Title,
+			"pageCount":  doc.PageCount.Int32,
+			"sourceType": doc.SourceType,
+		},
+		"previewImageUrl": previewImageURL,
+		"previewPageUrls": previewPageURLs,
+		"documentUrl":     documentURL,
+		// Legacy alias: prefer image; fall back to inline PDF for older clients.
+		"previewUrl": previewURL,
+		"expiresAt":  time.Now().Add(15 * time.Minute).UTC().Format(time.RFC3339),
+	})
+}
+
+// PublicNDASignedDownload streams the visitor's sealed NDA PDF (session required).
+func (h *Handler) PublicNDASignedDownload(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.RequireNda || !result.Link.NdaTemplateID.Valid {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda not available"})
+		return
+	}
+	row, err := h.service.queries.GetLinkNDAAgreementByLinkVisitorTemplate(c.Request.Context(), db.GetLinkNDAAgreementByLinkVisitorTemplateParams{
+		LinkID:        result.Link.ID,
+		VisitorID:     pgtype.Text{String: result.VisitorID, Valid: result.VisitorID != ""},
+		NdaTemplateID: result.Link.NdaTemplateID,
+	})
+	if err != nil || row.SignedFileKey == "" {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "signed nda not ready"})
+		return
+	}
+	if h.storage == nil {
+		c.JSON(http.StatusNotImplemented, gin.H{"code": "not_configured", "message": "storage not configured"})
+		return
+	}
+	obj, err := h.storage.GetObject(c.Request.Context(), row.SignedFileKey)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	defer obj.Close()
+	filename := fmt.Sprintf("nda-signed-%s.pdf", row.CertificateID)
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Disposition", `attachment; filename="`+filename+`"`)
+	c.Status(http.StatusOK)
+	_, _ = io.Copy(c.Writer, obj)
 }
 
 // documentsForAccessResponse returns the documents that should be exposed to a
@@ -1227,26 +1568,13 @@ func (h *Handler) documentsForAccessResponse(ctx context.Context, link db.Link, 
 				logger.Attr("deal_room_id", uuidToString(link.DealRoomID)),
 			)
 		} else {
-			// If the link has an explicit folder scope, restrict the exposed
-			// documents to those folders. Otherwise fall back to the whole room.
-			applyScope := len(link.FolderScopePaths) > 0
-			scoped := make(map[string]bool, len(link.FolderScopePaths))
-			for _, p := range link.FolderScopePaths {
-				scoped[p] = true
-			}
+			// If the link uses allowlist mode, restrict exposed documents.
+			// Empty allowlist exposes nothing. Legacy full mode exposes the whole room.
+			applyScope := dealRoomUsesFolderAllowlist(link)
 
 			for _, d := range drDocs {
-				if applyScope {
-					inScope := false
-					for _, scopePath := range link.FolderScopePaths {
-						if d.FolderPath == scopePath || strings.HasPrefix(d.FolderPath, scopePath+"/") {
-							inScope = true
-							break
-						}
-					}
-					if !inScope {
-						continue
-					}
+				if applyScope && !folderPathInDealRoomScope(link, d.FolderPath) {
+					continue
 				}
 				documents = append(documents, gin.H{
 					"id":         uuidToString(d.DocumentID),
@@ -1327,8 +1655,8 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 
 // verifyLinkDocumentAccess checks whether docID belongs to the link.
 // For document links it checks the primary document or link_documents.
-// For deal-room links it honors the optional folder scope and verifies the
-// document is still present in the deal room (stale-scope guard).
+// For deal-room links it honors folder_scope_mode (full vs allowlist) and
+// verifies the document is still present in the deal room (stale-scope guard).
 func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, docID uuid.UUID) bool {
 	if uuid.UUID(link.DocumentID.Bytes) == docID {
 		return true
@@ -1343,17 +1671,7 @@ func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, do
 		if err != nil {
 			return false
 		}
-		// Unscoped deal-room links expose every document currently in the room.
-		if len(link.FolderScopePaths) == 0 {
-			return true
-		}
-		// Scoped links allow the exact folder or any descendant.
-		for _, scopePath := range link.FolderScopePaths {
-			if folderPath == scopePath || strings.HasPrefix(folderPath, scopePath+"/") {
-				return true
-			}
-		}
-		return false
+		return folderPathInDealRoomScope(link, folderPath)
 	}
 
 	// Document links fall back to link_documents / primary document.
@@ -1546,7 +1864,11 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 	c.Header("Content-Type", contentType)
 	c.Header("Cache-Control", "private, max-age=300")
 	if filename := c.Query("filename"); filename != "" {
-		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, path.Base(filename)))
+		disposition := "attachment"
+		if c.Query("disposition") == "inline" {
+			disposition = "inline"
+		}
+		c.Header("Content-Disposition", fmt.Sprintf(`%s; filename="%s"`, disposition, path.Base(filename)))
 	}
 
 	if watermark != "" && shouldApplyServerWatermark(key) {
@@ -1635,13 +1957,12 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				return AccessResult{}, fmt.Errorf("get link: %w", err)
 			}
 			// Invalidate session if link config changed since session was issued.
-			configChanged := session.SecurityVersion > 0 &&
-				link.SecurityVersion != session.SecurityVersion
+			configChanged := sessionSecurityConfigChanged(link, session)
 			if !configChanged {
 				switch link.Status {
 				case "deleted":
 					return AccessResult{}, ErrLinkNotFound
-				case "disabled", "revoked":
+				case "disabled", "revoked", "archived":
 					h.recordSecurityEventFromAccessError(c.Request.Context(), link, ErrLinkDisabled, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
 					return AccessResult{}, ErrLinkDisabled
 				}
@@ -1651,11 +1972,8 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				}
 				// Explicit security-gate check: if the link now requires NDA
 				// or email verification that the session does not prove, force
-				// re-authentication. The timestamp check above catches most
-				// config changes, but sub-second churn (remove+readd NDA) can
-				// land on the same timestamp.
-				securityChanged := (link.RequireNda && !session.NDAAgreed) ||
-					(link.RequireEmailVerification && session.Email == "")
+				// re-authentication.
+				securityChanged := sessionSecurityGatesUnsatisfied(link, session)
 				if securityChanged {
 					_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
 				}
@@ -1749,6 +2067,8 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": err.Error()})
 	case errors.Is(err, ErrLinkDisabled):
 		c.JSON(http.StatusGone, gin.H{"code": "link_disabled", "message": err.Error()})
+	case errors.Is(err, ErrLinkArchived):
+		c.JSON(http.StatusGone, gin.H{"code": "link_archived", "message": err.Error()})
 	case errors.Is(err, ErrLinkMaxAccessReached):
 		c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": err.Error()})
 	case errors.Is(err, ErrRequiresEmail):
@@ -1759,6 +2079,8 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_email_code", "message": err.Error()})
 	case errors.Is(err, ErrRequiresNDA):
 		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
+	case errors.Is(err, ErrInvalidSignerName):
+		c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signer_name", "message": err.Error()})
 	case errors.Is(err, ErrRequiresPassword):
 		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": err.Error()})
 	case errors.Is(err, ErrInvalidPassword):
@@ -1767,6 +2089,8 @@ func mapAccessError(c *gin.Context, err error) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": err.Error()})
 	case errors.Is(err, ErrNotAllowedEmail):
 		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+	case errors.Is(err, ErrDeliveryEmailMismatch):
+		c.JSON(http.StatusForbidden, gin.H{"code": "email_mismatch", "message": err.Error()})
 	case errors.Is(err, ErrInviteExpired):
 		c.JSON(http.StatusGone, gin.H{"code": "invite_expired", "message": err.Error()})
 	case errors.Is(err, ErrInviteRevoked):
@@ -1787,6 +2111,8 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "expired_link_accessed", "", false
 	case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
 		return "revoked_link_accessed", "", false
+	case errors.Is(err, ErrLinkArchived):
+		return "revoked_link_accessed", "archived", false
 	case errors.Is(err, ErrLinkMaxAccessReached):
 		return "max_access_reached", "", false
 	case errors.Is(err, ErrInvalidEmailCode):
@@ -1803,6 +2129,8 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 		return "blocked_email", "", true
 	case errors.Is(err, ErrNotAllowedEmail):
 		return "not_in_allow_list", "", true
+	case errors.Is(err, ErrDeliveryEmailMismatch):
+		return "security_gate_failed", "delivery_email_mismatch", true
 	case errors.Is(err, ErrInviteExpired):
 		return "invite_token_expired", "", false
 	case errors.Is(err, ErrInviteRevoked):
@@ -1877,6 +2205,8 @@ func accessErrorCode(err error) string {
 		return "invalid_email_code"
 	case errors.Is(err, ErrRequiresNDA):
 		return "nda_required"
+	case errors.Is(err, ErrInvalidSignerName):
+		return "invalid_signer_name"
 	case errors.Is(err, ErrRequiresPassword):
 		return "requires_password"
 	case errors.Is(err, ErrInvalidPassword):
@@ -1885,6 +2215,8 @@ func accessErrorCode(err error) string {
 		return "blocked_email"
 	case errors.Is(err, ErrNotAllowedEmail):
 		return "not_allowed"
+	case errors.Is(err, ErrDeliveryEmailMismatch):
+		return "email_mismatch"
 	case errors.Is(err, ErrInviteExpired):
 		return "invite_expired"
 	case errors.Is(err, ErrInviteRevoked):
@@ -2031,6 +2363,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"documentTitle":               documentTitle,
 		"documentIds":                 linkDocumentIDs(linkDocs, link),
 		"folderPaths":                 link.FolderScopePaths,
+		"folderScopeMode":             link.FolderScopeMode,
 		"documents":                   documents,
 		"isBundle":                    isBundle,
 		"name":                        textOrNil(link.Name),
@@ -2063,6 +2396,9 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 	}
 	if link.NdaDocumentID.Valid {
 		item["ndaDocumentId"] = uuidToString(link.NdaDocumentID)
+	}
+	if link.NdaTemplateID.Valid {
+		item["ndaTemplateId"] = uuidToString(link.NdaTemplateID)
 	}
 	if link.ExpiresAt.Valid {
 		item["expiresAt"] = link.ExpiresAt.Time.Format(time.RFC3339)

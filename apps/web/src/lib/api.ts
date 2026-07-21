@@ -19,7 +19,10 @@ import type {
   HeatLevel,
   IntegrationStatus,
   Link,
+  LinkAccessRequest,
   LinkAnalytics,
+  LinkAccessCodeContact,
+  LinkRecentVisitor,
   PageAnalytics,
   PermissionConfig,
   RiskAlert,
@@ -91,31 +94,13 @@ export interface PublicLinkCredentials {
   sessionToken?: string;
 }
 
-export interface PublicDealRoomView {
-  room: {
-    id: string;
-    name: string;
-    description: string;
-    ndaEnabled: boolean;
-    requiresApproval: boolean;
-  };
-  member: {
-    id: string;
-    email: string;
-    role: DealRoomMember["role"];
-    ndaStatus: DealRoomMember["nda_status"];
-    status: DealRoomMember["status"];
-  } | null;
-  folders: DealRoomFolder[];
-  documents: DealRoomFolderDocs[];
-}
-
 export interface CreateDealRoomLinkPayload {
   name?: string;
   require_email?: boolean;
   require_email_verification?: boolean;
   require_nda?: boolean;
   nda_document_id?: string;
+  nda_template_id?: string;
   require_password?: boolean;
   password?: string;
   allowed_emails?: string[];
@@ -131,8 +116,10 @@ export interface CreateDealRoomLinkPayload {
   custom_domain?: string;
   tags?: string[];
   notify_on_access?: boolean;
-  // Optional folder scope. When provided, the link only exposes these deal-room folders.
+  // Allowlist of deal-room folders. Empty deny-all. Creates always use allowlist mode.
   folder_paths?: string[];
+  // "full" (legacy whole-room) or "allowlist". Creates ignore this and always allowlist.
+  folder_scope_mode?: "full" | "allowlist";
 }
 
 export interface SendMarketingBatchRequest {
@@ -289,6 +276,7 @@ export const api = {
       emailCode?: string;
       password?: string;
       ndaAgreed?: boolean;
+      signerName?: string;
       sessionToken?: string;
       inviteToken?: string;
     }
@@ -302,6 +290,15 @@ export const api = {
       requiresPassword: boolean;
       requiresNda: boolean;
       sessionToken: string;
+      ndaResponseId?: string;
+      ndaCertificateId?: string;
+      ndaTemplate?: {
+        id: string;
+        name: string;
+        requireSignerName: boolean;
+        sourceDocumentId: string;
+        contentSha256?: string;
+      };
     }>(undefined, `/v1/public/links/${token}`, {
       method: "POST",
       skipAuth: true,
@@ -310,9 +307,104 @@ export const api = {
         email_code: opts?.emailCode,
         password: opts?.password,
         nda_agreed: opts?.ndaAgreed ?? false,
+        signer_name: opts?.signerName,
         invite_token: opts?.inviteToken,
       }),
       headers: opts?.sessionToken ? { "X-Link-Session": opts.sessionToken } : undefined,
+    }),
+
+  requestPublicLinkAccess: (
+    token: string,
+    opts: { email: string; reason: string; signerName?: string }
+  ) =>
+    request<{ id: string; email: string; status: string }>(undefined, `/v1/public/links/${token}/access-requests`, {
+      method: "POST",
+      skipAuth: true,
+      body: JSON.stringify({
+        email: opts.email,
+        reason: opts.reason,
+        signer_name: opts.signerName,
+      }),
+    }),
+
+  checkPublicLinkEmail: (token: string, email: string) =>
+    request<{ ok: boolean }>(undefined, `/v1/public/links/${token}/check-email`, {
+      method: "POST",
+      skipAuth: true,
+      body: JSON.stringify({ email }),
+    }),
+
+  getPublicNDAPreview: (token: string, email?: string) => {
+    const qs = email?.trim()
+      ? `?email=${encodeURIComponent(email.trim())}`
+      : "";
+    return request<{
+      ndaTemplate: {
+        id: string;
+        name: string;
+        requireSignerName: boolean;
+        sourceDocumentId: string;
+        contentSha256?: string;
+      };
+      document: { id: string; title: string; pageCount: number; sourceType: string };
+      previewImageUrl?: string;
+      previewPageUrls?: string[];
+      documentUrl?: string;
+      previewUrl: string;
+      expiresAt: string;
+    }>(undefined, `/v1/public/links/${token}/nda${qs}`, {
+      method: "GET",
+      skipAuth: true,
+    });
+  },
+
+  getPublicNDASignedDownloadPath: (token: string) =>
+    `/api/v1/public/links/${token}/nda/signed`,
+
+  listNDATemplates: (includeArchived = false) =>
+    request<{ data: Array<{
+      id: string;
+      name: string;
+      source_document_id: string;
+      content_sha256: string;
+      require_signer_name: boolean;
+      status: string;
+      response_count: number;
+      link_count: number;
+      created_at: string;
+      updated_at: string;
+    }> }>(
+      getWorkspaceSlug(),
+      `/nda/templates${includeArchived ? "?include_archived=true" : ""}`
+    ),
+
+  createNDATemplate: (documentId: string, name?: string) =>
+    request<{ data: { id: string; name: string; source_document_id: string } }>(
+      getWorkspaceSlug(),
+      "/nda/templates",
+      {
+        method: "POST",
+        body: JSON.stringify({ document_id: documentId, name }),
+      }
+    ),
+
+  listNDATemplateResponses: (templateId: string) =>
+    request<{ data: Array<{
+      id: string;
+      link_id: string;
+      nda_template_id: string;
+      email: string;
+      signer_name: string;
+      certificate_id: string;
+      content_sha256: string;
+      has_signed_file: boolean;
+      signed_at: string;
+      status: string;
+    }> }>(getWorkspaceSlug(), `/nda/templates/${templateId}/responses`),
+
+  downloadNDAResponse: (responseId: string) =>
+    request<Blob>(getWorkspaceSlug(), `/nda/responses/${responseId}/download`, {
+      method: "GET",
     }),
 
   // Public Visitor Q&A
@@ -465,13 +557,49 @@ export const api = {
       method: "DELETE",
     }),
 
-  getAccessLogs: (linkId: string) =>
-    request<{ data: AccessLog[] }>(
+  getAccessLogs: (
+    linkId: string,
+    params: { limit?: number; offset?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.limit != null) search.set("limit", String(params.limit));
+    if (params.offset != null) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return request<{ data: AccessLog[]; has_more?: boolean }>(
       getWorkspaceSlug(),
-      `/links/${linkId}/access-logs`
-    ),
+      `/links/${linkId}/access-logs${qs ? `?${qs}` : ""}`,
+    );
+  },
   getLinkAnalytics: (linkId: string) =>
     request<{ data: LinkAnalytics }>(getWorkspaceSlug(), `/links/${linkId}/analytics`),
+
+  listLinkRecentVisitors: (
+    linkId: string,
+    params: { limit?: number; offset?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.limit != null) search.set("limit", String(params.limit));
+    if (params.offset != null) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return request<{ data: LinkRecentVisitor[]; has_more?: boolean }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/analytics/visitors${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  listLinkAccessCodeContacts: (
+    linkId: string,
+    params: { limit?: number; offset?: number } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.limit != null) search.set("limit", String(params.limit));
+    if (params.offset != null) search.set("offset", String(params.offset));
+    const qs = search.toString();
+    return request<{ data: LinkAccessCodeContact[]; has_more?: boolean }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/analytics/access-code-contacts${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   resendLinkAccessCode: (linkId: string, email: string, force = false) =>
     request<void>(getWorkspaceSlug(), `/links/${linkId}/access-codes/resend`, {
@@ -509,6 +637,22 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ rules }),
     }),
+
+  // Link access requests (visitor authorization applications).
+  getLinkAccessRequests: (linkId: string) =>
+    request<{ data: LinkAccessRequest[] }>(getWorkspaceSlug(), `/links/${linkId}/access-requests`),
+  approveLinkAccessRequest: (linkId: string, requestId: string) =>
+    request<{ data: LinkAccessRequest }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/access-requests/${requestId}/approve`,
+      { method: "POST" }
+    ),
+  rejectLinkAccessRequest: (linkId: string, requestId: string) =>
+    request<{ data: LinkAccessRequest }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/access-requests/${requestId}/reject`,
+      { method: "POST" }
+    ),
 
   // Visitor Q&A
   listLinkQuestions: (linkId: string) =>
@@ -630,18 +774,6 @@ export const api = {
   rejectDealRoomAccessRequest: (roomId: string, requestId: string) =>
     request<DealRoomAccessRequest>(getWorkspaceSlug(), `/deal-rooms/${roomId}/access-requests/${requestId}/reject`, {
       method: "POST",
-    }),
-
-  // Public deal room
-  getPublicDealRoom: (slug: string, email?: string) =>
-    request<PublicDealRoomView>(undefined, `/v1/public/deal-rooms/${slug}${email ? `?email=${encodeURIComponent(email)}` : ""}`, {
-      skipAuth: true,
-    }),
-  signDealRoomNDA: (slug: string, payload: { email: string }) =>
-    request<void>(undefined, `/v1/public/deal-rooms/${slug}/nda`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      skipAuth: true,
     }),
 
   getInsightsOverview: () =>

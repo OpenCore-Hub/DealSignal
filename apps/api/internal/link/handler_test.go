@@ -13,6 +13,27 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestRevokeInvitationRequestDefaultRemoveFromAllowList(t *testing.T) {
+	parse := func(body string) bool {
+		var req RevokeInvitationRequest
+		_ = json.Unmarshal([]byte(body), &req)
+		remove := true
+		if req.RemoveFromAllowList != nil {
+			remove = *req.RemoveFromAllowList
+		}
+		return remove
+	}
+	if !parse(`{}`) {
+		t.Fatal("omitted removeFromAllowList must default to true")
+	}
+	if !parse(`{"removeFromAllowList":true}`) {
+		t.Fatal("explicit true must remove")
+	}
+	if parse(`{"removeFromAllowList":false}`) {
+		t.Fatal("explicit false must retain allowlist")
+	}
+}
+
 func TestLinkSecurityFlagsModernEmailVerification(t *testing.T) {
 	// Modern email verification (created by the new UI) stores permission_type
 	// as "public", require_email as false, and require_email_verification as true.
@@ -406,26 +427,25 @@ func TestAccessRateLimitDefaultBehavior(t *testing.T) {
 // for invalidating sessions when link security_version changes. This mirrors
 // the exact expression used in both Handler.Access and resolvePublicAccess.
 func TestSessionConfigChangeInvalidationLogic(t *testing.T) {
-	checkConfigChanged := func(sessionSecurityVersion int32, linkSecurityVersion int32) bool {
-		return sessionSecurityVersion > 0 && linkSecurityVersion != sessionSecurityVersion
-	}
-
 	tests := []struct {
-		name             string
-		sessionVersion   int32
-		linkVersion      int32
-		wantInvalidate   bool
+		name           string
+		sessionVersion int32
+		linkVersion    int32
+		wantInvalidate bool
 	}{
 		{"config not changed", 3, 3, false},
 		{"config changed (newer link)", 3, 4, true},
 		{"config changed (rollback unlikely)", 3, 2, true},
-		{"old session (backward compat)", 0, 4, false},
+		{"legacy session against versioned link", 0, 4, true},
 		{"both zero", 0, 0, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			got := checkConfigChanged(tc.sessionVersion, tc.linkVersion)
+			got := sessionSecurityConfigChanged(
+				db.Link{SecurityVersion: tc.linkVersion},
+				LinkSession{SecurityVersion: tc.sessionVersion},
+			)
 			if got != tc.wantInvalidate {
 				t.Errorf("configChanged = %v, want %v", got, tc.wantInvalidate)
 			}

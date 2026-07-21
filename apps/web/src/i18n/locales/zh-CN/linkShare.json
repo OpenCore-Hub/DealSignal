@@ -39,6 +39,8 @@
     "linkNameDuplicate": "链接名称已存在",
     "documentScope": {
       "allDocuments": "全部文档可访问",
+      "legacyAllDocuments": "全部文档可访问（历史设置）",
+      "noneAuthorized": "未授权任何目录 — 访客无法预览任何文件",
       "selectedDocuments": "{{folders}} 个文件夹 / {{documents}} 个文档",
       "selectAll": "全选",
       "deselectAll": "取消",
@@ -178,6 +180,17 @@
       "fulfilled": "已完成"
     }
   },
+  "accessRequests": {
+    "title": "访问申请",
+    "description": "访客针对此分享链接提交的授权申请。批准后会加入白名单；若开启邮箱验证，将发送访问验证码。",
+    "approve": "批准",
+    "reject": "拒绝",
+    "approveSuccess": "已批准访问申请",
+    "approveError": "批准访问申请失败",
+    "rejectSuccess": "已拒绝访问申请",
+    "rejectError": "拒绝访问申请失败",
+    "loadFailed": "加载访问申请失败"
+  },
   "activity": {
     "title": "链接活动",
     "windowControls": "窗口大小",
@@ -198,6 +211,12 @@
     "recentVisitors": "最近访客",
     "noRecentVisitors": "暂无最近访客。",
     "visitorViews": "{{count}} 次访问",
+    "loadingMoreVisitors": "加载更多访客…",
+    "loadMoreVisitorsFailed": "加载更多访客失败",
+    "loadingMoreActivity": "加载更多访问明细…",
+    "loadMoreActivityFailed": "加载更多访问明细失败",
+    "loadingMoreDelivery": "加载更多联系人…",
+    "loadMoreDeliveryFailed": "加载更多联系人失败",
     "keyPages": "关键页面",
     "noKeyPages": "暂无关键页面。",
     "pageLabel": "第 {{pageNumber}} 页",
@@ -221,6 +240,13 @@
     "resendAllFailed": "重发未送达",
     "resendAllSuccess": "已重发 {{sent}} / {{attempted}}",
     "resendAllPartial": "已重发 {{sent}} / {{attempted}}，仍有 {{failed}} 失败",
-    "resendAllNone": "没有需要重发的未送达项"
+    "resendAllNone": "没有需要重发的未送达项",
+    "tabs": {
+      "visitors": "访客",
+      "activity": "访问明细",
+      "delivery": "送达",
+      "engage": "互动",
+      "ariaLabel": "链接活动分区"
+    }
   }
 }

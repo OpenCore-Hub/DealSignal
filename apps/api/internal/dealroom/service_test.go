@@ -570,7 +570,7 @@ func TestListAccessRequestsAndReject(t *testing.T) {
 	roomID := uuid.UUID(room.ID.Bytes).String()
 	slug := room.Slug
 
-	req, err := svc.CreateAccessRequest(context.Background(), slug, "applicant@example.com", "Please")
+	req, err := svc.CreateAccessRequest(context.Background(), slug, "applicant@example.com", "Please", "")
 	if err != nil {
 		t.Fatalf("create access request: %v", err)
 	}
@@ -592,6 +592,205 @@ func TestListAccessRequestsAndReject(t *testing.T) {
 	}
 	if rejected.Status != "rejected" {
 		t.Fatalf("expected rejected status, got %s", rejected.Status)
+	}
+}
+
+func TestCreateAccessRequestReturnsExistingPending(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:             "dup-request-room",
+		Name:             "Dup Request Room",
+		RequiresApproval: true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	first, err := svc.CreateAccessRequest(context.Background(), room.Slug, "visitor@example.com", "first", "")
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	second, err := svc.CreateAccessRequest(context.Background(), room.Slug, "visitor@example.com", "second", "")
+	if err != nil {
+		t.Fatalf("second create: %v", err)
+	}
+	if first.ID != second.ID {
+		t.Fatalf("expected same pending request id, got %v vs %v", first.ID, second.ID)
+	}
+	if len(fake.requests) != 1 {
+		t.Fatalf("expected 1 stored request, got %d", len(fake.requests))
+	}
+}
+
+func TestListFoldersForMemberRequiresActiveMembership(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	outsiderID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "member-folders-room",
+		Name: "Member Folders Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	if _, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, outsiderID); !errors.Is(err, ErrApprovalRequired) {
+		t.Fatalf("expected ErrApprovalRequired for outsider, got %v", err)
+	}
+	folders, err := svc.ListFoldersForMember(context.Background(), roomID, wsID, ownerID)
+	if err != nil {
+		t.Fatalf("owner list folders: %v", err)
+	}
+	if len(folders) == 0 {
+		t.Fatal("expected folders for owner")
+	}
+}
+
+func TestRecordNDARequiresMemberAndActivates(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:        "nda-room",
+		Name:        "NDA Room",
+		RequiresNDA: true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+
+	if err := svc.RecordNDA(context.Background(), room.Slug, "stranger@example.com", "127.0.0.1", "test"); !errors.Is(err, ErrMemberNotFound) {
+		t.Fatalf("expected ErrMemberNotFound for non-member, got %v", err)
+	}
+
+	req, err := svc.CreateAccessRequest(context.Background(), room.Slug, "Applicant@Example.com", "need access", "")
+	if err != nil {
+		t.Fatalf("create access request: %v", err)
+	}
+	if req.Status != "approved" {
+		t.Fatalf("expected auto-approved request when approval not required, got %s", req.Status)
+	}
+
+	var pending *db.RoomMember
+	for i := range fake.members {
+		if fake.members[i].Email == "applicant@example.com" {
+			pending = &fake.members[i]
+			break
+		}
+	}
+	if pending == nil {
+		t.Fatal("expected auto-created member")
+	}
+	if pending.Status != "pending" {
+		t.Fatalf("expected pending member before NDA, got %s", pending.Status)
+	}
+
+	if err := svc.RecordNDA(context.Background(), room.Slug, "Applicant@Example.com", "127.0.0.1", "test"); err != nil {
+		t.Fatalf("record nda: %v", err)
+	}
+
+	roomOut, member, err := svc.PublicAccess(context.Background(), room.Slug, "applicant@example.com")
+	if err != nil {
+		t.Fatalf("public access after nda: %v", err)
+	}
+	if roomOut.Slug != room.Slug {
+		t.Fatalf("unexpected room slug %s", roomOut.Slug)
+	}
+	if member.Status != "active" || member.NdaStatus != "signed" {
+		t.Fatalf("expected active+signed member, got status=%s nda=%s", member.Status, member.NdaStatus)
+	}
+}
+
+func TestRecordNDARejectedWhenRoomDoesNotRequireNDA(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "no-nda-room",
+		Name: "No NDA Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if _, err := svc.AddMember(context.Background(), uuid.UUID(room.ID.Bytes).String(), wsID, ownerID, "viewer@example.com", "viewer"); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+	if err := svc.RecordNDA(context.Background(), room.Slug, "viewer@example.com", "127.0.0.1", "test"); !errors.Is(err, ErrNDANotRequired) {
+		t.Fatalf("expected ErrNDANotRequired, got %v", err)
+	}
+}
+
+func TestSetFolderPermissionNormalizesEmail(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "perm-room",
+		Name: "Perm Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	if _, err := svc.AddMember(context.Background(), roomID, wsID, ownerID, "alice@example.com", "viewer"); err != nil {
+		t.Fatalf("add member: %v", err)
+	}
+
+	perm, err := svc.SetFolderPermission(context.Background(), roomID, wsID, ownerID, "Alice@Example.com", "/general", "none")
+	if err != nil {
+		t.Fatalf("set folder permission: %v", err)
+	}
+	if perm.Email != "alice@example.com" {
+		t.Fatalf("expected normalized email, got %q", perm.Email)
+	}
+
+	got, err := svc.GetFolderPermission(context.Background(), roomID, "ALICE@example.com", "/general")
+	if err != nil {
+		t.Fatalf("get folder permission: %v", err)
+	}
+	if got != "none" {
+		t.Fatalf("expected none permission, got %s", got)
 	}
 }
 
@@ -722,8 +921,12 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 			if f.members[i].RoomID == roomID && f.members[i].Email == email {
 				f.members[i].NdaStatus = "signed"
 				f.members[i].NdaSignedAt = nowTs()
+				f.members[i].Status = "active"
+				f.members[i].UpdatedAt = nowTs()
 			}
 		}
+	case strings.Contains(sqlLower, "insert into room_nda_agreements"):
+		// Idempotent agreement insert; fake stores nothing beyond success.
 	}
 	return pgconn.CommandTag{}, nil
 }
@@ -993,6 +1196,16 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		f.requests = append(f.requests, req)
 		return fakeRow{values: requestRow(req)}
 
+	case strings.Contains(sqlLower, "from room_access_requests") && strings.Contains(sqlLower, "status = 'pending'") && strings.Contains(sqlLower, "and email"):
+		roomID := argUUID(args, 0)
+		email := argString(args, 1)
+		for _, r := range f.requests {
+			if r.RoomID == roomID && r.Email == email && r.Status == "pending" {
+				return fakeRow{values: requestRow(r)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
 	case strings.Contains(sqlLower, "from room_access_requests") && strings.Contains(sqlLower, "where id = $1 and room_id"):
 		id := argUUID(args, 0)
 		roomID := argUUID(args, 1)
@@ -1061,6 +1274,33 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			}
 		}
 		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "insert into room_member_folder_permissions"):
+		perm := db.RoomMemberFolderPermission{
+			ID:          newPGUUID(),
+			TenantID:    argUUID(args, 0),
+			WorkspaceID: argUUID(args, 1),
+			RoomID:      argUUID(args, 2),
+			Email:       argString(args, 3),
+			FolderPath:  argString(args, 4),
+			Permission:  argString(args, 5),
+			CreatedAt:   nowTs(),
+			UpdatedAt:   nowTs(),
+		}
+		replaced := false
+		for i := range f.perms {
+			if f.perms[i].RoomID == perm.RoomID && f.perms[i].Email == perm.Email && f.perms[i].FolderPath == perm.FolderPath {
+				perm.ID = f.perms[i].ID
+				perm.CreatedAt = f.perms[i].CreatedAt
+				f.perms[i] = perm
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			f.perms = append(f.perms, perm)
+		}
+		return fakeRow{values: permRow(perm)}
 	}
 
 	f.t.Logf("unexpected QueryRow: %s", sql)

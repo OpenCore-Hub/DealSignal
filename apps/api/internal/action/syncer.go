@@ -96,12 +96,17 @@ func (s *Syncer) syncLinkAccessRequests(ctx context.Context, tenantID, workspace
 	if err != nil {
 		return fmt.Errorf("list pending link access requests: %w", err)
 	}
+	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkAccessRequest, r.ID, pgtype.Text{String: r.Email, Valid: true}, r.LinkName, "approve"); err != nil {
+		linkID := uuid.UUID(r.LinkID.Bytes).String()
+		current[linkID] = true
+		// Source ID is the link so dashboard navigation opens the share link
+		// (not the request UUID). One pending action per link with open requests.
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkAccessRequest, r.LinkID, pgtype.Text{String: r.Email, Valid: true}, r.LinkName, "approve"); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.closeStaleActions(ctx, workspaceID, SourceTypeLinkAccessRequest, current)
 }
 
 func (s *Syncer) syncRoomAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {

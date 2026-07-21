@@ -1,5 +1,7 @@
 export type LinkPreset = "public" | "standard" | "confidential" | "custom";
 
+export type FolderScopeMode = "full" | "allowlist";
+
 export interface AccessConfig {
   requireEmail: boolean;
   requireEmailVerification: boolean;
@@ -8,6 +10,7 @@ export interface AccessConfig {
   watermarkEnabled: boolean;
   requireNda: boolean;
   ndaDocumentId: string;
+  ndaTemplateId: string;
   allowDownloading: boolean;
   enableScreenshotProtection: boolean;
   aiCopilotEnabled: boolean;
@@ -24,5 +27,6 @@ export interface DraftLink extends AccessConfig {
   customDomain: string;
   notifyOnAccess: boolean;
   folderPaths: string[];
+  folderScopeMode: FolderScopeMode;
   contactIds: string[];
 }

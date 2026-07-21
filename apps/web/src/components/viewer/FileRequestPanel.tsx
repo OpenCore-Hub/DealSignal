@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { PaperPlaneTilt, Spinner } from "@phosphor-icons/react";
 import type { FileRequest } from "@/types";
@@ -20,13 +20,17 @@ export function FileRequestPanel({ token, sessionToken }: FileRequestPanelProps)
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  // Sliding session refresh rotates sessionToken frequently; keep a ref so the
+  // list effect does not re-fetch on every credential rotate.
+  const sessionTokenRef = useRef(sessionToken);
+  sessionTokenRef.current = sessionToken;
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         setError(null);
-        const res = await api.listPublicFileRequests(token, creds(sessionToken));
+        const res = await api.listPublicFileRequests(token, creds(sessionTokenRef.current));
         if (!cancelled) setRequests(res.data ?? []);
       } catch {
         if (!cancelled) setError(t("documents:viewer.fileRequestLoadError", "Could not load requests"));
@@ -35,7 +39,7 @@ export function FileRequestPanel({ token, sessionToken }: FileRequestPanelProps)
       }
     })();
     return () => { cancelled = true; };
-  }, [token, sessionToken, t, refreshKey]);
+  }, [token, t, refreshKey]);
 
   const handleSubmit = async () => {
     const trimmed = message.trim();
@@ -46,7 +50,7 @@ export function FileRequestPanel({ token, sessionToken }: FileRequestPanelProps)
     setSubmitting(true);
     setError(null);
     try {
-      await api.createPublicFileRequest(token, trimmed, creds(sessionToken));
+      await api.createPublicFileRequest(token, trimmed, creds(sessionTokenRef.current));
       setMessage("");
       setRefreshKey((k) => k + 1);
     } catch (e: unknown) {

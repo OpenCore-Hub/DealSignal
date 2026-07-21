@@ -39,6 +39,8 @@
     "linkNameDuplicate": "A link with this name already exists",
     "documentScope": {
       "allDocuments": "All documents accessible",
+      "legacyAllDocuments": "All documents accessible (legacy)",
+      "noneAuthorized": "No folders authorized — visitors cannot preview any files",
       "selectedDocuments": "{{folders}} folders / {{documents}} documents",
       "selectAll": "Select all",
       "deselectAll": "Deselect",
@@ -178,6 +180,17 @@
       "fulfilled": "Fulfilled"
     }
   },
+  "accessRequests": {
+    "title": "Access requests",
+    "description": "Visitors who asked for authorization to this share link. Approving adds them to the allowlist and sends an access code when verification is enabled.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveSuccess": "Access request approved",
+    "approveError": "Failed to approve access request",
+    "rejectSuccess": "Access request rejected",
+    "rejectError": "Failed to reject access request",
+    "loadFailed": "Failed to load access requests"
+  },
   "activity": {
     "title": "Link activity",
     "windowControls": "Window size",
@@ -198,6 +211,12 @@
     "recentVisitors": "Recent visitors",
     "noRecentVisitors": "No recent visitors yet.",
     "visitorViews": "{{count}} views",
+    "loadingMoreVisitors": "Loading more visitors…",
+    "loadMoreVisitorsFailed": "Failed to load more visitors",
+    "loadingMoreActivity": "Loading more activity…",
+    "loadMoreActivityFailed": "Failed to load more activity",
+    "loadingMoreDelivery": "Loading more contacts…",
+    "loadMoreDeliveryFailed": "Failed to load more contacts",
     "accessCodeContacts": "Verification code delivery",
     "noAccessCodeContacts": "No verification codes have been sent for this link yet.",
     "codeSendStatus": {
@@ -221,6 +240,13 @@
     "noKeyPages": "No key pages yet.",
     "pageLabel": "Page {{pageNumber}}",
     "qaRecords": "Q&A records",
-    "noQARecords": "No questions yet."
+    "noQARecords": "No questions yet.",
+    "tabs": {
+      "visitors": "Visitors",
+      "activity": "Activity log",
+      "delivery": "Delivery",
+      "engage": "Engage",
+      "ariaLabel": "Link activity sections"
+    }
   }
 }

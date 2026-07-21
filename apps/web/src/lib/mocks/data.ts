@@ -12,6 +12,7 @@ import type {
   Document,
   HeatAlert,
   Link,
+  LinkAccessRequest,
   PageAnalytics,
   RiskAlert,
   Signal,
@@ -165,6 +166,19 @@ export const mockLinks: Link[] = [
         fileSize: 4_200_000,
       },
     ],
+  },
+];
+
+export const mockLinkAccessRequests: LinkAccessRequest[] = [
+  {
+    id: "lar_1",
+    link_id: "link_1",
+    email: "partner@example.com",
+    signer_name: "Alex Partner",
+    reason: "Need access to review the data room materials",
+    status: "pending",
+    created_at: "2026-06-20T12:00:00Z",
+    updated_at: "2026-06-20T12:00:00Z",
   },
 ];
 
@@ -535,6 +549,15 @@ export const mockDealRooms: DealRoom[] = [
     documents: mockDealRoomFolderDocs,
     members: mockDealRoomMembers,
     accessRequests: mockDealRoomAccessRequests,
+    recentVisitors: [
+      {
+        email: "investor@example.com",
+        name: "Investor",
+        heatLevel: "hot",
+        lastSeenAt: "2026-06-20T12:00:00Z",
+      },
+    ],
+    unreadQuestions: 1,
   },
   {
     id: "room_2",

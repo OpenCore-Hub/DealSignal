@@ -21,16 +21,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -402,86 +398,85 @@ export function DealRoomFolderTree({
                     onChange={(e) => void handleFolderUploadChange(e, node.folder.path)}
                   />
                 )}
-                <Popover>
-                  <PopoverTrigger
-                    className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    className={cn(
+                      buttonVariants({ variant: "ghost", size: "icon-sm" }),
+                      "rounded-full text-muted-foreground opacity-70 transition-all duration-200",
+                      "hover:bg-muted hover:text-foreground hover:opacity-100",
+                      "data-[popup-open]:bg-muted data-[popup-open]:text-foreground data-[popup-open]:opacity-100",
+                      "focus-visible:opacity-100",
+                    )}
                     onClick={(e) => e.stopPropagation()}
                     aria-label={t("folders.actions", { name: node.folder.name })}
                   >
-                    <DotsThreeVertical size={18} />
-                  </PopoverTrigger>
-                  <PopoverContent align="end" side="bottom" sideOffset={4} className="w-auto min-w-[3.5rem] p-2">
-                    <TooltipProvider delay={100}>
-                      <div className="flex flex-col gap-1">
-                        <Tooltip>
-                          <TooltipTrigger
-                            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              startCreate(node.folder.path);
-                            }}
-                            aria-label={t("folders.newSubfolder")}
-                          >
-                            <Plus size={18} />
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            {t("folders.newSubfolder")}
-                          </TooltipContent>
-                        </Tooltip>
+                    <DotsThreeVertical size={18} weight="bold" />
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent
+                    align="end"
+                    side="bottom"
+                    sideOffset={8}
+                    className="min-w-52 origin-top-right p-1.5 shadow-dropdown"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <DropdownMenuItem
+                      className="gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both"
+                      style={{ animationDelay: "20ms", animationDuration: "180ms" }}
+                      onClick={() => startCreate(node.folder.path)}
+                    >
+                      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground">
+                        <Plus size={16} weight="bold" />
+                      </span>
+                      <span className="font-medium tracking-tight">
+                        {t("folders.newSubfolder")}
+                      </span>
+                    </DropdownMenuItem>
 
-                        {onFolderUpload && (
-                          <Tooltip>
-                            <TooltipTrigger
-                              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                fileInputRefs.current.get(node.folder.path)?.click();
-                              }}
-                              aria-label={t("folders.addFile")}
-                            >
-                              <UploadSimple size={18} />
-                            </TooltipTrigger>
-                            <TooltipContent side="right">
-                              {t("folders.addFile")}
-                            </TooltipContent>
-                          </Tooltip>
-                        )}
+                    {onFolderUpload && (
+                      <DropdownMenuItem
+                        className="gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both"
+                        style={{ animationDelay: "50ms", animationDuration: "180ms" }}
+                        onClick={() => {
+                          fileInputRefs.current.get(node.folder.path)?.click();
+                        }}
+                      >
+                        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground">
+                          <UploadSimple size={16} />
+                        </span>
+                        <span className="font-medium tracking-tight">
+                          {t("folders.addFile")}
+                        </span>
+                      </DropdownMenuItem>
+                    )}
 
-                        <Tooltip>
-                          <TooltipTrigger
-                            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              startRename(node.folder);
-                            }}
-                            aria-label={t("folders.rename")}
-                          >
-                            <PencilSimple size={18} />
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            {t("folders.rename")}
-                          </TooltipContent>
-                        </Tooltip>
+                    <DropdownMenuItem
+                      className="gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both"
+                      style={{ animationDelay: "80ms", animationDuration: "180ms" }}
+                      onClick={() => startRename(node.folder)}
+                    >
+                      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground">
+                        <PencilSimple size={16} />
+                      </span>
+                      <span className="font-medium tracking-tight">
+                        {t("folders.rename")}
+                      </span>
+                    </DropdownMenuItem>
 
-                        <Tooltip>
-                          <TooltipTrigger
-                            className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              void handleDelete(node.folder);
-                            }}
-                            aria-label={tc("delete")}
-                          >
-                            <Trash size={18} className="text-destructive" />
-                          </TooltipTrigger>
-                          <TooltipContent side="right">
-                            {tc("delete")}
-                          </TooltipContent>
-                        </Tooltip>
-                      </div>
-                    </TooltipProvider>
-                  </PopoverContent>
-                </Popover>
+                    <DropdownMenuSeparator className="my-1.5" />
+
+                    <DropdownMenuItem
+                      variant="destructive"
+                      className="gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both"
+                      style={{ animationDelay: "110ms", animationDuration: "180ms" }}
+                      onClick={() => void handleDelete(node.folder)}
+                    >
+                      <span className="flex size-4 shrink-0 items-center justify-center text-destructive">
+                        <Trash size={16} />
+                      </span>
+                      <span className="font-medium tracking-tight">{tc("delete")}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             )}
           </div>
@@ -555,45 +550,45 @@ export function DealRoomFolderTree({
       {contextMenu && (
         <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)}>
           {isAdmin && (
-            <>
+            <div className="min-w-48 p-1 animate-in fade-in-0 zoom-in-95 duration-150">
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
                 onClick={() => {
                   startCreate(contextMenu.folder.path);
                   setContextMenu(null);
                 }}
               >
-                <Plus size={14} />
+                <Plus size={16} weight="bold" className="text-muted-foreground" />
                 {t("folders.newSubfolder")}
               </button>
               {onDocumentsAdd && workspaceDocuments && workspaceDocuments.length > 0 && !isNavigator && (
                 <button
-                  className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                  className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
                   onClick={() => {
                     setAddToFolder(contextMenu.folder.path);
                     setContextMenu(null);
                   }}
                 >
-                  <FileText size={14} />
+                  <FileText size={16} className="text-muted-foreground" />
                   {t("folders.addFile")}
                 </button>
               )}
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground active:scale-[0.98]"
                 onClick={() => startRename(contextMenu.folder)}
               >
-                <PencilSimple size={14} />
+                <PencilSimple size={16} className="text-muted-foreground" />
                 {t("folders.rename")}
               </button>
-              <div className="my-1 h-px bg-border" />
+              <div className="my-1.5 h-px bg-border" />
               <button
-                className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-destructive hover:bg-destructive/10"
+                className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight text-destructive transition-colors hover:bg-destructive/10 active:scale-[0.98]"
                 onClick={() => void handleDelete(contextMenu.folder)}
               >
-                <Trash size={14} />
+                <Trash size={16} />
                 {tc("delete")}
               </button>
-            </>
+            </div>
           )}
           {!isAdmin && <p className="px-2 py-1 text-sm text-muted-foreground">{t("folders.readOnly")}</p>}
         </ContextMenu>

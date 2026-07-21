@@ -16,6 +16,7 @@ interface AccessSummaryCardProps {
   allowedViewers: string[];
   blockedViewers: string[];
   folderPaths?: string[];
+  folderScopeMode?: "full" | "allowlist";
   documents?: DealRoomFolderDocs[];
   onEditAccess: () => void;
 }
@@ -31,6 +32,7 @@ export function AccessSummaryCard({
   allowedViewers,
   blockedViewers,
   folderPaths = [],
+  folderScopeMode = "allowlist",
   documents = [],
   onEditAccess,
 }: AccessSummaryCardProps) {
@@ -63,6 +65,7 @@ export function AccessSummaryCard({
 
   const selectedFolderCount = folderPaths.length;
   const scopedDocumentCount = useMemo(() => {
+    if (folderScopeMode === "full") return documents.reduce((n, f) => n + (f.documents ?? []).length, 0);
     if (selectedFolderCount === 0) return 0;
     let count = 0;
     for (const folder of documents) {
@@ -78,13 +81,23 @@ export function AccessSummaryCard({
       }
     }
     return count;
-  }, [documents, folderPaths, selectedFolderCount]);
-  const isScoped = selectedFolderCount > 0;
+  }, [documents, folderPaths, folderScopeMode, selectedFolderCount]);
+  const isLegacyFull = folderScopeMode === "full";
+  const isScoped = folderScopeMode === "allowlist" && selectedFolderCount > 0;
+  const isDenyAll = folderScopeMode === "allowlist" && selectedFolderCount === 0;
 
   const hasRestrictions =
-    items.length > 0 || allowedViewers.length > 0 || blockedViewers.length > 0 || isScoped;
+    items.length > 0 ||
+    allowedViewers.length > 0 ||
+    blockedViewers.length > 0 ||
+    isScoped ||
+    isDenyAll ||
+    isLegacyFull;
   const restrictionCount =
-    items.length + allowedViewers.length + blockedViewers.length + (isScoped ? 1 : 0);
+    items.length +
+    allowedViewers.length +
+    blockedViewers.length +
+    (isScoped || isDenyAll || isLegacyFull ? 1 : 0);
 
   return (
     <div className="rounded-lg border border-border bg-muted/30 p-4">
@@ -144,6 +157,18 @@ export function AccessSummaryCard({
                   {item.label}
                 </span>
               ))}
+              {isLegacyFull && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
+                  <Folder size={14} />
+                  {t("share.documentScope.legacyAllDocuments")}
+                </span>
+              )}
+              {isDenyAll && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-destructive/10 px-2 py-1 text-xs text-destructive">
+                  <Folder size={14} />
+                  {t("share.documentScope.noneAuthorized")}
+                </span>
+              )}
               {isScoped && (
                 <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">
                   <Folder size={14} />

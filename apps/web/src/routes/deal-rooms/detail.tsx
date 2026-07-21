@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { motion, AnimatePresence } from "motion/react";
-import { Envelope } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
@@ -11,32 +10,22 @@ import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
-import { InviteMemberDialog } from "@/components/deal-rooms/InviteMemberDialog";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
 import { useDealRoomTab } from "@/hooks/useDealRoomTab";
 import { DealRoomShareButton } from "@/components/deal-rooms/DealRoomShareButton";
 import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissionsSection";
+import { DealRoomAccessRequestsPanel } from "@/components/deal-rooms/DealRoomAccessRequestsPanel";
 import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsTab";
 import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
+import { DealRoomDocumentsHome } from "@/components/deal-rooms/DealRoomDocumentsHome";
+import { DealRoomActivityTab } from "@/components/deal-rooms/DealRoomActivityTab";
+import { DealRoomSettingsTab } from "@/components/deal-rooms/DealRoomSettingsTab";
+import { useDealRoomNavSignals, fetchDealRoomLinks } from "@/hooks/useDealRoomNavSignals";
+import { useDealRoomNavStore } from "@/stores/dealRoomNavStore";
 import { useUIStore, type BreadcrumbItem } from "@/stores/uiStore";
-import type { DealRoomFolderDocs } from "@/types";
-
-function normalizeText(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ");
-}
-
-function matchesRecommendedFile(documentTitle: string, recommendedName: string): boolean {
-  const title = normalizeText(documentTitle);
-  const rec = normalizeText(recommendedName);
-  if (title.includes(rec)) return true;
-  if (rec.includes(title) && title.length > 3) return true;
-  const recWords = rec.split(" ").filter(Boolean);
-  if (recWords.length > 1) {
-    return recWords.every((word) => title.includes(word));
-  }
-  return false;
-}
+import { matchesRecommendedFile } from "@/lib/dealRoomReadiness";
+import type { DealRoomFolderDocs, Link } from "@/types";
 
 interface UploadProgressItem {
   id: string;
@@ -72,17 +61,22 @@ export function DealRoomDetailPage() {
   const shouldOpenDocuments = searchParams.get("addDocuments") === "1";
   const [documentsDialogOpen, setDocumentsDialogOpen] = useState(shouldOpenDocuments);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadTargetFolderRef = useRef<string | null>(null);
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
   const activePollsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
   const [uploadItems, setUploadItems] = useState<UploadProgressItem[]>([]);
   const [linksRevision, setLinksRevision] = useState(0);
+  const [roomLinks, setRoomLinks] = useState<Link[]>([]);
+  const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const bumpLinksRevision = useCallback(() => {
     setLinksRevision((n) => n + 1);
   }, []);
-  const { tab } = useDealRoomTab();
+  const { tab, setTab } = useDealRoomTab();
   const reducedMotion = useReducedMotion();
   const currentWorkspace = useUIStore((state) => state.currentWorkspace);
   const setBreadcrumbs = useUIStore((state) => state.setBreadcrumbs);
+  const navSignals = useDealRoomNavStore();
+  useDealRoomNavSignals(roomId, linksRevision);
 
   const workspaceName = currentWorkspace?.name || workspaceSlug;
 
@@ -137,6 +131,24 @@ export function DealRoomDetailPage() {
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
 
   const room = data?.room ?? null;
+
+  useEffect(() => {
+    if (!roomId) {
+      setRoomLinks([]);
+      return;
+    }
+    let cancelled = false;
+    void fetchDealRoomLinks(roomId)
+      .then((links) => {
+        if (!cancelled) setRoomLinks(links);
+      })
+      .catch(() => {
+        if (!cancelled) setRoomLinks([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId, linksRevision]);
 
   // Sync page breadcrumb to the global header.
   useEffect(() => {
@@ -319,7 +331,9 @@ export function DealRoomDetailPage() {
 
   const handleUpload = useCallback(
     async (file: File) => {
-      const { path } = resolveTargetFolder(file.name);
+      const override = uploadTargetFolderRef.current;
+      uploadTargetFolderRef.current = null;
+      const path = override ?? resolveTargetFolder(file.name).path;
       await uploadFileToFolder(file, path);
     },
     [resolveTargetFolder, uploadFileToFolder]
@@ -439,23 +453,53 @@ export function DealRoomDetailPage() {
     return null;
   }
 
+  const activeLinkCount = navSignals.activeLinkCount || room.activeLinkCount || roomLinks.length;
+  const viewCount = navSignals.viewCount || room.viewCount || 0;
+  const description = room.description?.trim() ?? "";
+  const descriptionLong = description.length > 120;
+
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
-      <PageHeader title={room.name} description={room.description}>
-        <div className="flex flex-wrap items-center gap-2">
+      {tab === "participants" ? (
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <DealRoomShareButton
             roomId={room.id}
             slug={room.slug}
             onChanged={bumpLinksRevision}
           />
-          <InviteMemberDialog roomId={room.id} onInvited={refetch}>
-            <Button variant="outline" className="gap-1.5">
-              <Envelope size={16} />
-              {t("detail.invite")}
-            </Button>
-          </InviteMemberDialog>
         </div>
-      </PageHeader>
+      ) : (
+        <PageHeader
+          title={room.name}
+          description={
+            description
+              ? descriptionExpanded || !descriptionLong
+                ? description
+                : `${description.slice(0, 120).trimEnd()}…`
+              : undefined
+          }
+        >
+          <div className="flex flex-wrap items-center gap-2">
+            {descriptionLong && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => setDescriptionExpanded((v) => !v)}
+              >
+                {descriptionExpanded
+                  ? t("documentsHome.descriptionHide")
+                  : t("documentsHome.descriptionShow")}
+              </Button>
+            )}
+            <DealRoomShareButton
+              roomId={room.id}
+              slug={room.slug}
+              onChanged={bumpLinksRevision}
+            />
+          </div>
+        </PageHeader>
+      )}
 
       <AnimatePresence mode="wait">
         <motion.div
@@ -463,7 +507,12 @@ export function DealRoomDetailPage() {
           {...(reducedMotion ? {} : tabTransition)}
         >
           {tab === "documents" && (
-            <div className="space-y-4">
+            <DealRoomDocumentsHome
+              activeLinkCount={activeLinkCount}
+              failedDeliveries={navSignals.failedDeliveries}
+              unreadQuestions={navSignals.unreadQuestions}
+              onJumpTab={setTab}
+            >
               <Card>
                 <CardContent className="pt-6">
                   <DealRoomFolderTree
@@ -489,11 +538,12 @@ export function DealRoomDetailPage() {
                   />
                 </CardContent>
               </Card>
-            </div>
+            </DealRoomDocumentsHome>
           )}
 
           {tab === "participants" && (
             <div className="grid grid-cols-1 gap-4">
+              <DealRoomAccessRequestsPanel roomId={room.id} onChanged={refetch} />
               <FolderPermissionsSection roomId={room.id} refreshKey={linksRevision} />
             </div>
           )}
@@ -501,34 +551,30 @@ export function DealRoomDetailPage() {
           {tab === "qa" && <DealRoomQATab />}
 
           {tab === "activity" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("activity.title")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-body text-muted-foreground">{t("activity.comingSoon")}</p>
-              </CardContent>
-            </Card>
+            <DealRoomActivityTab
+              recentVisitors={room.recentVisitors}
+              links={roomLinks}
+              onOpenShare={() => setTab("participants")}
+              onOpenAnalytics={() => setTab("analytics")}
+            />
           )}
 
           {tab === "analytics" && (
             <DealRoomAnalyticsTab
               documentCount={room.documentCount}
-              viewCount={room.viewCount}
-              activeLinkCount={room.activeLinkCount}
+              viewCount={viewCount}
+              activeLinkCount={activeLinkCount}
               recentVisitors={room.recentVisitors}
             />
           )}
 
           {tab === "settings" && (
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("settings.title")}</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-body text-muted-foreground">{t("settings.comingSoon")}</p>
-              </CardContent>
-            </Card>
+            <DealRoomSettingsTab
+              room={room}
+              roomId={room.id}
+              activeLinkCount={activeLinkCount}
+              onMemberInvited={refetch}
+            />
           )}
         </motion.div>
       </AnimatePresence>

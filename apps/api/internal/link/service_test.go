@@ -10,6 +10,17 @@ import (
 	"golang.org/x/crypto/bcrypt"
 )
 
+func TestDeliveryEmailMismatchError(t *testing.T) {
+	err := &DeliveryEmailMismatchError{AuthorizedEmail: "alice@example.com"}
+	if !errors.Is(err, ErrDeliveryEmailMismatch) {
+		t.Fatal("expected errors.Is to match ErrDeliveryEmailMismatch")
+	}
+	var mismatch *DeliveryEmailMismatchError
+	if !errors.As(err, &mismatch) || mismatch.AuthorizedEmail != "alice@example.com" {
+		t.Fatalf("expected authorized email via errors.As, got %#v", mismatch)
+	}
+}
+
 func TestNormalizeSecurityConfig(t *testing.T) {
 	cases := []struct {
 		name                                       string

@@ -37,11 +37,19 @@ var (
 	ErrFolderNotEmpty     = errors.New("folder is not empty")
 	ErrFolderNotFound     = errors.New("folder not found")
 	ErrFolderExists       = errors.New("folder already exists")
+	ErrNDANotRequired     = errors.New("nda is not required for this room")
+	ErrAccessRequestExists = errors.New("access request already exists")
+	ErrRateLimited         = errors.New("too many requests")
 )
 
 // Beginner starts a database transaction.
 type Beginner interface {
 	Begin(context.Context) (pgx.Tx, error)
+}
+
+// RateLimiter is the subset of redis.Client used for public endpoint throttling.
+type RateLimiter interface {
+	RateLimitAllow(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error)
 }
 
 // Service handles data rooms.
@@ -50,6 +58,7 @@ type Service struct {
 	pool         Beginner
 	cfg          *config.Config
 	actionSyncer ActionSyncer
+	rateLimiter  RateLimiter
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
@@ -63,6 +72,11 @@ type ServiceOption func(*Service)
 // WithActionSyncer wires an action syncer so room events can resolve action items.
 func WithActionSyncer(a ActionSyncer) ServiceOption {
 	return func(s *Service) { s.actionSyncer = a }
+}
+
+// WithRateLimiter wires a rate limiter for public access-request throttling.
+func WithRateLimiter(r RateLimiter) ServiceOption {
+	return func(s *Service) { s.rateLimiter = r }
 }
 
 // NewService creates a deal room service.
@@ -189,39 +203,43 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 		return db.DealRoom{}, fmt.Errorf("marshal settings: %w", err)
 	}
 
-	room, err := s.queries.CreateDealRoom(ctx, db.CreateDealRoomParams{
-		TenantID:         tenant,
-		WorkspaceID:      workspaceUUID,
-		Slug:             req.Slug,
-		Name:             req.Name,
-		Description:      pgtype.Text{String: req.Description, Valid: req.Description != ""},
-		TemplateType:     pgtype.Text{String: req.TemplateType, Valid: req.TemplateType != ""},
-		Settings:         settingsBytes,
-		RequiresNda:      req.RequiresNDA,
-		RequiresApproval: req.RequiresApproval,
-		Status:           "active",
-		CreatedBy:        userUUID,
-	})
-	if err != nil {
+	var room db.DealRoom
+	if err := s.runInTx(ctx, func(q *db.Queries) error {
+		created, createErr := q.CreateDealRoom(ctx, db.CreateDealRoomParams{
+			TenantID:         tenant,
+			WorkspaceID:      workspaceUUID,
+			Slug:             req.Slug,
+			Name:             req.Name,
+			Description:      pgtype.Text{String: req.Description, Valid: req.Description != ""},
+			TemplateType:     pgtype.Text{String: req.TemplateType, Valid: req.TemplateType != ""},
+			Settings:         settingsBytes,
+			RequiresNda:      req.RequiresNDA,
+			RequiresApproval: req.RequiresApproval,
+			Status:           "active",
+			CreatedBy:        userUUID,
+		})
+		if createErr != nil {
+			return createErr
+		}
+		if _, addErr := q.AddRoomMember(ctx, db.AddRoomMemberParams{
+			TenantID:    tenant,
+			WorkspaceID: workspaceUUID,
+			RoomID:      created.ID,
+			Email:       "",
+			UserID:      userUUID,
+			Role:        "owner",
+			NdaStatus:   ndaStatusFor(created.RequiresNda),
+			Status:      "active",
+		}); addErr != nil {
+			return fmt.Errorf("add room owner: %w", addErr)
+		}
+		room = created
+		return nil
+	}); err != nil {
 		if strings.Contains(err.Error(), "unique") {
 			return db.DealRoom{}, ErrDuplicateSlug
 		}
 		return db.DealRoom{}, fmt.Errorf("create room: %w", err)
-	}
-
-	// creator becomes owner
-	_, addErr := s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
-		TenantID:    tenant,
-		WorkspaceID: workspaceUUID,
-		RoomID:      room.ID,
-		Email:       "",
-		UserID:      userUUID,
-		Role:        "owner",
-		NdaStatus:   ndaStatusFor(room.RequiresNda),
-		Status:      "active",
-	})
-	if addErr != nil {
-		return db.DealRoom{}, fmt.Errorf("add room owner: %w", addErr)
 	}
 	return room, nil
 }
@@ -336,8 +354,11 @@ func (s *Service) GetRoomDetail(ctx context.Context, roomID, workspaceID, userID
 	if err != nil {
 		return RoomDetail{}, err
 	}
+	if err := s.requireActiveRoomMember(ctx, summary.Room.ID, userID); err != nil {
+		return RoomDetail{}, err
+	}
 
-	folders, err := s.ListFolders(ctx, roomID, workspaceID)
+	folders, err := s.loadFolders(summary.Room)
 	if err != nil {
 		return RoomDetail{}, err
 	}
@@ -490,11 +511,15 @@ func (s *Service) RemoveMember(ctx context.Context, roomID, workspaceID, userID,
 }
 
 // CreateAccessRequest creates a public access request for a room.
-func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reason string) (db.RoomAccessRequest, error) {
+func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reason, clientIP string) (db.RoomAccessRequest, error) {
 	if _, err := mail.ParseAddress(email); err != nil {
 		return db.RoomAccessRequest{}, ErrInvalidEmail
 	}
 	email = strings.ToLower(strings.TrimSpace(email))
+
+	if err := s.checkPublicAccessRequestRateLimit(ctx, roomSlug, clientIP); err != nil {
+		return db.RoomAccessRequest{}, err
+	}
 
 	room, err := s.queries.GetDealRoomBySlug(ctx, roomSlug)
 	if err != nil {
@@ -510,6 +535,15 @@ func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reas
 	})
 	if existing.Status == "active" {
 		return db.RoomAccessRequest{}, errors.New("already a member")
+	}
+
+	if pending, perr := s.queries.GetPendingAccessRequestByRoomAndEmail(ctx, db.GetPendingAccessRequestByRoomAndEmailParams{
+		RoomID: room.ID,
+		Email:  email,
+	}); perr == nil {
+		return pending, nil
+	} else if !errors.Is(perr, pgx.ErrNoRows) {
+		return db.RoomAccessRequest{}, fmt.Errorf("lookup pending access request: %w", perr)
 	}
 
 	status := "pending"
@@ -550,7 +584,42 @@ func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reas
 		return created, nil
 	}
 
-	return s.queries.CreateAccessRequest(ctx, reqParams)
+	created, err := s.queries.CreateAccessRequest(ctx, reqParams)
+	if err != nil {
+		if strings.Contains(err.Error(), "idx_room_access_requests_pending_room_email") ||
+			strings.Contains(err.Error(), "unique") {
+			if pending, perr := s.queries.GetPendingAccessRequestByRoomAndEmail(ctx, db.GetPendingAccessRequestByRoomAndEmailParams{
+				RoomID: room.ID,
+				Email:  email,
+			}); perr == nil {
+				return pending, nil
+			}
+			return db.RoomAccessRequest{}, ErrAccessRequestExists
+		}
+		return db.RoomAccessRequest{}, fmt.Errorf("create access request: %w", err)
+	}
+	return created, nil
+}
+
+func (s *Service) checkPublicAccessRequestRateLimit(ctx context.Context, roomSlug, clientIP string) error {
+	if s.rateLimiter == nil {
+		return nil
+	}
+	ip := strings.TrimSpace(clientIP)
+	if ip == "" {
+		ip = "unknown"
+	}
+	key := fmt.Sprintf("dealroom:access-request:%s:%s", roomSlug, ip)
+	allowed, _, err := s.rateLimiter.RateLimitAllow(ctx, key, 5, time.Hour)
+	if err != nil {
+		// Fail open: rate limiter outage must not block legitimate requests.
+		logger.ErrorCtx(ctx, "dealroom access request rate limit check failed", err)
+		return nil
+	}
+	if !allowed {
+		return ErrRateLimited
+	}
+	return nil
 }
 
 // ApproveAccessRequest approves a pending request and activates the member.
@@ -697,13 +766,33 @@ func (s *Service) PublicAccess(ctx context.Context, slug, email string) (db.Deal
 	return room, member, nil
 }
 
-// RecordNDA records an NDA agreement and updates member status.
+// RecordNDA records an NDA agreement for an existing room member and activates
+// them. Callers must already be members (invited or approved); arbitrary emails
+// cannot forge agreements or flip membership state.
 func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string) error {
 	email = strings.ToLower(strings.TrimSpace(email))
+	if _, err := mail.ParseAddress(email); err != nil {
+		return ErrInvalidEmail
+	}
 	room, err := s.queries.GetDealRoomBySlug(ctx, roomSlug)
 	if err != nil {
-		return ErrRoomNotFound
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrRoomNotFound
+		}
+		return err
 	}
+	if !room.RequiresNda {
+		return ErrNDANotRequired
+	}
+
+	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: room.ID,
+		Email:  email,
+	})
+	if err != nil || !member.ID.Valid {
+		return ErrMemberNotFound
+	}
+
 	if err := s.queries.CreateNDAAgreement(ctx, db.CreateNDAAgreementParams{
 		RoomID:    room.ID,
 		Email:     email,
@@ -712,14 +801,13 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 	}); err != nil {
 		return fmt.Errorf("record nda: %w", err)
 	}
-	if ndaErr := s.queries.UpdateRoomMemberNDA(ctx, db.UpdateRoomMemberNDAParams{
+	// Marks NDA signed and sets status=active so NDA-gated pending members
+	// (auto-approved requests / post-approval NDA wait) can pass PublicAccess.
+	if err := s.queries.UpdateRoomMemberNDA(ctx, db.UpdateRoomMemberNDAParams{
 		RoomID: room.ID,
 		Email:  email,
-	}); ndaErr != nil {
-		logger.ErrorCtx(ctx, "update room member NDA status failed", ndaErr,
-			logger.Attr("room_id", uuid.UUID(room.ID.Bytes).String()),
-			logger.Attr("email", email),
-		)
+	}); err != nil {
+		return fmt.Errorf("update room member NDA: %w", err)
 	}
 	s.resolveRoomNDA(ctx, uuid.UUID(room.WorkspaceID.Bytes).String(), room.ID, email)
 	return nil
@@ -727,12 +815,24 @@ func (s *Service) RecordNDA(ctx context.Context, roomSlug, email, ip, ua string)
 
 // SetFolderPermission sets a folder permission for a member email.
 func (s *Service) SetFolderPermission(ctx context.Context, roomID, workspaceID, adminUserID, email, folderPath, permission string) (db.RoomMemberFolderPermission, error) {
+	if _, err := mail.ParseAddress(email); err != nil {
+		return db.RoomMemberFolderPermission{}, ErrInvalidEmail
+	}
+	email = strings.ToLower(strings.TrimSpace(email))
+
 	room, err := s.GetRoom(ctx, roomID, workspaceID)
 	if err != nil {
 		return db.RoomMemberFolderPermission{}, err
 	}
 	if err := s.requireRoomAdmin(ctx, room.ID, adminUserID); err != nil {
 		return db.RoomMemberFolderPermission{}, err
+	}
+	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+		RoomID: room.ID,
+		Email:  email,
+	})
+	if err != nil || !member.ID.Valid {
+		return db.RoomMemberFolderPermission{}, ErrMemberNotFound
 	}
 	return s.queries.SetFolderPermission(ctx, db.SetFolderPermissionParams{
 		TenantID:    room.TenantID,
@@ -746,6 +846,7 @@ func (s *Service) SetFolderPermission(ctx context.Context, roomID, workspaceID, 
 
 // GetFolderPermission returns effective folder permission for a member.
 func (s *Service) GetFolderPermission(ctx context.Context, roomID, email, folderPath string) (string, error) {
+	email = strings.ToLower(strings.TrimSpace(email))
 	roomUUID := pgUUID(roomID)
 	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
 		RoomID: roomUUID,
@@ -1103,9 +1204,22 @@ func (s *Service) GetRoomDocuments(ctx context.Context, roomID, workspaceID, use
 }
 
 // ListFolders returns the folder structure stored in a room's settings.
+// Callers that expose this over HTTP must use ListFoldersForMember instead.
 func (s *Service) ListFolders(ctx context.Context, roomID, workspaceID string) ([]Folder, error) {
 	room, err := s.GetRoom(ctx, roomID, workspaceID)
 	if err != nil {
+		return nil, err
+	}
+	return s.loadFolders(room)
+}
+
+// ListFoldersForMember returns folders only for an active room member.
+func (s *Service) ListFoldersForMember(ctx context.Context, roomID, workspaceID, userID string) ([]Folder, error) {
+	room, err := s.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireActiveRoomMember(ctx, room.ID, userID); err != nil {
 		return nil, err
 	}
 	return s.loadFolders(room)
@@ -1430,6 +1544,23 @@ func (s *Service) requireRoomAdmin(ctx context.Context, roomID pgtype.UUID, user
 		}
 	}
 	return ErrNotRoomAdmin
+}
+
+func (s *Service) requireActiveRoomMember(ctx context.Context, roomID pgtype.UUID, userID string) error {
+	member, err := s.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
+		RoomID: roomID,
+		UserID: pgUUID(userID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrApprovalRequired
+		}
+		return err
+	}
+	if member.Status != "active" {
+		return ErrApprovalRequired
+	}
+	return nil
 }
 
 func (s *Service) runInTx(ctx context.Context, fn func(*db.Queries) error) error {

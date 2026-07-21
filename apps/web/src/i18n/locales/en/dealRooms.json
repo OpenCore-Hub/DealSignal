@@ -15,6 +15,17 @@
   "memberCount_other": "{{count}} members",
   "pendingApprovals_one": "{{count}} pending",
   "pendingApprovals_other": "{{count}} pending",
+  "accessRequests": {
+    "title": "Room access requests",
+    "description": "Visitors who requested membership for this deal room. Approving activates them as viewers.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveSuccess": "Access request approved",
+    "approveError": "Failed to approve access request",
+    "rejectSuccess": "Access request rejected",
+    "rejectError": "Failed to reject access request",
+    "loadFailed": "Failed to load access requests"
+  },
   "lastAccessed": "Last accessed {{time}}",
   "search": {
     "placeholder": "Search datarooms..."
@@ -68,7 +79,8 @@
     "settings": "Settings"
   },
   "sidebar": {
-    "label": "Deal room navigation"
+    "label": "Deal room navigation",
+    "backToRooms": "All deal rooms"
   },
   "share": {
     "title": "Share",
@@ -200,11 +212,68 @@
     "documents": "Documents",
     "noVisitors": "No visitors yet",
     "title": "Activity",
-    "comingSoon": "Detailed activity logs are coming soon."
+    "comingSoon": "Detailed activity logs are coming soon.",
+    "description": "Recent access events across share links for this room.",
+    "emptyTitle": "No activity yet",
+    "emptyDescription": "When visitors open a share link, recent access will show up here.",
+    "goShare": "Manage share links",
+    "goAnalytics": "View analytics",
+    "linkFallback": "Share link",
+    "linkViews_one": "{{count}} view",
+    "linkViews_other": "{{count}} views"
   },
   "settings": {
     "title": "Room Settings",
-    "comingSoon": "Room settings are coming soon."
+    "comingSoon": "Room settings are coming soon.",
+    "description": "Current room policy at a glance. Editable controls will expand here.",
+    "moreComing": "Freeze, default watermark, and retention controls are coming soon.",
+    "inviteMembers": "Invite members",
+    "enabled": "On",
+    "disabled": "Off",
+    "fields": {
+      "stage": "Stage",
+      "status": "Status",
+      "nda": "NDA required",
+      "requiresApproval": "Access approval",
+      "members": "Members"
+    },
+    "stage": {
+      "preparing": "Preparing",
+      "open": "Open"
+    },
+    "stageHint": "Derived from whether this room has active share links.",
+    "status": {
+      "active": "Active",
+      "archived": "Archived",
+      "pending": "Pending"
+    }
+  },
+  "documentsHome": {
+    "commandStripLabel": "Room readiness summary",
+    "descriptionShow": "Show description",
+    "descriptionHide": "Hide description",
+    "metrics": {
+      "documents": "Documents",
+      "activeLinks": "Active links",
+      "views": "Views"
+    },
+    "attention": {
+      "failedDeliveries_one": "{{count}} access code failed to send — fix in Share",
+      "failedDeliveries_other": "{{count}} access codes failed to send — fix in Share",
+      "unreadQuestions_one": "{{count}} unanswered question — open Q&A",
+      "unreadQuestions_other": "{{count}} unanswered questions — open Q&A",
+      "noActiveLinks": "No active share links yet — create one in Share"
+    },
+    "readiness": {
+      "emptyTitle": "Add your first document",
+      "emptyDescription": "Upload or attach a file to start preparing this room for sharing.",
+      "emptyCta": "Upload first document",
+      "requiredTitle": "Recommended materials still missing",
+      "requiredDescription_one": "{{count}} recommended file is not in this room yet.",
+      "requiredDescription_other": "{{count}} recommended files are not in this room yet.",
+      "requiredCta": "Upload {{name}}",
+      "more": "+{{count}} more"
+    }
   },
   "participants": {
     "title": "Participants"
@@ -238,9 +307,13 @@
       "actions": {
         "view": "View activity",
         "edit": "Edit",
+        "approveRequests": "Review access requests",
         "sendCode": "Send verification code",
         "delete": "Delete"
       },
+      "pendingRequestsBadge": "{{count}} pending",
+      "pendingRequestsBanner": "{{count}} access request(s) waiting for approval. Open a link and use Access Control to approve or reject.",
+      "pendingRequestsLoadFailed": "Failed to load pending access requests",
       "sendCode": {
         "title": "Send verification code",
         "description": "Choose allowed visitors to resend a one-time access code. Blocked visitors are excluded.",

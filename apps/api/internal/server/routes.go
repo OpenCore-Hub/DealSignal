@@ -28,6 +28,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/marketing"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/nda"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
@@ -231,7 +232,9 @@ func (s *Server) registerRoutes() error {
 
 			actionSyncer := action.NewSyncer(queries)
 
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil, link.WithActionSyncer(actionSyncer))
+			ndaSvc := nda.NewService(queries, storageClient, appMailer)
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil, link.WithActionSyncer(actionSyncer), link.WithNDAService(ndaSvc))
+			ndaHandler := nda.NewHandler(ndaSvc)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
 				dedupChecker = analytics.NewFailoverDedupChecker(s.redisClient, queries, s.cfg.LinkOpenDedupWindow, s.cfg.PageViewDedupWindow)
@@ -274,7 +277,10 @@ func (s *Server) registerRoutes() error {
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
 
-			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg, dealroom.WithActionSyncer(actionSyncer))
+			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg,
+				dealroom.WithActionSyncer(actionSyncer),
+				dealroom.WithRateLimiter(s.redisClient),
+			)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
 
 			complianceSvc := compliance.NewService(queries, s.dbPool, s.cfg)
@@ -296,6 +302,7 @@ func (s *Server) registerRoutes() error {
 			searchHandler.RegisterRoutes(ws)
 			assistantHandler.RegisterRoutes(ws)
 			linkHandler.RegisterWorkspaceRoutes(ws)
+			ndaHandler.RegisterRoutes(ws)
 			analyticsHandler.RegisterWorkspaceRoutes(ws)
 			ws.GET("/reverse-funnel", linkHandler.ReverseFunnel)
 			ws.GET("/events", sseHandler.StreamEvents)

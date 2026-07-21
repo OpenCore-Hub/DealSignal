@@ -80,15 +80,49 @@ func TestDocumentsForAccessResponse_DealRoomScope(t *testing.T) {
 
 	h := &Handler{service: f.svc}
 
-	t.Run("unscoped link exposes all current room documents", func(t *testing.T) {
+	t.Run("empty allowlist exposes no documents", func(t *testing.T) {
 		link, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
-			Name: "Unscoped",
+			Name: "Empty allowlist",
 		})
 		if err != nil {
-			t.Fatalf("create unscoped link: %v", err)
+			t.Fatalf("create empty allowlist link: %v", err)
 		}
 
 		got := h.documentsForAccessResponse(ctx, link, link.PublicToken)
+		if len(got) != 0 {
+			t.Fatalf("expected 0 documents, got %d", len(got))
+		}
+	})
+
+	t.Run("legacy full mode exposes all current room documents", func(t *testing.T) {
+		link, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
+			Name:        "Legacy full",
+			FolderPaths: []string{"/general"},
+		})
+		if err != nil {
+			t.Fatalf("create link: %v", err)
+		}
+		if err := f.q.UpdateLinkFolderScopePaths(ctx, db.UpdateLinkFolderScopePathsParams{
+			FolderScopePaths: []string{},
+			ID:               link.ID,
+			WorkspaceID:      link.WorkspaceID,
+		}); err != nil {
+			t.Fatalf("clear paths: %v", err)
+		}
+		if err := f.q.UpdateLinkFolderScopeMode(ctx, db.UpdateLinkFolderScopeModeParams{
+			FolderScopeMode:  FolderScopeModeFull,
+			HasDocumentScope: false,
+			ID:               link.ID,
+			WorkspaceID:      link.WorkspaceID,
+		}); err != nil {
+			t.Fatalf("set full mode: %v", err)
+		}
+		fresh, err := f.svc.GetByID(ctx, uuid.UUID(link.ID.Bytes).String(), wsID)
+		if err != nil {
+			t.Fatalf("reload: %v", err)
+		}
+
+		got := h.documentsForAccessResponse(ctx, fresh, fresh.PublicToken)
 		if len(got) != len(docs) {
 			t.Fatalf("expected %d documents, got %d", len(docs), len(got))
 		}
@@ -129,11 +163,38 @@ func TestVerifyLinkDocumentAccess_DealRoomScope(t *testing.T) {
 		t.Fatalf("create scoped link: %v", err)
 	}
 
-	unscopedLink, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
-		Name: "Unscoped",
+	legacyFullLink, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
+		Name:        "Legacy full",
+		FolderPaths: []string{"/general"},
 	})
 	if err != nil {
-		t.Fatalf("create unscoped link: %v", err)
+		t.Fatalf("create legacy full link: %v", err)
+	}
+	if err := f.q.UpdateLinkFolderScopePaths(ctx, db.UpdateLinkFolderScopePathsParams{
+		FolderScopePaths: []string{},
+		ID:               legacyFullLink.ID,
+		WorkspaceID:      legacyFullLink.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("clear paths: %v", err)
+	}
+	if err := f.q.UpdateLinkFolderScopeMode(ctx, db.UpdateLinkFolderScopeModeParams{
+		FolderScopeMode:  FolderScopeModeFull,
+		HasDocumentScope: false,
+		ID:               legacyFullLink.ID,
+		WorkspaceID:      legacyFullLink.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set full mode: %v", err)
+	}
+	legacyFullLink, err = f.svc.GetByID(ctx, uuid.UUID(legacyFullLink.ID.Bytes).String(), wsID)
+	if err != nil {
+		t.Fatalf("reload legacy full link: %v", err)
+	}
+
+	emptyAllowlistLink, err := f.svc.CreateDealRoomLink(ctx, userID, wsID, roomID, DealRoomLinkRequest{
+		Name: "Empty allowlist",
+	})
+	if err != nil {
+		t.Fatalf("create empty allowlist link: %v", err)
 	}
 
 	t.Run("scoped link allows in-scope document", func(t *testing.T) {
@@ -175,22 +236,30 @@ func TestVerifyLinkDocumentAccess_DealRoomScope(t *testing.T) {
 		}
 	})
 
-	t.Run("unscoped link allows any current room document", func(t *testing.T) {
+	t.Run("legacy full link allows any current room document", func(t *testing.T) {
 		for i, d := range docs {
-			if !h.verifyLinkDocumentAccess(ctx, unscopedLink, uuid.UUID(d.ID.Bytes)) {
+			if !h.verifyLinkDocumentAccess(ctx, legacyFullLink, uuid.UUID(d.ID.Bytes)) {
 				t.Fatalf("expected room document %d to be allowed", i)
 			}
 		}
 	})
 
-	t.Run("document removed from room is denied by both scoped and unscoped links", func(t *testing.T) {
+	t.Run("empty allowlist denies all room documents", func(t *testing.T) {
+		for i, d := range docs {
+			if h.verifyLinkDocumentAccess(ctx, emptyAllowlistLink, uuid.UUID(d.ID.Bytes)) {
+				t.Fatalf("expected room document %d to be denied", i)
+			}
+		}
+	})
+
+	t.Run("document removed from room is denied by both scoped and legacy full links", func(t *testing.T) {
 		drSvc := dealroom.NewService(f.q, f.tx, &config.Config{})
 		if err := drSvc.RemoveDocument(ctx, roomID, wsID, userID, uuid.UUID(docs[1].ID.Bytes).String()); err != nil {
 			t.Fatalf("remove document from room: %v", err)
 		}
 
-		if h.verifyLinkDocumentAccess(ctx, unscopedLink, uuid.UUID(docs[1].ID.Bytes)) {
-			t.Fatal("unscoped link should deny removed document")
+		if h.verifyLinkDocumentAccess(ctx, legacyFullLink, uuid.UUID(docs[1].ID.Bytes)) {
+			t.Fatal("legacy full link should deny removed document")
 		}
 	})
 }

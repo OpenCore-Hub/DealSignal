@@ -16,6 +16,7 @@ export interface PresetValues {
   watermarkEnabled: boolean;
   requireNda: boolean;
   ndaDocumentId: string;
+  ndaTemplateId: string;
   allowDownloading: boolean;
   enableScreenshotProtection: boolean;
   aiCopilotEnabled: boolean;
@@ -33,6 +34,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     watermarkEnabled: false,
     requireNda: false,
     ndaDocumentId: "",
+    ndaTemplateId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
     aiCopilotEnabled: false,
@@ -48,6 +50,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     watermarkEnabled: true,
     requireNda: false,
     ndaDocumentId: "",
+    ndaTemplateId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
     aiCopilotEnabled: false,
@@ -63,6 +66,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     watermarkEnabled: true,
     requireNda: false,
     ndaDocumentId: "",
+    ndaTemplateId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
     aiCopilotEnabled: false,

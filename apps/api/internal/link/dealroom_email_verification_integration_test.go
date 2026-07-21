@@ -130,8 +130,8 @@ func TestDealRoomEmailVerification_OnDemand(t *testing.T) {
 		EmailCode: lc.AccessCode,
 		IP:        "127.0.0.1",
 		UA:        "test-agent",
-	}); err == nil {
-		t.Fatal("expected access with mismatched email to fail")
+	}); !errors.Is(err, ErrDeliveryEmailMismatch) {
+		t.Fatalf("expected ErrDeliveryEmailMismatch, got %v", err)
 	}
 
 	// 4. Access with an unknown code fails.

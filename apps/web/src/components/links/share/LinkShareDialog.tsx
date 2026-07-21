@@ -26,6 +26,7 @@ import {
   buildRules,
   buildLinkPayload,
   validateDraft,
+  LinkAccessRequestsPanel,
 } from "./";
 import type { DraftLink } from "./types";
 
@@ -84,6 +85,29 @@ function LinkShareDialogContent({
   const { t } = useTranslation("linkShare");
   const [tab, setTab] = useState<"share" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.link, data?.rules));
+  const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.listNDATemplates();
+        if (cancelled) return;
+        setNdaTemplates(
+          (res.data ?? []).map((tpl) => ({
+            id: tpl.id,
+            name: tpl.name,
+            sourceDocumentId: tpl.source_document_id,
+          }))
+        );
+      } catch {
+        if (!cancelled) setNdaTemplates([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
@@ -271,13 +295,17 @@ function LinkShareDialogContent({
                     highlightedFields={highlightedFields}
                   />
                 </TabsContent>
-                <TabsContent value="access">
+                <TabsContent value="access" className="space-y-4">
+                  {link ? (
+                    <LinkAccessRequestsPanel linkId={link.id} onChanged={() => { void refetch(); }} />
+                  ) : null}
                   <AccessTab
                     draft={draft}
                     updateDraft={updateDraft}
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
                     isDealRoomLink={!!link?.dealRoomId}
+                    ndaTemplates={ndaTemplates}
                     documents={link?.documents.map((d) => ({ id: d.id, title: d.title })) ?? []}
                   />
                 </TabsContent>

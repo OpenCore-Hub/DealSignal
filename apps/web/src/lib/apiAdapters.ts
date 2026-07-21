@@ -3,6 +3,7 @@ import type { IntegrationStatus, PermissionConfig } from "@/types";
 export interface CreateLinkPayload {
   document_ids?: string[];
   folder_paths?: string[];
+  folder_scope_mode?: "full" | "allowlist";
   name?: string;
   permission_type?: string;
   require_email?: boolean;
@@ -10,6 +11,7 @@ export interface CreateLinkPayload {
   require_password?: boolean;
   require_nda?: boolean;
   nda_document_id?: string;
+  nda_template_id?: string;
   allowed_emails?: string[];
   password?: string;
   contact_ids?: string[];

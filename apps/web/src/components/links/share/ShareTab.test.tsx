@@ -58,6 +58,7 @@ const baseDraft: DraftLink = {
   watermarkEnabled: true,
   requireNda: false,
   ndaDocumentId: "",
+  ndaTemplateId: "",
   allowDownloading: false,
   aiCopilotEnabled: false,
   enableScreenshotProtection: false,
@@ -69,6 +70,7 @@ const baseDraft: DraftLink = {
   customDomain: "",
   notifyOnAccess: false,
   folderPaths: [],
+  folderScopeMode: "allowlist",
   contactIds: [],
 };
 

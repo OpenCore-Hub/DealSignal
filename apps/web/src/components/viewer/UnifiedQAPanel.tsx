@@ -74,6 +74,10 @@ export function UnifiedQAPanel({
   const [mode, setMode] = useState<"ai" | "owner">(aiCopilotEnabled ? "ai" : "owner");
   const [ownerSubmitting, setOwnerSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Sliding session refresh rotates sessionToken frequently; keep a ref so the
+  // questions list effect does not re-fetch on every credential rotate.
+  const sessionTokenRef = useRef(sessionToken);
+  sessionTokenRef.current = sessionToken;
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +86,7 @@ export function UnifiedQAPanel({
       setQuestionError(null);
       setLoadingQuestions(true);
       try {
-        const res = await api.listPublicQuestions(token, creds(sessionToken));
+        const res = await api.listPublicQuestions(token, creds(sessionTokenRef.current));
         if (!cancelled) setQuestions(res.data ?? []);
       } catch {
         if (!cancelled) setQuestionError(t("documents:viewer.qaLoadError"));
@@ -91,7 +95,7 @@ export function UnifiedQAPanel({
       }
     })();
     return () => { cancelled = true; };
-  }, [token, sessionToken, qaEnabled, t, refreshKey]);
+  }, [token, qaEnabled, t, refreshKey]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -144,7 +148,7 @@ export function UnifiedQAPanel({
 
       if (mode === "ai") {
         setInput("");
-        await sendMessage(text, { documentId, publicSessionToken: sessionToken });
+        await sendMessage(text, { documentId, publicSessionToken: sessionTokenRef.current });
         return;
       }
 
@@ -156,7 +160,7 @@ export function UnifiedQAPanel({
       setQuestionError(null);
       setInput("");
       try {
-        await api.createPublicQuestion(token, text, creds(sessionToken));
+        await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
         setRefreshKey((k) => k + 1);
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -165,7 +169,7 @@ export function UnifiedQAPanel({
         setOwnerSubmitting(false);
       }
     },
-    [input, mode, documentId, sessionToken, sendMessage, t, token]
+    [input, mode, documentId, sendMessage, t, token]
   );
 
   const showModeToggle = aiCopilotEnabled && qaEnabled;

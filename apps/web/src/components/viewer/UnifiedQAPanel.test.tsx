@@ -134,4 +134,52 @@ describe("UnifiedQAPanel", () => {
     });
     await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalledTimes(2));
   });
+
+  it("does not re-list questions when sessionToken rotates", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    const { rerender } = await renderPanel({ sessionToken: "session-1" });
+    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1));
+
+    const i18n = await createTestI18n({
+      common: {},
+      layout: {},
+      documents: {
+        "viewer.sidebarQA": "Q&A",
+        "viewer.qaLoadError": "Could not load questions",
+        "viewer.qaLengthError": "Question must be 1–500 characters",
+        "viewer.qaDisabled": "Q&A is not available",
+        "viewer.qaError": "Failed to submit question",
+        "viewer.qaEmptyUnified": "No messages yet.",
+        "viewer.qaSourceAI": "AI",
+        "viewer.qaSourceOwner": "Owner",
+        "viewer.qaModeAI": "Ask AI",
+        "viewer.qaModeOwner": "Ask Owner",
+        "viewer.qaAIPlaceholder": "Ask AI...",
+        "viewer.qaOwnerPlaceholder": "Ask owner...",
+        "viewer.qaSubmit": "Ask",
+      },
+      ai: {
+        "viewer.thinking": "Thinking...",
+        "evidence.page": "Page {{pageNumber}}",
+      },
+    });
+
+    rerender(
+      <I18nextProvider i18n={i18n}>
+        <UnifiedQAPanel
+          token="token-1"
+          sessionToken="session-2"
+          documentId="doc-1"
+          qaEnabled
+          aiCopilotEnabled={false}
+        />
+      </I18nextProvider>
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+
+    expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1);
+  });
 });

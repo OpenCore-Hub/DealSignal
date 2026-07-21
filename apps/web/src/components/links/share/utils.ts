@@ -61,6 +61,7 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
       watermarkEnabled: link.watermarkEnabled ?? false,
       requireNda: link.requireNda ?? false,
       ndaDocumentId: link.ndaDocumentId ?? "",
+      ndaTemplateId: (link as { ndaTemplateId?: string }).ndaTemplateId ?? "",
       allowDownloading: link.downloadEnabled ?? false,
       enableScreenshotProtection: link.screenshotProtectionEnabled ?? false,
       aiCopilotEnabled: link.aiCopilotEnabled ?? false,
@@ -72,6 +73,12 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
       customDomain: link.customDomain ?? "",
       notifyOnAccess: link.notifyOnAccess ?? false,
       folderPaths: link.folderPaths ?? [],
+      folderScopeMode:
+        link.folderScopeMode === "full" || link.folderScopeMode === "allowlist"
+          ? link.folderScopeMode
+          : (link.folderPaths?.length ?? 0) > 0
+            ? "allowlist"
+            : "full",
       contactIds: link.contactIds ?? [],
     };
   }
@@ -85,6 +92,7 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
     customDomain: "",
     notifyOnAccess: false,
     folderPaths: [],
+    folderScopeMode: "allowlist",
     contactIds: [],
   };
 }
@@ -134,14 +142,20 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
       : "public";
   return {
     document_ids: existingLink?.documentIds ?? [],
-    folder_paths: draft.folderPaths,
+    folder_scope_mode: draft.folderScopeMode,
+    // Preserve legacy full-room links: omit folder_paths so backend does not
+    // convert them to an empty allowlist (deny-all) on unrelated saves.
+    ...(draft.folderScopeMode === "allowlist"
+      ? { folder_paths: draft.folderPaths }
+      : {}),
     name: draft.name.trim(),
     permission_type: permissionType,
     require_email: draft.requireEmail,
     require_email_verification: draft.requireEmailVerification,
     require_password: draft.requirePassword,
     require_nda: draft.requireNda,
-    nda_document_id: draft.requireNda ? draft.ndaDocumentId : undefined,
+    nda_template_id: draft.requireNda ? (draft.ndaTemplateId || undefined) : undefined,
+    nda_document_id: draft.requireNda ? (draft.ndaDocumentId || undefined) : undefined,
     password: draft.requirePassword && draft.password ? draft.password : undefined,
     expires_at: toRFC3339(draft.expiresAt) || undefined,
     download_enabled: draft.allowDownloading,
@@ -204,7 +218,7 @@ export function validateDraft(
   if (conflict) {
     errors.conflict = t("accessRules.errors.conflict", { value: conflict });
   }
-  if (draft.requireNda && !draft.ndaDocumentId) {
+  if (draft.requireNda && !draft.ndaTemplateId && !draft.ndaDocumentId) {
     errors.ndaDocumentId = t("accessRules.errors.ndaDocumentRequired");
   }
   return errors;

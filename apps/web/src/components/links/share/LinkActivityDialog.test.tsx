@@ -24,10 +24,6 @@ function Wrapper({ children }: { children: React.ReactNode }) {
   return <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>;
 }
 
-vi.mock("./hooks", () => ({
-  useAccessLogs: () => ({ logs: [], loading: false }),
-}));
-
 vi.mock("./AnalyticsTab", () => ({
   AnalyticsTab: () => <div>Analytics content</div>,
 }));
@@ -54,7 +50,9 @@ describe("LinkActivityDialog window controls", () => {
       </Wrapper>,
     );
 
-    expect(screen.getByText("Link activity")).toBeInTheDocument();
+    const title = screen.getByText("Link activity");
+    expect(title).toHaveClass("sr-only");
+    expect(screen.getByRole("toolbar", { name: "Window size" })).toBeInTheDocument();
 
     const shrink = screen.getByRole("button", { name: "Shrink window" });
     const enlarge = screen.getByRole("button", { name: "Enlarge window" });

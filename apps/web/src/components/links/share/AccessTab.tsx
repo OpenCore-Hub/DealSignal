@@ -24,6 +24,7 @@ interface AccessTabProps {
   highlightedFields?: string[];
   isDealRoomLink?: boolean;
   documents?: { id: string; title: string }[];
+  ndaTemplates?: { id: string; name: string; sourceDocumentId: string }[];
 }
 
 function OptionSwitch({
@@ -130,6 +131,7 @@ export function AccessTab({
   highlightedFields = [],
   isDealRoomLink,
   documents = [],
+  ndaTemplates = [],
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
 
@@ -166,8 +168,27 @@ export function AccessTab({
     updateDraft({
       requireNda: checked,
       ndaDocumentId: checked ? draft.ndaDocumentId : "",
+      ndaTemplateId: checked ? draft.ndaTemplateId : "",
     });
   };
+
+  const ndaOptions =
+    ndaTemplates.length > 0
+      ? ndaTemplates.map((tpl) => ({
+          id: tpl.id,
+          title: tpl.name,
+          templateId: tpl.id,
+          documentId: tpl.sourceDocumentId,
+        }))
+      : documents.map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          templateId: "",
+          documentId: doc.id,
+        }));
+
+  // Always controlled: empty selection is null (not undefined) for Base UI Select.
+  const selectedNdaValue = draft.ndaTemplateId || draft.ndaDocumentId || "";
 
   const conflicts = useMemo(
     () => draft.allowedViewers.filter((v) => draft.blockedViewers.includes(v)),
@@ -331,21 +352,39 @@ export function AccessTab({
                 {t("accessRules.additionalProtections.ndaDocument")}
               </Label>
               <Select
-                value={draft.ndaDocumentId}
-                onValueChange={(value) => updateDraft({ ndaDocumentId: value || "" })}
+                value={selectedNdaValue || null}
+                onValueChange={(value) => {
+                  const selected = value ?? "";
+                  if (!selected || selected === "__empty__") return;
+                  const opt = ndaOptions.find(
+                    (o) => o.id === selected || o.templateId === selected || o.documentId === selected
+                  );
+                  const nextTemplateId =
+                    opt?.templateId && opt.templateId.length > 0
+                      ? opt.templateId
+                      : ndaTemplates.some((t) => t.id === selected)
+                        ? selected
+                        : "";
+                  const nextDocumentId =
+                    opt?.documentId && opt.documentId.length > 0 ? opt.documentId : selected;
+                  updateDraft({
+                    ndaTemplateId: nextTemplateId,
+                    ndaDocumentId: nextDocumentId,
+                  });
+                }}
               >
                 <SelectTrigger aria-label={t("accessRules.additionalProtections.ndaDocument")} className="w-full">
                   <SelectValue placeholder={t("accessRules.additionalProtections.ndaDocumentPlaceholder")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {documents.length === 0 ? (
+                  {ndaOptions.length === 0 ? (
                     <SelectItem value="__empty__" disabled>
                       {t("accessRules.additionalProtections.ndaDocumentPlaceholder")}
                     </SelectItem>
                   ) : (
-                    documents.map((doc) => (
-                      <SelectItem key={doc.id} value={doc.id}>
-                        {doc.title}
+                    ndaOptions.map((opt) => (
+                      <SelectItem key={opt.id} value={opt.id}>
+                        {opt.title}
                       </SelectItem>
                     ))
                   )}

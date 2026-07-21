@@ -146,6 +146,7 @@ export function ShareTab({
         allowedViewers={draft.allowedViewers}
         blockedViewers={draft.blockedViewers}
         folderPaths={draft.folderPaths}
+        folderScopeMode={draft.folderScopeMode}
         documents={documents}
         onEditAccess={onEditAccess}
       />

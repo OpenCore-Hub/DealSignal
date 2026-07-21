@@ -10,12 +10,10 @@ import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
-  DialogHeader,
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
-import { useAccessLogs } from "./hooks";
 import { AnalyticsTab } from "./AnalyticsTab";
 import type { Link } from "@/types";
 
@@ -57,7 +55,6 @@ export function LinkActivityDialog({
   };
   const [size, setSize] = useState<ActivityWindowSize>("md");
   const [fullscreen, setFullscreen] = useState(false);
-  const { logs, loading: logsLoading } = useAccessLogs(link.id, open);
 
   useEffect(() => {
     if (!open) {
@@ -93,9 +90,7 @@ export function LinkActivityDialog({
           fullscreen ? SIZE_CLASS.full : SIZE_CLASS[size],
         )}
       >
-        <DialogHeader className="pr-28">
-          <DialogTitle>{t("activity.title")}</DialogTitle>
-        </DialogHeader>
+        <DialogTitle className="sr-only">{t("activity.title")}</DialogTitle>
 
         <div
           className="absolute top-2 right-12 flex items-center gap-0.5"
@@ -142,13 +137,7 @@ export function LinkActivityDialog({
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto py-2">
-          {logsLoading ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">
-              {t("common:loading")}
-            </div>
-          ) : (
-            <AnalyticsTab link={link} logs={logs} />
-          )}
+          {open ? <AnalyticsTab link={link} logs={[]} /> : null}
         </div>
       </DialogContent>
     </Dialog>

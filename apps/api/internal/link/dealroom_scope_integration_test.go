@@ -148,6 +148,38 @@ func (drf *dealRoomFixture) createLink(t *testing.T, name string, folderPaths []
 	return link
 }
 
+// forceLegacyFullMode simulates a pre-migration whole-room link (empty paths + full mode).
+func (drf *dealRoomFixture) forceLegacyFullMode(t *testing.T, link db.Link) db.Link {
+	t.Helper()
+	if err := drf.f.q.UpdateLinkFolderScopePaths(drf.ctx(), db.UpdateLinkFolderScopePathsParams{
+		FolderScopePaths: []string{},
+		ID:               link.ID,
+		WorkspaceID:      link.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("clear paths: %v", err)
+	}
+	if err := drf.f.q.UpdateLinkFolderScopeMode(drf.ctx(), db.UpdateLinkFolderScopeModeParams{
+		FolderScopeMode:  FolderScopeModeFull,
+		HasDocumentScope: false,
+		ID:               link.ID,
+		WorkspaceID:      link.WorkspaceID,
+	}); err != nil {
+		t.Fatalf("set full mode: %v", err)
+	}
+	fresh, err := drf.f.svc.GetByID(drf.ctx(), uuid.UUID(link.ID.Bytes).String(), drf.wsID)
+	if err != nil {
+		t.Fatalf("reload link: %v", err)
+	}
+	return fresh
+}
+
+func (drf *dealRoomFixture) createLegacyFullLink(t *testing.T, name string) db.Link {
+	t.Helper()
+	// Create with a valid path first (create always writes allowlist), then convert.
+	link := drf.createLink(t, name, []string{"/general"})
+	return drf.forceLegacyFullMode(t, link)
+}
+
 func (drf *dealRoomFixture) updateLinkScope(t *testing.T, linkID string, folderPaths []string) db.Link {
 	t.Helper()
 	link, err := drf.f.svc.UpdateLink(drf.ctx(), linkID, drf.wsID, UpdateLinkRequest{
@@ -202,7 +234,7 @@ func containsAll(haystack []string, needles []string) bool {
 	return true
 }
 
-func TestDealRoomScope_FullRoom(t *testing.T) {
+func TestDealRoomScope_LegacyFullRoom(t *testing.T) {
 	drf := newDealRoomFixture(t)
 	defer drf.cleanup()
 
@@ -214,7 +246,7 @@ func TestDealRoomScope_FullRoom(t *testing.T) {
 	drf.addDocumentToFolder(t, d1, general, 0)
 	drf.addDocumentToFolder(t, d2, legal, 0)
 
-	link := drf.createLink(t, "Full room", nil)
+	link := drf.createLegacyFullLink(t, "Full room")
 	titles := drf.docTitlesByAccess(link)
 	if len(titles) != 2 || !containsAll(titles, []string{"doc-general", "doc-legal"}) {
 		t.Fatalf("expected full room to expose all docs, got %v", titles)
@@ -410,7 +442,7 @@ func TestDealRoomScope_UpdateScope(t *testing.T) {
 	drf.addDocumentToFolder(t, d1, "/general", 0)
 	drf.addDocumentToFolder(t, d2, legal, 0)
 
-	link := drf.createLink(t, "Unscoped", nil)
+	link := drf.createLegacyFullLink(t, "Unscoped")
 	if len(drf.docTitlesByAccess(link)) != 2 {
 		t.Fatalf("expected full room before update")
 	}
@@ -419,6 +451,9 @@ func TestDealRoomScope_UpdateScope(t *testing.T) {
 	if len(updated.FolderScopePaths) != 1 || updated.FolderScopePaths[0] != legal {
 		t.Fatalf("expected scope updated to legal, got %v", updated.FolderScopePaths)
 	}
+	if updated.FolderScopeMode != FolderScopeModeAllowlist {
+		t.Fatalf("expected allowlist after path update, got %q", updated.FolderScopeMode)
+	}
 
 	titles := drf.docTitlesByAccess(updated)
 	if len(titles) != 1 || titles[0] != "doc-legal" {
@@ -426,8 +461,8 @@ func TestDealRoomScope_UpdateScope(t *testing.T) {
 	}
 
 	updated = drf.updateLinkScope(t, uuid.UUID(link.ID.Bytes).String(), []string{})
-	if len(drf.docTitlesByAccess(updated)) != 2 {
-		t.Fatalf("expected full room after clearing scope, got %v", drf.docTitlesByAccess(updated))
+	if len(drf.docTitlesByAccess(updated)) != 0 {
+		t.Fatalf("expected deny-all after clearing allowlist, got %v", drf.docTitlesByAccess(updated))
 	}
 }
 
@@ -462,7 +497,7 @@ func TestDealRoomScope_DocumentRemovedFromRoomDenied(t *testing.T) {
 	drf.addDocumentToFolder(t, d1, general, 0)
 
 	scoped := drf.createLink(t, "Scoped", []string{general})
-	unscoped := drf.createLink(t, "Unscoped", nil)
+	unscoped := drf.createLegacyFullLink(t, "Unscoped")
 
 	drf.removeDocument(t, d1)
 
@@ -492,7 +527,7 @@ func TestDealRoomScope_LinkStatusBlocksAccess(t *testing.T) {
 	}
 }
 
-func TestDealRoomScope_CreateWithEmptyScopeMeansFullRoom(t *testing.T) {
+func TestDealRoomScope_CreateWithEmptyScopeMeansDenyAll(t *testing.T) {
 	drf := newDealRoomFixture(t)
 	defer drf.cleanup()
 
@@ -502,10 +537,32 @@ func TestDealRoomScope_CreateWithEmptyScopeMeansFullRoom(t *testing.T) {
 	drf.addDocumentToFolder(t, d1, "/general", 0)
 	drf.addDocumentToFolder(t, d2, legal, 0)
 
-	link := drf.createLink(t, "Empty scope means full room", []string{})
+	link := drf.createLink(t, "Empty allowlist means deny-all", []string{})
+	if link.FolderScopeMode != FolderScopeModeAllowlist {
+		t.Fatalf("expected allowlist mode, got %q", link.FolderScopeMode)
+	}
 	titles := drf.docTitlesByAccess(link)
+	if len(titles) != 0 {
+		t.Fatalf("expected empty folder allowlist to expose no documents, got %v", titles)
+	}
+	drf.assertAccess(t, link, nil, []db.CreateDocumentRow{d1, d2})
+}
+
+func TestDealRoomScope_LegacyFullModeStillExposesWholeRoom(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.cleanup()
+
+	legal := drf.createFolder(t, "Legal", "/")
+	d1 := drf.createDocument(t, "doc-general")
+	d2 := drf.createDocument(t, "doc-legal")
+	drf.addDocumentToFolder(t, d1, "/general", 0)
+	drf.addDocumentToFolder(t, d2, legal, 0)
+
+	link := drf.createLink(t, "Legacy full mode", []string{legal})
+	fresh := drf.forceLegacyFullMode(t, link)
+	titles := drf.docTitlesByAccess(fresh)
 	if len(titles) != 2 {
-		t.Fatalf("expected empty folder scope to expose whole room, got %v", titles)
+		t.Fatalf("expected legacy full mode to expose whole room, got %v", titles)
 	}
 }
 
@@ -588,7 +645,7 @@ func TestDealRoomScope_EmailVerificationNotRequiredForAccessCheck(t *testing.T) 
 	}
 }
 
-func TestDealRoomScope_UpdateFromScopedToUnscoped(t *testing.T) {
+func TestDealRoomScope_UpdateFromScopedToEmptyDenyAll(t *testing.T) {
 	drf := newDealRoomFixture(t)
 	defer drf.cleanup()
 
@@ -604,8 +661,11 @@ func TestDealRoomScope_UpdateFromScopedToUnscoped(t *testing.T) {
 	}
 
 	updated := drf.updateLinkScope(t, uuid.UUID(link.ID.Bytes).String(), []string{})
-	if len(drf.docTitlesByAccess(updated)) != 2 {
-		t.Fatalf("expected full room after clearing scope, got %v", drf.docTitlesByAccess(updated))
+	if updated.FolderScopeMode != FolderScopeModeAllowlist {
+		t.Fatalf("expected allowlist mode after clear, got %q", updated.FolderScopeMode)
+	}
+	if len(drf.docTitlesByAccess(updated)) != 0 {
+		t.Fatalf("expected deny-all after clearing allowlist, got %v", drf.docTitlesByAccess(updated))
 	}
 }
 
@@ -677,7 +737,7 @@ func TestDealRoomScope_ConcurrentScopedAndUnscopedLinks(t *testing.T) {
 	drf.addDocumentToFolder(t, d2, legal, 0)
 
 	scoped := drf.createLink(t, "Scoped", []string{legal})
-	unscoped := drf.createLink(t, "Unscoped", nil)
+	unscoped := drf.createLegacyFullLink(t, "Unscoped")
 
 	if len(drf.docTitlesByAccess(scoped)) != 1 {
 		t.Fatalf("expected scoped link to expose 1 doc")

@@ -81,7 +81,13 @@ vi.mock("./DealRoomShareDialog", () => ({
 }));
 
 vi.mock("@/components/links/share", () => ({
-  LinkActivityDialog: () => null,
+  LinkActivityDialog: ({
+    link,
+    open,
+  }: {
+    link: { id: string; name?: string };
+    open: boolean;
+  }) => (open ? <div data-testid="link-activity-dialog">{link.name}</div> : null),
 }));
 
 vi.mock("./SendVerificationCodeDialog", () => ({
@@ -147,5 +153,20 @@ describe("FolderPermissionsSection refresh", () => {
     await waitFor(() => {
       expect(screen.getByText("New share")).toBeInTheDocument();
     });
+  });
+
+  it("opens link activity when clicking a share link row", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [makeLink()] });
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    const row = await screen.findByTestId("deal-room-link-row-link-1");
+    fireEvent.click(row);
+
+    expect(await screen.findByTestId("link-activity-dialog")).toHaveTextContent("Investor pack");
   });
 });

@@ -24,6 +24,7 @@ import {
   ShareTab,
   AccessTab,
   DocumentsTab,
+  LinkAccessRequestsPanel,
   buildDraft,
   buildRules,
   buildAllowedLists,
@@ -140,6 +141,29 @@ function DealRoomShareDialogContent({
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
+  const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await api.listNDATemplates();
+        if (cancelled) return;
+        setNdaTemplates(
+          (res.data ?? []).map((tpl) => ({
+            id: tpl.id,
+            name: tpl.name,
+            sourceDocumentId: tpl.source_document_id,
+          }))
+        );
+      } catch {
+        if (!cancelled) setNdaTemplates([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Unsaved-changes tracking. We use a mutable ref instead of a callback so
   // the data-sync effect does not depend on the comparison function, which
@@ -244,6 +268,7 @@ function DealRoomShareDialogContent({
           require_email: draft.requireEmail,
           require_email_verification: draft.requireEmailVerification,
           require_nda: draft.requireNda,
+          nda_template_id: draft.requireNda ? (draft.ndaTemplateId || undefined) : undefined,
           nda_document_id: draft.requireNda ? draft.ndaDocumentId : undefined,
           require_password: draft.requirePassword,
           password: draft.requirePassword && draft.password ? draft.password : undefined,
@@ -259,7 +284,7 @@ function DealRoomShareDialogContent({
           screenshot_protection_enabled: draft.enableScreenshotProtection,
           custom_domain: draft.customDomain || undefined,
           notify_on_access: draft.notifyOnAccess,
-          folder_paths: draft.folderPaths.length > 0 ? draft.folderPaths : undefined,
+          folder_paths: draft.folderPaths,
         });
       } else {
         await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
@@ -384,13 +409,17 @@ function DealRoomShareDialogContent({
                     documents={data?.documents ?? []}
                   />
                 </TabsContent>
-                <TabsContent value="access">
+                <TabsContent value="access" className="space-y-4">
+                  {selectedLink ? (
+                    <LinkAccessRequestsPanel linkId={selectedLink.id} onChanged={() => { void refetch(); }} />
+                  ) : null}
                   <AccessTab
                     draft={draft}
                     updateDraft={updateDraft}
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
                     isDealRoomLink={isDealRoomLink}
+                    ndaTemplates={ndaTemplates}
                     documents={(data?.documents ?? [])
                       .flatMap((folder) => folder.documents ?? [])
                       .map((d) => ({ id: d.document_id, title: d.title }))}
@@ -401,7 +430,10 @@ function DealRoomShareDialogContent({
                     folders={data?.folders ?? []}
                     documents={data?.documents ?? []}
                     selectedPaths={draft.folderPaths}
-                    onChange={(paths) => updateDraft({ folderPaths: paths })}
+                    scopeMode={draft.folderScopeMode}
+                    onChange={({ scopeMode, selectedPaths }) =>
+                      updateDraft({ folderScopeMode: scopeMode, folderPaths: selectedPaths })
+                    }
                   />
                 </TabsContent>
 

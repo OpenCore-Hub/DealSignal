@@ -20,6 +20,7 @@ import {
   mockDocuments,
   mockHeatAlerts,
   mockLinks,
+  mockLinkAccessRequests,
   mockPageAnalytics,
   mockSignals,
   mockSuggestions,
@@ -383,6 +384,7 @@ export const handlers = [
     const payload = (await request.json()) as {
       document_ids?: string[];
       folder_paths?: string[];
+      folder_scope_mode?: "full" | "allowlist";
       name?: string;
       permission_type?: string;
       require_email_verification?: boolean;
@@ -399,8 +401,13 @@ export const handlers = [
     };
     // Update the in-memory link to reflect the edited values so subsequent reads
     // (including tests) see the new state.
-    if (payload.folder_paths && payload.folder_paths.length > 0) {
+    if (payload.folder_paths !== undefined) {
       link.folderPaths = payload.folder_paths;
+    }
+    if (payload.folder_scope_mode === "full" || payload.folder_scope_mode === "allowlist") {
+      link.folderScopeMode = payload.folder_scope_mode;
+    } else if (payload.folder_paths !== undefined) {
+      link.folderScopeMode = "allowlist";
     }
     if (payload.document_ids && payload.document_ids.length > 0) {
       link.documentIds = payload.document_ids;
@@ -448,9 +455,138 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/links/:id/access-logs", ({ params }) => {
-    return HttpResponse.json({ data: mockAccessLogs.filter((l) => l.linkId === params.id) });
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/access-requests", ({ params }) => {
+    const linkId = params.id as string;
+    const data = mockLinkAccessRequests.filter((r) => r.link_id === linkId);
+    return HttpResponse.json({ data });
   }),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/links/:id/access-requests/:requestId/approve",
+    ({ params }) => {
+      const req = mockLinkAccessRequests.find(
+        (r) => r.id === params.requestId && r.link_id === params.id
+      );
+      if (!req) return new HttpResponse(null, { status: 404 });
+      req.status = "approved";
+      req.updated_at = new Date().toISOString();
+      const existing = mockContacts.find(
+        (c) => c.email.toLowerCase() === req.email.toLowerCase()
+      );
+      if (existing) {
+        if (req.signer_name && !existing.name) {
+          existing.name = req.signer_name;
+        }
+      } else {
+        mockContacts.unshift({
+          id: generateId("contact"),
+          email: req.email,
+          name: req.signer_name ?? "",
+          organization: "",
+          role: "",
+          heatLevel: "cold",
+          score: 0,
+          scoreHistory: [],
+          totalVisits: 0,
+          totalDurationSeconds: 0,
+          viewedDocuments: [],
+        });
+      }
+      return HttpResponse.json({ data: req });
+    }
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/links/:id/access-requests/:requestId/reject",
+    ({ params }) => {
+      const req = mockLinkAccessRequests.find(
+        (r) => r.id === params.requestId && r.link_id === params.id
+      );
+      if (!req) return new HttpResponse(null, { status: 404 });
+      req.status = "rejected";
+      req.updated_at = new Date().toISOString();
+      return HttpResponse.json({ data: req });
+    }
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/access-logs", ({ params, request }) => {
+    const url = new URL(request.url);
+    const limitParam = Number(url.searchParams.get("limit"));
+    const offsetParam = Number(url.searchParams.get("offset"));
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 200;
+    const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+    const all = mockAccessLogs.filter((l) => l.linkId === params.id);
+    const data = all.slice(offset, offset + limit);
+    return HttpResponse.json({
+      data,
+      has_more: offset + data.length < all.length,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/analytics/visitors", ({ params, request }) => {
+    const url = new URL(request.url);
+    const limitParam = Number(url.searchParams.get("limit"));
+    const offsetParam = Number(url.searchParams.get("offset"));
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 10;
+    const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+
+    const byVisitor = new Map<
+      string,
+      {
+        visitor_id: string;
+        visitor_email?: string;
+        first_access_at: string;
+        last_access_at: string;
+        total_views: number;
+      }
+    >();
+    for (const log of mockAccessLogs.filter((l) => l.linkId === params.id)) {
+      const visitorId = log.visitorEmail || log.id;
+      const prev = byVisitor.get(visitorId);
+      if (!prev) {
+        byVisitor.set(visitorId, {
+          visitor_id: visitorId,
+          visitor_email: log.visitorEmail || undefined,
+          first_access_at: log.timestamp,
+          last_access_at: log.timestamp,
+          total_views: 1,
+        });
+        continue;
+      }
+      prev.total_views += 1;
+      if (log.timestamp < prev.first_access_at) prev.first_access_at = log.timestamp;
+      if (log.timestamp > prev.last_access_at) prev.last_access_at = log.timestamp;
+    }
+
+    const all = [...byVisitor.values()].sort((a, b) => {
+      const byTime = b.last_access_at.localeCompare(a.last_access_at);
+      if (byTime !== 0) return byTime;
+      return a.visitor_id.localeCompare(b.visitor_id);
+    });
+    const data = all.slice(offset, offset + limit);
+    return HttpResponse.json({
+      data,
+      has_more: offset + data.length < all.length,
+    });
+  }),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/links/:id/analytics/access-code-contacts",
+    ({ request }) => {
+      const url = new URL(request.url);
+      const limitParam = Number(url.searchParams.get("limit"));
+      const offsetParam = Number(url.searchParams.get("offset"));
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 10;
+      const offset = Number.isFinite(offsetParam) && offsetParam > 0 ? offsetParam : 0;
+      // MSW fixture: empty by default; e2e seeds come from real API.
+      const all: unknown[] = [];
+      const data = all.slice(offset, offset + limit);
+      return HttpResponse.json({
+        data,
+        has_more: offset + data.length < all.length,
+      });
+    },
+  ),
 
   http.post("*/api/workspaces/:workspaceSlug/links", async ({ request }) => {
     const body = (await request.json()) as {

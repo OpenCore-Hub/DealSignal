@@ -133,7 +133,7 @@ func (s *Service) SyncContacts(ctx context.Context, workspaceID string) error {
 		_, err := s.queries.UpsertContactByEmail(ctx, db.UpsertContactByEmailParams{
 			WorkspaceID: wsUUID,
 			Email:       email,
-			Column3:     pgtype.Text{},
+			Name:        "",
 		})
 		if err != nil {
 			return fmt.Errorf("upsert contact %s: %w", email.String, err)

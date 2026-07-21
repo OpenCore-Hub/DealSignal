@@ -48,6 +48,7 @@ const baseDraft: DraftLink = {
   watermarkEnabled: false,
   requireNda: false,
   ndaDocumentId: "",
+  ndaTemplateId: "",
   allowDownloading: false,
   aiCopilotEnabled: false,
   enableScreenshotProtection: false,
@@ -59,6 +60,7 @@ const baseDraft: DraftLink = {
   customDomain: "",
   notifyOnAccess: false,
   folderPaths: [],
+  folderScopeMode: "allowlist",
   contactIds: [],
 };
 
@@ -169,7 +171,7 @@ describe("AccessTab", () => {
     expect(updateDraft).toHaveBeenCalledWith({ watermarkEnabled: true });
 
     fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireNda: true, ndaDocumentId: "" });
+    expect(updateDraft).toHaveBeenCalledWith({ requireNda: true, ndaDocumentId: "", ndaTemplateId: "" });
 
     fireEvent.click(screen.getByRole("switch", { name: /allow downloading/i }));
     expect(updateDraft).toHaveBeenCalledWith({ allowDownloading: true });
@@ -242,6 +244,24 @@ describe("AccessTab", () => {
     expect(screen.getByText(/Select a document/i)).toBeInTheDocument();
   });
 
+  it("selects an NDA document without toggling controlled state", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, requireNda: true },
+      {},
+      true,
+      [
+        { id: "doc-1", title: "NDA v1" },
+        { id: "doc-2", title: "NDA v2" },
+      ]
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: /NDA agreement document/i }));
+    fireEvent.click(screen.getByRole("option", { name: "NDA v1" }));
+    expect(updateDraft).toHaveBeenCalledWith({
+      ndaTemplateId: "",
+      ndaDocumentId: "doc-1",
+    });
+  });
+
   it("shows NDA document required error", () => {
     renderAccessTab(
       { ...baseDraft, requireNda: true },
@@ -260,6 +280,6 @@ describe("AccessTab", () => {
       [{ id: "doc-1", title: "NDA v1" }]
     );
     fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireNda: false, ndaDocumentId: "" });
+    expect(updateDraft).toHaveBeenCalledWith({ requireNda: false, ndaDocumentId: "", ndaTemplateId: "" });
   });
 });

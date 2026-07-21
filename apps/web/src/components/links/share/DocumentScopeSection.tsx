@@ -9,7 +9,8 @@ interface DocumentScopeSectionProps {
   folders: DealRoomFolder[];
   documents: DealRoomFolderDocs[];
   selectedPaths: string[];
-  onChange: (paths: string[]) => void;
+  scopeMode: "full" | "allowlist";
+  onChange: (next: { scopeMode: "full" | "allowlist"; selectedPaths: string[] }) => void;
   disabled?: boolean;
 }
 
@@ -203,61 +204,75 @@ export function DocumentScopeSection({
   folders,
   documents,
   selectedPaths,
+  scopeMode,
   onChange,
   disabled,
 }: DocumentScopeSectionProps) {
   const { t } = useTranslation("linkShare");
 
   const tree = useMemo(() => buildFolderTree(folders), [folders]);
+  const allRootPaths = useMemo(
+    () => (tree.length > 0 ? tree.map((node) => node.folder.path) : folders.map((f) => f.path)),
+    [tree, folders]
+  );
+  // Legacy full mode is displayed as all roots checked until the owner edits scope.
+  const effectivePaths = scopeMode === "full" ? allRootPaths : selectedPaths;
   const directCounts = useMemo(
     () => countDocumentsByPath(documents),
     [documents]
   );
   const totalDocs = useMemo(
-    () => totalDocumentsInScope(documents, selectedPaths),
-    [documents, selectedPaths]
+    () => totalDocumentsInScope(documents, effectivePaths),
+    [documents, effectivePaths]
   );
-  const selectedCount = selectedPaths.length;
+  const selectedCount = effectivePaths.length;
+
+  const emitAllowlist = (paths: string[]) => {
+    onChange({ scopeMode: "allowlist", selectedPaths: paths });
+  };
 
   const handleToggle = (path: string) => {
     if (disabled) return;
-    onChange(togglePath(path, selectedPaths));
+    const base = scopeMode === "full" ? allRootPaths : selectedPaths;
+    emitAllowlist(togglePath(path, base));
   };
 
   const handleClearAll = () => {
     if (disabled) return;
-    // Empty selection means the whole deal room is accessible.
-    onChange([]);
+    // Empty allowlist denies all visitor document access.
+    emitAllowlist([]);
   };
 
   const handleSelectAll = () => {
     if (disabled) return;
-    // Select all root folder paths; selecting roots covers all descendants.
-    const allRootPaths =
-      tree.length > 0 ? tree.map((node) => node.folder.path) : folders.map((f) => f.path);
-    onChange(allRootPaths);
+    emitAllowlist(allRootPaths);
   };
 
-  const isScoped = selectedPaths.length > 0;
+  const isAllowlist = scopeMode === "allowlist";
+  const hasSelection = effectivePaths.length > 0;
 
   return (
     <div className="flex h-full flex-col space-y-3 rounded-lg border border-border bg-muted/30 p-4">
       <div className="flex items-center justify-between gap-2">
         <p className="text-xs text-muted-foreground">
-          {isScoped
-            ? t("share.documentScope.selectedDocuments", {
-                folders: selectedCount,
-                documents: totalDocs,
-              })
-            : t("share.documentScope.allDocuments")}
+          {scopeMode === "full"
+            ? t("share.documentScope.legacyAllDocuments")
+            : hasSelection
+              ? t("share.documentScope.selectedDocuments", {
+                  folders: selectedCount,
+                  documents: totalDocs,
+                })
+              : t("share.documentScope.noneAuthorized")}
         </p>
         <button
           type="button"
           disabled={disabled}
-          onClick={isScoped ? handleClearAll : handleSelectAll}
+          onClick={isAllowlist && hasSelection ? handleClearAll : handleSelectAll}
           className="shrink-0 text-xs text-primary hover:underline disabled:pointer-events-none disabled:text-muted-foreground"
         >
-          {isScoped ? t("share.documentScope.deselectAll") : t("share.documentScope.selectAll")}
+          {isAllowlist && hasSelection
+            ? t("share.documentScope.deselectAll")
+            : t("share.documentScope.selectAll")}
         </button>
       </div>
 
@@ -271,7 +286,7 @@ export function DocumentScopeSection({
                 key={folder.path}
                 node={{ folder, children: [] }}
                 depth={0}
-                selectedPaths={selectedPaths}
+                selectedPaths={effectivePaths}
                 directCounts={directCounts}
                 onToggle={handleToggle}
               />
@@ -282,7 +297,7 @@ export function DocumentScopeSection({
                 key={node.folder.path}
                 node={node}
                 depth={0}
-                selectedPaths={selectedPaths}
+                selectedPaths={effectivePaths}
                 directCounts={directCounts}
                 onToggle={handleToggle}
               />

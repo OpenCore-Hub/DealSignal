@@ -102,6 +102,7 @@ describe("isPresetMatch", () => {
       customDomain: "",
       notifyOnAccess: false,
       folderPaths: [],
+      folderScopeMode: "allowlist",
       contactIds: [],
     };
     expect(isPresetMatch("public", draft)).toBe(true);

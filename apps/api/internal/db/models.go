@@ -306,6 +306,8 @@ type Link struct {
 	HasDocumentScope            bool
 	FolderScopePaths            []string
 	NdaDocumentID               pgtype.UUID
+	FolderScopeMode             string
+	NdaTemplateID               pgtype.UUID
 }
 
 type LinkAccessRequest struct {
@@ -320,6 +322,7 @@ type LinkAccessRequest struct {
 	ReviewedAt  pgtype.Timestamptz
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
+	SignerName  pgtype.Text
 }
 
 type LinkAccessRule struct {
@@ -443,16 +446,22 @@ type LinkInvitation struct {
 }
 
 type LinkNdaAgreement struct {
-	ID          pgtype.UUID
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	LinkID      pgtype.UUID
-	VisitorID   pgtype.Text
-	Email       pgtype.Text
-	Ip          pgtype.Text
-	UserAgent   pgtype.Text
-	NdaAgreed   bool
-	SignedAt    pgtype.Timestamptz
+	ID            pgtype.UUID
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	LinkID        pgtype.UUID
+	VisitorID     pgtype.Text
+	Email         pgtype.Text
+	Ip            pgtype.Text
+	UserAgent     pgtype.Text
+	NdaAgreed     bool
+	SignedAt      pgtype.Timestamptz
+	NdaTemplateID pgtype.UUID
+	ContentSha256 string
+	SignerName    string
+	CertificateID string
+	SignedFileKey string
+	Status        string
 }
 
 type LinkUploadedFile struct {
@@ -489,6 +498,20 @@ type LinkVisitorQuestion struct {
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
 	IntentTag    string
+}
+
+type NdaTemplate struct {
+	ID                pgtype.UUID
+	TenantID          pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	Name              string
+	SourceDocumentID  pgtype.UUID
+	ContentSha256     string
+	RequireSignerName bool
+	Status            string
+	CreatedBy         pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
 }
 
 type Notification struct {

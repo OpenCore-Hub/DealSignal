@@ -60,6 +60,8 @@ export interface Link {
   documentId: string;
   documentIds: string[];
   folderPaths: string[];
+  /** Deal-room folder scope mode. Missing/undefined treated as allowlist for new drafts. */
+  folderScopeMode?: "full" | "allowlist";
   documentTitle: string;
   name?: string;
   shortUrl: string;
@@ -97,6 +99,8 @@ export interface Link {
   requireNda?: boolean;
   /** NDA agreement document ID when requireNda is enabled. */
   ndaDocumentId?: string;
+  /** Workspace NDA template ID when requireNda is enabled. */
+  ndaTemplateId?: string;
   /** Explicit password requirement flag (available from v2.6+ backend). */
   requirePassword?: boolean;
   /** Deal room ID when this is a deal-room share link (available from v2.6+ backend). */
@@ -140,6 +144,7 @@ export interface LinkAccessRequest {
   link_id: string;
   email: string;
   reason?: string;
+  signer_name?: string;
   status: "pending" | "approved" | "rejected";
   created_at: string;
   updated_at: string;
@@ -273,6 +278,7 @@ export interface LinkAnalytics {
     last_access_at: string;
     total_views: number;
   }[];
+  recent_visitors_has_more?: boolean;
   key_pages: {
     page_number: number;
     views: number;
@@ -293,7 +299,14 @@ export interface LinkAnalytics {
     used_at?: string;
     can_resend?: boolean;
   }[];
+  access_code_contacts_has_more?: boolean;
+  access_code_failed_count?: number;
+  access_code_remediable_count?: number;
 }
+
+export type LinkAccessCodeContact = NonNullable<LinkAnalytics["access_code_contacts"]>[number];
+
+export type LinkRecentVisitor = LinkAnalytics["recent_visitors"][number];
 
 export interface VisitorSummary {
   visitorId: string;

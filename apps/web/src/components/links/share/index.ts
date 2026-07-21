@@ -1,3 +1,4 @@
+export { LinkAccessRequestsPanel } from "./LinkAccessRequestsPanel";
 export { ShareTab } from "./ShareTab";
 export { AccessTab } from "./AccessTab";
 export { AnalyticsTab } from "./AnalyticsTab";
@@ -11,7 +12,7 @@ export { CopyButton } from "./CopyButton";
 export { CollapsibleSection } from "./CollapsibleSection";
 export { DocumentScopeSection } from "./DocumentScopeSection";
 export { PRESETS, isPresetMatch, PRESET_NAMES, applyPreset } from "./presets";
-export type { DraftLink, LinkPreset } from "./types";
+export type { DraftLink, LinkPreset, FolderScopeMode } from "./types";
 export {
   buildDraft,
   buildRules,

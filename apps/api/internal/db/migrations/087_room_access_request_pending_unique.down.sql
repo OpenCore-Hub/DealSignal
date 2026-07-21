@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_room_access_requests_pending_room_email;

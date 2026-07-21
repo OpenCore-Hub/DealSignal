@@ -12,6 +12,17 @@
   "documentCount": "{{count}} 文档",
   "memberCount": "{{count}} 成员",
   "pendingApprovals": "{{count}} 待审批",
+  "accessRequests": {
+    "title": "数据室访问申请",
+    "description": "访客申请加入此数据室的请求。批准后将激活为查看者。",
+    "approve": "批准",
+    "reject": "拒绝",
+    "approveSuccess": "已批准访问申请",
+    "approveError": "批准访问申请失败",
+    "rejectSuccess": "已拒绝访问申请",
+    "rejectError": "拒绝访问申请失败",
+    "loadFailed": "加载访问申请失败"
+  },
   "lastAccessed": "最近访问 {{time}}",
   "search": {
     "placeholder": "搜索数据室..."
@@ -65,7 +76,8 @@
     "settings": "设置"
   },
   "sidebar": {
-    "label": "数据室导航"
+    "label": "数据室导航",
+    "backToRooms": "全部数据室"
   },
   "share": {
     "title": "分享",
@@ -197,11 +209,68 @@
     "documents": "文档",
     "noVisitors": "暂无访客",
     "title": "活动",
-    "comingSoon": "详细活动日志功能即将上线。"
+    "comingSoon": "详细活动日志功能即将上线。",
+    "description": "本数据室分享链接的最近访问事件。",
+    "emptyTitle": "暂无活动",
+    "emptyDescription": "访客打开分享链接后，最近访问会显示在这里。",
+    "goShare": "管理分享链接",
+    "goAnalytics": "查看分析",
+    "linkFallback": "分享链接",
+    "linkViews_one": "{{count}} 次访问",
+    "linkViews_other": "{{count}} 次访问"
   },
   "settings": {
     "title": "数据室设置",
-    "comingSoon": "数据室设置功能即将上线。"
+    "comingSoon": "数据室设置功能即将上线。",
+    "description": "当前房间策略一览。可编辑控件将逐步完善。",
+    "moreComing": "冻结房间、默认水印与保留策略即将上线。",
+    "inviteMembers": "邀请成员",
+    "enabled": "开启",
+    "disabled": "关闭",
+    "fields": {
+      "stage": "阶段",
+      "status": "状态",
+      "nda": "需要 NDA",
+      "requiresApproval": "访问审批",
+      "members": "成员数"
+    },
+    "stage": {
+      "preparing": "筹备中",
+      "open": "开放中"
+    },
+    "stageHint": "由是否存在活跃分享链接推导。",
+    "status": {
+      "active": "活跃",
+      "archived": "已归档",
+      "pending": "待处理"
+    }
+  },
+  "documentsHome": {
+    "commandStripLabel": "数据室就绪摘要",
+    "descriptionShow": "显示描述",
+    "descriptionHide": "隐藏描述",
+    "metrics": {
+      "documents": "文档",
+      "activeLinks": "活跃链接",
+      "views": "访问"
+    },
+    "attention": {
+      "failedDeliveries_one": "{{count}} 个验证码发送失败 — 前往分享处理",
+      "failedDeliveries_other": "{{count}} 个验证码发送失败 — 前往分享处理",
+      "unreadQuestions_one": "{{count}} 个未答问题 — 打开问答",
+      "unreadQuestions_other": "{{count}} 个未答问题 — 打开问答",
+      "noActiveLinks": "尚无活跃分享链接 — 前往分享创建"
+    },
+    "readiness": {
+      "emptyTitle": "添加第一份文档",
+      "emptyDescription": "上传或关联文件，开始为本数据室的对外分享做准备。",
+      "emptyCta": "上传第一份文档",
+      "requiredTitle": "仍缺推荐材料",
+      "requiredDescription_one": "还有 {{count}} 份推荐文件未放入本数据室。",
+      "requiredDescription_other": "还有 {{count}} 份推荐文件未放入本数据室。",
+      "requiredCta": "上传 {{name}}",
+      "more": "另有 {{count}} 个"
+    }
   },
   "participants": {
     "title": "访客"
@@ -235,9 +304,13 @@
       "actions": {
         "view": "查看活动",
         "edit": "编辑",
+        "approveRequests": "审批访问申请",
         "sendCode": "发送验证码",
         "delete": "删除"
       },
+      "pendingRequestsBadge": "{{count}} 待审批",
+      "pendingRequestsBanner": "有 {{count}} 条访问申请待审批。打开对应链接，在「访问控制」中批准或拒绝。",
+      "pendingRequestsLoadFailed": "加载待审批访问申请失败",
       "sendCode": {
         "title": "发送验证码",
         "description": "选择允许访问的访客，向其邮箱重新发送一次性访问验证码。已过滤禁止访问的访客。",

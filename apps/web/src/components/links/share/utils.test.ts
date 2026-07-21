@@ -13,6 +13,7 @@ const baseDraft: DraftLink = {
   watermarkEnabled: false,
   requireNda: false,
   ndaDocumentId: "",
+  ndaTemplateId: "",
   allowDownloading: false,
   enableScreenshotProtection: false,
   aiCopilotEnabled: false,
@@ -24,6 +25,7 @@ const baseDraft: DraftLink = {
   customDomain: "",
   notifyOnAccess: false,
   folderPaths: [],
+  folderScopeMode: "allowlist",
   contactIds: [],
 };
 
@@ -128,6 +130,28 @@ describe("buildLinkPayload", () => {
     };
     const payload = buildLinkPayload(draft);
     expect(payload.permission_type).toBe("nda");
+  });
+
+  it("sends allowlist folder_paths including empty deny-all", () => {
+    const draft: DraftLink = {
+      ...baseDraft,
+      folderScopeMode: "allowlist",
+      folderPaths: [],
+    };
+    const payload = buildLinkPayload(draft);
+    expect(payload.folder_scope_mode).toBe("allowlist");
+    expect(payload.folder_paths).toEqual([]);
+  });
+
+  it("omits folder_paths when preserving legacy full mode", () => {
+    const draft: DraftLink = {
+      ...baseDraft,
+      folderScopeMode: "full",
+      folderPaths: [],
+    };
+    const payload = buildLinkPayload(draft);
+    expect(payload.folder_scope_mode).toBe("full");
+    expect(payload.folder_paths).toBeUndefined();
   });
 });
 

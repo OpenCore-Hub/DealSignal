@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 )
 
 func TestLinkSessionRoundTrip(t *testing.T) {
@@ -170,7 +172,6 @@ func TestLinkSessionPasswordNotStored(t *testing.T) {
 // config changes (security_version increments past the session's SecurityVersion),
 // the session should be invalidated at the call site.
 func TestLinkSessionSecurityVersionInvalidation(t *testing.T) {
-	// Simulate link at security_version=1, session issued at v=1, link bumped to v=2.
 	session := LinkSession{
 		PublicToken:     "tok",
 		Email:           "alice@example.com",
@@ -178,23 +179,21 @@ func TestLinkSessionSecurityVersionInvalidation(t *testing.T) {
 		SecurityVersion: 1,
 	}
 
-	// Condition that should invalidate: link.SecurityVersion != session.SecurityVersion
-	configChanged := session.SecurityVersion > 0 && 2 != session.SecurityVersion
-	if !configChanged {
+	if !sessionSecurityConfigChanged(db.Link{SecurityVersion: 2}, session) {
 		t.Error("session should be invalidated when link security_version was bumped")
 	}
 
-	// Condition that should pass: link.SecurityVersion == session.SecurityVersion
-	configChanged = session.SecurityVersion > 0 && 1 != session.SecurityVersion
-	if configChanged {
+	if sessionSecurityConfigChanged(db.Link{SecurityVersion: 1}, session) {
 		t.Error("session should NOT be invalidated when link security_version matches session")
 	}
 
-	// Backward compatibility: SecurityVersion=0 (old sessions) should never invalidate.
+	// Legacy sessions (SecurityVersion=0) must be invalidated once the link is versioned.
 	session.SecurityVersion = 0
-	configChanged = session.SecurityVersion > 0 && 2 != session.SecurityVersion
-	if configChanged {
-		t.Error("old sessions (SecurityVersion=0) should NOT be invalidated (backward compat)")
+	if !sessionSecurityConfigChanged(db.Link{SecurityVersion: 2}, session) {
+		t.Error("legacy sessions (SecurityVersion=0) must be invalidated when link.SecurityVersion > 0")
+	}
+	if sessionSecurityConfigChanged(db.Link{SecurityVersion: 0}, session) {
+		t.Error("legacy sessions should remain valid when link.SecurityVersion is still 0")
 	}
 }
 

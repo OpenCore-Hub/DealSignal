@@ -15,6 +15,8 @@ i18nInstance.use(initReactI18next).init({
         share: {
           documentScope: {
             allDocuments: "All documents accessible",
+            legacyAllDocuments: "All documents accessible (legacy)",
+            noneAuthorized: "No folders authorized — visitors cannot preview any files",
             selectedDocuments: "{{folders}} folders / {{documents}} documents",
             selectAll: "Select all",
             deselectAll: "Deselect",
@@ -51,6 +53,7 @@ describe("DocumentsTab", () => {
           folders={folders}
           documents={documents}
           selectedPaths={[]}
+          scopeMode="allowlist"
           onChange={onChange}
         />
       </Wrapper>
@@ -61,6 +64,9 @@ describe("DocumentsTab", () => {
     const row = screen.getByTestId("folder-row-/financials");
     const checkbox = row.querySelector('[role="checkbox"]') as HTMLElement;
     fireEvent.click(checkbox);
-    expect(onChange).toHaveBeenCalledWith(["/financials"]);
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials"],
+    });
   });
 });

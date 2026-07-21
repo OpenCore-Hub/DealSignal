@@ -150,6 +150,10 @@ func (h *Handler) Get(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
 			return
 		}
+		if errors.Is(err, ErrApprovalRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -247,13 +251,17 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	request, err := h.service.CreateAccessRequest(c.Request.Context(), c.Param("slug"), req.Email, req.Reason)
+	request, err := h.service.CreateAccessRequest(c.Request.Context(), c.Param("slug"), req.Email, req.Reason, c.ClientIP())
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
 		case errors.Is(err, ErrInvalidEmail):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+		case errors.Is(err, ErrRateLimited):
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": err.Error()})
+		case errors.Is(err, ErrAccessRequestExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		}
@@ -275,7 +283,18 @@ func (h *Handler) RecordNDA(c *gin.Context) {
 		return
 	}
 	if err := h.service.RecordNDA(c.Request.Context(), c.Param("slug"), req.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		switch {
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		case errors.Is(err, ErrMemberNotFound):
+			c.JSON(http.StatusForbidden, gin.H{"code": "member_not_found", "message": err.Error()})
+		case errors.Is(err, ErrNDANotRequired):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_not_required", "message": err.Error()})
+		case errors.Is(err, ErrInvalidEmail):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -339,6 +358,12 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrMemberNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": err.Error()})
+		case errors.Is(err, ErrInvalidEmail):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		}
@@ -349,10 +374,19 @@ func (h *Handler) SetFolderPermission(c *gin.Context) {
 
 // ListFolders returns the folder structure of a room.
 func (h *Handler) ListFolders(c *gin.Context) {
-	folders, err := h.service.ListFolders(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
+	folders, err := h.service.ListFoldersForMember(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+	)
 	if err != nil {
 		if errors.Is(err, ErrRoomNotFound) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			return
+		}
+		if errors.Is(err, ErrApprovalRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
