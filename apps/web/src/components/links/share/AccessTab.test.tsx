@@ -65,22 +65,39 @@ const baseDraft: DraftLink = {
 };
 
 describe("AccessTab", () => {
-  it("toggles require email", () => {
+  it("toggles require email and clears verification", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
     expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true, requireEmailVerification: false });
   });
 
-  it("toggles verification independently of email", () => {
+  it("toggles verification mutually exclusive with email", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email verification/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ requireEmailVerification: true, requireEmail: true });
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmailVerification: true, requireEmail: false });
   });
 
-  it("disabling email also disables verification", () => {
-    const { updateDraft } = renderAccessTab({ ...baseDraft, requireEmail: true, requireEmailVerification: true });
+  it("enabling email turns off verification", () => {
+    const { updateDraft } = renderAccessTab({
+      ...baseDraft,
+      requireEmail: false,
+      requireEmailVerification: true,
+    });
+    fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
+    expect(updateDraft).toHaveBeenCalledWith({ requireEmail: true, requireEmailVerification: false });
+  });
+
+  it("disabling email clears email without keeping verification", () => {
+    const { updateDraft } = renderAccessTab({ ...baseDraft, requireEmail: true, requireEmailVerification: false });
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
     expect(updateDraft).toHaveBeenCalledWith({ requireEmail: false, requireEmailVerification: false });
+  });
+
+  it("shows email identity mutual-exclusion hint", () => {
+    renderAccessTab(baseDraft);
+    expect(
+      screen.getByText(/Choose one: ask visitors to enter an email, or verify with a one-time code/i)
+    ).toBeInTheDocument();
   });
 
   it("disables verification toggle for non-deal-room links", () => {
@@ -179,7 +196,7 @@ describe("AccessTab", () => {
 
   it("toggles screenshot protection switch", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
-    const switchEl = screen.getByRole("switch", { name: /screenshot protection/i });
+    const switchEl = screen.getByRole("switch", { name: /reduce leak risk/i });
     expect(switchEl).not.toBeDisabled();
     fireEvent.click(switchEl);
     expect(updateDraft).toHaveBeenCalledWith({ enableScreenshotProtection: true });

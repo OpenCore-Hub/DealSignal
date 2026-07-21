@@ -55,10 +55,11 @@
     "savedDescription": "Changes take effect immediately; existing viewer sessions will be invalidated.",
     "authentication": {
       "title": "Authentication",
+      "emailIdentityHint": "Choose one: ask visitors to enter an email, or verify with a one-time code (not both).",
       "requireEmail": "Require email to view",
-      "requireEmailDescription": "Only verified emails can access",
+      "requireEmailDescription": "Visitor must enter their email to access",
       "requireVerification": "Require email verification",
-      "requireVerificationDescription": "Send a one-time code to the viewer's email",
+      "requireVerificationDescription": "Send a one-time code; identity comes from the code (no email field on the visitor page)",
       "verificationDisabledForDocuments": "Email verification requires contacts and is only available for deal room links",
       "requirePassword": "Require password to view",
       "requirePasswordDescription": "Viewer must enter a password",

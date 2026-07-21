@@ -136,10 +136,11 @@
     "savedDescription": "更改立即生效；现有访客会话将失效。",
     "authentication": {
       "title": "身份验证",
+      "emailIdentityHint": "二选一：要求访客填写邮箱，或通过一次性验证码验证（不可同时开启）。",
       "requireEmail": "要求邮箱查看",
-      "requireEmailDescription": "仅验证过的邮箱可访问",
+      "requireEmailDescription": "访客需输入邮箱才能访问",
       "requireVerification": "要求邮箱验证",
-      "requireVerificationDescription": "向访客邮箱发送一次性验证码",
+      "requireVerificationDescription": "向访客邮箱发送一次性验证码；身份由验证码绑定（访客页无需再填邮箱）",
       "requirePassword": "要求密码查看",
       "requirePasswordDescription": "访客必须输入密码",
       "passwordPlaceholder": "输入密码"

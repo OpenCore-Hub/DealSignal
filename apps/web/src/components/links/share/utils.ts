@@ -37,6 +37,20 @@ export function toRFC3339(localValue: string): string {
   return `${localValue}:00${sign}${hh}:${mm}`;
 }
 
+/**
+ * Email self-report and email verification are mutually exclusive identity gates.
+ * When both are true (legacy links), prefer verification — the stronger signal.
+ */
+export function normalizeEmailIdentityGates(
+  requireEmail: boolean,
+  requireEmailVerification: boolean
+): { requireEmail: boolean; requireEmailVerification: boolean } {
+  if (requireEmailVerification) {
+    return { requireEmail: false, requireEmailVerification: true };
+  }
+  return { requireEmail, requireEmailVerification: false };
+}
+
 export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink {
   const allowedViewers: string[] = [];
   const blockedViewers: string[] = [];
@@ -51,11 +65,15 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
   }
 
   if (link) {
+    const identity = normalizeEmailIdentityGates(
+      link.requireEmail ?? false,
+      link.requireEmailVerification ?? false
+    );
     return {
       name: link.name ?? "",
       expiresAt: toDateTimeLocal(link.expiresAt),
-      requireEmail: link.requireEmail ?? false,
-      requireEmailVerification: link.requireEmailVerification ?? false,
+      requireEmail: identity.requireEmail,
+      requireEmailVerification: identity.requireEmailVerification,
       requirePassword: link.requirePassword ?? false,
       password: "",
       watermarkEnabled: link.watermarkEnabled ?? false,
@@ -135,9 +153,10 @@ export function buildAllowedLists(draft: DraftLink): {
 }
 
 export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): UpdateLinkPayload {
+  const identity = normalizeEmailIdentityGates(draft.requireEmail, draft.requireEmailVerification);
   const permissionType = draft.requireNda
     ? "nda"
-    : draft.requireEmailVerification || draft.requireEmail
+    : identity.requireEmailVerification || identity.requireEmail
       ? "email_required"
       : "public";
   return {
@@ -150,8 +169,8 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
       : {}),
     name: draft.name.trim(),
     permission_type: permissionType,
-    require_email: draft.requireEmail,
-    require_email_verification: draft.requireEmailVerification,
+    require_email: identity.requireEmail,
+    require_email_verification: identity.requireEmailVerification,
     require_password: draft.requirePassword,
     require_nda: draft.requireNda,
     nda_template_id: draft.requireNda ? (draft.ndaTemplateId || undefined) : undefined,
@@ -168,7 +187,7 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
     custom_domain: draft.customDomain || undefined,
     notify_on_access: draft.notifyOnAccess,
     contact_ids:
-      draft.requireEmailVerification && !existingLink?.dealRoomId && draft.contactIds.length > 0
+      identity.requireEmailVerification && !existingLink?.dealRoomId && draft.contactIds.length > 0
         ? draft.contactIds
         : undefined,
   };

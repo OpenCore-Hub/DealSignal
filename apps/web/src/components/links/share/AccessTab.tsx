@@ -145,14 +145,16 @@ export function AccessTab({
   const handleRequireEmailChange = (checked: boolean) => {
     updateDraft({
       requireEmail: checked,
-      requireEmailVerification: checked ? draft.requireEmailVerification : false,
+      // Mutually exclusive with verification — identity is either self-reported or code-proven.
+      requireEmailVerification: false,
     });
   };
 
   const handleRequireVerificationChange = (checked: boolean) => {
     updateDraft({
       requireEmailVerification: checked,
-      requireEmail: checked ? true : draft.requireEmail,
+      // Mutually exclusive with email self-report; code resolves the visitor email.
+      requireEmail: false,
     });
   };
 
@@ -207,6 +209,9 @@ export function AccessTab({
     <div className="space-y-6 py-2">
       <div className="space-y-4">
         <h4 className="text-sm font-medium">{t("accessRules.authentication.title")}</h4>
+        <p className="text-xs text-muted-foreground">
+          {t("accessRules.authentication.emailIdentityHint")}
+        </p>
         <OptionSwitch
           label={t("accessRules.authentication.requireEmail")}
           description={t("accessRules.authentication.requireEmailDescription")}

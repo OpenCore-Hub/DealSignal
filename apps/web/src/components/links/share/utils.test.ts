@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAllowedLists, buildDraft, buildLinkPayload, buildRules, toDateTimeLocal, toRFC3339, validateDraft, isValidCustomDomain } from "./utils";
+import { buildAllowedLists, buildDraft, buildLinkPayload, buildRules, toDateTimeLocal, toRFC3339, validateDraft, isValidCustomDomain, normalizeEmailIdentityGates } from "./utils";
 import type { DraftLink } from "./types";
 import type { AccessRule, Link } from "@/types";
 
@@ -59,7 +59,39 @@ describe("toDateTimeLocal", () => {
   });
 });
 
+describe("normalizeEmailIdentityGates", () => {
+  it("prefers verification when both are true", () => {
+    expect(normalizeEmailIdentityGates(true, true)).toEqual({
+      requireEmail: false,
+      requireEmailVerification: true,
+    });
+  });
+
+  it("keeps email-only and verification-only unchanged", () => {
+    expect(normalizeEmailIdentityGates(true, false)).toEqual({
+      requireEmail: true,
+      requireEmailVerification: false,
+    });
+    expect(normalizeEmailIdentityGates(false, true)).toEqual({
+      requireEmail: false,
+      requireEmailVerification: true,
+    });
+  });
+});
+
 describe("buildLinkPayload", () => {
+  it("normalizes legacy both-true identity to verification-only on save", () => {
+    const draft: DraftLink = {
+      ...baseDraft,
+      requireEmail: true,
+      requireEmailVerification: true,
+      allowedViewers: ["alice@vc.com"],
+    };
+    const payload = buildLinkPayload(draft);
+    expect(payload.require_email).toBe(false);
+    expect(payload.require_email_verification).toBe(true);
+  });
+
   it("formats expires_at as RFC3339 when set", () => {
     const draft = { ...baseDraft, expiresAt: "2026-08-17T08:41" };
     const payload = buildLinkPayload(draft);
@@ -224,6 +256,20 @@ describe("buildDraft", () => {
     const draft = buildDraft(null, rules);
     expect(draft.allowedViewers).toEqual(["alice@vc.com"]);
     expect(draft.blockedViewers).toEqual([]);
+  });
+
+  it("normalizes legacy both-true identity to verification-only when loading a link", () => {
+    const link = {
+      id: "link-1",
+      name: "Legacy",
+      shortUrl: "https://example.com/l/tok",
+      requireEmail: true,
+      requireEmailVerification: true,
+      documentIds: [],
+    } as unknown as Link;
+    const draft = buildDraft(link, []);
+    expect(draft.requireEmail).toBe(false);
+    expect(draft.requireEmailVerification).toBe(true);
   });
 });
 

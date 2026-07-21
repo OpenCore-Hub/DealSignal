@@ -60,7 +60,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     expiresAt: daysFromNow(30),
   },
   confidential: {
-    requireEmail: true,
+    requireEmail: false,
     requireEmailVerification: true,
     requirePassword: true,
     watermarkEnabled: true,
