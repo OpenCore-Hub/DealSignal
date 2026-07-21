@@ -181,6 +181,7 @@
     "ndaLabel": "I agree to the non-disclosure agreement",
     "ndaRequired": "Please agree to the non-disclosure agreement to continue.",
     "ndaPreviewTitle": "NDA preview",
+    "ndaPreviewLoading": "Loading agreement preview…",
     "ndaPreviewUnavailable": "Preview is not ready yet. Open the full agreement to review it.",
     "ndaPreviewZoomHint": "Click to enlarge preview",
     "ndaOpenFull": "Open full agreement",

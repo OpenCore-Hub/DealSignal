@@ -927,9 +927,31 @@ func TestRequestAccess(t *testing.T) {
 			t.Fatalf("reject access request: %v", err)
 		}
 
-		_, err = f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "", "")
-		if !errors.Is(err, ErrAccessRequestExists) {
-			t.Fatalf("expected ErrAccessRequestExists, got %v", err)
+		_, err = f.svc.RequestAccess(f.ctx, f.link, "visitor@other.com", "please reconsider", "Alex")
+		if err != nil {
+			t.Fatalf("re-request after reject: %v", err)
+		}
+		listed, listErr := f.svc.ListAccessRequests(f.ctx,
+			uuid.UUID(f.workspace.ID.Bytes).String(),
+			uuid.UUID(f.link.ID.Bytes).String(),
+		)
+		if listErr != nil {
+			t.Fatalf("list access requests: %v", listErr)
+		}
+		found := false
+		for _, item := range listed {
+			if item.Email == "visitor@other.com" && item.Status == "pending" {
+				found = true
+				if item.Reason != "please reconsider" {
+					t.Fatalf("expected updated reason, got %q", item.Reason)
+				}
+				if item.SignerName != "Alex" {
+					t.Fatalf("expected updated signer, got %q", item.SignerName)
+				}
+			}
+		}
+		if !found {
+			t.Fatal("expected reopened pending access request after reject")
 		}
 	})
 }
@@ -1011,6 +1033,122 @@ func TestApproveAccessRequest(t *testing.T) {
 		}
 		if !contact.Name.Valid || contact.Name.String != "Alex Visitor" {
 			t.Fatalf("expected contact name Alex Visitor, got %#v", contact.Name)
+		}
+	})
+
+	t.Run("UpdateAccessRules drops removed allow and rejects approved request", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+		userID := uuid.UUID(f.user.ID.Bytes).String()
+		linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "seed@example.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "removed@other.com", "need access", "")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+		if _, err := f.svc.ApproveAccessRequest(f.ctx, wsID, linkID, req.ID, userID); err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+
+		// Owner removes the approved visitor from the allow list and saves.
+		if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+			{RuleType: "email", Value: "seed@example.com", Action: "allow"},
+		}); err != nil {
+			t.Fatalf("UpdateAccessRules: %v", err)
+		}
+		rules, err := f.svc.ListAccessRules(f.ctx, wsID, linkID)
+		if err != nil {
+			t.Fatalf("list rules: %v", err)
+		}
+		for _, r := range rules {
+			if r.Action == "allow" && r.Value == "removed@other.com" {
+				t.Fatal("expected removed allow email to stay removed")
+			}
+		}
+
+		row, err := f.q.GetLinkAccessRequestByLinkAndEmail(f.ctx, db.GetLinkAccessRequestByLinkAndEmailParams{
+			LinkID: f.link.ID,
+			Email:  "removed@other.com",
+		})
+		if err != nil {
+			t.Fatalf("get access request: %v", err)
+		}
+		if row.Status != "rejected" {
+			t.Fatalf("expected approved request to become rejected, got %s", row.Status)
+		}
+
+		if _, err := f.svc.CheckPublicEmail(f.ctx, f.link.PublicToken, "removed@other.com", "127.0.0.1"); !errors.Is(err, ErrNotAllowedEmail) {
+			t.Fatalf("expected not allowed after remove, got %v", err)
+		}
+	})
+
+	t.Run("CheckPublicEmail heals missing allow rule for approved request", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+		userID := uuid.UUID(f.user.ID.Bytes).String()
+		linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "seed@example.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "heal@other.com", "need access", "")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+		if _, err := f.svc.ApproveAccessRequest(f.ctx, wsID, linkID, req.ID, userID); err != nil {
+			t.Fatalf("approve: %v", err)
+		}
+
+		// Simulate share-dialog wipe: delete allow for approved email only, keep another allow.
+		if err := f.q.DeleteLinkAccessRuleByLinkAndValue(f.ctx, db.DeleteLinkAccessRuleByLinkAndValueParams{
+			LinkID:   f.link.ID,
+			RuleType: "email",
+			Value:    "heal@other.com",
+			Action:   "allow",
+		}); err != nil {
+			t.Fatalf("delete allow rule: %v", err)
+		}
+
+		if _, err := f.svc.CheckPublicEmail(f.ctx, f.link.PublicToken, "heal@other.com", "127.0.0.1"); err != nil {
+			t.Fatalf("expected heal to succeed: %v", err)
+		}
+		rules, err := f.q.ListLinkAccessRulesByLink(f.ctx, f.link.ID)
+		if err != nil {
+			t.Fatalf("list rules: %v", err)
+		}
+		found := false
+		for _, r := range rules {
+			if r.Action == "allow" && r.Value == "heal@other.com" {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatal("expected healed allow rule")
 		}
 	})
 

@@ -1464,8 +1464,12 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 	// Snapshot current rules before replacing them.
 	oldRules, _ := qtx.ListLinkAccessRulesByLink(ctx, pgtype.UUID{Bytes: linkUUID, Valid: true})
 	snapshot := make([]AccessRule, 0, len(oldRules))
+	oldAllow := make(map[string]struct{})
 	for _, r := range oldRules {
 		snapshot = append(snapshot, AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action})
+		if r.Action == "allow" && r.RuleType == "email" {
+			oldAllow[strings.ToLower(strings.TrimSpace(r.Value))] = struct{}{}
+		}
 	}
 	snapshotBytes, err := json.Marshal(snapshot)
 	if err != nil {
@@ -1500,21 +1504,47 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 		}
 	}
 
-	// Revoke active invitations because the access rules that governed them have
-	// changed. Used invitations are left untouched for audit purposes.
+	allowedEmails := make(map[string]struct{}, len(rules))
+	for _, r := range rules {
+		if r.Action == "allow" && r.RuleType == "email" {
+			allowedEmails[strings.ToLower(strings.TrimSpace(r.Value))] = struct{}{}
+		}
+	}
+
+	// Owner removed someone from the allow list: drop their approved access
+	// request so CheckPublicEmail heal cannot restore the allow rule.
+	for email := range oldAllow {
+		if _, keep := allowedEmails[email]; keep {
+			continue
+		}
+		if _, rejectErr := qtx.RejectApprovedLinkAccessRequestByEmail(ctx, db.RejectApprovedLinkAccessRequestByEmailParams{
+			LinkID:     link.ID,
+			Email:      email,
+			ReviewedBy: userUUID,
+		}); rejectErr != nil && !errors.Is(rejectErr, pgx.ErrNoRows) {
+			return fmt.Errorf("reject approved access request for removed allow email: %w", rejectErr)
+		}
+	}
+
+	// Revoke invitations only for emails that are no longer allowed.
+	// Used invitations are left untouched for audit purposes.
 	invitations, err := qtx.ListLinkInvitationsByLink(ctx, link.ID)
 	if err != nil {
 		return fmt.Errorf("list invitations: %w", err)
 	}
 	for _, inv := range invitations {
-		if inv.Status == "pending" || inv.Status == "opened" || inv.Status == "verified" {
-			if _, err := qtx.UpdateLinkInvitationStatus(ctx, db.UpdateLinkInvitationStatusParams{
-				Status: "revoked",
-				UsedAt: pgtype.Timestamptz{},
-				ID:     inv.ID,
-			}); err != nil {
-				return fmt.Errorf("revoke invitation: %w", err)
-			}
+		if inv.Status != "pending" && inv.Status != "opened" && inv.Status != "verified" {
+			continue
+		}
+		if _, ok := allowedEmails[strings.ToLower(strings.TrimSpace(inv.Email))]; ok {
+			continue
+		}
+		if _, err := qtx.UpdateLinkInvitationStatus(ctx, db.UpdateLinkInvitationStatusParams{
+			Status: "revoked",
+			UsedAt: pgtype.Timestamptz{},
+			ID:     inv.ID,
+		}); err != nil {
+			return fmt.Errorf("revoke invitation: %w", err)
 		}
 	}
 
@@ -1980,9 +2010,78 @@ func (s *Service) CheckPublicEmail(ctx context.Context, publicToken, email, clie
 		return link, fmt.Errorf("evaluate access rules: %w", err)
 	}
 	if !eval.Allowed {
+		// Approved access requests must remain usable even if a later share-dialog
+		// save wiped the allow rule. Heal the rule and re-check.
+		if eval.Reason != "blocked_email" {
+			if healed, healErr := s.healAllowRuleForApprovedRequest(ctx, link, email); healErr != nil {
+				return link, healErr
+			} else if healed {
+				return link, nil
+			}
+		}
 		return link, mapRuleError(eval.Reason)
 	}
 	return link, nil
+}
+
+// mergeApprovedAllowRules appends allow rules for approved applicants that are
+// not already allowed and not explicitly blocked in the incoming rule set.
+func mergeApprovedAllowRules(rules []AccessRule, approvedEmails []string) []AccessRule {
+	if len(approvedEmails) == 0 {
+		return rules
+	}
+	blocked := make(map[string]struct{})
+	allowed := make(map[string]struct{})
+	for _, r := range rules {
+		v := strings.ToLower(strings.TrimSpace(r.Value))
+		if r.RuleType != "email" || v == "" {
+			continue
+		}
+		switch r.Action {
+		case "block":
+			blocked[v] = struct{}{}
+		case "allow":
+			allowed[v] = struct{}{}
+		}
+	}
+	merged := append([]AccessRule(nil), rules...)
+	for _, email := range approvedEmails {
+		email = strings.ToLower(strings.TrimSpace(email))
+		if email == "" {
+			continue
+		}
+		if _, ok := blocked[email]; ok {
+			continue
+		}
+		if _, ok := allowed[email]; ok {
+			continue
+		}
+		merged = append(merged, AccessRule{RuleType: "email", Value: email, Action: "allow"})
+		allowed[email] = struct{}{}
+	}
+	return merged
+}
+
+// healAllowRuleForApprovedRequest restores an allow rule when the visitor has an
+// approved access request but is currently denied by missing allowlist entry.
+func (s *Service) healAllowRuleForApprovedRequest(ctx context.Context, link db.Link, email string) (bool, error) {
+	existing, err := s.queries.GetLinkAccessRequestByLinkAndEmail(ctx, db.GetLinkAccessRequestByLinkAndEmailParams{
+		LinkID: link.ID,
+		Email:  email,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return false, nil
+		}
+		return false, fmt.Errorf("lookup access request: %w", err)
+	}
+	if existing.Status != "approved" {
+		return false, nil
+	}
+	if err := s.ensureEmailAllowRule(ctx, s.queries, link, email); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // RequestAccess lets a blocked or not-allowed visitor request access to a link.
@@ -2022,7 +2121,26 @@ func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason
 		if existing.Status == "pending" {
 			return dbAccessRequestToDomain(existing), nil
 		}
-		return LinkAccessRequest{}, ErrAccessRequestExists
+		// Previously approved/rejected but still denied by rules (e.g. allow rule
+		// missing or later removed) — reopen so owners see a fresh pending item.
+		reasonText := existing.Reason
+		if reason != "" {
+			reasonText = pgtype.Text{String: reason, Valid: true}
+		}
+		signerText := existing.SignerName
+		if signerName != "" {
+			signerText = pgtype.Text{String: signerName, Valid: true}
+		}
+		reopened, reopenErr := s.queries.ReopenLinkAccessRequest(ctx, db.ReopenLinkAccessRequestParams{
+			ID:         existing.ID,
+			Reason:     reasonText,
+			SignerName: signerText,
+		})
+		if reopenErr != nil {
+			return LinkAccessRequest{}, fmt.Errorf("reopen access request: %w", reopenErr)
+		}
+		s.notifyLinkAccessRequest(ctx, link, linkID, email, reason, signerName)
+		return dbAccessRequestToDomain(reopened), nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
 		return LinkAccessRequest{}, fmt.Errorf("lookup existing access request: %w", err)
@@ -2040,26 +2158,30 @@ func (s *Service) RequestAccess(ctx context.Context, link db.Link, email, reason
 		return LinkAccessRequest{}, fmt.Errorf("create access request: %w", err)
 	}
 
-	if s.notifier != nil {
-		creatorID := uuid.UUID(link.CreatedBy.Bytes).String()
-		wsID := uuid.UUID(link.WorkspaceID.Bytes).String()
-		subject := "New access request on your link"
-		body := fmt.Sprintf("A visitor (%s) requested access to \"%s\". Reason: %s. Review the request in the share dialog.", email, link.Name.String, reason)
-		if reason == "" {
-			body = fmt.Sprintf("A visitor (%s) requested access to \"%s\". Review the request in the share dialog.", email, link.Name.String)
-		}
-		if signerName != "" {
-			body = fmt.Sprintf("%s Signer name: %s.", body, signerName)
-		}
-		if _, notifyErr := s.notifier.Enqueue(ctx, wsID, creatorID, "email", subject, body); notifyErr != nil {
-			logger.ErrorCtx(ctx, "failed to enqueue access request notification", notifyErr,
-				logger.Attr("link_id", linkID),
-				logger.Attr("email", email),
-			)
-		}
-	}
-
+	s.notifyLinkAccessRequest(ctx, link, linkID, email, reason, signerName)
 	return dbAccessRequestToDomain(row), nil
+}
+
+func (s *Service) notifyLinkAccessRequest(ctx context.Context, link db.Link, linkID, email, reason, signerName string) {
+	if s.notifier == nil {
+		return
+	}
+	creatorID := uuid.UUID(link.CreatedBy.Bytes).String()
+	wsID := uuid.UUID(link.WorkspaceID.Bytes).String()
+	subject := "New access request on your link"
+	body := fmt.Sprintf("A visitor (%s) requested access to \"%s\". Reason: %s. Review the request in the share dialog.", email, link.Name.String, reason)
+	if reason == "" {
+		body = fmt.Sprintf("A visitor (%s) requested access to \"%s\". Review the request in the share dialog.", email, link.Name.String)
+	}
+	if signerName != "" {
+		body = fmt.Sprintf("%s Signer name: %s.", body, signerName)
+	}
+	if _, notifyErr := s.notifier.Enqueue(ctx, wsID, creatorID, "email", subject, body); notifyErr != nil {
+		logger.ErrorCtx(ctx, "failed to enqueue access request notification", notifyErr,
+			logger.Attr("link_id", linkID),
+			logger.Attr("email", email),
+		)
+	}
 }
 
 // ListAccessRequests returns all access requests for a link.
@@ -2566,8 +2688,17 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		return AccessResult{}, fmt.Errorf("evaluate access rules: %w", err)
 	}
 	if !eval.Allowed {
-		s.recordSecurityEvent(ctx, link, "", effectiveEmail, eval.Reason, "")
-		return AccessResult{}, mapRuleError(eval.Reason)
+		if eval.Reason != "blocked_email" && effectiveEmail != "" {
+			if healed, healErr := s.healAllowRuleForApprovedRequest(ctx, link, effectiveEmail); healErr != nil {
+				return AccessResult{}, healErr
+			} else if healed {
+				eval = AccessEvaluation{Allowed: true, Reason: "approved_access_request"}
+			}
+		}
+		if !eval.Allowed {
+			s.recordSecurityEvent(ctx, link, "", effectiveEmail, eval.Reason, "")
+			return AccessResult{}, mapRuleError(eval.Reason)
+		}
 	}
 
 	if requiresEmail {

@@ -2489,6 +2489,28 @@ SET status = $1,
 WHERE id = $3 AND status = 'pending'
 RETURNING *;
 
+-- name: ReopenLinkAccessRequest :one
+UPDATE link_access_requests
+SET status = 'pending',
+    reason = $2,
+    signer_name = $3,
+    reviewed_by = NULL,
+    reviewed_at = NULL,
+    updated_at = now()
+WHERE id = $1 AND status <> 'pending'
+RETURNING *;
+
+-- name: RejectApprovedLinkAccessRequestByEmail :one
+UPDATE link_access_requests
+SET status = 'rejected',
+    reviewed_by = $3,
+    reviewed_at = now(),
+    updated_at = now()
+WHERE link_id = $1
+  AND email = $2
+  AND status = 'approved'
+RETURNING *;
+
 -- name: CreateVisitorQuestion :one
 INSERT INTO link_visitor_questions (
     tenant_id, workspace_id, link_id, visitor_id, visitor_email, question

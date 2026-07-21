@@ -18,7 +18,8 @@ import type { LinkAccessRequest } from "@/types";
 
 interface LinkAccessRequestsPanelProps {
   linkId: string;
-  onChanged?: () => void;
+  /** Called after approve/reject. Approve passes the granted email so parents can sync allowlists. */
+  onChanged?: (detail?: { email?: string; action: "approve" | "reject" }) => void;
 }
 
 export function LinkAccessRequestsPanel({ linkId, onChanged }: LinkAccessRequestsPanelProps) {
@@ -43,7 +44,7 @@ export function LinkAccessRequestsPanel({ linkId, onChanged }: LinkAccessRequest
         await api.approveLinkAccessRequest(linkId, request.id);
         toast.success(t("accessRequests.approveSuccess"));
         await refetch();
-        onChanged?.();
+        onChanged?.({ email: request.email, action: "approve" });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("accessRequests.approveError"));
       } finally {
@@ -60,7 +61,7 @@ export function LinkAccessRequestsPanel({ linkId, onChanged }: LinkAccessRequest
         await api.rejectLinkAccessRequest(linkId, request.id);
         toast.success(t("accessRequests.rejectSuccess"));
         await refetch();
-        onChanged?.();
+        onChanged?.({ email: request.email, action: "reject" });
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t("accessRequests.rejectError"));
       } finally {

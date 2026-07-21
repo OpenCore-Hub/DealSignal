@@ -1430,8 +1430,9 @@ func (h *Handler) ndaTemplateMeta(ctx context.Context, link db.Link) gin.H {
 }
 
 // PublicNDAPreview returns metadata for the link's NDA document so visitors can
-// review it before One-Click acceptance. Preview is gated like Access:
-// active link lifecycle + allow/block rules (pass ?email= when allowlisted).
+// read it before One-Click acceptance. Preview is available whenever the public
+// link is active and RequireNda is set — allow/block rules still apply at Access,
+// email check, and sign time, not for reading the agreement text.
 func (h *Handler) PublicNDAPreview(c *gin.Context) {
 	token := c.Param("publicToken")
 	ctx := c.Request.Context()
@@ -1442,16 +1443,6 @@ func (h *Handler) PublicNDAPreview(c *gin.Context) {
 	}
 	if !link.RequireNda {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda not required"})
-		return
-	}
-	email := strings.TrimSpace(strings.ToLower(c.Query("email")))
-	eval, evalErr := h.service.EvaluateAccessRules(ctx, uuid.UUID(link.ID.Bytes).String(), email)
-	if evalErr != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to evaluate access rules"})
-		return
-	}
-	if !eval.Allowed {
-		mapAccessError(c, mapRuleError(eval.Reason))
 		return
 	}
 	meta := h.ndaTemplateMeta(ctx, link)

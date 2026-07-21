@@ -411,7 +411,22 @@ function DealRoomShareDialogContent({
                 </TabsContent>
                 <TabsContent value="access" className="space-y-4">
                   {selectedLink ? (
-                    <LinkAccessRequestsPanel linkId={selectedLink.id} onChanged={() => { void refetch(); }} />
+                    <LinkAccessRequestsPanel
+                      linkId={selectedLink.id}
+                      onChanged={(detail) => {
+                        if (detail?.action === "approve" && detail.email) {
+                          const email = detail.email.trim().toLowerCase();
+                          setDraft((prev) => {
+                            if (prev.allowedViewers.some((v) => v.trim().toLowerCase() === email)) {
+                              return prev;
+                            }
+                            return { ...prev, allowedViewers: [...prev.allowedViewers, email] };
+                          });
+                          // Approving grants access without marking the rest of the form dirty.
+                        }
+                        void refetch();
+                      }}
+                    />
                   ) : null}
                   <AccessTab
                     draft={draft}

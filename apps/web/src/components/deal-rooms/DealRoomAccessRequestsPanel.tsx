@@ -13,7 +13,17 @@ import {
 } from "@/components/ui/card";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import type { DealRoomAccessRequest } from "@/types";
+
+type PendingAccessRequest = {
+  id: string;
+  email: string;
+  reason?: string;
+  signerName?: string;
+  /** Present for share-link requests; absent for room-membership requests. */
+  linkId?: string;
+  linkName?: string;
+  source: "room" | "link";
+};
 
 interface DealRoomAccessRequestsPanelProps {
   roomId: string;
@@ -29,17 +39,53 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
     error,
     refetch,
   } = useAsyncData(async () => {
-    const res = await api.getDealRoomAccessRequests(roomId);
-    return res.data ?? [];
+    const [roomRes, linksRes] = await Promise.all([
+      api.getDealRoomAccessRequests(roomId),
+      api.getDealRoomLinks(roomId),
+    ]);
+    const roomPending: PendingAccessRequest[] = (roomRes.data ?? [])
+      .filter((r) => r.status === "pending")
+      .map((r) => ({
+        id: r.id,
+        email: r.email,
+        reason: r.reason,
+        source: "room" as const,
+      }));
+
+    const links = linksRes.data ?? [];
+    const linkEntries = await Promise.all(
+      links.map(async (link) => {
+        const res = await api.getLinkAccessRequests(link.id);
+        return (res.data ?? [])
+          .filter((r) => r.status === "pending")
+          .map(
+            (r): PendingAccessRequest => ({
+              id: r.id,
+              email: r.email,
+              reason: r.reason,
+              signerName: r.signer_name,
+              linkId: link.id,
+              linkName: link.name || undefined,
+              source: "link",
+            })
+          );
+      })
+    );
+
+    return [...roomPending, ...linkEntries.flat()];
   }, [roomId]);
 
-  const pending = (requests ?? []).filter((r) => r.status === "pending");
+  const pending = requests ?? [];
 
   const handleApprove = useCallback(
-    async (request: DealRoomAccessRequest) => {
+    async (request: PendingAccessRequest) => {
       setBusyId(request.id);
       try {
-        await api.approveDealRoomAccessRequest(roomId, request.id);
+        if (request.source === "link" && request.linkId) {
+          await api.approveLinkAccessRequest(request.linkId, request.id);
+        } else {
+          await api.approveDealRoomAccessRequest(roomId, request.id);
+        }
         toast.success(t("accessRequests.approveSuccess"));
         await refetch();
         onChanged?.();
@@ -53,10 +99,14 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
   );
 
   const handleReject = useCallback(
-    async (request: DealRoomAccessRequest) => {
+    async (request: PendingAccessRequest) => {
       setBusyId(request.id);
       try {
-        await api.rejectDealRoomAccessRequest(roomId, request.id);
+        if (request.source === "link" && request.linkId) {
+          await api.rejectLinkAccessRequest(request.linkId, request.id);
+        } else {
+          await api.rejectDealRoomAccessRequest(roomId, request.id);
+        }
         toast.success(t("accessRequests.rejectSuccess"));
         await refetch();
         onChanged?.();
@@ -100,7 +150,10 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
   }
 
   return (
-    <Card className="border-amber-500/30 bg-amber-500/5">
+    <Card
+      className="border-amber-500/30 bg-amber-500/5"
+      data-testid="deal-room-access-requests-panel"
+    >
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-h3">
           <UserPlus size={20} />
@@ -112,12 +165,22 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
       <CardContent className="space-y-3">
         {pending.map((request) => (
           <div
-            key={request.id}
+            key={`${request.source}-${request.id}`}
             className="flex flex-col gap-3 rounded-lg border bg-background p-3 sm:flex-row sm:items-start sm:justify-between"
             data-testid={`deal-room-access-request-${request.id}`}
           >
-            <div className="min-w-0 space-y-1">
+            <div className="min-h-0 min-w-0 space-y-1">
               <p className="truncate text-sm font-medium">{request.email}</p>
+              {request.signerName ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("accessRequests.signerName", { name: request.signerName })}
+                </p>
+              ) : null}
+              {request.linkName ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("accessRequests.linkLabel", { name: request.linkName })}
+                </p>
+              ) : null}
               {request.reason ? (
                 <p className="text-sm text-muted-foreground">{request.reason}</p>
               ) : null}

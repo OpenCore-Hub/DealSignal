@@ -297,7 +297,21 @@ function LinkShareDialogContent({
                 </TabsContent>
                 <TabsContent value="access" className="space-y-4">
                   {link ? (
-                    <LinkAccessRequestsPanel linkId={link.id} onChanged={() => { void refetch(); }} />
+                    <LinkAccessRequestsPanel
+                      linkId={link.id}
+                      onChanged={(detail) => {
+                        if (detail?.action === "approve" && detail.email) {
+                          const email = detail.email.trim().toLowerCase();
+                          setDraft((prev) => {
+                            if (prev.allowedViewers.some((v) => v.trim().toLowerCase() === email)) {
+                              return prev;
+                            }
+                            return { ...prev, allowedViewers: [...prev.allowedViewers, email] };
+                          });
+                        }
+                        void refetch();
+                      }}
+                    />
                   ) : null}
                   <AccessTab
                     draft={draft}

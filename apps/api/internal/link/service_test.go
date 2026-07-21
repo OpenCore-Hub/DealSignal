@@ -372,6 +372,34 @@ func TestMakeVisitorIDConsistency(t *testing.T) {
 
 
 
+func TestMergeApprovedAllowRules(t *testing.T) {
+	rules := []AccessRule{
+		{RuleType: "email", Value: "owner@example.com", Action: "allow"},
+		{RuleType: "email", Value: "blocked@example.com", Action: "block"},
+	}
+	merged := mergeApprovedAllowRules(rules, []string{
+		"owner@example.com",
+		"kept@example.com",
+		"blocked@example.com",
+		"",
+	})
+	var hasKept, hasBlockedAllow bool
+	for _, r := range merged {
+		if r.Action == "allow" && r.Value == "kept@example.com" {
+			hasKept = true
+		}
+		if r.Action == "allow" && r.Value == "blocked@example.com" {
+			hasBlockedAllow = true
+		}
+	}
+	if !hasKept {
+		t.Fatal("expected approved email to be merged as allow")
+	}
+	if hasBlockedAllow {
+		t.Fatal("must not allow an explicitly blocked approved email")
+	}
+}
+
 func TestEvaluateAccessRules(t *testing.T) {
 	cases := []struct {
 		name            string

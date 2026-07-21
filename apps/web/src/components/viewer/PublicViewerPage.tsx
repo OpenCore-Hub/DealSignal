@@ -173,6 +173,7 @@ export function PublicViewerPage() {
   const [ndaDeliveryEmail, setNdaDeliveryEmail] = useState(prefilledEmail);
   const [ndaPreviewPageUrls, setNdaPreviewPageUrls] = useState<string[]>([]);
   const [ndaDocumentUrl, setNdaDocumentUrl] = useState<string | null>(null);
+  const [ndaPreviewStatus, setNdaPreviewStatus] = useState<"idle" | "loading" | "ready" | "error">("idle");
   const [ndaPreviewZoomed, setNdaPreviewZoomed] = useState(false);
   const [ndaBinding, setNdaBinding] = useState<NdaTemplateBinding | null>(null);
   // NDA gate phases: sign → 30s signed review → clean email/code page.
@@ -287,6 +288,7 @@ export function PublicViewerPage() {
           : [];
     setNdaPreviewPageUrls(pages);
     setNdaDocumentUrl(preview.documentUrl || preview.previewUrl || null);
+    setNdaPreviewStatus(pages.length > 0 || Boolean(preview.documentUrl || preview.previewUrl) ? "ready" : "error");
 
     const templateId = preview.ndaTemplate?.id?.trim() ?? "";
     if (!templateId) return;
@@ -499,12 +501,12 @@ export function PublicViewerPage() {
           setGateError(err.message ?? t("viewer.signerNameRequired"));
         }
         if (err.requiresNda && token) {
-          const previewEmail = isValidDeliveryEmail(ndaDeliveryEmail)
-            ? ndaDeliveryEmail.trim()
-            : undefined;
-          void api.getPublicNDAPreview?.(token, previewEmail).then((preview) => {
+          setNdaPreviewStatus((prev) => (prev === "ready" ? prev : "loading"));
+          void api.getPublicNDAPreview?.(token).then((preview) => {
             applyNdaPreview(preview);
-          }).catch(() => { /* preview is best-effort */ });
+          }).catch(() => {
+            setNdaPreviewStatus((prev) => (prev === "ready" ? prev : "error"));
+          });
         }
       } else {
         // Unknown error codes (e.g. internal_error / network_error) still need
@@ -658,25 +660,27 @@ export function PublicViewerPage() {
     ndaAgreed &&
     isValidDeliveryEmail(ndaDeliveryEmail);
 
-  // Load NDA preview once a delivery email is present so allowlisted links can
-  // evaluate access rules (preview without email is denied when allow rules exist).
+  // Always load NDA preview on the sign/review gate so visitors can read the
+  // agreement before providing an email. Failures keep a visible placeholder.
   useEffect(() => {
     if (!token || !security.nda) return;
     if (ndaGatePhase !== "sign" && ndaGatePhase !== "review") return;
-    if (!isValidDeliveryEmail(ndaDeliveryEmail)) return;
-    const email = ndaDeliveryEmail.trim();
     let cancelled = false;
+    setNdaPreviewStatus((prev) => (prev === "ready" ? prev : "loading"));
     void api
-      .getPublicNDAPreview?.(token, email)
+      .getPublicNDAPreview?.(token)
       .then((preview) => {
         if (cancelled) return;
         applyNdaPreview(preview);
       })
-      .catch(() => { /* preview is best-effort */ });
+      .catch(() => {
+        if (cancelled) return;
+        setNdaPreviewStatus((prev) => (prev === "ready" ? prev : "error"));
+      });
     return () => {
       cancelled = true;
     };
-  }, [token, security.nda, ndaGatePhase, ndaDeliveryEmail, applyNdaPreview]);
+  }, [token, security.nda, ndaGatePhase, applyNdaPreview]);
 
   /** Pre-review allowlist check. On success enters NDA review; on deny keeps mismatch actions. */
   const checkAndEnterNdaReview = useCallback(async () => {
@@ -685,12 +689,12 @@ export function PublicViewerPage() {
     setFloatingTip(null);
     setNdaEmailChecking(true);
     try {
-      // Allowlist first — preview itself is gated and would fail for denied emails.
+      // Allowlist first — signing must not proceed for denied emails.
       await api.checkPublicLinkEmail(token, deliveryEmail);
 
       let binding = ndaBinding;
       if (!binding?.ndaTemplateId) {
-        const preview = await api.getPublicNDAPreview(token, deliveryEmail);
+        const preview = await api.getPublicNDAPreview(token);
         applyNdaPreview(preview);
         if (!preview.ndaTemplate?.id) {
           setGateError(t("viewer.ndaPreviewUnavailable"));
@@ -1279,7 +1283,9 @@ export function PublicViewerPage() {
                       />
                     ) : (
                       <div className="flex h-40 items-center justify-center px-4 text-center text-xs text-muted-foreground">
-                        {t("viewer.ndaPreviewUnavailable")}
+                        {ndaPreviewStatus === "loading" || ndaPreviewStatus === "idle"
+                          ? t("viewer.ndaPreviewLoading")
+                          : t("viewer.ndaPreviewUnavailable")}
                       </div>
                     )}
                     <div className="border-t bg-muted/20 px-4 py-4">
@@ -1355,40 +1361,46 @@ export function PublicViewerPage() {
 
             {inNdaSign && (
               <div className="flex min-h-0 flex-1 flex-col space-y-3">
-                {(ndaPreviewPageUrls.length > 0 || ndaDocumentUrl) && (
-                  <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
-                    {ndaPreviewPageUrls.length > 0 ? (
-                      <div
-                        className="h-full cursor-zoom-in overflow-y-auto overscroll-contain bg-white"
-                        onClick={() => setNdaPreviewZoomed(true)}
-                        title={t("viewer.ndaPreviewZoomHint")}
-                        role="button"
-                        tabIndex={0}
-                        aria-label={t("viewer.ndaPreviewZoomHint")}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            setNdaPreviewZoomed(true);
-                          }
-                        }}
-                      >
-                        {ndaPreviewPageUrls.map((url, index) => (
-                          <img
-                            key={`${url}-${index}`}
-                            src={url}
-                            alt={t("viewer.ndaPreviewPage", { page: index + 1 })}
-                            className="block h-auto w-full select-none pointer-events-none border-b border-border/40 last:border-b-0"
-                            draggable={false}
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="flex h-full min-h-32 items-center justify-center px-4 text-center text-xs text-muted-foreground">
-                        {t("viewer.ndaPreviewUnavailable")}
-                      </div>
-                    )}
-                  </div>
-                )}
+                <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
+                  {ndaPreviewPageUrls.length > 0 ? (
+                    <div
+                      className="h-full cursor-zoom-in overflow-y-auto overscroll-contain bg-white"
+                      onClick={() => setNdaPreviewZoomed(true)}
+                      title={t("viewer.ndaPreviewZoomHint")}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={t("viewer.ndaPreviewZoomHint")}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          setNdaPreviewZoomed(true);
+                        }
+                      }}
+                    >
+                      {ndaPreviewPageUrls.map((url, index) => (
+                        <img
+                          key={`${url}-${index}`}
+                          src={url}
+                          alt={t("viewer.ndaPreviewPage", { page: index + 1 })}
+                          className="block h-auto w-full select-none pointer-events-none border-b border-border/40 last:border-b-0"
+                          draggable={false}
+                        />
+                      ))}
+                    </div>
+                  ) : ndaDocumentUrl ? (
+                    <iframe
+                      title={t("viewer.ndaPreviewTitle")}
+                      src={ndaDocumentUrl}
+                      className="h-full min-h-[50%] w-full border-0 bg-white"
+                    />
+                  ) : (
+                    <div className="flex h-full min-h-32 items-center justify-center px-4 text-center text-xs text-muted-foreground">
+                      {ndaPreviewStatus === "loading" || ndaPreviewStatus === "idle"
+                        ? t("viewer.ndaPreviewLoading")
+                        : t("viewer.ndaPreviewUnavailable")}
+                    </div>
+                  )}
+                </div>
                 <Dialog open={ndaPreviewZoomed} onOpenChange={setNdaPreviewZoomed}>
                   <DialogContent className="max-h-[90vh] gap-0 overflow-hidden p-0 sm:max-w-3xl">
                     <DialogHeader className="border-b px-4 py-3">

@@ -176,6 +176,7 @@
     "ndaLabel": "我同意保密协议",
     "ndaRequired": "请勾选同意保密协议以继续查看文档。",
     "ndaPreviewTitle": "保密协议预览",
+    "ndaPreviewLoading": "正在加载协议预览…",
     "ndaPreviewUnavailable": "预览暂不可用，请打开完整协议查看。",
     "ndaPreviewZoomHint": "单击放大预览",
     "ndaOpenFull": "打开完整协议",

@@ -16,8 +16,10 @@
   "pendingApprovals_one": "{{count}} pending",
   "pendingApprovals_other": "{{count}} pending",
   "accessRequests": {
-    "title": "Room access requests",
-    "description": "Visitors who requested membership for this deal room. Approving activates them as viewers.",
+    "title": "Access requests",
+    "description": "Pending visitor requests for this deal room and its share links.",
+    "linkLabel": "Share link: {{name}}",
+    "signerName": "Signer: {{name}}",
     "approve": "Approve",
     "reject": "Reject",
     "approveSuccess": "Access request approved",

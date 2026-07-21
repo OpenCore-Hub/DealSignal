@@ -291,15 +291,56 @@ describe("PublicViewerPage", () => {
 
     await renderPage("nda-preview-token");
 
+    await waitFor(() => {
+      expect(getPublicNDAPreviewMock).toHaveBeenCalledWith("nda-preview-token");
+    });
     const preview = await waitFor(() =>
       screen.getByRole("button", { name: "viewer.ndaPreviewZoomHint" })
     );
     expect(preview.className).toMatch(/overflow-y-auto/);
+    // Preview sits below the sign title and above the delivery-email field.
+    expect(screen.getByText("viewer.ndaSignTitle").compareDocumentPosition(preview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(preview.compareDocumentPosition(document.getElementById("nda-delivery-email")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     fireEvent.click(preview);
     await waitFor(() => {
       expect(screen.getByRole("dialog")).toBeInTheDocument();
     });
     expect(screen.getAllByRole("img").length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("keeps an NDA preview placeholder when preview fetch fails", async () => {
+    accessPublicLinkMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "nda_required",
+        message: "nda required",
+        requestId: "req-nda-preview-fail",
+        requiresEmail: false,
+        requiresEmailVerification: false,
+        requiresPassword: false,
+        requiresNda: true,
+        isDealRoom: false,
+      })
+    );
+    getPublicNDAPreviewMock.mockRejectedValue(
+      new ApiError({
+        status: 404,
+        code: "not_found",
+        message: "nda template not found",
+        requestId: "req-nda-missing",
+      })
+    );
+
+    await renderPage("nda-preview-fail-token");
+
+    await waitFor(() => {
+      expect(document.getElementById("nda")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getByText("viewer.ndaPreviewUnavailable")).toBeInTheDocument();
+    });
+    expect(getPublicNDAPreviewMock).toHaveBeenCalledWith("nda-preview-fail-token");
+    expect(document.getElementById("nda-delivery-email")).toBeInTheDocument();
   });
 
   it("disables Continue until NDA email, name and agreement are complete", async () => {

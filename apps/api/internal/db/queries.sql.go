@@ -10902,6 +10902,82 @@ func (q *Queries) RecordLinkOpened(ctx context.Context, arg RecordLinkOpenedPara
 	return result.RowsAffected(), nil
 }
 
+const rejectApprovedLinkAccessRequestByEmail = `-- name: RejectApprovedLinkAccessRequestByEmail :one
+UPDATE link_access_requests
+SET status = 'rejected',
+    reviewed_by = $3,
+    reviewed_at = now(),
+    updated_at = now()
+WHERE link_id = $1
+  AND email = $2
+  AND status = 'approved'
+RETURNING id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at, signer_name
+`
+
+type RejectApprovedLinkAccessRequestByEmailParams struct {
+	LinkID     pgtype.UUID
+	Email      string
+	ReviewedBy pgtype.UUID
+}
+
+func (q *Queries) RejectApprovedLinkAccessRequestByEmail(ctx context.Context, arg RejectApprovedLinkAccessRequestByEmailParams) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, rejectApprovedLinkAccessRequestByEmail, arg.LinkID, arg.Email, arg.ReviewedBy)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SignerName,
+	)
+	return i, err
+}
+
+const reopenLinkAccessRequest = `-- name: ReopenLinkAccessRequest :one
+UPDATE link_access_requests
+SET status = 'pending',
+    reason = $2,
+    signer_name = $3,
+    reviewed_by = NULL,
+    reviewed_at = NULL,
+    updated_at = now()
+WHERE id = $1 AND status <> 'pending'
+RETURNING id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at, signer_name
+`
+
+type ReopenLinkAccessRequestParams struct {
+	ID         pgtype.UUID
+	Reason     pgtype.Text
+	SignerName pgtype.Text
+}
+
+func (q *Queries) ReopenLinkAccessRequest(ctx context.Context, arg ReopenLinkAccessRequestParams) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, reopenLinkAccessRequest, arg.ID, arg.Reason, arg.SignerName)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SignerName,
+	)
+	return i, err
+}
+
 const resetLinkInvitation = `-- name: ResetLinkInvitation :one
 UPDATE link_invitations
 SET token = $1,

@@ -13,8 +13,10 @@
   "memberCount": "{{count}} 成员",
   "pendingApprovals": "{{count}} 待审批",
   "accessRequests": {
-    "title": "数据室访问申请",
-    "description": "访客申请加入此数据室的请求。批准后将激活为查看者。",
+    "title": "访问申请",
+    "description": "此数据室及其分享链接上待处理的访客申请。",
+    "linkLabel": "分享链接：{{name}}",
+    "signerName": "签署人：{{name}}",
     "approve": "批准",
     "reject": "拒绝",
     "approveSuccess": "已批准访问申请",
