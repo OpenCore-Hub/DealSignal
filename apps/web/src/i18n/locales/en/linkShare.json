@@ -86,8 +86,8 @@
       "ndaDocumentPlaceholder": "Select a document",
       "allowDownloading": "Allow downloading",
       "allowDownloadingDescription": "Allow viewers to download documents",
-      "screenshotProtection": "Enable screenshot protection",
-      "screenshotProtectionDescription": "Show warning and blur on Print Screen",
+      "screenshotProtection": "Reduce leak risk",
+      "screenshotProtectionDescription": "Blur when inactive and discourage common shortcuts; screenshots stay traceable via watermark",
       "comingSoon": "Coming soon"
     },
     "advanced": {

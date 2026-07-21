@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeAll } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { describe, it, expect, vi, beforeAll, afterEach } from "vitest";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import i18next from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { ViewerCanvas } from "./ViewerCanvas";
@@ -66,6 +66,10 @@ async function createCanvasI18n() {
             currentPageStats: "Viewed {{count}} times · avg. time {{duration}}.",
             pageHeat: "Page heat",
             thumbnailViews: "{{count}} views · {{duration}}",
+            printWarning: "Print and capture discouraged",
+            printWarningHint: "Content may include identifying watermarks and stay attributable.",
+            inactiveBlurWarning: "Content blurred while inactive",
+            inactiveBlurHint: "Helps reduce leak risk; screenshots remain attributable via watermark.",
           },
         },
       },
@@ -98,6 +102,14 @@ describe("ViewerCanvas", () => {
     if (!i18next.isInitialized) {
       await i18next.use(initReactI18next).init({ lng: "en", fallbackLng: "en" });
     }
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
   });
 
   it("renders the page image when a signed URL is available", async () => {
@@ -136,5 +148,62 @@ describe("ViewerCanvas", () => {
     await renderCanvas();
     const thumbnails = screen.getAllByRole("button", { name: /Page \d/i });
     expect(thumbnails).toHaveLength(3);
+  });
+
+  it("does not show inactive blur when screenshot protection is off", async () => {
+    await renderCanvas({ screenshotProtectionEnabled: false });
+    await act(async () => {
+      fireEvent.blur(window);
+    });
+    expect(screen.queryByTestId("inactive-blur-overlay")).not.toBeInTheDocument();
+  });
+
+  it("blurs content when the window becomes inactive and protection is on", async () => {
+    await renderCanvas({
+      screenshotProtectionEnabled: true,
+      imageUrl: "https://cdn.example.com/page-1.png",
+    });
+    expect(screen.queryByTestId("inactive-blur-overlay")).not.toBeInTheDocument();
+
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    await act(async () => {
+      fireEvent.blur(window);
+    });
+
+    expect(screen.getByTestId("inactive-blur-overlay")).toBeInTheDocument();
+    expect(screen.getByText("Content blurred while inactive")).toBeInTheDocument();
+    expect(
+      screen.getByText("Helps reduce leak risk; screenshots remain attributable via watermark.")
+    ).toBeInTheDocument();
+
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    await act(async () => {
+      fireEvent.focus(window);
+    });
+    expect(screen.queryByTestId("inactive-blur-overlay")).not.toBeInTheDocument();
+  });
+
+  it("blurs content when the tab becomes hidden", async () => {
+    await renderCanvas({ screenshotProtectionEnabled: true });
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "hidden",
+    });
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+
+    expect(screen.getByTestId("inactive-blur-overlay")).toBeInTheDocument();
+
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    vi.spyOn(document, "hasFocus").mockReturnValue(true);
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(screen.queryByTestId("inactive-blur-overlay")).not.toBeInTheDocument();
   });
 });

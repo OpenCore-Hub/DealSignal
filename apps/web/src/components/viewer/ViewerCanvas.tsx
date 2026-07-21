@@ -49,6 +49,8 @@ export function ViewerCanvas({
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
   const [printWarning, setPrintWarning] = useState(false);
+  /** Soft deterrent: blur page content when the tab/window is not active. */
+  const [isInactive, setIsInactive] = useState(false);
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -91,9 +93,19 @@ export function ViewerCanvas({
     ? currentPageInfo.width / currentPageInfo.height
     : 0.75;
 
-  // Print Screen detection: Ctrl+P / Cmd+P triggers a warning overlay.
+  // Soft screenshot deterrence: shortcut warnings, no context menu, blur when inactive.
+  // This does not block OS-level screenshots; watermark remains the traceability signal.
   useEffect(() => {
-    if (!screenshotProtectionEnabled) return;
+    if (!screenshotProtectionEnabled) {
+      setIsInactive(false);
+      return;
+    }
+
+    const syncInactive = () => {
+      const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+      const unfocused = typeof document !== "undefined" && !document.hasFocus();
+      setIsInactive(hidden || unfocused);
+    };
 
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
@@ -101,7 +113,7 @@ export function ViewerCanvas({
         setPrintWarning(true);
         setTimeout(() => setPrintWarning(false), 4000);
       }
-      // Print Screen key and common screenshot shortcuts.
+      // Common screenshot shortcuts (best-effort; OS capture may still succeed).
       if (
         e.key === "PrintScreen" ||
         e.key === "Snapshot" ||
@@ -114,19 +126,27 @@ export function ViewerCanvas({
       }
     };
 
-    // Disable right-click context menu on the document area.
     const handleContextMenu = (e: MouseEvent) => {
       e.preventDefault();
     };
+
+    // Initial: only hide if tab is already in background (hasFocus is unreliable in tests/SSR).
+    setIsInactive(typeof document !== "undefined" && document.visibilityState === "hidden");
 
     const el = viewportRef.current;
     if (el) {
       el.addEventListener("contextmenu", handleContextMenu);
     }
     window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("blur", syncInactive);
+    window.addEventListener("focus", syncInactive);
+    document.addEventListener("visibilitychange", syncInactive);
     return () => {
       if (el) el.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("blur", syncInactive);
+      window.removeEventListener("focus", syncInactive);
+      document.removeEventListener("visibilitychange", syncInactive);
     };
   }, [screenshotProtectionEnabled]);
   const availableWidth = Math.max(300, viewportSize.width);
@@ -165,29 +185,37 @@ export function ViewerCanvas({
             screenshotProtectionEnabled && "select-none"
           )}
           style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
+          data-inactive-blur={screenshotProtectionEnabled && isInactive ? "true" : undefined}
         >
-          {doc.status !== "ready" ? (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
-              <FileText size={48} className="text-muted-foreground/50" />
-              <p className="text-body">{t("documents:viewer.processing", { status: doc.status })}</p>
-            </div>
-          ) : imageUrl ? (
-            <img
-              src={imageUrl}
-              alt={t("documents:viewer.pageLabel", { pageNumber: page })}
-              className="h-full w-full object-contain"
-            />
-          ) : (
-            <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
-              <div className="text-h1 text-muted-foreground">
-                {t("documents:viewer.pagePlaceholder", { pageNumber: page })}
+          <div
+            className={cn(
+              "h-full w-full transition-[filter] duration-150",
+              screenshotProtectionEnabled && isInactive && "blur-md"
+            )}
+          >
+            {doc.status !== "ready" ? (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
+                <FileText size={48} className="text-muted-foreground/50" />
+                <p className="text-body">{t("documents:viewer.processing", { status: doc.status })}</p>
               </div>
-              <p className="text-body text-muted-foreground">{t("documents:viewer.previewPlaceholder")}</p>
-            </div>
-          )}
+            ) : imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={t("documents:viewer.pageLabel", { pageNumber: page })}
+                className="h-full w-full object-contain"
+              />
+            ) : (
+              <div className="flex h-full w-full flex-col items-center justify-center gap-4 p-8 text-center text-muted-foreground">
+                <div className="text-h1 text-muted-foreground">
+                  {t("documents:viewer.pagePlaceholder", { pageNumber: page })}
+                </div>
+                <p className="text-body text-muted-foreground">{t("documents:viewer.previewPlaceholder")}</p>
+              </div>
+            )}
 
-          <HighlightOverlay evidences={activeEvidence} />
-          <WatermarkOverlay watermark={activeWatermark} />
+            <HighlightOverlay evidences={activeEvidence} />
+            <WatermarkOverlay watermark={activeWatermark} />
+          </div>
           {printWarning && (
             <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/80 backdrop-blur-sm">
               <div className="flex flex-col items-center gap-3 rounded-lg bg-card p-6 shadow-lg">
@@ -197,6 +225,21 @@ export function ViewerCanvas({
                 </p>
                 <p className="text-xs text-muted-foreground">
                   {t("documents:viewer.printWarningHint")}
+                </p>
+              </div>
+            </div>
+          )}
+          {!printWarning && screenshotProtectionEnabled && isInactive && (
+            <div
+              className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm"
+              data-testid="inactive-blur-overlay"
+            >
+              <div className="flex max-w-xs flex-col items-center gap-2 rounded-lg bg-card/95 px-5 py-4 text-center shadow-lg">
+                <p className="text-sm font-medium text-foreground">
+                  {t("documents:viewer.inactiveBlurWarning")}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {t("documents:viewer.inactiveBlurHint")}
                 </p>
               </div>
             </div>

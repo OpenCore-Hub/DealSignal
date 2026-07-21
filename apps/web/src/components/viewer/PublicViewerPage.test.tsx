@@ -506,6 +506,83 @@ describe("PublicViewerPage", () => {
     expect(screen.queryByRole("button", { name: "viewer.continue" })).not.toBeInTheDocument();
   });
 
+  it("shows localized blocked-email tip on NDA check (never raw backend message)", async () => {
+    accessPublicLinkMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "nda_required",
+        message: "nda required",
+        requestId: "req-blocked-boot",
+        requiresEmail: false,
+        requiresEmailVerification: true,
+        requiresPassword: false,
+        requiresNda: true,
+        isDealRoom: false,
+      })
+    );
+    checkPublicLinkEmailMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "blocked_email",
+        message: "email is blocked",
+        requestId: "req-blocked-deny",
+        requiresEmail: false,
+        requiresEmailVerification: true,
+        requiresPassword: false,
+        requiresNda: true,
+        isDealRoom: false,
+      })
+    );
+
+    await renderPage("nda-blocked-email-token");
+
+    await waitFor(() => {
+      expect(document.getElementById("nda")).toBeInTheDocument();
+    });
+    fireEvent.change(document.getElementById("nda-delivery-email")!, {
+      target: { value: "leaker@bad.com" },
+    });
+    fireEvent.change(document.getElementById("signer-name")!, { target: { value: "Blocked User" } });
+    fireEvent.click(document.getElementById("nda")!);
+    fireEvent.click(screen.getByRole("button", { name: "viewer.continue" }));
+
+    await waitFor(() => {
+      expect(checkPublicLinkEmailMock).toHaveBeenCalledWith("nda-blocked-email-token", "leaker@bad.com");
+    });
+    await waitFor(() => {
+      expect(screen.getAllByText("viewer.emailBlocked").length).toBeGreaterThanOrEqual(1);
+    });
+    expect(screen.queryByText("email is blocked")).not.toBeInTheDocument();
+    expect(screen.getByText("viewer.ndaSignTitle")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "retry" })).toBeInTheDocument();
+    // Blocked visitors cannot request authorization.
+    expect(screen.queryByRole("button", { name: "viewer.requestAuthorization" })).not.toBeInTheDocument();
+  });
+
+  it("shows unavailable page for blocked_email on Access (localized, not raw message)", async () => {
+    accessPublicLinkMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "blocked_email",
+        message: "email is blocked",
+        requestId: "req-access-blocked",
+        requiresEmail: true,
+        requiresEmailVerification: false,
+        requiresPassword: false,
+        requiresNda: false,
+        isDealRoom: false,
+      })
+    );
+
+    await renderPage("access-blocked-token");
+
+    await waitFor(() => {
+      expect(screen.getByText("viewer.blocked_emailTitle")).toBeInTheDocument();
+    });
+    expect(screen.getByText("viewer.blocked_emailDescription")).toBeInTheDocument();
+    expect(screen.queryByText("email is blocked")).not.toBeInTheDocument();
+  });
+
   it("retry after not_allowed re-checks email without resetting to Continue", async () => {
     accessPublicLinkMock.mockRejectedValue(
       new ApiError({

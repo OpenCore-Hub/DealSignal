@@ -86,8 +86,8 @@
       "ndaDocumentPlaceholder": "选择文档",
       "allowDownloading": "允许下载",
       "allowDownloadingDescription": "允许访客下载文档",
-      "screenshotProtection": "启用截图保护",
-      "screenshotProtectionDescription": "检测到 Print Screen 时显示警告并模糊内容",
+      "screenshotProtection": "降低泄露风险",
+      "screenshotProtectionDescription": "失活时模糊内容并弱化常见快捷键；截图仍可通过水印追溯",
       "comingSoon": "即将上线"
     },
     "advanced": {

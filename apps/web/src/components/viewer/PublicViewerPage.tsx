@@ -205,7 +205,6 @@ export function PublicViewerPage() {
   const [ndaEmailChecking, setNdaEmailChecking] = useState(false);
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
-  const [folderView, setFolderView] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // Monotonic id so in-flight Access responses are ignored after a newer
   // tryAccess starts (token/invite change or double-submit). Replaces a
@@ -536,7 +535,6 @@ export function PublicViewerPage() {
     setAccess(null);
     setAccessCredentials({});
     setSelectedDocIndex(0);
-    setFolderView(false);
     setNdaCountdown(30);
     setNdaSignedAt(null);
     ndaReviewFinishedRef.current = false;
@@ -730,7 +728,7 @@ export function PublicViewerPage() {
       if (err.code === "not_allowed" || err.code === "blocked_email") {
         const tip =
           err.code === "blocked_email"
-            ? (err.message ?? t("viewer.emailNotAllowed"))
+            ? t("viewer.emailBlocked")
             : t("viewer.emailNotAuthorized");
         setGateErrorCode(err.code === "blocked_email" ? "blocked_email" : "not_allowed");
         setGateError(tip);
@@ -878,7 +876,11 @@ export function PublicViewerPage() {
         isDealRoom: err.isDealRoom ?? prev.isDealRoom,
       }));
       if (err.code === "not_allowed" || err.code === "blocked_email") {
-        setGateError(t("viewer.accessRequestStillPending"));
+        setGateError(
+          err.code === "blocked_email"
+            ? t("viewer.emailBlocked")
+            : t("viewer.accessRequestStillPending")
+        );
         return;
       }
       setGateError(err.message ?? t("common:error.loadFailed"));
@@ -1004,9 +1006,9 @@ export function PublicViewerPage() {
     );
   }
 
-  // Deal-room: folder browser when explicitly requested, or when scope yields
-  // zero documents (empty allowlist) so visitors never land on a blank canvas.
-  if (access?.link.dealRoomId && (folderView || access.documents.length === 0)) {
+  // Deal-room: folder browser when scope yields zero documents (empty allowlist)
+  // so visitors never land on a blank canvas.
+  if (access?.link.dealRoomId && access.documents.length === 0) {
     return (
       <PublicDealRoomLinkViewer
         linkName={access.link.name}
@@ -1016,7 +1018,6 @@ export function PublicViewerPage() {
           if (idx >= 0) {
             setSelectedDocIndex(idx);
           }
-          setFolderView(false);
         }}
       />
     );
@@ -1558,16 +1559,6 @@ export function PublicViewerPage() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden">
-      {access.link.dealRoomId && (
-        <div className="flex items-center gap-3 border-b bg-background px-4 py-2">
-          <Button variant="ghost" size="sm" onClick={() => setFolderView(true)}>
-            {t("common:back")}
-          </Button>
-          <span className="text-sm font-medium truncate">
-            {selectedDoc?.title}
-          </span>
-        </div>
-      )}
       <CanvasViewer
         publicToken={token}
         publicLink={access.link}
