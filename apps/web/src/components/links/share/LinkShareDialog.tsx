@@ -319,6 +319,7 @@ function LinkShareDialogContent({
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
                     isDealRoomLink={!!link?.dealRoomId}
+                    passwordAlreadySet={Boolean(link?.requirePassword)}
                     ndaTemplates={ndaTemplates}
                     documents={link?.documents.map((d) => ({ id: d.id, title: d.title })) ?? []}
                   />

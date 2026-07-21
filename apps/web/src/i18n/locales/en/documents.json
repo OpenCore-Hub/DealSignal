@@ -158,6 +158,7 @@
     "sidebarClose": "Close sidebar",
     "sidebarDocuments": "Documents",
     "sidebarAI": "AI Assistant",
+    "folderRoot": "Root",
     "noDocuments": "No documents",
     "pages": "pages",
     "downloadDisabled": "Download requires backend signed URL support",

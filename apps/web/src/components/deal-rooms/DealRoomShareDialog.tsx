@@ -434,6 +434,7 @@ function DealRoomShareDialogContent({
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
                     isDealRoomLink={isDealRoomLink}
+                    passwordAlreadySet={Boolean(selectedLink?.requirePassword)}
                     ndaTemplates={ndaTemplates}
                     documents={(data?.documents ?? [])
                       .flatMap((folder) => folder.documents ?? [])

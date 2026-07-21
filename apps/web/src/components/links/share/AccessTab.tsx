@@ -1,5 +1,5 @@
-import { useState, useMemo } from "react";
-import { Question, Eye, EyeSlash } from "@phosphor-icons/react";
+import { useState, useMemo, useEffect } from "react";
+import { Question } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -12,6 +12,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { ContactEmailTagInput } from "./ContactEmailTagInput";
 import { CollapsibleSection } from "./CollapsibleSection";
@@ -23,6 +29,8 @@ interface AccessTabProps {
   errors: Record<string, string>;
   highlightedFields?: string[];
   isDealRoomLink?: boolean;
+  /** True when the link already has a password hash server-side (plaintext is never returned). */
+  passwordAlreadySet?: boolean;
   documents?: { id: string; title: string }[];
   ndaTemplates?: { id: string; name: string; sourceDocumentId: string }[];
 }
@@ -48,15 +56,23 @@ function OptionSwitch({
       disabled && "opacity-50",
       highlighted && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
     )}>
-      <div className="space-y-0.5">
-        <Label className="flex items-center gap-1.5 font-normal text-foreground">
-          {label}
-          {description && (
-            <span title={description}>
-              <Question size={14} className="text-muted-foreground" />
-            </span>
-          )}
-        </Label>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Label className="font-normal text-foreground">{label}</Label>
+        {description && (
+          <TooltipProvider delay={150}>
+            <Tooltip>
+              <TooltipTrigger
+                type="button"
+                delay={150}
+                className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={description}
+              >
+                <Question size={14} weight="regular" aria-hidden />
+              </TooltipTrigger>
+              <TooltipContent side="top">{description}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
       <Switch
         aria-label={label}
@@ -124,12 +140,15 @@ function strengthBarColor(level: PasswordStrengthLevel): string {
   }
 }
 
+const STORED_PASSWORD_MASK = "••••••••";
+
 export function AccessTab({
   draft,
   updateDraft,
   errors,
   highlightedFields = [],
   isDealRoomLink,
+  passwordAlreadySet = false,
   documents = [],
   ndaTemplates = [],
 }: AccessTabProps) {
@@ -137,7 +156,14 @@ export function AccessTab({
 
   const isHighlighted = (field: string) => highlightedFields.includes(field);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  /** When a stored password is masked, focus clears the mask so the owner can type a replacement. */
+  const [editingStoredPassword, setEditingStoredPassword] = useState(false);
+
+  useEffect(() => {
+    if (!draft.requirePassword || !passwordAlreadySet) {
+      setEditingStoredPassword(false);
+    }
+  }, [draft.requirePassword, passwordAlreadySet]);
 
   const advancedCount = FUNCTIONAL_ADVANCED_KEYS.filter((key) => draft[key]).length;
   const verificationDisabled = !isDealRoomLink;
@@ -202,6 +228,36 @@ export function AccessTab({
     [draft.password]
   );
 
+  const showStoredPasswordMask =
+    passwordAlreadySet && draft.password.length === 0 && !editingStoredPassword;
+  const passwordFieldValue = showStoredPasswordMask ? STORED_PASSWORD_MASK : draft.password;
+  const passwordFieldPlaceholder = passwordAlreadySet
+    ? t("accessRules.authentication.passwordReplacePlaceholder")
+    : t("accessRules.authentication.passwordPlaceholder");
+
+  const handlePasswordChange = (next: string) => {
+    if (showStoredPasswordMask) {
+      setEditingStoredPassword(true);
+      // Replace the mask wholesale — ignore residual mask characters from some browsers.
+      const stripped = next.split(STORED_PASSWORD_MASK).join("");
+      updateDraft({ password: stripped });
+      return;
+    }
+    updateDraft({ password: next });
+  };
+
+  const handlePasswordFocus = () => {
+    if (showStoredPasswordMask) {
+      setEditingStoredPassword(true);
+    }
+  };
+
+  const handlePasswordBlur = () => {
+    if (draft.password.length === 0) {
+      setEditingStoredPassword(false);
+    }
+  };
+
   const allowedViewersNeedEmail =
     draft.allowedViewers.length > 0 && !draft.requireEmail && !draft.requireEmailVerification;
 
@@ -243,24 +299,25 @@ export function AccessTab({
           />
           {draft.requirePassword && (
             <div className="space-y-2">
-              <div className="relative">
-                <Input
-                  type={showPassword ? "text" : "password"}
-                  value={draft.password}
-                  onChange={(e) => updateDraft({ password: e.target.value })}
-                  placeholder={t("accessRules.authentication.passwordPlaceholder")}
-                  className="pr-10"
-                  aria-describedby="password-strength-hint"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute inset-y-0 right-0 flex items-center px-3 text-muted-foreground hover:text-foreground"
-                  aria-label={showPassword ? t("accessRules.authentication.hidePassword") : t("accessRules.authentication.showPassword")}
-                >
-                  {showPassword ? <EyeSlash size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
+              <Input
+                type="password"
+                value={passwordFieldValue}
+                onChange={(e) => handlePasswordChange(e.target.value)}
+                onFocus={handlePasswordFocus}
+                onBlur={handlePasswordBlur}
+                placeholder={passwordFieldPlaceholder}
+                autoComplete="new-password"
+                aria-describedby={
+                  passwordAlreadySet && draft.password.length === 0
+                    ? "password-set-hint"
+                    : "password-strength-hint"
+                }
+              />
+              {passwordAlreadySet && draft.password.length === 0 && (
+                <p id="password-set-hint" className="text-xs text-muted-foreground">
+                  {t("accessRules.authentication.passwordSetHint")}
+                </p>
+              )}
               {draft.password.length > 0 && (
                 <div className="space-y-1">
                   <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">

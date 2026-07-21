@@ -520,6 +520,13 @@ export function PublicViewerPage() {
   }, [token, t, sessionKey, signerName, ndaDeliveryEmail, showFloatingGateTip, applyNdaPreview]);
   tryAccessRef.current = tryAccess;
 
+  // Deal-room visitors need the document sidebar visible so folder structure
+  // is discoverable without hunting for the toolbar toggle.
+  useEffect(() => {
+    if (!access?.link.dealRoomId || access.documents.length === 0) return;
+    setSidebarOpen(true);
+  }, [access?.link.dealRoomId, access?.link.id, access?.documents.length]);
+
   useEffect(() => {
     if (!token) return;
     const bootKey = `${token}|${inviteToken ?? ""}`;

@@ -143,7 +143,9 @@
       "requireVerificationDescription": "向访客邮箱发送一次性验证码；身份由验证码绑定（访客页无需再填邮箱）",
       "requirePassword": "要求密码查看",
       "requirePasswordDescription": "访客必须输入密码",
-      "passwordPlaceholder": "输入密码"
+      "passwordPlaceholder": "输入密码",
+      "passwordReplacePlaceholder": "输入新密码以更换",
+      "passwordSetHint": "密码已设置。留空则保持不变；输入新密码可更换。"
     },
     "allowedViewers": {
       "title": "允许访问的访客",
@@ -163,8 +165,8 @@
       "requireNdaDescription": "访客必须先同意 NDA 才能访问",
       "allowDownloading": "允许下载",
       "allowDownloadingDescription": "允许访客下载文档",
-      "screenshotProtection": "降低泄露风险",
-      "screenshotProtectionDescription": "失活时模糊内容并弱化常见快捷键；截图仍可通过水印追溯"
+      "screenshotProtection": "防截图保护",
+      "screenshotProtectionDescription": "降低泄露风险"
     },
     "advanced": {
       "title": "高级",

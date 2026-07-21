@@ -283,7 +283,7 @@ export const api = {
   ) =>
     request<{
       link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
-      documents: { id: string; title: string; pageCount: number; sourceType: string }[];
+      documents: { id: string; title: string; pageCount: number; sourceType: string; folderPath?: string }[];
       visitorId: string;
       requiresEmail: boolean;
       requiresEmailVerification: boolean;

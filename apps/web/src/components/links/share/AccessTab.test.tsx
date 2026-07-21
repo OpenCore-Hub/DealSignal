@@ -27,12 +27,20 @@ function renderAccessTab(
   draft: DraftLink,
   errors: Record<string, string> = {},
   isDealRoomLink = true,
-  documents: { id: string; title: string }[] = []
+  documents: { id: string; title: string }[] = [],
+  passwordAlreadySet = false
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
     <Wrapper>
-      <AccessTab draft={draft} updateDraft={updateDraft} errors={errors} isDealRoomLink={isDealRoomLink} documents={documents} />
+      <AccessTab
+        draft={draft}
+        updateDraft={updateDraft}
+        errors={errors}
+        isDealRoomLink={isDealRoomLink}
+        documents={documents}
+        passwordAlreadySet={passwordAlreadySet}
+      />
     </Wrapper>
   );
   return { updateDraft, rerender };
@@ -123,6 +131,22 @@ describe("AccessTab", () => {
     expect(screen.getByPlaceholderText(/enter password/i)).toBeInTheDocument();
   });
 
+  it("masks a stored password and keeps the field password-only", () => {
+    renderAccessTab(
+      { ...baseDraft, requirePassword: true, password: "" },
+      {},
+      true,
+      [],
+      true
+    );
+
+    const input = screen.getByDisplayValue("••••••••") as HTMLInputElement;
+    expect(input.type).toBe("password");
+    expect(screen.getByText(/Password is set\. Leave blank to keep it/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /show password/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /hide password/i })).not.toBeInTheDocument();
+  });
+
   it("updates allowed viewers and auto-enables email when missing", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     const allowedInput = screen.getByPlaceholderText(/alice@vc\.com/i);
@@ -196,10 +220,16 @@ describe("AccessTab", () => {
 
   it("toggles screenshot protection switch", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
-    const switchEl = screen.getByRole("switch", { name: /reduce leak risk/i });
+    const switchEl = screen.getByRole("switch", { name: /screenshot protection/i });
     expect(switchEl).not.toBeDisabled();
     fireEvent.click(switchEl);
     expect(updateDraft).toHaveBeenCalledWith({ enableScreenshotProtection: true });
+  });
+
+  it("exposes screenshot protection help on the question trigger", () => {
+    renderAccessTab(baseDraft);
+    expect(screen.getByRole("button", { name: /reduce leak risk/i })).toBeInTheDocument();
+    expect(screen.queryByTitle(/reduce leak risk/i)).not.toBeInTheDocument();
   });
 
   it("shows advanced count badge when AI Copilot is enabled", () => {

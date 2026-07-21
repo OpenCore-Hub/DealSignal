@@ -153,6 +153,7 @@
     "sidebarClose": "关闭侧栏",
     "sidebarDocuments": "文档",
     "sidebarAI": "AI 助手",
+    "folderRoot": "根目录",
     "noDocuments": "暂无文档",
     "pages": "页",
     "downloadDisabled": "下载需后端签名 URL 支持",

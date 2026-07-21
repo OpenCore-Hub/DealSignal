@@ -1,6 +1,12 @@
 import { Question } from "@phosphor-icons/react";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export interface SecuritySwitchProps {
@@ -20,15 +26,23 @@ export function SecuritySwitch({
 }: SecuritySwitchProps) {
   return (
     <div className={cn("flex items-start justify-between gap-4", disabled && "opacity-50")}>
-      <div className="space-y-0.5">
-        <Label className="flex items-center gap-1.5 font-normal text-foreground">
-          {label}
-          {description && (
-            <span title={description}>
-              <Question size={14} className="text-muted-foreground" />
-            </span>
-          )}
-        </Label>
+      <div className="flex min-w-0 items-center gap-1.5">
+        <Label className="font-normal text-foreground">{label}</Label>
+        {description && (
+          <TooltipProvider delay={150}>
+            <Tooltip>
+              <TooltipTrigger
+                type="button"
+                delay={150}
+                className="inline-flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground outline-none hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                aria-label={description}
+              >
+                <Question size={14} weight="regular" aria-hidden />
+              </TooltipTrigger>
+              <TooltipContent side="top">{description}</TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        )}
       </div>
       <Switch
         checked={checked}

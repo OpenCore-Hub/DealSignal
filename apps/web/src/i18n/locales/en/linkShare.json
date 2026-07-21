@@ -64,8 +64,8 @@
       "requirePassword": "Require password to view",
       "requirePasswordDescription": "Viewer must enter a password",
       "passwordPlaceholder": "Enter password",
-      "showPassword": "Show password",
-      "hidePassword": "Hide password"
+      "passwordReplacePlaceholder": "Enter a new password to replace",
+      "passwordSetHint": "Password is set. Leave blank to keep it, or enter a new one to replace."
     },
     "allowedViewers": {
       "title": "Allowed viewers",
@@ -87,8 +87,8 @@
       "ndaDocumentPlaceholder": "Select a document",
       "allowDownloading": "Allow downloading",
       "allowDownloadingDescription": "Allow viewers to download documents",
-      "screenshotProtection": "Reduce leak risk",
-      "screenshotProtectionDescription": "Blur when inactive and discourage common shortcuts; screenshots stay traceable via watermark",
+      "screenshotProtection": "Screenshot protection",
+      "screenshotProtectionDescription": "Reduce leak risk",
       "comingSoon": "Coming soon"
     },
     "advanced": {
