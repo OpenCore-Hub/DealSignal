@@ -275,16 +275,57 @@ SET title = $1, updated_at = now()
 WHERE id = $2;
 
 -- name: CreateAssistantMessage :one
-INSERT INTO assistant_messages (session_id, role, content, evidence)
-VALUES ($1, $2, $3, $4)
-RETURNING id, session_id, role, content, evidence, created_at;
+INSERT INTO assistant_messages (
+  session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids;
 
 -- name: ListAssistantMessagesBySession :many
-SELECT id, session_id, role, content, evidence, created_at
+SELECT id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 FROM assistant_messages
 WHERE session_id = $1
 ORDER BY created_at ASC
 LIMIT $2;
+
+-- name: GetAssistantSessionByIDAndLink :one
+SELECT *
+FROM assistant_sessions
+WHERE id = $1 AND link_id = $2
+LIMIT 1;
+
+-- name: ListAskDocsAuditSessionsByLink :many
+SELECT
+  s.id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+WHERE s.link_id = $1
+  AND s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2;
+
 -- name: CreateLink :one
 INSERT INTO links (
     tenant_id, workspace_id, document_id, deal_room_id, public_token, name, permission_type, expires_at, max_access_count,

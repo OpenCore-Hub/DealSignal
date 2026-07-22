@@ -39,12 +39,15 @@ type ActionItem struct {
 }
 
 type AssistantMessage struct {
-	ID        pgtype.UUID
-	SessionID pgtype.UUID
-	Role      string
-	Content   string
-	Evidence  []byte
-	CreatedAt pgtype.Timestamptz
+	ID                    pgtype.UUID
+	SessionID             pgtype.UUID
+	Role                  string
+	Content               string
+	Evidence              []byte
+	CreatedAt             pgtype.Timestamptz
+	ResultStatus          pgtype.Text
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
 }
 
 type AssistantSession struct {

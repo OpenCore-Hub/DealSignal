@@ -796,16 +796,21 @@ func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemPara
 }
 
 const createAssistantMessage = `-- name: CreateAssistantMessage :one
-INSERT INTO assistant_messages (session_id, role, content, evidence)
-VALUES ($1, $2, $3, $4)
-RETURNING id, session_id, role, content, evidence, created_at
+INSERT INTO assistant_messages (
+  session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 `
 
 type CreateAssistantMessageParams struct {
-	SessionID pgtype.UUID
-	Role      string
-	Content   string
-	Evidence  []byte
+	SessionID             pgtype.UUID
+	Role                  string
+	Content               string
+	Evidence              []byte
+	ResultStatus          pgtype.Text
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
 }
 
 func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistantMessageParams) (AssistantMessage, error) {
@@ -814,6 +819,9 @@ func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistan
 		arg.Role,
 		arg.Content,
 		arg.Evidence,
+		arg.ResultStatus,
+		arg.AuthorizedDocumentIds,
+		arg.RetrievalDocumentIds,
 	)
 	var i AssistantMessage
 	err := row.Scan(
@@ -823,6 +831,9 @@ func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistan
 		&i.Content,
 		&i.Evidence,
 		&i.CreatedAt,
+		&i.ResultStatus,
+		&i.AuthorizedDocumentIds,
+		&i.RetrievalDocumentIds,
 	)
 	return i, err
 }
@@ -3328,6 +3339,35 @@ type GetAssistantSessionParams struct {
 
 func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessionParams) (AssistantSession, error) {
 	row := q.db.QueryRow(ctx, getAssistantSession, arg.ID, arg.WorkspaceID, arg.UserID)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VisitorID,
+	)
+	return i, err
+}
+
+const getAssistantSessionByIDAndLink = `-- name: GetAssistantSessionByIDAndLink :one
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at, visitor_id
+FROM assistant_sessions
+WHERE id = $1 AND link_id = $2
+LIMIT 1
+`
+
+type GetAssistantSessionByIDAndLinkParams struct {
+	ID     pgtype.UUID
+	LinkID pgtype.UUID
+}
+
+func (q *Queries) GetAssistantSessionByIDAndLink(ctx context.Context, arg GetAssistantSessionByIDAndLinkParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, getAssistantSessionByIDAndLink, arg.ID, arg.LinkID)
 	var i AssistantSession
 	err := row.Scan(
 		&i.ID,
@@ -7170,8 +7210,82 @@ func (q *Queries) ListArchivedDocumentsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const listAskDocsAuditSessionsByLink = `-- name: ListAskDocsAuditSessionsByLink :many
+SELECT
+  s.id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+WHERE s.link_id = $1
+  AND s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditSessionsByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
+
+type ListAskDocsAuditSessionsByLinkRow struct {
+	ID              pgtype.UUID
+	VisitorID       pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	QuestionPreview string
+	ResultStatus    string
+	EvidenceCount   int64
+}
+
+func (q *Queries) ListAskDocsAuditSessionsByLink(ctx context.Context, arg ListAskDocsAuditSessionsByLinkParams) ([]ListAskDocsAuditSessionsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByLink, arg.LinkID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditSessionsByLinkRow
+	for rows.Next() {
+		var i ListAskDocsAuditSessionsByLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitorID,
+			&i.CreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
-SELECT id, session_id, role, content, evidence, created_at
+SELECT id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 FROM assistant_messages
 WHERE session_id = $1
 ORDER BY created_at ASC
@@ -7199,6 +7313,9 @@ func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAs
 			&i.Content,
 			&i.Evidence,
 			&i.CreatedAt,
+			&i.ResultStatus,
+			&i.AuthorizedDocumentIds,
+			&i.RetrievalDocumentIds,
 		); err != nil {
 			return nil, err
 		}

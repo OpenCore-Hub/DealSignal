@@ -11,7 +11,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
+	linkpkg "github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
@@ -70,6 +70,11 @@ type Querier interface {
 	ListLinkDocumentsByPublicToken(ctx context.Context, publicToken string) ([]db.ListLinkDocumentsByPublicTokenRow, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
 	GetDealRoomKnowledgeBaseByRoom(ctx context.Context, roomID pgtype.UUID) (db.DealRoomKnowledgeBasis, error)
+	GetWorkspaceMember(ctx context.Context, arg db.GetWorkspaceMemberParams) (db.WorkspaceMember, error)
+	GetRoomMemberByUserID(ctx context.Context, arg db.GetRoomMemberByUserIDParams) (db.RoomMember, error)
+	GetLinkByIDAndWorkspace(ctx context.Context, arg db.GetLinkByIDAndWorkspaceParams) (db.Link, error)
+	GetAssistantSessionByIDAndLink(ctx context.Context, arg db.GetAssistantSessionByIDAndLinkParams) (db.AssistantSession, error)
+	ListAskDocsAuditSessionsByLink(ctx context.Context, arg db.ListAskDocsAuditSessionsByLinkParams) ([]db.ListAskDocsAuditSessionsByLinkRow, error)
 	CreateAssistantMessage(ctx context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error)
 	ListAssistantMessagesBySession(ctx context.Context, arg db.ListAssistantMessagesBySessionParams) ([]db.AssistantMessage, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
@@ -150,7 +155,9 @@ func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req Chat
 		return nil, fmt.Errorf("search evidence: %w", err)
 	}
 
-	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList, askDocsAuditSnapshot{
+		ResultStatus: ResultStatusSuccess,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -212,6 +219,10 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 	if err != nil {
 		return nil, fmt.Errorf("list link documents: %w", err)
 	}
+	authorizedIDs, err := linkpkg.AuthorizedDocumentIDs(ctx, s.queries, link)
+	if err != nil {
+		return nil, fmt.Errorf("list authorized documents: %w", err)
+	}
 
 	// Fail closed: empty Access∩KB scope never falls back to workspace-wide search.
 	var evidenceList []search.Evidence
@@ -224,11 +235,20 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 		evidenceList, scopeViolations = filterEvidenceToDocuments(evidenceList, documentIDs)
 	}
 
+	audit := askDocsAuditSnapshot{
+		AuthorizedDocumentIDs: authorizedIDs,
+		RetrievalDocumentIDs:  documentIDs,
+	}
 	var resp *ChatResponse
 	if len(evidenceList) == 0 {
-		resp, err = s.refuseNoEvidence(ctx, session.ID, link)
+		audit.ResultStatus = ResultStatusNoEvidence
+		resp, err = s.refuseNoEvidence(ctx, session.ID, link, audit)
 	} else {
-		resp, err = s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+		audit.ResultStatus = ResultStatusSuccess
+		if scopeViolations > 0 {
+			audit.ResultStatus = "scope_violation"
+		}
+		resp, err = s.complete(ctx, session.ID, req.Message, msgs, evidenceList, audit)
 	}
 	if err != nil {
 		return nil, err
@@ -336,7 +356,7 @@ func (s *Service) resolvePublicSession(ctx context.Context, link db.Link, visito
 
 func (s *Service) documentIDsForLink(ctx context.Context, row db.Link) ([]uuid.UUID, error) {
 	// Access document set (folder allowlist included).
-	authorized, err := link.AuthorizedDocumentIDs(ctx, s.queries, row)
+	authorized, err := linkpkg.AuthorizedDocumentIDs(ctx, s.queries, row)
 	if err != nil {
 		return nil, err
 	}
@@ -413,14 +433,17 @@ func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uui
 	return out, dropped
 }
 
-func (s *Service) refuseNoEvidence(ctx context.Context, sessionID pgtype.UUID, link db.Link) (*ChatResponse, error) {
+func (s *Service) refuseNoEvidence(ctx context.Context, sessionID pgtype.UUID, link db.Link, audit askDocsAuditSnapshot) (*ChatResponse, error) {
 	answer := noEvidenceAnswer(requestLang(ctx), link.QaEnabled)
 	evBytes, _ := json.Marshal([]search.Evidence{})
 	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
-		SessionID: sessionID,
-		Role:      "assistant",
-		Content:   answer,
-		Evidence:  evBytes,
+		SessionID:             sessionID,
+		Role:                  "assistant",
+		Content:               answer,
+		Evidence:              evBytes,
+		ResultStatus:          pgtype.Text{String: audit.ResultStatus, Valid: audit.ResultStatus != ""},
+		AuthorizedDocumentIds: uuidsToPG(audit.AuthorizedDocumentIDs),
+		RetrievalDocumentIds:  uuidsToPG(audit.RetrievalDocumentIDs),
 	}); err != nil {
 		return nil, fmt.Errorf("save assistant message: %w", err)
 	}
@@ -447,7 +470,21 @@ func noEvidenceAnswer(lang string, suggestAskHost bool) string {
 	return answer
 }
 
-func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUserMessage string, msgs []db.AssistantMessage, evidenceList []search.Evidence) (*ChatResponse, error) {
+type askDocsAuditSnapshot struct {
+	AuthorizedDocumentIDs []uuid.UUID
+	RetrievalDocumentIDs  []uuid.UUID
+	ResultStatus          string
+}
+
+func uuidsToPG(ids []uuid.UUID) []pgtype.UUID {
+	out := make([]pgtype.UUID, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, pgtype.UUID{Bytes: id, Valid: true})
+	}
+	return out
+}
+
+func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUserMessage string, msgs []db.AssistantMessage, evidenceList []search.Evidence, audit askDocsAuditSnapshot) (*ChatResponse, error) {
 	evContext := s.formatter.BuildContext(evidenceList)
 	evContext = truncateToLength(evContext, maxEvidenceChars)
 
@@ -463,18 +500,22 @@ func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUs
 
 	evBytes, _ := json.Marshal(evidenceList)
 	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
-		SessionID: sessionID,
-		Role:      "assistant",
-		Content:   answer,
-		Evidence:  evBytes,
+		SessionID:             sessionID,
+		Role:                  "assistant",
+		Content:               answer,
+		Evidence:              evBytes,
+		ResultStatus:          pgtype.Text{String: audit.ResultStatus, Valid: audit.ResultStatus != ""},
+		AuthorizedDocumentIds: uuidsToPG(audit.AuthorizedDocumentIDs),
+		RetrievalDocumentIds:  uuidsToPG(audit.RetrievalDocumentIDs),
 	}); err != nil {
 		return nil, fmt.Errorf("save assistant message: %w", err)
 	}
 
 	return &ChatResponse{
-		SessionID: pgUUIDToString(sessionID),
-		Answer:    answer,
-		Evidence:  evidenceList,
+		SessionID:    pgUUIDToString(sessionID),
+		Answer:       answer,
+		Evidence:     evidenceList,
+		ResultStatus: audit.ResultStatus,
 	}, nil
 }
 
