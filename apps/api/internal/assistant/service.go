@@ -77,6 +77,12 @@ type Querier interface {
 	GetAssistantSessionByIDAndLink(ctx context.Context, arg db.GetAssistantSessionByIDAndLinkParams) (db.AssistantSession, error)
 	ListAskDocsAuditSessionsByLink(ctx context.Context, arg db.ListAskDocsAuditSessionsByLinkParams) ([]db.ListAskDocsAuditSessionsByLinkRow, error)
 	ListAskDocsAuditSessionsByRoom(ctx context.Context, arg db.ListAskDocsAuditSessionsByRoomParams) ([]db.ListAskDocsAuditSessionsByRoomRow, error)
+	ListAskDocsAuditArchivesByLink(ctx context.Context, arg db.ListAskDocsAuditArchivesByLinkParams) ([]db.ListAskDocsAuditArchivesByLinkRow, error)
+	ListAskDocsAuditArchivesByRoom(ctx context.Context, arg db.ListAskDocsAuditArchivesByRoomParams) ([]db.ListAskDocsAuditArchivesByRoomRow, error)
+	GetAskDocsAuditArchive(ctx context.Context, arg db.GetAskDocsAuditArchiveParams) (db.AskDocsAuditArchive, error)
+	ListAskDocsSessionsDueForArchive(ctx context.Context, arg db.ListAskDocsSessionsDueForArchiveParams) ([]db.ListAskDocsSessionsDueForArchiveRow, error)
+	UpsertAskDocsAuditArchive(ctx context.Context, arg db.UpsertAskDocsAuditArchiveParams) error
+	DeleteAssistantSessionByID(ctx context.Context, id pgtype.UUID) error
 	ListAskHighRiskSecurityEventsByLink(ctx context.Context, arg db.ListAskHighRiskSecurityEventsByLinkParams) ([]db.ListAskHighRiskSecurityEventsByLinkRow, error)
 	ListAskHighRiskSecurityEventsByRoom(ctx context.Context, arg db.ListAskHighRiskSecurityEventsByRoomParams) ([]db.ListAskHighRiskSecurityEventsByRoomRow, error)
 	CreateAssistantMessage(ctx context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error)

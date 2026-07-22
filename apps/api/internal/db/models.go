@@ -38,6 +38,26 @@ type ActionItem struct {
 	SourceID    pgtype.Text
 }
 
+type AskDocsAuditArchive struct {
+	SessionID             pgtype.UUID
+	LinkID                pgtype.UUID
+	WorkspaceID           pgtype.UUID
+	DealRoomID            pgtype.UUID
+	TenantID              pgtype.UUID
+	VisitorID             string
+	QuestionPreview       string
+	ResultStatus          string
+	EvidenceCount         int32
+	Question              string
+	Answer                string
+	Evidence              []byte
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
+	Messages              []byte
+	SessionCreatedAt      pgtype.Timestamptz
+	ArchivedAt            pgtype.Timestamptz
+}
+
 type AssistantMessage struct {
 	ID                    pgtype.UUID
 	SessionID             pgtype.UUID

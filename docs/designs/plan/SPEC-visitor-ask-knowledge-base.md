@@ -92,7 +92,7 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 ### Audit & signals
 - V1 audit projection over public assistant sessions/messages plus authorized-scope snapshot and result status; reserve dedicated append-only table later.
 - Visibility: room members ∪ workspace admins; full Q&A text.
-- Hot window 90 days; then archive (not delete); admins can still open archived items.
+- Hot window 90 days from live `assistant_sessions`; older sessions are **physically archived** into `ask_docs_audit_archives` (detail preserved), then removed from hot tables. Default list = hot only; `archived=true` merges cold rows. Detail falls back to archive when the hot session is gone.
 - UI: link management audit + room-level timeline; V1 may ship link-side first.
 - Keep async question→Signal creation alongside audit; separate UX labels.
 
@@ -104,7 +104,7 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 ### Phased delivery (release gate)
 - Gate-0 (anti-bypass) + Sec-0 (scope alignment) + Audit-1 + Ingest-1 + KB-1 + Mig-1 — **done in code**; remaining UX/test debt in `PLAN-visitor-ask-v1-debt.md` (B3–B7 naming, MSW, security-events UI).
 - UX phases (naming/card, visitor polish, room audit summary) + V1.5 channel hint + smoke e2e + SPEC #36 blur — **done**.
-- Still open (not this epic / OOS): dedicated append-only audit table; single-document KB product / V2 deprecation.
+- Still open (not this epic / OOS): fully independent append-only live audit ledger (cold archive table is B2); single-document KB product / V2 deprecation.
 
 ## Testing Decisions
 

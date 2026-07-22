@@ -33,13 +33,13 @@
 |------|------|------|-------------|------|
 | C | 生产正确性 hotfix | 3 | 3 review | C1–C3 已实现，待合入 |
 | A | 假实现 / 空转 | 5 | 5 review | A1=C3；真双世代 + building Ask Docs + 无 chunk 校验 |
-| B | 半真 / 缺口 | 11 | 9 review + 2 deferred | B1/B3–B7/B9–B11 review；B2/B8 deferred |
+| B | 半真 / 缺口 | 11 | 11 review | B1–B11 全部实现待合入（含 B2 冷归档 + B8 gate 统一） |
 | D | 文档与追踪 | 2 | 2 review | 本文 + SPEC 对齐 |
 | E | Out of Scope（仅登记） | — | — | 不计入完成率 |
 
-**滚动完成率**：以合入 `done` 为准；当前工作区 P0 项均 `review`。
+**滚动完成率**：以合入 `done` 为准；当前工作区 P0/P1/P2 债务项均 `review`。
 
-**当前建议下一刀**：合入部署 **C1–C3 + A2–A4 + B1 + B3–B7 + B9–B11**（含 migration `092`/`093`）；B2/B8 仍 deferred。
+**当前建议下一刀**：合入部署 **C1–C3 + A2–A4 + B1–B11**（含 migration `092`/`093`/`094`）。
 
 ---
 
@@ -89,13 +89,13 @@
 | ID | 优先级 | 状态 | SPEC 依据 | 任务 | 验收 | 依赖 | 负责人 | 更新日期 |
 |----|--------|------|-----------|------|------|------|--------|----------|
 | B1 | P1 | `review` | US#25 | Ask Docs/Host 限额：Redis 不可用时 **fail-closed（拒绝）** | 超限 → 429/`rate_limit_exceeded` + 安全事件；Redis 失败 → 503/`limiter_unavailable`（不写 rate_limit 事件）；单测覆盖 | — | | 2026-07-22 |
-| B2 | P2 | `deferred` | US#28 | 物理/冷归档（V1 现为 90 天软过滤） | 里程碑：独立审计表或归档存储 | Future | | 2026-07-22 |
+| B2 | P2 | `review` | US#28 | 物理/冷归档（90 天热窗口外写入 `ask_docs_audit_archives`） | migration `094`；热列表 SQL `created_at>=cutoff`；`archived=true` 读冷表；detail 热→冷回退；后台 worker + 列表机会归档；单测 archive/get-from-archive | — | | 2026-07-22 |
 | B3 | P1 | `review` | US#32 | 所有者可见 Ask 高危安全事件（block / scope_violation / rate_limit）入口 | 链接/室分析页 `AskSecurityEventsPanel`；migration `093`；API `ask-security-events` | — | | 2026-07-22 |
 | B4 | P2 | `review` | US#20 | 核对审计详情返回的 quote 是否也需 ≤320；与访客响应策略一致 | 持久化 + 审计投影均 ≤320；`TestGetAskDocsAudit_TruncatesLongQuotes` / stored evidence 断言 | — | | 2026-07-22 |
 | B5 | P2 | `review` | Frontend 命名 | Bundle/Smart Link「AI Copilot」→ Visitor Ask / Ask Docs；清理遗留 `aiAgents` / `qaConversations` 文案 | Access + creator 无旧名；en/zh-CN 同步 | — | | 2026-07-22 |
 | B6 | P1 | `review` | 测试债 | MSW：KB 预门控、coverage warning、public `assistant/chat`、（可选）KB/audit handlers | Playwright：`visitor-ask-docs` + `knowledge-base` + `ask-security-events` + `visitor-ask-naming` + `visitor-ask-kb-gate`（US#11/12/A4）；MSW handlers | C2 | | 2026-07-22 |
 | B7 | P2 | `review` | US#31 | Management「Visitor questions」等与 Ask Host / 审计入口文案分离 | Engage：Ask Host activity/inbox 与 Ask Docs audit 分栏；中英文明确「审计≠信号≠问发起方」；e2e `visitor-ask-naming` | — | | 2026-07-22 |
-| B8 | P2 | `deferred` | 架构 | 统一 Visitor Ask gate（限额+安全事件）减少 Docs/Host 双路径 glue | 非功能阻断；可随重构 | — | | 2026-07-22 |
+| B8 | P2 | `review` | 架构 | 统一 Visitor Ask gate（限额+安全事件）减少 Docs/Host 双路径 glue | `visitorask.Check` + shared deny codes/messages；Ask Docs/Host handlers 共用；单测 gate | B1 | | 2026-07-22 |
 | B9 | P1 | `review` | US#32 / US#24 | Owner 高危事件列表包含白名单撤销 `not_in_allow_list`（与 blocked_* 同属 block） | SQL 过滤 + en/zh-CN；MSW/e2e 可见「Removed from allowlist」 | B3 | | 2026-07-22 |
 | B10 | P0 | `review` | 假实现 | 消灭 `DealRoomQATab` 假数据/`comingSoon`；室级 Ask Host 收件箱 + 真回复 | `GET …/deal-rooms/:id/visitor-questions`；owner/admin 或室成员鉴权；DTO snake_case；e2e `visitor-ask-host-inbox`；auth 单测 | — | | 2026-07-22 |
 | B11 | P1 | `review` | US#25 / B1 UX | 访客侧区分超限 vs 限额器不可用（Ask Docs + Ask Host） | `rate_limit_exceeded` / `limiter_unavailable` 独立 i18n；e2e 断言文案；不把基础设施失败写成「请求过多」 | B1 | | 2026-07-22 |
@@ -146,6 +146,8 @@
 - **B9**：owner Ask 高危事件含 `not_in_allow_list`（白名单撤销）
 - **B10**：室级 Ask Host 收件箱（真 API + 鉴权，无假数据）
 - **B11**：访客侧 `rate_limit_exceeded` / `limiter_unavailable` 独立 i18n（Ask Docs + Ask Host）
+- **B8**：`visitorask.Check` 统一 Docs/Host 限额与安全事件 glue
+- **B2**：Ask Docs 审计 90 天外冷归档表 `ask_docs_audit_archives` + worker
 
 ---
 
@@ -199,3 +201,4 @@
 | 1.1 | 2026-07-22 | 评审跟进：Ask Host 室/链接鉴权对齐 audit；去掉 analytics comingSoon；zh-CN dashboard 复数键同步 |
 | 1.2 | 2026-07-22 | B1 taxonomy：Redis fail-closed → 503/`limiter_unavailable`；访客超限仍 429/`rate_limit_exceeded` |
 | 1.3 | 2026-07-22 | B11：访客 Ask Docs/Host 错误文案按 code 分流（超限 vs 限额器不可用） |
+| 1.4 | 2026-07-22 | B8：统一 `visitorask.Check` gate；B2：`094` 冷归档表 + worker + 热/冷 list/detail |

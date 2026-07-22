@@ -18,7 +18,6 @@ import (
 )
 
 const (
-	securityEventRateLimited     = "rate_limit_exceeded"
 	securityEventScopeViolation  = "scope_violation"
 	maxVisitorEvidenceQuoteRunes = 320
 )
@@ -110,20 +109,7 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 	}
 
 	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	ok, limErr := visitorask.AllowAskDocs(c.Request.Context(), h.limiter, linkID, result.VisitorID)
-	if limErr != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"code":    "limiter_unavailable",
-			"message": "Ask Docs is temporarily unavailable, please try again later",
-		})
-		return
-	}
-	if !ok {
-		h.recordSecurity(c, result.Link, securityEventRateLimited, result.VisitorID, result.Email, "ask_docs")
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"code":    "rate_limit_exceeded",
-			"message": "too many Ask Docs requests, please try again later",
-		})
+	if h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskDocs) {
 		return
 	}
 
@@ -163,6 +149,23 @@ func truncateRunes(s string, max int) string {
 		return s
 	}
 	return string([]rune(s)[:max])
+}
+
+// rejectIfAskLimited returns true when Ask Docs/Host must be denied (response already written).
+// Shared Visitor Ask gate (B8) with link Ask Host — same codes, event taxonomy, and fail-closed rules.
+func (h *PublicHandler) rejectIfAskLimited(c *gin.Context, result link.AccessResult, linkID string, ch visitorask.Channel) bool {
+	decision := visitorask.Check(c.Request.Context(), h.limiter, ch, linkID, result.VisitorID)
+	if decision == visitorask.DecisionAllow {
+		return false
+	}
+	if visitorask.ShouldRecordRateLimitEvent(decision) {
+		h.recordSecurity(c, result.Link, visitorask.EventTypeRateLimited, result.VisitorID, result.Email, visitorask.EventReason(ch))
+	}
+	c.JSON(visitorask.DenyHTTPStatus(decision), gin.H{
+		"code":    visitorask.DenyCode(decision),
+		"message": visitorask.DenyMessage(ch, decision),
+	})
+	return true
 }
 
 func (h *PublicHandler) recordSecurity(c *gin.Context, row db.Link, eventType, visitorID, email, reason string) {

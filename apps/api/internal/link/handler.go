@@ -96,24 +96,31 @@ func (h *Handler) recordAskSecurityEvent(ctx context.Context, row db.Link, event
 }
 
 // rejectIfAskHostLimited returns true when Ask Host must be denied (response already written).
-// Visitor over-limit → 429 + rate_limit_exceeded security event.
-// Redis/limiter failure → 503 limiter_unavailable with no rate-limit security event.
+// Uses the shared Visitor Ask gate (B8): over-limit → 429 + security event; Redis fail → 503, no event.
 func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
-	ok, limErr := visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID)
-	if limErr != nil {
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"code":    "limiter_unavailable",
-			"message": "Ask Host is temporarily unavailable, please try again later",
-		})
-		return true
-	}
-	if ok {
+	return h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskHost)
+}
+
+func (h *Handler) rejectIfAskLimited(c *gin.Context, result AccessResult, linkID string, ch visitorask.Channel) bool {
+	decision := visitorask.Check(c.Request.Context(), h.visitorAskLimiter(), ch, linkID, result.VisitorID)
+	if decision == visitorask.DecisionAllow {
 		return false
 	}
-	h.recordAskSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
-	c.JSON(http.StatusTooManyRequests, gin.H{
-		"code":    "rate_limit_exceeded",
-		"message": "too many Ask Host requests, please try again later",
+	if visitorask.ShouldRecordRateLimitEvent(decision) {
+		h.recordAskSecurityEvent(
+			c.Request.Context(),
+			result.Link,
+			visitorask.EventTypeRateLimited,
+			result.VisitorID,
+			result.Email,
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			visitorask.EventReason(ch),
+		)
+	}
+	c.JSON(visitorask.DenyHTTPStatus(decision), gin.H{
+		"code":    visitorask.DenyCode(decision),
+		"message": visitorask.DenyMessage(ch, decision),
 	})
 	return true
 }

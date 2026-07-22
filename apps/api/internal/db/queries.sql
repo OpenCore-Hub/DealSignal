@@ -357,6 +357,7 @@ WHERE id = $1 AND link_id = $2
 LIMIT 1;
 
 -- name: ListAskDocsAuditSessionsByLink :many
+-- Hot window only (created_at >= $2). Older rows live in ask_docs_audit_archives after B2.
 SELECT
   s.id,
   s.visitor_id,
@@ -385,8 +386,9 @@ SELECT
 FROM assistant_sessions s
 WHERE s.link_id = $1
   AND s.visitor_id IS NOT NULL
+  AND s.created_at >= $2
 ORDER BY s.created_at DESC
-LIMIT $2;
+LIMIT $3;
 
 -- name: ListAskDocsAuditSessionsByRoom :many
 SELECT
@@ -418,8 +420,91 @@ SELECT
 FROM assistant_sessions s
 INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
 WHERE s.visitor_id IS NOT NULL
+  AND s.created_at >= $2
 ORDER BY s.created_at DESC
+LIMIT $3;
+
+-- name: ListAskDocsAuditArchivesByLink :many
+SELECT
+  session_id,
+  link_id,
+  visitor_id,
+  session_created_at,
+  question_preview,
+  result_status,
+  evidence_count
+FROM ask_docs_audit_archives
+WHERE link_id = $1
+ORDER BY session_created_at DESC
 LIMIT $2;
+
+-- name: ListAskDocsAuditArchivesByRoom :many
+SELECT
+  session_id,
+  link_id,
+  visitor_id,
+  session_created_at,
+  question_preview,
+  result_status,
+  evidence_count
+FROM ask_docs_audit_archives
+WHERE deal_room_id = $1
+ORDER BY session_created_at DESC
+LIMIT $2;
+
+-- name: GetAskDocsAuditArchive :one
+SELECT *
+FROM ask_docs_audit_archives
+WHERE session_id = $1 AND link_id = $2
+LIMIT 1;
+
+-- name: ListAskDocsSessionsDueForArchive :many
+SELECT
+  s.id,
+  s.link_id,
+  s.workspace_id,
+  s.visitor_id,
+  s.created_at,
+  l.deal_room_id,
+  l.tenant_id
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id
+WHERE s.visitor_id IS NOT NULL
+  AND s.link_id IS NOT NULL
+  AND s.created_at < $1
+  AND NOT EXISTS (
+    SELECT 1 FROM ask_docs_audit_archives a WHERE a.session_id = s.id
+  )
+ORDER BY s.created_at ASC
+LIMIT $2;
+
+-- name: UpsertAskDocsAuditArchive :exec
+INSERT INTO ask_docs_audit_archives (
+  session_id,
+  link_id,
+  workspace_id,
+  deal_room_id,
+  tenant_id,
+  visitor_id,
+  question_preview,
+  result_status,
+  evidence_count,
+  question,
+  answer,
+  evidence,
+  authorized_document_ids,
+  retrieval_document_ids,
+  messages,
+  session_created_at,
+  archived_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+)
+ON CONFLICT (session_id) DO NOTHING;
+
+-- name: DeleteAssistantSessionByID :exec
+DELETE FROM assistant_sessions
+WHERE id = $1;
 
 -- name: CreateLink :one
 INSERT INTO links (

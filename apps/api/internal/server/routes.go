@@ -229,6 +229,9 @@ func (s *Server) registerRoutes() error {
 
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc)
 			assistantHandler := assistant.NewHandler(assistantSvc)
+			askDocsArchiveWorker := assistant.NewAskDocsAuditArchiveWorker(assistantSvc, 6*time.Hour, 50)
+			s.registerWorker(askDocsArchiveWorker)
+			askDocsArchiveWorker.Start(s.shutdownCtx)
 
 			actionSyncer := action.NewSyncer(queries)
 

@@ -2821,6 +2821,16 @@ func (q *Queries) DeleteAccessLogsBefore(ctx context.Context, createdAt pgtype.T
 	return result.RowsAffected(), nil
 }
 
+const deleteAssistantSessionByID = `-- name: DeleteAssistantSessionByID :exec
+DELETE FROM assistant_sessions
+WHERE id = $1
+`
+
+func (q *Queries) DeleteAssistantSessionByID(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAssistantSessionByID, id)
+	return err
+}
+
 const deleteChunkEmbeddingBuildsForDocuments = `-- name: DeleteChunkEmbeddingBuildsForDocuments :exec
 DELETE FROM chunk_embedding_builds b
 USING chunks c
@@ -3346,6 +3356,43 @@ func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBy
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+	)
+	return i, err
+}
+
+const getAskDocsAuditArchive = `-- name: GetAskDocsAuditArchive :one
+SELECT session_id, link_id, workspace_id, deal_room_id, tenant_id, visitor_id, question_preview, result_status, evidence_count, question, answer, evidence, authorized_document_ids, retrieval_document_ids, messages, session_created_at, archived_at
+FROM ask_docs_audit_archives
+WHERE session_id = $1 AND link_id = $2
+LIMIT 1
+`
+
+type GetAskDocsAuditArchiveParams struct {
+	SessionID pgtype.UUID
+	LinkID    pgtype.UUID
+}
+
+func (q *Queries) GetAskDocsAuditArchive(ctx context.Context, arg GetAskDocsAuditArchiveParams) (AskDocsAuditArchive, error) {
+	row := q.db.QueryRow(ctx, getAskDocsAuditArchive, arg.SessionID, arg.LinkID)
+	var i AskDocsAuditArchive
+	err := row.Scan(
+		&i.SessionID,
+		&i.LinkID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.TenantID,
+		&i.VisitorID,
+		&i.QuestionPreview,
+		&i.ResultStatus,
+		&i.EvidenceCount,
+		&i.Question,
+		&i.Answer,
+		&i.Evidence,
+		&i.AuthorizedDocumentIds,
+		&i.RetrievalDocumentIds,
+		&i.Messages,
+		&i.SessionCreatedAt,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
@@ -7236,6 +7283,122 @@ func (q *Queries) ListArchivedDocumentsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const listAskDocsAuditArchivesByLink = `-- name: ListAskDocsAuditArchivesByLink :many
+SELECT
+  session_id,
+  link_id,
+  visitor_id,
+  session_created_at,
+  question_preview,
+  result_status,
+  evidence_count
+FROM ask_docs_audit_archives
+WHERE link_id = $1
+ORDER BY session_created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditArchivesByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
+
+type ListAskDocsAuditArchivesByLinkRow struct {
+	SessionID        pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        string
+	SessionCreatedAt pgtype.Timestamptz
+	QuestionPreview  string
+	ResultStatus     string
+	EvidenceCount    int32
+}
+
+func (q *Queries) ListAskDocsAuditArchivesByLink(ctx context.Context, arg ListAskDocsAuditArchivesByLinkParams) ([]ListAskDocsAuditArchivesByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditArchivesByLink, arg.LinkID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditArchivesByLinkRow
+	for rows.Next() {
+		var i ListAskDocsAuditArchivesByLinkRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.SessionCreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsAuditArchivesByRoom = `-- name: ListAskDocsAuditArchivesByRoom :many
+SELECT
+  session_id,
+  link_id,
+  visitor_id,
+  session_created_at,
+  question_preview,
+  result_status,
+  evidence_count
+FROM ask_docs_audit_archives
+WHERE deal_room_id = $1
+ORDER BY session_created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditArchivesByRoomParams struct {
+	DealRoomID pgtype.UUID
+	Limit      int32
+}
+
+type ListAskDocsAuditArchivesByRoomRow struct {
+	SessionID        pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        string
+	SessionCreatedAt pgtype.Timestamptz
+	QuestionPreview  string
+	ResultStatus     string
+	EvidenceCount    int32
+}
+
+func (q *Queries) ListAskDocsAuditArchivesByRoom(ctx context.Context, arg ListAskDocsAuditArchivesByRoomParams) ([]ListAskDocsAuditArchivesByRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditArchivesByRoom, arg.DealRoomID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditArchivesByRoomRow
+	for rows.Next() {
+		var i ListAskDocsAuditArchivesByRoomRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.SessionCreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAskDocsAuditSessionsByLink = `-- name: ListAskDocsAuditSessionsByLink :many
 SELECT
   s.id,
@@ -7265,13 +7428,15 @@ SELECT
 FROM assistant_sessions s
 WHERE s.link_id = $1
   AND s.visitor_id IS NOT NULL
+  AND s.created_at >= $2
 ORDER BY s.created_at DESC
-LIMIT $2
+LIMIT $3
 `
 
 type ListAskDocsAuditSessionsByLinkParams struct {
-	LinkID pgtype.UUID
-	Limit  int32
+	LinkID    pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+	Limit     int32
 }
 
 type ListAskDocsAuditSessionsByLinkRow struct {
@@ -7283,8 +7448,9 @@ type ListAskDocsAuditSessionsByLinkRow struct {
 	EvidenceCount   int64
 }
 
+// Hot window only (created_at >= $2). Older rows live in ask_docs_audit_archives after B2.
 func (q *Queries) ListAskDocsAuditSessionsByLink(ctx context.Context, arg ListAskDocsAuditSessionsByLinkParams) ([]ListAskDocsAuditSessionsByLinkRow, error) {
-	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByLink, arg.LinkID, arg.Limit)
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByLink, arg.LinkID, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -7340,12 +7506,14 @@ SELECT
 FROM assistant_sessions s
 INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
 WHERE s.visitor_id IS NOT NULL
+  AND s.created_at >= $2
 ORDER BY s.created_at DESC
-LIMIT $2
+LIMIT $3
 `
 
 type ListAskDocsAuditSessionsByRoomParams struct {
 	DealRoomID pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
 	Limit      int32
 }
 
@@ -7360,7 +7528,7 @@ type ListAskDocsAuditSessionsByRoomRow struct {
 }
 
 func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAskDocsAuditSessionsByRoomParams) ([]ListAskDocsAuditSessionsByRoomRow, error) {
-	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByRoom, arg.DealRoomID, arg.Limit)
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByRoom, arg.DealRoomID, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -7376,6 +7544,70 @@ func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAs
 			&i.QuestionPreview,
 			&i.ResultStatus,
 			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsSessionsDueForArchive = `-- name: ListAskDocsSessionsDueForArchive :many
+SELECT
+  s.id,
+  s.link_id,
+  s.workspace_id,
+  s.visitor_id,
+  s.created_at,
+  l.deal_room_id,
+  l.tenant_id
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id
+WHERE s.visitor_id IS NOT NULL
+  AND s.link_id IS NOT NULL
+  AND s.created_at < $1
+  AND NOT EXISTS (
+    SELECT 1 FROM ask_docs_audit_archives a WHERE a.session_id = s.id
+  )
+ORDER BY s.created_at ASC
+LIMIT $2
+`
+
+type ListAskDocsSessionsDueForArchiveParams struct {
+	CreatedAt pgtype.Timestamptz
+	Limit     int32
+}
+
+type ListAskDocsSessionsDueForArchiveRow struct {
+	ID          pgtype.UUID
+	LinkID      pgtype.UUID
+	WorkspaceID pgtype.UUID
+	VisitorID   pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	DealRoomID  pgtype.UUID
+	TenantID    pgtype.UUID
+}
+
+func (q *Queries) ListAskDocsSessionsDueForArchive(ctx context.Context, arg ListAskDocsSessionsDueForArchiveParams) ([]ListAskDocsSessionsDueForArchiveRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsSessionsDueForArchive, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsSessionsDueForArchiveRow
+	for rows.Next() {
+		var i ListAskDocsSessionsDueForArchiveRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.WorkspaceID,
+			&i.VisitorID,
+			&i.CreatedAt,
+			&i.DealRoomID,
+			&i.TenantID,
 		); err != nil {
 			return nil, err
 		}
@@ -13281,6 +13513,74 @@ func (q *Queries) UpdateWorkspaceSecurity(ctx context.Context, arg UpdateWorkspa
 		&i.WebhookSecret,
 	)
 	return i, err
+}
+
+const upsertAskDocsAuditArchive = `-- name: UpsertAskDocsAuditArchive :exec
+INSERT INTO ask_docs_audit_archives (
+  session_id,
+  link_id,
+  workspace_id,
+  deal_room_id,
+  tenant_id,
+  visitor_id,
+  question_preview,
+  result_status,
+  evidence_count,
+  question,
+  answer,
+  evidence,
+  authorized_document_ids,
+  retrieval_document_ids,
+  messages,
+  session_created_at,
+  archived_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+)
+ON CONFLICT (session_id) DO NOTHING
+`
+
+type UpsertAskDocsAuditArchiveParams struct {
+	SessionID             pgtype.UUID
+	LinkID                pgtype.UUID
+	WorkspaceID           pgtype.UUID
+	DealRoomID            pgtype.UUID
+	TenantID              pgtype.UUID
+	VisitorID             string
+	QuestionPreview       string
+	ResultStatus          string
+	EvidenceCount         int32
+	Question              string
+	Answer                string
+	Evidence              []byte
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
+	Messages              []byte
+	SessionCreatedAt      pgtype.Timestamptz
+	ArchivedAt            pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertAskDocsAuditArchive(ctx context.Context, arg UpsertAskDocsAuditArchiveParams) error {
+	_, err := q.db.Exec(ctx, upsertAskDocsAuditArchive,
+		arg.SessionID,
+		arg.LinkID,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+		arg.TenantID,
+		arg.VisitorID,
+		arg.QuestionPreview,
+		arg.ResultStatus,
+		arg.EvidenceCount,
+		arg.Question,
+		arg.Answer,
+		arg.Evidence,
+		arg.AuthorizedDocumentIds,
+		arg.RetrievalDocumentIds,
+		arg.Messages,
+		arg.SessionCreatedAt,
+		arg.ArchivedAt,
+	)
+	return err
 }
 
 const upsertChunkEmbeddingBuild = `-- name: UpsertChunkEmbeddingBuild :exec

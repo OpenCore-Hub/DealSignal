@@ -40,6 +40,13 @@ type mockQuerier struct {
 	roomStatus        string
 	roomErr           error
 	auditRows         []db.ListAskDocsAuditSessionsByLinkRow
+	auditArchives     []db.ListAskDocsAuditArchivesByLinkRow
+	roomAuditArchives []db.ListAskDocsAuditArchivesByRoomRow
+	dueArchiveRows    []db.ListAskDocsSessionsDueForArchiveRow
+	auditArchiveDetail db.AskDocsAuditArchive
+	auditArchiveOK    bool
+	deletedSessionIDs []pgtype.UUID
+	upsertedArchives  []db.UpsertAskDocsAuditArchiveParams
 	auditSession      db.AssistantSession
 	auditSessionOK    bool
 	room              db.DealRoom
@@ -169,6 +176,35 @@ func (m *mockQuerier) GetAssistantSessionByIDAndLink(_ context.Context, arg db.G
 
 func (m *mockQuerier) ListAskDocsAuditSessionsByLink(_ context.Context, _ db.ListAskDocsAuditSessionsByLinkParams) ([]db.ListAskDocsAuditSessionsByLinkRow, error) {
 	return m.auditRows, nil
+}
+
+func (m *mockQuerier) ListAskDocsAuditArchivesByLink(_ context.Context, _ db.ListAskDocsAuditArchivesByLinkParams) ([]db.ListAskDocsAuditArchivesByLinkRow, error) {
+	return m.auditArchives, nil
+}
+
+func (m *mockQuerier) ListAskDocsAuditArchivesByRoom(_ context.Context, _ db.ListAskDocsAuditArchivesByRoomParams) ([]db.ListAskDocsAuditArchivesByRoomRow, error) {
+	return m.roomAuditArchives, nil
+}
+
+func (m *mockQuerier) GetAskDocsAuditArchive(_ context.Context, _ db.GetAskDocsAuditArchiveParams) (db.AskDocsAuditArchive, error) {
+	if !m.auditArchiveOK {
+		return db.AskDocsAuditArchive{}, pgx.ErrNoRows
+	}
+	return m.auditArchiveDetail, nil
+}
+
+func (m *mockQuerier) ListAskDocsSessionsDueForArchive(_ context.Context, _ db.ListAskDocsSessionsDueForArchiveParams) ([]db.ListAskDocsSessionsDueForArchiveRow, error) {
+	return m.dueArchiveRows, nil
+}
+
+func (m *mockQuerier) UpsertAskDocsAuditArchive(_ context.Context, arg db.UpsertAskDocsAuditArchiveParams) error {
+	m.upsertedArchives = append(m.upsertedArchives, arg)
+	return nil
+}
+
+func (m *mockQuerier) DeleteAssistantSessionByID(_ context.Context, id pgtype.UUID) error {
+	m.deletedSessionIDs = append(m.deletedSessionIDs, id)
+	return nil
 }
 
 func (m *mockQuerier) GetDealRoomByID(_ context.Context, _ db.GetDealRoomByIDParams) (db.DealRoom, error) {
@@ -878,13 +914,16 @@ func TestListAskDocsAudit_DefaultExcludesArchived(t *testing.T) {
 				ResultStatus:    ResultStatusSuccess,
 				EvidenceCount:   1,
 			},
+		},
+		auditArchives: []db.ListAskDocsAuditArchivesByLinkRow{
 			{
-				ID:              pgtype.UUID{Bytes: oldID, Valid: true},
-				VisitorID:       pgtype.Text{String: "v-old", Valid: true},
-				CreatedAt:       pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
-				QuestionPreview: "old question",
-				ResultStatus:    ResultStatusNoEvidence,
-				EvidenceCount:   0,
+				SessionID:         pgtype.UUID{Bytes: oldID, Valid: true},
+				LinkID:            pgtype.UUID{Bytes: linkID, Valid: true},
+				VisitorID:         "v-old",
+				SessionCreatedAt:  pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
+				QuestionPreview:   "old question",
+				ResultStatus:      ResultStatusNoEvidence,
+				EvidenceCount:     0,
 			},
 		},
 	}
@@ -913,6 +952,95 @@ func TestListAskDocsAudit_DefaultExcludesArchived(t *testing.T) {
 	}
 	if !archived {
 		t.Fatal("expected old session marked archived")
+	}
+}
+
+func TestArchiveDueAskDocsSessions_MovesToColdStorage(t *testing.T) {
+	now := time.Now().UTC()
+	sessionID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	sid := pgtype.UUID{Bytes: sessionID, Valid: true}
+
+	q := &mockQuerier{
+		dueArchiveRows: []db.ListAskDocsSessionsDueForArchiveRow{
+			{
+				ID:          sid,
+				LinkID:      pgtype.UUID{Bytes: linkID, Valid: true},
+				WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+				VisitorID:   pgtype.Text{String: "v1", Valid: true},
+				CreatedAt:   pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
+			},
+		},
+		messages: []db.AssistantMessage{
+			{
+				SessionID: sid,
+				Role:      "user",
+				Content:   "Where is the model?",
+				CreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
+			},
+			{
+				SessionID:             sid,
+				Role:                  "assistant",
+				Content:               "In Finance.",
+				ResultStatus:          pgtype.Text{String: ResultStatusSuccess, Valid: true},
+				AuthorizedDocumentIds: []pgtype.UUID{},
+				RetrievalDocumentIds:  []pgtype.UUID{},
+				Evidence:              []byte(`[{"chunk_id":"c1","quote":"Finance","page_number":1,"score":0.9}]`),
+				CreatedAt:             pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	n, err := svc.ArchiveDueAskDocsSessions(context.Background(), now, 10)
+	if err != nil {
+		t.Fatalf("ArchiveDueAskDocsSessions: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("expected 1 archived, got %d", n)
+	}
+	if len(q.upsertedArchives) != 1 || q.upsertedArchives[0].Question != "Where is the model?" {
+		t.Fatalf("expected upserted archive, got %+v", q.upsertedArchives)
+	}
+	if len(q.deletedSessionIDs) != 1 || q.deletedSessionIDs[0] != sid {
+		t.Fatalf("expected session deleted, got %+v", q.deletedSessionIDs)
+	}
+}
+
+func TestGetAskDocsAudit_FromColdArchive(t *testing.T) {
+	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	sessionID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	now := time.Now().UTC()
+
+	q := &mockQuerier{
+		linkOK: true,
+		link: db.Link{
+			ID:          pgtype.UUID{Bytes: linkID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		wsRole:         "admin",
+		auditSessionOK: false,
+		auditArchiveOK: true,
+		auditArchiveDetail: db.AskDocsAuditArchive{
+			SessionID:        pgtype.UUID{Bytes: sessionID, Valid: true},
+			LinkID:           pgtype.UUID{Bytes: linkID, Valid: true},
+			VisitorID:        "v-old",
+			Question:         "Old Q",
+			Answer:           "Old A",
+			ResultStatus:     ResultStatusSuccess,
+			Evidence:         []byte(`[]`),
+			Messages:         []byte(`[{"role":"user","content":"Old Q","created_at":"2025-01-01T00:00:00Z"},{"role":"assistant","content":"Old A","created_at":"2025-01-01T00:00:01Z"}]`),
+			SessionCreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -120), Valid: true},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	detail, err := svc.GetAskDocsAudit(context.Background(), wsID.String(), linkID.String(), sessionID.String(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("GetAskDocsAudit: %v", err)
+	}
+	if !detail.Archived || detail.VisitorID != "v-old" || len(detail.Messages) != 2 {
+		t.Fatalf("unexpected archive detail: %+v", detail)
 	}
 }
 
@@ -1317,10 +1445,12 @@ func TestListRoomAskDocsAudit_DefaultExcludesArchived(t *testing.T) {
 				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
 				CreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -10), Valid: true},
 			},
+		},
+		roomAuditArchives: []db.ListAskDocsAuditArchivesByRoomRow{
 			{
-				ID:        pgtype.UUID{Bytes: oldID, Valid: true},
-				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
-				CreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
+				SessionID:        pgtype.UUID{Bytes: oldID, Valid: true},
+				LinkID:           pgtype.UUID{Bytes: linkID, Valid: true},
+				SessionCreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
 			},
 		},
 	}
