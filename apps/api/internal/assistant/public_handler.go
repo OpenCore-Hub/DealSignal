@@ -1,37 +1,36 @@
 package assistant
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/gin-gonic/gin"
 )
 
-// LinkResolver resolves a public token to a link without consuming access counts.
-type LinkResolver interface {
-	ResolvePublicLink(ctx context.Context, publicToken string) (db.Link, error)
+// PublicAccessAuthorizer resolves visitor access the same way page/asset
+// endpoints do (session reuse, security version, gates).
+type PublicAccessAuthorizer interface {
+	AuthorizePublicAccess(c *gin.Context, publicToken string) (link.AccessResult, error)
 }
 
 // PublicHandler serves the anonymous AI copilot endpoint for public links.
 type PublicHandler struct {
-	service     *Service
-	linkService LinkResolver
-	cfg         *config.Config
+	service *Service
+	access  PublicAccessAuthorizer
+	cfg     *config.Config
 }
 
 // NewPublicHandler creates a public AI handler.
-func NewPublicHandler(s *Service, lr LinkResolver, cfg *config.Config) *PublicHandler {
-	return &PublicHandler{service: s, linkService: lr, cfg: cfg}
+func NewPublicHandler(s *Service, access PublicAccessAuthorizer, cfg *config.Config) *PublicHandler {
+	return &PublicHandler{service: s, access: access, cfg: cfg}
 }
 
 // RegisterPublicRoutes mounts the public assistant endpoint.
 func (h *PublicHandler) RegisterPublicRoutes(r *gin.RouterGroup) {
-	r.POST("/assistant/chat", h.Chat)
+	r.POST("/links/:publicToken/assistant/chat", h.Chat)
 }
 
 // PublicChatRequest is the HTTP body for the public endpoint.
@@ -54,10 +53,23 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	linkRow, err := h.linkService.ResolvePublicLink(c.Request.Context(), session.PublicToken)
-	if err != nil {
-		mapPublicLinkError(c, err)
+	publicToken := c.Param("publicToken")
+	if publicToken == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "token_required", "message": "public token is required"})
 		return
+	}
+	if session.PublicToken != publicToken {
+		c.JSON(http.StatusForbidden, gin.H{"code": "token_mismatch", "message": "session does not match link token"})
+		return
+	}
+
+	result, err := h.access.AuthorizePublicAccess(c, publicToken)
+	if err != nil {
+		link.WriteAccessError(c, err)
+		return
+	}
+	if result.SessionToken != "" {
+		c.Header("X-Link-Session-Refresh", result.SessionToken)
 	}
 
 	var body PublicChatRequest
@@ -66,7 +78,7 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	resp, err := h.service.PublicChat(c.Request.Context(), linkRow, session.VisitorID, session.Email, ChatRequest{
+	resp, err := h.service.PublicChat(c.Request.Context(), result.Link, result.VisitorID, result.Email, ChatRequest{
 		SessionID: strings.TrimSpace(body.SessionID),
 		Message:   strings.TrimSpace(body.Message),
 	})
@@ -76,21 +88,6 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, resp)
-}
-
-func mapPublicLinkError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, link.ErrLinkNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
-	case errors.Is(err, link.ErrLinkExpired):
-		c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": err.Error()})
-	case errors.Is(err, link.ErrLinkDisabled), errors.Is(err, link.ErrLinkRevoked):
-		c.JSON(http.StatusForbidden, gin.H{"code": "link_disabled", "message": err.Error()})
-	case errors.Is(err, link.ErrLinkMaxAccessReached):
-		c.JSON(http.StatusForbidden, gin.H{"code": "access_limit_reached", "message": err.Error()})
-	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resolve link"})
-	}
 }
 
 func mapPublicChatError(c *gin.Context, err error) {

@@ -1966,9 +1966,23 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				// re-authentication.
 				securityChanged := sessionSecurityGatesUnsatisfied(link, session)
 				if securityChanged {
-					_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+					if h.analytics != nil {
+						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+					}
 				}
 				if !securityChanged {
+					// Re-evaluate allow/block on every reuse (Q21). Rule changes
+					// also bump security_version, but Ask Docs / assets must not
+					// rely solely on that for revocation.
+					eval, evalErr := h.service.EvaluateAccessRules(c.Request.Context(), uuid.UUID(link.ID.Bytes).String(), session.Email)
+					if evalErr != nil {
+						return AccessResult{}, fmt.Errorf("evaluate access rules: %w", evalErr)
+					}
+					if !eval.Allowed {
+						ruleErr := mapRuleError(eval.Reason)
+						h.recordSecurityEventFromAccessError(c.Request.Context(), link, ruleErr, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
+						return AccessResult{}, ruleErr
+					}
 					// Sliding session: re-sign with fresh ExpiresAt so the idle
 					// timeout resets on every request.
 					refreshed, err := refreshLinkSession(session, h.cfg.LinkSessionSecret)
@@ -2008,7 +2022,24 @@ func (h *Handler) writeSessionRefreshHeader(c *gin.Context, result AccessResult)
 }
 
 func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
-	return h.resolvePublicAccess(c, c.Query("token"))
+	// Prefer path-bound publicToken (Ask Host / file-requests); fall back to
+	// query token used by document page/asset endpoints.
+	token := c.Param("publicToken")
+	if token == "" {
+		token = c.Query("token")
+	}
+	return h.resolvePublicAccess(c, token)
+}
+
+// AuthorizePublicAccess exposes the shared public Access resolution for callers
+// that bind publicToken from the path (e.g. Ask Docs).
+func (h *Handler) AuthorizePublicAccess(c *gin.Context, publicToken string) (AccessResult, error) {
+	return h.resolvePublicAccess(c, publicToken)
+}
+
+// WriteAccessError maps Access/resolvePublicAccess failures to HTTP responses.
+func WriteAccessError(c *gin.Context, err error) {
+	mapAccessError(c, err)
 }
 
 // publicAccessRequestFromContext reads link access credentials from the
@@ -2138,6 +2169,9 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link db.Link, err error, visitorID, email, ip, ua string) {
 	eventType, reason, gateFailure := securityEventFromError(err)
 	if eventType == "" {
+		return
+	}
+	if h.analytics == nil {
 		return
 	}
 	_ = h.analytics.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)

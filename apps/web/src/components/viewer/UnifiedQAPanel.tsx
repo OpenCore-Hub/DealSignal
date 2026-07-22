@@ -148,7 +148,11 @@ export function UnifiedQAPanel({
 
       if (mode === "ai") {
         setInput("");
-        await sendMessage(text, { documentId, publicSessionToken: sessionTokenRef.current });
+        await sendMessage(text, {
+          documentId,
+          publicToken: token,
+          publicSessionToken: sessionTokenRef.current,
+        });
         return;
       }
 

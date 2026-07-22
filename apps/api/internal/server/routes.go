@@ -275,7 +275,7 @@ func (s *Server) registerRoutes() error {
 			webhookHandler := crm.NewWebhookHandler()
 			public.POST("/webhooks/crm/deal-stage", webhookHandler.HandleDealStageChange)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
-			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkSvc, s.cfg)
+			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkHandler, s.cfg)
 
 			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg,
 				dealroom.WithActionSyncer(actionSyncer),

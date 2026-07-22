@@ -1,7 +1,7 @@
 /**
  * Public viewer advanced — email code send/resend, public assistant chat, NDA gate flow.
  * Covers: POST /links/:token/send-email-code, POST /links/:token/resend-code,
- *         POST /assistant/chat (public), public event recording
+ *         POST /links/:token/assistant/chat (public), public event recording
  */
 import { test, expect } from "@playwright/test";
 import { seedRealBackend, seedDocument, seedLink, apiFetch } from "./real-helpers";
@@ -119,7 +119,7 @@ test.describe("Public viewer advanced (real backend)", () => {
 
     // Try the public assistant chat
     if (sessionToken) {
-      const res = await apiFetch(`/api/v1/public/assistant/chat`, {
+      const res = await apiFetch(`/api/v1/public/links/${publicToken}/assistant/chat`, {
         method: "POST",
         headers: { "X-Link-Session": sessionToken },
         body: JSON.stringify({ message: "Summarize this document" }),

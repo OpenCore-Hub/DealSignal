@@ -7,7 +7,6 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -42,14 +41,44 @@ func (m *mockLinkResolver) ResolvePublicLink(_ context.Context, _ string) (db.Li
 	return m.link, m.err
 }
 
-func TestPublicHandlerMissingSession(t *testing.T) {
+type mockAccessAuthorizer struct {
+	result    link.AccessResult
+	err       error
+	calls     int
+	lastToken string
+}
+
+func (m *mockAccessAuthorizer) AuthorizePublicAccess(_ *gin.Context, publicToken string) (link.AccessResult, error) {
+	m.calls++
+	m.lastToken = publicToken
+	return m.result, m.err
+}
+
+// legacyAuthorizer adapts mockLinkResolver for older handler tests.
+func legacyAuthorizer(lr *mockLinkResolver) PublicAccessAuthorizer {
+	return publicAccessFunc(func(c *gin.Context, publicToken string) (link.AccessResult, error) {
+		row, err := lr.ResolvePublicLink(c.Request.Context(), publicToken)
+		if err != nil {
+			return link.AccessResult{}, err
+		}
+		return link.AccessResult{Link: row}, nil
+	})
+}
+
+type publicAccessFunc func(c *gin.Context, publicToken string) (link.AccessResult, error)
+
+func (f publicAccessFunc) AuthorizePublicAccess(c *gin.Context, publicToken string) (link.AccessResult, error) {
+	return f(c, publicToken)
+}
+
+func TestPublicAskDocsRejectsMissingSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockLinkResolver{}, &config.Config{})
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockAccessAuthorizer{}, &config.Config{})
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{}`)))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusUnauthorized {
@@ -57,14 +86,84 @@ func TestPublicHandlerMissingSession(t *testing.T) {
 	}
 }
 
+func TestPublicAskDocsRejectsTokenMismatch(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	docID := uuid.MustParse("66666666-6666-6666-6666-666666666666")
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
+	}}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	// Session bound to token-1, but request path uses token-2.
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-2/assistant/chat", bytes.NewReader([]byte(`{"message":"hello"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	if auth.calls != 0 {
+		t.Fatalf("Access authorizer must not run on token mismatch, got %d calls", auth.calls)
+	}
+}
+
+func TestPublicAskDocsAllowsAuthorizedSession(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	docID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link:      db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
+		VisitorID: "v1",
+		Email:     "visitor@example.com",
+	}}
+
+	sessionID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+	q := &mockQuerier{sessionID: sessionID}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{{ChunkID: "chunk-1", PageNumber: 1, Quote: "quote"}}}
+	l := &mockLLM{answer: "answer"}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	h := NewPublicHandler(svc, auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hello"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if auth.calls != 1 {
+		t.Fatalf("expected Access authorizer to be called once, got %d", auth.calls)
+	}
+	if auth.lastToken != "token-1" {
+		t.Fatalf("expected authorizer token token-1, got %q", auth.lastToken)
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if resp.Answer != "answer" {
+		t.Fatalf("expected answer answer, got %q", resp.Answer)
+	}
+}
+
 func TestPublicHandlerInvalidSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockLinkResolver{}, &config.Config{LinkSessionSecret: "secret"})
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockAccessAuthorizer{}, &config.Config{LinkSessionSecret: "secret"})
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{}`)))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set("X-Link-Session", "bad-token")
 	r.ServeHTTP(w, req)
 
@@ -76,38 +175,72 @@ func TestPublicHandlerInvalidSession(t *testing.T) {
 func TestPublicHandlerLinkDisabled(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{LinkSessionSecret: "secret"}
-	resolver := &mockLinkResolver{err: link.ErrLinkDisabled}
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), resolver, cfg)
+	auth := &mockAccessAuthorizer{err: link.ErrLinkDisabled}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
 	token := signTestSession(link.LinkSession{PublicToken: "token-1"}, cfg.LinkSessionSecret)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{}`)))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	// Access-parity uses mapAccessError: disabled → 410 Gone.
+	if w.Code != http.StatusGone {
+		t.Fatalf("expected 410, got %d", w.Code)
+	}
+}
+
+func TestPublicAskDocsRejectsBlockedEmail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	auth := &mockAccessAuthorizer{err: link.ErrBlockedEmail}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", Email: "blocked@example.com"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "blocked_email" {
+		t.Fatalf("expected blocked_email, got %v", body["code"])
+	}
+}
+
+func TestPublicAskDocsRejectsWhenAIDisabled(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	auth := &mockAccessAuthorizer{result: link.AccessResult{Link: db.Link{AiCopilotEnabled: false}}}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
 	req.Header.Set("X-Link-Session", token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", w.Code)
 	}
-}
-
-func TestPublicHandlerAICopilotDisabled(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	cfg := &config.Config{LinkSessionSecret: "secret"}
-	resolver := &mockLinkResolver{link: db.Link{AiCopilotEnabled: false}}
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), resolver, cfg)
-	r := gin.New()
-	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
-
-	token := signTestSession(link.LinkSession{PublicToken: "token-1"}, cfg.LinkSessionSecret)
-	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
-	req.Header.Set("X-Link-Session", token)
-	r.ServeHTTP(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403, got %d", w.Code)
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "ai_copilot_disabled" {
+		t.Fatalf("expected ai_copilot_disabled, got %v", body["code"])
 	}
 }
 
@@ -115,7 +248,10 @@ func TestPublicHandlerChatSuccess(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{LinkSessionSecret: "secret"}
 	docID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
-	resolver := &mockLinkResolver{link: db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}}}
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link:      db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
+		VisitorID: "v1",
+	}}
 
 	sessionID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
 	q := &mockQuerier{sessionID: sessionID}
@@ -123,13 +259,13 @@ func TestPublicHandlerChatSuccess(t *testing.T) {
 	l := &mockLLM{answer: "answer"}
 	svc := NewService(q, s, evidence.NewFormatter(), l)
 
-	h := NewPublicHandler(svc, resolver, cfg)
+	h := NewPublicHandler(svc, auth, cfg)
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
 	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{"message":"hello"}`)))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hello"}`)))
 	req.Header.Set("X-Link-Session", token)
 	r.ServeHTTP(w, req)
 
@@ -148,14 +284,14 @@ func TestPublicHandlerChatSuccess(t *testing.T) {
 func TestPublicHandlerLinkExpired(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{LinkSessionSecret: "secret"}
-	resolver := &mockLinkResolver{err: link.ErrLinkExpired}
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), resolver, cfg)
+	auth := &mockAccessAuthorizer{err: link.ErrLinkExpired}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
 	token := signTestSession(link.LinkSession{PublicToken: "token-1"}, cfg.LinkSessionSecret)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{}`)))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{}`)))
 	req.Header.Set("X-Link-Session", token)
 	r.ServeHTTP(w, req)
 
@@ -168,28 +304,18 @@ func TestPublicHandlerMessageRequired(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{LinkSessionSecret: "secret"}
 	docID := uuid.MustParse("55555555-5555-5555-5555-555555555555")
-	resolver := &mockLinkResolver{link: db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}}}
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), resolver, cfg)
+	auth := legacyAuthorizer(&mockLinkResolver{link: db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}}})
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
 	token := signTestSession(link.LinkSession{PublicToken: "token-1"}, cfg.LinkSessionSecret)
 	w := httptest.NewRecorder()
-	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/assistant/chat", bytes.NewReader([]byte(`{"message":"   "}`)))
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"   "}`)))
 	req.Header.Set("X-Link-Session", token)
 	r.ServeHTTP(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400, got %d", w.Code)
-	}
-}
-
-func TestMapPublicLinkErrorDefault(t *testing.T) {
-	gin.SetMode(gin.TestMode)
-	w := httptest.NewRecorder()
-	c, _ := gin.CreateTestContext(w)
-	mapPublicLinkError(c, errors.New("boom"))
-	if c.Writer.Status() != http.StatusInternalServerError {
-		t.Fatalf("expected 500, got %d", c.Writer.Status())
 	}
 }

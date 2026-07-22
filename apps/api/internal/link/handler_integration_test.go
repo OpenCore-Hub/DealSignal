@@ -5,11 +5,15 @@ package link
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -328,5 +332,127 @@ func TestDocumentsForAccessResponse_StaleScopeAfterRemoval(t *testing.T) {
 	if len(got) != len(docs)-1 {
 		body, _ := json.Marshal(got)
 		t.Fatalf("expected %d documents after removal, got %d: %s", len(docs)-1, len(got), body)
+	}
+}
+
+// TestAuthorizePublicAccess_ReevaluatesAllowBlockOnSessionReuse proves that a
+// reused session is re-checked against allow/block rules even when
+// security_version is aligned (Q21 / Ask Docs Access-parity).
+func TestAuthorizePublicAccess_ReevaluatesAllowBlockOnSessionReuse(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	secret := "test-link-session-secret"
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+	}); err != nil {
+		t.Fatalf("allow alice: %v", err)
+	}
+
+	access, err := f.svc.Access(f.ctx, f.link.PublicToken, AccessRequest{Email: "alice@vc.com"})
+	if err != nil {
+		t.Fatalf("access as alice: %v", err)
+	}
+
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "bob@vc.com", Action: "allow"},
+		{RuleType: "email", Value: "alice@vc.com", Action: "block"},
+	}); err != nil {
+		t.Fatalf("block alice: %v", err)
+	}
+
+	fresh, err := f.svc.GetByPublicToken(f.ctx, f.link.PublicToken)
+	if err != nil {
+		t.Fatalf("reload link: %v", err)
+	}
+
+	// Align security_version so sessionSecurityConfigChanged is false — isolate
+	// allow/block recheck from version-bump invalidation.
+	sessionTok, err := signLinkSession(LinkSession{
+		PublicToken:     f.link.PublicToken,
+		Email:           "alice@vc.com",
+		VisitorID:       access.VisitorID,
+		SecurityVersion: fresh.SecurityVersion,
+	}, secret)
+	if err != nil {
+		t.Fatalf("sign session: %v", err)
+	}
+
+	h := &Handler{service: f.svc, cfg: &config.Config{LinkSessionSecret: secret}}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/ask", nil)
+	c.Request.Header.Set("X-Link-Session", sessionTok)
+
+	_, err = h.AuthorizePublicAccess(c, f.link.PublicToken)
+	if err == nil {
+		t.Fatal("expected blocked email to be rejected on session reuse")
+	}
+	if !errors.Is(err, ErrBlockedEmail) {
+		t.Fatalf("expected ErrBlockedEmail, got %v", err)
+	}
+}
+
+// TestAuthorizePublicAccess_RejectsUnsatisfiedEmailVerificationGate locks gate
+// parity with page/asset access: a session that does not prove email verification
+// cannot reuse access when the link requires it.
+func TestAuthorizePublicAccess_RejectsUnsatisfiedEmailVerificationGate(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	secret := "test-link-session-secret"
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	docID := uuid.UUID(f.link.DocumentID.Bytes).String()
+
+	contact, err := f.q.CreateContact(f.ctx, db.CreateContactParams{
+		WorkspaceID: f.workspace.ID,
+		Email:       pgtype.Text{String: "alice@vc.com", Valid: true},
+		Name:        pgtype.Text{String: "Alice", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	verifiedLink, err := f.svc.CreateLink(f.ctx, userID, wsID, CreateLinkRequest{
+		DocumentID:               docID,
+		Name:                     "Verified Ask Docs Link",
+		PermissionType:           "public",
+		RequireEmailVerification: true,
+		ContactIDs:               []string{uuid.UUID(contact.ID.Bytes).String()},
+	})
+	if err != nil {
+		t.Fatalf("create verified link: %v", err)
+	}
+
+	sessionTok, err := signLinkSession(LinkSession{
+		PublicToken:     verifiedLink.PublicToken,
+		Email:           "alice@vc.com",
+		EmailVerified:   false,
+		VisitorID:       "visitor-1",
+		SecurityVersion: verifiedLink.SecurityVersion,
+	}, secret)
+	if err != nil {
+		t.Fatalf("sign session: %v", err)
+	}
+
+	h := &Handler{service: f.svc, cfg: &config.Config{LinkSessionSecret: secret}}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/pages", nil)
+	c.Request.Header.Set("X-Link-Session", sessionTok)
+
+	_, err = h.AuthorizePublicAccess(c, verifiedLink.PublicToken)
+	if err == nil {
+		t.Fatal("expected unverified session to be rejected when email verification is required")
+	}
+	if !errors.Is(err, ErrRequiresEmail) && !errors.Is(err, ErrRequiresEmailCode) {
+		t.Fatalf("expected email gate error, got %v", err)
 	}
 }

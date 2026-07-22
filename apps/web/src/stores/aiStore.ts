@@ -13,6 +13,7 @@ const I18N_KEYS = {
 interface ChatContext {
   documentId?: string;
   pageNumber?: number;
+  publicToken?: string;
   publicSessionToken?: string;
 }
 
@@ -83,8 +84,9 @@ export const useAIStore = create<AIState>((set, get) => ({
     try {
       let assistantMessage: ChatMessage;
 
-      if (context?.publicSessionToken) {
+      if (context?.publicSessionToken && context.publicToken) {
         const res = await api.publicAssistantChat(
+          context.publicToken,
           { message: content, session_id: get().sessionId ?? undefined },
           context.publicSessionToken
         );

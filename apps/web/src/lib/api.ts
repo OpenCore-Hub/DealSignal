@@ -804,12 +804,16 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  publicAssistantChat: (payload: { message: string; session_id?: string }, sessionToken: string) =>
+  publicAssistantChat: (
+    publicToken: string,
+    payload: { message: string; session_id?: string },
+    sessionToken: string
+  ) =>
     request<{
       session_id: string;
       answer: string;
       evidence?: Evidence[];
-    }>(undefined, "/v1/public/assistant/chat", {
+    }>(undefined, `/v1/public/links/${encodeURIComponent(publicToken)}/assistant/chat`, {
       method: "POST",
       body: JSON.stringify(payload),
       skipAuth: true,
