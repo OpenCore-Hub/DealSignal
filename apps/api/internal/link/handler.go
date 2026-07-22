@@ -520,6 +520,10 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
 			return
 		}
+		if errors.Is(err, ErrKnowledgeBaseRequired) {
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_required", "message": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -528,6 +532,9 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
+	}
+	if w := h.service.AskDocsCoverageWarning(c.Request.Context(), link); w != nil {
+		item["warnings"] = []AskDocsCoverageWarning{*w}
 	}
 	c.JSON(http.StatusOK, item)
 }
@@ -923,6 +930,11 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseRequired):
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    "knowledge_base_required",
+				"message": err.Error(),
+			})
 		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		default:
@@ -935,6 +947,9 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
+	}
+	if w := h.service.AskDocsCoverageWarning(c.Request.Context(), link); w != nil {
+		item["warnings"] = []AskDocsCoverageWarning{*w}
 	}
 	c.JSON(http.StatusCreated, item)
 }
@@ -1195,6 +1210,8 @@ func (h *Handler) Create(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseRequired):
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_required", "message": err.Error()})
 		case errors.Is(err, ErrInvalidPermission):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
 		default:
