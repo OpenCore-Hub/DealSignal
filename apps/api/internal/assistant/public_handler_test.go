@@ -183,6 +183,60 @@ func TestPublicAskDocsScopeViolationWritesSecurityEvent(t *testing.T) {
 	}
 }
 
+func TestPublicAskDocsAllOutOfScopeEvidenceRefusesAndWritesSecurityEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	inScope := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	outOfScope := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{
+			AiCopilotEnabled: true,
+			DocumentID:       pgtype.UUID{Bytes: inScope, Valid: true},
+			PublicToken:      "token-1",
+		},
+		VisitorID: "v1",
+		Email:     "v@example.com",
+	}}
+	sessionID := pgtype.UUID{Bytes: [16]byte{13}, Valid: true}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: inScope, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "bad1", DocumentID: outOfScope.String(), Quote: "leak-1"},
+		{ChunkID: "bad2", DocumentID: outOfScope.String(), Quote: "leak-2"},
+	}}
+	events := &mockSecurityEvents{}
+	h := NewPublicHandler(NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "should-not-run"}), auth, cfg)
+	h.WithSecurityEvents(events)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"q"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Evidence) != 0 {
+		t.Fatalf("expected no visitor evidence after all drops, got %+v", resp.Evidence)
+	}
+	if resp.ResultStatus != ResultStatusNoEvidence {
+		t.Fatalf("result_status=%q want %q", resp.ResultStatus, ResultStatusNoEvidence)
+	}
+	if len(events.events) != 1 || events.events[0].eventType != "scope_violation" {
+		t.Fatalf("expected scope_violation security event, got %+v", events.events)
+	}
+}
+
 func TestPublicAskDocsRejectsMissingSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockAccessAuthorizer{}, &config.Config{})

@@ -603,6 +603,49 @@ func TestPublicChatEmptySearchResultsRefuseWithoutLLM(t *testing.T) {
 	}
 }
 
+func TestPublicChatAllOutOfScopeEvidenceCountsViolations(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{14}, Valid: true}
+	inScope := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	outOfScope := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		legacyDocOK:     true,
+		legacyDoc:       db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: inScope, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "bad1", DocumentID: outOfScope.String(), Quote: "out-1"},
+		{ChunkID: "bad2", DocumentID: outOfScope.String(), Quote: "out-2"},
+	}}
+	llm := &mockLLM{answer: "should-not-run"}
+	svc := NewService(q, s, evidence.NewFormatter(), llm)
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DocumentID:       pgtype.UUID{Bytes: inScope, Valid: true},
+		WorkspaceID:      pgtype.UUID{Bytes: uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd"), Valid: true},
+		PublicToken:      "tok",
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Evidence) != 0 {
+		t.Fatalf("expected empty evidence, got %+v", resp.Evidence)
+	}
+	if resp.ResultStatus != ResultStatusNoEvidence {
+		t.Fatalf("result_status=%q want %q", resp.ResultStatus, ResultStatusNoEvidence)
+	}
+	if resp.ScopeViolations != 2 {
+		t.Fatalf("scopeViolations=%d want 2", resp.ScopeViolations)
+	}
+	if llm.called {
+		t.Fatal("LLM must not run when all evidence is dropped")
+	}
+}
+
 func TestPublicChatDropsOutOfScopeEvidence(t *testing.T) {
 	ctx := context.Background()
 	sessionID := pgtype.UUID{Bytes: [16]byte{8}, Valid: true}
