@@ -206,4 +206,36 @@ describe("ViewerCanvas", () => {
     });
     expect(screen.queryByTestId("inactive-blur-overlay")).not.toBeInTheDocument();
   });
+
+  it("keeps Ask sidebar interactive while the inactive blur overlay is visible", async () => {
+    const onAskClick = vi.fn();
+    await renderCanvas({
+      screenshotProtectionEnabled: true,
+      sidebar: (
+        <aside data-testid="ask-sidebar">
+          <button type="button" onClick={onAskClick}>
+            Ask
+          </button>
+        </aside>
+      ),
+    });
+
+    vi.spyOn(document, "hasFocus").mockReturnValue(false);
+    await act(async () => {
+      fireEvent.blur(window);
+    });
+
+    const overlay = screen.getByTestId("inactive-blur-overlay");
+    expect(overlay).toBeInTheDocument();
+    expect(overlay.className).toMatch(/pointer-events-none/);
+
+    const askBtn = screen.getByRole("button", { name: "Ask" });
+    expect(askBtn).toBeEnabled();
+    fireEvent.click(askBtn);
+    expect(onAskClick).toHaveBeenCalledTimes(1);
+
+    // Overlay must stay on the document plane, not wrap the Ask sidebar.
+    expect(overlay.contains(askBtn)).toBe(false);
+    expect(screen.getByTestId("ask-sidebar").contains(askBtn)).toBe(true);
+  });
 });
