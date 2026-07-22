@@ -805,6 +805,7 @@ type fakeDB struct {
 	roomDocs  []db.DealRoomDocument
 	requests  []db.RoomAccessRequest
 	perms     []db.RoomMemberFolderPermission
+	kbs       []db.DealRoomKnowledgeBasis
 }
 
 func newFakeDB(t *testing.T) *fakeDB {
@@ -927,6 +928,8 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 		}
 	case strings.Contains(sqlLower, "insert into room_nda_agreements"):
 		// Idempotent agreement insert; fake stores nothing beyond success.
+	case strings.Contains(sqlLower, "update ingestion_jobs") && strings.Contains(sqlLower, "skip_embedding"):
+		// Preview-only ingest flag; no-op in fake.
 	}
 	return pgconn.CommandTag{}, nil
 }
@@ -1230,6 +1233,47 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		f.roomDocs = append(f.roomDocs, doc)
 		return fakeRow{values: roomDocRow(doc)}
 
+	case strings.Contains(sqlLower, "from deal_room_knowledge_bases") && strings.Contains(sqlLower, "where room_id"):
+		roomID := argUUID(args, 0)
+		for _, kb := range f.kbs {
+			if kb.RoomID == roomID {
+				return fakeRow{values: kbRow(kb)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "insert into deal_room_knowledge_bases"):
+		kb := db.DealRoomKnowledgeBasis{
+			ID:                  newPGUUID(),
+			TenantID:            argUUID(args, 0),
+			WorkspaceID:         argUUID(args, 1),
+			RoomID:              argUUID(args, 2),
+			Status:              argString(args, 3),
+			FolderPaths:         argStringSlice(args, 4),
+			DocumentIds:         argUUIDSlice(args, 5),
+			ActiveDocumentIds:   argUUIDSlice(args, 6),
+			BuildingDocumentIds: argUUIDSlice(args, 7),
+			ActiveGeneration:    argInt32(args, 8),
+			BuildingGeneration:  argInt4(args, 9),
+			ErrorMessage:        argText(args, 10),
+			CreatedAt:           nowTs(),
+			UpdatedAt:           nowTs(),
+		}
+		replaced := false
+		for i := range f.kbs {
+			if f.kbs[i].RoomID == kb.RoomID {
+				kb.ID = f.kbs[i].ID
+				kb.CreatedAt = f.kbs[i].CreatedAt
+				f.kbs[i] = kb
+				replaced = true
+				break
+			}
+		}
+		if !replaced {
+			f.kbs = append(f.kbs, kb)
+		}
+		return fakeRow{values: kbRow(kb)}
+
 	case strings.Contains(sqlLower, "from deal_room_documents") && strings.Contains(sqlLower, "where id = $1 and room_id"):
 		id := argUUID(args, 0)
 		roomID := argUUID(args, 1)
@@ -1463,6 +1507,44 @@ func argUUID(args []interface{}, i int) pgtype.UUID {
 		return u
 	}
 	return pgtype.UUID{}
+}
+
+func argStringSlice(args []interface{}, i int) []string {
+	if i >= len(args) || args[i] == nil {
+		return nil
+	}
+	if s, ok := args[i].([]string); ok {
+		return s
+	}
+	return nil
+}
+
+func argUUIDSlice(args []interface{}, i int) []pgtype.UUID {
+	if i >= len(args) || args[i] == nil {
+		return nil
+	}
+	if s, ok := args[i].([]pgtype.UUID); ok {
+		return s
+	}
+	return nil
+}
+
+func argInt4(args []interface{}, i int) pgtype.Int4 {
+	if i >= len(args) || args[i] == nil {
+		return pgtype.Int4{}
+	}
+	if v, ok := args[i].(pgtype.Int4); ok {
+		return v
+	}
+	return pgtype.Int4{}
+}
+
+func kbRow(kb db.DealRoomKnowledgeBasis) []interface{} {
+	return []interface{}{
+		kb.ID, kb.TenantID, kb.WorkspaceID, kb.RoomID, kb.Status,
+		kb.FolderPaths, kb.DocumentIds, kb.ActiveDocumentIds, kb.BuildingDocumentIds,
+		kb.ActiveGeneration, kb.BuildingGeneration, kb.ErrorMessage, kb.CreatedAt, kb.UpdatedAt,
+	}
 }
 
 func argBytes(args []interface{}, i int) []byte {

@@ -2810,3 +2810,39 @@ WHERE s.workspace_id = $1
   AND s.rule_id <> ''
 GROUP BY s.rule_id
 ORDER BY generated_count DESC;
+
+-- name: GetDealRoomKnowledgeBaseByRoom :one
+SELECT *
+FROM deal_room_knowledge_bases
+WHERE room_id = $1;
+
+-- name: UpsertDealRoomKnowledgeBase :one
+INSERT INTO deal_room_knowledge_bases (
+  tenant_id, workspace_id, room_id, status, folder_paths, document_ids,
+  active_document_ids, building_document_ids, active_generation, building_generation, error_message
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+ON CONFLICT (room_id) DO UPDATE SET
+  status = EXCLUDED.status,
+  folder_paths = EXCLUDED.folder_paths,
+  document_ids = EXCLUDED.document_ids,
+  active_document_ids = EXCLUDED.active_document_ids,
+  building_document_ids = EXCLUDED.building_document_ids,
+  active_generation = EXCLUDED.active_generation,
+  building_generation = EXCLUDED.building_generation,
+  error_message = EXCLUDED.error_message,
+  updated_at = now()
+RETURNING *;
+
+-- name: UpdateDealRoomKnowledgeBaseStatus :one
+UPDATE deal_room_knowledge_bases
+SET status = $2,
+    active_document_ids = COALESCE(sqlc.narg(active_document_ids)::uuid[], active_document_ids),
+    building_document_ids = COALESCE(sqlc.narg(building_document_ids)::uuid[], building_document_ids),
+    active_generation = COALESCE(sqlc.narg(active_generation)::int, active_generation),
+    building_generation = sqlc.narg(building_generation)::int,
+    error_message = sqlc.narg(error_message),
+    updated_at = now()
+WHERE room_id = $1
+RETURNING *;

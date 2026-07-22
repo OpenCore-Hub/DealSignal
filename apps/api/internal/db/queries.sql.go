@@ -3781,6 +3781,34 @@ func (q *Queries) GetDealRoomFolderPaths(ctx context.Context, arg GetDealRoomFol
 	return folders, err
 }
 
+const getDealRoomKnowledgeBaseByRoom = `-- name: GetDealRoomKnowledgeBaseByRoom :one
+SELECT id, tenant_id, workspace_id, room_id, status, folder_paths, document_ids, active_document_ids, building_document_ids, active_generation, building_generation, error_message, created_at, updated_at
+FROM deal_room_knowledge_bases
+WHERE room_id = $1
+`
+
+func (q *Queries) GetDealRoomKnowledgeBaseByRoom(ctx context.Context, roomID pgtype.UUID) (DealRoomKnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, getDealRoomKnowledgeBaseByRoom, roomID)
+	var i DealRoomKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Status,
+		&i.FolderPaths,
+		&i.DocumentIds,
+		&i.ActiveDocumentIds,
+		&i.BuildingDocumentIds,
+		&i.ActiveGeneration,
+		&i.BuildingGeneration,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDocumentByID = `-- name: GetDocumentByID :one
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -11805,6 +11833,59 @@ func (q *Queries) UpdateDealRoomDocumentsFolderPath(ctx context.Context, arg Upd
 	return err
 }
 
+const updateDealRoomKnowledgeBaseStatus = `-- name: UpdateDealRoomKnowledgeBaseStatus :one
+UPDATE deal_room_knowledge_bases
+SET status = $2,
+    active_document_ids = COALESCE($3::uuid[], active_document_ids),
+    building_document_ids = COALESCE($4::uuid[], building_document_ids),
+    active_generation = COALESCE($5::int, active_generation),
+    building_generation = $6::int,
+    error_message = $7,
+    updated_at = now()
+WHERE room_id = $1
+RETURNING id, tenant_id, workspace_id, room_id, status, folder_paths, document_ids, active_document_ids, building_document_ids, active_generation, building_generation, error_message, created_at, updated_at
+`
+
+type UpdateDealRoomKnowledgeBaseStatusParams struct {
+	RoomID              pgtype.UUID
+	Status              string
+	ActiveDocumentIds   []pgtype.UUID
+	BuildingDocumentIds []pgtype.UUID
+	ActiveGeneration    pgtype.Int4
+	BuildingGeneration  pgtype.Int4
+	ErrorMessage        pgtype.Text
+}
+
+func (q *Queries) UpdateDealRoomKnowledgeBaseStatus(ctx context.Context, arg UpdateDealRoomKnowledgeBaseStatusParams) (DealRoomKnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, updateDealRoomKnowledgeBaseStatus,
+		arg.RoomID,
+		arg.Status,
+		arg.ActiveDocumentIds,
+		arg.BuildingDocumentIds,
+		arg.ActiveGeneration,
+		arg.BuildingGeneration,
+		arg.ErrorMessage,
+	)
+	var i DealRoomKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Status,
+		&i.FolderPaths,
+		&i.DocumentIds,
+		&i.ActiveDocumentIds,
+		&i.BuildingDocumentIds,
+		&i.ActiveGeneration,
+		&i.BuildingGeneration,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateDealRoomSettings = `-- name: UpdateDealRoomSettings :exec
 UPDATE deal_rooms
 SET settings = $1::jsonb, updated_at = now()
@@ -12717,6 +12798,74 @@ func (q *Queries) UpsertCrmSyncState(ctx context.Context, arg UpsertCrmSyncState
 		arg.Summary,
 	)
 	return err
+}
+
+const upsertDealRoomKnowledgeBase = `-- name: UpsertDealRoomKnowledgeBase :one
+INSERT INTO deal_room_knowledge_bases (
+  tenant_id, workspace_id, room_id, status, folder_paths, document_ids,
+  active_document_ids, building_document_ids, active_generation, building_generation, error_message
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+ON CONFLICT (room_id) DO UPDATE SET
+  status = EXCLUDED.status,
+  folder_paths = EXCLUDED.folder_paths,
+  document_ids = EXCLUDED.document_ids,
+  active_document_ids = EXCLUDED.active_document_ids,
+  building_document_ids = EXCLUDED.building_document_ids,
+  active_generation = EXCLUDED.active_generation,
+  building_generation = EXCLUDED.building_generation,
+  error_message = EXCLUDED.error_message,
+  updated_at = now()
+RETURNING id, tenant_id, workspace_id, room_id, status, folder_paths, document_ids, active_document_ids, building_document_ids, active_generation, building_generation, error_message, created_at, updated_at
+`
+
+type UpsertDealRoomKnowledgeBaseParams struct {
+	TenantID            pgtype.UUID
+	WorkspaceID         pgtype.UUID
+	RoomID              pgtype.UUID
+	Status              string
+	FolderPaths         []string
+	DocumentIds         []pgtype.UUID
+	ActiveDocumentIds   []pgtype.UUID
+	BuildingDocumentIds []pgtype.UUID
+	ActiveGeneration    int32
+	BuildingGeneration  pgtype.Int4
+	ErrorMessage        pgtype.Text
+}
+
+func (q *Queries) UpsertDealRoomKnowledgeBase(ctx context.Context, arg UpsertDealRoomKnowledgeBaseParams) (DealRoomKnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, upsertDealRoomKnowledgeBase,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.Status,
+		arg.FolderPaths,
+		arg.DocumentIds,
+		arg.ActiveDocumentIds,
+		arg.BuildingDocumentIds,
+		arg.ActiveGeneration,
+		arg.BuildingGeneration,
+		arg.ErrorMessage,
+	)
+	var i DealRoomKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Status,
+		&i.FolderPaths,
+		&i.DocumentIds,
+		&i.ActiveDocumentIds,
+		&i.BuildingDocumentIds,
+		&i.ActiveGeneration,
+		&i.BuildingGeneration,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertIntegrationToken = `-- name: UpsertIntegrationToken :exec

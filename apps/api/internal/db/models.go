@@ -163,6 +163,23 @@ type DealRoomDocument struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type DealRoomKnowledgeBasis struct {
+	ID                  pgtype.UUID
+	TenantID            pgtype.UUID
+	WorkspaceID         pgtype.UUID
+	RoomID              pgtype.UUID
+	Status              string
+	FolderPaths         []string
+	DocumentIds         []pgtype.UUID
+	ActiveDocumentIds   []pgtype.UUID
+	BuildingDocumentIds []pgtype.UUID
+	ActiveGeneration    int32
+	BuildingGeneration  pgtype.Int4
+	ErrorMessage        pgtype.Text
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
 type Document struct {
 	ID          pgtype.UUID
 	TenantID    pgtype.UUID

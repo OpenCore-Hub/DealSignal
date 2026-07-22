@@ -51,6 +51,10 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 	g.POST("/:roomId/folder-permissions", h.SetFolderPermission)
 
+	g.GET("/:roomId/knowledge-base", h.GetKnowledgeBase)
+	g.POST("/:roomId/knowledge-base", h.CreateKnowledgeBase)
+	g.POST("/:roomId/knowledge-base/rebuild", h.RebuildKnowledgeBase)
+
 	r.GET("/deal-room-templates", h.ListTemplates)
 }
 
@@ -616,6 +620,102 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, requestResponse(req))
+}
+
+// CreateKnowledgeBaseRequest is the body for creating a room knowledge base.
+type CreateKnowledgeBaseRequest struct {
+	FolderPaths []string `json:"folder_paths"`
+	DocumentIDs []string `json:"document_ids"`
+}
+
+// GetKnowledgeBase returns the deal-room knowledge base status strip projection.
+func (h *Handler) GetKnowledgeBase(c *gin.Context) {
+	kb, err := h.service.GetKnowledgeBase(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
+	if err != nil {
+		if errors.Is(err, ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, kb)
+}
+
+// CreateKnowledgeBase creates a room knowledge base from an explicit selection.
+func (h *Handler) CreateKnowledgeBase(c *gin.Context) {
+	var req CreateKnowledgeBaseRequest
+	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	kb, err := h.service.CreateKnowledgeBase(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		KnowledgeBaseSelection{FolderPaths: req.FolderPaths, DocumentIDs: req.DocumentIDs},
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseExists):
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_exists", "message": err.Error()})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusCreated, kb)
+}
+
+// RebuildKnowledgeBase rebuilds the room knowledge base (optional new selection).
+func (h *Handler) RebuildKnowledgeBase(c *gin.Context) {
+	var req struct {
+		FolderPaths *[]string `json:"folder_paths"`
+		DocumentIDs *[]string `json:"document_ids"`
+	}
+	var sel *KnowledgeBaseSelection
+	if err := c.ShouldBindJSON(&req); err != nil && c.Request.ContentLength > 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		return
+	}
+	if req.FolderPaths != nil || req.DocumentIDs != nil {
+		fp, di := []string{}, []string{}
+		if req.FolderPaths != nil {
+			fp = *req.FolderPaths
+		}
+		if req.DocumentIDs != nil {
+			di = *req.DocumentIDs
+		}
+		sel = &KnowledgeBaseSelection{FolderPaths: fp, DocumentIDs: di}
+	}
+	kb, err := h.service.RebuildKnowledgeBase(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		sel,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "knowledge_base_not_found", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseBuilding):
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_building", "message": err.Error()})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, kb)
 }
 
 func mapPublicError(c *gin.Context, err error) {
