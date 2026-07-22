@@ -50,6 +50,10 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
       "viewer.qaDisabled": "Q&A is not available",
       "viewer.qaError": "Failed to submit question",
       "viewer.qaEmptyUnified": "No messages yet.",
+      "viewer.qaEmptyHint": "Ask Docs first; switch to Ask Host if you need missing materials.",
+      "viewer.qaEmptyPromptSummarize": "Summarize key points from authorized materials",
+      "viewer.qaEmptyPromptMissing": "Materials seem to be missing",
+      "viewer.qaPendingReply": "Awaiting reply",
       "viewer.qaSourceAI": "AI",
       "viewer.qaSourceOwner": "Host",
       "viewer.qaModeAI": "Ask Docs",
@@ -128,6 +132,30 @@ describe("UnifiedQAPanel", () => {
     });
     expect(screen.getByText("Pricing starts at $99.")).toBeInTheDocument();
     expect(screen.getByText("Host")).toBeInTheDocument();
+    expect(screen.queryByText("Awaiting reply")).not.toBeInTheDocument();
+  });
+
+  it("shows awaiting-reply on pending Host questions", async () => {
+    listPublicQuestionsMock.mockResolvedValue({
+      data: [
+        {
+          id: "q-pending",
+          link_id: "link-1",
+          visitor_id: "v1",
+          question: "Can you share the full model?",
+          status: "pending",
+          created_at: "2026-07-11T10:00:00Z",
+          updated_at: "2026-07-11T10:00:00Z",
+        },
+      ],
+    });
+
+    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
+
+    await waitFor(() => {
+      expect(screen.getByText("Can you share the full model?")).toBeInTheDocument();
+    });
+    expect(screen.getByText("Awaiting reply")).toBeInTheDocument();
   });
 
   it("submits a question to the owner and refreshes the list", async () => {
@@ -226,6 +254,66 @@ describe("UnifiedQAPanel", () => {
     expect(screen.getByText("No messages yet.")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
     expect(screen.queryByText(/file request/i)).not.toBeInTheDocument();
+  });
+
+  it("Ask Docs-only empty state does not show dual-channel prompts", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: false });
+
+    expect(screen.getByText("No messages yet.")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Materials seem to be missing/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Summarize key points from authorized materials/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("Ask Host-only empty state does not show dual-channel prompts", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
+
+    expect(screen.getByText("No messages yet.")).toBeInTheDocument();
+    expect(
+      screen.queryByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Summarize key points from authorized materials/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /Materials seem to be missing/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("dual-channel empty state offers summarize and missing-materials prompts", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+
+    expect(
+      screen.getByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Summarize key points from authorized materials/i }),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByText(/file request/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Materials seem to be missing/i }));
+    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
+  });
+
+  it("empty summarize prompt stays on Ask Docs and fills the draft", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /Summarize key points from authorized materials/i }),
+    );
+    expect(screen.getByPlaceholderText("Ask about authorized materials...")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Summarize key points from authorized materials")).toBeInTheDocument();
   });
 
   it("offers Ask Host switch after no-evidence refusal when Ask Host is enabled", async () => {

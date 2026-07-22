@@ -26,6 +26,7 @@ interface UIMessage {
   evidences?: Evidence[];
   resultStatus?: string;
   suggestAskHost?: boolean;
+  pendingReply?: boolean;
 }
 
 const creds = (token?: string) => (token ? { sessionToken: token } : undefined);
@@ -130,6 +131,7 @@ export function UnifiedQAPanel({
           source: "you",
           content: q.question,
           createdAt: q.created_at,
+          pendingReply: q.status === "pending",
         });
         if (q.answer && q.status === "answered") {
           list.push({
@@ -202,7 +204,36 @@ export function UnifiedQAPanel({
         ) : allMessages.length === 0 ? (
           <div className="flex flex-col items-center py-10 text-center text-muted-foreground">
             <ChatCenteredDots size={28} className="mb-3 opacity-25" />
-            <p className="text-sm font-medium">{t("documents:viewer.qaEmptyUnified")}</p>
+            <p className="text-sm font-medium">
+              {showModeToggle
+                ? t("documents:viewer.qaEmptyHint")
+                : t("documents:viewer.qaEmptyUnified")}
+            </p>
+            {showModeToggle && (
+              <div className="mt-4 flex w-full max-w-sm flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-auto whitespace-normal px-3 py-2 text-xs font-normal"
+                  onClick={() => {
+                    setMode("ai");
+                    setInput(t("documents:viewer.qaEmptyPromptSummarize"));
+                  }}
+                >
+                  {t("documents:viewer.qaEmptyPromptSummarize")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-auto whitespace-normal px-3 py-2 text-xs font-normal"
+                  onClick={() => setMode("owner")}
+                >
+                  {t("documents:viewer.qaEmptyPromptMissing")}
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           allMessages.map((msg) => {
@@ -234,6 +265,11 @@ export function UnifiedQAPanel({
                       <EvidenceCard key={ev.chunk_id} evidence={ev} />
                     ))}
                   </div>
+                  {msg.pendingReply && (
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t("documents:viewer.qaPendingReply")}
+                    </span>
+                  )}
                   {msg.source === "ai" &&
                     msg.resultStatus === "no_evidence" &&
                     msg.suggestAskHost &&
