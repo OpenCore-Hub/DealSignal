@@ -27,6 +27,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 
 	r.GET("/links/:id/ask-docs-audit", h.ListAskDocsAudit)
 	r.GET("/links/:id/ask-docs-audit/:sessionId", h.GetAskDocsAudit)
+	r.GET("/deal-rooms/:roomId/ask-docs-audit", h.ListRoomAskDocsAudit)
 }
 
 // chatRequest is the JSON body for the chat endpoint.
@@ -84,6 +85,27 @@ func (h *Handler) GetAskDocsAudit(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, detail)
+}
+
+// ListRoomAskDocsAudit returns Ask Docs audit sessions across a deal room.
+func (h *Handler) ListRoomAskDocsAudit(c *gin.Context) {
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	includeArchived, _ := strconv.ParseBool(c.Query("archived"))
+
+	entries, err := h.service.ListRoomAskDocsAudit(
+		c.Request.Context(),
+		workspaceID,
+		c.Param("roomId"),
+		userID,
+		c.Query("link_id"),
+		includeArchived,
+	)
+	if err != nil {
+		writeAskDocsAuditError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": entries})
 }
 
 func writeAskDocsAuditError(c *gin.Context, err error) {

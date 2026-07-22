@@ -7284,6 +7284,83 @@ func (q *Queries) ListAskDocsAuditSessionsByLink(ctx context.Context, arg ListAs
 	return items, nil
 }
 
+const listAskDocsAuditSessionsByRoom = `-- name: ListAskDocsAuditSessionsByRoom :many
+SELECT
+  s.id,
+  s.link_id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
+WHERE s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditSessionsByRoomParams struct {
+	DealRoomID pgtype.UUID
+	Limit      int32
+}
+
+type ListAskDocsAuditSessionsByRoomRow struct {
+	ID              pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	QuestionPreview string
+	ResultStatus    string
+	EvidenceCount   int64
+}
+
+func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAskDocsAuditSessionsByRoomParams) ([]ListAskDocsAuditSessionsByRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByRoom, arg.DealRoomID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditSessionsByRoomRow
+	for rows.Next() {
+		var i ListAskDocsAuditSessionsByRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.CreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
 SELECT id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 FROM assistant_messages

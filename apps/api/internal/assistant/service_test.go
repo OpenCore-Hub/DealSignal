@@ -40,6 +40,9 @@ type mockQuerier struct {
 	auditRows         []db.ListAskDocsAuditSessionsByLinkRow
 	auditSession      db.AssistantSession
 	auditSessionOK    bool
+	room              db.DealRoom
+	roomOK            bool
+	roomAuditRows     []db.ListAskDocsAuditSessionsByRoomRow
 }
 
 func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error) {
@@ -162,6 +165,17 @@ func (m *mockQuerier) GetAssistantSessionByIDAndLink(_ context.Context, arg db.G
 
 func (m *mockQuerier) ListAskDocsAuditSessionsByLink(_ context.Context, _ db.ListAskDocsAuditSessionsByLinkParams) ([]db.ListAskDocsAuditSessionsByLinkRow, error) {
 	return m.auditRows, nil
+}
+
+func (m *mockQuerier) GetDealRoomByID(_ context.Context, _ db.GetDealRoomByIDParams) (db.DealRoom, error) {
+	if !m.roomOK {
+		return db.DealRoom{}, pgx.ErrNoRows
+	}
+	return m.room, nil
+}
+
+func (m *mockQuerier) ListAskDocsAuditSessionsByRoom(_ context.Context, _ db.ListAskDocsAuditSessionsByRoomParams) ([]db.ListAskDocsAuditSessionsByRoomRow, error) {
+	return m.roomAuditRows, nil
 }
 
 type mockSearcher struct {
@@ -952,6 +966,189 @@ func TestPublicChatPersistsAuditSnapshot(t *testing.T) {
 	}
 	if len(assistant.AuthorizedDocumentIds) != 1 {
 		t.Fatalf("persisted authorized ids=%v", assistant.AuthorizedDocumentIds)
+	}
+}
+
+func TestListRoomAskDocsAudit_AllowsActiveRoomMember(t *testing.T) {
+	roomID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	wsID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkA := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	sessionID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		wsErr:      pgx.ErrNoRows,
+		roomStatus: "active",
+		roomOK:     true,
+		room: db.DealRoom{
+			ID:          pgtype.UUID{Bytes: roomID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		roomAuditRows: []db.ListAskDocsAuditSessionsByRoomRow{
+			{
+				ID:              pgtype.UUID{Bytes: sessionID, Valid: true},
+				LinkID:          pgtype.UUID{Bytes: linkA, Valid: true},
+				VisitorID:       pgtype.Text{String: "v1", Valid: true},
+				CreatedAt:       pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+				QuestionPreview: "What is ARR?",
+				ResultStatus:    ResultStatusSuccess,
+				EvidenceCount:   2,
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	got, err := svc.ListRoomAskDocsAudit(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), "", false)
+	if err != nil {
+		t.Fatalf("expected room member allowed, got %v", err)
+	}
+	if len(got) != 1 || got[0].SessionID != sessionID.String() || got[0].LinkID != linkA.String() {
+		t.Fatalf("unexpected entries: %+v", got)
+	}
+}
+
+func TestListRoomAskDocsAudit_Forbidden(t *testing.T) {
+	roomID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	wsID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	q := &mockQuerier{
+		wsRole:  "member",
+		roomErr: pgx.ErrNoRows,
+		roomOK:  true,
+		room: db.DealRoom{
+			ID:          pgtype.UUID{Bytes: roomID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	_, err := svc.ListRoomAskDocsAudit(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), "", false)
+	if !errors.Is(err, ErrAskDocsAuditForbidden) {
+		t.Fatalf("expected forbidden, got %v", err)
+	}
+}
+
+func TestListRoomAskDocsAudit_DefaultExcludesArchived(t *testing.T) {
+	roomID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	wsID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	hotID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	oldID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	now := time.Now().UTC()
+
+	q := &mockQuerier{
+		wsRole: "admin",
+		roomOK: true,
+		room: db.DealRoom{
+			ID:          pgtype.UUID{Bytes: roomID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		roomAuditRows: []db.ListAskDocsAuditSessionsByRoomRow{
+			{
+				ID:        pgtype.UUID{Bytes: hotID, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -10), Valid: true},
+			},
+			{
+				ID:        pgtype.UUID{Bytes: oldID, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: now.AddDate(0, 0, -100), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	got, err := svc.ListRoomAskDocsAudit(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), "", false)
+	if err != nil {
+		t.Fatalf("ListRoomAskDocsAudit: %v", err)
+	}
+	if len(got) != 1 || got[0].SessionID != hotID.String() {
+		t.Fatalf("default must be hot-only, got %+v", got)
+	}
+	gotAll, err := svc.ListRoomAskDocsAudit(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), "", true)
+	if err != nil {
+		t.Fatalf("archived: %v", err)
+	}
+	if len(gotAll) != 2 {
+		t.Fatalf("archived=true must return both, got %d", len(gotAll))
+	}
+}
+
+func TestListRoomAskDocsAudit_FiltersByLinkID(t *testing.T) {
+	roomID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	wsID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkA := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	linkB := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	sessA := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	sessB := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+	q := &mockQuerier{
+		wsRole: "admin",
+		roomOK: true,
+		room: db.DealRoom{
+			ID:          pgtype.UUID{Bytes: roomID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		roomAuditRows: []db.ListAskDocsAuditSessionsByRoomRow{
+			{
+				ID:        pgtype.UUID{Bytes: sessA, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkA, Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+			{
+				ID:        pgtype.UUID{Bytes: sessB, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkB, Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	got, err := svc.ListRoomAskDocsAudit(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), linkA.String(), false)
+	if err != nil {
+		t.Fatalf("filter: %v", err)
+	}
+	if len(got) != 1 || got[0].SessionID != sessA.String() || got[0].LinkID != linkA.String() {
+		t.Fatalf("expected only link A, got %+v", got)
+	}
+}
+
+func TestListRoomAskDocsAudit_AggregatesAcrossLinks(t *testing.T) {
+	roomID := uuid.MustParse("22222222-2222-2222-2222-222222222222")
+	wsID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	linkA := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	linkB := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	sessA := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	sessB := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+
+	q := &mockQuerier{
+		wsRole: "admin",
+		roomOK: true,
+		room: db.DealRoom{
+			ID:          pgtype.UUID{Bytes: roomID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		roomAuditRows: []db.ListAskDocsAuditSessionsByRoomRow{
+			{
+				ID:        pgtype.UUID{Bytes: sessA, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkA, Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+			{
+				ID:        pgtype.UUID{Bytes: sessB, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkB, Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(-time.Minute), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	got, err := svc.ListRoomAskDocsAudit(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), "", false)
+	if err != nil {
+		t.Fatalf("aggregate: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 sessions across links, got %d", len(got))
+	}
+	links := map[string]bool{}
+	for _, e := range got {
+		links[e.LinkID] = true
+	}
+	if !links[linkA.String()] || !links[linkB.String()] {
+		t.Fatalf("expected both links, got %+v", got)
 	}
 }
 

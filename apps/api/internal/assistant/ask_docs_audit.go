@@ -22,9 +22,10 @@ var ErrAskDocsAuditNotFound = errors.New("ask docs audit not found")
 const askDocsAuditHotDays = 90
 const askDocsAuditListLimit = 200
 
-// AskDocsAuditEntry is a list-row projection for link-side Ask Docs audit.
+// AskDocsAuditEntry is a list-row projection for Ask Docs audit (link or room).
 type AskDocsAuditEntry struct {
 	SessionID       string    `json:"session_id"`
+	LinkID          string    `json:"link_id,omitempty"`
 	VisitorID       string    `json:"visitor_id,omitempty"`
 	QuestionPreview string    `json:"question_preview"`
 	ResultStatus    string    `json:"result_status,omitempty"`
@@ -135,6 +136,64 @@ func (s *Service) ListAskDocsAudit(ctx context.Context, workspaceID, linkID, use
 	for _, row := range rows {
 		entry := AskDocsAuditEntry{
 			SessionID:       uuid.UUID(row.ID.Bytes).String(),
+			LinkID:          uuid.UUID(link.ID.Bytes).String(),
+			QuestionPreview: row.QuestionPreview,
+			ResultStatus:    row.ResultStatus,
+			EvidenceCount:   int(row.EvidenceCount),
+			CreatedAt:       row.CreatedAt.Time,
+		}
+		if row.VisitorID.Valid {
+			entry.VisitorID = row.VisitorID.String
+		}
+		entries = append(entries, entry)
+	}
+	return filterAskDocsAuditEntries(entries, time.Now().UTC(), includeArchived), nil
+}
+
+// ListRoomAskDocsAudit returns Ask Docs audit rows across all links in a deal room.
+// Optional linkID filters to a single link; includeArchived controls the 90-day window.
+func (s *Service) ListRoomAskDocsAudit(ctx context.Context, workspaceID, roomID, userID, linkID string, includeArchived bool) ([]AskDocsAuditEntry, error) {
+	room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+		ID:          pgUUID(roomID),
+		WorkspaceID: pgUUID(workspaceID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrAskDocsAuditNotFound
+		}
+		return nil, err
+	}
+	if err := authorizeAskDocsAudit(ctx, s.queries, db.Link{
+		WorkspaceID: room.WorkspaceID,
+		DealRoomID:  room.ID,
+	}, userID); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.queries.ListAskDocsAuditSessionsByRoom(ctx, db.ListAskDocsAuditSessionsByRoomParams{
+		DealRoomID: room.ID,
+		Limit:      askDocsAuditListLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var filterLink pgtype.UUID
+	if linkID != "" {
+		filterLink = pgUUID(linkID)
+		if !filterLink.Valid {
+			return nil, ErrAskDocsAuditNotFound
+		}
+	}
+
+	entries := make([]AskDocsAuditEntry, 0, len(rows))
+	for _, row := range rows {
+		if filterLink.Valid && row.LinkID != filterLink {
+			continue
+		}
+		entry := AskDocsAuditEntry{
+			SessionID:       uuid.UUID(row.ID.Bytes).String(),
+			LinkID:          uuid.UUID(row.LinkID.Bytes).String(),
 			QuestionPreview: row.QuestionPreview,
 			ResultStatus:    row.ResultStatus,
 			EvidenceCount:   int(row.EvidenceCount),

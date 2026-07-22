@@ -326,6 +326,39 @@ WHERE s.link_id = $1
 ORDER BY s.created_at DESC
 LIMIT $2;
 
+-- name: ListAskDocsAuditSessionsByRoom :many
+SELECT
+  s.id,
+  s.link_id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
+WHERE s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2;
+
 -- name: CreateLink :one
 INSERT INTO links (
     tenant_id, workspace_id, document_id, deal_room_id, public_token, name, permission_type, expires_at, max_access_count,
