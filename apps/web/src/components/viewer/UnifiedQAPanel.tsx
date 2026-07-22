@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useAIStore } from "@/stores/aiStore";
 import type { Evidence, VisitorQuestion, ChatMessage } from "@/types";
+import { suggestAskHostFromDraft } from "./visitorAskChannelHint";
 
 interface UnifiedQAPanelProps {
   token: string;
@@ -183,6 +184,8 @@ export function UnifiedQAPanel({
   const showModeToggle = aiCopilotEnabled && qaEnabled;
   const busy = aiPending || ownerSubmitting;
   const placeholder = mode === "ai" ? t("documents:viewer.qaAIPlaceholder") : t("documents:viewer.qaOwnerPlaceholder");
+  const showChannelHint =
+    mode === "ai" && Boolean(qaEnabled) && Boolean(aiCopilotEnabled) && suggestAskHostFromDraft(input);
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -292,6 +295,23 @@ export function UnifiedQAPanel({
               <User size={12} />
               {t("documents:viewer.qaModeOwner")}
             </button>
+          </div>
+        )}
+        {showChannelHint && (
+          <div
+            role="status"
+            className="rounded-md border border-border bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground"
+          >
+            <p>{t("documents:viewer.qaChannelHint")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1.5 h-7 text-xs"
+              onClick={() => setMode("owner")}
+            >
+              {t("documents:viewer.qaChannelHintSwitch")}
+            </Button>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex gap-2">

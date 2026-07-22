@@ -60,6 +60,9 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
       "viewer.qaNoEvidence": "I couldn't find supporting material in the documents you can access for this link.",
       "viewer.qaSuggestAskHost": "You can ask the host instead.",
       "viewer.qaSwitchToAskHost": "Ask the host instead",
+      "viewer.qaChannelHint":
+        "This looks like a request for missing materials. Ask Host may be a better fit — you can still send via Ask Docs.",
+      "viewer.qaChannelHintSwitch": "Switch to Ask Host",
     },
     ai: {
       "viewer.thinking": "Thinking...",
@@ -248,5 +251,41 @@ describe("UnifiedQAPanel", () => {
     expect(switchBtn).toBeInTheDocument();
     fireEvent.click(switchBtn);
     expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
+  });
+
+  it("suggests switching to Ask Host before send for missing-material drafts", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    sendMessageMock.mockResolvedValue(undefined);
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+
+    const input = screen.getByPlaceholderText("Ask about authorized materials...");
+    fireEvent.change(input, { target: { value: "能否提供完整财报？" } });
+
+    expect(
+      await screen.findByText(/Ask Host may be a better fit/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Switch to Ask Host/i }));
+    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
+    expect(sendMessageMock).not.toHaveBeenCalled();
+  });
+
+  it("still allows sending via Ask Docs when the channel hint is visible", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    sendMessageMock.mockResolvedValue(undefined);
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+
+    const input = screen.getByPlaceholderText("Ask about authorized materials...");
+    fireEvent.change(input, { target: { value: "能否提供完整财报？" } });
+    expect(await screen.findByText(/Ask Host may be a better fit/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByLabelText("Ask"));
+    await waitFor(() => {
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "能否提供完整财报？",
+        expect.objectContaining({ publicToken: "token-1" }),
+      );
+    });
+    expect(createPublicQuestionMock).not.toHaveBeenCalled();
   });
 });

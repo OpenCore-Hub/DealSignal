@@ -278,6 +278,8 @@
     "qaNoEvidence": "在您可访问的材料中未找到依据。",
     "qaSuggestAskHost": "您可以改问发起方。",
     "qaSwitchToAskHost": "改问发起方",
+    "qaChannelHint": "这更像是在索取缺失材料。改问发起方可能更合适——您仍可通过问文档发送。",
+    "qaChannelHintSwitch": "改问发起方",
     "sidebarRequests": "文件请求",
     "printWarning": "不建议打印或截屏",
     "printWarningHint": "内容可能含水印标识，截图可追溯。",

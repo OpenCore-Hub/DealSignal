@@ -283,6 +283,8 @@
     "qaNoEvidence": "I couldn't find supporting material in the documents you can access for this link.",
     "qaSuggestAskHost": "You can ask the host instead.",
     "qaSwitchToAskHost": "Ask the host instead",
+    "qaChannelHint": "This looks like a request for missing materials. Ask Host may be a better fit — you can still send via Ask Docs.",
+    "qaChannelHintSwitch": "Switch to Ask Host",
     "sidebarRequests": "Requests",
     "printWarning": "Print and capture discouraged",
     "printWarningHint": "Content may include identifying watermarks and stay attributable.",
