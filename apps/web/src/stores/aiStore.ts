@@ -96,6 +96,8 @@ export const useAIStore = create<AIState>((set, get) => ({
           content: res.answer,
           evidences: res.evidence,
           createdAt: new Date().toISOString(),
+          resultStatus: res.result_status,
+          suggestAskHost: Boolean(res.suggest_ask_host),
         };
         set({ sessionId: res.session_id });
       } else if (context?.documentId) {

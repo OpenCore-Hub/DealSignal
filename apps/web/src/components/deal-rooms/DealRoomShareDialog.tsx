@@ -33,6 +33,11 @@ import {
   validateDraft,
 } from "@/components/links/share";
 import type { DraftLink } from "@/components/links/share";
+import {
+  askDocsCoverageWarningMessage,
+  extractAskDocsWarnings,
+  visitorAskSaveErrorMessage,
+} from "@/components/links/share/visitorAskSaveFeedback";
 
 const tabTransition = {
   initial: { opacity: 0, x: 8 },
@@ -261,6 +266,7 @@ function DealRoomShareDialogContent({
     setSaving(true);
     try {
       let link = selectedLink;
+      let savedPayload: unknown = link;
       if (!link) {
         const { allowedEmails, blockedEmails } = buildAllowedLists(draft);
         link = await api.createDealRoomLink(roomId, {
@@ -286,8 +292,9 @@ function DealRoomShareDialogContent({
           notify_on_access: draft.notifyOnAccess,
           folder_paths: draft.folderPaths,
         });
+        savedPayload = link;
       } else {
-        await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
+        savedPayload = await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
         await api.setLinkAccessRules(link.id, buildRules(draft));
       }
 
@@ -295,11 +302,19 @@ function DealRoomShareDialogContent({
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 1500);
       toast.success(t(selectedLink ? "share.saveSuccess" : "share.createSuccess"));
+      const coverage = askDocsCoverageWarningMessage(extractAskDocsWarnings(savedPayload), lt);
+      if (coverage) {
+        toast.warning(coverage);
+      }
       await refetch();
       await onChanged?.();
       return link;
     } catch (err) {
-      if (err instanceof ApiError && err.code === "duplicate_name") {
+      const kbGate =
+        err instanceof ApiError ? visitorAskSaveErrorMessage(err, lt) : null;
+      if (kbGate) {
+        toast.error(kbGate);
+      } else if (err instanceof ApiError && err.code === "duplicate_name") {
         toast.error(lt("share.linkNameDuplicate"));
       } else {
         toast.error(t("common:error.saveFailed"));

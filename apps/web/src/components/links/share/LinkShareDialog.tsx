@@ -28,6 +28,11 @@ import {
   validateDraft,
   LinkAccessRequestsPanel,
 } from "./";
+import {
+  askDocsCoverageWarningMessage,
+  extractAskDocsWarnings,
+  visitorAskSaveErrorMessage,
+} from "./visitorAskSaveFeedback";
 import type { DraftLink } from "./types";
 
 interface LinkShareDialogProps {
@@ -183,16 +188,24 @@ function LinkShareDialogContent({
     if (!link) return false;
     setSaving(true);
     try {
-      await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
+      const saved = await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
       await api.setLinkAccessRules(link.id, buildRules(draft));
       toast.success(t("share.saveSuccess"));
+      const coverage = askDocsCoverageWarningMessage(extractAskDocsWarnings(saved), t);
+      if (coverage) {
+        toast.warning(coverage);
+      }
       markClean();
       await refetch();
       onChanged?.();
       return true;
     } catch (err) {
       console.error("saveLinkAndRules failed:", err);
-      if (err instanceof ApiError && err.code === "duplicate_name") {
+      const kbGate =
+        err instanceof ApiError ? visitorAskSaveErrorMessage(err, t) : null;
+      if (kbGate) {
+        toast.error(kbGate);
+      } else if (err instanceof ApiError && err.code === "duplicate_name") {
         toast.error(t("share.linkNameDuplicate"));
       } else {
         const message = err instanceof Error ? err.message : "";

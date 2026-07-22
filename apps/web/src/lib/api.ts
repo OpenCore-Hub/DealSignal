@@ -814,6 +814,8 @@ export const api = {
       session_id: string;
       answer: string;
       evidence?: Evidence[];
+      result_status?: string;
+      suggest_ask_host?: boolean;
     }>(undefined, `/v1/public/links/${encodeURIComponent(publicToken)}/assistant/chat`, {
       method: "POST",
       body: JSON.stringify(payload),

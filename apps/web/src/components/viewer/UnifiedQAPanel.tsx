@@ -23,6 +23,8 @@ interface UIMessage {
   content: string;
   createdAt: string;
   evidences?: Evidence[];
+  resultStatus?: string;
+  suggestAskHost?: boolean;
 }
 
 const creds = (token?: string) => (token ? { sessionToken: token } : undefined);
@@ -115,6 +117,8 @@ export function UnifiedQAPanel({
           content: resolveAIMessage(msg, t),
           createdAt: msg.createdAt,
           evidences: msg.evidences,
+          resultStatus: msg.resultStatus,
+          suggestAskHost: msg.suggestAskHost,
         });
       });
     }
@@ -227,6 +231,21 @@ export function UnifiedQAPanel({
                       <EvidenceCard key={ev.chunk_id} evidence={ev} />
                     ))}
                   </div>
+                  {msg.source === "ai" &&
+                    msg.resultStatus === "no_evidence" &&
+                    msg.suggestAskHost &&
+                    qaEnabled &&
+                    mode === "ai" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-1 h-7 self-start text-xs"
+                        onClick={() => setMode("owner")}
+                      >
+                        {t("documents:viewer.qaSwitchToAskHost")}
+                      </Button>
+                    )}
                 </div>
               </div>
             );

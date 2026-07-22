@@ -20,14 +20,23 @@ vi.mock("@/lib/api", () => ({
 
 const sendMessageMock = vi.fn();
 const setHighlightMock = vi.fn();
+const useAIStoreMock = vi.fn(() => ({
+  messages: [] as Array<{
+    id: string;
+    role: "user" | "assistant";
+    content: string;
+    createdAt: string;
+    evidences?: unknown[];
+    resultStatus?: string;
+    suggestAskHost?: boolean;
+  }>,
+  pending: false,
+  sendMessage: sendMessageMock,
+  setHighlight: setHighlightMock,
+}));
 
 vi.mock("@/stores/aiStore", () => ({
-  useAIStore: () => ({
-    messages: [],
-    pending: false,
-    sendMessage: sendMessageMock,
-    setHighlight: setHighlightMock,
-  }),
+  useAIStore: () => useAIStoreMock(),
 }));
 
 async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAPanel>> = {}) {
@@ -35,19 +44,22 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
     common: {},
     layout: {},
     documents: {
-      "viewer.sidebarQA": "Q&A",
+      "viewer.sidebarQA": "Ask",
       "viewer.qaLoadError": "Could not load questions",
       "viewer.qaLengthError": "Question must be 1–500 characters",
       "viewer.qaDisabled": "Q&A is not available",
       "viewer.qaError": "Failed to submit question",
       "viewer.qaEmptyUnified": "No messages yet.",
       "viewer.qaSourceAI": "AI",
-      "viewer.qaSourceOwner": "Owner",
-      "viewer.qaModeAI": "Ask AI",
-      "viewer.qaModeOwner": "Ask Owner",
-      "viewer.qaAIPlaceholder": "Ask AI...",
-      "viewer.qaOwnerPlaceholder": "Ask owner...",
+      "viewer.qaSourceOwner": "Host",
+      "viewer.qaModeAI": "Ask Docs",
+      "viewer.qaModeOwner": "Ask Host",
+      "viewer.qaAIPlaceholder": "Ask about authorized materials...",
+      "viewer.qaOwnerPlaceholder": "Ask the host...",
       "viewer.qaSubmit": "Ask",
+      "viewer.qaNoEvidence": "I couldn't find supporting material in the documents you can access for this link.",
+      "viewer.qaSuggestAskHost": "You can ask the host instead.",
+      "viewer.qaSwitchToAskHost": "Ask the host instead",
     },
     ai: {
       "viewer.thinking": "Thinking...",
@@ -82,6 +94,13 @@ describe("UnifiedQAPanel", () => {
     createPublicQuestionMock.mockReset();
     sendMessageMock.mockReset();
     setHighlightMock.mockReset();
+    useAIStoreMock.mockReset();
+    useAIStoreMock.mockReturnValue({
+      messages: [],
+      pending: false,
+      sendMessage: sendMessageMock,
+      setHighlight: setHighlightMock,
+    });
   });
 
   it("renders owner questions and answers with source tags", async () => {
@@ -105,7 +124,7 @@ describe("UnifiedQAPanel", () => {
       expect(screen.getByText("What is the pricing?")).toBeInTheDocument();
     });
     expect(screen.getByText("Pricing starts at $99.")).toBeInTheDocument();
-    expect(screen.getByText("Owner")).toBeInTheDocument();
+    expect(screen.getByText("Host")).toBeInTheDocument();
   });
 
   it("submits a question to the owner and refreshes the list", async () => {
@@ -125,7 +144,7 @@ describe("UnifiedQAPanel", () => {
     await renderPanel();
     await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1));
 
-    const input = screen.getByPlaceholderText("Ask owner...");
+    const input = screen.getByPlaceholderText("Ask the host...");
     fireEvent.change(input, { target: { value: "Can I get a demo?" } });
     fireEvent.click(screen.getByLabelText("Ask"));
 
@@ -144,18 +163,18 @@ describe("UnifiedQAPanel", () => {
       common: {},
       layout: {},
       documents: {
-        "viewer.sidebarQA": "Q&A",
+        "viewer.sidebarQA": "Ask",
         "viewer.qaLoadError": "Could not load questions",
         "viewer.qaLengthError": "Question must be 1–500 characters",
         "viewer.qaDisabled": "Q&A is not available",
         "viewer.qaError": "Failed to submit question",
         "viewer.qaEmptyUnified": "No messages yet.",
         "viewer.qaSourceAI": "AI",
-        "viewer.qaSourceOwner": "Owner",
-        "viewer.qaModeAI": "Ask AI",
-        "viewer.qaModeOwner": "Ask Owner",
-        "viewer.qaAIPlaceholder": "Ask AI...",
-        "viewer.qaOwnerPlaceholder": "Ask owner...",
+        "viewer.qaSourceOwner": "Host",
+        "viewer.qaModeAI": "Ask Docs",
+        "viewer.qaModeOwner": "Ask Host",
+        "viewer.qaAIPlaceholder": "Ask about authorized materials...",
+        "viewer.qaOwnerPlaceholder": "Ask the host...",
         "viewer.qaSubmit": "Ask",
       },
       ai: {
@@ -181,5 +200,53 @@ describe("UnifiedQAPanel", () => {
     });
 
     expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("defaults to Ask Docs when both channels are enabled", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+    expect(screen.getByPlaceholderText("Ask about authorized materials...")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ask Docs/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /Ask Host/i })).toBeInTheDocument();
+  });
+
+  it("hides mode toggle when only Ask Host is enabled", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
+    expect(screen.queryByRole("button", { name: /Ask Docs/i })).not.toBeInTheDocument();
+    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
+  });
+
+  it("empty Ask Docs state does not deep-link to file requests", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: false });
+    expect(screen.getByText("No messages yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    expect(screen.queryByText(/file request/i)).not.toBeInTheDocument();
+  });
+
+  it("offers Ask Host switch after no-evidence refusal when Ask Host is enabled", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    useAIStoreMock.mockReturnValue({
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          content: "I couldn't find supporting material in the documents you can access for this link.",
+          createdAt: "2026-07-22T00:00:00Z",
+          resultStatus: "no_evidence",
+          suggestAskHost: true,
+        },
+      ],
+      pending: false,
+      sendMessage: sendMessageMock,
+      setHighlight: setHighlightMock,
+    });
+
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+    const switchBtn = screen.getByRole("button", { name: /Ask the host instead/i });
+    expect(switchBtn).toBeInTheDocument();
+    fireEvent.click(switchBtn);
+    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
   });
 });

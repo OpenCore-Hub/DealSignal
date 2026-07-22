@@ -87,6 +87,13 @@ export interface Link {
   indexFileEnabled?: boolean;
   /** Screenshot protection feature toggle (available from v2.7+ backend). */
   screenshotProtectionEnabled?: boolean;
+  /** Soft warnings returned on create/update (e.g. Ask Docs auth ⊄ KB). */
+  warnings?: Array<{
+    code: string;
+    message: string;
+    missing_folder_paths?: string[];
+    missing_document_ids?: string[];
+  }>;
   requireEmailVerification?: boolean;
   maxAccessCount?: number;
   /** Allowed emails for whitelist (available from v2.5+ backend). */
@@ -211,6 +218,10 @@ export interface ChatMessage {
   content: string;
   evidences?: Evidence[];
   createdAt: string;
+  /** Ask Docs audit/result status from public assistant API. */
+  resultStatus?: string;
+  /** When true, UI may offer switching to Ask Host after a refusal. */
+  suggestAskHost?: boolean;
 }
 
 export interface Evidence {
