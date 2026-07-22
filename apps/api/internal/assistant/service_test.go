@@ -23,7 +23,10 @@ type mockQuerier struct {
 	publicSessionID  pgtype.UUID
 	messages         []db.AssistantMessage
 	createdMsgs      []db.AssistantMessage
-	linkDocs         []db.ListLinkDocumentsByLinkRow
+	roomDocs         []db.ListDealRoomDocumentsWithMetaRow
+	publicLinkDocs   []db.ListLinkDocumentsByPublicTokenRow
+	legacyDoc        db.GetDocumentByIDRow
+	legacyDocOK      bool
 }
 
 func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error) {
@@ -60,8 +63,19 @@ func (m *mockQuerier) GetAssistantSessionByIDForPublic(_ context.Context, arg db
 	return db.AssistantSession{}, errors.New("not found")
 }
 
-func (m *mockQuerier) ListLinkDocumentsByLink(_ context.Context, _ pgtype.UUID) ([]db.ListLinkDocumentsByLinkRow, error) {
-	return m.linkDocs, nil
+func (m *mockQuerier) ListDealRoomDocumentsWithMeta(_ context.Context, _ pgtype.UUID) ([]db.ListDealRoomDocumentsWithMetaRow, error) {
+	return m.roomDocs, nil
+}
+
+func (m *mockQuerier) ListLinkDocumentsByPublicToken(_ context.Context, _ string) ([]db.ListLinkDocumentsByPublicTokenRow, error) {
+	return m.publicLinkDocs, nil
+}
+
+func (m *mockQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error) {
+	if !m.legacyDocOK {
+		return db.GetDocumentByIDRow{}, errors.New("not found")
+	}
+	return m.legacyDoc, nil
 }
 
 func (m *mockQuerier) CreateAssistantMessage(_ context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error) {
@@ -94,14 +108,18 @@ type mockSearcher struct {
 	evidence            []search.Evidence
 	inDocumentsEvidence []search.Evidence
 	inDocumentsCalled   bool
+	searchCalled        bool
+	lastDocumentIDs     []uuid.UUID
 }
 
 func (m *mockSearcher) Search(_ context.Context, _ pgtype.UUID, _ string, _ int) ([]search.Evidence, error) {
+	m.searchCalled = true
 	return m.evidence, nil
 }
 
-func (m *mockSearcher) SearchInDocuments(_ context.Context, _ pgtype.UUID, _ []uuid.UUID, _ string, _ int) ([]search.Evidence, error) {
+func (m *mockSearcher) SearchInDocuments(_ context.Context, _ pgtype.UUID, documentIDs []uuid.UUID, _ string, _ int) ([]search.Evidence, error) {
 	m.inDocumentsCalled = true
+	m.lastDocumentIDs = append([]uuid.UUID(nil), documentIDs...)
 	return m.inDocumentsEvidence, nil
 }
 
@@ -246,12 +264,13 @@ func TestPublicChatCreatesSessionAndUsesDocumentSearch(t *testing.T) {
 	q := &mockQuerier{
 		sessionID:       sessionID,
 		publicSessionID: sessionID,
-		linkDocs: []db.ListLinkDocumentsByLinkRow{
+		publicLinkDocs: []db.ListLinkDocumentsByPublicTokenRow{
+			{DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
 			{DocumentID: pgtype.UUID{Bytes: linkDocID, Valid: true}},
 		},
 	}
 	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
-		{ChunkID: "chunk-public", PageNumber: 2, Quote: "Public quote."},
+		{ChunkID: "chunk-public", DocumentID: docID.String(), PageNumber: 2, Quote: "Public quote."},
 	}}
 	l := &mockLLM{answer: "Public answer."}
 	svc := NewService(q, s, evidence.NewFormatter(), l)
@@ -259,6 +278,7 @@ func TestPublicChatCreatesSessionAndUsesDocumentSearch(t *testing.T) {
 	link := db.Link{
 		AiCopilotEnabled: true,
 		DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+		PublicToken:      "tok",
 	}
 	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "What is this?"})
 	if err != nil {
@@ -270,8 +290,121 @@ func TestPublicChatCreatesSessionAndUsesDocumentSearch(t *testing.T) {
 	if !s.inDocumentsCalled {
 		t.Fatal("expected SearchInDocuments to be called")
 	}
+	if s.searchCalled {
+		t.Fatal("public Ask Docs must not use workspace-wide Search")
+	}
 	if len(q.createdMsgs) != 2 {
 		t.Fatalf("expected 2 messages saved, got %d", len(q.createdMsgs))
+	}
+}
+
+func TestPublicChatDealRoomAllowlistExcludesOutOfScopeDocs(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{6}, Valid: true}
+	inScope := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	outOfScope := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: inScope, Valid: true}, FolderPath: "/general"},
+			{DocumentID: pgtype.UUID{Bytes: outOfScope, Valid: true}, FolderPath: "/legal"},
+		},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c1", DocumentID: inScope.String(), Quote: "ok"},
+	}}
+	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"})
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+		FolderScopeMode:  "allowlist",
+		FolderScopePaths: []string{"/general"},
+		PublicToken:      "tok",
+	}
+	if _, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.inDocumentsCalled {
+		t.Fatal("expected SearchInDocuments")
+	}
+	if len(s.lastDocumentIDs) != 1 || s.lastDocumentIDs[0] != inScope {
+		t.Fatalf("expected search scoped to %s, got %v", inScope, s.lastDocumentIDs)
+	}
+	if s.searchCalled {
+		t.Fatal("must not fall back to workspace Search")
+	}
+}
+
+func TestPublicChatEmptyAuthorizedSetFailClosed(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{
+				DocumentID: pgtype.UUID{Bytes: uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"), Valid: true},
+				FolderPath: "/general",
+			},
+		},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "leak", DocumentID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", Quote: "should not appear"},
+	}}
+	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "no basis"})
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+		FolderScopeMode:  "allowlist",
+		FolderScopePaths: nil, // empty allowlist → no docs
+		PublicToken:      "tok",
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if s.inDocumentsCalled || s.searchCalled {
+		t.Fatal("empty authorized set must not search documents or workspace")
+	}
+	if len(resp.Evidence) != 0 {
+		t.Fatalf("expected no evidence, got %d", len(resp.Evidence))
+	}
+}
+
+func TestPublicChatDropsOutOfScopeEvidence(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{8}, Valid: true}
+	inScope := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	outOfScope := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		legacyDocOK:     true,
+		legacyDoc:       db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: inScope, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "ok", DocumentID: inScope.String(), Quote: "in"},
+		{ChunkID: "bad", DocumentID: outOfScope.String(), Quote: "out"},
+	}}
+	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"})
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DocumentID:       pgtype.UUID{Bytes: inScope, Valid: true},
+		WorkspaceID:      pgtype.UUID{Bytes: uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd"), Valid: true},
+		PublicToken:      "tok",
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Evidence) != 1 || resp.Evidence[0].DocumentID != inScope.String() {
+		t.Fatalf("expected only in-scope evidence, got %+v", resp.Evidence)
 	}
 }
 

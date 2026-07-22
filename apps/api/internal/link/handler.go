@@ -1547,68 +1547,42 @@ func (h *Handler) PublicNDASignedDownload(c *gin.Context) {
 }
 
 // documentsForAccessResponse returns the documents that should be exposed to a
-// public visitor. For deal-room links it returns the deal room documents; for
-// document links it returns the linked documents or the legacy primary document.
+// public visitor. Scope matches AuthorizedDocumentIDs (Ask Docs retrieval).
 func (h *Handler) documentsForAccessResponse(ctx context.Context, link db.Link, token string) []gin.H {
-	documents := make([]gin.H, 0)
-
-	if link.DealRoomID.Valid {
-		drDocs, err := h.service.queries.ListDealRoomDocumentsWithMeta(ctx, link.DealRoomID)
-		if err != nil {
+	// Prefer path token when provided (callers pass the Access path token).
+	if token != "" {
+		link.PublicToken = token
+	}
+	docs, err := listAuthorizedDocuments(ctx, h.service.queries, link)
+	if err != nil {
+		if link.DealRoomID.Valid {
 			logger.ErrorCtx(ctx, "list deal room documents for access response failed", err,
 				logger.Attr("deal_room_id", uuidToString(link.DealRoomID)),
 			)
 		} else {
-			// If the link uses allowlist mode, restrict exposed documents.
-			// Empty allowlist exposes nothing. Legacy full mode exposes the whole room.
-			applyScope := dealRoomUsesFolderAllowlist(link)
-
-			for _, d := range drDocs {
-				if applyScope && !folderPathInDealRoomScope(link, d.FolderPath) {
-					continue
-				}
-				documents = append(documents, gin.H{
-					"id":         uuidToString(d.DocumentID),
-					"title":      d.DocumentTitle,
-					"sourceType": d.SourceType,
-					"pageCount":  d.PageCount,
-					"folderPath": d.FolderPath,
-				})
-			}
+			logger.ErrorCtx(ctx, "list link documents for access response failed", err,
+				logger.Attr("token", token),
+			)
 		}
-		return documents
+		return []gin.H{}
 	}
 
-	linkDocs, err := h.service.queries.ListLinkDocumentsByPublicToken(ctx, token)
-	if err != nil {
-		logger.ErrorCtx(ctx, "list link documents for access response failed", err,
-			logger.Attr("token", token),
-		)
-	}
-	for _, ld := range linkDocs {
-		documents = append(documents, gin.H{
-			"id":         uuidToString(ld.DocumentID),
-			"title":      ld.Title,
-			"sourceType": ld.SourceType,
-			"pageCount":  ld.PageCount,
-		})
-	}
-	// Fallback: single-document legacy links.
-	if len(documents) == 0 {
-		doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-			ID:          link.DocumentID,
-			WorkspaceID: link.WorkspaceID,
-		})
-		if err == nil {
-			documents = append(documents, gin.H{
-				"id":         uuidToString(doc.ID),
-				"title":      doc.Title,
-				"pageCount":  doc.PageCount.Int32,
-				"status":     doc.Status,
-				"sourceType": doc.SourceType,
-				"fileSize":   0,
-			})
+	documents := make([]gin.H, 0, len(docs))
+	for _, d := range docs {
+		item := gin.H{
+			"id":         d.ID.String(),
+			"title":      d.Title,
+			"sourceType": d.SourceType,
+			"pageCount":  d.PageCount,
 		}
+		if d.IncludeFolder {
+			item["folderPath"] = d.FolderPath
+		}
+		if d.IncludeMeta {
+			item["status"] = d.Status
+			item["fileSize"] = d.FileSize
+		}
+		documents = append(documents, item)
 	}
 	return documents
 }

@@ -123,8 +123,14 @@ func TestPublicAskDocsAllowsAuthorizedSession(t *testing.T) {
 	}}
 
 	sessionID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
-	q := &mockQuerier{sessionID: sessionID}
-	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{{ChunkID: "chunk-1", PageNumber: 1, Quote: "quote"}}}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: docID, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "chunk-1", DocumentID: docID.String(), PageNumber: 1, Quote: "quote"},
+	}}
 	l := &mockLLM{answer: "answer"}
 	svc := NewService(q, s, evidence.NewFormatter(), l)
 
@@ -153,6 +159,65 @@ func TestPublicAskDocsAllowsAuthorizedSession(t *testing.T) {
 	}
 	if resp.Answer != "answer" {
 		t.Fatalf("expected answer answer, got %q", resp.Answer)
+	}
+}
+
+func TestPublicAskDocsRetrievalScopedToAccessAllowlist(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	inScope := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	outOfScope := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{
+			AiCopilotEnabled: true,
+			DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+			FolderScopeMode:  link.FolderScopeModeAllowlist,
+			FolderScopePaths: []string{"/general"},
+			PublicToken:      "token-1",
+		},
+		VisitorID: "v1",
+	}}
+
+	sessionID := pgtype.UUID{Bytes: [16]byte{10}, Valid: true}
+	q := &mockQuerier{
+		sessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: inScope, Valid: true}, FolderPath: "/general"},
+			{DocumentID: pgtype.UUID{Bytes: outOfScope, Valid: true}, FolderPath: "/legal"},
+		},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "ok", DocumentID: inScope.String(), Quote: "in"},
+		{ChunkID: "bad", DocumentID: outOfScope.String(), Quote: "out"},
+	}}
+	h := NewPublicHandler(NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"}), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"scope?"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if !s.inDocumentsCalled {
+		t.Fatal("expected SearchInDocuments at public Ask Docs seam")
+	}
+	if len(s.lastDocumentIDs) != 1 || s.lastDocumentIDs[0] != inScope {
+		t.Fatalf("retrieval must match Access allowlist, got %v", s.lastDocumentIDs)
+	}
+	if s.searchCalled {
+		t.Fatal("public Ask Docs must not use workspace-wide Search")
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Evidence) != 1 || resp.Evidence[0].DocumentID != inScope.String() {
+		t.Fatalf("response must drop out-of-scope evidence, got %+v", resp.Evidence)
 	}
 }
 
@@ -254,8 +319,14 @@ func TestPublicHandlerChatSuccess(t *testing.T) {
 	}}
 
 	sessionID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
-	q := &mockQuerier{sessionID: sessionID}
-	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{{ChunkID: "chunk-1", PageNumber: 1, Quote: "quote"}}}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: docID, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "chunk-1", DocumentID: docID.String(), PageNumber: 1, Quote: "quote"},
+	}}
 	l := &mockLLM{answer: "answer"}
 	svc := NewService(q, s, evidence.NewFormatter(), l)
 

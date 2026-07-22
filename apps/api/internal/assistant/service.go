@@ -11,6 +11,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
@@ -56,7 +57,9 @@ type Querier interface {
 	GetAssistantSession(ctx context.Context, arg db.GetAssistantSessionParams) (db.AssistantSession, error)
 	GetAssistantSessionByLinkAndVisitor(ctx context.Context, arg db.GetAssistantSessionByLinkAndVisitorParams) (db.AssistantSession, error)
 	GetAssistantSessionByIDForPublic(ctx context.Context, arg db.GetAssistantSessionByIDForPublicParams) (db.AssistantSession, error)
-	ListLinkDocumentsByLink(ctx context.Context, linkID pgtype.UUID) ([]db.ListLinkDocumentsByLinkRow, error)
+	ListDealRoomDocumentsWithMeta(ctx context.Context, roomID pgtype.UUID) ([]db.ListDealRoomDocumentsWithMetaRow, error)
+	ListLinkDocumentsByPublicToken(ctx context.Context, publicToken string) ([]db.ListLinkDocumentsByPublicTokenRow, error)
+	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
 	CreateAssistantMessage(ctx context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error)
 	ListAssistantMessagesBySession(ctx context.Context, arg db.ListAssistantMessagesBySessionParams) ([]db.AssistantMessage, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
@@ -197,9 +200,14 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 		return nil, fmt.Errorf("list link documents: %w", err)
 	}
 
-	evidenceList, err := s.search.SearchInDocuments(ctx, link.WorkspaceID, documentIDs, req.Message, defaultSearchResults)
-	if err != nil {
-		return nil, fmt.Errorf("search evidence: %w", err)
+	// Fail closed: empty Access scope never falls back to workspace-wide search.
+	var evidenceList []search.Evidence
+	if len(documentIDs) > 0 {
+		evidenceList, err = s.search.SearchInDocuments(ctx, link.WorkspaceID, documentIDs, req.Message, defaultSearchResults)
+		if err != nil {
+			return nil, fmt.Errorf("search evidence: %w", err)
+		}
+		evidenceList = filterEvidenceToDocuments(evidenceList, documentIDs)
 	}
 
 	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
@@ -303,30 +311,27 @@ func (s *Service) resolvePublicSession(ctx context.Context, link db.Link, visito
 	return session, nil
 }
 
-func (s *Service) documentIDsForLink(ctx context.Context, link db.Link) ([]uuid.UUID, error) {
-	seen := make(map[uuid.UUID]struct{})
-	var ids []uuid.UUID
+func (s *Service) documentIDsForLink(ctx context.Context, row db.Link) ([]uuid.UUID, error) {
+	// Same document set Access exposes to visitors (folder allowlist included).
+	return link.AuthorizedDocumentIDs(ctx, s.queries, row)
+}
 
-	if link.DocumentID.Valid {
-		id := uuid.UUID(link.DocumentID.Bytes)
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uuid.UUID) []search.Evidence {
+	if len(evidenceList) == 0 || len(documentIDs) == 0 {
+		return nil
 	}
-
-	linkDocs, err := s.queries.ListLinkDocumentsByLink(ctx, link.ID)
-	if err != nil {
-		return nil, err
+	allowed := make(map[string]struct{}, len(documentIDs))
+	for _, id := range documentIDs {
+		allowed[id.String()] = struct{}{}
 	}
-	for _, ld := range linkDocs {
-		id := uuid.UUID(ld.DocumentID.Bytes)
-		if _, ok := seen[id]; ok {
+	out := make([]search.Evidence, 0, len(evidenceList))
+	for _, ev := range evidenceList {
+		if _, ok := allowed[ev.DocumentID]; !ok {
 			continue
 		}
-		seen[id] = struct{}{}
-		ids = append(ids, id)
+		out = append(out, ev)
 	}
-
-	return ids, nil
+	return out
 }
 
 func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUserMessage string, msgs []db.AssistantMessage, evidenceList []search.Evidence) (*ChatResponse, error) {
