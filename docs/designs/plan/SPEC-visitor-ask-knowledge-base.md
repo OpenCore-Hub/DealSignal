@@ -1,6 +1,7 @@
 # Spec: Visitor Ask, Deal-Room Knowledge Base, and Anti-Bypass Controls
 
-> Source design: `docs/designs/plan/visitor-ask-knowledge-base.md` (v1.2)  
+> Source design: `docs/designs/plan/visitor-ask-knowledge-base.md` (v1.3)  
+> Status: **V1 implemented** (2026-07-22) — release gates + UX phases closed; Future/OOS unchanged  
 > Test seams (agreed): (1) Public visitor API (2) Deal-room owner + link save API (3) Owner audit read API
 
 ## Problem Statement
@@ -101,8 +102,9 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 - Deal-room documents page: Create KB / Rebuild KB + status strip.
 
 ### Phased delivery (release gate)
-- Gate-0 (anti-bypass) + Sec-0 (scope alignment) + Audit-1 + Ingest-1 + KB-1 + Mig-1 before promising production deal-room Ask Docs.
-- Then UX phases: naming/card, visitor polish, room audit summary.
+- Gate-0 (anti-bypass) + Sec-0 (scope alignment) + Audit-1 + Ingest-1 + KB-1 + Mig-1 — **done**; production deal-room Ask Docs may be promised under these controls.
+- UX phases (naming/card, visitor polish, room audit summary) + V1.5 channel hint + smoke e2e + SPEC #36 blur — **done**.
+- Still open (not this epic): dedicated append-only audit table; single-document KB product / V2 deprecation.
 
 ## Testing Decisions
 
@@ -144,7 +146,7 @@ Seam 1 is the release-blocking core; 2 and 3 are required for the full product p
 
 ## Further Notes
 
-- Design authority: `docs/designs/plan/visitor-ask-knowledge-base.md` v1.2 (grilling Q1–Q25).
+- Design authority: `docs/designs/plan/visitor-ask-knowledge-base.md` v1.3 (grilling Q1–Q25; V1 implemented).
 - Domain language: Deal Room, Link, Access, Visitor Ask / 沟通, Ask Docs / 问文档, Ask Host / 问发起方, Knowledge Base, folder allowlist, Link session, Signal, security event.
 - Hide “RAG/knowledge base” jargon from visitors; owners see KB controls on the deal-room documents page.
 - i18n mandatory for all new user-facing strings (en + zh-CN).
