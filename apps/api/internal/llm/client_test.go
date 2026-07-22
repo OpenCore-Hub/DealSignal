@@ -208,6 +208,33 @@ func TestJoinOpenAIAPIURL(t *testing.T) {
 	}
 }
 
+func TestEmbedBatchViaChatCompletionsMisconfiguredGuidance(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"field messages is required","type":"new_api_error"}}`))
+	}))
+	defer ts.Close()
+
+	c, err := NewClient(Config{
+		APIKey:            "sk-test",
+		BaseURL:           ts.URL + "/v1",
+		EmbeddingModel:    "text-embedding-3-small",
+		EmbeddingEndpoint: "chat_completions",
+		HTTPClient:        ts.Client(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = c.EmbedBatch(context.Background(), []string{"hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "OPENAI_EMBEDDING_ENDPOINT=embeddings") {
+		t.Fatalf("expected misconfiguration guidance, got %v", err)
+	}
+}
+
 func TestEmbedBatchViaChatCompletions(t *testing.T) {
 	var requestPath string
 	var requestBody map[string]interface{}

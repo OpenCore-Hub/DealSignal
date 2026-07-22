@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -172,6 +173,15 @@ func (s *Server) registerRoutes() error {
 				if err != nil {
 					return fmt.Errorf("llm client: %w", err)
 				}
+				endpoint := s.cfg.OpenAIEmbeddingEndpoint
+				if endpoint == "" {
+					endpoint = "embeddings"
+				}
+				slog.Info("llm client configured",
+					"embedding_model", s.cfg.OpenAIEmbeddingModel,
+					"embedding_endpoint", endpoint,
+					"base_url_set", s.cfg.OpenAIBaseURL != "",
+				)
 				ingestionEmbedder = llmClient
 				searchEmbedder = llmClient
 				chatCompleter = llmClient

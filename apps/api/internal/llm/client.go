@@ -209,7 +209,15 @@ func (c *Client) embedBatchChatCompletions(ctx context.Context, texts []string) 
 		return nil, fmt.Errorf("read chat-completions embedding response: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("chat-completions embedding returned status %d: %s", resp.StatusCode, string(body))
+		bodyStr := string(body)
+		if strings.Contains(strings.ToLower(bodyStr), "messages is required") {
+			return nil, fmt.Errorf(
+				"chat-completions embedding returned status %d (provider expects a chat payload; set OPENAI_EMBEDDING_ENDPOINT=embeddings for OpenAI-compatible /v1/embeddings): %s",
+				resp.StatusCode,
+				bodyStr,
+			)
+		}
+		return nil, fmt.Errorf("chat-completions embedding returned status %d: %s", resp.StatusCode, bodyStr)
 	}
 
 	var parsed embeddingResponse
