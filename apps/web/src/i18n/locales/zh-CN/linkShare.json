@@ -189,6 +189,39 @@
       "fulfilled": "已完成"
     }
   },
+  "askDocsAudit": {
+    "title": "问文档审计",
+    "description": "访客「问文档」对话的只读账本。这不是 Signal 收件箱。",
+    "roomTitle": "问文档时间线",
+    "roomDescription": "数据室范围的问文档审计，可按链接筛选。这不是 Signal 收件箱。",
+    "loading": "正在加载问文档审计...",
+    "loadFailed": "加载问文档审计失败",
+    "forbidden": "你没有权限查看问文档审计。",
+    "empty": "近 90 天内暂无问文档会话。",
+    "emptyArchived": "未找到问文档会话。",
+    "showArchived": "包含归档（超过 90 天）",
+    "hotWindowHint": "默认展示近 90 天记录。",
+    "channel": "问文档",
+    "evidenceCount": "{{count}} 处引用",
+    "archivedBadge": "已归档",
+    "filterAllLinks": "全部链接",
+    "filterByLink": "按链接筛选",
+    "anonymous": "匿名访客",
+    "detailTitle": "会话详情",
+    "detailBack": "返回列表",
+    "detailLoading": "正在加载会话...",
+    "detailFailed": "加载会话详情失败",
+    "messages": "对话",
+    "evidence": "证据",
+    "noEvidence": "无证据记录",
+    "resultStatus": "结果",
+    "resultStatuses": {
+      "success": "已回答",
+      "no_evidence": "无证据",
+      "kb_unavailable": "知识库不可用",
+      "scope_violation": "作用域违规"
+    }
+  },
   "accessRequests": {
     "title": "访问申请",
     "description": "访客针对此分享链接提交的授权申请。批准后会加入白名单；若开启邮箱验证，将发送访问验证码。",

@@ -37,6 +37,8 @@ import type {
   WorkspaceSettings,
   VisitorQuestion,
   FileRequest,
+  AskDocsAuditEntry,
+  AskDocsAuditDetail,
 } from "@/types";
 import { request } from "@/lib/apiClient";
 import {
@@ -672,6 +674,35 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ status }),
     }),
+
+  // Ask Docs audit (link + room)
+  listLinkAskDocsAudit: (linkId: string, params: { archived?: boolean } = {}) => {
+    const search = new URLSearchParams();
+    if (params.archived) search.set("archived", "true");
+    const qs = search.toString();
+    return request<{ data: AskDocsAuditEntry[] }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getLinkAskDocsAudit: (linkId: string, sessionId: string) =>
+    request<AskDocsAuditDetail>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask-docs-audit/${sessionId}`,
+    ),
+  listRoomAskDocsAudit: (
+    roomId: string,
+    params: { archived?: boolean; linkId?: string } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.archived) search.set("archived", "true");
+    if (params.linkId) search.set("link_id", params.linkId);
+    const qs = search.toString();
+    return request<{ data: AskDocsAuditEntry[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
+    );
+  },
 
   getContacts: () =>
     request<{ data: Contact[] }>(getWorkspaceSlug(), "/contacts"),

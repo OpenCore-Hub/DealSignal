@@ -21,6 +21,7 @@ import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
+import { AskDocsAuditPanel } from "./AskDocsAuditPanel";
 import type {
   AccessLog,
   FileRequest,
@@ -867,6 +868,8 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
               )}
             </CardContent>
           </Card>
+
+          <AskDocsAuditPanel mode="link" linkId={link.id} />
 
           <ManagementTab
             questions={questions}

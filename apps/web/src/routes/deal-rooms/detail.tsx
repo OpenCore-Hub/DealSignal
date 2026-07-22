@@ -561,10 +561,12 @@ export function DealRoomDetailPage() {
 
           {tab === "analytics" && (
             <DealRoomAnalyticsTab
+              roomId={room.id}
               documentCount={room.documentCount}
               viewCount={viewCount}
               activeLinkCount={activeLinkCount}
               recentVisitors={room.recentVisitors}
+              links={roomLinks}
             />
           )}
 

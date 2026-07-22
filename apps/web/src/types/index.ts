@@ -146,6 +146,37 @@ export interface FileRequest {
   updated_at: string;
 }
 
+/** Link- or room-level Ask Docs audit list row. */
+export interface AskDocsAuditEntry {
+  session_id: string;
+  link_id?: string;
+  visitor_id?: string;
+  question_preview: string;
+  result_status?: string;
+  evidence_count: number;
+  created_at: string;
+  archived: boolean;
+}
+
+export interface AskDocsAuditMessage {
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+/** Full Ask Docs audit session detail. */
+export interface AskDocsAuditDetail {
+  session_id: string;
+  visitor_id?: string;
+  created_at: string;
+  archived: boolean;
+  messages: AskDocsAuditMessage[];
+  authorized_document_ids: string[];
+  retrieval_document_ids: string[];
+  evidence: Evidence[];
+  result_status?: string;
+}
+
 export interface LinkAccessRequest {
   id: string;
   link_id: string;

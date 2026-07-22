@@ -189,6 +189,39 @@
       "fulfilled": "Fulfilled"
     }
   },
+  "askDocsAudit": {
+    "title": "Ask Docs audit",
+    "description": "Read-only ledger of visitor Ask Docs conversations. This is not the Signal inbox.",
+    "roomTitle": "Ask Docs timeline",
+    "roomDescription": "Room-wide Ask Docs audit. Filter by link. This is not the Signal inbox.",
+    "loading": "Loading Ask Docs audit...",
+    "loadFailed": "Failed to load Ask Docs audit",
+    "forbidden": "You do not have permission to view Ask Docs audit.",
+    "empty": "No Ask Docs sessions in the last 90 days.",
+    "emptyArchived": "No Ask Docs sessions found.",
+    "showArchived": "Include archived (older than 90 days)",
+    "hotWindowHint": "Showing the last 90 days by default.",
+    "channel": "Ask Docs",
+    "evidenceCount": "{{count}} citations",
+    "archivedBadge": "Archived",
+    "filterAllLinks": "All links",
+    "filterByLink": "Filter by link",
+    "anonymous": "Anonymous visitor",
+    "detailTitle": "Session detail",
+    "detailBack": "Back to list",
+    "detailLoading": "Loading session...",
+    "detailFailed": "Failed to load session detail",
+    "messages": "Conversation",
+    "evidence": "Evidence",
+    "noEvidence": "No evidence recorded",
+    "resultStatus": "Result",
+    "resultStatuses": {
+      "success": "Answered",
+      "no_evidence": "No evidence",
+      "kb_unavailable": "Knowledge base unavailable",
+      "scope_violation": "Scope violation"
+    }
+  },
   "accessRequests": {
     "title": "Access requests",
     "description": "Visitors who asked for authorization to this share link. Approving adds them to the allowlist and sends an access code when verification is enabled.",
