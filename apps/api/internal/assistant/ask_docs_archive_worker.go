@@ -12,6 +12,8 @@ type AskDocsAuditArchiveWorker struct {
 	svc      *Service
 	interval time.Duration
 	batch    int
+	stop     chan struct{}
+	done     chan struct{}
 }
 
 // NewAskDocsAuditArchiveWorker creates a background archiver (B2 / US#28).
@@ -22,11 +24,22 @@ func NewAskDocsAuditArchiveWorker(svc *Service, interval time.Duration, batch in
 	if batch <= 0 {
 		batch = askDocsAuditArchiveBatch
 	}
-	return &AskDocsAuditArchiveWorker{svc: svc, interval: interval, batch: batch}
+	return &AskDocsAuditArchiveWorker{
+		svc:      svc,
+		interval: interval,
+		batch:    batch,
+		stop:     make(chan struct{}),
+		done:     make(chan struct{}),
+	}
 }
 
-// Start runs one archive pass immediately, then on interval until ctx is cancelled.
+// Start begins the archive loop in a background goroutine (must not block registerRoutes).
 func (w *AskDocsAuditArchiveWorker) Start(ctx context.Context) {
+	go w.run(ctx)
+}
+
+func (w *AskDocsAuditArchiveWorker) run(ctx context.Context) {
+	defer close(w.done)
 	w.runOnce(ctx)
 	ticker := time.NewTicker(w.interval)
 	defer ticker.Stop()
@@ -34,14 +47,23 @@ func (w *AskDocsAuditArchiveWorker) Start(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-w.stop:
+			return
 		case <-ticker.C:
 			w.runOnce(ctx)
 		}
 	}
 }
 
-// Stop is a no-op for worker interface compatibility.
-func (w *AskDocsAuditArchiveWorker) Stop() {}
+// Stop signals the worker to exit and waits for the current loop to finish.
+func (w *AskDocsAuditArchiveWorker) Stop() {
+	select {
+	case <-w.stop:
+	default:
+		close(w.stop)
+	}
+	<-w.done
+}
 
 func (w *AskDocsAuditArchiveWorker) runOnce(ctx context.Context) {
 	if w.svc == nil {
