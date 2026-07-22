@@ -26,6 +26,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -40,6 +41,7 @@ type Handler struct {
 	storage     *storage.Client
 	cfg         *config.Config
 	publisher   EventPublisher
+	askLimiter  visitorask.Limiter
 }
 
 // EventPublisher is the interface for publishing real-time events.
@@ -50,6 +52,37 @@ type EventPublisher interface {
 // SetEventPublisher sets the event publisher for SSE push.
 func (h *Handler) SetEventPublisher(p EventPublisher) {
 	h.publisher = p
+}
+
+// SetAskLimiter attaches visitor Ask Host rate limiting (defaults to service Redis).
+func (h *Handler) SetAskLimiter(lim visitorask.Limiter) {
+	h.askLimiter = lim
+}
+
+func (h *Handler) visitorAskLimiter() visitorask.Limiter {
+	if h.askLimiter != nil {
+		return h.askLimiter
+	}
+	if h.service != nil {
+		return h.service.redisClient
+	}
+	return nil
+}
+
+// rejectIfAskHostLimited returns true when the visitor exceeded Ask Host limits
+// (response already written: 429 + high-risk security event).
+func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
+	if visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID) {
+		return false
+	}
+	if h.analytics != nil {
+		_ = h.analytics.RecordSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
+	}
+	c.JSON(http.StatusTooManyRequests, gin.H{
+		"code":    "rate_limit_exceeded",
+		"message": "too many Ask Host requests, please try again later",
+	})
+	return true
 }
 
 // NewHandler creates a link handler.
@@ -251,30 +284,30 @@ type CreateRequest struct {
 
 // UpdateRequest is the JSON body for updating a link.
 type UpdateRequest struct {
-	DocumentIDs              []string `json:"document_ids,omitempty"`
-	Name                     string   `json:"name,omitempty"`
-	PermissionType           string   `json:"permission_type,omitempty"`
-	RequireEmail             bool     `json:"require_email,omitempty"`
-	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequireNDA               bool     `json:"require_nda,omitempty"`
-	NDADocumentID            string   `json:"nda_document_id,omitempty"`
-	NDATemplateID            string   `json:"nda_template_id,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
-	Password                 string   `json:"password,omitempty"`
-	ExpiresAt                *string  `json:"expires_at,omitempty"`
-	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
-	DownloadEnabled          *bool    `json:"download_enabled,omitempty"`
-	WatermarkEnabled         *bool    `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled         *bool    `json:"ai_copilot_enabled,omitempty"`
-	ContactIDs               []string `json:"contact_ids,omitempty"`
-	CustomDomain             string   `json:"custom_domain,omitempty"`
-	Tags                     []string `json:"tags,omitempty"`
-	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
-	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
-	FileRequestsEnabled      *bool    `json:"file_requests_enabled,omitempty"`
-	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
-	ScreenshotProtectionEnabled *bool `json:"screenshot_protection_enabled,omitempty"`
-	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
+	DocumentIDs                 []string `json:"document_ids,omitempty"`
+	Name                        string   `json:"name,omitempty"`
+	PermissionType              string   `json:"permission_type,omitempty"`
+	RequireEmail                bool     `json:"require_email,omitempty"`
+	RequireEmailVerification    bool     `json:"require_email_verification,omitempty"`
+	RequireNDA                  bool     `json:"require_nda,omitempty"`
+	NDADocumentID               string   `json:"nda_document_id,omitempty"`
+	NDATemplateID               string   `json:"nda_template_id,omitempty"`
+	RequirePassword             bool     `json:"require_password,omitempty"`
+	Password                    string   `json:"password,omitempty"`
+	ExpiresAt                   *string  `json:"expires_at,omitempty"`
+	MaxAccessCount              *int32   `json:"max_access_count,omitempty"`
+	DownloadEnabled             *bool    `json:"download_enabled,omitempty"`
+	WatermarkEnabled            *bool    `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled            *bool    `json:"ai_copilot_enabled,omitempty"`
+	ContactIDs                  []string `json:"contact_ids,omitempty"`
+	CustomDomain                string   `json:"custom_domain,omitempty"`
+	Tags                        []string `json:"tags,omitempty"`
+	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
+	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled         *bool    `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled            *bool    `json:"index_file_enabled,omitempty"`
+	ScreenshotProtectionEnabled *bool    `json:"screenshot_protection_enabled,omitempty"`
+	TargetFolderPath            string   `json:"target_folder_path,omitempty"`
 	// FolderPaths is the allowlist of deal-room folders when mode is allowlist.
 	// Empty allowlist denies all documents. Omit to leave unchanged.
 	FolderPaths []string `json:"folder_paths,omitempty"`
@@ -447,25 +480,25 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	}
 
 	link, err := h.service.UpdateLink(c.Request.Context(), linkID, workspaceID, UpdateLinkRequest{
-		DocumentIDs:              req.DocumentIDs,
-		FolderPaths:              req.FolderPaths,
-		FolderScopeMode:          req.FolderScopeMode,
-		Name:                     req.Name,
-		PermissionType:           req.PermissionType,
-		RequireEmail:             req.RequireEmail,
-		RequireEmailVerification: req.RequireEmailVerification,
+		DocumentIDs:                 req.DocumentIDs,
+		FolderPaths:                 req.FolderPaths,
+		FolderScopeMode:             req.FolderScopeMode,
+		Name:                        req.Name,
+		PermissionType:              req.PermissionType,
+		RequireEmail:                req.RequireEmail,
+		RequireEmailVerification:    req.RequireEmailVerification,
 		RequireNDA:                  req.RequireNDA,
 		NDADocumentID:               req.NDADocumentID,
 		NDATemplateID:               req.NDATemplateID,
 		RequirePassword:             req.RequirePassword,
-		Password:                 req.Password,
-		ExpiresAt:                expiresAt,
-		MaxAccessCount:           req.MaxAccessCount,
-		DownloadEnabled:          downloadEnabled,
-		WatermarkEnabled:         watermarkEnabled,
-		AICopilotEnabled:         aiCopilotEnabled,
-		QaEnabled:                qaEnabled,
-		FileRequestsEnabled:      fileRequestsEnabled,
+		Password:                    req.Password,
+		ExpiresAt:                   expiresAt,
+		MaxAccessCount:              req.MaxAccessCount,
+		DownloadEnabled:             downloadEnabled,
+		WatermarkEnabled:            watermarkEnabled,
+		AICopilotEnabled:            aiCopilotEnabled,
+		QaEnabled:                   qaEnabled,
+		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
 		ScreenshotProtectionEnabled: screenshotProtectionEnabled,
 		TargetFolderPath:            req.TargetFolderPath,
@@ -816,27 +849,27 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 
 // CreateDealRoomLinkRequest is the JSON body for creating a deal-room share link.
 type CreateDealRoomLinkRequest struct {
-	Name                     string   `json:"name,omitempty"`
-	RequireEmail             bool     `json:"require_email,omitempty"`
-	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequireNDA               bool     `json:"require_nda,omitempty"`
-	NDADocumentID            string   `json:"nda_document_id,omitempty"`
-	NDATemplateID            string   `json:"nda_template_id,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
-	Password                 string   `json:"password,omitempty"`
-	AllowedEmails            []string `json:"allowed_emails,omitempty"`
-	BlockedEmails            []string `json:"blocked_emails,omitempty"`
-	ExpiresAt                *string  `json:"expires_at,omitempty"`
-	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
-	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
-	QaEnabled                bool     `json:"qa_enabled,omitempty"`
-	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
-	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
-	ScreenshotProtectionEnabled bool  `json:"screenshot_protection_enabled,omitempty"`
-	CustomDomain             string   `json:"custom_domain,omitempty"`
-	Tags                     []string `json:"tags,omitempty"`
-	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
+	Name                        string   `json:"name,omitempty"`
+	RequireEmail                bool     `json:"require_email,omitempty"`
+	RequireEmailVerification    bool     `json:"require_email_verification,omitempty"`
+	RequireNDA                  bool     `json:"require_nda,omitempty"`
+	NDADocumentID               string   `json:"nda_document_id,omitempty"`
+	NDATemplateID               string   `json:"nda_template_id,omitempty"`
+	RequirePassword             bool     `json:"require_password,omitempty"`
+	Password                    string   `json:"password,omitempty"`
+	AllowedEmails               []string `json:"allowed_emails,omitempty"`
+	BlockedEmails               []string `json:"blocked_emails,omitempty"`
+	ExpiresAt                   *string  `json:"expires_at,omitempty"`
+	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
+	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled            bool     `json:"ai_copilot_enabled,omitempty"`
+	QaEnabled                   bool     `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
+	ScreenshotProtectionEnabled bool     `json:"screenshot_protection_enabled,omitempty"`
+	CustomDomain                string   `json:"custom_domain,omitempty"`
+	Tags                        []string `json:"tags,omitempty"`
+	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
 	// FolderPaths is the allowlist of deal-room folders. Empty deny-all.
 	// Creates always persist folder_scope_mode=allowlist.
 	FolderPaths []string `json:"folder_paths,omitempty"`
@@ -861,18 +894,18 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	roomID := c.Param("roomId")
 
 	link, err := h.service.CreateDealRoomLink(c.Request.Context(), userID, workspaceID, roomID, DealRoomLinkRequest{
-		Name:                     req.Name,
-		RequireEmail:             req.RequireEmail,
-		RequireEmailVerification: req.RequireEmailVerification,
-		RequireNDA:               req.RequireNDA,
-		NDADocumentID:            req.NDADocumentID,
-		NDATemplateID:            req.NDATemplateID,
-		RequirePassword:          req.RequirePassword,
-		Password:                 req.Password,
-		AllowedEmails:            req.AllowedEmails,
-		BlockedEmails:            req.BlockedEmails,
-		ExpiresAt:                expiresAt,
-		DownloadEnabled:          req.DownloadEnabled,
+		Name:                        req.Name,
+		RequireEmail:                req.RequireEmail,
+		RequireEmailVerification:    req.RequireEmailVerification,
+		RequireNDA:                  req.RequireNDA,
+		NDADocumentID:               req.NDADocumentID,
+		NDATemplateID:               req.NDATemplateID,
+		RequirePassword:             req.RequirePassword,
+		Password:                    req.Password,
+		AllowedEmails:               req.AllowedEmails,
+		BlockedEmails:               req.BlockedEmails,
+		ExpiresAt:                   expiresAt,
+		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
 		AICopilotEnabled:            req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
@@ -1421,11 +1454,11 @@ func (h *Handler) ndaTemplateMeta(ctx context.Context, link db.Link) gin.H {
 		return nil
 	}
 	return gin.H{
-		"id":                  uuidToString(tpl.ID),
-		"name":                tpl.Name,
-		"requireSignerName":   tpl.RequireSignerName,
-		"sourceDocumentId":    uuidToString(tpl.SourceDocumentID),
-		"contentSha256":       tpl.ContentSha256,
+		"id":                uuidToString(tpl.ID),
+		"name":              tpl.Name,
+		"requireSignerName": tpl.RequireSignerName,
+		"sourceDocumentId":  uuidToString(tpl.SourceDocumentID),
+		"contentSha256":     tpl.ContentSha256,
 	}
 }
 
@@ -2797,6 +2830,10 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 	h.writeSessionRefreshHeader(c, result)
 	if !result.Link.QaEnabled {
 		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	linkID := uuid.UUID(result.Link.ID.Bytes).String()
+	if h.rejectIfAskHostLimited(c, result, linkID) {
 		return
 	}
 	var body struct {

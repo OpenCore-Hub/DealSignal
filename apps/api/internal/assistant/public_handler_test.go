@@ -9,8 +9,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -71,6 +73,116 @@ func (f publicAccessFunc) AuthorizePublicAccess(c *gin.Context, publicToken stri
 	return f(c, publicToken)
 }
 
+type mockRateLimiter struct {
+	allow     bool
+	calls     int
+	lastKey   string
+	lastLimit int
+}
+
+func (m *mockRateLimiter) RateLimitAllow(_ context.Context, key string, limit int, _ time.Duration) (bool, int, error) {
+	m.calls++
+	m.lastKey = key
+	m.lastLimit = limit
+	if m.allow {
+		return true, limit, nil
+	}
+	return false, 0, nil
+}
+
+type securityEventCall struct {
+	eventType string
+	visitorID string
+	email     string
+	reason    string
+}
+
+type mockSecurityEvents struct {
+	events []securityEventCall
+}
+
+func (m *mockSecurityEvents) RecordSecurityEvent(_ context.Context, _ db.Link, eventType, visitorID, email, _, _, reason string) error {
+	m.events = append(m.events, securityEventCall{
+		eventType: eventType,
+		visitorID: visitorID,
+		email:     email,
+		reason:    reason,
+	})
+	return nil
+}
+
+func TestPublicAskDocsMissingSessionDoesNotWriteSecurityEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	events := &mockSecurityEvents{}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockAccessAuthorizer{}, &config.Config{})
+	h.WithSecurityEvents(events)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401, got %d", w.Code)
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("ordinary 401 must not write security events, got %+v", events.events)
+	}
+}
+
+func TestPublicAskDocsScopeViolationWritesSecurityEvent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	inScope := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	outOfScope := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{
+			AiCopilotEnabled: true,
+			DocumentID:       pgtype.UUID{Bytes: inScope, Valid: true},
+			WorkspaceID:      pgtype.UUID{Bytes: uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd"), Valid: true},
+			PublicToken:      "token-1",
+		},
+		VisitorID: "v1",
+		Email:     "v@example.com",
+	}}
+	sessionID := pgtype.UUID{Bytes: [16]byte{13}, Valid: true}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: inScope, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "ok", DocumentID: inScope.String(), Quote: "in"},
+		{ChunkID: "bad", DocumentID: outOfScope.String(), Quote: "out"},
+	}}
+	events := &mockSecurityEvents{}
+	h := NewPublicHandler(NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"}), auth, cfg)
+	h.WithSecurityEvents(events)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"q"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Evidence) != 1 {
+		t.Fatalf("expected in-scope evidence only, got %+v", resp.Evidence)
+	}
+	if len(events.events) != 1 || events.events[0].eventType != "scope_violation" {
+		t.Fatalf("expected scope_violation security event, got %+v", events.events)
+	}
+}
+
 func TestPublicAskDocsRejectsMissingSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), &mockAccessAuthorizer{}, &config.Config{})
@@ -109,6 +221,57 @@ func TestPublicAskDocsRejectsTokenMismatch(t *testing.T) {
 	}
 	if auth.calls != 0 {
 		t.Fatalf("Access authorizer must not run on token mismatch, got %d calls", auth.calls)
+	}
+}
+
+func TestPublicAskDocsRateLimitReturns429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	docID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	linkID := pgtype.UUID{Bytes: uuid.MustParse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), Valid: true}
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{
+			ID:               linkID,
+			AiCopilotEnabled: true,
+			DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+			PublicToken:      "token-1",
+		},
+		VisitorID: "v1",
+		Email:     "v@example.com",
+	}}
+
+	sessionID := pgtype.UUID{Bytes: [16]byte{11}, Valid: true}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: docID, Valid: true}},
+	}
+	limiter := &mockRateLimiter{allow: false}
+	events := &mockSecurityEvents{}
+	h := NewPublicHandler(NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{answer: "ans"}), auth, cfg)
+	h.WithRateLimiter(limiter).WithSecurityEvents(events)
+
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hello"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "rate_limit_exceeded" {
+		t.Fatalf("expected rate_limit_exceeded, got %v", body["code"])
+	}
+	if len(events.events) != 1 || events.events[0].eventType != "rate_limit_exceeded" {
+		t.Fatalf("expected rate_limit_exceeded security event, got %+v", events.events)
 	}
 }
 
@@ -218,6 +381,59 @@ func TestPublicAskDocsRetrievalScopedToAccessAllowlist(t *testing.T) {
 	}
 	if len(resp.Evidence) != 1 || resp.Evidence[0].DocumentID != inScope.String() {
 		t.Fatalf("response must drop out-of-scope evidence, got %+v", resp.Evidence)
+	}
+}
+
+func TestPublicAskDocsTruncatesEvidenceQuotes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	docID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{
+			AiCopilotEnabled: true,
+			DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+			PublicToken:      "token-1",
+		},
+		VisitorID: "v1",
+	}}
+	longQuote := strings.Repeat("字", 400)
+	sessionID := pgtype.UUID{Bytes: [16]byte{12}, Valid: true}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: docID, Valid: true}},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c1", DocumentID: docID.String(), PageNumber: 3, Quote: longQuote},
+	}}
+	h := NewPublicHandler(NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"}), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"q"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp ChatResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(resp.Evidence) != 1 {
+		t.Fatalf("expected 1 evidence, got %d", len(resp.Evidence))
+	}
+	if got := utf8.RuneCountInString(resp.Evidence[0].Quote); got != 320 {
+		t.Fatalf("quote rune length = %d, want 320", got)
+	}
+	if resp.Evidence[0].PageNumber != 3 {
+		t.Fatalf("page jump must remain, got page %d", resp.Evidence[0].PageNumber)
+	}
+	if resp.Evidence[0].DocumentID != docID.String() {
+		t.Fatalf("document_id must remain, got %q", resp.Evidence[0].DocumentID)
 	}
 }
 

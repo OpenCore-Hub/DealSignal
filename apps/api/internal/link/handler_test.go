@@ -1,16 +1,20 @@
 package link
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 func TestRevokeInvitationRequestDefaultRemoveFromAllowList(t *testing.T) {
@@ -584,3 +588,36 @@ func TestParseExpiresAt(t *testing.T) {
 }
 
 func strPtr(s string) *string { return &s }
+
+type denyAskLimiter struct{}
+
+func (denyAskLimiter) RateLimitAllow(context.Context, string, int, time.Duration) (bool, int, error) {
+	return false, 0, nil
+}
+
+func TestRejectIfAskHostLimitedReturns429(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handler{askLimiter: denyAskLimiter{}}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/public/links/tok/questions", nil)
+
+	result := AccessResult{
+		Link:      db.Link{ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}, QaEnabled: true},
+		VisitorID: "v1",
+		Email:     "v@example.com",
+	}
+	if !h.rejectIfAskHostLimited(c, result, "link-1") {
+		t.Fatal("expected Ask Host rate limit rejection")
+	}
+	if w.Code != http.StatusTooManyRequests {
+		t.Fatalf("expected 429, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "rate_limit_exceeded" {
+		t.Fatalf("expected rate_limit_exceeded, got %v", body["code"])
+	}
+}

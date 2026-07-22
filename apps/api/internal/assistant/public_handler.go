@@ -1,14 +1,34 @@
 package assistant
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
+
+const (
+	securityEventRateLimited     = "rate_limit_exceeded"
+	securityEventScopeViolation  = "scope_violation"
+	maxVisitorEvidenceQuoteRunes = 320
+)
+
+// RateLimiter is the Redis-backed sliding-window limiter used by Ask Docs/Host.
+type RateLimiter = visitorask.Limiter
+
+// SecurityEventWriter records high-risk visitor security events.
+type SecurityEventWriter interface {
+	RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error
+}
 
 // PublicAccessAuthorizer resolves visitor access the same way page/asset
 // endpoints do (session reuse, security version, gates).
@@ -18,14 +38,28 @@ type PublicAccessAuthorizer interface {
 
 // PublicHandler serves the anonymous AI copilot endpoint for public links.
 type PublicHandler struct {
-	service *Service
-	access  PublicAccessAuthorizer
-	cfg     *config.Config
+	service  *Service
+	access   PublicAccessAuthorizer
+	cfg      *config.Config
+	limiter  RateLimiter
+	security SecurityEventWriter
 }
 
 // NewPublicHandler creates a public AI handler.
 func NewPublicHandler(s *Service, access PublicAccessAuthorizer, cfg *config.Config) *PublicHandler {
 	return &PublicHandler{service: s, access: access, cfg: cfg}
+}
+
+// WithRateLimiter attaches visitor Ask rate limiting (fail-open when unset).
+func (h *PublicHandler) WithRateLimiter(limiter RateLimiter) *PublicHandler {
+	h.limiter = limiter
+	return h
+}
+
+// WithSecurityEvents attaches high-risk security event recording.
+func (h *PublicHandler) WithSecurityEvents(w SecurityEventWriter) *PublicHandler {
+	h.security = w
+	return h
 }
 
 // RegisterPublicRoutes mounts the public assistant endpoint.
@@ -72,6 +106,16 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 		c.Header("X-Link-Session-Refresh", result.SessionToken)
 	}
 
+	linkID := uuid.UUID(result.Link.ID.Bytes).String()
+	if !visitorask.AllowAskDocs(c.Request.Context(), h.limiter, linkID, result.VisitorID) {
+		h.recordSecurity(c, result.Link, securityEventRateLimited, result.VisitorID, result.Email, "ask_docs")
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    "rate_limit_exceeded",
+			"message": "too many Ask Docs requests, please try again later",
+		})
+		return
+	}
+
 	var body PublicChatRequest
 	if err := c.ShouldBindJSON(&body); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
@@ -87,7 +131,34 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 		return
 	}
 
+	if resp.ScopeViolations > 0 {
+		h.recordSecurity(c, result.Link, securityEventScopeViolation, result.VisitorID, result.Email, "out_of_scope_evidence")
+	}
+	truncateVisitorEvidenceQuotes(resp.Evidence)
 	c.JSON(http.StatusOK, resp)
+}
+
+func truncateVisitorEvidenceQuotes(evidenceList []search.Evidence) {
+	for i := range evidenceList {
+		evidenceList[i].Quote = truncateRunes(evidenceList[i].Quote, maxVisitorEvidenceQuoteRunes)
+	}
+}
+
+func truncateRunes(s string, max int) string {
+	if max <= 0 || s == "" {
+		return s
+	}
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	return string([]rune(s)[:max])
+}
+
+func (h *PublicHandler) recordSecurity(c *gin.Context, row db.Link, eventType, visitorID, email, reason string) {
+	if h.security == nil {
+		return
+	}
+	_ = h.security.RecordSecurityEvent(c.Request.Context(), row, eventType, visitorID, email, c.ClientIP(), c.Request.UserAgent(), reason)
 }
 
 func mapPublicChatError(c *gin.Context, err error) {

@@ -17,16 +17,16 @@ import (
 )
 
 type mockQuerier struct {
-	session          db.AssistantSession
-	sessionID        pgtype.UUID
-	publicSession    db.AssistantSession
-	publicSessionID  pgtype.UUID
-	messages         []db.AssistantMessage
-	createdMsgs      []db.AssistantMessage
-	roomDocs         []db.ListDealRoomDocumentsWithMetaRow
-	publicLinkDocs   []db.ListLinkDocumentsByPublicTokenRow
-	legacyDoc        db.GetDocumentByIDRow
-	legacyDocOK      bool
+	session         db.AssistantSession
+	sessionID       pgtype.UUID
+	publicSession   db.AssistantSession
+	publicSessionID pgtype.UUID
+	messages        []db.AssistantMessage
+	createdMsgs     []db.AssistantMessage
+	roomDocs        []db.ListDealRoomDocumentsWithMetaRow
+	publicLinkDocs  []db.ListLinkDocumentsByPublicTokenRow
+	legacyDoc       db.GetDocumentByIDRow
+	legacyDocOK     bool
 }
 
 func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error) {
@@ -405,6 +405,9 @@ func TestPublicChatDropsOutOfScopeEvidence(t *testing.T) {
 	}
 	if len(resp.Evidence) != 1 || resp.Evidence[0].DocumentID != inScope.String() {
 		t.Fatalf("expected only in-scope evidence, got %+v", resp.Evidence)
+	}
+	if resp.ScopeViolations != 1 {
+		t.Fatalf("scopeViolations=%d want 1", resp.ScopeViolations)
 	}
 }
 

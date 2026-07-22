@@ -12,8 +12,8 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
@@ -22,10 +22,10 @@ import (
 )
 
 var (
-	ErrMessageRequired = errors.New("message is required")
-	ErrInvalidSession  = errors.New("invalid session id")
-	ErrSessionNotFound = errors.New("session not found")
-	ErrLLMNotConfigured = errors.New("llm not configured")
+	ErrMessageRequired   = errors.New("message is required")
+	ErrInvalidSession    = errors.New("invalid session id")
+	ErrSessionNotFound   = errors.New("session not found")
+	ErrLLMNotConfigured  = errors.New("llm not configured")
 	ErrAICopilotDisabled = errors.New("ai copilot disabled")
 )
 
@@ -79,18 +79,19 @@ type ChatRequest struct {
 
 // ChatResponse is the service-level chat output.
 type ChatResponse struct {
-	SessionID string            `json:"session_id"`
-	Answer    string            `json:"answer"`
-	Evidence  []search.Evidence `json:"evidence"`
+	SessionID       string            `json:"session_id"`
+	Answer          string            `json:"answer"`
+	Evidence        []search.Evidence `json:"evidence"`
+	ScopeViolations int               `json:"-"` // internal: dropped out-of-scope evidence count
 }
 
 // Service handles assistant conversations.
 type Service struct {
-	queries        Querier
-	search         Searcher
-	formatter      *evidence.Formatter
-	llm            ChatCompleter
-	signalCreator  SignalCreator
+	queries       Querier
+	search        Searcher
+	formatter     *evidence.Formatter
+	llm           ChatCompleter
+	signalCreator SignalCreator
 }
 
 // NewService creates an assistant service.
@@ -202,18 +203,20 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 
 	// Fail closed: empty Access scope never falls back to workspace-wide search.
 	var evidenceList []search.Evidence
+	var scopeViolations int
 	if len(documentIDs) > 0 {
 		evidenceList, err = s.search.SearchInDocuments(ctx, link.WorkspaceID, documentIDs, req.Message, defaultSearchResults)
 		if err != nil {
 			return nil, fmt.Errorf("search evidence: %w", err)
 		}
-		evidenceList = filterEvidenceToDocuments(evidenceList, documentIDs)
+		evidenceList, scopeViolations = filterEvidenceToDocuments(evidenceList, documentIDs)
 	}
 
 	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
 	if err != nil {
 		return nil, err
 	}
+	resp.ScopeViolations = scopeViolations
 
 	docID := ""
 	if link.DocumentID.Valid {
@@ -316,22 +319,24 @@ func (s *Service) documentIDsForLink(ctx context.Context, row db.Link) ([]uuid.U
 	return link.AuthorizedDocumentIDs(ctx, s.queries, row)
 }
 
-func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uuid.UUID) []search.Evidence {
+func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uuid.UUID) ([]search.Evidence, int) {
 	if len(evidenceList) == 0 || len(documentIDs) == 0 {
-		return nil
+		return nil, 0
 	}
 	allowed := make(map[string]struct{}, len(documentIDs))
 	for _, id := range documentIDs {
 		allowed[id.String()] = struct{}{}
 	}
 	out := make([]search.Evidence, 0, len(evidenceList))
+	dropped := 0
 	for _, ev := range evidenceList {
 		if _, ok := allowed[ev.DocumentID]; !ok {
+			dropped++
 			continue
 		}
 		out = append(out, ev)
 	}
-	return out
+	return out, dropped
 }
 
 func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUserMessage string, msgs []db.AssistantMessage, evidenceList []search.Evidence) (*ChatResponse, error) {
