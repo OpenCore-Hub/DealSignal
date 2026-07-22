@@ -35,13 +35,19 @@ import (
 
 // Handler exposes link endpoints.
 type Handler struct {
-	service     *Service
-	analytics   *analytics.Service
-	suggestions *suggestions.Service
-	storage     *storage.Client
-	cfg         *config.Config
-	publisher   EventPublisher
-	askLimiter  visitorask.Limiter
+	service      *Service
+	analytics    *analytics.Service
+	suggestions  *suggestions.Service
+	storage      *storage.Client
+	cfg          *config.Config
+	publisher    EventPublisher
+	askLimiter   visitorask.Limiter
+	securitySink SecurityEventSink
+}
+
+// SecurityEventSink records high-risk visitor security events (Ask Host limits, gates).
+type SecurityEventSink interface {
+	RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error
 }
 
 // EventPublisher is the interface for publishing real-time events.
@@ -59,6 +65,11 @@ func (h *Handler) SetAskLimiter(lim visitorask.Limiter) {
 	h.askLimiter = lim
 }
 
+// SetSecuritySink attaches an optional security-event recorder (tests / overrides).
+func (h *Handler) SetSecuritySink(s SecurityEventSink) {
+	h.securitySink = s
+}
+
 func (h *Handler) visitorAskLimiter() visitorask.Limiter {
 	if h.askLimiter != nil {
 		return h.askLimiter
@@ -69,15 +80,23 @@ func (h *Handler) visitorAskLimiter() visitorask.Limiter {
 	return nil
 }
 
+func (h *Handler) recordAskSecurityEvent(ctx context.Context, row db.Link, eventType, visitorID, email, ip, ua, reason string) {
+	if h.securitySink != nil {
+		_ = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+		return
+	}
+	if h.analytics != nil {
+		_ = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	}
+}
+
 // rejectIfAskHostLimited returns true when the visitor exceeded Ask Host limits
 // (response already written: 429 + high-risk security event).
 func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
 	if visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID) {
 		return false
 	}
-	if h.analytics != nil {
-		_ = h.analytics.RecordSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
-	}
+	h.recordAskSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
 	c.JSON(http.StatusTooManyRequests, gin.H{
 		"code":    "rate_limit_exceeded",
 		"message": "too many Ask Host requests, please try again later",

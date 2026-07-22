@@ -472,6 +472,66 @@ func TestAuthorizePublicAccess_ReevaluatesAllowBlockOnSessionReuse(t *testing.T)
 	}
 }
 
+// TestAuthorizePublicAccess_ReevaluatesNotAllowedOnSessionReuse proves removal
+// from the allow list also revokes Ask Docs / asset session reuse (Q21).
+func TestAuthorizePublicAccess_ReevaluatesNotAllowedOnSessionReuse(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	secret := "test-link-session-secret"
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+	}); err != nil {
+		t.Fatalf("allow alice: %v", err)
+	}
+
+	access, err := f.svc.Access(f.ctx, f.link.PublicToken, AccessRequest{Email: "alice@vc.com"})
+	if err != nil {
+		t.Fatalf("access as alice: %v", err)
+	}
+
+	// Alice removed from allow list (only bob remains) — not an explicit block.
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "bob@vc.com", Action: "allow"},
+	}); err != nil {
+		t.Fatalf("replace allow list: %v", err)
+	}
+
+	fresh, err := f.svc.GetByPublicToken(f.ctx, f.link.PublicToken)
+	if err != nil {
+		t.Fatalf("reload link: %v", err)
+	}
+
+	sessionTok, err := signLinkSession(LinkSession{
+		PublicToken:     f.link.PublicToken,
+		Email:           "alice@vc.com",
+		VisitorID:       access.VisitorID,
+		SecurityVersion: fresh.SecurityVersion,
+	}, secret)
+	if err != nil {
+		t.Fatalf("sign session: %v", err)
+	}
+
+	h := &Handler{service: f.svc, cfg: &config.Config{LinkSessionSecret: secret}}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/ask", nil)
+	c.Request.Header.Set("X-Link-Session", sessionTok)
+
+	_, err = h.AuthorizePublicAccess(c, f.link.PublicToken)
+	if err == nil {
+		t.Fatal("expected not-allowed email to be rejected on session reuse")
+	}
+	if !errors.Is(err, ErrNotAllowedEmail) {
+		t.Fatalf("expected ErrNotAllowedEmail, got %v", err)
+	}
+}
+
 // TestAuthorizePublicAccess_RejectsUnsatisfiedEmailVerificationGate locks gate
 // parity with page/asset access: a session that does not prove email verification
 // cannot reuse access when the link requires it.

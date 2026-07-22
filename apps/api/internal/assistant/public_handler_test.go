@@ -205,7 +205,8 @@ func TestPublicAskDocsRejectsTokenMismatch(t *testing.T) {
 	auth := &mockAccessAuthorizer{result: link.AccessResult{
 		Link: db.Link{AiCopilotEnabled: true, DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
 	}}
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
+	llm := &mockLLM{answer: "should-not-run"}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), llm), auth, cfg)
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
@@ -221,6 +222,9 @@ func TestPublicAskDocsRejectsTokenMismatch(t *testing.T) {
 	}
 	if auth.calls != 0 {
 		t.Fatalf("Access authorizer must not run on token mismatch, got %d calls", auth.calls)
+	}
+	if llm.called {
+		t.Fatal("Ask Docs must not chat on token mismatch")
 	}
 }
 
@@ -485,7 +489,8 @@ func TestPublicAskDocsRejectsBlockedEmail(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{LinkSessionSecret: "secret"}
 	auth := &mockAccessAuthorizer{err: link.ErrBlockedEmail}
-	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{}), auth, cfg)
+	llm := &mockLLM{answer: "should-not-run"}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), llm), auth, cfg)
 	r := gin.New()
 	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
 
@@ -504,6 +509,72 @@ func TestPublicAskDocsRejectsBlockedEmail(t *testing.T) {
 	}
 	if body["code"] != "blocked_email" {
 		t.Fatalf("expected blocked_email, got %v", body["code"])
+	}
+	if llm.called {
+		t.Fatal("Ask Docs must not chat after Access reject (blocked)")
+	}
+	if auth.calls != 1 {
+		t.Fatalf("expected AuthorizePublicAccess once, got %d", auth.calls)
+	}
+}
+
+func TestPublicAskDocsRejectsNotAllowedEmail(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	auth := &mockAccessAuthorizer{err: link.ErrNotAllowedEmail}
+	llm := &mockLLM{answer: "should-not-run"}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), llm), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", Email: "removed@vc.com"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "not_allowed" {
+		t.Fatalf("expected not_allowed, got %v", body["code"])
+	}
+	if llm.called {
+		t.Fatal("Ask Docs must not chat after Access reject (not allowed)")
+	}
+}
+
+func TestPublicAskDocsRejectsUnsatisfiedNDAGate(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	auth := &mockAccessAuthorizer{err: link.ErrRequiresNDA}
+	llm := &mockLLM{answer: "should-not-run"}
+	h := NewPublicHandler(NewService(&mockQuerier{}, &mockSearcher{}, evidence.NewFormatter(), llm), auth, cfg)
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", Email: "v@example.com", NDAAgreed: false}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hi"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "nda_required" {
+		t.Fatalf("expected nda_required, got %v", body["code"])
+	}
+	if llm.called {
+		t.Fatal("Ask Docs must not chat when NDA gate is unsatisfied")
 	}
 }
 
