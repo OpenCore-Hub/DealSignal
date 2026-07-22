@@ -104,14 +104,10 @@
       "openKnowledgeBase": "打开知识库",
       "askDocsScopeNotInKb": "部分授权文件夹或文档不在知识库勾选范围内；问文档只会检索重叠部分",
       "askDocsScopeGaps": "未纳入知识库：{{items}}",
-      "aiAgents": "AI 助手",
-      "aiAgentsDescription": "允许在查看器中使用 AI 助手",
       "fileRequests": "启用文件请求",
       "fileRequestsDescription": "允许访客请求补充文件",
       "indexFile": "启用索引文件生成",
       "indexFileDescription": "为数据室生成索引页",
-      "qaConversations": "启用问答对话",
-      "qaConversationsDescription": "允许访客提问",
       "comingSoon": "即将上线"
     },
     "emptyTitle": "无限制",
@@ -164,9 +160,9 @@
     "done": "完成",
     "loading": "正在加载管理数据...",
     "loadFailed": "加载管理数据失败",
-    "questionsTitle": "访客问题",
-    "questionsDescription": "回复访客提交的问题。",
-    "noQuestions": "暂无问题。",
+    "questionsTitle": "问发起方收件箱",
+    "questionsDescription": "回复访客通过问发起方提交的异步问题。此处不是问文档审计，也不是信号收件箱。",
+    "noQuestions": "暂无问发起方问题。",
     "anonymous": "匿名",
     "answerLabel": "回复：",
     "answerPlaceholder": "输入回复内容...",
@@ -193,9 +189,9 @@
   },
   "askDocsAudit": {
     "title": "问文档审计",
-    "description": "访客「问文档」对话的只读账本。这不是 Signal 收件箱。",
+    "description": "访客「问文档」对话的只读账本。不是问发起方收件箱。意图信号会单独出现在仪表盘 — 此处不是信号收件箱。",
     "roomTitle": "问文档时间线",
-    "roomDescription": "数据室范围的问文档审计，可按链接筛选。这不是 Signal 收件箱。",
+    "roomDescription": "数据室范围的问文档审计，可按链接筛选。不是问发起方收件箱。意图信号会单独出现在仪表盘 — 此处不是信号收件箱。",
     "loading": "正在加载问文档审计...",
     "loadFailed": "加载问文档审计失败",
     "forbidden": "你没有权限查看问文档审计。",
@@ -222,6 +218,33 @@
       "no_evidence": "无证据",
       "kb_unavailable": "知识库不可用",
       "scope_violation": "作用域违规"
+    }
+  },
+  "askSecurityEvents": {
+    "title": "沟通安全事件",
+    "description": "问文档 / 问发起方的高危事件：拦截（含移出白名单）、作用域违规与频率限制。",
+    "roomTitle": "沟通安全事件",
+    "roomDescription": "数据室范围的高危提问事件（拦截、作用域违规、频率限制），可按链接筛选。",
+    "loading": "正在加载安全事件...",
+    "loadFailed": "加载安全事件失败",
+    "forbidden": "你没有权限查看提问安全事件。",
+    "empty": "暂无高危提问安全事件。",
+    "filterAllLinks": "全部链接",
+    "filterByLink": "按链接筛选",
+    "anonymous": "匿名访客",
+    "highRiskBadge": "高危",
+    "reasonLabel": "详情",
+    "eventTypes": {
+      "rate_limit_exceeded": "超过频率限制",
+      "scope_violation": "作用域违规",
+      "blocked_email": "邮箱被拦截",
+      "blocked_domain": "域名被拦截",
+      "not_in_allow_list": "已移出白名单"
+    },
+    "reasons": {
+      "ask_docs": "问文档",
+      "ask_host": "问发起方",
+      "out_of_scope_evidence": "越权证据"
     }
   },
   "accessRequests": {
@@ -264,8 +287,8 @@
     "keyPages": "关键页面",
     "noKeyPages": "暂无关键页面。",
     "pageLabel": "第 {{pageNumber}} 页",
-    "qaRecords": "问答记录",
-    "noQARecords": "暂无问题。",
+    "qaRecords": "问发起方动态",
+    "noQARecords": "暂无问发起方问题。",
     "accessCodeContacts": "验证码发送",
     "noAccessCodeContacts": "暂无验证码联系人。",
     "codeSendStatus": {

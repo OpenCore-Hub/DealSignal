@@ -261,6 +261,8 @@
     "qaLengthError": "问题长度需为 1–500 字符",
     "qaDisabled": "此链接未开启「问发起方」",
     "qaError": "提交问题失败",
+    "qaRateLimited": "问发起方请求过于频繁，请稍后再试。",
+    "qaLimiterUnavailable": "问发起方暂时不可用，请稍后再试。",
     "qaEmpty": "暂无问题，可向发起方提问。",
     "qaOwnerReply": "发起方回复",
     "qaAnswered": "已回复",

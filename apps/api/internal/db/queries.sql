@@ -215,6 +215,64 @@ UPDATE chunks
 SET search_vector = to_tsvector('english', text)
 WHERE id = $1;
 
+-- name: UpdateChunkEmbedding :exec
+UPDATE chunks
+SET embedding = $2
+WHERE id = $1 AND workspace_id = $3;
+
+-- name: UpsertChunkEmbeddingBuild :exec
+INSERT INTO chunk_embedding_builds (chunk_id, workspace_id, generation, embedding)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (chunk_id, generation) DO UPDATE
+SET embedding = EXCLUDED.embedding,
+    created_at = now();
+
+-- name: PromoteChunkEmbeddingBuild :exec
+UPDATE chunks c
+SET embedding = b.embedding
+FROM chunk_embedding_builds b
+WHERE c.id = b.chunk_id
+  AND b.workspace_id = $1
+  AND b.generation = $2
+  AND c.workspace_id = $1
+  AND c.document_id = ANY(sqlc.arg(document_ids)::uuid[]);
+
+-- name: DeleteChunkEmbeddingBuildsForDocuments :exec
+DELETE FROM chunk_embedding_builds b
+USING chunks c
+WHERE b.chunk_id = c.id
+  AND b.workspace_id = $1
+  AND b.generation = $2
+  AND c.document_id = ANY(sqlc.arg(document_ids)::uuid[]);
+
+-- name: ListChunksForEmbedding :many
+-- Chunks with non-empty text for KB create/rebuild embedding.
+SELECT
+    c.id,
+    c.document_id,
+    c.text
+FROM chunks c
+WHERE c.workspace_id = $1
+  AND c.document_id = ANY(sqlc.arg(document_ids)::uuid[])
+  AND c.text IS NOT NULL
+  AND btrim(c.text) <> ''
+ORDER BY c.document_id, c.chunk_index NULLS LAST, c.id;
+
+-- name: ListDocumentsMissingEmbeddableChunks :many
+-- Documents in the selection that have no non-empty text chunks (cannot be embedded).
+SELECT d.id
+FROM documents d
+WHERE d.workspace_id = $1
+  AND d.id = ANY(sqlc.arg(document_ids)::uuid[])
+  AND NOT EXISTS (
+    SELECT 1
+    FROM chunks c
+    WHERE c.workspace_id = $1
+      AND c.document_id = d.id
+      AND c.text IS NOT NULL
+      AND btrim(c.text) <> ''
+  );
+
 -- name: SearchChunksByVector :many
 SELECT
     c.id,
@@ -278,7 +336,11 @@ WHERE id = $2;
 INSERT INTO assistant_messages (
   session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES (
+  $1, $2, $3, $4, $5,
+  COALESCE(sqlc.narg(authorized_document_ids)::uuid[], '{}'::uuid[]),
+  COALESCE(sqlc.narg(retrieval_document_ids)::uuid[], '{}'::uuid[])
+)
 RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids;
 
 -- name: ListAssistantMessagesBySession :many
@@ -2420,6 +2482,49 @@ WHERE link_id = $1
   AND created_at > now() - interval '24 hours'
 ORDER BY created_at DESC;
 
+-- name: ListAskHighRiskSecurityEventsByLink :many
+-- Owner-visible Visitor Ask high-risk events (US#32): block (blocked_email /
+-- blocked_domain / not_in_allow_list), scope_violation, rate_limit_exceeded.
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+  AND event_type = ANY (ARRAY[
+    'rate_limit_exceeded',
+    'scope_violation',
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list'
+  ]::text[])
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- name: ListAskHighRiskSecurityEventsByRoom :many
+SELECT
+    se.id,
+    se.link_id,
+    se.event_type,
+    se.visitor_id,
+    se.email,
+    se.ip,
+    se.user_agent,
+    se.reason,
+    se.created_at
+FROM security_events se
+INNER JOIN links l ON l.id = se.link_id
+WHERE l.deal_room_id = $1
+  AND l.workspace_id = $2
+  AND l.status NOT IN ('deleted', 'disabled')
+  AND (sqlc.narg(link_id)::uuid IS NULL OR se.link_id = sqlc.narg(link_id))
+  AND se.event_type = ANY (ARRAY[
+    'rate_limit_exceeded',
+    'scope_violation',
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list'
+  ]::text[])
+ORDER BY se.created_at DESC
+LIMIT $3;
+
 -- name: CreateEmailLog :one
 INSERT INTO email_logs (recipient, email_type, provider, status, subject, workspace_id)
 VALUES ($1, $2, $3, $4, $5, $6)
@@ -2624,6 +2729,14 @@ SELECT * FROM link_visitor_questions
 WHERE link_id = $1
 ORDER BY created_at DESC;
 
+-- name: ListVisitorQuestionsByRoom :many
+SELECT q.*
+FROM link_visitor_questions q
+INNER JOIN links l ON l.id = q.link_id AND l.deal_room_id = $1
+WHERE q.workspace_id = $2
+ORDER BY q.created_at DESC
+LIMIT $3;
+
 -- name: ListVisitorQuestionsByVisitor :many
 SELECT * FROM link_visitor_questions
 WHERE link_id = $1 AND visitor_id = $2
@@ -2632,7 +2745,7 @@ ORDER BY created_at DESC;
 -- name: AnswerVisitorQuestion :one
 UPDATE link_visitor_questions
 SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
-WHERE id = $3 AND workspace_id = $4
+WHERE id = $3 AND workspace_id = $4 AND link_id = $5
 RETURNING *;
 
 -- name: GetVisitorQuestionByID :one

@@ -126,6 +126,10 @@ export function KnowledgeBasePanel({
       setWizard(null);
       setRebuildConfirmOpen(false);
     } catch (e) {
+      if (e instanceof ApiError && e.code === "no_searchable_chunks") {
+        toast.error(t("knowledgeBase.noSearchableChunks"));
+        return;
+      }
       const fallback =
         wizard === "create"
           ? t("knowledgeBase.createFailed")

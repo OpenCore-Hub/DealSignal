@@ -4589,27 +4589,94 @@ func (s *Service) ListMyVisitorQuestions(ctx context.Context, linkID pgtype.UUID
 }
 
 // ListLinkVisitorQuestions returns all questions for a link (owner view).
-func (s *Service) ListLinkVisitorQuestions(ctx context.Context, linkID pgtype.UUID) ([]db.LinkVisitorQuestion, error) {
-	return s.queries.ListVisitorQuestionsByLink(ctx, linkID)
+func (s *Service) ListLinkVisitorQuestions(ctx context.Context, link db.Link, userID string) ([]VisitorQuestion, error) {
+	if err := authorizeAskHostOwnerView(ctx, s.queries, link.WorkspaceID, link.DealRoomID, userID); err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListVisitorQuestionsByLink(ctx, link.ID)
+	if err != nil {
+		return nil, err
+	}
+	return mapVisitorQuestions(rows), nil
 }
 
-// AnswerVisitorQuestion records an answer to a visitor question.
-// The caller must verify workspace ownership before invoking.
-func (s *Service) AnswerVisitorQuestion(ctx context.Context, questionID, workspaceID, userID pgtype.UUID, answer string) (db.LinkVisitorQuestion, error) {
+// ListRoomVisitorQuestions returns Ask Host questions across all links in a deal room.
+// Optional linkID filters to a single link within the room.
+func (s *Service) ListRoomVisitorQuestions(ctx context.Context, workspaceID, roomID, userID, linkID string) ([]VisitorQuestion, error) {
+	roomUUID, err := uuid.Parse(roomID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid deal room id")
+	}
+	wsUUID := pgUUID(workspaceID)
+	if !wsUUID.Valid {
+		return nil, fmt.Errorf("invalid workspace id")
+	}
+
+	room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+		ID:          pgtype.UUID{Bytes: roomUUID, Valid: true},
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFoundInWorkspace
+		}
+		return nil, fmt.Errorf("get deal room: %w", err)
+	}
+
+	if err := authorizeAskHostOwnerView(ctx, s.queries, room.WorkspaceID, room.ID, userID); err != nil {
+		return nil, err
+	}
+
+	rows, err := s.queries.ListVisitorQuestionsByRoom(ctx, db.ListVisitorQuestionsByRoomParams{
+		DealRoomID:  room.ID,
+		WorkspaceID: wsUUID,
+		Limit:       visitorQuestionsListLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var filterLink pgtype.UUID
+	if linkID != "" {
+		filterLink = pgUUID(linkID)
+		if !filterLink.Valid {
+			return nil, ErrNotFoundInWorkspace
+		}
+	}
+
+	out := make([]VisitorQuestion, 0, len(rows))
+	for _, q := range rows {
+		if filterLink.Valid && q.LinkID != filterLink {
+			continue
+		}
+		out = append(out, mapVisitorQuestion(q))
+	}
+	return out, nil
+}
+
+// AnswerVisitorQuestion records an answer to a visitor question on a specific link.
+func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, questionID, userID pgtype.UUID, answer string) (VisitorQuestion, error) {
 	if strings.TrimSpace(answer) == "" {
-		return db.LinkVisitorQuestion{}, fmt.Errorf("answer is required")
+		return VisitorQuestion{}, fmt.Errorf("answer is required")
+	}
+	if err := authorizeAskHostOwnerView(ctx, s.queries, link.WorkspaceID, link.DealRoomID, uuid.UUID(userID.Bytes).String()); err != nil {
+		return VisitorQuestion{}, err
 	}
 	q, err := s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
 		Answer:      pgtype.Text{String: strings.TrimSpace(answer), Valid: true},
 		AnsweredBy:  userID,
 		ID:          questionID,
-		WorkspaceID: workspaceID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
 	})
 	if err != nil {
-		return db.LinkVisitorQuestion{}, err
+		if errors.Is(err, pgx.ErrNoRows) {
+			return VisitorQuestion{}, ErrNotFoundInWorkspace
+		}
+		return VisitorQuestion{}, err
 	}
-	s.resolveLinkQuestion(uuid.UUID(workspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
-	return q, nil
+	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
+	return mapVisitorQuestion(q), nil
 }
 
 const maxPendingFileRequestsPerVisitor = 3

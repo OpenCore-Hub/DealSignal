@@ -177,6 +177,17 @@ export interface AskDocsAuditDetail {
   result_status?: string;
 }
 
+/** Owner-visible Visitor Ask high-risk security event (US#32). */
+export interface AskSecurityEvent {
+  id: string;
+  link_id: string;
+  event_type: string;
+  visitor_id?: string;
+  email?: string;
+  reason?: string;
+  created_at: string;
+}
+
 export interface LinkAccessRequest {
   id: string;
   link_id: string;

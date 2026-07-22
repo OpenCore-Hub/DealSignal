@@ -104,14 +104,10 @@
       "openKnowledgeBase": "Open knowledge base",
       "askDocsScopeNotInKb": "Some authorized folders or documents are outside the knowledge base; Ask Docs will only search the overlap",
       "askDocsScopeGaps": "Outside KB: {{items}}",
-      "aiAgents": "AI Agents",
-      "aiAgentsDescription": "Allow AI assistant in the viewer",
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",
       "indexFile": "Enable index file generation",
       "indexFileDescription": "Generate an index page for the deal room",
-      "qaConversations": "Enable Q&A conversations",
-      "qaConversationsDescription": "Allow viewers to ask questions",
       "comingSoon": "Coming soon"
     },
     "emptyTitle": "No restrictions",
@@ -164,9 +160,9 @@
     "done": "Done",
     "loading": "Loading management data...",
     "loadFailed": "Failed to load management data",
-    "questionsTitle": "Visitor questions",
-    "questionsDescription": "Reply to questions submitted by viewers.",
-    "noQuestions": "No questions yet.",
+    "questionsTitle": "Ask Host inbox",
+    "questionsDescription": "Reply to async Ask Host questions from visitors. This is not Ask Docs audit and not the Signal inbox.",
+    "noQuestions": "No Ask Host questions yet.",
     "anonymous": "Anonymous",
     "answerLabel": "Answer:",
     "answerPlaceholder": "Type your answer...",
@@ -193,9 +189,9 @@
   },
   "askDocsAudit": {
     "title": "Ask Docs audit",
-    "description": "Read-only ledger of visitor Ask Docs conversations. This is not the Signal inbox.",
+    "description": "Read-only ledger of visitor Ask Docs conversations. Not the Ask Host inbox. Intent Signals appear on the dashboard separately — this is not the Signal inbox.",
     "roomTitle": "Ask Docs timeline",
-    "roomDescription": "Room-wide Ask Docs audit. Filter by link. This is not the Signal inbox.",
+    "roomDescription": "Room-wide Ask Docs audit. Filter by link. Not the Ask Host inbox. Intent Signals appear on the dashboard separately — this is not the Signal inbox.",
     "loading": "Loading Ask Docs audit...",
     "loadFailed": "Failed to load Ask Docs audit",
     "forbidden": "You do not have permission to view Ask Docs audit.",
@@ -222,6 +218,33 @@
       "no_evidence": "No evidence",
       "kb_unavailable": "Knowledge base unavailable",
       "scope_violation": "Scope violation"
+    }
+  },
+  "askSecurityEvents": {
+    "title": "Visitor Ask security events",
+    "description": "High-risk Ask Docs / Ask Host events: blocks (including allowlist removal), scope violations, and rate limits.",
+    "roomTitle": "Visitor Ask security events",
+    "roomDescription": "Room-wide high-risk Ask events (blocks, scope violations, rate limits). Filter by link.",
+    "loading": "Loading security events...",
+    "loadFailed": "Failed to load security events",
+    "forbidden": "You do not have permission to view Ask security events.",
+    "empty": "No high-risk Ask security events yet.",
+    "filterAllLinks": "All links",
+    "filterByLink": "Filter by link",
+    "anonymous": "Anonymous visitor",
+    "highRiskBadge": "High risk",
+    "reasonLabel": "Detail",
+    "eventTypes": {
+      "rate_limit_exceeded": "Rate limit exceeded",
+      "scope_violation": "Scope violation",
+      "blocked_email": "Blocked email",
+      "blocked_domain": "Blocked domain",
+      "not_in_allow_list": "Removed from allowlist"
+    },
+    "reasons": {
+      "ask_docs": "Ask Docs",
+      "ask_host": "Ask Host",
+      "out_of_scope_evidence": "Out-of-scope evidence"
     }
   },
   "accessRequests": {
@@ -283,8 +306,8 @@
     "keyPages": "Key pages",
     "noKeyPages": "No key pages yet.",
     "pageLabel": "Page {{pageNumber}}",
-    "qaRecords": "Q&A records",
-    "noQARecords": "No questions yet.",
+    "qaRecords": "Ask Host activity",
+    "noQARecords": "No Ask Host questions yet.",
     "tabs": {
       "visitors": "Visitors",
       "activity": "Activity log",

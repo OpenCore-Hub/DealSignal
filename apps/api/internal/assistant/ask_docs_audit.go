@@ -274,6 +274,8 @@ func (s *Service) GetAskDocsAudit(ctx context.Context, workspaceID, linkID, sess
 		if len(m.Evidence) > 0 {
 			var ev []search.Evidence
 			if err := json.Unmarshal(m.Evidence, &ev); err == nil {
+				// Defense in depth for pre-B4 rows that stored longer quotes (US#20).
+				truncateVisitorEvidenceQuotes(ev)
 				detail.Evidence = ev
 			}
 		}

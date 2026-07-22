@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
@@ -43,6 +45,8 @@ type mockQuerier struct {
 	room              db.DealRoom
 	roomOK            bool
 	roomAuditRows     []db.ListAskDocsAuditSessionsByRoomRow
+	askSecEvents      []db.ListAskHighRiskSecurityEventsByLinkRow
+	roomAskSecEvents  []db.ListAskHighRiskSecurityEventsByRoomRow
 }
 
 func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error) {
@@ -176,6 +180,23 @@ func (m *mockQuerier) GetDealRoomByID(_ context.Context, _ db.GetDealRoomByIDPar
 
 func (m *mockQuerier) ListAskDocsAuditSessionsByRoom(_ context.Context, _ db.ListAskDocsAuditSessionsByRoomParams) ([]db.ListAskDocsAuditSessionsByRoomRow, error) {
 	return m.roomAuditRows, nil
+}
+
+func (m *mockQuerier) ListAskHighRiskSecurityEventsByLink(_ context.Context, _ db.ListAskHighRiskSecurityEventsByLinkParams) ([]db.ListAskHighRiskSecurityEventsByLinkRow, error) {
+	return m.askSecEvents, nil
+}
+
+func (m *mockQuerier) ListAskHighRiskSecurityEventsByRoom(_ context.Context, arg db.ListAskHighRiskSecurityEventsByRoomParams) ([]db.ListAskHighRiskSecurityEventsByRoomRow, error) {
+	if !arg.LinkID.Valid {
+		return m.roomAskSecEvents, nil
+	}
+	out := make([]db.ListAskHighRiskSecurityEventsByRoomRow, 0, len(m.roomAskSecEvents))
+	for _, row := range m.roomAskSecEvents {
+		if row.LinkID == arg.LinkID {
+			out = append(out, row)
+		}
+	}
+	return out, nil
 }
 
 type mockSearcher struct {
@@ -502,6 +523,54 @@ func TestPublicChatDealRoomExcludesKBNotAuthorized(t *testing.T) {
 	}
 	if len(s.lastDocumentIDs) != 1 || s.lastDocumentIDs[0] != inBoth {
 		t.Fatalf("expected Access∩KB of %s only, got %v", inBoth, s.lastDocumentIDs)
+	}
+}
+
+func TestPublicChatBuildingUsesActiveDocumentIds(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{12}, Valid: true}
+	activeDoc := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	buildingOnly := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: activeDoc, Valid: true}, FolderPath: "/general"},
+			{DocumentID: pgtype.UUID{Bytes: buildingOnly, Valid: true}, FolderPath: "/general"},
+		},
+		kb: db.DealRoomKnowledgeBasis{
+			Status: "building",
+			ActiveDocumentIds: []pgtype.UUID{
+				{Bytes: activeDoc, Valid: true},
+			},
+			BuildingDocumentIds: []pgtype.UUID{
+				{Bytes: activeDoc, Valid: true},
+				{Bytes: buildingOnly, Valid: true},
+			},
+		},
+		kbOK: true,
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c1", DocumentID: activeDoc.String(), Quote: "ok"},
+	}}
+	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"})
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+		FolderScopeMode:  "allowlist",
+		FolderScopePaths: []string{"/general"},
+		PublicToken:      "tok",
+	}
+	if _, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.inDocumentsCalled {
+		t.Fatal("building KB must still search ActiveDocumentIds ∩ Access")
+	}
+	if len(s.lastDocumentIDs) != 1 || s.lastDocumentIDs[0] != activeDoc {
+		t.Fatalf("expected active-only search of %s, got %v", activeDoc, s.lastDocumentIDs)
 	}
 }
 
@@ -867,6 +936,118 @@ func TestListAskDocsAudit_Forbidden(t *testing.T) {
 	}
 }
 
+func TestListAskSecurityEvents_ReturnsHighRiskOnly(t *testing.T) {
+	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	evID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	q := &mockQuerier{
+		linkOK: true,
+		link: db.Link{
+			ID:          pgtype.UUID{Bytes: linkID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		wsRole: "admin",
+		askSecEvents: []db.ListAskHighRiskSecurityEventsByLinkRow{
+			{
+				ID:        pgtype.UUID{Bytes: evID, Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
+				EventType: "rate_limit_exceeded",
+				Reason:    pgtype.Text{String: "ask_docs", Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+			{
+				ID:        pgtype.UUID{Bytes: uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"), Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
+				EventType: "scope_violation",
+				VisitorID: pgtype.Text{String: "v1", Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+			{
+				ID:        pgtype.UUID{Bytes: uuid.MustParse("abababab-abab-abab-abab-abababababab"), Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
+				EventType: "not_in_allow_list",
+				Email:     pgtype.Text{String: "removed@vc.com", Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	got, err := svc.ListAskSecurityEvents(context.Background(), wsID.String(), linkID.String(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("ListAskSecurityEvents: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("expected 3 events including allowlist removal, got %d: %+v", len(got), got)
+	}
+	if got[0].EventType != "rate_limit_exceeded" || got[0].Reason != "ask_docs" {
+		t.Fatalf("unexpected first event: %+v", got[0])
+	}
+	if got[1].EventType != "scope_violation" || got[1].VisitorID != "v1" {
+		t.Fatalf("unexpected second event: %+v", got[1])
+	}
+	if got[2].EventType != "not_in_allow_list" || got[2].Email != "removed@vc.com" {
+		t.Fatalf("expected not_in_allow_list allowlist-removal event, got %+v", got[2])
+	}
+}
+
+func TestListAskSecurityEvents_Forbidden(t *testing.T) {
+	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	q := &mockQuerier{
+		linkOK: true,
+		link: db.Link{
+			ID:          pgtype.UUID{Bytes: linkID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+			DealRoomID:  pgtype.UUID{Bytes: uuid.MustParse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), Valid: true},
+		},
+		wsRole:  "member",
+		roomErr: pgx.ErrNoRows,
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	_, err := svc.ListAskSecurityEvents(context.Background(), wsID.String(), linkID.String(), uuid.NewString())
+	if !errors.Is(err, ErrAskDocsAuditForbidden) {
+		t.Fatalf("expected forbidden, got %v", err)
+	}
+}
+
+func TestListRoomAskSecurityEvents_FiltersByLink(t *testing.T) {
+	roomID := uuid.MustParse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee")
+	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	linkA := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	linkB := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	q := &mockQuerier{
+		roomOK: true,
+		room: db.DealRoom{
+			ID:          pgtype.UUID{Bytes: roomID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		wsRole: "owner",
+		roomAskSecEvents: []db.ListAskHighRiskSecurityEventsByRoomRow{
+			{
+				ID:        pgtype.UUID{Bytes: uuid.MustParse("11111111-1111-1111-1111-111111111111"), Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkA, Valid: true},
+				EventType: "blocked_email",
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+			{
+				ID:        pgtype.UUID{Bytes: uuid.MustParse("22222222-2222-2222-2222-222222222222"), Valid: true},
+				LinkID:    pgtype.UUID{Bytes: linkB, Valid: true},
+				EventType: "rate_limit_exceeded",
+				Reason:    pgtype.Text{String: "ask_host", Valid: true},
+				CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	got, err := svc.ListRoomAskSecurityEvents(context.Background(), wsID.String(), roomID.String(), uuid.NewString(), linkB.String())
+	if err != nil {
+		t.Fatalf("ListRoomAskSecurityEvents: %v", err)
+	}
+	if len(got) != 1 || got[0].LinkID != linkB.String() || got[0].EventType != "rate_limit_exceeded" {
+		t.Fatalf("expected only linkB rate limit event, got %+v", got)
+	}
+}
+
 func TestGetAskDocsAudit_DetailIncludesSnapshot(t *testing.T) {
 	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
 	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
@@ -927,6 +1108,54 @@ func TestGetAskDocsAudit_DetailIncludesSnapshot(t *testing.T) {
 	}
 	if len(detail.Evidence) != 1 || detail.Evidence[0].Quote != "snippet" {
 		t.Fatalf("evidence=%+v", detail.Evidence)
+	}
+}
+
+func TestGetAskDocsAudit_TruncatesLongQuotes(t *testing.T) {
+	linkID := uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc")
+	wsID := uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd")
+	sessionID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	longQuote := strings.Repeat("字", 400)
+	evBytes, _ := json.Marshal([]search.Evidence{{DocumentID: "doc-1", Quote: longQuote, PageNumber: 1}})
+
+	q := &mockQuerier{
+		linkOK: true,
+		link: db.Link{
+			ID:          pgtype.UUID{Bytes: linkID, Valid: true},
+			WorkspaceID: pgtype.UUID{Bytes: wsID, Valid: true},
+		},
+		wsRole:         "owner",
+		auditSessionOK: true,
+		auditSession: db.AssistantSession{
+			ID:        pgtype.UUID{Bytes: sessionID, Valid: true},
+			LinkID:    pgtype.UUID{Bytes: linkID, Valid: true},
+			VisitorID: pgtype.Text{String: "visitor-1", Valid: true},
+			CreatedAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+		},
+		messages: []db.AssistantMessage{
+			{
+				SessionID:    pgtype.UUID{Bytes: sessionID, Valid: true},
+				Role:         "assistant",
+				Content:      "answer",
+				Evidence:     evBytes,
+				ResultStatus: pgtype.Text{String: ResultStatusSuccess, Valid: true},
+				CreatedAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+			},
+		},
+	}
+	svc := NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{})
+	detail, err := svc.GetAskDocsAudit(context.Background(), wsID.String(), linkID.String(), sessionID.String(), uuid.NewString())
+	if err != nil {
+		t.Fatalf("GetAskDocsAudit: %v", err)
+	}
+	if len(detail.Evidence) != 1 {
+		t.Fatalf("expected 1 evidence, got %d", len(detail.Evidence))
+	}
+	if got := utf8.RuneCountInString(detail.Evidence[0].Quote); got != maxVisitorEvidenceQuoteRunes {
+		t.Fatalf("audit quote rune length = %d, want %d", got, maxVisitorEvidenceQuoteRunes)
+	}
+	if detail.Evidence[0].PageNumber != 1 {
+		t.Fatalf("page jump must remain, got %d", detail.Evidence[0].PageNumber)
 	}
 }
 

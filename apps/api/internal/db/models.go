@@ -92,6 +92,14 @@ type ChunkBox struct {
 	CreatedAt       pgtype.Timestamptz
 }
 
+type ChunkEmbeddingBuild struct {
+	ChunkID     pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	Embedding   pgvector.Vector
+	CreatedAt   pgtype.Timestamptz
+}
+
 type ComplianceAuditLog struct {
 	ID           pgtype.UUID
 	TenantID     pgtype.UUID

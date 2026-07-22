@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import type { ChatMessage, Evidence } from "@/types";
 
 // i18n keys stored in the store; the AIAssistant component resolves them via t().
@@ -8,6 +9,8 @@ const I18N_KEYS = {
   searchResults: "ai:search.results",
   searchNoResults: "ai:search.noResults",
   searchError: "ai:search.error",
+  rateLimited: "ai:search.rateLimited",
+  limiterUnavailable: "ai:search.limiterUnavailable",
 } as const;
 
 interface ChatContext {
@@ -144,11 +147,19 @@ export const useAIStore = create<AIState>((set, get) => ({
         messages: [...state.messages, assistantMessage],
         pending: false,
       }));
-    } catch {
+    } catch (e) {
+      let content: string = I18N_KEYS.searchError;
+      if (e instanceof ApiError) {
+        if (e.code === "rate_limit_exceeded") {
+          content = I18N_KEYS.rateLimited;
+        } else if (e.code === "limiter_unavailable") {
+          content = I18N_KEYS.limiterUnavailable;
+        }
+      }
       const errorMessage: ChatMessage = {
         id: `a_${Date.now()}`,
         role: "assistant",
-        content: I18N_KEYS.searchError,
+        content,
         createdAt: new Date().toISOString(),
       };
       set((state) => ({

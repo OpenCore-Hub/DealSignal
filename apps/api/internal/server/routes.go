@@ -281,10 +281,16 @@ func (s *Server) registerRoutes() error {
 			}
 			assistantPublicHandler.WithSecurityEvents(analyticsSvc)
 
-			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg,
+			dealroomOpts := []dealroom.ServiceOption{
 				dealroom.WithActionSyncer(actionSyncer),
 				dealroom.WithRateLimiter(s.redisClient),
-			)
+			}
+			if llmClient != nil {
+				dealroomOpts = append(dealroomOpts, dealroom.WithDocumentEmbedder(
+					ingestion.NewKnowledgeBaseEmbedder(queries, llmClient),
+				))
+			}
+			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg, dealroomOpts...)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
 
 			complianceSvc := compliance.NewService(queries, s.dbPool, s.cfg)

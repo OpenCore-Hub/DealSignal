@@ -176,7 +176,7 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 const answerVisitorQuestion = `-- name: AnswerVisitorQuestion :one
 UPDATE link_visitor_questions
 SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
-WHERE id = $3 AND workspace_id = $4
+WHERE id = $3 AND workspace_id = $4 AND link_id = $5
 RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag
 `
 
@@ -185,6 +185,7 @@ type AnswerVisitorQuestionParams struct {
 	AnsweredBy  pgtype.UUID
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
 }
 
 func (q *Queries) AnswerVisitorQuestion(ctx context.Context, arg AnswerVisitorQuestionParams) (LinkVisitorQuestion, error) {
@@ -193,6 +194,7 @@ func (q *Queries) AnswerVisitorQuestion(ctx context.Context, arg AnswerVisitorQu
 		arg.AnsweredBy,
 		arg.ID,
 		arg.WorkspaceID,
+		arg.LinkID,
 	)
 	var i LinkVisitorQuestion
 	err := row.Scan(
@@ -799,7 +801,11 @@ const createAssistantMessage = `-- name: CreateAssistantMessage :one
 INSERT INTO assistant_messages (
   session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES (
+  $1, $2, $3, $4, $5,
+  COALESCE($6::uuid[], '{}'::uuid[]),
+  COALESCE($7::uuid[], '{}'::uuid[])
+)
 RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 `
 
@@ -2813,6 +2819,26 @@ func (q *Queries) DeleteAccessLogsBefore(ctx context.Context, createdAt pgtype.T
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const deleteChunkEmbeddingBuildsForDocuments = `-- name: DeleteChunkEmbeddingBuildsForDocuments :exec
+DELETE FROM chunk_embedding_builds b
+USING chunks c
+WHERE b.chunk_id = c.id
+  AND b.workspace_id = $1
+  AND b.generation = $2
+  AND c.document_id = ANY($3::uuid[])
+`
+
+type DeleteChunkEmbeddingBuildsForDocumentsParams struct {
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	DocumentIds []pgtype.UUID
+}
+
+func (q *Queries) DeleteChunkEmbeddingBuildsForDocuments(ctx context.Context, arg DeleteChunkEmbeddingBuildsForDocumentsParams) error {
+	_, err := q.db.Exec(ctx, deleteChunkEmbeddingBuildsForDocuments, arg.WorkspaceID, arg.Generation, arg.DocumentIds)
+	return err
 }
 
 const deleteChunksByDocument = `-- name: DeleteChunksByDocument :exec
@@ -7361,6 +7387,152 @@ func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAs
 	return items, nil
 }
 
+const listAskHighRiskSecurityEventsByLink = `-- name: ListAskHighRiskSecurityEventsByLink :many
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+  AND event_type = ANY (ARRAY[
+    'rate_limit_exceeded',
+    'scope_violation',
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list'
+  ]::text[])
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListAskHighRiskSecurityEventsByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
+
+type ListAskHighRiskSecurityEventsByLinkRow struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        pgtype.Text
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+// Owner-visible Visitor Ask high-risk events (US#32): block (blocked_email /
+// blocked_domain / not_in_allow_list), scope_violation, rate_limit_exceeded.
+func (q *Queries) ListAskHighRiskSecurityEventsByLink(ctx context.Context, arg ListAskHighRiskSecurityEventsByLinkParams) ([]ListAskHighRiskSecurityEventsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAskHighRiskSecurityEventsByLink, arg.LinkID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskHighRiskSecurityEventsByLinkRow
+	for rows.Next() {
+		var i ListAskHighRiskSecurityEventsByLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Ip,
+			&i.UserAgent,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskHighRiskSecurityEventsByRoom = `-- name: ListAskHighRiskSecurityEventsByRoom :many
+SELECT
+    se.id,
+    se.link_id,
+    se.event_type,
+    se.visitor_id,
+    se.email,
+    se.ip,
+    se.user_agent,
+    se.reason,
+    se.created_at
+FROM security_events se
+INNER JOIN links l ON l.id = se.link_id
+WHERE l.deal_room_id = $1
+  AND l.workspace_id = $2
+  AND l.status NOT IN ('deleted', 'disabled')
+  AND ($4::uuid IS NULL OR se.link_id = $4)
+  AND se.event_type = ANY (ARRAY[
+    'rate_limit_exceeded',
+    'scope_violation',
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list'
+  ]::text[])
+ORDER BY se.created_at DESC
+LIMIT $3
+`
+
+type ListAskHighRiskSecurityEventsByRoomParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	LinkID      pgtype.UUID
+}
+
+type ListAskHighRiskSecurityEventsByRoomRow struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        pgtype.Text
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListAskHighRiskSecurityEventsByRoom(ctx context.Context, arg ListAskHighRiskSecurityEventsByRoomParams) ([]ListAskHighRiskSecurityEventsByRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAskHighRiskSecurityEventsByRoom,
+		arg.DealRoomID,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.LinkID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskHighRiskSecurityEventsByRoomRow
+	for rows.Next() {
+		var i ListAskHighRiskSecurityEventsByRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Ip,
+			&i.UserAgent,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
 SELECT id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 FROM assistant_messages
@@ -7441,6 +7613,51 @@ func (q *Queries) ListChunksByDocumentIDs(ctx context.Context, documentIds []pgt
 			&i.PageNumber,
 			&i.DocumentID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChunksForEmbedding = `-- name: ListChunksForEmbedding :many
+SELECT
+    c.id,
+    c.document_id,
+    c.text
+FROM chunks c
+WHERE c.workspace_id = $1
+  AND c.document_id = ANY($2::uuid[])
+  AND c.text IS NOT NULL
+  AND btrim(c.text) <> ''
+ORDER BY c.document_id, c.chunk_index NULLS LAST, c.id
+`
+
+type ListChunksForEmbeddingParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentIds []pgtype.UUID
+}
+
+type ListChunksForEmbeddingRow struct {
+	ID         pgtype.UUID
+	DocumentID pgtype.UUID
+	Text       string
+}
+
+// Chunks with non-empty text for KB create/rebuild embedding.
+func (q *Queries) ListChunksForEmbedding(ctx context.Context, arg ListChunksForEmbeddingParams) ([]ListChunksForEmbeddingRow, error) {
+	rows, err := q.db.Query(ctx, listChunksForEmbedding, arg.WorkspaceID, arg.DocumentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChunksForEmbeddingRow
+	for rows.Next() {
+		var i ListChunksForEmbeddingRow
+		if err := rows.Scan(&i.ID, &i.DocumentID, &i.Text); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -7929,6 +8146,47 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentsMissingEmbeddableChunks = `-- name: ListDocumentsMissingEmbeddableChunks :many
+SELECT d.id
+FROM documents d
+WHERE d.workspace_id = $1
+  AND d.id = ANY($2::uuid[])
+  AND NOT EXISTS (
+    SELECT 1
+    FROM chunks c
+    WHERE c.workspace_id = $1
+      AND c.document_id = d.id
+      AND c.text IS NOT NULL
+      AND btrim(c.text) <> ''
+  )
+`
+
+type ListDocumentsMissingEmbeddableChunksParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentIds []pgtype.UUID
+}
+
+// Documents in the selection that have no non-empty text chunks (cannot be embedded).
+func (q *Queries) ListDocumentsMissingEmbeddableChunks(ctx context.Context, arg ListDocumentsMissingEmbeddableChunksParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listDocumentsMissingEmbeddableChunks, arg.WorkspaceID, arg.DocumentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -10789,6 +11047,55 @@ func (q *Queries) ListVisitorQuestionsByLink(ctx context.Context, linkID pgtype.
 	return items, nil
 }
 
+const listVisitorQuestionsByRoom = `-- name: ListVisitorQuestionsByRoom :many
+SELECT q.id, q.tenant_id, q.workspace_id, q.link_id, q.visitor_id, q.visitor_email, q.question, q.answer, q.answered_by, q.status, q.created_at, q.updated_at, q.intent_tag
+FROM link_visitor_questions q
+INNER JOIN links l ON l.id = q.link_id AND l.deal_room_id = $1
+WHERE q.workspace_id = $2
+ORDER BY q.created_at DESC
+LIMIT $3
+`
+
+type ListVisitorQuestionsByRoomParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+func (q *Queries) ListVisitorQuestionsByRoom(ctx context.Context, arg ListVisitorQuestionsByRoomParams) ([]LinkVisitorQuestion, error) {
+	rows, err := q.db.Query(ctx, listVisitorQuestionsByRoom, arg.DealRoomID, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkVisitorQuestion
+	for rows.Next() {
+		var i LinkVisitorQuestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.Question,
+			&i.Answer,
+			&i.AnsweredBy,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IntentTag,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisitorQuestionsByVisitor = `-- name: ListVisitorQuestionsByVisitor :many
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag FROM link_visitor_questions
 WHERE link_id = $1 AND visitor_id = $2
@@ -11139,6 +11446,28 @@ WHERE id = ANY($1::uuid[])
 
 func (q *Queries) MarkSuggestionsSynced(ctx context.Context, dollar_1 []pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markSuggestionsSynced, dollar_1)
+	return err
+}
+
+const promoteChunkEmbeddingBuild = `-- name: PromoteChunkEmbeddingBuild :exec
+UPDATE chunks c
+SET embedding = b.embedding
+FROM chunk_embedding_builds b
+WHERE c.id = b.chunk_id
+  AND b.workspace_id = $1
+  AND b.generation = $2
+  AND c.workspace_id = $1
+  AND c.document_id = ANY($3::uuid[])
+`
+
+type PromoteChunkEmbeddingBuildParams struct {
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	DocumentIds []pgtype.UUID
+}
+
+func (q *Queries) PromoteChunkEmbeddingBuild(ctx context.Context, arg PromoteChunkEmbeddingBuildParams) error {
+	_, err := q.db.Exec(ctx, promoteChunkEmbeddingBuild, arg.WorkspaceID, arg.Generation, arg.DocumentIds)
 	return err
 }
 
@@ -11962,6 +12291,23 @@ type UpdateAssistantSessionTitleParams struct {
 
 func (q *Queries) UpdateAssistantSessionTitle(ctx context.Context, arg UpdateAssistantSessionTitleParams) error {
 	_, err := q.db.Exec(ctx, updateAssistantSessionTitle, arg.Title, arg.ID)
+	return err
+}
+
+const updateChunkEmbedding = `-- name: UpdateChunkEmbedding :exec
+UPDATE chunks
+SET embedding = $2
+WHERE id = $1 AND workspace_id = $3
+`
+
+type UpdateChunkEmbeddingParams struct {
+	ID          pgtype.UUID
+	Embedding   pgvector.Vector
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateChunkEmbedding(ctx context.Context, arg UpdateChunkEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, updateChunkEmbedding, arg.ID, arg.Embedding, arg.WorkspaceID)
 	return err
 }
 
@@ -12935,6 +13281,31 @@ func (q *Queries) UpdateWorkspaceSecurity(ctx context.Context, arg UpdateWorkspa
 		&i.WebhookSecret,
 	)
 	return i, err
+}
+
+const upsertChunkEmbeddingBuild = `-- name: UpsertChunkEmbeddingBuild :exec
+INSERT INTO chunk_embedding_builds (chunk_id, workspace_id, generation, embedding)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (chunk_id, generation) DO UPDATE
+SET embedding = EXCLUDED.embedding,
+    created_at = now()
+`
+
+type UpsertChunkEmbeddingBuildParams struct {
+	ChunkID     pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	Embedding   pgvector.Vector
+}
+
+func (q *Queries) UpsertChunkEmbeddingBuild(ctx context.Context, arg UpsertChunkEmbeddingBuildParams) error {
+	_, err := q.db.Exec(ctx, upsertChunkEmbeddingBuild,
+		arg.ChunkID,
+		arg.WorkspaceID,
+		arg.Generation,
+		arg.Embedding,
+	)
+	return err
 }
 
 const upsertContactByEmail = `-- name: UpsertContactByEmail :one

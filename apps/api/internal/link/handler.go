@@ -81,19 +81,33 @@ func (h *Handler) visitorAskLimiter() visitorask.Limiter {
 }
 
 func (h *Handler) recordAskSecurityEvent(ctx context.Context, row db.Link, eventType, visitorID, email, ip, ua, reason string) {
+	var err error
 	if h.securitySink != nil {
-		_ = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
-		return
+		err = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	} else if h.analytics != nil {
+		err = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
 	}
-	if h.analytics != nil {
-		_ = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	if err != nil {
+		logger.ErrorCtx(ctx, "record ask security event failed", err,
+			logger.Attr("event_type", eventType),
+			logger.Attr("reason", reason),
+		)
 	}
 }
 
-// rejectIfAskHostLimited returns true when the visitor exceeded Ask Host limits
-// (response already written: 429 + high-risk security event).
+// rejectIfAskHostLimited returns true when Ask Host must be denied (response already written).
+// Visitor over-limit → 429 + rate_limit_exceeded security event.
+// Redis/limiter failure → 503 limiter_unavailable with no rate-limit security event.
 func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
-	if visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID) {
+	ok, limErr := visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID)
+	if limErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    "limiter_unavailable",
+			"message": "Ask Host is temporarily unavailable, please try again later",
+		})
+		return true
+	}
+	if ok {
 		return false
 	}
 	h.recordAskSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
@@ -148,6 +162,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	dr := r.Group("/deal-rooms/:roomId/links")
 	dr.POST("", h.CreateDealRoomLink)
 	dr.GET("", h.ListDealRoomLinks)
+
+	// Room-wide Ask Host inbox (across all links in the deal room).
+	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
 }
 
 // RegisterPublicRoutes mounts public link routes.
@@ -2664,9 +2681,26 @@ func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 		return
 	}
-	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link.ID)
+	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link, middleware.UserIDFrom(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": questions})
+}
+
+// ListRoomVisitorQuestions returns Ask Host questions across a deal room (owner view).
+func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	questions, err := h.service.ListRoomVisitorQuestions(
+		c.Request.Context(),
+		wsID,
+		c.Param("roomId"),
+		middleware.UserIDFrom(c),
+		c.Query("link_id"),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": questions})
@@ -2675,6 +2709,12 @@ func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
 // AnswerVisitorQuestion allows the owner to answer a visitor question.
 func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
 	qUUID, err := uuid.Parse(c.Param("questionId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid question id"})
@@ -2687,17 +2727,30 @@ func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	wsUUID, _ := uuid.Parse(wsID)
-	uUUID, _ := uuid.Parse(middleware.UserIDFrom(c))
-	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
-	wID := pgtype.UUID{Bytes: wsUUID, Valid: true}
-	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
-	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), qID, wID, uID, body.Answer)
+	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
+		return
+	}
+	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
+	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
+	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), link, qID, uID, body.Answer)
+	if err != nil {
+		writeAskHostError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": q})
+}
+
+func writeAskHostError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrAskHostForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "ask host inbox forbidden"})
+	case errors.Is(err, ErrNotFoundInWorkspace):
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+	}
 }
 
 // ListLinkFileRequests returns all file requests for a link (owner view).
@@ -2885,7 +2938,7 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 		return
 	}
 	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, body.Question)
-	c.JSON(http.StatusCreated, gin.H{"question": q})
+	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
 }
 
 // PublicListMyVisitorQuestions returns the visitor's own questions.
@@ -2901,7 +2954,7 @@ func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"questions": questions})
+	c.JSON(http.StatusOK, gin.H{"data": mapVisitorQuestions(questions)})
 }
 
 // PublicCreateFileRequest allows a visitor to request a file.

@@ -12,7 +12,7 @@ import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, Deal
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocumentByIdMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock, getDealRoomLinksMock, getLinkAnalyticsMock, listLinkQuestionsMock } = vi.hoisted(() => ({
+const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocumentByIdMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock, getDealRoomLinksMock, getLinkAnalyticsMock, listRoomQuestionsMock } = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
@@ -22,7 +22,7 @@ const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocu
   createDealRoomFolderMock: vi.fn(),
   getDealRoomLinksMock: vi.fn(),
   getLinkAnalyticsMock: vi.fn(),
-  listLinkQuestionsMock: vi.fn(),
+  listRoomQuestionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -36,7 +36,8 @@ vi.mock("@/lib/api", () => ({
     createDealRoomFolder: createDealRoomFolderMock,
     getDealRoomLinks: getDealRoomLinksMock,
     getLinkAnalytics: getLinkAnalyticsMock,
-    listLinkQuestions: listLinkQuestionsMock,
+    listRoomQuestions: listRoomQuestionsMock,
+    answerQuestion: vi.fn(),
   },
 }));
 
@@ -195,12 +196,12 @@ describe("DealRoomDetailPage", () => {
     getDocumentByIdMock.mockReset();
     getDealRoomLinksMock.mockReset();
     getLinkAnalyticsMock.mockReset();
-    listLinkQuestionsMock.mockReset();
+    listRoomQuestionsMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
     getDealRoomLinksMock.mockResolvedValue({ data: [] });
     getLinkAnalyticsMock.mockResolvedValue({ data: { access_code_contacts: [] } });
-    listLinkQuestionsMock.mockResolvedValue({ data: [] });
+    listRoomQuestionsMock.mockResolvedValue({ data: [] });
   });
 
   it("renders loading skeleton", async () => {

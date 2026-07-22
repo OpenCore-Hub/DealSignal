@@ -10,6 +10,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 	"github.com/gin-gonic/gin"
@@ -50,7 +51,9 @@ func NewPublicHandler(s *Service, access PublicAccessAuthorizer, cfg *config.Con
 	return &PublicHandler{service: s, access: access, cfg: cfg}
 }
 
-// WithRateLimiter attaches visitor Ask rate limiting (fail-open when unset).
+// WithRateLimiter attaches visitor Ask rate limiting.
+// Unset limiter skips enforcement (tests / incomplete wiring only).
+// When set, Redis/limiter errors fail closed (deny) — see visitorask.Allow*.
 func (h *PublicHandler) WithRateLimiter(limiter RateLimiter) *PublicHandler {
 	h.limiter = limiter
 	return h
@@ -107,7 +110,15 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 	}
 
 	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	if !visitorask.AllowAskDocs(c.Request.Context(), h.limiter, linkID, result.VisitorID) {
+	ok, limErr := visitorask.AllowAskDocs(c.Request.Context(), h.limiter, linkID, result.VisitorID)
+	if limErr != nil {
+		c.JSON(http.StatusServiceUnavailable, gin.H{
+			"code":    "limiter_unavailable",
+			"message": "Ask Docs is temporarily unavailable, please try again later",
+		})
+		return
+	}
+	if !ok {
 		h.recordSecurity(c, result.Link, securityEventRateLimited, result.VisitorID, result.Email, "ask_docs")
 		c.JSON(http.StatusTooManyRequests, gin.H{
 			"code":    "rate_limit_exceeded",
@@ -158,7 +169,12 @@ func (h *PublicHandler) recordSecurity(c *gin.Context, row db.Link, eventType, v
 	if h.security == nil {
 		return
 	}
-	_ = h.security.RecordSecurityEvent(c.Request.Context(), row, eventType, visitorID, email, c.ClientIP(), c.Request.UserAgent(), reason)
+	if err := h.security.RecordSecurityEvent(c.Request.Context(), row, eventType, visitorID, email, c.ClientIP(), c.Request.UserAgent(), reason); err != nil {
+		logger.ErrorCtx(c.Request.Context(), "record ask security event failed", err,
+			logger.Attr("event_type", eventType),
+			logger.Attr("reason", reason),
+		)
+	}
 }
 
 func mapPublicChatError(c *gin.Context, err error) {

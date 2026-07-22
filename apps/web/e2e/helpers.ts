@@ -10,9 +10,15 @@ export async function resetMockState(page: Page) {
 }
 
 async function authenticate(page: Page) {
-  await page.evaluate(() => {
-    localStorage.setItem("access_token", "mock_e2e_token");
-  });
+  // App auth gate checks auth_session cookie (see router.tsx), not localStorage.
+  await page.context().addCookies([
+    {
+      name: "auth_session",
+      value: "1",
+      url: "http://localhost:5175",
+      sameSite: "Lax",
+    },
+  ]);
 }
 
 export async function setupAuthenticatedPage(page: Page) {

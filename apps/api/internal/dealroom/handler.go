@@ -662,6 +662,8 @@ func (h *Handler) CreateKnowledgeBase(c *gin.Context) {
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
 		case errors.Is(err, ErrKnowledgeBaseExists):
 			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_exists", "message": err.Error()})
+		case errors.Is(err, ErrNoSearchableChunks):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "no_searchable_chunks", "message": err.Error()})
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
 		default:
@@ -708,6 +710,8 @@ func (h *Handler) RebuildKnowledgeBase(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "knowledge_base_not_found", "message": err.Error()})
 		case errors.Is(err, ErrKnowledgeBaseBuilding):
 			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_building", "message": err.Error()})
+		case errors.Is(err, ErrNoSearchableChunks):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "no_searchable_chunks", "message": err.Error()})
 		case errors.Is(err, ErrRoomNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
 		default:
