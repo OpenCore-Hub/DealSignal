@@ -156,24 +156,29 @@ SET deleted_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 
 -- name: CreateIngestionJob :one
-INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
-VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at;
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status, skip_embedding)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding;
 
 -- name: GetIngestionJobByDocument :one
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1;
 
 -- name: ListPendingIngestionJobs :many
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE status = 'queued'
    OR (status = 'failed' AND attempts < 3)
    OR (status = 'processing' AND updated_at < now() - interval '5 minutes')
 ORDER BY created_at ASC
 LIMIT $1;
+
+-- name: SetIngestionJobSkipEmbedding :exec
+UPDATE ingestion_jobs
+SET skip_embedding = $2, updated_at = now()
+WHERE document_id = $1;
 
 -- name: UpdateIngestionJob :exec
 UPDATE ingestion_jobs
@@ -1190,6 +1195,29 @@ SELECT EXISTS(
     JOIN documents d ON d.id = drd.document_id
     WHERE drd.room_id = $1 AND drd.document_id = $2 AND d.deleted_at IS NULL
 ) AS exists;
+
+-- name: DocumentInAnyDealRoom :one
+SELECT EXISTS(
+    SELECT 1 FROM deal_room_documents drd
+    JOIN documents d ON d.id = drd.document_id
+    WHERE drd.document_id = $1 AND d.deleted_at IS NULL
+) AS exists;
+
+-- name: CountDocumentChunksWithEmbedding :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1
+  AND embedding IS NOT NULL;
+
+-- name: CountDocumentChunks :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1;
+
+-- name: CountDocumentPages :one
+SELECT COUNT(*)::bigint
+FROM pages
+WHERE document_id = $1;
 
 -- name: GetDealRoomDocumentFolderPath :one
 SELECT drd.folder_path

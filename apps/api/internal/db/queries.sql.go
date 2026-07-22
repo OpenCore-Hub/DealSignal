@@ -309,6 +309,46 @@ func (q *Queries) ConsumeLinkInvitation(ctx context.Context, id pgtype.UUID) (Co
 	return i, err
 }
 
+const countDocumentChunks = `-- name: CountDocumentChunks :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1
+`
+
+func (q *Queries) CountDocumentChunks(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentChunks, documentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countDocumentChunksWithEmbedding = `-- name: CountDocumentChunksWithEmbedding :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1
+  AND embedding IS NOT NULL
+`
+
+func (q *Queries) CountDocumentChunksWithEmbedding(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentChunksWithEmbedding, documentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countDocumentPages = `-- name: CountDocumentPages :one
+SELECT COUNT(*)::bigint
+FROM pages
+WHERE document_id = $1
+`
+
+func (q *Queries) CountDocumentPages(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentPages, documentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countDocumentsInFolder = `-- name: CountDocumentsInFolder :one
 SELECT COUNT(*) AS count
 FROM deal_room_documents
@@ -1381,16 +1421,17 @@ func (q *Queries) CreateHubSpotSyncJob(ctx context.Context, arg CreateHubSpotSyn
 }
 
 const createIngestionJob = `-- name: CreateIngestionJob :one
-INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
-VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status, skip_embedding)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 `
 
 type CreateIngestionJobParams struct {
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	DocumentID  pgtype.UUID
-	Status      string
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	DocumentID    pgtype.UUID
+	Status        string
+	SkipEmbedding bool
 }
 
 func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJobParams) (IngestionJob, error) {
@@ -1399,6 +1440,7 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		arg.WorkspaceID,
 		arg.DocumentID,
 		arg.Status,
+		arg.SkipEmbedding,
 	)
 	var i IngestionJob
 	err := row.Scan(
@@ -1411,6 +1453,7 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SkipEmbedding,
 	)
 	return i, err
 }
@@ -3021,6 +3064,21 @@ func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionPa
 	return err
 }
 
+const documentInAnyDealRoom = `-- name: DocumentInAnyDealRoom :one
+SELECT EXISTS(
+    SELECT 1 FROM deal_room_documents drd
+    JOIN documents d ON d.id = drd.document_id
+    WHERE drd.document_id = $1 AND d.deleted_at IS NULL
+) AS exists
+`
+
+func (q *Queries) DocumentInAnyDealRoom(ctx context.Context, documentID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, documentInAnyDealRoom, documentID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const existsLinkNameInDealRoom = `-- name: ExistsLinkNameInDealRoom :one
 SELECT EXISTS (
   SELECT 1
@@ -4125,7 +4183,7 @@ func (q *Queries) GetFolderPermissionsByRoomAndEmail(ctx context.Context, arg Ge
 }
 
 const getIngestionJobByDocument = `-- name: GetIngestionJobByDocument :one
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1
@@ -4144,6 +4202,7 @@ func (q *Queries) GetIngestionJobByDocument(ctx context.Context, documentID pgty
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SkipEmbedding,
 	)
 	return i, err
 }
@@ -8967,7 +9026,7 @@ func (q *Queries) ListPendingHubSpotSyncJobs(ctx context.Context, limit int32) (
 }
 
 const listPendingIngestionJobs = `-- name: ListPendingIngestionJobs :many
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE status = 'queued'
    OR (status = 'failed' AND attempts < 3)
@@ -8995,6 +9054,7 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SkipEmbedding,
 		); err != nil {
 			return nil, err
 		}
@@ -11529,6 +11589,22 @@ func (q *Queries) SetFolderPermission(ctx context.Context, arg SetFolderPermissi
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setIngestionJobSkipEmbedding = `-- name: SetIngestionJobSkipEmbedding :exec
+UPDATE ingestion_jobs
+SET skip_embedding = $2, updated_at = now()
+WHERE document_id = $1
+`
+
+type SetIngestionJobSkipEmbeddingParams struct {
+	DocumentID    pgtype.UUID
+	SkipEmbedding bool
+}
+
+func (q *Queries) SetIngestionJobSkipEmbedding(ctx context.Context, arg SetIngestionJobSkipEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, setIngestionJobSkipEmbedding, arg.DocumentID, arg.SkipEmbedding)
+	return err
 }
 
 const setLinkNDABinding = `-- name: SetLinkNDABinding :exec

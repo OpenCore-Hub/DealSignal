@@ -335,6 +335,80 @@ func TestDocumentsForAccessResponse_StaleScopeAfterRemoval(t *testing.T) {
 	}
 }
 
+// TestAddDocument_FlagsPreviewOnlyIngest covers #96 at the deal-room owner seam:
+// adding a document to a room marks ingestion skip_embedding and membership so
+// ProcessDocument will not auto-embed.
+func TestAddDocument_FlagsPreviewOnlyIngest(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	ctx := f.ctx
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{})
+	room, err := drSvc.CreateRoom(ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug:         "room-" + uuid.NewString(),
+		Name:         "Preview Ingest Room",
+		TemplateType: "custom",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	docID := uuid.New()
+	doc, err := f.q.CreateDocument(ctx, db.CreateDocumentParams{
+		ID:          pgtype.UUID{Bytes: docID, Valid: true},
+		TenantID:    f.link.TenantID,
+		WorkspaceID: f.workspace.ID,
+		CreatedBy:   f.user.ID,
+		Title:       "room-preview.pdf",
+		SourceType:  "pdf",
+		Status:      "uploaded",
+		StorageKey:  "test-key",
+		FileSize:    pgtype.Int8{Int64: 1024, Valid: true},
+		Category:    "general",
+	})
+	if err != nil {
+		t.Fatalf("create document: %v", err)
+	}
+
+	job, err := f.q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+		TenantID:      f.link.TenantID,
+		WorkspaceID:   f.workspace.ID,
+		DocumentID:    doc.ID,
+		Status:        "queued",
+		SkipEmbedding: false,
+	})
+	if err != nil {
+		t.Fatalf("create ingestion job: %v", err)
+	}
+	if job.SkipEmbedding {
+		t.Fatal("expected job to start with skip_embedding=false")
+	}
+
+	if _, err := drSvc.AddDocument(ctx, roomID, wsID, userID, uuid.UUID(doc.ID.Bytes).String(), "/general", 0); err != nil {
+		t.Fatalf("add document to room: %v", err)
+	}
+
+	inRoom, err := f.q.DocumentInAnyDealRoom(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("DocumentInAnyDealRoom: %v", err)
+	}
+	if !inRoom {
+		t.Fatal("expected document to be in a deal room")
+	}
+
+	updated, err := f.q.GetIngestionJobByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("reload ingestion job: %v", err)
+	}
+	if !updated.SkipEmbedding {
+		t.Fatal("AddDocument must set skip_embedding so ingest does not auto-embed")
+	}
+}
+
 // TestAuthorizePublicAccess_ReevaluatesAllowBlockOnSessionReuse proves that a
 // reused session is re-checked against allow/block rules even when
 // security_version is aligned (Q21 / Ask Docs Access-parity).

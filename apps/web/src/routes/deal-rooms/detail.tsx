@@ -272,7 +272,7 @@ export function DealRoomDetailPage() {
       activeIntervalsRef.current.add(interval);
 
       try {
-        const doc = await api.uploadDocument(file);
+        const doc = await api.uploadDocument(file, undefined, { skipEmbedding: true });
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
 

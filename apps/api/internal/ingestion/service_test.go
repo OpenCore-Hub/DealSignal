@@ -57,7 +57,7 @@ func (r fakeRow) Scan(dest ...interface{}) error {
 	if r.err != nil {
 		return r.err
 	}
-	vals := []interface{}{r.job.ID, r.job.TenantID, r.job.WorkspaceID, r.job.DocumentID, r.job.Status, r.job.Attempts, r.job.ErrorMessage, r.job.CreatedAt, r.job.UpdatedAt}
+	vals := []interface{}{r.job.ID, r.job.TenantID, r.job.WorkspaceID, r.job.DocumentID, r.job.Status, r.job.Attempts, r.job.ErrorMessage, r.job.CreatedAt, r.job.UpdatedAt, r.job.SkipEmbedding}
 	if len(dest) != len(vals) {
 		return errors.New("scan count mismatch")
 	}
@@ -75,6 +75,8 @@ func (r fakeRow) Scan(dest ...interface{}) error {
 			}
 		case *pgtype.Timestamptz:
 			*d = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+		case *bool:
+			*d = v.(bool)
 		default:
 			return errors.New("unsupported scan destination")
 		}

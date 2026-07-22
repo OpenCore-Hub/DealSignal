@@ -58,7 +58,7 @@ func (s *Service) ProcessDocument(ctx context.Context, doc db.GetDocumentByIDRow
 		return err
 	}
 
-	if err := s.run(ctx, doc); err != nil {
+	if err := s.run(ctx, doc, job.SkipEmbedding); err != nil {
 		_ = s.updateJob(ctx, job.ID, "failed", currentAttempts+1, err.Error())
 		_ = s.updateDocumentStatus(ctx, doc.ID, "failed", nil)
 		return err
@@ -67,7 +67,7 @@ func (s *Service) ProcessDocument(ctx context.Context, doc db.GetDocumentByIDRow
 	return s.updateJob(ctx, job.ID, "completed", currentAttempts+1, "")
 }
 
-func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
+func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow, skipEmbedding bool) error {
 	if err := s.cleanupDocumentData(ctx, doc.ID); err != nil {
 		return fmt.Errorf("cleanup existing document data: %w", err)
 	}
@@ -96,6 +96,14 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 	tenantID := uuidToString(doc.TenantID)
 	workspaceID := uuidToString(doc.WorkspaceID)
 	docID := uuidToString(doc.ID)
+
+	inDealRoom, err := s.queries.DocumentInAnyDealRoom(ctx, doc.ID)
+	if err != nil {
+		return fmt.Errorf("check deal room membership: %w", err)
+	}
+	// skip_embedding is set at upload/AddDocument time so the worker does not
+	// race ahead of room association; membership is a second line of defense.
+	writeEmbeddings := embedOnIngest(s.embedder != nil, inDealRoom || skipEmbedding)
 
 	pageCount := int32(len(pages))
 	for _, p := range pages {
@@ -134,7 +142,7 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			normalizedTexts[i] = normalizeText(ch.Text)
 		}
 
-		if s.embedder == nil {
+		if !writeEmbeddings {
 			for i, ch := range chunks {
 				chunkRow, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
 					TenantID:       doc.TenantID,

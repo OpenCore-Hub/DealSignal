@@ -73,7 +73,8 @@ func (h *Handler) Create(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
 	category := c.PostForm("category")
-	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader)
+	skipEmbedding := c.PostForm("skip_embedding") == "true" || c.PostForm("skip_embedding") == "1"
+	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader, skipEmbedding)
 	if err != nil {
 		switch err {
 		case ErrFileTooLarge:
