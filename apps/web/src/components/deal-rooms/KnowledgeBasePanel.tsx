@@ -12,10 +12,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import type {
   DealRoomDocumentItem,
+  DealRoomFolder,
   DealRoomKnowledgeBase,
   DealRoomKnowledgeBaseStatus,
 } from "@/types";
@@ -24,6 +33,7 @@ interface KnowledgeBasePanelProps {
   roomId: string;
   isAdmin: boolean;
   documents: DealRoomDocumentItem[];
+  folders?: DealRoomFolder[];
 }
 
 type WizardMode = "create" | "rebuild" | null;
@@ -32,6 +42,7 @@ export function KnowledgeBasePanel({
   roomId,
   isAdmin,
   documents,
+  folders = [],
 }: KnowledgeBasePanelProps) {
   const { t } = useTranslation("dealRooms");
   const [kb, setKb] = useState<DealRoomKnowledgeBase | null>(null);
@@ -39,7 +50,9 @@ export function KnowledgeBasePanel({
   const [loadError, setLoadError] = useState<"forbidden" | "generic" | null>(null);
   const [wizard, setWizard] = useState<WizardMode>(null);
   const [selectedDocIds, setSelectedDocIds] = useState<Set<string>>(new Set());
+  const [selectedFolderPaths, setSelectedFolderPaths] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
+  const [rebuildConfirmOpen, setRebuildConfirmOpen] = useState(false);
 
   const selectableDocs = useMemo(
     () => documents.filter((d) => d.status === "ready"),
@@ -74,8 +87,8 @@ export function KnowledgeBasePanel({
   }, [roomId]);
 
   const openWizard = (mode: WizardMode) => {
-    const initial = new Set(kb?.document_ids ?? []);
-    setSelectedDocIds(initial);
+    setSelectedDocIds(new Set(kb?.document_ids ?? []));
+    setSelectedFolderPaths(new Set(kb?.folder_paths ?? []));
     setWizard(mode);
   };
 
@@ -88,12 +101,21 @@ export function KnowledgeBasePanel({
     });
   };
 
-  const submitWizard = async () => {
+  const toggleFolder = (path: string, checked: boolean) => {
+    setSelectedFolderPaths((prev) => {
+      const next = new Set(prev);
+      if (checked) next.add(path);
+      else next.delete(path);
+      return next;
+    });
+  };
+
+  const runSubmit = async () => {
     if (!wizard) return;
     setBusy(true);
     try {
       const selection = {
-        folder_paths: [] as string[],
+        folder_paths: Array.from(selectedFolderPaths),
         document_ids: Array.from(selectedDocIds),
       };
       const res =
@@ -102,6 +124,7 @@ export function KnowledgeBasePanel({
           : await api.rebuildDealRoomKnowledgeBase(roomId, selection);
       setKb(res);
       setWizard(null);
+      setRebuildConfirmOpen(false);
     } catch (e) {
       const fallback =
         wizard === "create"
@@ -111,6 +134,14 @@ export function KnowledgeBasePanel({
     } finally {
       setBusy(false);
     }
+  };
+
+  const onPrimarySubmit = () => {
+    if (wizard === "rebuild") {
+      setRebuildConfirmOpen(true);
+      return;
+    }
+    void runSubmit();
   };
 
   const statusText = (status: DealRoomKnowledgeBaseStatus, row: DealRoomKnowledgeBase) => {
@@ -187,31 +218,58 @@ export function KnowledgeBasePanel({
 
             {wizard ? (
               <div className="space-y-3 rounded-lg border p-3">
-                <p className="text-sm font-medium">{t("knowledgeBase.selectDocuments")}</p>
-                {selectableDocs.length === 0 ? (
-                  <p className="text-sm text-muted-foreground">{t("knowledgeBase.status.none")}</p>
-                ) : (
-                  <ul className="space-y-2">
-                    {selectableDocs.map((doc) => {
-                      const checked = selectedDocIds.has(doc.document_id);
-                      const id = `kb-doc-${doc.document_id}`;
-                      return (
-                        <li key={doc.document_id} className="flex items-center gap-2">
-                          <Checkbox
-                            id={id}
-                            checked={checked}
-                            onCheckedChange={(v) => toggleDoc(doc.document_id, v === true)}
-                          />
-                          <Label htmlFor={id} className="font-normal">
-                            {doc.title}
-                          </Label>
-                        </li>
-                      );
-                    })}
-                  </ul>
-                )}
+                {folders.length > 0 ? (
+                  <div className="space-y-2">
+                    <p className="text-sm font-medium">{t("knowledgeBase.selectFolders")}</p>
+                    <ul className="space-y-2">
+                      {folders.map((folder) => {
+                        const checked = selectedFolderPaths.has(folder.path);
+                        const id = `kb-folder-${folder.path}`;
+                        return (
+                          <li key={folder.path} className="flex items-center gap-2">
+                            <Checkbox
+                              id={id}
+                              checked={checked}
+                              onCheckedChange={(v) => toggleFolder(folder.path, v === true)}
+                            />
+                            <Label htmlFor={id} className="font-normal">
+                              {folder.name}
+                            </Label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <div className="space-y-2">
+                  <p className="text-sm font-medium">{t("knowledgeBase.selectDocuments")}</p>
+                  {selectableDocs.length === 0 ? (
+                    <p className="text-sm text-muted-foreground">{t("knowledgeBase.status.none")}</p>
+                  ) : (
+                    <ul className="space-y-2">
+                      {selectableDocs.map((doc) => {
+                        const checked = selectedDocIds.has(doc.document_id);
+                        const id = `kb-doc-${doc.document_id}`;
+                        return (
+                          <li key={doc.document_id} className="flex items-center gap-2">
+                            <Checkbox
+                              id={id}
+                              checked={checked}
+                              onCheckedChange={(v) => toggleDoc(doc.document_id, v === true)}
+                            />
+                            <Label htmlFor={id} className="font-normal">
+                              {doc.title}
+                            </Label>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  )}
+                </div>
+
                 <div className="flex flex-wrap gap-2">
-                  <Button type="button" size="sm" disabled={busy} onClick={() => void submitWizard()}>
+                  <Button type="button" size="sm" disabled={busy} onClick={onPrimarySubmit}>
                     {busy
                       ? wizard === "create"
                         ? t("knowledgeBase.creating")
@@ -235,6 +293,28 @@ export function KnowledgeBasePanel({
           </>
         )}
       </CardContent>
+
+      <Dialog open={rebuildConfirmOpen} onOpenChange={setRebuildConfirmOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("knowledgeBase.confirmRebuildTitle")}</DialogTitle>
+            <DialogDescription>{t("knowledgeBase.confirmRebuildBody")}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              type="button"
+              variant="ghost"
+              disabled={busy}
+              onClick={() => setRebuildConfirmOpen(false)}
+            >
+              {t("knowledgeBase.cancel")}
+            </Button>
+            <Button type="button" disabled={busy} onClick={() => void runSubmit()}>
+              {busy ? t("knowledgeBase.rebuilding") : t("knowledgeBase.confirmRebuild")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }

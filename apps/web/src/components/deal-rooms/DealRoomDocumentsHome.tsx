@@ -2,12 +2,13 @@ import { WarningCircle } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import type { DealRoomTab } from "@/hooks/useDealRoomTab";
 import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
-import type { DealRoomDocumentItem } from "@/types";
+import type { DealRoomDocumentItem, DealRoomFolder } from "@/types";
 
 interface DealRoomDocumentsHomeProps {
   roomId: string;
   isAdmin?: boolean;
   documents?: DealRoomDocumentItem[];
+  folders?: DealRoomFolder[];
   activeLinkCount: number;
   failedDeliveries: number;
   unreadQuestions: number;
@@ -23,6 +24,7 @@ export function DealRoomDocumentsHome({
   roomId,
   isAdmin = false,
   documents = [],
+  folders = [],
   activeLinkCount,
   failedDeliveries,
   unreadQuestions,
@@ -80,7 +82,12 @@ export function DealRoomDocumentsHome({
         </div>
       )}
 
-      <KnowledgeBasePanel roomId={roomId} isAdmin={isAdmin} documents={documents} />
+      <KnowledgeBasePanel
+        roomId={roomId}
+        isAdmin={isAdmin}
+        documents={documents}
+        folders={folders}
+      />
 
       {children}
     </div>

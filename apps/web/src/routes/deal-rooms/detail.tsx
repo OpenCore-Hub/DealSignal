@@ -511,6 +511,7 @@ export function DealRoomDetailPage() {
               roomId={room.id}
               isAdmin={true}
               documents={allRoomDocuments}
+              folders={room.folders ?? []}
               activeLinkCount={activeLinkCount}
               failedDeliveries={navSignals.failedDeliveries}
               unreadQuestions={navSignals.unreadQuestions}

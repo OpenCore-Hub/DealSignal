@@ -4,7 +4,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
 import { createTestI18n } from "@/i18n/test-utils";
-import type { DealRoomDocumentItem, DealRoomKnowledgeBase } from "@/types";
+import type { DealRoomDocumentItem, DealRoomFolder, DealRoomKnowledgeBase } from "@/types";
 
 const {
   getDealRoomKnowledgeBaseMock,
@@ -38,8 +38,12 @@ const kbI18n = {
   "knowledgeBase.rebuild": "Rebuild knowledge base",
   "knowledgeBase.rebuilding": "Rebuilding...",
   "knowledgeBase.selectDocuments": "Documents to include",
+  "knowledgeBase.selectFolders": "Folders to include",
   "knowledgeBase.confirmCreate": "Create",
   "knowledgeBase.confirmRebuild": "Rebuild",
+  "knowledgeBase.confirmRebuildTitle": "Rebuild knowledge base?",
+  "knowledgeBase.confirmRebuildBody":
+    "Visitors keep using the previous index until rebuild finishes.",
   "knowledgeBase.cancel": "Cancel",
   "knowledgeBase.forbidden": "Only room owners and admins can manage the knowledge base.",
   "knowledgeBase.loadFailed": "Failed to load knowledge base",
@@ -78,6 +82,7 @@ function makeKb(overrides: Partial<DealRoomKnowledgeBase> = {}): DealRoomKnowled
 async function renderPanel(props: {
   isAdmin?: boolean;
   documents?: DealRoomDocumentItem[];
+  folders?: DealRoomFolder[];
 }) {
   const i18n = await createTestI18n({ dealRooms: kbI18n });
   return render(
@@ -86,6 +91,7 @@ async function renderPanel(props: {
         roomId="room-1"
         isAdmin={props.isAdmin ?? true}
         documents={props.documents ?? [makeDoc()]}
+        folders={props.folders ?? []}
       />
     </I18nextProvider>,
   );
@@ -95,6 +101,39 @@ describe("KnowledgeBasePanel", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getDealRoomKnowledgeBaseMock.mockResolvedValue(makeKb());
+  });
+
+  it("creates a knowledge base with selected folder_paths", async () => {
+    createDealRoomKnowledgeBaseMock.mockResolvedValue(
+      makeKb({
+        status: "ready",
+        folder_paths: ["/legal"],
+        folder_count: 1,
+        embedded_count: 0,
+      }),
+    );
+
+    await renderPanel({
+      documents: [],
+      folders: [{ path: "/legal", name: "Legal", sort_order: 0 }],
+    });
+
+    expect(
+      await screen.findByText(/Not created — create a knowledge base/i),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /Create knowledge base/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Legal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(createDealRoomKnowledgeBaseMock).toHaveBeenCalledWith("room-1", {
+        folder_paths: ["/legal"],
+        document_ids: [],
+      });
+    });
+
+    expect(await screen.findByText(/Ready · 0 documents included/i)).toBeInTheDocument();
   });
 
   it("creates a knowledge base from selected documents and shows ready status", async () => {
@@ -154,6 +193,8 @@ describe("KnowledgeBasePanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /Rebuild knowledge base/i }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Financials/i }));
     fireEvent.click(screen.getByRole("button", { name: /^Rebuild$/i }));
+    // Confirm dialog before calling API.
+    fireEvent.click(screen.getByRole("button", { name: /^Rebuild$/i }));
 
     await waitFor(() => {
       expect(rebuildDealRoomKnowledgeBaseMock).toHaveBeenCalledWith("room-1", {
@@ -162,6 +203,74 @@ describe("KnowledgeBasePanel", () => {
       });
     });
     expect(await screen.findByText(/Ready · 2 documents included/i)).toBeInTheDocument();
+  });
+
+  it("requires rebuild confirmation before calling the API", async () => {
+    getDealRoomKnowledgeBaseMock.mockResolvedValue(
+      makeKb({
+        status: "ready",
+        document_ids: ["doc-1"],
+        embedded_count: 1,
+      }),
+    );
+    rebuildDealRoomKnowledgeBaseMock.mockResolvedValue(
+      makeKb({ status: "ready", embedded_count: 1 }),
+    );
+
+    await renderPanel({});
+    await screen.findByText(/Ready · 1 documents included/i);
+
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild knowledge base/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Rebuild$/i }));
+
+    expect(rebuildDealRoomKnowledgeBaseMock).not.toHaveBeenCalled();
+    expect(screen.getByText(/Rebuild knowledge base\?/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Rebuild$/i }));
+    await waitFor(() => {
+      expect(rebuildDealRoomKnowledgeBaseMock).toHaveBeenCalled();
+    });
+  });
+
+  it("rebuilds with selected folder_paths", async () => {
+    getDealRoomKnowledgeBaseMock.mockResolvedValue(
+      makeKb({
+        status: "stale",
+        folder_paths: ["/general"],
+        document_ids: [],
+        embedded_count: 0,
+        folder_count: 1,
+      }),
+    );
+    rebuildDealRoomKnowledgeBaseMock.mockResolvedValue(
+      makeKb({
+        status: "ready",
+        folder_paths: ["/general", "/legal"],
+        folder_count: 2,
+        embedded_count: 0,
+      }),
+    );
+
+    await renderPanel({
+      documents: [],
+      folders: [
+        { path: "/general", name: "General", sort_order: 0 },
+        { path: "/legal", name: "Legal", sort_order: 1 },
+      ],
+    });
+
+    await screen.findByText(/Out of date/i);
+    fireEvent.click(screen.getByRole("button", { name: /Rebuild knowledge base/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Legal/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Rebuild$/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Rebuild$/i }));
+
+    await waitFor(() => {
+      expect(rebuildDealRoomKnowledgeBaseMock).toHaveBeenCalledWith("room-1", {
+        folder_paths: expect.arrayContaining(["/general", "/legal"]),
+        document_ids: [],
+      });
+    });
   });
 
   it("hides create and rebuild actions for non-admins", async () => {
