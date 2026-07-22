@@ -39,6 +39,7 @@ import type {
   FileRequest,
   AskDocsAuditEntry,
   AskDocsAuditDetail,
+  AskSecurityEvent,
   DealRoomKnowledgeBase,
   DealRoomKnowledgeBaseSelection,
 } from "@/types";
@@ -659,9 +660,18 @@ export const api = {
       { method: "POST" }
     ),
 
-  // Visitor Q&A
+  // Visitor Q&A / Ask Host
   listLinkQuestions: (linkId: string) =>
     request<{ data: VisitorQuestion[] }>(getWorkspaceSlug(), `/links/${linkId}/questions`),
+  listRoomQuestions: (roomId: string, params: { linkId?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (params.linkId) search.set("link_id", params.linkId);
+    const qs = search.toString();
+    return request<{ data: VisitorQuestion[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/visitor-questions${qs ? `?${qs}` : ""}`,
+    );
+  },
   answerQuestion: (linkId: string, questionId: string, answer: string) =>
     request<{ data: VisitorQuestion }>(getWorkspaceSlug(), `/links/${linkId}/questions/${questionId}/answer`, {
       method: "PATCH",
@@ -703,6 +713,25 @@ export const api = {
     return request<{ data: AskDocsAuditEntry[] }>(
       getWorkspaceSlug(),
       `/deal-rooms/${roomId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
+    );
+  },
+
+  // Visitor Ask high-risk security events (link + room)
+  listLinkAskSecurityEvents: (linkId: string) =>
+    request<{ data: AskSecurityEvent[] }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask-security-events`,
+    ),
+  listRoomAskSecurityEvents: (
+    roomId: string,
+    params: { linkId?: string } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.linkId) search.set("link_id", params.linkId);
+    const qs = search.toString();
+    return request<{ data: AskSecurityEvent[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/ask-security-events${qs ? `?${qs}` : ""}`,
     );
   },
 

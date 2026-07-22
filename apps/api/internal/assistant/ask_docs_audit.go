@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sort"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -109,6 +111,8 @@ func filterAskDocsAuditEntries(entries []AskDocsAuditEntry, now time.Time, inclu
 }
 
 // ListAskDocsAudit returns link-side Ask Docs audit rows visible to the caller.
+// Default lists the 90-day hot window from assistant_sessions; archived=true also
+// returns cold rows from ask_docs_audit_archives (B2 / US#28).
 func (s *Service) ListAskDocsAudit(ctx context.Context, workspaceID, linkID, userID string, includeArchived bool) ([]AskDocsAuditEntry, error) {
 	link, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
 		ID:          pgUUID(linkID),
@@ -124,9 +128,16 @@ func (s *Service) ListAskDocsAudit(ctx context.Context, workspaceID, linkID, use
 		return nil, err
 	}
 
+	now := time.Now().UTC()
+	// Best-effort move due sessions to cold storage before listing.
+	if _, err := s.ArchiveDueAskDocsSessions(ctx, now, askDocsAuditArchiveBatch); err != nil {
+		logger.ErrorCtx(ctx, "ask docs audit opportunistic archive failed", err)
+	}
+
 	rows, err := s.queries.ListAskDocsAuditSessionsByLink(ctx, db.ListAskDocsAuditSessionsByLinkParams{
-		LinkID: link.ID,
-		Limit:  askDocsAuditListLimit,
+		LinkID:    link.ID,
+		CreatedAt: askDocsAuditHotCutoffArg(now),
+		Limit:     askDocsAuditListLimit,
 	})
 	if err != nil {
 		return nil, err
@@ -147,11 +158,41 @@ func (s *Service) ListAskDocsAudit(ctx context.Context, workspaceID, linkID, use
 		}
 		entries = append(entries, entry)
 	}
-	return filterAskDocsAuditEntries(entries, time.Now().UTC(), includeArchived), nil
+	entries = filterAskDocsAuditEntries(entries, now, false)
+
+	if !includeArchived {
+		return entries, nil
+	}
+
+	archives, err := s.queries.ListAskDocsAuditArchivesByLink(ctx, db.ListAskDocsAuditArchivesByLinkParams{
+		LinkID: link.ID,
+		Limit:  askDocsAuditListLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range archives {
+		entry := AskDocsAuditEntry{
+			SessionID:       uuid.UUID(row.SessionID.Bytes).String(),
+			LinkID:          uuid.UUID(row.LinkID.Bytes).String(),
+			VisitorID:       row.VisitorID,
+			QuestionPreview: row.QuestionPreview,
+			ResultStatus:    row.ResultStatus,
+			EvidenceCount:   int(row.EvidenceCount),
+			CreatedAt:       row.SessionCreatedAt.Time,
+			Archived:        true,
+		}
+		entries = append(entries, entry)
+	}
+	sortAskDocsAuditEntriesDesc(entries)
+	if len(entries) > askDocsAuditListLimit {
+		entries = entries[:askDocsAuditListLimit]
+	}
+	return entries, nil
 }
 
 // ListRoomAskDocsAudit returns Ask Docs audit rows across all links in a deal room.
-// Optional linkID filters to a single link; includeArchived controls the 90-day window.
+// Optional linkID filters to a single link; includeArchived controls cold archive retrieval.
 func (s *Service) ListRoomAskDocsAudit(ctx context.Context, workspaceID, roomID, userID, linkID string, includeArchived bool) ([]AskDocsAuditEntry, error) {
 	room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
 		ID:          pgUUID(roomID),
@@ -170,8 +211,14 @@ func (s *Service) ListRoomAskDocsAudit(ctx context.Context, workspaceID, roomID,
 		return nil, err
 	}
 
+	now := time.Now().UTC()
+	if _, err := s.ArchiveDueAskDocsSessions(ctx, now, askDocsAuditArchiveBatch); err != nil {
+		logger.ErrorCtx(ctx, "ask docs audit opportunistic archive failed", err)
+	}
+
 	rows, err := s.queries.ListAskDocsAuditSessionsByRoom(ctx, db.ListAskDocsAuditSessionsByRoomParams{
 		DealRoomID: room.ID,
+		CreatedAt:  askDocsAuditHotCutoffArg(now),
 		Limit:      askDocsAuditListLimit,
 	})
 	if err != nil {
@@ -204,10 +251,43 @@ func (s *Service) ListRoomAskDocsAudit(ctx context.Context, workspaceID, roomID,
 		}
 		entries = append(entries, entry)
 	}
-	return filterAskDocsAuditEntries(entries, time.Now().UTC(), includeArchived), nil
+	entries = filterAskDocsAuditEntries(entries, now, false)
+
+	if !includeArchived {
+		return entries, nil
+	}
+
+	archives, err := s.queries.ListAskDocsAuditArchivesByRoom(ctx, db.ListAskDocsAuditArchivesByRoomParams{
+		DealRoomID: room.ID,
+		Limit:      askDocsAuditListLimit,
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, row := range archives {
+		if filterLink.Valid && row.LinkID != filterLink {
+			continue
+		}
+		entries = append(entries, AskDocsAuditEntry{
+			SessionID:       uuid.UUID(row.SessionID.Bytes).String(),
+			LinkID:          uuid.UUID(row.LinkID.Bytes).String(),
+			VisitorID:       row.VisitorID,
+			QuestionPreview: row.QuestionPreview,
+			ResultStatus:    row.ResultStatus,
+			EvidenceCount:   int(row.EvidenceCount),
+			CreatedAt:       row.SessionCreatedAt.Time,
+			Archived:        true,
+		})
+	}
+	sortAskDocsAuditEntriesDesc(entries)
+	if len(entries) > askDocsAuditListLimit {
+		entries = entries[:askDocsAuditListLimit]
+	}
+	return entries, nil
 }
 
 // GetAskDocsAudit returns one Ask Docs audit session detail for a link.
+// Looks up the hot session first, then cold archive storage.
 func (s *Service) GetAskDocsAudit(ctx context.Context, workspaceID, linkID, sessionID, userID string) (*AskDocsAuditDetail, error) {
 	link, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
 		ID:          pgUUID(linkID),
@@ -229,7 +309,7 @@ func (s *Service) GetAskDocsAudit(ctx context.Context, workspaceID, linkID, sess
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrAskDocsAuditNotFound
+			return s.getAskDocsAuditFromArchive(ctx, link.ID, sessionID)
 		}
 		return nil, err
 	}
@@ -254,7 +334,7 @@ func (s *Service) GetAskDocsAudit(ctx context.Context, workspaceID, linkID, sess
 		Evidence:              []search.Evidence{},
 		Messages:              make([]AskDocsAuditMessage, 0, len(msgs)),
 	}
-	cutoff := time.Now().UTC().AddDate(0, 0, -askDocsAuditHotDays)
+	cutoff := askDocsAuditHotCutoff(time.Now().UTC())
 	detail.Archived = detail.CreatedAt.Before(cutoff)
 
 	for _, m := range msgs {
@@ -274,11 +354,19 @@ func (s *Service) GetAskDocsAudit(ctx context.Context, workspaceID, linkID, sess
 		if len(m.Evidence) > 0 {
 			var ev []search.Evidence
 			if err := json.Unmarshal(m.Evidence, &ev); err == nil {
+				// Defense in depth for pre-B4 rows that stored longer quotes (US#20).
+				truncateVisitorEvidenceQuotes(ev)
 				detail.Evidence = ev
 			}
 		}
 	}
 	return detail, nil
+}
+
+func sortAskDocsAuditEntriesDesc(entries []AskDocsAuditEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].CreatedAt.After(entries[j].CreatedAt)
+	})
 }
 
 func pgUUIDsToStrings(ids []pgtype.UUID) []string {

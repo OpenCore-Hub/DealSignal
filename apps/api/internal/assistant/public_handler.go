@@ -10,6 +10,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 	"github.com/gin-gonic/gin"
@@ -17,7 +18,6 @@ import (
 )
 
 const (
-	securityEventRateLimited     = "rate_limit_exceeded"
 	securityEventScopeViolation  = "scope_violation"
 	maxVisitorEvidenceQuoteRunes = 320
 )
@@ -50,7 +50,9 @@ func NewPublicHandler(s *Service, access PublicAccessAuthorizer, cfg *config.Con
 	return &PublicHandler{service: s, access: access, cfg: cfg}
 }
 
-// WithRateLimiter attaches visitor Ask rate limiting (fail-open when unset).
+// WithRateLimiter attaches visitor Ask rate limiting.
+// Unset limiter skips enforcement (tests / incomplete wiring only).
+// When set, Redis/limiter errors fail closed (deny) — see visitorask.Allow*.
 func (h *PublicHandler) WithRateLimiter(limiter RateLimiter) *PublicHandler {
 	h.limiter = limiter
 	return h
@@ -107,12 +109,7 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 	}
 
 	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	if !visitorask.AllowAskDocs(c.Request.Context(), h.limiter, linkID, result.VisitorID) {
-		h.recordSecurity(c, result.Link, securityEventRateLimited, result.VisitorID, result.Email, "ask_docs")
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"code":    "rate_limit_exceeded",
-			"message": "too many Ask Docs requests, please try again later",
-		})
+	if h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskDocs) {
 		return
 	}
 
@@ -154,11 +151,33 @@ func truncateRunes(s string, max int) string {
 	return string([]rune(s)[:max])
 }
 
+// rejectIfAskLimited returns true when Ask Docs/Host must be denied (response already written).
+// Shared Visitor Ask gate (B8) with link Ask Host — same codes, event taxonomy, and fail-closed rules.
+func (h *PublicHandler) rejectIfAskLimited(c *gin.Context, result link.AccessResult, linkID string, ch visitorask.Channel) bool {
+	decision := visitorask.Check(c.Request.Context(), h.limiter, ch, linkID, result.VisitorID)
+	if decision == visitorask.DecisionAllow {
+		return false
+	}
+	if visitorask.ShouldRecordRateLimitEvent(decision) {
+		h.recordSecurity(c, result.Link, visitorask.EventTypeRateLimited, result.VisitorID, result.Email, visitorask.EventReason(ch))
+	}
+	c.JSON(visitorask.DenyHTTPStatus(decision), gin.H{
+		"code":    visitorask.DenyCode(decision),
+		"message": visitorask.DenyMessage(ch, decision),
+	})
+	return true
+}
+
 func (h *PublicHandler) recordSecurity(c *gin.Context, row db.Link, eventType, visitorID, email, reason string) {
 	if h.security == nil {
 		return
 	}
-	_ = h.security.RecordSecurityEvent(c.Request.Context(), row, eventType, visitorID, email, c.ClientIP(), c.Request.UserAgent(), reason)
+	if err := h.security.RecordSecurityEvent(c.Request.Context(), row, eventType, visitorID, email, c.ClientIP(), c.Request.UserAgent(), reason); err != nil {
+		logger.ErrorCtx(c.Request.Context(), "record ask security event failed", err,
+			logger.Attr("event_type", eventType),
+			logger.Attr("reason", reason),
+		)
+	}
 }
 
 func mapPublicChatError(c *gin.Context, err error) {

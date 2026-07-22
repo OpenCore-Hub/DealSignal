@@ -72,7 +72,7 @@
   "tabs": {
     "documents": "文档",
     "participants": "分享",
-    "qa": "问答",
+    "qa": "问发起方",
     "activity": "活动",
     "analytics": "分析",
     "settings": "设置"
@@ -171,14 +171,16 @@
     "advanced": {
       "title": "高级",
       "enabledCount": "{count} 项已启用",
-      "aiAgents": "AI 助手",
-      "aiAgentsDescription": "允许在查看器中使用 AI 助手",
+      "visitorAsk": "沟通",
+      "visitorAskDescription": "允许访客就文档提问或留言给发起方",
+      "askDocs": "问文档",
+      "askDocsDescription": "基于授权材料的即时有据回答",
+      "askHost": "问发起方",
+      "askHostDescription": "异步提问，由链接所有者回复",
       "fileRequests": "启用文件请求",
       "fileRequestsDescription": "允许访客请求补充文件",
       "indexFile": "启用索引文件生成",
-      "indexFileDescription": "为数据室生成索引页",
-      "qaConversations": "启用问答对话",
-      "qaConversationsDescription": "允许访客提问"
+      "indexFileDescription": "为数据室生成索引页"
     },
     "emptyTitle": "无限制",
     "emptyDescription": "如果未启用身份验证门控，任何拥有链接的人都可以访问。",
@@ -262,8 +264,8 @@
     "attention": {
       "failedDeliveries_one": "{{count}} 个验证码发送失败 — 前往分享处理",
       "failedDeliveries_other": "{{count}} 个验证码发送失败 — 前往分享处理",
-      "unreadQuestions_one": "{{count}} 个未答问题 — 打开问答",
-      "unreadQuestions_other": "{{count}} 个未答问题 — 打开问答",
+      "unreadQuestions_one": "{{count}} 个未答问发起方问题 — 打开问发起方",
+      "unreadQuestions_other": "{{count}} 个未答问发起方问题 — 打开问发起方",
       "noActiveLinks": "尚无活跃分享链接 — 前往分享创建"
     },
     "readiness": {
@@ -302,6 +304,8 @@
     "loadFailed": "加载知识库失败",
     "createFailed": "创建知识库失败",
     "rebuildFailed": "重建知识库失败",
+    "embedFailed": "知识库向量化失败。请检查嵌入服务配置后重试。",
+    "noSearchableChunks": "所选文档中有无可检索文本。请先重新入库（仅有预览页不够），再构建知识库。",
     "rebuildHint": "重建完成前，访客仍使用旧索引。"
   },
   "participants": {
@@ -389,7 +393,7 @@
   },
   "analytics": {
     "title": "分析",
-    "comingSoon": "详细分析功能即将上线。",
+    "trendEmpty": "该数据室暂无浏览趋势数据。",
     "views": "浏览量",
     "activeLinks": "活跃链接",
     "recentVisitors": "最近访客",
@@ -397,15 +401,27 @@
     "topDocuments": "热门文档"
   },
   "qa": {
-    "title": "问答",
-    "askQuestion": "提问",
-    "placeholder": "就此数据室提问...",
-    "comingSoon": "问答功能即将上线，你的问题已记录。",
-    "emptyTitle": "暂无问题",
-    "emptyDescription": "关于该数据室的提问与回答将显示在这里。",
-    "submitted": "问题已提交",
-    "answeredBy": "由 {{name}} 回答",
-    "askedAt": "提问于 {{time}}"
+    "title": "问发起方收件箱",
+    "description": "回复本数据室各分享链接访客提出的异步问发起方问题。这不是 Ask Docs 审计，也不是信号收件箱。",
+    "loading": "正在加载问发起方问题...",
+    "loadFailed": "加载问发起方问题失败",
+    "retry": "重试",
+    "emptyTitle": "暂无问发起方问题",
+    "emptyDescription": "访客在本室分享链接上向发起方提问后，问题会显示在这里供你回复。",
+    "anonymous": "匿名访客",
+    "answerLabel": "回复：",
+    "answerPlaceholder": "输入你的回复...",
+    "sendAnswer": "发送回复",
+    "saving": "保存中...",
+    "answerSuccess": "回复已保存",
+    "answerFailed": "保存回复失败",
+    "filterByLink": "按链接筛选",
+    "filterAll": "全部链接",
+    "linkLabel": "链接",
+    "questionStatus": {
+      "pending": "待回复",
+      "answered": "已回复"
+    }
   },
   "new": {
     "title": "新建数据室",

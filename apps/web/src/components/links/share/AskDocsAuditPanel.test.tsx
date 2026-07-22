@@ -28,10 +28,10 @@ vi.mock("@/lib/api", () => ({
 const auditI18n = {
   "askDocsAudit.title": "Ask Docs audit",
   "askDocsAudit.description":
-    "Read-only ledger of visitor Ask Docs conversations. This is not the Signal inbox.",
+    "Read-only ledger of visitor Ask Docs conversations. Not the Ask Host inbox. Intent Signals appear on the dashboard separately — this is not the Signal inbox.",
   "askDocsAudit.roomTitle": "Ask Docs timeline",
   "askDocsAudit.roomDescription":
-    "Room-wide Ask Docs audit. Filter by link. This is not the Signal inbox.",
+    "Room-wide Ask Docs audit. Filter by link. Not the Ask Host inbox. Intent Signals appear on the dashboard separately — this is not the Signal inbox.",
   "askDocsAudit.loading": "Loading Ask Docs audit...",
   "askDocsAudit.loadFailed": "Failed to load Ask Docs audit",
   "askDocsAudit.forbidden": "You do not have permission to view Ask Docs audit.",

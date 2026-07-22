@@ -49,6 +49,8 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
       "viewer.qaLengthError": "Question must be 1–500 characters",
       "viewer.qaDisabled": "Q&A is not available",
       "viewer.qaError": "Failed to submit question",
+      "viewer.qaRateLimited": "Too many Ask Host questions. Please wait and try again.",
+      "viewer.qaLimiterUnavailable": "Ask Host is temporarily unavailable. Please try again later.",
       "viewer.qaEmptyUnified": "No messages yet.",
       "viewer.qaEmptyHint": "Ask Docs first; switch to Ask Host if you need missing materials.",
       "viewer.qaEmptyPromptSummarize": "Summarize key points from authorized materials",
@@ -375,5 +377,55 @@ describe("UnifiedQAPanel", () => {
       );
     });
     expect(createPublicQuestionMock).not.toHaveBeenCalled();
+  });
+
+  it("maps Ask Host rate_limit_exceeded to a distinct error", async () => {
+    const { ApiError } = await import("@/lib/apiClient");
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    createPublicQuestionMock.mockRejectedValue(
+      new ApiError({
+        status: 429,
+        code: "rate_limit_exceeded",
+        message: "too many",
+        requestId: "req-1",
+      }),
+    );
+
+    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
+    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText("Ask the host..."), {
+      target: { value: "__rate_limit__ spam" },
+    });
+    fireEvent.click(screen.getByLabelText("Ask"));
+
+    expect(
+      await screen.findByText(/Too many Ask Host questions/i),
+    ).toBeInTheDocument();
+  });
+
+  it("maps Ask Host limiter_unavailable to a distinct error", async () => {
+    const { ApiError } = await import("@/lib/apiClient");
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    createPublicQuestionMock.mockRejectedValue(
+      new ApiError({
+        status: 503,
+        code: "limiter_unavailable",
+        message: "down",
+        requestId: "req-2",
+      }),
+    );
+
+    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
+    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByPlaceholderText("Ask the host..."), {
+      target: { value: "__limiter_down__ ping" },
+    });
+    fireEvent.click(screen.getByLabelText("Ask"));
+
+    expect(
+      await screen.findByText(/Ask Host is temporarily unavailable/i),
+    ).toBeInTheDocument();
   });
 });

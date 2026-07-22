@@ -6,6 +6,7 @@ import type {
   DealRoomDocumentItem,
   DealRoomFolder,
   DealRoomFolderDocs,
+  DealRoomKnowledgeBase,
   DealRoomMember,
   Link,
   VisitorQuestion,
@@ -61,6 +62,10 @@ const initialState = {
 function resetMockState() {
   mockUsers.clear();
   mockPublicQuestions.clear();
+  mockOwnerQuestions.clear();
+  mockAskDocsBurst.clear();
+  mockKnowledgeBases.clear();
+  seedOwnerAskHostQuestions();
   mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
   mockDocuments.splice(0, mockDocuments.length, ...initialState.documents);
   mockLinks.splice(0, mockLinks.length, ...initialState.links);
@@ -81,6 +86,116 @@ interface MockUser {
 const mockUsers = new Map<string, MockUser>();
 /** Per-link visitor Ask Host questions for public MSW e2e. */
 const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
+/** Per-link Ask Host questions for owner inbox (room + link). */
+const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
+/** Per-link Ask Docs burst counters for rate-limit e2e. */
+const mockAskDocsBurst = new Map<string, number>();
+/** Per-room knowledge base state for owner KB e2e. */
+const mockKnowledgeBases = new Map<string, DealRoomKnowledgeBase>();
+
+function seedOwnerAskHostQuestions() {
+  mockOwnerQuestions.clear();
+  const now = new Date().toISOString();
+  mockOwnerQuestions.set("link_1", [
+    {
+      id: "owner_q_pending_1",
+      link_id: "link_1",
+      visitor_id: "visitor_owner_inbox",
+      visitor_email: "lp@example.com",
+      question: "Can you share the updated financial model?",
+      status: "pending",
+      created_at: now,
+      updated_at: now,
+    },
+  ]);
+}
+seedOwnerAskHostQuestions();
+
+function kbAllowsAskDocs(roomId: string | undefined): boolean {
+  if (!roomId) return true;
+  const kb = mockKnowledgeBases.get(roomId);
+  return !!kb && (kb.status === "ready" || kb.status === "stale");
+}
+
+/** Hard gate when enabling Ask Docs without ready/stale room KB (US#11). */
+function knowledgeBaseRequiredResponse(roomId: string | undefined, aiCopilotEnabled: boolean) {
+  if (!aiCopilotEnabled || !roomId) return null;
+  if (kbAllowsAskDocs(roomId)) return null;
+  return HttpResponse.json(
+    {
+      code: "knowledge_base_required",
+      message: "create or rebuild the room knowledge base before enabling Ask Docs",
+    },
+    { status: 409 },
+  );
+}
+
+/**
+ * Soft coverage warning when Ask Docs is on and authorized docs/folders are
+ * outside the KB checkbox selection (US#12). Empty KB selection ⇒ all auth gaps.
+ */
+function askDocsCoverageWarnings(
+  roomId: string | undefined,
+  aiCopilotEnabled: boolean,
+  documentIds: string[],
+  folderPaths: string[],
+): Array<{
+  code: string;
+  message: string;
+  missing_folder_paths?: string[];
+  missing_document_ids?: string[];
+}> | undefined {
+  if (!aiCopilotEnabled || !roomId) return undefined;
+  const kb = mockKnowledgeBases.get(roomId);
+  if (!kb || (kb.status !== "ready" && kb.status !== "stale")) return undefined;
+
+  const kbFolders = new Set((kb.folder_paths ?? []).map((p) => p.replace(/\/+$/, "") || "/"));
+  const kbDocs = new Set(kb.document_ids ?? []);
+  const missingFolders: string[] = [];
+  const missingDocs: string[] = [];
+
+  for (const path of folderPaths) {
+    const normalized = path.replace(/\/+$/, "") || "/";
+    const covered = [...kbFolders].some(
+      (scope) => normalized === scope || normalized.startsWith(`${scope}/`),
+    );
+    if (!covered) missingFolders.push(path);
+  }
+  for (const id of documentIds) {
+    if (kbDocs.has(id)) continue;
+    // Covered via folder selection only when we know the doc's folder — MSW uses
+    // empty folderPaths on many links, so treat uncovered doc ids as gaps unless
+    // the KB selected that doc explicitly.
+    const coveredByFolder =
+      folderPaths.length > 0 &&
+      missingFolders.length === 0 &&
+      kbFolders.size > 0;
+    if (!coveredByFolder) missingDocs.push(id);
+  }
+
+  // Empty KB selection: every authorized doc is outside the selection.
+  if (kbDocs.size === 0 && kbFolders.size === 0 && documentIds.length > 0) {
+    return [
+      {
+        code: "ask_docs_scope_not_in_kb",
+        message:
+          "Some authorized folders or documents are outside the knowledge base selection; Ask Docs will only use the intersection.",
+        missing_document_ids: documentIds,
+      },
+    ];
+  }
+
+  if (missingFolders.length === 0 && missingDocs.length === 0) return undefined;
+  return [
+    {
+      code: "ask_docs_scope_not_in_kb",
+      message:
+        "Some authorized folders or documents are outside the knowledge base selection; Ask Docs will only use the intersection.",
+      missing_folder_paths: missingFolders.length > 0 ? missingFolders : undefined,
+      missing_document_ids: missingDocs.length > 0 ? missingDocs : undefined,
+    },
+  ];
+}
 
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -402,6 +517,7 @@ export const handlers = [
       download_enabled?: boolean;
       watermark_enabled?: boolean;
       ai_copilot_enabled?: boolean;
+      qa_enabled?: boolean;
     };
     // Update the in-memory link to reflect the edited values so subsequent reads
     // (including tests) see the new state.
@@ -442,6 +558,19 @@ export const handlers = [
     if (typeof payload.ai_copilot_enabled === "boolean") link.aiCopilotEnabled = payload.ai_copilot_enabled;
     if (typeof payload.qa_enabled === "boolean") link.qaEnabled = payload.qa_enabled;
     if (payload.contact_ids) link.contactIds = payload.contact_ids;
+
+    const gate = knowledgeBaseRequiredResponse(link.dealRoomId, !!link.aiCopilotEnabled);
+    if (gate) return gate;
+
+    const warnings = askDocsCoverageWarnings(
+      link.dealRoomId,
+      !!link.aiCopilotEnabled,
+      link.documentIds ?? (link.documentId ? [link.documentId] : []),
+      link.folderPaths ?? [],
+    );
+    if (warnings?.length) {
+      return HttpResponse.json({ ...link, warnings });
+    }
     return HttpResponse.json(link);
   }),
 
@@ -464,6 +593,24 @@ export const handlers = [
     const linkId = params.id as string;
     const data = mockLinkAccessRequests.filter((r) => r.link_id === linkId);
     return HttpResponse.json({ data });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/access-rules", ({ params }) => {
+    const link = mockLinks.find((l) => l.id === params.id);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: [] as { ruleType: "email"; value: string; action: "allow" | "block" }[] });
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/links/:id/access-rules", async ({ params }) => {
+    const link = mockLinks.find((l) => l.id === params.id);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/links/:id/access-rules", async ({ params }) => {
+    const link = mockLinks.find((l) => l.id === params.id);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    return new HttpResponse(null, { status: 204 });
   }),
 
   http.post(
@@ -702,6 +849,146 @@ export const handlers = [
     return HttpResponse.json(room);
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/links", ({ params }) => {
+    const roomId = params.id as string;
+    if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+    const data = mockLinks.filter((l) => l.dealRoomId === roomId);
+    return HttpResponse.json({ data });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/links", async ({ params, request }) => {
+    const roomId = params.id as string;
+    if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as {
+      name?: string;
+      ai_copilot_enabled?: boolean;
+      qa_enabled?: boolean;
+      folder_paths?: string[];
+      document_ids?: string[];
+      require_email?: boolean;
+      require_email_verification?: boolean;
+      require_password?: boolean;
+      require_nda?: boolean;
+      download_enabled?: boolean;
+      watermark_enabled?: boolean;
+    };
+    const askDocs = !!body.ai_copilot_enabled;
+    const gate = knowledgeBaseRequiredResponse(roomId, askDocs);
+    if (gate) return gate;
+
+    const documentIds = body.document_ids?.length ? body.document_ids : ["doc_1"];
+    const newLink: Link = {
+      id: generateId("link"),
+      name: body.name,
+      documentId: documentIds[0],
+      documentIds,
+      folderPaths: body.folder_paths ?? [],
+      documentTitle: "Deal room link",
+      shortUrl: `https://invest.acme.capital/d/${generateId("sh")}`,
+      accessCount: 0,
+      heatLevel: "cold",
+      createdAt: new Date().toISOString(),
+      isActive: true,
+      avgDurationSeconds: 0,
+      permissionType: "public",
+      isBundle: documentIds.length > 1,
+      aiCopilotEnabled: askDocs,
+      qaEnabled: !!body.qa_enabled,
+      dealRoomId: roomId,
+      requireEmail: !!body.require_email,
+      requireEmailVerification: !!body.require_email_verification,
+      requirePassword: !!body.require_password,
+      requireNda: !!body.require_nda,
+      downloadEnabled: body.download_enabled,
+      watermarkEnabled: body.watermark_enabled,
+      documents: [],
+    };
+    mockLinks.unshift(newLink);
+    const warnings = askDocsCoverageWarnings(
+      roomId,
+      askDocs,
+      documentIds,
+      body.folder_paths ?? [],
+    );
+    if (warnings?.length) {
+      return HttpResponse.json({ ...newLink, warnings }, { status: 201 });
+    }
+    return HttpResponse.json(newLink, { status: 201 });
+  }),
+
+  // Ask Docs audit (owner analytics) — empty ledger by default
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-docs-audit", ({ params }) => {
+    const link = mockLinks.find((l) => l.id === params.id);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: [] });
+  }),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/ask-docs-audit",
+    ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({ data: [] });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/visitor-questions",
+    ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const filterLinkId = new URL(request.url).searchParams.get("link_id");
+      const roomLinkIds = new Set(
+        mockLinks.filter((l) => l.dealRoomId === roomId).map((l) => l.id),
+      );
+      const rows: VisitorQuestion[] = [];
+      for (const [linkId, list] of mockOwnerQuestions) {
+        if (!roomLinkIds.has(linkId)) continue;
+        if (filterLinkId && linkId !== filterLinkId) continue;
+        rows.push(...list);
+      }
+      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      return HttpResponse.json({ data: rows });
+    },
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/questions", ({ params }) => {
+    const linkId = params.id as string;
+    const link = mockLinks.find((l) => l.id === linkId);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ data: mockOwnerQuestions.get(linkId) ?? [] });
+  }),
+
+  http.patch(
+    "*/api/workspaces/:workspaceSlug/links/:id/questions/:questionId/answer",
+    async ({ params, request }) => {
+      const linkId = params.id as string;
+      const questionId = params.questionId as string;
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json().catch(() => ({}))) as { answer?: string };
+      const answer = (body.answer ?? "").trim();
+      if (!answer) {
+        return HttpResponse.json({ code: "invalid_input", message: "answer required" }, { status: 400 });
+      }
+      const list = mockOwnerQuestions.get(linkId) ?? [];
+      const idx = list.findIndex((q) => q.id === questionId);
+      if (idx < 0) {
+        return HttpResponse.json({ code: "question_not_found", message: "question not found" }, { status: 404 });
+      }
+      const updated: VisitorQuestion = {
+        ...list[idx],
+        answer,
+        status: "answered",
+        answered_by: "user_1",
+        updated_at: new Date().toISOString(),
+      };
+      list[idx] = updated;
+      mockOwnerQuestions.set(linkId, list);
+      return HttpResponse.json({ data: updated });
+    },
+  ),
+
   http.post("*/api/workspaces/:workspaceSlug/deal-rooms", async ({ request }) => {
     const body = (await request.json()) as {
       name: string;
@@ -824,6 +1111,178 @@ export const handlers = [
     const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
     return HttpResponse.json({ data: getRoomFolderDocs(room) });
+  }),
+
+  // Deal-room knowledge base (Ask Docs corpus)
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/knowledge-base", ({ params }) => {
+    const roomId = params.id as string;
+    const room = findRoom(roomId);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const existing = mockKnowledgeBases.get(roomId);
+    if (existing) return HttpResponse.json(existing);
+    return HttpResponse.json({
+      room_id: roomId,
+      status: "none",
+      folder_paths: [],
+      document_ids: [],
+      active_document_ids: [],
+      embedded_count: 0,
+      folder_count: 0,
+    } satisfies DealRoomKnowledgeBase);
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/knowledge-base", async ({ params, request }) => {
+    const roomId = params.id as string;
+    const room = findRoom(roomId);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json().catch(() => ({}))) as {
+      folder_paths?: string[];
+      document_ids?: string[];
+    };
+    const documentIds = body.document_ids ?? [];
+    if (documentIds.some((id) => id.includes("no_chunks") || id === "__no_chunks__")) {
+      return HttpResponse.json(
+        {
+          code: "no_searchable_chunks",
+          message:
+            "selected documents have no searchable text chunks; re-ingest documents that have preview pages but no extracted text before building the knowledge base",
+        },
+        { status: 400 },
+      );
+    }
+    const kb: DealRoomKnowledgeBase = {
+      room_id: roomId,
+      status: "ready",
+      folder_paths: body.folder_paths ?? [],
+      document_ids: documentIds,
+      active_document_ids: documentIds,
+      active_generation: 1,
+      embedded_count: documentIds.length,
+      folder_count: (body.folder_paths ?? []).length,
+    };
+    mockKnowledgeBases.set(roomId, kb);
+    return HttpResponse.json(kb, { status: 201 });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/knowledge-base/rebuild", async ({ params, request }) => {
+    const roomId = params.id as string;
+    const room = findRoom(roomId);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const existing = mockKnowledgeBases.get(roomId);
+    if (!existing || existing.status === "none") {
+      return HttpResponse.json(
+        { code: "knowledge_base_not_found", message: "knowledge base not found" },
+        { status: 404 },
+      );
+    }
+    if (existing.status === "building") {
+      return HttpResponse.json(
+        { code: "knowledge_base_building", message: "knowledge base is building" },
+        { status: 409 },
+      );
+    }
+    const body = (await request.json().catch(() => ({}))) as {
+      folder_paths?: string[];
+      document_ids?: string[];
+    };
+    const documentIds = body.document_ids ?? existing.document_ids;
+    const folderPaths = body.folder_paths ?? existing.folder_paths;
+    if (documentIds.some((id) => id.includes("no_chunks") || id === "__no_chunks__")) {
+      return HttpResponse.json(
+        {
+          code: "no_searchable_chunks",
+          message:
+            "selected documents have no searchable text chunks; re-ingest documents that have preview pages but no extracted text before building the knowledge base",
+        },
+        { status: 400 },
+      );
+    }
+    const kb: DealRoomKnowledgeBase = {
+      ...existing,
+      status: "ready",
+      folder_paths: folderPaths,
+      document_ids: documentIds,
+      active_document_ids: documentIds,
+      active_generation: (existing.active_generation ?? 1) + 1,
+      building_document_ids: [],
+      building_generation: undefined,
+      embedded_count: documentIds.length,
+      folder_count: folderPaths.length,
+      error_message: undefined,
+    };
+    mockKnowledgeBases.set(roomId, kb);
+    return HttpResponse.json(kb);
+  }),
+
+  // Visitor Ask high-risk security events (owner analytics)
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-security-events", ({ params }) => {
+    const linkId = params.id as string;
+    const link = mockLinks.find((l) => l.id === linkId);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({
+      data: [
+        {
+          id: `ask-sec-${linkId}-1`,
+          link_id: linkId,
+          event_type: "rate_limit_exceeded",
+          visitor_id: "visitor-ask-1",
+          email: "visitor@example.com",
+          reason: "ask_docs",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: `ask-sec-${linkId}-2`,
+          link_id: linkId,
+          event_type: "not_in_allow_list",
+          visitor_id: "visitor-ask-2",
+          email: "removed@vc.com",
+          created_at: new Date().toISOString(),
+        },
+      ],
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/ask-security-events", ({ params, request }) => {
+    const roomId = params.roomId as string;
+    const room = findRoom(roomId);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const url = new URL(request.url);
+    const filterLinkId = url.searchParams.get("link_id");
+    const roomLinks = mockLinks.filter((l) => l.dealRoomId === roomId);
+    const source = roomLinks.length > 0
+      ? roomLinks
+      : [{ id: `${roomId}-synthetic-link` } as { id: string }];
+    const events = source
+      .filter((l) => !filterLinkId || l.id === filterLinkId)
+      .flatMap((l, idx) => [
+        {
+          id: `ask-sec-room-${l.id}-rate`,
+          link_id: l.id,
+          event_type: "rate_limit_exceeded",
+          visitor_id: `visitor-rate-${idx}`,
+          email: `rate${idx}@example.com`,
+          reason: "ask_docs",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: `ask-sec-room-${l.id}-scope`,
+          link_id: l.id,
+          event_type: "scope_violation",
+          visitor_id: `visitor-scope-${idx}`,
+          email: `scope${idx}@example.com`,
+          reason: "out_of_scope_evidence",
+          created_at: new Date().toISOString(),
+        },
+        {
+          id: `ask-sec-room-${l.id}-allow`,
+          link_id: l.id,
+          event_type: "not_in_allow_list",
+          visitor_id: `visitor-allow-${idx}`,
+          email: `removed${idx}@vc.com`,
+          created_at: new Date().toISOString(),
+        },
+      ]);
+    return HttpResponse.json({ data: events });
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents", async ({ request, params }) => {
@@ -1406,12 +1865,107 @@ export const handlers = [
     return HttpResponse.json({ data: mockPublicQuestions.get(token) ?? [] });
   }),
 
+  // Public Ask Docs (Visitor Ask / Ask Docs channel)
+  http.post("*/api/v1/public/links/:token/assistant/chat", async ({ params, request }) => {
+    const token = params.token as string;
+    const link = mockLinks.find((l) => l.shortUrl.endsWith(token));
+    if (!link) {
+      return HttpResponse.json({ code: "not_found", message: "link not found" }, { status: 404 });
+    }
+    if (!link.aiCopilotEnabled) {
+      return HttpResponse.json(
+        { code: "ai_copilot_disabled", message: "Ask Docs is disabled for this link" },
+        { status: 403 },
+      );
+    }
+
+    const burst = (mockAskDocsBurst.get(token) ?? 0) + 1;
+    mockAskDocsBurst.set(token, burst);
+    // Keep burst low so smoke tests stay under limit; dedicated rate-limit test uses __rate_limit__.
+    if (burst > 20) {
+      return HttpResponse.json(
+        { code: "rate_limit_exceeded", message: "too many Ask Docs requests, please try again later" },
+        { status: 429 },
+      );
+    }
+
+    const body = (await request.json().catch(() => ({}))) as {
+      message?: string;
+      session_id?: string;
+    };
+    const message = (body.message ?? "").trim();
+    if (!message) {
+      return HttpResponse.json({ code: "invalid_request", message: "message required" }, { status: 400 });
+    }
+
+    const sessionId = body.session_id?.trim() || generateId("sess");
+    const lower = message.toLowerCase();
+    if (lower.includes("__rate_limit__")) {
+      return HttpResponse.json(
+        { code: "rate_limit_exceeded", message: "too many Ask Docs requests, please try again later" },
+        { status: 429 },
+      );
+    }
+    if (lower.includes("__limiter_down__")) {
+      return HttpResponse.json(
+        {
+          code: "limiter_unavailable",
+          message: "Ask Docs is temporarily unavailable, please try again later",
+        },
+        { status: 503 },
+      );
+    }
+    if (lower.includes("__no_evidence__") || lower.includes("no evidence")) {
+      return HttpResponse.json({
+        session_id: sessionId,
+        answer:
+          "I couldn't find supporting material in the documents you can access for this link. You can ask the host instead.",
+        evidence: [],
+        result_status: "no_evidence",
+        suggest_ask_host: Boolean(link.qaEnabled),
+      });
+    }
+
+    return HttpResponse.json({
+      session_id: sessionId,
+      answer: `Based on authorized materials, here is an answer to "${message}".`,
+      evidence: [
+        {
+          chunk_id: "chk_ask_docs_001",
+          document_id: link.documentId ?? "doc_1",
+          quote: "Revenue grew 3x year over year.",
+          page_number: 1,
+          boxes: [{ x: 0.12, y: 0.34, w: 0.45, h: 0.06 }],
+          score: 0.92,
+        },
+      ],
+      result_status: "success",
+      suggest_ask_host: false,
+    });
+  }),
+
   http.post("*/api/v1/public/links/:token/questions", async ({ params, request }) => {
     const token = params.token as string;
     const body = (await request.json().catch(() => ({}))) as { question?: string };
     const question = (body.question ?? "").trim();
     if (!question) {
       return HttpResponse.json({ code: "invalid_request", message: "question required" }, { status: 400 });
+    }
+    const lower = question.toLowerCase();
+    if (lower.includes("__rate_limit__")) {
+      return HttpResponse.json(
+        { code: "rate_limit_exceeded", message: "too many Ask Host requests, please try again later" },
+        { status: 429 },
+      );
+    }
+    if (lower.includes("__limiter_down__")) {
+      return HttpResponse.json(
+        {
+          code: "limiter_unavailable",
+          message: "Ask Host is temporarily unavailable, please try again later",
+        },
+        { status: 503 },
+      );
     }
     const row: VisitorQuestion = {
       id: generateId("q"),

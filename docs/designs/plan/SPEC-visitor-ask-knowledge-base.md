@@ -1,7 +1,7 @@
 # Spec: Visitor Ask, Deal-Room Knowledge Base, and Anti-Bypass Controls
 
 > Source design: `docs/designs/plan/visitor-ask-knowledge-base.md` (v1.3)  
-> Status: **V1 implemented** (2026-07-22) — release gates + UX phases closed; Future/OOS unchanged  
+> Status: **V1 shipped** — dual-gen rebuild, embedder wiring, building-period Ask Docs, Redis fail-closed limits landed; residual P1/P2 in `docs/designs/plan/PLAN-visitor-ask-v1-debt.md`  
 > Test seams (agreed): (1) Public visitor API (2) Deal-room owner + link save API (3) Owner audit read API
 
 ## Problem Statement
@@ -71,28 +71,28 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 - Create wizard: default **no** selection; user must opt in folders/documents.
 - Folder path follow: new docs under selected paths mark KB `stale`; embed only on rebuild.
 - Upload/ingestion for deal-room path: pages/chunks for preview only; **no** automatic embeddings.
-- Rebuild: serve previous embedding generation until new generation is ready; atomic switch; rollback on failure.
-- Soft stale: Ask Docs remains available when `stale`.
+- Rebuild: stage new embeddings in `chunk_embedding_builds` while Ask Docs keeps searching live `chunks.embedding` for `ActiveDocumentIds`; promote into live vectors then switch metadata atomically; discard staging on failure.
+- Soft stale: Ask Docs remains available when `stale`. During `building`, Ask Docs uses current `ActiveDocumentIds` ∩ Access (previous generation).
 
 ### Ask Docs retrieval & answering
 - Retrieval set = KB selected & embedded documents ∩ link Access-authorized documents (same scope function as Access document listing for deal rooms).
 - Default search across that full set (not current-open document only).
 - Never call workspace-wide search for public Ask Docs.
 - No evidence → refuse with fixed copy; audit `no_evidence`; optional Host switch CTA.
-- Evidence quotes returned to visitors truncated to **320** characters; page jump remains.
+- Evidence quotes returned to visitors truncated to **320** characters; page jump remains. The same cap is applied when persisting assistant evidence and when projecting Ask Docs audit detail (historical long quotes truncated on read).
 - Post-filter evidence document IDs; log `scope_violation` on any drop.
 
 ### Anti-bypass / access
 - Ask Docs and Ask Host must use the same public access resolution path as page assets (session, security version, gates).
 - Every Ask call: re-evaluate allow/block for session email; on failure invalidate session and 403.
 - Ask Docs HTTP route must include `publicToken` and require session public token match.
-- Rate limits (per visitor+link): Ask Docs 20/10min and 200/day; Ask Host 30/day; 429 when exceeded.
+- Rate limits (per visitor+link): Ask Docs 20/10min and 200/day; Ask Host 30/day; **429 `rate_limit_exceeded`** when exceeded (and high-risk security event). Redis/limiter errors **fail closed** with **503 `limiter_unavailable`** (deny, not labeled as visitor rate abuse; no rate_limit security event). Unset limiter skips enforcement (must not happen in production). Visitor UI maps these codes to distinct i18n strings (Ask Docs chat + Ask Host submit).
 - Product security events for high-risk only: block, scope_violation, rate limit (not every 401).
 
 ### Audit & signals
 - V1 audit projection over public assistant sessions/messages plus authorized-scope snapshot and result status; reserve dedicated append-only table later.
 - Visibility: room members ∪ workspace admins; full Q&A text.
-- Hot window 90 days; then archive (not delete); admins can still open archived items.
+- Hot window 90 days from live `assistant_sessions`; older sessions are **physically archived** into `ask_docs_audit_archives` (detail preserved), then removed from hot tables. Default list = hot only; `archived=true` merges cold rows. Detail falls back to archive when the hot session is gone.
 - UI: link management audit + room-level timeline; V1 may ship link-side first.
 - Keep async question→Signal creation alongside audit; separate UX labels.
 
@@ -102,9 +102,9 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 - Deal-room documents page: Create KB / Rebuild KB + status strip.
 
 ### Phased delivery (release gate)
-- Gate-0 (anti-bypass) + Sec-0 (scope alignment) + Audit-1 + Ingest-1 + KB-1 + Mig-1 — **done**; production deal-room Ask Docs may be promised under these controls.
+- Gate-0 (anti-bypass) + Sec-0 (scope alignment) + Audit-1 + Ingest-1 + KB-1 + Mig-1 — **done in code**; remaining UX/test debt in `PLAN-visitor-ask-v1-debt.md` (B3–B7 naming, MSW, security-events UI).
 - UX phases (naming/card, visitor polish, room audit summary) + V1.5 channel hint + smoke e2e + SPEC #36 blur — **done**.
-- Still open (not this epic): dedicated append-only audit table; single-document KB product / V2 deprecation.
+- Still open (not this epic / OOS): fully independent append-only live audit ledger (cold archive table is B2); single-document KB product / V2 deprecation.
 
 ## Testing Decisions
 
@@ -146,7 +146,8 @@ Seam 1 is the release-blocking core; 2 and 3 are required for the full product p
 
 ## Further Notes
 
-- Design authority: `docs/designs/plan/visitor-ask-knowledge-base.md` v1.3 (grilling Q1–Q25; V1 implemented).
+- Design authority: `docs/designs/plan/visitor-ask-knowledge-base.md` v1.3 (grilling Q1–Q25; V1 shipped with debt).
+- Implementation debt / progress: `docs/designs/plan/PLAN-visitor-ask-v1-debt.md`.
 - Domain language: Deal Room, Link, Access, Visitor Ask / 沟通, Ask Docs / 问文档, Ask Host / 问发起方, Knowledge Base, folder allowlist, Link session, Signal, security event.
 - Hide “RAG/knowledge base” jargon from visitors; owners see KB controls on the deal-room documents page.
 - i18n mandatory for all new user-facing strings (en + zh-CN).

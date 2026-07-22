@@ -4,6 +4,7 @@ import { ChatCenteredDots, PaperPlaneRight, Robot, Spinner, User } from "@phosph
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { useAIStore } from "@/stores/aiStore";
 import type { Evidence, VisitorQuestion, ChatMessage } from "@/types";
 import { suggestAskHostFromDraft } from "./visitorAskChannelHint";
@@ -53,7 +54,13 @@ function resolveAIMessage(msg: ChatMessage, t: (key: string, options?: Record<st
     const key = msg.content;
     const meta = msg as unknown as Record<string, unknown>;
     const query = (meta._query as string) ?? "";
-    if (key === "ai:search.results" || key === "ai:search.noResults" || key === "ai:search.error") {
+    if (
+      key === "ai:search.results" ||
+      key === "ai:search.noResults" ||
+      key === "ai:search.error" ||
+      key === "ai:search.rateLimited" ||
+      key === "ai:search.limiterUnavailable"
+    ) {
       return t(key, { query });
     }
     return t(key);
@@ -174,8 +181,19 @@ export function UnifiedQAPanel({
         await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
         setRefreshKey((k) => k + 1);
       } catch (e: unknown) {
-        const msg = e instanceof Error ? e.message : String(e);
-        setQuestionError(msg.includes("disabled") ? t("documents:viewer.qaDisabled") : t("documents:viewer.qaError"));
+        if (e instanceof ApiError) {
+          if (e.code === "qa_disabled") {
+            setQuestionError(t("documents:viewer.qaDisabled"));
+          } else if (e.code === "rate_limit_exceeded") {
+            setQuestionError(t("documents:viewer.qaRateLimited"));
+          } else if (e.code === "limiter_unavailable") {
+            setQuestionError(t("documents:viewer.qaLimiterUnavailable"));
+          } else {
+            setQuestionError(t("documents:viewer.qaError"));
+          }
+        } else {
+          setQuestionError(t("documents:viewer.qaError"));
+        }
       } finally {
         setOwnerSubmitting(false);
       }

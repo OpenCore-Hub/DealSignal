@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"strings"
@@ -172,6 +173,15 @@ func (s *Server) registerRoutes() error {
 				if err != nil {
 					return fmt.Errorf("llm client: %w", err)
 				}
+				endpoint := s.cfg.OpenAIEmbeddingEndpoint
+				if endpoint == "" {
+					endpoint = "embeddings"
+				}
+				slog.Info("llm client configured",
+					"embedding_model", s.cfg.OpenAIEmbeddingModel,
+					"embedding_endpoint", endpoint,
+					"base_url_set", s.cfg.OpenAIBaseURL != "",
+				)
 				ingestionEmbedder = llmClient
 				searchEmbedder = llmClient
 				chatCompleter = llmClient
@@ -229,6 +239,9 @@ func (s *Server) registerRoutes() error {
 
 			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc)
 			assistantHandler := assistant.NewHandler(assistantSvc)
+			askDocsArchiveWorker := assistant.NewAskDocsAuditArchiveWorker(assistantSvc, 6*time.Hour, 50)
+			s.registerWorker(askDocsArchiveWorker)
+			askDocsArchiveWorker.Start(s.shutdownCtx)
 
 			actionSyncer := action.NewSyncer(queries)
 
@@ -281,10 +294,16 @@ func (s *Server) registerRoutes() error {
 			}
 			assistantPublicHandler.WithSecurityEvents(analyticsSvc)
 
-			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg,
+			dealroomOpts := []dealroom.ServiceOption{
 				dealroom.WithActionSyncer(actionSyncer),
 				dealroom.WithRateLimiter(s.redisClient),
-			)
+			}
+			if llmClient != nil {
+				dealroomOpts = append(dealroomOpts, dealroom.WithDocumentEmbedder(
+					ingestion.NewKnowledgeBaseEmbedder(queries, llmClient),
+				))
+			}
+			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg, dealroomOpts...)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
 
 			complianceSvc := compliance.NewService(queries, s.dbPool, s.cfg)

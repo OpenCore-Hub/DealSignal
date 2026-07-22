@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -75,6 +76,7 @@ func (f publicAccessFunc) AuthorizePublicAccess(c *gin.Context, publicToken stri
 
 type mockRateLimiter struct {
 	allow     bool
+	err       error
 	calls     int
 	lastKey   string
 	lastLimit int
@@ -84,6 +86,9 @@ func (m *mockRateLimiter) RateLimitAllow(_ context.Context, key string, limit in
 	m.calls++
 	m.lastKey = key
 	m.lastLimit = limit
+	if m.err != nil {
+		return false, 0, m.err
+	}
 	if m.allow {
 		return true, limit, nil
 	}
@@ -333,6 +338,57 @@ func TestPublicAskDocsRateLimitReturns429(t *testing.T) {
 	}
 }
 
+func TestPublicAskDocsLimiterUnavailableReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{LinkSessionSecret: "secret"}
+	docID := uuid.MustParse("44444444-4444-4444-4444-444444444444")
+	linkID := pgtype.UUID{Bytes: uuid.MustParse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"), Valid: true}
+	auth := &mockAccessAuthorizer{result: link.AccessResult{
+		Link: db.Link{
+			ID:               linkID,
+			AiCopilotEnabled: true,
+			DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+			PublicToken:      "token-1",
+		},
+		VisitorID: "v1",
+		Email:     "v@example.com",
+	}}
+
+	sessionID := pgtype.UUID{Bytes: [16]byte{11}, Valid: true}
+	q := &mockQuerier{
+		sessionID:   sessionID,
+		legacyDocOK: true,
+		legacyDoc:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: docID, Valid: true}},
+	}
+	limiter := &mockRateLimiter{allow: true, err: errors.New("redis down")}
+	events := &mockSecurityEvents{}
+	h := NewPublicHandler(NewService(q, &mockSearcher{}, evidence.NewFormatter(), &mockLLM{answer: "ans"}), auth, cfg)
+	h.WithRateLimiter(limiter).WithSecurityEvents(events)
+
+	r := gin.New()
+	h.RegisterPublicRoutes(r.Group("/api/v1/public"))
+
+	token := signTestSession(link.LinkSession{PublicToken: "token-1", VisitorID: "v1"}, cfg.LinkSessionSecret)
+	w := httptest.NewRecorder()
+	req, _ := http.NewRequest(http.MethodPost, "/api/v1/public/links/token-1/assistant/chat", bytes.NewReader([]byte(`{"message":"hello"}`)))
+	req.Header.Set("X-Link-Session", token)
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "limiter_unavailable" {
+		t.Fatalf("expected limiter_unavailable, got %v", body["code"])
+	}
+	if len(events.events) != 0 {
+		t.Fatalf("infra deny must not write rate_limit security event, got %+v", events.events)
+	}
+}
+
 func TestPublicAskDocsAllowsAuthorizedSession(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{LinkSessionSecret: "secret"}
@@ -500,6 +556,17 @@ func TestPublicAskDocsTruncatesEvidenceQuotes(t *testing.T) {
 	}
 	if resp.Evidence[0].DocumentID != docID.String() {
 		t.Fatalf("document_id must remain, got %q", resp.Evidence[0].DocumentID)
+	}
+	// B4: persisted audit evidence must also be ≤320 (not only the HTTP response).
+	if len(q.createdMsgs) < 2 {
+		t.Fatalf("expected user+assistant messages saved, got %d", len(q.createdMsgs))
+	}
+	var stored []search.Evidence
+	if err := json.Unmarshal(q.createdMsgs[len(q.createdMsgs)-1].Evidence, &stored); err != nil {
+		t.Fatalf("unmarshal stored evidence: %v", err)
+	}
+	if len(stored) != 1 || utf8.RuneCountInString(stored[0].Quote) != 320 {
+		t.Fatalf("stored quote rune length want 320, got %+v", stored)
 	}
 }
 

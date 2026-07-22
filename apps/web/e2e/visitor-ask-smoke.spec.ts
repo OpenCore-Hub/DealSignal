@@ -14,7 +14,10 @@ test.describe("Visitor Ask smoke (MSW)", () => {
     await page.goto(`/l/${SMOKE_TOKEN}`);
     await expect(page.locator("img[alt*='Page']").first()).toBeVisible({ timeout: 15000 });
 
-    await page.getByRole("button", { name: /Open sidebar/i }).click();
+    const openSidebar = page.getByRole("button", { name: /Open sidebar/i });
+    if (await openSidebar.isVisible().catch(() => false)) {
+      await openSidebar.click();
+    }
     // Sidebar tab is type=button; composer submit is type=submit aria-label="Ask".
     const askTab = page.locator('button[type="button"]').filter({ hasText: /^Ask$/ });
     await expect(askTab).toBeVisible({ timeout: 10000 });
@@ -37,5 +40,25 @@ test.describe("Visitor Ask smoke (MSW)", () => {
 
     await expect(page.getByText("Can you share the full model?")).toBeVisible({ timeout: 10000 });
     await expect(page.getByText(/Awaiting reply/i)).toBeVisible({ timeout: 10000 });
+  });
+
+  test("Ask Host rate limit shows distinct error", async ({ page }) => {
+    attachDebug(page);
+    await resetMockState(page);
+
+    await page.goto(`/l/${SMOKE_TOKEN}`);
+    await expect(page.locator("img[alt*='Page']").first()).toBeVisible({ timeout: 15000 });
+    const openSidebar = page.getByRole("button", { name: /Open sidebar/i });
+    if (await openSidebar.isVisible().catch(() => false)) {
+      await openSidebar.click();
+    }
+    await page.locator('button[type="button"]').filter({ hasText: /^Ask$/ }).click();
+    await page.getByRole("button", { name: /Materials seem to be missing/i }).click();
+
+    const hostInput = page.getByPlaceholder(/Ask the host a question/i);
+    await hostInput.fill("__rate_limit__ spam");
+    await page.getByRole("button", { name: "Ask", exact: true }).and(page.locator('[type="submit"]')).click();
+
+    await expect(page.getByText(/Too many Ask Host questions/i)).toBeVisible({ timeout: 10000 });
   });
 });

@@ -266,6 +266,8 @@
     "qaLengthError": "Question must be 1–500 characters",
     "qaDisabled": "Ask Host is not available for this link",
     "qaError": "Failed to submit question",
+    "qaRateLimited": "Too many Ask Host questions. Please wait and try again.",
+    "qaLimiterUnavailable": "Ask Host is temporarily unavailable. Please try again later.",
     "qaEmpty": "No questions yet. Ask the host about this document.",
     "qaOwnerReply": "Host reply",
     "qaAnswered": "Answered",

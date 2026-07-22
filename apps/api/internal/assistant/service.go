@@ -77,6 +77,14 @@ type Querier interface {
 	GetAssistantSessionByIDAndLink(ctx context.Context, arg db.GetAssistantSessionByIDAndLinkParams) (db.AssistantSession, error)
 	ListAskDocsAuditSessionsByLink(ctx context.Context, arg db.ListAskDocsAuditSessionsByLinkParams) ([]db.ListAskDocsAuditSessionsByLinkRow, error)
 	ListAskDocsAuditSessionsByRoom(ctx context.Context, arg db.ListAskDocsAuditSessionsByRoomParams) ([]db.ListAskDocsAuditSessionsByRoomRow, error)
+	ListAskDocsAuditArchivesByLink(ctx context.Context, arg db.ListAskDocsAuditArchivesByLinkParams) ([]db.ListAskDocsAuditArchivesByLinkRow, error)
+	ListAskDocsAuditArchivesByRoom(ctx context.Context, arg db.ListAskDocsAuditArchivesByRoomParams) ([]db.ListAskDocsAuditArchivesByRoomRow, error)
+	GetAskDocsAuditArchive(ctx context.Context, arg db.GetAskDocsAuditArchiveParams) (db.AskDocsAuditArchive, error)
+	ListAskDocsSessionsDueForArchive(ctx context.Context, arg db.ListAskDocsSessionsDueForArchiveParams) ([]db.ListAskDocsSessionsDueForArchiveRow, error)
+	UpsertAskDocsAuditArchive(ctx context.Context, arg db.UpsertAskDocsAuditArchiveParams) error
+	DeleteAssistantSessionByID(ctx context.Context, id pgtype.UUID) error
+	ListAskHighRiskSecurityEventsByLink(ctx context.Context, arg db.ListAskHighRiskSecurityEventsByLinkParams) ([]db.ListAskHighRiskSecurityEventsByLinkRow, error)
+	ListAskHighRiskSecurityEventsByRoom(ctx context.Context, arg db.ListAskHighRiskSecurityEventsByRoomParams) ([]db.ListAskHighRiskSecurityEventsByRoomRow, error)
 	CreateAssistantMessage(ctx context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error)
 	ListAssistantMessagesBySession(ctx context.Context, arg db.ListAssistantMessagesBySessionParams) ([]db.AssistantMessage, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
@@ -137,9 +145,11 @@ func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req Chat
 	}
 
 	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
-		SessionID: session.ID,
-		Role:      "user",
-		Content:   req.Message,
+		SessionID:             session.ID,
+		Role:                  "user",
+		Content:               req.Message,
+		AuthorizedDocumentIds: []pgtype.UUID{},
+		RetrievalDocumentIds:  []pgtype.UUID{},
 	}); err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
@@ -202,9 +212,11 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 	}
 
 	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
-		SessionID: session.ID,
-		Role:      "user",
-		Content:   req.Message,
+		SessionID:             session.ID,
+		Role:                  "user",
+		Content:               req.Message,
+		AuthorizedDocumentIds: []pgtype.UUID{},
+		RetrievalDocumentIds:  []pgtype.UUID{},
 	}); err != nil {
 		return nil, fmt.Errorf("save user message: %w", err)
 	}
@@ -374,7 +386,9 @@ func (s *Service) documentIDsForLink(ctx context.Context, row db.Link) ([]uuid.U
 		return nil, err
 	}
 	switch kb.Status {
-	case "ready", "stale":
+	case "ready", "stale", "building":
+		// During rebuild, ActiveDocumentIds still points at the previous
+		// generation corpus so Ask Docs keeps working on the live index.
 		return intersectUUIDs(authorized, pgUUIDsToUUIDs(kb.ActiveDocumentIds)), nil
 	default:
 		return nil, nil
@@ -499,6 +513,9 @@ func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUs
 	if err != nil {
 		return nil, fmt.Errorf("llm completion: %w", err)
 	}
+
+	// Persist and return visitor-safe quotes (US#20 / B4). LLM context above keeps full text.
+	truncateVisitorEvidenceQuotes(evidenceList)
 
 	evBytes, _ := json.Marshal(evidenceList)
 	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{

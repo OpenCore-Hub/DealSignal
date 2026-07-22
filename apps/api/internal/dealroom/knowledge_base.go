@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -21,10 +22,34 @@ const (
 )
 
 var (
-	ErrKnowledgeBaseExists   = errors.New("knowledge base already exists")
-	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
-	ErrKnowledgeBaseBuilding = errors.New("knowledge base is building")
+	ErrKnowledgeBaseExists      = errors.New("knowledge base already exists")
+	ErrKnowledgeBaseNotFound    = errors.New("knowledge base not found")
+	ErrKnowledgeBaseBuilding    = errors.New("knowledge base is building")
+	ErrNoSearchableChunks       = errors.New("selected documents have no searchable text chunks")
+	ErrKnowledgeBaseEmbedFailed = errors.New("knowledge base embedding failed")
 )
+
+// MissingChunksError lists documents that cannot be embedded (no text chunks).
+type MissingChunksError struct {
+	DocumentIDs []string
+}
+
+func (e *MissingChunksError) Error() string {
+	if e == nil || len(e.DocumentIDs) == 0 {
+		return ErrNoSearchableChunks.Error()
+	}
+	ids := append([]string(nil), e.DocumentIDs...)
+	sort.Strings(ids)
+	return fmt.Sprintf(
+		"%s; re-ingest documents that have preview pages but no extracted text before building the knowledge base: %s",
+		ErrNoSearchableChunks.Error(),
+		strings.Join(ids, ", "),
+	)
+}
+
+func (e *MissingChunksError) Is(target error) bool {
+	return target == ErrNoSearchableChunks
+}
 
 // KnowledgeBaseSelection is the explicit corpus checkbox set for a room KB.
 // Create defaults to empty (no folders / documents selected).
@@ -49,9 +74,12 @@ type KnowledgeBase struct {
 }
 
 // DocumentEmbedder embeds selected ready documents for a knowledge base build.
-// Implementations may be sync (tests) or queue async jobs (production).
+// generation == 0 writes live embeddings; generation > 0 stages a rebuild side
+// index that must be promoted (or discarded) explicitly.
 type DocumentEmbedder interface {
-	EmbedDocuments(ctx context.Context, workspaceID string, documentIDs []uuid.UUID) error
+	EmbedDocuments(ctx context.Context, workspaceID string, documentIDs []uuid.UUID, generation int32) error
+	PromoteGeneration(ctx context.Context, workspaceID string, documentIDs []uuid.UUID, generation int32) error
+	DiscardGeneration(ctx context.Context, workspaceID string, documentIDs []uuid.UUID, generation int32) error
 }
 
 // WithDocumentEmbedder wires KB embedding.
@@ -88,16 +116,21 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, roomID, workspaceID, 
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
+	if err := s.ensureEmbeddableChunks(ctx, workspaceID, resolved); err != nil {
+		return KnowledgeBase{}, err
+	}
 
 	buildingGen := int32(1)
-	row, err := s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
+	_, err = s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
 		TenantID:            room.TenantID,
 		WorkspaceID:         room.WorkspaceID,
 		RoomID:              room.ID,
 		Status:              KBStatusBuilding,
-		FolderPaths:         sel.FolderPaths,
+		FolderPaths:         coalesceStringArray(sel.FolderPaths),
 		DocumentIds:         stringIDsToPG(sel.DocumentIDs),
-		ActiveDocumentIds:   nil,
+		// pgx encodes nil []uuid as SQL NULL, which bypasses DEFAULT '{}' and
+		// violates NOT NULL on active_document_ids / building_document_ids.
+		ActiveDocumentIds:   emptyPGUUIDArray(),
 		BuildingDocumentIds: uuidsToPG(resolved),
 		ActiveGeneration:    0,
 		BuildingGeneration:  pgtype.Int4{Int32: buildingGen, Valid: true},
@@ -107,16 +140,16 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, roomID, workspaceID, 
 		return KnowledgeBase{}, fmt.Errorf("upsert knowledge base: %w", err)
 	}
 
-	if err := s.runEmbed(ctx, workspaceID, resolved); err != nil {
+	if err := s.runEmbed(ctx, workspaceID, resolved, 0); err != nil {
 		failed, upErr := s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
 			TenantID:            room.TenantID,
 			WorkspaceID:         room.WorkspaceID,
 			RoomID:              room.ID,
 			Status:              KBStatusFailed,
-			FolderPaths:         sel.FolderPaths,
+			FolderPaths:         coalesceStringArray(sel.FolderPaths),
 			DocumentIds:         stringIDsToPG(sel.DocumentIDs),
-			ActiveDocumentIds:   nil,
-			BuildingDocumentIds: nil,
+			ActiveDocumentIds:   emptyPGUUIDArray(),
+			BuildingDocumentIds: emptyPGUUIDArray(),
 			ActiveGeneration:    0,
 			BuildingGeneration:  pgtype.Int4{},
 			ErrorMessage:        pgtype.Text{String: err.Error(), Valid: true},
@@ -124,18 +157,18 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, roomID, workspaceID, 
 		if upErr != nil {
 			return KnowledgeBase{}, upErr
 		}
-		return toKnowledgeBase(failed), nil
+		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
 	}
 
-	row, err = s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
+	row, err := s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
 		TenantID:            room.TenantID,
 		WorkspaceID:         room.WorkspaceID,
 		RoomID:              room.ID,
 		Status:              KBStatusReady,
-		FolderPaths:         sel.FolderPaths,
+		FolderPaths:         coalesceStringArray(sel.FolderPaths),
 		DocumentIds:         stringIDsToPG(sel.DocumentIDs),
 		ActiveDocumentIds:   uuidsToPG(resolved),
-		BuildingDocumentIds: nil,
+		BuildingDocumentIds: emptyPGUUIDArray(),
 		ActiveGeneration:    buildingGen,
 		BuildingGeneration:  pgtype.Int4{},
 		ErrorMessage:        pgtype.Text{},
@@ -143,7 +176,6 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, roomID, workspaceID, 
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
-	_ = row
 	return toKnowledgeBase(row), nil
 }
 
@@ -168,8 +200,10 @@ func (s *Service) GetKnowledgeBase(ctx context.Context, roomID, workspaceID stri
 	return toKnowledgeBase(row), nil
 }
 
-// RebuildKnowledgeBase rebuilds the KB with optional new selection. Serves the
-// previous active index until the new generation is ready, then switches atomically.
+// RebuildKnowledgeBase rebuilds the KB with optional new selection. Stages new
+// embeddings without overwriting the live index, then promotes atomically on
+// success. Ask Docs continues to use ActiveDocumentIds + live vectors while
+// status is building.
 func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID, userID string, sel *KnowledgeBaseSelection) (KnowledgeBase, error) {
 	room, err := s.GetRoom(ctx, roomID, workspaceID)
 	if err != nil {
@@ -198,6 +232,9 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
+	if err := s.ensureEmbeddableChunks(ctx, workspaceID, resolved); err != nil {
+		return KnowledgeBase{}, err
+	}
 
 	prevActive := existing.ActiveDocumentIds
 	prevGen := existing.ActiveGeneration
@@ -206,14 +243,14 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 		nextGen = 1
 	}
 
-	row, err := s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
+	_, err = s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
 		TenantID:            room.TenantID,
 		WorkspaceID:         room.WorkspaceID,
 		RoomID:              room.ID,
 		Status:              KBStatusBuilding,
-		FolderPaths:         selection.FolderPaths,
+		FolderPaths:         coalesceStringArray(selection.FolderPaths),
 		DocumentIds:         stringIDsToPG(selection.DocumentIDs),
-		ActiveDocumentIds:   prevActive, // keep serving old index
+		ActiveDocumentIds:   coalescePGUUIDArray(prevActive), // keep serving old index
 		BuildingDocumentIds: uuidsToPG(resolved),
 		ActiveGeneration:    prevGen,
 		BuildingGeneration:  pgtype.Int4{Int32: nextGen, Valid: true},
@@ -223,7 +260,8 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 		return KnowledgeBase{}, err
 	}
 
-	if err := s.runEmbed(ctx, workspaceID, resolved); err != nil {
+	if err := s.runEmbed(ctx, workspaceID, resolved, nextGen); err != nil {
+		_ = s.discardEmbed(ctx, workspaceID, resolved, nextGen)
 		// Rollback building state; restore previous ready/stale with old active set.
 		restoreStatus := existing.Status
 		if restoreStatus == KBStatusBuilding {
@@ -234,10 +272,10 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 			WorkspaceID:         room.WorkspaceID,
 			RoomID:              room.ID,
 			Status:              restoreStatus,
-			FolderPaths:         existing.FolderPaths,
-			DocumentIds:         existing.DocumentIds,
-			ActiveDocumentIds:   prevActive,
-			BuildingDocumentIds: nil,
+			FolderPaths:         coalesceStringArray(existing.FolderPaths),
+			DocumentIds:         coalescePGUUIDArray(existing.DocumentIds),
+			ActiveDocumentIds:   coalescePGUUIDArray(prevActive),
+			BuildingDocumentIds: emptyPGUUIDArray(),
 			ActiveGeneration:    prevGen,
 			BuildingGeneration:  pgtype.Int4{},
 			ErrorMessage:        pgtype.Text{String: err.Error(), Valid: true},
@@ -245,27 +283,49 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 		if upErr != nil {
 			return KnowledgeBase{}, upErr
 		}
-		return toKnowledgeBase(failed), nil
+		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
 	}
 
-	// Atomic switch to new generation.
-	row, err = s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
+	// Promote staged vectors + switch KB metadata in one transaction so Ask Docs
+	// never observes promoted embeddings with stale building metadata (or the reverse).
+	readyParams := db.UpsertDealRoomKnowledgeBaseParams{
 		TenantID:            room.TenantID,
 		WorkspaceID:         room.WorkspaceID,
 		RoomID:              room.ID,
 		Status:              KBStatusReady,
-		FolderPaths:         selection.FolderPaths,
+		FolderPaths:         coalesceStringArray(selection.FolderPaths),
 		DocumentIds:         stringIDsToPG(selection.DocumentIDs),
 		ActiveDocumentIds:   uuidsToPG(resolved),
-		BuildingDocumentIds: nil,
+		BuildingDocumentIds: emptyPGUUIDArray(),
 		ActiveGeneration:    nextGen,
 		BuildingGeneration:  pgtype.Int4{},
 		ErrorMessage:        pgtype.Text{},
-	})
-	if err != nil {
-		return KnowledgeBase{}, err
 	}
-	_ = row
+	row, err := s.promoteAndActivate(ctx, workspaceID, resolved, nextGen, readyParams)
+	if err != nil {
+		_ = s.discardEmbed(ctx, workspaceID, resolved, nextGen)
+		restoreStatus := existing.Status
+		if restoreStatus == KBStatusBuilding {
+			restoreStatus = KBStatusReady
+		}
+		failed, upErr := s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
+			TenantID:            room.TenantID,
+			WorkspaceID:         room.WorkspaceID,
+			RoomID:              room.ID,
+			Status:              restoreStatus,
+			FolderPaths:         coalesceStringArray(existing.FolderPaths),
+			DocumentIds:         coalescePGUUIDArray(existing.DocumentIds),
+			ActiveDocumentIds:   coalescePGUUIDArray(prevActive),
+			BuildingDocumentIds: emptyPGUUIDArray(),
+			ActiveGeneration:    prevGen,
+			BuildingGeneration:  pgtype.Int4{},
+			ErrorMessage:        pgtype.Text{String: err.Error(), Valid: true},
+		})
+		if upErr != nil {
+			return KnowledgeBase{}, upErr
+		}
+		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
+	}
 	return toKnowledgeBase(row), nil
 }
 
@@ -294,10 +354,10 @@ func (s *Service) MarkKnowledgeBaseStaleIfNeeded(ctx context.Context, roomID pgt
 		WorkspaceID:         row.WorkspaceID,
 		RoomID:              row.RoomID,
 		Status:              KBStatusStale,
-		FolderPaths:         row.FolderPaths,
-		DocumentIds:         row.DocumentIds,
-		ActiveDocumentIds:   row.ActiveDocumentIds,
-		BuildingDocumentIds: row.BuildingDocumentIds,
+		FolderPaths:         coalesceStringArray(row.FolderPaths),
+		DocumentIds:         coalescePGUUIDArray(row.DocumentIds),
+		ActiveDocumentIds:   coalescePGUUIDArray(row.ActiveDocumentIds),
+		BuildingDocumentIds: coalescePGUUIDArray(row.BuildingDocumentIds),
 		ActiveGeneration:    row.ActiveGeneration,
 		BuildingGeneration:  row.BuildingGeneration,
 		ErrorMessage:        row.ErrorMessage,
@@ -305,14 +365,93 @@ func (s *Service) MarkKnowledgeBaseStaleIfNeeded(ctx context.Context, roomID pgt
 	return err
 }
 
-func (s *Service) runEmbed(ctx context.Context, workspaceID string, documentIDs []uuid.UUID) error {
+func (s *Service) runEmbed(ctx context.Context, workspaceID string, documentIDs []uuid.UUID, generation int32) error {
 	if len(documentIDs) == 0 {
 		return nil
 	}
 	if s.embedder == nil {
-		return nil // no-op when embedder not configured (preview-only envs)
+		return fmt.Errorf("knowledge base document embedder is not configured")
 	}
-	return s.embedder.EmbedDocuments(ctx, workspaceID, documentIDs)
+	return s.embedder.EmbedDocuments(ctx, workspaceID, documentIDs, generation)
+}
+
+// promoteAndActivate copies staged embeddings into live vectors and switches KB
+// metadata in one transaction (or a single sequenced call when pool is unset in tests).
+func (s *Service) promoteAndActivate(
+	ctx context.Context,
+	workspaceID string,
+	documentIDs []uuid.UUID,
+	generation int32,
+	readyParams db.UpsertDealRoomKnowledgeBaseParams,
+) (db.DealRoomKnowledgeBasis, error) {
+	var row db.DealRoomKnowledgeBasis
+	err := s.runInTx(ctx, func(q *db.Queries) error {
+		if len(documentIDs) > 0 && generation > 0 {
+			ws, err := uuid.Parse(strings.TrimSpace(workspaceID))
+			if err != nil {
+				return fmt.Errorf("invalid workspace id: %w", err)
+			}
+			pgWS := pgtype.UUID{Bytes: ws, Valid: true}
+			pgDocs := uuidsToPG(documentIDs)
+			if err := q.PromoteChunkEmbeddingBuild(ctx, db.PromoteChunkEmbeddingBuildParams{
+				WorkspaceID: pgWS,
+				Generation:  generation,
+				DocumentIds: pgDocs,
+			}); err != nil {
+				return fmt.Errorf("promote embedding generation %d: %w", generation, err)
+			}
+			if err := q.DeleteChunkEmbeddingBuildsForDocuments(ctx, db.DeleteChunkEmbeddingBuildsForDocumentsParams{
+				WorkspaceID: pgWS,
+				Generation:  generation,
+				DocumentIds: pgDocs,
+			}); err != nil {
+				return fmt.Errorf("cleanup embedding generation %d: %w", generation, err)
+			}
+		}
+		var upErr error
+		row, upErr = q.UpsertDealRoomKnowledgeBase(ctx, readyParams)
+		return upErr
+	})
+	return row, err
+}
+
+func (s *Service) discardEmbed(ctx context.Context, workspaceID string, documentIDs []uuid.UUID, generation int32) error {
+	if generation <= 0 || len(documentIDs) == 0 || s.embedder == nil {
+		return nil
+	}
+	return s.embedder.DiscardGeneration(ctx, workspaceID, documentIDs, generation)
+}
+
+// ensureEmbeddableChunks fails early when any selected document has no text chunks.
+func (s *Service) ensureEmbeddableChunks(ctx context.Context, workspaceID string, documentIDs []uuid.UUID) error {
+	if len(documentIDs) == 0 {
+		return nil
+	}
+	ws, err := uuid.Parse(strings.TrimSpace(workspaceID))
+	if err != nil {
+		return fmt.Errorf("invalid workspace id: %w", err)
+	}
+	missing, err := s.queries.ListDocumentsMissingEmbeddableChunks(ctx, db.ListDocumentsMissingEmbeddableChunksParams{
+		WorkspaceID: pgtype.UUID{Bytes: ws, Valid: true},
+		DocumentIds: uuidsToPG(documentIDs),
+	})
+	if err != nil {
+		return fmt.Errorf("validate embeddable chunks: %w", err)
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	ids := make([]string, 0, len(missing))
+	for _, id := range missing {
+		if !id.Valid {
+			continue
+		}
+		ids = append(ids, uuid.UUID(id.Bytes).String())
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return &MissingChunksError{DocumentIDs: ids}
 }
 
 func (s *Service) resolveSelectedReadyDocuments(ctx context.Context, room db.DealRoom, sel KnowledgeBaseSelection) ([]uuid.UUID, error) {
@@ -438,6 +577,26 @@ func uuidsToPG(ids []uuid.UUID) []pgtype.UUID {
 		out = append(out, pgtype.UUID{Bytes: id, Valid: true})
 	}
 	return out
+}
+
+// emptyPGUUIDArray is a non-nil empty uuid[] for NOT NULL columns.
+// A nil Go slice is encoded by pgx as SQL NULL and bypasses DEFAULT '{}'.
+func emptyPGUUIDArray() []pgtype.UUID {
+	return []pgtype.UUID{}
+}
+
+func coalescePGUUIDArray(ids []pgtype.UUID) []pgtype.UUID {
+	if ids == nil {
+		return emptyPGUUIDArray()
+	}
+	return ids
+}
+
+func coalesceStringArray(ss []string) []string {
+	if ss == nil {
+		return []string{}
+	}
+	return ss
 }
 
 func pgIDsToStrings(ids []pgtype.UUID) []string {

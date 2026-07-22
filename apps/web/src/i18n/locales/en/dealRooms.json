@@ -75,7 +75,7 @@
   "tabs": {
     "documents": "Documents",
     "participants": "Share",
-    "qa": "Q&A",
+    "qa": "Ask Host",
     "activity": "Activity",
     "analytics": "Analytics",
     "settings": "Settings"
@@ -174,14 +174,16 @@
     "advanced": {
       "title": "Advanced",
       "enabledCount": "{count} enabled",
-      "aiAgents": "AI Agents",
-      "aiAgentsDescription": "Allow AI assistant in the viewer",
+      "visitorAsk": "Visitor Ask",
+      "visitorAskDescription": "Let visitors ask about documents or message the host",
+      "askDocs": "Ask Docs",
+      "askDocsDescription": "Instant answers grounded in authorized materials",
+      "askHost": "Ask Host",
+      "askHostDescription": "Async questions for the link owner to answer",
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",
       "indexFile": "Enable index file generation",
-      "indexFileDescription": "Generate an index page for the deal room",
-      "qaConversations": "Enable Q&A conversations",
-      "qaConversationsDescription": "Allow viewers to ask questions"
+      "indexFileDescription": "Generate an index page for the deal room"
     },
     "emptyTitle": "No restrictions",
     "emptyDescription": "Anyone with the link can access if authentication gates are disabled.",
@@ -265,8 +267,8 @@
     "attention": {
       "failedDeliveries_one": "{{count}} access code failed to send — fix in Share",
       "failedDeliveries_other": "{{count}} access codes failed to send — fix in Share",
-      "unreadQuestions_one": "{{count}} unanswered question — open Q&A",
-      "unreadQuestions_other": "{{count}} unanswered questions — open Q&A",
+      "unreadQuestions_one": "{{count}} unanswered Ask Host question — open Ask Host",
+      "unreadQuestions_other": "{{count}} unanswered Ask Host questions — open Ask Host",
       "noActiveLinks": "No active share links yet — create one in Share"
     },
     "readiness": {
@@ -305,6 +307,8 @@
     "loadFailed": "Failed to load knowledge base",
     "createFailed": "Failed to create knowledge base",
     "rebuildFailed": "Failed to rebuild knowledge base",
+    "embedFailed": "Knowledge base embedding failed. Check the embedding provider configuration and try again.",
+    "noSearchableChunks": "Some selected documents have no searchable text. Re-ingest them (preview pages alone are not enough) before building the knowledge base.",
     "rebuildHint": "Visitors keep using the previous index until rebuild finishes."
   },
   "participants": {
@@ -392,7 +396,7 @@
   },
   "analytics": {
     "title": "Analytics",
-    "comingSoon": "Detailed analytics are coming soon.",
+    "trendEmpty": "No view trend data yet for this deal room.",
     "views": "Views",
     "activeLinks": "Active links",
     "recentVisitors": "Recent visitors",
@@ -400,15 +404,27 @@
     "topDocuments": "Top documents"
   },
   "qa": {
-    "title": "Q&A",
-    "askQuestion": "Ask a question",
-    "placeholder": "Ask something about this deal room...",
-    "comingSoon": "Q&A will be available soon. Your question has been noted.",
-    "emptyTitle": "No questions yet",
-    "emptyDescription": "Questions and answers about this deal room will appear here.",
-    "submitted": "Question submitted",
-    "answeredBy": "Answered by {{name}}",
-    "askedAt": "Asked {{time}}"
+    "title": "Ask Host inbox",
+    "description": "Reply to async Ask Host questions from visitors across this deal room's links. This is not Ask Docs audit and not the Signal inbox.",
+    "loading": "Loading Ask Host questions...",
+    "loadFailed": "Failed to load Ask Host questions",
+    "retry": "Retry",
+    "emptyTitle": "No Ask Host questions yet",
+    "emptyDescription": "When visitors ask the host on a share link for this room, questions appear here for you to answer.",
+    "anonymous": "Anonymous",
+    "answerLabel": "Answer:",
+    "answerPlaceholder": "Type your answer...",
+    "sendAnswer": "Send answer",
+    "saving": "Saving...",
+    "answerSuccess": "Answer saved",
+    "answerFailed": "Failed to save answer",
+    "filterByLink": "Filter by link",
+    "filterAll": "All links",
+    "linkLabel": "Link",
+    "questionStatus": {
+      "pending": "Pending",
+      "answered": "Answered"
+    }
   },
   "new": {
     "title": "New Deal Room",

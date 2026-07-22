@@ -552,7 +552,7 @@ export function DealRoomDetailPage() {
             </div>
           )}
 
-          {tab === "qa" && <DealRoomQATab />}
+          {tab === "qa" && <DealRoomQATab roomId={room.id} />}
 
           {tab === "activity" && (
             <DealRoomActivityTab

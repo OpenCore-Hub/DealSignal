@@ -238,7 +238,7 @@ describe("AccessTab", () => {
     expect(screen.queryByTitle(/reduce leak risk/i)).not.toBeInTheDocument();
   });
 
-  it("shows advanced count badge when AI Copilot is enabled", () => {
+  it("shows advanced count badge when Visitor Ask (Ask Docs) is enabled", () => {
     renderAccessTab({ ...baseDraft, aiCopilotEnabled: true });
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });

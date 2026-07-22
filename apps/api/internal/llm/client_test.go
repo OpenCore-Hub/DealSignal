@@ -188,6 +188,53 @@ func TestEmbedBatch(t *testing.T) {
 	}
 }
 
+func TestJoinOpenAIAPIURL(t *testing.T) {
+	cases := []struct {
+		base, path, want string
+	}{
+		{"https://api.openai.com/v1", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		{"https://openrouter.ai/api/v1/", "/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions"},
+		{"https://example.com", "/v1/chat/completions", "https://example.com/v1/chat/completions"},
+		{"https://example.com/v1", "/embeddings", "https://example.com/v1/embeddings"},
+	}
+	for _, tc := range cases {
+		got := joinOpenAIAPIURL(tc.base, tc.path)
+		if got != tc.want {
+			t.Fatalf("joinOpenAIAPIURL(%q, %q) = %q, want %q", tc.base, tc.path, got, tc.want)
+		}
+		if strings.Contains(got, "/v1/v1/") {
+			t.Fatalf("must not produce double /v1: %q", got)
+		}
+	}
+}
+
+func TestEmbedBatchViaChatCompletionsMisconfiguredGuidance(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte(`{"error":{"message":"field messages is required","type":"new_api_error"}}`))
+	}))
+	defer ts.Close()
+
+	c, err := NewClient(Config{
+		APIKey:            "sk-test",
+		BaseURL:           ts.URL + "/v1",
+		EmbeddingModel:    "text-embedding-3-small",
+		EmbeddingEndpoint: "chat_completions",
+		HTTPClient:        ts.Client(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	_, err = c.EmbedBatch(context.Background(), []string{"hello"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "OPENAI_EMBEDDING_ENDPOINT=embeddings") {
+		t.Fatalf("expected misconfiguration guidance, got %v", err)
+	}
+}
+
 func TestEmbedBatchViaChatCompletions(t *testing.T) {
 	var requestPath string
 	var requestBody map[string]interface{}
@@ -223,7 +270,7 @@ func TestEmbedBatchViaChatCompletions(t *testing.T) {
 
 	c, err := NewClient(Config{
 		APIKey:            "sk-test",
-		BaseURL:           ts.URL,
+		BaseURL:           ts.URL + "/v1", // SDK-style base must not become /v1/v1/...
 		EmbeddingModel:    "text-embedding-3-small",
 		EmbeddingEndpoint: "chat_completions",
 		ChatModel:         "gpt-4o-mini",
@@ -243,8 +290,8 @@ func TestEmbedBatchViaChatCompletions(t *testing.T) {
 	if len(vecs[0]) != 3 || len(vecs[1]) != 3 {
 		t.Fatalf("expected 3-dim embeddings, got %d and %d", len(vecs[0]), len(vecs[1]))
 	}
-	if !strings.HasSuffix(requestPath, "/chat/completions") {
-		t.Fatalf("expected path to end with /chat/completions, got %s", requestPath)
+	if requestPath != "/v1/chat/completions" {
+		t.Fatalf("expected /v1/chat/completions (no double /v1), got %s", requestPath)
 	}
 	input, ok := requestBody["input"].([]interface{})
 	if !ok || len(input) != 2 {
