@@ -1,8 +1,13 @@
 import { WarningCircle } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import type { DealRoomTab } from "@/hooks/useDealRoomTab";
+import { KnowledgeBasePanel } from "./KnowledgeBasePanel";
+import type { DealRoomDocumentItem } from "@/types";
 
 interface DealRoomDocumentsHomeProps {
+  roomId: string;
+  isAdmin?: boolean;
+  documents?: DealRoomDocumentItem[];
   activeLinkCount: number;
   failedDeliveries: number;
   unreadQuestions: number;
@@ -15,6 +20,9 @@ interface DealRoomDocumentsHomeProps {
  * Command strip / readiness banners were removed — tree is the primary surface.
  */
 export function DealRoomDocumentsHome({
+  roomId,
+  isAdmin = false,
+  documents = [],
   activeLinkCount,
   failedDeliveries,
   unreadQuestions,
@@ -71,6 +79,8 @@ export function DealRoomDocumentsHome({
           </div>
         </div>
       )}
+
+      <KnowledgeBasePanel roomId={roomId} isAdmin={isAdmin} documents={documents} />
 
       {children}
     </div>

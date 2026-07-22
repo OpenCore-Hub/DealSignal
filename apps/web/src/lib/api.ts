@@ -39,6 +39,8 @@ import type {
   FileRequest,
   AskDocsAuditEntry,
   AskDocsAuditDetail,
+  DealRoomKnowledgeBase,
+  DealRoomKnowledgeBaseSelection,
 } from "@/types";
 import { request } from "@/lib/apiClient";
 import {
@@ -771,6 +773,34 @@ export const api = {
     request<void>(getWorkspaceSlug(), `/deal-rooms/${roomId}/documents/${docId}`, {
       method: "DELETE",
     }),
+
+  // Deal-room knowledge base (Ask Docs corpus)
+  getDealRoomKnowledgeBase: (roomId: string) =>
+    request<DealRoomKnowledgeBase>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge-base`),
+  createDealRoomKnowledgeBase: (roomId: string, selection: DealRoomKnowledgeBaseSelection = {}) =>
+    request<DealRoomKnowledgeBase>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge-base`, {
+      method: "POST",
+      body: JSON.stringify({
+        folder_paths: selection.folder_paths ?? [],
+        document_ids: selection.document_ids ?? [],
+      }),
+    }),
+  rebuildDealRoomKnowledgeBase: (roomId: string, selection?: DealRoomKnowledgeBaseSelection) =>
+    request<DealRoomKnowledgeBase>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge-base/rebuild`,
+      {
+        method: "POST",
+        body: JSON.stringify(
+          selection
+            ? {
+                folder_paths: selection.folder_paths ?? [],
+                document_ids: selection.document_ids ?? [],
+              }
+            : {},
+        ),
+      },
+    ),
 
   // Deal room members
   getDealRoomMembers: (roomId: string) =>

@@ -508,6 +508,9 @@ export function DealRoomDetailPage() {
         >
           {tab === "documents" && (
             <DealRoomDocumentsHome
+              roomId={room.id}
+              isAdmin={true}
+              documents={allRoomDocuments}
               activeLinkCount={activeLinkCount}
               failedDeliveries={navSignals.failedDeliveries}
               unreadQuestions={navSignals.unreadQuestions}

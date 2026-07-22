@@ -430,6 +430,33 @@ export interface DealRoomMember {
   nda_signed_at?: string;
 }
 
+/** Deal-room knowledge base status for Ask Docs corpus. */
+export type DealRoomKnowledgeBaseStatus =
+  | "none"
+  | "building"
+  | "ready"
+  | "failed"
+  | "stale";
+
+export interface DealRoomKnowledgeBase {
+  room_id: string;
+  status: DealRoomKnowledgeBaseStatus;
+  folder_paths: string[];
+  document_ids: string[];
+  active_document_ids?: string[];
+  building_document_ids?: string[];
+  active_generation?: number;
+  building_generation?: number;
+  error_message?: string;
+  embedded_count: number;
+  folder_count: number;
+}
+
+export interface DealRoomKnowledgeBaseSelection {
+  folder_paths?: string[];
+  document_ids?: string[];
+}
+
 export interface DealRoomAccessRequest {
   id: string;
   email: string;
