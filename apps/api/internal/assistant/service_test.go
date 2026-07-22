@@ -13,6 +13,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -27,6 +28,8 @@ type mockQuerier struct {
 	publicLinkDocs  []db.ListLinkDocumentsByPublicTokenRow
 	legacyDoc       db.GetDocumentByIDRow
 	legacyDocOK     bool
+	kb              db.DealRoomKnowledgeBasis
+	kbOK            bool
 }
 
 func (m *mockQuerier) CreateAssistantSession(_ context.Context, arg db.CreateAssistantSessionParams) (db.AssistantSession, error) {
@@ -78,6 +81,13 @@ func (m *mockQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDPar
 	return m.legacyDoc, nil
 }
 
+func (m *mockQuerier) GetDealRoomKnowledgeBaseByRoom(_ context.Context, _ pgtype.UUID) (db.DealRoomKnowledgeBasis, error) {
+	if !m.kbOK {
+		return db.DealRoomKnowledgeBasis{}, pgx.ErrNoRows
+	}
+	return m.kb, nil
+}
+
 func (m *mockQuerier) CreateAssistantMessage(_ context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error) {
 	msg := db.AssistantMessage{
 		SessionID: arg.SessionID,
@@ -124,10 +134,14 @@ func (m *mockSearcher) SearchInDocuments(_ context.Context, _ pgtype.UUID, docum
 }
 
 type mockLLM struct {
-	answer string
+	answer  string
+	called  bool
+	history []llm.Message
 }
 
-func (m *mockLLM) ChatCompletion(_ context.Context, _ string, _ []llm.Message) (string, error) {
+func (m *mockLLM) ChatCompletion(_ context.Context, _ string, history []llm.Message) (string, error) {
+	m.called = true
+	m.history = history
 	return m.answer, nil
 }
 
@@ -311,6 +325,11 @@ func TestPublicChatDealRoomAllowlistExcludesOutOfScopeDocs(t *testing.T) {
 			{DocumentID: pgtype.UUID{Bytes: inScope, Valid: true}, FolderPath: "/general"},
 			{DocumentID: pgtype.UUID{Bytes: outOfScope, Valid: true}, FolderPath: "/legal"},
 		},
+		kb: db.DealRoomKnowledgeBasis{
+			Status:            "ready",
+			ActiveDocumentIds: []pgtype.UUID{{Bytes: inScope, Valid: true}, {Bytes: outOfScope, Valid: true}},
+		},
+		kbOK: true,
 	}
 	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
 		{ChunkID: "c1", DocumentID: inScope.String(), Quote: "ok"},
@@ -338,6 +357,90 @@ func TestPublicChatDealRoomAllowlistExcludesOutOfScopeDocs(t *testing.T) {
 	}
 }
 
+func TestPublicChatDealRoomExcludesAuthorizedNotInKB(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+	inBoth := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	authOnly := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: inBoth, Valid: true}, FolderPath: "/general"},
+			{DocumentID: pgtype.UUID{Bytes: authOnly, Valid: true}, FolderPath: "/general"},
+		},
+		kb: db.DealRoomKnowledgeBasis{
+			Status:            "ready",
+			ActiveDocumentIds: []pgtype.UUID{{Bytes: inBoth, Valid: true}},
+		},
+		kbOK: true,
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c1", DocumentID: inBoth.String(), Quote: "ok"},
+	}}
+	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"})
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+		FolderScopeMode:  "allowlist",
+		FolderScopePaths: []string{"/general"},
+		PublicToken:      "tok",
+	}
+	if _, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.inDocumentsCalled {
+		t.Fatal("expected SearchInDocuments")
+	}
+	if len(s.lastDocumentIDs) != 1 || s.lastDocumentIDs[0] != inBoth {
+		t.Fatalf("expected KB∩Access search of %s only, got %v", inBoth, s.lastDocumentIDs)
+	}
+}
+
+func TestPublicChatDealRoomExcludesKBNotAuthorized(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{10}, Valid: true}
+	inBoth := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	kbOnly := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: inBoth, Valid: true}, FolderPath: "/general"},
+			{DocumentID: pgtype.UUID{Bytes: kbOnly, Valid: true}, FolderPath: "/legal"},
+		},
+		kb: db.DealRoomKnowledgeBasis{
+			Status: "ready",
+			ActiveDocumentIds: []pgtype.UUID{
+				{Bytes: inBoth, Valid: true},
+				{Bytes: kbOnly, Valid: true},
+			},
+		},
+		kbOK: true,
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c1", DocumentID: inBoth.String(), Quote: "ok"},
+	}}
+	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "ans"})
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+		FolderScopeMode:  "allowlist",
+		FolderScopePaths: []string{"/general"}, // kbOnly is under /legal → not authorized
+		PublicToken:      "tok",
+	}
+	if _, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"}); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(s.lastDocumentIDs) != 1 || s.lastDocumentIDs[0] != inBoth {
+		t.Fatalf("expected Access∩KB of %s only, got %v", inBoth, s.lastDocumentIDs)
+	}
+}
+
 func TestPublicChatEmptyAuthorizedSetFailClosed(t *testing.T) {
 	ctx := context.Background()
 	sessionID := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
@@ -350,14 +453,18 @@ func TestPublicChatEmptyAuthorizedSetFailClosed(t *testing.T) {
 				FolderPath: "/general",
 			},
 		},
+		kbOK: true,
+		kb:   db.DealRoomKnowledgeBasis{Status: "ready", ActiveDocumentIds: nil},
 	}
 	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
 		{ChunkID: "leak", DocumentID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", Quote: "should not appear"},
 	}}
-	svc := NewService(q, s, evidence.NewFormatter(), &mockLLM{answer: "no basis"})
+	l := &mockLLM{answer: "ungrounded invent"}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
 
 	link := db.Link{
 		AiCopilotEnabled: true,
+		QaEnabled:        true,
 		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
 		FolderScopeMode:  "allowlist",
 		FolderScopePaths: nil, // empty allowlist → no docs
@@ -370,8 +477,65 @@ func TestPublicChatEmptyAuthorizedSetFailClosed(t *testing.T) {
 	if s.inDocumentsCalled || s.searchCalled {
 		t.Fatal("empty authorized set must not search documents or workspace")
 	}
+	if l.called {
+		t.Fatal("no evidence must not call LLM for ungrounded answers")
+	}
 	if len(resp.Evidence) != 0 {
 		t.Fatalf("expected no evidence, got %d", len(resp.Evidence))
+	}
+	if resp.ResultStatus != ResultStatusNoEvidence {
+		t.Fatalf("result_status=%q want %q", resp.ResultStatus, ResultStatusNoEvidence)
+	}
+	if resp.Answer == "" || resp.Answer == l.answer {
+		t.Fatalf("expected fixed refusal copy, got %q", resp.Answer)
+	}
+	if !resp.SuggestAskHost {
+		t.Fatal("expected suggest_ask_host when Ask Host enabled")
+	}
+}
+
+func TestPublicChatEmptySearchResultsRefuseWithoutLLM(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{11}, Valid: true}
+	docID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: docID, Valid: true}, FolderPath: "/general"},
+		},
+		kbOK: true,
+		kb: db.DealRoomKnowledgeBasis{
+			Status:            "ready",
+			ActiveDocumentIds: []pgtype.UUID{{Bytes: docID, Valid: true}},
+		},
+	}
+	s := &mockSearcher{inDocumentsEvidence: nil} // searchable set non-empty, no hits
+	l := &mockLLM{answer: "hallucination"}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DealRoomID:       pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true},
+		FolderScopeMode:  "allowlist",
+		FolderScopePaths: []string{"/general"},
+		PublicToken:      "tok",
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "Q?"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !s.inDocumentsCalled {
+		t.Fatal("expected search within ∩")
+	}
+	if l.called {
+		t.Fatal("empty evidence must not call LLM")
+	}
+	if resp.ResultStatus != ResultStatusNoEvidence {
+		t.Fatalf("result_status=%q", resp.ResultStatus)
+	}
+	if resp.SuggestAskHost {
+		t.Fatal("suggest_ask_host must be false when Ask Host disabled")
 	}
 }
 

@@ -33,7 +33,16 @@ const (
 	maxContextMessages   = 20
 	maxEvidenceChars     = 12000 // approximate 3000 tokens
 	defaultSearchResults = 5
+
+	ResultStatusSuccess    = "success"
+	ResultStatusNoEvidence = "no_evidence"
 )
+
+// Fixed visitor-facing refusal (no "knowledge base" jargon).
+const noEvidenceAnswerEN = "I couldn't find supporting material in the documents you can access for this link."
+const noEvidenceAnswerZH = "在您可访问的材料中未找到依据。"
+const noEvidenceAskHostHintEN = " You can ask the host instead."
+const noEvidenceAskHostHintZH = " 您可以改问发起方。"
 
 const systemPrompt = `You are a helpful research assistant for a document workspace.
 Answer the user's question using only the evidence provided.
@@ -60,6 +69,7 @@ type Querier interface {
 	ListDealRoomDocumentsWithMeta(ctx context.Context, roomID pgtype.UUID) ([]db.ListDealRoomDocumentsWithMetaRow, error)
 	ListLinkDocumentsByPublicToken(ctx context.Context, publicToken string) ([]db.ListLinkDocumentsByPublicTokenRow, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
+	GetDealRoomKnowledgeBaseByRoom(ctx context.Context, roomID pgtype.UUID) (db.DealRoomKnowledgeBasis, error)
 	CreateAssistantMessage(ctx context.Context, arg db.CreateAssistantMessageParams) (db.AssistantMessage, error)
 	ListAssistantMessagesBySession(ctx context.Context, arg db.ListAssistantMessagesBySessionParams) ([]db.AssistantMessage, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
@@ -82,6 +92,8 @@ type ChatResponse struct {
 	SessionID       string            `json:"session_id"`
 	Answer          string            `json:"answer"`
 	Evidence        []search.Evidence `json:"evidence"`
+	ResultStatus    string            `json:"result_status,omitempty"`
+	SuggestAskHost  bool              `json:"suggest_ask_host,omitempty"`
 	ScopeViolations int               `json:"-"` // internal: dropped out-of-scope evidence count
 }
 
@@ -201,7 +213,7 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 		return nil, fmt.Errorf("list link documents: %w", err)
 	}
 
-	// Fail closed: empty Access scope never falls back to workspace-wide search.
+	// Fail closed: empty Access∩KB scope never falls back to workspace-wide search.
 	var evidenceList []search.Evidence
 	var scopeViolations int
 	if len(documentIDs) > 0 {
@@ -212,11 +224,19 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 		evidenceList, scopeViolations = filterEvidenceToDocuments(evidenceList, documentIDs)
 	}
 
-	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	var resp *ChatResponse
+	if len(evidenceList) == 0 {
+		resp, err = s.refuseNoEvidence(ctx, session.ID, link)
+	} else {
+		resp, err = s.complete(ctx, session.ID, req.Message, msgs, evidenceList)
+	}
 	if err != nil {
 		return nil, err
 	}
 	resp.ScopeViolations = scopeViolations
+	if resp.ResultStatus == "" {
+		resp.ResultStatus = ResultStatusSuccess
+	}
 
 	docID := ""
 	if link.DocumentID.Valid {
@@ -315,8 +335,62 @@ func (s *Service) resolvePublicSession(ctx context.Context, link db.Link, visito
 }
 
 func (s *Service) documentIDsForLink(ctx context.Context, row db.Link) ([]uuid.UUID, error) {
-	// Same document set Access exposes to visitors (folder allowlist included).
-	return link.AuthorizedDocumentIDs(ctx, s.queries, row)
+	// Access document set (folder allowlist included).
+	authorized, err := link.AuthorizedDocumentIDs(ctx, s.queries, row)
+	if err != nil {
+		return nil, err
+	}
+	if !row.DealRoomID.Valid {
+		// Single-document links: no room KB product surface (Q1).
+		return authorized, nil
+	}
+	kb, err := s.queries.GetDealRoomKnowledgeBaseByRoom(ctx, row.DealRoomID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	switch kb.Status {
+	case "ready", "stale":
+		return intersectUUIDs(authorized, pgUUIDsToUUIDs(kb.ActiveDocumentIds)), nil
+	default:
+		return nil, nil
+	}
+}
+
+func intersectUUIDs(a, b []uuid.UUID) []uuid.UUID {
+	if len(a) == 0 || len(b) == 0 {
+		return nil
+	}
+	allowed := make(map[uuid.UUID]struct{}, len(b))
+	for _, id := range b {
+		allowed[id] = struct{}{}
+	}
+	out := make([]uuid.UUID, 0, len(a))
+	seen := make(map[uuid.UUID]struct{}, len(a))
+	for _, id := range a {
+		if _, ok := allowed[id]; !ok {
+			continue
+		}
+		if _, dup := seen[id]; dup {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func pgUUIDsToUUIDs(ids []pgtype.UUID) []uuid.UUID {
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if !id.Valid {
+			continue
+		}
+		out = append(out, uuid.UUID(id.Bytes))
+	}
+	return out
 }
 
 func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uuid.UUID) ([]search.Evidence, int) {
@@ -337,6 +411,40 @@ func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uui
 		out = append(out, ev)
 	}
 	return out, dropped
+}
+
+func (s *Service) refuseNoEvidence(ctx context.Context, sessionID pgtype.UUID, link db.Link) (*ChatResponse, error) {
+	answer := noEvidenceAnswer(requestLang(ctx), link.QaEnabled)
+	evBytes, _ := json.Marshal([]search.Evidence{})
+	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
+		SessionID: sessionID,
+		Role:      "assistant",
+		Content:   answer,
+		Evidence:  evBytes,
+	}); err != nil {
+		return nil, fmt.Errorf("save assistant message: %w", err)
+	}
+	return &ChatResponse{
+		SessionID:      pgUUIDToString(sessionID),
+		Answer:         answer,
+		Evidence:       []search.Evidence{},
+		ResultStatus:   ResultStatusNoEvidence,
+		SuggestAskHost: link.QaEnabled,
+	}, nil
+}
+
+func noEvidenceAnswer(lang string, suggestAskHost bool) string {
+	zh := strings.HasPrefix(strings.ToLower(lang), "zh")
+	answer := noEvidenceAnswerEN
+	hint := noEvidenceAskHostHintEN
+	if zh {
+		answer = noEvidenceAnswerZH
+		hint = noEvidenceAskHostHintZH
+	}
+	if suggestAskHost {
+		return answer + hint
+	}
+	return answer
 }
 
 func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUserMessage string, msgs []db.AssistantMessage, evidenceList []search.Evidence) (*ChatResponse, error) {

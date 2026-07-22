@@ -348,6 +348,14 @@ func TestPublicAskDocsRetrievalScopedToAccessAllowlist(t *testing.T) {
 			{DocumentID: pgtype.UUID{Bytes: inScope, Valid: true}, FolderPath: "/general"},
 			{DocumentID: pgtype.UUID{Bytes: outOfScope, Valid: true}, FolderPath: "/legal"},
 		},
+		kbOK: true,
+		kb: db.DealRoomKnowledgeBasis{
+			Status: "ready",
+			ActiveDocumentIds: []pgtype.UUID{
+				{Bytes: inScope, Valid: true},
+				{Bytes: outOfScope, Valid: true},
+			},
+		},
 	}
 	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
 		{ChunkID: "ok", DocumentID: inScope.String(), Quote: "in"},
