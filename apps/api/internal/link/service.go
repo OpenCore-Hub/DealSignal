@@ -446,6 +446,10 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		tenantID = dealRoom.TenantID
 		dealRoomID = dealRoom.ID
 
+		if err := ensureAskDocsKnowledgeBase(ctx, qtx, dealRoomID, req.AICopilotEnabled); err != nil {
+			return db.Link{}, err
+		}
+
 		// Deal-room links always use allowlist mode (empty = deny-all).
 		if err := s.validateDealRoomFolderPaths(ctx, qtx, workspaceUUID, dealRoomID, req.FolderPaths); err != nil {
 			return db.Link{}, err
@@ -736,6 +740,10 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
 	if err != nil {
+		return db.Link{}, err
+	}
+
+	if err := ensureAskDocsKnowledgeBase(ctx, s.queries, existing.DealRoomID, req.AICopilotEnabled); err != nil {
 		return db.Link{}, err
 	}
 
@@ -4943,10 +4951,11 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	}
 
 	_, err = qtx.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:    link.TenantID,
-		WorkspaceID: link.WorkspaceID,
-		DocumentID:  doc.ID,
-		Status:      "queued",
+		TenantID:      link.TenantID,
+		WorkspaceID:   link.WorkspaceID,
+		DocumentID:    doc.ID,
+		Status:        "queued",
+		SkipEmbedding: true, // deal-room visitor uploads: preview only until KB embed
 	})
 	if err != nil {
 		return fmt.Errorf("create ingestion job: %w", err)

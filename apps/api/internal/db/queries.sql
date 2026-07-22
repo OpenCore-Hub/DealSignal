@@ -156,24 +156,29 @@ SET deleted_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 
 -- name: CreateIngestionJob :one
-INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
-VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at;
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status, skip_embedding)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding;
 
 -- name: GetIngestionJobByDocument :one
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1;
 
 -- name: ListPendingIngestionJobs :many
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE status = 'queued'
    OR (status = 'failed' AND attempts < 3)
    OR (status = 'processing' AND updated_at < now() - interval '5 minutes')
 ORDER BY created_at ASC
 LIMIT $1;
+
+-- name: SetIngestionJobSkipEmbedding :exec
+UPDATE ingestion_jobs
+SET skip_embedding = $2, updated_at = now()
+WHERE document_id = $1;
 
 -- name: UpdateIngestionJob :exec
 UPDATE ingestion_jobs
@@ -270,16 +275,90 @@ SET title = $1, updated_at = now()
 WHERE id = $2;
 
 -- name: CreateAssistantMessage :one
-INSERT INTO assistant_messages (session_id, role, content, evidence)
-VALUES ($1, $2, $3, $4)
-RETURNING id, session_id, role, content, evidence, created_at;
+INSERT INTO assistant_messages (
+  session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids;
 
 -- name: ListAssistantMessagesBySession :many
-SELECT id, session_id, role, content, evidence, created_at
+SELECT id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 FROM assistant_messages
 WHERE session_id = $1
 ORDER BY created_at ASC
 LIMIT $2;
+
+-- name: GetAssistantSessionByIDAndLink :one
+SELECT *
+FROM assistant_sessions
+WHERE id = $1 AND link_id = $2
+LIMIT 1;
+
+-- name: ListAskDocsAuditSessionsByLink :many
+SELECT
+  s.id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+WHERE s.link_id = $1
+  AND s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2;
+
+-- name: ListAskDocsAuditSessionsByRoom :many
+SELECT
+  s.id,
+  s.link_id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
+WHERE s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2;
+
 -- name: CreateLink :one
 INSERT INTO links (
     tenant_id, workspace_id, document_id, deal_room_id, public_token, name, permission_type, expires_at, max_access_count,
@@ -1190,6 +1269,29 @@ SELECT EXISTS(
     JOIN documents d ON d.id = drd.document_id
     WHERE drd.room_id = $1 AND drd.document_id = $2 AND d.deleted_at IS NULL
 ) AS exists;
+
+-- name: DocumentInAnyDealRoom :one
+SELECT EXISTS(
+    SELECT 1 FROM deal_room_documents drd
+    JOIN documents d ON d.id = drd.document_id
+    WHERE drd.document_id = $1 AND d.deleted_at IS NULL
+) AS exists;
+
+-- name: CountDocumentChunksWithEmbedding :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1
+  AND embedding IS NOT NULL;
+
+-- name: CountDocumentChunks :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1;
+
+-- name: CountDocumentPages :one
+SELECT COUNT(*)::bigint
+FROM pages
+WHERE document_id = $1;
 
 -- name: GetDealRoomDocumentFolderPath :one
 SELECT drd.folder_path
@@ -2782,3 +2884,39 @@ WHERE s.workspace_id = $1
   AND s.rule_id <> ''
 GROUP BY s.rule_id
 ORDER BY generated_count DESC;
+
+-- name: GetDealRoomKnowledgeBaseByRoom :one
+SELECT *
+FROM deal_room_knowledge_bases
+WHERE room_id = $1;
+
+-- name: UpsertDealRoomKnowledgeBase :one
+INSERT INTO deal_room_knowledge_bases (
+  tenant_id, workspace_id, room_id, status, folder_paths, document_ids,
+  active_document_ids, building_document_ids, active_generation, building_generation, error_message
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+ON CONFLICT (room_id) DO UPDATE SET
+  status = EXCLUDED.status,
+  folder_paths = EXCLUDED.folder_paths,
+  document_ids = EXCLUDED.document_ids,
+  active_document_ids = EXCLUDED.active_document_ids,
+  building_document_ids = EXCLUDED.building_document_ids,
+  active_generation = EXCLUDED.active_generation,
+  building_generation = EXCLUDED.building_generation,
+  error_message = EXCLUDED.error_message,
+  updated_at = now()
+RETURNING *;
+
+-- name: UpdateDealRoomKnowledgeBaseStatus :one
+UPDATE deal_room_knowledge_bases
+SET status = $2,
+    active_document_ids = COALESCE(sqlc.narg(active_document_ids)::uuid[], active_document_ids),
+    building_document_ids = COALESCE(sqlc.narg(building_document_ids)::uuid[], building_document_ids),
+    active_generation = COALESCE(sqlc.narg(active_generation)::int, active_generation),
+    building_generation = sqlc.narg(building_generation)::int,
+    error_message = sqlc.narg(error_message),
+    updated_at = now()
+WHERE room_id = $1
+RETURNING *;

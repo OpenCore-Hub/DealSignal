@@ -5,11 +5,15 @@ package link
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -328,5 +332,261 @@ func TestDocumentsForAccessResponse_StaleScopeAfterRemoval(t *testing.T) {
 	if len(got) != len(docs)-1 {
 		body, _ := json.Marshal(got)
 		t.Fatalf("expected %d documents after removal, got %d: %s", len(docs)-1, len(got), body)
+	}
+}
+
+// TestAddDocument_FlagsPreviewOnlyIngest covers #96 at the deal-room owner seam:
+// adding a document to a room marks ingestion skip_embedding and membership so
+// ProcessDocument will not auto-embed.
+func TestAddDocument_FlagsPreviewOnlyIngest(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	ctx := f.ctx
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{})
+	room, err := drSvc.CreateRoom(ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug:         "room-" + uuid.NewString(),
+		Name:         "Preview Ingest Room",
+		TemplateType: "custom",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	docID := uuid.New()
+	doc, err := f.q.CreateDocument(ctx, db.CreateDocumentParams{
+		ID:          pgtype.UUID{Bytes: docID, Valid: true},
+		TenantID:    f.link.TenantID,
+		WorkspaceID: f.workspace.ID,
+		CreatedBy:   f.user.ID,
+		Title:       "room-preview.pdf",
+		SourceType:  "pdf",
+		Status:      "uploaded",
+		StorageKey:  "test-key",
+		FileSize:    pgtype.Int8{Int64: 1024, Valid: true},
+		Category:    "general",
+	})
+	if err != nil {
+		t.Fatalf("create document: %v", err)
+	}
+
+	job, err := f.q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+		TenantID:      f.link.TenantID,
+		WorkspaceID:   f.workspace.ID,
+		DocumentID:    doc.ID,
+		Status:        "queued",
+		SkipEmbedding: false,
+	})
+	if err != nil {
+		t.Fatalf("create ingestion job: %v", err)
+	}
+	if job.SkipEmbedding {
+		t.Fatal("expected job to start with skip_embedding=false")
+	}
+
+	if _, err := drSvc.AddDocument(ctx, roomID, wsID, userID, uuid.UUID(doc.ID.Bytes).String(), "/general", 0); err != nil {
+		t.Fatalf("add document to room: %v", err)
+	}
+
+	inRoom, err := f.q.DocumentInAnyDealRoom(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("DocumentInAnyDealRoom: %v", err)
+	}
+	if !inRoom {
+		t.Fatal("expected document to be in a deal room")
+	}
+
+	updated, err := f.q.GetIngestionJobByDocument(ctx, doc.ID)
+	if err != nil {
+		t.Fatalf("reload ingestion job: %v", err)
+	}
+	if !updated.SkipEmbedding {
+		t.Fatal("AddDocument must set skip_embedding so ingest does not auto-embed")
+	}
+}
+
+// TestAuthorizePublicAccess_ReevaluatesAllowBlockOnSessionReuse proves that a
+// reused session is re-checked against allow/block rules even when
+// security_version is aligned (Q21 / Ask Docs Access-parity).
+func TestAuthorizePublicAccess_ReevaluatesAllowBlockOnSessionReuse(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	secret := "test-link-session-secret"
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+	}); err != nil {
+		t.Fatalf("allow alice: %v", err)
+	}
+
+	access, err := f.svc.Access(f.ctx, f.link.PublicToken, AccessRequest{Email: "alice@vc.com"})
+	if err != nil {
+		t.Fatalf("access as alice: %v", err)
+	}
+
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "bob@vc.com", Action: "allow"},
+		{RuleType: "email", Value: "alice@vc.com", Action: "block"},
+	}); err != nil {
+		t.Fatalf("block alice: %v", err)
+	}
+
+	fresh, err := f.svc.GetByPublicToken(f.ctx, f.link.PublicToken)
+	if err != nil {
+		t.Fatalf("reload link: %v", err)
+	}
+
+	// Align security_version so sessionSecurityConfigChanged is false — isolate
+	// allow/block recheck from version-bump invalidation.
+	sessionTok, err := signLinkSession(LinkSession{
+		PublicToken:     f.link.PublicToken,
+		Email:           "alice@vc.com",
+		VisitorID:       access.VisitorID,
+		SecurityVersion: fresh.SecurityVersion,
+	}, secret)
+	if err != nil {
+		t.Fatalf("sign session: %v", err)
+	}
+
+	h := &Handler{service: f.svc, cfg: &config.Config{LinkSessionSecret: secret}}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/ask", nil)
+	c.Request.Header.Set("X-Link-Session", sessionTok)
+
+	_, err = h.AuthorizePublicAccess(c, f.link.PublicToken)
+	if err == nil {
+		t.Fatal("expected blocked email to be rejected on session reuse")
+	}
+	if !errors.Is(err, ErrBlockedEmail) {
+		t.Fatalf("expected ErrBlockedEmail, got %v", err)
+	}
+}
+
+// TestAuthorizePublicAccess_ReevaluatesNotAllowedOnSessionReuse proves removal
+// from the allow list also revokes Ask Docs / asset session reuse (Q21).
+func TestAuthorizePublicAccess_ReevaluatesNotAllowedOnSessionReuse(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	secret := "test-link-session-secret"
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "alice@vc.com", Action: "allow"},
+	}); err != nil {
+		t.Fatalf("allow alice: %v", err)
+	}
+
+	access, err := f.svc.Access(f.ctx, f.link.PublicToken, AccessRequest{Email: "alice@vc.com"})
+	if err != nil {
+		t.Fatalf("access as alice: %v", err)
+	}
+
+	// Alice removed from allow list (only bob remains) — not an explicit block.
+	if err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "bob@vc.com", Action: "allow"},
+	}); err != nil {
+		t.Fatalf("replace allow list: %v", err)
+	}
+
+	fresh, err := f.svc.GetByPublicToken(f.ctx, f.link.PublicToken)
+	if err != nil {
+		t.Fatalf("reload link: %v", err)
+	}
+
+	sessionTok, err := signLinkSession(LinkSession{
+		PublicToken:     f.link.PublicToken,
+		Email:           "alice@vc.com",
+		VisitorID:       access.VisitorID,
+		SecurityVersion: fresh.SecurityVersion,
+	}, secret)
+	if err != nil {
+		t.Fatalf("sign session: %v", err)
+	}
+
+	h := &Handler{service: f.svc, cfg: &config.Config{LinkSessionSecret: secret}}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/ask", nil)
+	c.Request.Header.Set("X-Link-Session", sessionTok)
+
+	_, err = h.AuthorizePublicAccess(c, f.link.PublicToken)
+	if err == nil {
+		t.Fatal("expected not-allowed email to be rejected on session reuse")
+	}
+	if !errors.Is(err, ErrNotAllowedEmail) {
+		t.Fatalf("expected ErrNotAllowedEmail, got %v", err)
+	}
+}
+
+// TestAuthorizePublicAccess_RejectsUnsatisfiedEmailVerificationGate locks gate
+// parity with page/asset access: a session that does not prove email verification
+// cannot reuse access when the link requires it.
+func TestAuthorizePublicAccess_RejectsUnsatisfiedEmailVerificationGate(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+
+	secret := "test-link-session-secret"
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	docID := uuid.UUID(f.link.DocumentID.Bytes).String()
+
+	contact, err := f.q.CreateContact(f.ctx, db.CreateContactParams{
+		WorkspaceID: f.workspace.ID,
+		Email:       pgtype.Text{String: "alice@vc.com", Valid: true},
+		Name:        pgtype.Text{String: "Alice", Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("create contact: %v", err)
+	}
+
+	verifiedLink, err := f.svc.CreateLink(f.ctx, userID, wsID, CreateLinkRequest{
+		DocumentID:               docID,
+		Name:                     "Verified Ask Docs Link",
+		PermissionType:           "public",
+		RequireEmailVerification: true,
+		ContactIDs:               []string{uuid.UUID(contact.ID.Bytes).String()},
+	})
+	if err != nil {
+		t.Fatalf("create verified link: %v", err)
+	}
+
+	sessionTok, err := signLinkSession(LinkSession{
+		PublicToken:     verifiedLink.PublicToken,
+		Email:           "alice@vc.com",
+		EmailVerified:   false,
+		VisitorID:       "visitor-1",
+		SecurityVersion: verifiedLink.SecurityVersion,
+	}, secret)
+	if err != nil {
+		t.Fatalf("sign session: %v", err)
+	}
+
+	h := &Handler{service: f.svc, cfg: &config.Config{LinkSessionSecret: secret}}
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/pages", nil)
+	c.Request.Header.Set("X-Link-Session", sessionTok)
+
+	_, err = h.AuthorizePublicAccess(c, verifiedLink.PublicToken)
+	if err == nil {
+		t.Fatal("expected unverified session to be rejected when email verification is required")
+	}
+	if !errors.Is(err, ErrRequiresEmail) && !errors.Is(err, ErrRequiresEmailCode) {
+		t.Fatalf("expected email gate error, got %v", err)
 	}
 }

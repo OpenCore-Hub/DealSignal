@@ -37,6 +37,10 @@ import type {
   WorkspaceSettings,
   VisitorQuestion,
   FileRequest,
+  AskDocsAuditEntry,
+  AskDocsAuditDetail,
+  DealRoomKnowledgeBase,
+  DealRoomKnowledgeBaseSelection,
 } from "@/types";
 import { request } from "@/lib/apiClient";
 import {
@@ -516,10 +520,11 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  uploadDocument: (file: File, category?: string) => {
+  uploadDocument: (file: File, category?: string, opts?: { skipEmbedding?: boolean }) => {
     const formData = new FormData();
     formData.append("file", file);
     if (category) formData.append("category", category);
+    if (opts?.skipEmbedding) formData.append("skip_embedding", "true");
     return request<Document>(getWorkspaceSlug(), "/documents", {
       method: "POST",
       body: formData,
@@ -672,6 +677,35 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
+  // Ask Docs audit (link + room)
+  listLinkAskDocsAudit: (linkId: string, params: { archived?: boolean } = {}) => {
+    const search = new URLSearchParams();
+    if (params.archived) search.set("archived", "true");
+    const qs = search.toString();
+    return request<{ data: AskDocsAuditEntry[] }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
+    );
+  },
+  getLinkAskDocsAudit: (linkId: string, sessionId: string) =>
+    request<AskDocsAuditDetail>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask-docs-audit/${sessionId}`,
+    ),
+  listRoomAskDocsAudit: (
+    roomId: string,
+    params: { archived?: boolean; linkId?: string } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.archived) search.set("archived", "true");
+    if (params.linkId) search.set("link_id", params.linkId);
+    const qs = search.toString();
+    return request<{ data: AskDocsAuditEntry[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
+    );
+  },
+
   getContacts: () =>
     request<{ data: Contact[] }>(getWorkspaceSlug(), "/contacts"),
   createContact: (payload: { email: string; name?: string }) =>
@@ -740,6 +774,34 @@ export const api = {
       method: "DELETE",
     }),
 
+  // Deal-room knowledge base (Ask Docs corpus)
+  getDealRoomKnowledgeBase: (roomId: string) =>
+    request<DealRoomKnowledgeBase>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge-base`),
+  createDealRoomKnowledgeBase: (roomId: string, selection: DealRoomKnowledgeBaseSelection = {}) =>
+    request<DealRoomKnowledgeBase>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge-base`, {
+      method: "POST",
+      body: JSON.stringify({
+        folder_paths: selection.folder_paths ?? [],
+        document_ids: selection.document_ids ?? [],
+      }),
+    }),
+  rebuildDealRoomKnowledgeBase: (roomId: string, selection?: DealRoomKnowledgeBaseSelection) =>
+    request<DealRoomKnowledgeBase>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge-base/rebuild`,
+      {
+        method: "POST",
+        body: JSON.stringify(
+          selection
+            ? {
+                folder_paths: selection.folder_paths ?? [],
+                document_ids: selection.document_ids ?? [],
+              }
+            : {},
+        ),
+      },
+    ),
+
   // Deal room members
   getDealRoomMembers: (roomId: string) =>
     request<{ data: DealRoomMember[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members`),
@@ -804,12 +866,18 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  publicAssistantChat: (payload: { message: string; session_id?: string }, sessionToken: string) =>
+  publicAssistantChat: (
+    publicToken: string,
+    payload: { message: string; session_id?: string },
+    sessionToken: string
+  ) =>
     request<{
       session_id: string;
       answer: string;
       evidence?: Evidence[];
-    }>(undefined, "/v1/public/assistant/chat", {
+      result_status?: string;
+      suggest_ask_host?: boolean;
+    }>(undefined, `/v1/public/links/${encodeURIComponent(publicToken)}/assistant/chat`, {
       method: "POST",
       body: JSON.stringify(payload),
       skipAuth: true,

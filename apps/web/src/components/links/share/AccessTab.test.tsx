@@ -28,7 +28,11 @@ function renderAccessTab(
   errors: Record<string, string> = {},
   isDealRoomLink = true,
   documents: { id: string; title: string }[] = [],
-  passwordAlreadySet = false
+  passwordAlreadySet = false,
+  extras: {
+    knowledgeBaseStatus?: import("@/types").DealRoomKnowledgeBaseStatus | null;
+    knowledgeBaseHref?: string;
+  } = {}
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -40,6 +44,8 @@ function renderAccessTab(
         isDealRoomLink={isDealRoomLink}
         documents={documents}
         passwordAlreadySet={passwordAlreadySet}
+        knowledgeBaseStatus={extras.knowledgeBaseStatus}
+        knowledgeBaseHref={extras.knowledgeBaseHref}
       />
     </Wrapper>
   );
@@ -237,24 +243,95 @@ describe("AccessTab", () => {
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("counts all functional advanced switches in the advanced badge", () => {
+  it("counts Visitor Ask as one when both Ask Docs and Ask Host are enabled", () => {
     renderAccessTab({
       ...baseDraft,
       aiCopilotEnabled: true,
       enableFileRequests: true,
       enableQaConversations: true,
     });
-    expect(screen.getByText("3 enabled")).toBeInTheDocument();
+    // Visitor Ask (Docs+Host) = 1, file requests = 1 → 2
+    expect(screen.getByText("2 enabled")).toBeInTheDocument();
+  });
+
+  it("renders Visitor Ask master with Ask Docs and Ask Host sub-channels", () => {
+    renderAccessTab({ ...baseDraft, aiCopilotEnabled: true });
+    fireEvent.click(screen.getByText(/advanced/i));
+    expect(screen.getByText(/Visitor Ask/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Ask Docs/i })).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /Ask Host/i })).toBeInTheDocument();
+    expect(screen.queryByText(/AI Agents/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
+  });
+
+  it("disables Ask Docs and shows KB guide when room knowledge base is missing", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, enableQaConversations: true },
+      {},
+      true,
+      [],
+      false,
+      {
+        knowledgeBaseStatus: "none",
+        knowledgeBaseHref: "/acme/deal-rooms/room-1?tab=documents",
+      }
+    );
+    fireEvent.click(screen.getByText(/advanced/i));
+
+    const askDocs = screen.getByRole("switch", { name: /Ask Docs/i });
+    expect(askDocs).toBeDisabled();
+    expect(
+      screen.getByText(/Create or rebuild the room knowledge base before enabling Ask Docs/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open knowledge base/i })).toHaveAttribute(
+      "href",
+      "/acme/deal-rooms/room-1?tab=documents"
+    );
+
+    fireEvent.click(askDocs);
+    expect(updateDraft).not.toHaveBeenCalledWith(
+      expect.objectContaining({ aiCopilotEnabled: true })
+    );
+  });
+
+  it("allows Ask Docs when room knowledge base is ready", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, enableQaConversations: true },
+      {},
+      true,
+      [],
+      false,
+      { knowledgeBaseStatus: "ready" }
+    );
+    fireEvent.click(screen.getByText(/advanced/i));
+
+    const askDocs = screen.getByRole("switch", { name: /Ask Docs/i });
+    expect(askDocs).not.toBeDisabled();
+    fireEvent.click(askDocs);
+    expect(updateDraft).toHaveBeenCalledWith({ aiCopilotEnabled: true });
+  });
+
+  it("turning off Visitor Ask master clears both Ask Docs and Ask Host", () => {
+    const { updateDraft } = renderAccessTab({
+      ...baseDraft,
+      aiCopilotEnabled: true,
+      enableQaConversations: true,
+    });
+    fireEvent.click(screen.getByText(/advanced/i));
+    fireEvent.click(screen.getByRole("switch", { name: /Visitor Ask/i }));
+    expect(updateDraft).toHaveBeenCalledWith({
+      aiCopilotEnabled: false,
+      enableQaConversations: false,
+    });
   });
 
   it("renders all advanced options when section is expanded", () => {
     renderAccessTab({ ...baseDraft, aiCopilotEnabled: true });
     // Click the Advanced section header to expand
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByText(/AI Agents/i)).toBeInTheDocument();
+    expect(screen.getByText(/Visitor Ask/i)).toBeInTheDocument();
     expect(screen.getByText(/file requests/i)).toBeInTheDocument();
     expect(screen.getByText(/index file/i)).toBeInTheDocument();
-    expect(screen.getByText(/Q&A conversations/i)).toBeInTheDocument();
   });
 
   it("enables functional advanced switches except screenshot protection", () => {
@@ -262,7 +339,7 @@ describe("AccessTab", () => {
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
     expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
-    expect(screen.getByRole("switch", { name: /Q&A conversations/i })).not.toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Visitor Ask/i })).not.toBeDisabled();
   });
 
   it("displays validation errors", () => {

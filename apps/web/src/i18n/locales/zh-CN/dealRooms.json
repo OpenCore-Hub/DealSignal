@@ -277,6 +277,33 @@
       "more": "另有 {{count}} 个"
     }
   },
+  "knowledgeBase": {
+    "title": "知识库",
+    "description": "勾选「问文档」可用的文档范围。在链接上开启问文档前，请先创建或重建知识库。",
+    "status": {
+      "none": "未创建 — 开启「问文档」前请先创建知识库",
+      "building": "构建中 {{done}}/{{total}}",
+      "ready": "已就绪 · 已纳入 {{count}} 个文档",
+      "stale": "已过期 — 建议重建（问文档仍可用）",
+      "failed": "构建失败 — 请重新创建"
+    },
+    "create": "创建知识库",
+    "creating": "创建中...",
+    "rebuild": "重建知识库",
+    "rebuilding": "重建中...",
+    "selectDocuments": "纳入文档",
+    "selectFolders": "纳入文件夹",
+    "confirmCreate": "创建",
+    "confirmRebuild": "重建",
+    "confirmRebuildTitle": "确认重建知识库？",
+    "confirmRebuildBody": "重建完成前，访客仍使用旧索引。",
+    "cancel": "取消",
+    "forbidden": "仅数据室所有者和管理员可管理知识库。",
+    "loadFailed": "加载知识库失败",
+    "createFailed": "创建知识库失败",
+    "rebuildFailed": "重建知识库失败",
+    "rebuildHint": "重建完成前，访客仍使用旧索引。"
+  },
   "participants": {
     "title": "访客"
   },

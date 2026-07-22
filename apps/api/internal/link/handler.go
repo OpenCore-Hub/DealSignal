@@ -26,6 +26,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -34,12 +35,19 @@ import (
 
 // Handler exposes link endpoints.
 type Handler struct {
-	service     *Service
-	analytics   *analytics.Service
-	suggestions *suggestions.Service
-	storage     *storage.Client
-	cfg         *config.Config
-	publisher   EventPublisher
+	service      *Service
+	analytics    *analytics.Service
+	suggestions  *suggestions.Service
+	storage      *storage.Client
+	cfg          *config.Config
+	publisher    EventPublisher
+	askLimiter   visitorask.Limiter
+	securitySink SecurityEventSink
+}
+
+// SecurityEventSink records high-risk visitor security events (Ask Host limits, gates).
+type SecurityEventSink interface {
+	RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error
 }
 
 // EventPublisher is the interface for publishing real-time events.
@@ -50,6 +58,50 @@ type EventPublisher interface {
 // SetEventPublisher sets the event publisher for SSE push.
 func (h *Handler) SetEventPublisher(p EventPublisher) {
 	h.publisher = p
+}
+
+// SetAskLimiter attaches visitor Ask Host rate limiting (defaults to service Redis).
+func (h *Handler) SetAskLimiter(lim visitorask.Limiter) {
+	h.askLimiter = lim
+}
+
+// SetSecuritySink attaches an optional security-event recorder (tests / overrides).
+func (h *Handler) SetSecuritySink(s SecurityEventSink) {
+	h.securitySink = s
+}
+
+func (h *Handler) visitorAskLimiter() visitorask.Limiter {
+	if h.askLimiter != nil {
+		return h.askLimiter
+	}
+	if h.service != nil {
+		return h.service.redisClient
+	}
+	return nil
+}
+
+func (h *Handler) recordAskSecurityEvent(ctx context.Context, row db.Link, eventType, visitorID, email, ip, ua, reason string) {
+	if h.securitySink != nil {
+		_ = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+		return
+	}
+	if h.analytics != nil {
+		_ = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	}
+}
+
+// rejectIfAskHostLimited returns true when the visitor exceeded Ask Host limits
+// (response already written: 429 + high-risk security event).
+func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
+	if visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID) {
+		return false
+	}
+	h.recordAskSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
+	c.JSON(http.StatusTooManyRequests, gin.H{
+		"code":    "rate_limit_exceeded",
+		"message": "too many Ask Host requests, please try again later",
+	})
+	return true
 }
 
 // NewHandler creates a link handler.
@@ -251,30 +303,30 @@ type CreateRequest struct {
 
 // UpdateRequest is the JSON body for updating a link.
 type UpdateRequest struct {
-	DocumentIDs              []string `json:"document_ids,omitempty"`
-	Name                     string   `json:"name,omitempty"`
-	PermissionType           string   `json:"permission_type,omitempty"`
-	RequireEmail             bool     `json:"require_email,omitempty"`
-	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequireNDA               bool     `json:"require_nda,omitempty"`
-	NDADocumentID            string   `json:"nda_document_id,omitempty"`
-	NDATemplateID            string   `json:"nda_template_id,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
-	Password                 string   `json:"password,omitempty"`
-	ExpiresAt                *string  `json:"expires_at,omitempty"`
-	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
-	DownloadEnabled          *bool    `json:"download_enabled,omitempty"`
-	WatermarkEnabled         *bool    `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled         *bool    `json:"ai_copilot_enabled,omitempty"`
-	ContactIDs               []string `json:"contact_ids,omitempty"`
-	CustomDomain             string   `json:"custom_domain,omitempty"`
-	Tags                     []string `json:"tags,omitempty"`
-	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
-	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
-	FileRequestsEnabled      *bool    `json:"file_requests_enabled,omitempty"`
-	IndexFileEnabled         *bool    `json:"index_file_enabled,omitempty"`
-	ScreenshotProtectionEnabled *bool `json:"screenshot_protection_enabled,omitempty"`
-	TargetFolderPath         string   `json:"target_folder_path,omitempty"`
+	DocumentIDs                 []string `json:"document_ids,omitempty"`
+	Name                        string   `json:"name,omitempty"`
+	PermissionType              string   `json:"permission_type,omitempty"`
+	RequireEmail                bool     `json:"require_email,omitempty"`
+	RequireEmailVerification    bool     `json:"require_email_verification,omitempty"`
+	RequireNDA                  bool     `json:"require_nda,omitempty"`
+	NDADocumentID               string   `json:"nda_document_id,omitempty"`
+	NDATemplateID               string   `json:"nda_template_id,omitempty"`
+	RequirePassword             bool     `json:"require_password,omitempty"`
+	Password                    string   `json:"password,omitempty"`
+	ExpiresAt                   *string  `json:"expires_at,omitempty"`
+	MaxAccessCount              *int32   `json:"max_access_count,omitempty"`
+	DownloadEnabled             *bool    `json:"download_enabled,omitempty"`
+	WatermarkEnabled            *bool    `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled            *bool    `json:"ai_copilot_enabled,omitempty"`
+	ContactIDs                  []string `json:"contact_ids,omitempty"`
+	CustomDomain                string   `json:"custom_domain,omitempty"`
+	Tags                        []string `json:"tags,omitempty"`
+	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
+	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled         *bool    `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled            *bool    `json:"index_file_enabled,omitempty"`
+	ScreenshotProtectionEnabled *bool    `json:"screenshot_protection_enabled,omitempty"`
+	TargetFolderPath            string   `json:"target_folder_path,omitempty"`
 	// FolderPaths is the allowlist of deal-room folders when mode is allowlist.
 	// Empty allowlist denies all documents. Omit to leave unchanged.
 	FolderPaths []string `json:"folder_paths,omitempty"`
@@ -447,25 +499,25 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	}
 
 	link, err := h.service.UpdateLink(c.Request.Context(), linkID, workspaceID, UpdateLinkRequest{
-		DocumentIDs:              req.DocumentIDs,
-		FolderPaths:              req.FolderPaths,
-		FolderScopeMode:          req.FolderScopeMode,
-		Name:                     req.Name,
-		PermissionType:           req.PermissionType,
-		RequireEmail:             req.RequireEmail,
-		RequireEmailVerification: req.RequireEmailVerification,
+		DocumentIDs:                 req.DocumentIDs,
+		FolderPaths:                 req.FolderPaths,
+		FolderScopeMode:             req.FolderScopeMode,
+		Name:                        req.Name,
+		PermissionType:              req.PermissionType,
+		RequireEmail:                req.RequireEmail,
+		RequireEmailVerification:    req.RequireEmailVerification,
 		RequireNDA:                  req.RequireNDA,
 		NDADocumentID:               req.NDADocumentID,
 		NDATemplateID:               req.NDATemplateID,
 		RequirePassword:             req.RequirePassword,
-		Password:                 req.Password,
-		ExpiresAt:                expiresAt,
-		MaxAccessCount:           req.MaxAccessCount,
-		DownloadEnabled:          downloadEnabled,
-		WatermarkEnabled:         watermarkEnabled,
-		AICopilotEnabled:         aiCopilotEnabled,
-		QaEnabled:                qaEnabled,
-		FileRequestsEnabled:      fileRequestsEnabled,
+		Password:                    req.Password,
+		ExpiresAt:                   expiresAt,
+		MaxAccessCount:              req.MaxAccessCount,
+		DownloadEnabled:             downloadEnabled,
+		WatermarkEnabled:            watermarkEnabled,
+		AICopilotEnabled:            aiCopilotEnabled,
+		QaEnabled:                   qaEnabled,
+		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
 		ScreenshotProtectionEnabled: screenshotProtectionEnabled,
 		TargetFolderPath:            req.TargetFolderPath,
@@ -487,6 +539,10 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
 			return
 		}
+		if errors.Is(err, ErrKnowledgeBaseRequired) {
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_required", "message": err.Error()})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -495,6 +551,9 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
+	}
+	if w := h.service.AskDocsCoverageWarning(c.Request.Context(), link); w != nil {
+		item["warnings"] = []AskDocsCoverageWarning{*w}
 	}
 	c.JSON(http.StatusOK, item)
 }
@@ -816,27 +875,27 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 
 // CreateDealRoomLinkRequest is the JSON body for creating a deal-room share link.
 type CreateDealRoomLinkRequest struct {
-	Name                     string   `json:"name,omitempty"`
-	RequireEmail             bool     `json:"require_email,omitempty"`
-	RequireEmailVerification bool     `json:"require_email_verification,omitempty"`
-	RequireNDA               bool     `json:"require_nda,omitempty"`
-	NDADocumentID            string   `json:"nda_document_id,omitempty"`
-	NDATemplateID            string   `json:"nda_template_id,omitempty"`
-	RequirePassword          bool     `json:"require_password,omitempty"`
-	Password                 string   `json:"password,omitempty"`
-	AllowedEmails            []string `json:"allowed_emails,omitempty"`
-	BlockedEmails            []string `json:"blocked_emails,omitempty"`
-	ExpiresAt                *string  `json:"expires_at,omitempty"`
-	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
-	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
-	QaEnabled                bool     `json:"qa_enabled,omitempty"`
-	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
-	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
-	ScreenshotProtectionEnabled bool  `json:"screenshot_protection_enabled,omitempty"`
-	CustomDomain             string   `json:"custom_domain,omitempty"`
-	Tags                     []string `json:"tags,omitempty"`
-	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
+	Name                        string   `json:"name,omitempty"`
+	RequireEmail                bool     `json:"require_email,omitempty"`
+	RequireEmailVerification    bool     `json:"require_email_verification,omitempty"`
+	RequireNDA                  bool     `json:"require_nda,omitempty"`
+	NDADocumentID               string   `json:"nda_document_id,omitempty"`
+	NDATemplateID               string   `json:"nda_template_id,omitempty"`
+	RequirePassword             bool     `json:"require_password,omitempty"`
+	Password                    string   `json:"password,omitempty"`
+	AllowedEmails               []string `json:"allowed_emails,omitempty"`
+	BlockedEmails               []string `json:"blocked_emails,omitempty"`
+	ExpiresAt                   *string  `json:"expires_at,omitempty"`
+	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
+	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
+	AICopilotEnabled            bool     `json:"ai_copilot_enabled,omitempty"`
+	QaEnabled                   bool     `json:"qa_enabled,omitempty"`
+	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
+	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
+	ScreenshotProtectionEnabled bool     `json:"screenshot_protection_enabled,omitempty"`
+	CustomDomain                string   `json:"custom_domain,omitempty"`
+	Tags                        []string `json:"tags,omitempty"`
+	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
 	// FolderPaths is the allowlist of deal-room folders. Empty deny-all.
 	// Creates always persist folder_scope_mode=allowlist.
 	FolderPaths []string `json:"folder_paths,omitempty"`
@@ -861,18 +920,18 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	roomID := c.Param("roomId")
 
 	link, err := h.service.CreateDealRoomLink(c.Request.Context(), userID, workspaceID, roomID, DealRoomLinkRequest{
-		Name:                     req.Name,
-		RequireEmail:             req.RequireEmail,
-		RequireEmailVerification: req.RequireEmailVerification,
-		RequireNDA:               req.RequireNDA,
-		NDADocumentID:            req.NDADocumentID,
-		NDATemplateID:            req.NDATemplateID,
-		RequirePassword:          req.RequirePassword,
-		Password:                 req.Password,
-		AllowedEmails:            req.AllowedEmails,
-		BlockedEmails:            req.BlockedEmails,
-		ExpiresAt:                expiresAt,
-		DownloadEnabled:          req.DownloadEnabled,
+		Name:                        req.Name,
+		RequireEmail:                req.RequireEmail,
+		RequireEmailVerification:    req.RequireEmailVerification,
+		RequireNDA:                  req.RequireNDA,
+		NDADocumentID:               req.NDADocumentID,
+		NDATemplateID:               req.NDATemplateID,
+		RequirePassword:             req.RequirePassword,
+		Password:                    req.Password,
+		AllowedEmails:               req.AllowedEmails,
+		BlockedEmails:               req.BlockedEmails,
+		ExpiresAt:                   expiresAt,
+		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
 		AICopilotEnabled:            req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
@@ -890,6 +949,11 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseRequired):
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    "knowledge_base_required",
+				"message": err.Error(),
+			})
 		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		default:
@@ -902,6 +966,9 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
+	}
+	if w := h.service.AskDocsCoverageWarning(c.Request.Context(), link); w != nil {
+		item["warnings"] = []AskDocsCoverageWarning{*w}
 	}
 	c.JSON(http.StatusCreated, item)
 }
@@ -1162,6 +1229,8 @@ func (h *Handler) Create(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+		case errors.Is(err, ErrKnowledgeBaseRequired):
+			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_required", "message": err.Error()})
 		case errors.Is(err, ErrInvalidPermission):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
 		default:
@@ -1421,11 +1490,11 @@ func (h *Handler) ndaTemplateMeta(ctx context.Context, link db.Link) gin.H {
 		return nil
 	}
 	return gin.H{
-		"id":                  uuidToString(tpl.ID),
-		"name":                tpl.Name,
-		"requireSignerName":   tpl.RequireSignerName,
-		"sourceDocumentId":    uuidToString(tpl.SourceDocumentID),
-		"contentSha256":       tpl.ContentSha256,
+		"id":                uuidToString(tpl.ID),
+		"name":              tpl.Name,
+		"requireSignerName": tpl.RequireSignerName,
+		"sourceDocumentId":  uuidToString(tpl.SourceDocumentID),
+		"contentSha256":     tpl.ContentSha256,
 	}
 }
 
@@ -1547,68 +1616,42 @@ func (h *Handler) PublicNDASignedDownload(c *gin.Context) {
 }
 
 // documentsForAccessResponse returns the documents that should be exposed to a
-// public visitor. For deal-room links it returns the deal room documents; for
-// document links it returns the linked documents or the legacy primary document.
+// public visitor. Scope matches AuthorizedDocumentIDs (Ask Docs retrieval).
 func (h *Handler) documentsForAccessResponse(ctx context.Context, link db.Link, token string) []gin.H {
-	documents := make([]gin.H, 0)
-
-	if link.DealRoomID.Valid {
-		drDocs, err := h.service.queries.ListDealRoomDocumentsWithMeta(ctx, link.DealRoomID)
-		if err != nil {
+	// Prefer path token when provided (callers pass the Access path token).
+	if token != "" {
+		link.PublicToken = token
+	}
+	docs, err := listAuthorizedDocuments(ctx, h.service.queries, link)
+	if err != nil {
+		if link.DealRoomID.Valid {
 			logger.ErrorCtx(ctx, "list deal room documents for access response failed", err,
 				logger.Attr("deal_room_id", uuidToString(link.DealRoomID)),
 			)
 		} else {
-			// If the link uses allowlist mode, restrict exposed documents.
-			// Empty allowlist exposes nothing. Legacy full mode exposes the whole room.
-			applyScope := dealRoomUsesFolderAllowlist(link)
-
-			for _, d := range drDocs {
-				if applyScope && !folderPathInDealRoomScope(link, d.FolderPath) {
-					continue
-				}
-				documents = append(documents, gin.H{
-					"id":         uuidToString(d.DocumentID),
-					"title":      d.DocumentTitle,
-					"sourceType": d.SourceType,
-					"pageCount":  d.PageCount,
-					"folderPath": d.FolderPath,
-				})
-			}
+			logger.ErrorCtx(ctx, "list link documents for access response failed", err,
+				logger.Attr("token", token),
+			)
 		}
-		return documents
+		return []gin.H{}
 	}
 
-	linkDocs, err := h.service.queries.ListLinkDocumentsByPublicToken(ctx, token)
-	if err != nil {
-		logger.ErrorCtx(ctx, "list link documents for access response failed", err,
-			logger.Attr("token", token),
-		)
-	}
-	for _, ld := range linkDocs {
-		documents = append(documents, gin.H{
-			"id":         uuidToString(ld.DocumentID),
-			"title":      ld.Title,
-			"sourceType": ld.SourceType,
-			"pageCount":  ld.PageCount,
-		})
-	}
-	// Fallback: single-document legacy links.
-	if len(documents) == 0 {
-		doc, err := h.service.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-			ID:          link.DocumentID,
-			WorkspaceID: link.WorkspaceID,
-		})
-		if err == nil {
-			documents = append(documents, gin.H{
-				"id":         uuidToString(doc.ID),
-				"title":      doc.Title,
-				"pageCount":  doc.PageCount.Int32,
-				"status":     doc.Status,
-				"sourceType": doc.SourceType,
-				"fileSize":   0,
-			})
+	documents := make([]gin.H, 0, len(docs))
+	for _, d := range docs {
+		item := gin.H{
+			"id":         d.ID.String(),
+			"title":      d.Title,
+			"sourceType": d.SourceType,
+			"pageCount":  d.PageCount,
 		}
+		if d.IncludeFolder {
+			item["folderPath"] = d.FolderPath
+		}
+		if d.IncludeMeta {
+			item["status"] = d.Status
+			item["fileSize"] = d.FileSize
+		}
+		documents = append(documents, item)
 	}
 	return documents
 }
@@ -1966,9 +2009,23 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				// re-authentication.
 				securityChanged := sessionSecurityGatesUnsatisfied(link, session)
 				if securityChanged {
-					_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+					if h.analytics != nil {
+						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+					}
 				}
 				if !securityChanged {
+					// Re-evaluate allow/block on every reuse (Q21). Rule changes
+					// also bump security_version, but Ask Docs / assets must not
+					// rely solely on that for revocation.
+					eval, evalErr := h.service.EvaluateAccessRules(c.Request.Context(), uuid.UUID(link.ID.Bytes).String(), session.Email)
+					if evalErr != nil {
+						return AccessResult{}, fmt.Errorf("evaluate access rules: %w", evalErr)
+					}
+					if !eval.Allowed {
+						ruleErr := mapRuleError(eval.Reason)
+						h.recordSecurityEventFromAccessError(c.Request.Context(), link, ruleErr, session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent())
+						return AccessResult{}, ruleErr
+					}
 					// Sliding session: re-sign with fresh ExpiresAt so the idle
 					// timeout resets on every request.
 					refreshed, err := refreshLinkSession(session, h.cfg.LinkSessionSecret)
@@ -2008,7 +2065,24 @@ func (h *Handler) writeSessionRefreshHeader(c *gin.Context, result AccessResult)
 }
 
 func (h *Handler) verifyPublicAccess(c *gin.Context) (AccessResult, error) {
-	return h.resolvePublicAccess(c, c.Query("token"))
+	// Prefer path-bound publicToken (Ask Host / file-requests); fall back to
+	// query token used by document page/asset endpoints.
+	token := c.Param("publicToken")
+	if token == "" {
+		token = c.Query("token")
+	}
+	return h.resolvePublicAccess(c, token)
+}
+
+// AuthorizePublicAccess exposes the shared public Access resolution for callers
+// that bind publicToken from the path (e.g. Ask Docs).
+func (h *Handler) AuthorizePublicAccess(c *gin.Context, publicToken string) (AccessResult, error) {
+	return h.resolvePublicAccess(c, publicToken)
+}
+
+// WriteAccessError maps Access/resolvePublicAccess failures to HTTP responses.
+func WriteAccessError(c *gin.Context, err error) {
+	mapAccessError(c, err)
 }
 
 // publicAccessRequestFromContext reads link access credentials from the
@@ -2138,6 +2212,9 @@ func securityEventFromError(err error) (eventType, reason string, gateFailure bo
 func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link db.Link, err error, visitorID, email, ip, ua string) {
 	eventType, reason, gateFailure := securityEventFromError(err)
 	if eventType == "" {
+		return
+	}
+	if h.analytics == nil {
 		return
 	}
 	_ = h.analytics.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
@@ -2789,6 +2866,10 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 	h.writeSessionRefreshHeader(c, result)
 	if !result.Link.QaEnabled {
 		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	linkID := uuid.UUID(result.Link.ID.Bytes).String()
+	if h.rejectIfAskHostLimited(c, result, linkID) {
 		return
 	}
 	var body struct {

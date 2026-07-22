@@ -63,7 +63,9 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 }
 
 // CreateDocument validates, stores the file and creates the document record.
-func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader) (Document, error) {
+// When skipEmbedding is true (deal-room uploads), ingestion creates preview
+// pages/chunks only and does not write vector embeddings.
+func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader, skipEmbedding bool) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {
 		return Document{}, err
@@ -112,10 +114,11 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	}
 
 	_, err = s.queries.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:    tenantUUID,
-		WorkspaceID: workspaceUUID,
-		DocumentID:  d.ID,
-		Status:      "queued",
+		TenantID:       tenantUUID,
+		WorkspaceID:    workspaceUUID,
+		DocumentID:     d.ID,
+		Status:         "queued",
+		SkipEmbedding:  skipEmbedding,
 	})
 	if err != nil {
 		return Document{}, fmt.Errorf("create ingestion job: %w", err)

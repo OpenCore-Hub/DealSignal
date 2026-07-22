@@ -59,6 +59,7 @@ type Service struct {
 	cfg          *config.Config
 	actionSyncer ActionSyncer
 	rateLimiter  RateLimiter
+	embedder     DocumentEmbedder
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
@@ -921,7 +922,7 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 		}
 		return db.DealRoomDocument{}, err
 	}
-	return s.queries.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
+	row, err := s.queries.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
 		TenantID:    room.TenantID,
 		WorkspaceID: room.WorkspaceID,
 		RoomID:      room.ID,
@@ -929,6 +930,17 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 		FolderPath:  folderPath,
 		SortOrder:   sortOrder,
 	})
+	if err != nil {
+		return db.DealRoomDocument{}, err
+	}
+	// Preview-only ingest: if the document is still queued/processing, ensure
+	// the worker will not auto-embed once it reaches the chunk-write step.
+	_ = s.queries.SetIngestionJobSkipEmbedding(ctx, db.SetIngestionJobSkipEmbeddingParams{
+		DocumentID:    doc.ID,
+		SkipEmbedding: true,
+	})
+	_ = s.MarkKnowledgeBaseStaleIfNeeded(ctx, room.ID, folderPath)
+	return row, nil
 }
 
 // RemoveDocument removes a document from a room. Only admins can remove.

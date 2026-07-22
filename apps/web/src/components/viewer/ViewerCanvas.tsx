@@ -231,6 +231,7 @@ export function ViewerCanvas({
           )}
           {!printWarning && screenshotProtectionEnabled && isInactive && (
             <div
+              // SPEC #36: never capture pointer events — Ask sidebar stays usable while blurred.
               className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-background/60 backdrop-blur-sm"
               data-testid="inactive-blur-overlay"
             >

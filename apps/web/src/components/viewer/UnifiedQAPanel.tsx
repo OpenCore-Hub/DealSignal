@@ -6,6 +6,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { useAIStore } from "@/stores/aiStore";
 import type { Evidence, VisitorQuestion, ChatMessage } from "@/types";
+import { suggestAskHostFromDraft } from "./visitorAskChannelHint";
 
 interface UnifiedQAPanelProps {
   token: string;
@@ -23,6 +24,9 @@ interface UIMessage {
   content: string;
   createdAt: string;
   evidences?: Evidence[];
+  resultStatus?: string;
+  suggestAskHost?: boolean;
+  pendingReply?: boolean;
 }
 
 const creds = (token?: string) => (token ? { sessionToken: token } : undefined);
@@ -115,6 +119,8 @@ export function UnifiedQAPanel({
           content: resolveAIMessage(msg, t),
           createdAt: msg.createdAt,
           evidences: msg.evidences,
+          resultStatus: msg.resultStatus,
+          suggestAskHost: msg.suggestAskHost,
         });
       });
     }
@@ -125,6 +131,7 @@ export function UnifiedQAPanel({
           source: "you",
           content: q.question,
           createdAt: q.created_at,
+          pendingReply: q.status === "pending",
         });
         if (q.answer && q.status === "answered") {
           list.push({
@@ -148,7 +155,11 @@ export function UnifiedQAPanel({
 
       if (mode === "ai") {
         setInput("");
-        await sendMessage(text, { documentId, publicSessionToken: sessionTokenRef.current });
+        await sendMessage(text, {
+          documentId,
+          publicToken: token,
+          publicSessionToken: sessionTokenRef.current,
+        });
         return;
       }
 
@@ -175,6 +186,8 @@ export function UnifiedQAPanel({
   const showModeToggle = aiCopilotEnabled && qaEnabled;
   const busy = aiPending || ownerSubmitting;
   const placeholder = mode === "ai" ? t("documents:viewer.qaAIPlaceholder") : t("documents:viewer.qaOwnerPlaceholder");
+  const showChannelHint =
+    mode === "ai" && Boolean(qaEnabled) && Boolean(aiCopilotEnabled) && suggestAskHostFromDraft(input);
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -191,7 +204,36 @@ export function UnifiedQAPanel({
         ) : allMessages.length === 0 ? (
           <div className="flex flex-col items-center py-10 text-center text-muted-foreground">
             <ChatCenteredDots size={28} className="mb-3 opacity-25" />
-            <p className="text-sm font-medium">{t("documents:viewer.qaEmptyUnified")}</p>
+            <p className="text-sm font-medium">
+              {showModeToggle
+                ? t("documents:viewer.qaEmptyHint")
+                : t("documents:viewer.qaEmptyUnified")}
+            </p>
+            {showModeToggle && (
+              <div className="mt-4 flex w-full max-w-sm flex-col gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-auto whitespace-normal px-3 py-2 text-xs font-normal"
+                  onClick={() => {
+                    setMode("ai");
+                    setInput(t("documents:viewer.qaEmptyPromptSummarize"));
+                  }}
+                >
+                  {t("documents:viewer.qaEmptyPromptSummarize")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-auto whitespace-normal px-3 py-2 text-xs font-normal"
+                  onClick={() => setMode("owner")}
+                >
+                  {t("documents:viewer.qaEmptyPromptMissing")}
+                </Button>
+              </div>
+            )}
           </div>
         ) : (
           allMessages.map((msg) => {
@@ -223,6 +265,26 @@ export function UnifiedQAPanel({
                       <EvidenceCard key={ev.chunk_id} evidence={ev} />
                     ))}
                   </div>
+                  {msg.pendingReply && (
+                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                      {t("documents:viewer.qaPendingReply")}
+                    </span>
+                  )}
+                  {msg.source === "ai" &&
+                    msg.resultStatus === "no_evidence" &&
+                    msg.suggestAskHost &&
+                    qaEnabled &&
+                    mode === "ai" && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        className="mt-1 h-7 self-start text-xs"
+                        onClick={() => setMode("owner")}
+                      >
+                        {t("documents:viewer.qaSwitchToAskHost")}
+                      </Button>
+                    )}
                 </div>
               </div>
             );
@@ -269,6 +331,23 @@ export function UnifiedQAPanel({
               <User size={12} />
               {t("documents:viewer.qaModeOwner")}
             </button>
+          </div>
+        )}
+        {showChannelHint && (
+          <div
+            role="status"
+            className="rounded-md border border-border bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground"
+          >
+            <p>{t("documents:viewer.qaChannelHint")}</p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-1.5 h-7 text-xs"
+              onClick={() => setMode("owner")}
+            >
+              {t("documents:viewer.qaChannelHintSwitch")}
+            </Button>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex gap-2">

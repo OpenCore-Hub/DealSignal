@@ -8,6 +8,7 @@ import type {
   DealRoomFolderDocs,
   DealRoomMember,
   Link,
+  VisitorQuestion,
   WorkspaceMember,
 } from "@/types";
 import {
@@ -59,6 +60,7 @@ const initialState = {
 
 function resetMockState() {
   mockUsers.clear();
+  mockPublicQuestions.clear();
   mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
   mockDocuments.splice(0, mockDocuments.length, ...initialState.documents);
   mockLinks.splice(0, mockLinks.length, ...initialState.links);
@@ -77,6 +79,8 @@ interface MockUser {
   name: string;
 }
 const mockUsers = new Map<string, MockUser>();
+/** Per-link visitor Ask Host questions for public MSW e2e. */
+const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
 
 function generateId(prefix: string): string {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -436,6 +440,7 @@ export const handlers = [
     if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
     if (typeof payload.watermark_enabled === "boolean") link.watermarkEnabled = payload.watermark_enabled;
     if (typeof payload.ai_copilot_enabled === "boolean") link.aiCopilotEnabled = payload.ai_copilot_enabled;
+    if (typeof payload.qa_enabled === "boolean") link.qaEnabled = payload.qa_enabled;
     if (payload.contact_ids) link.contactIds = payload.contact_ids;
     return HttpResponse.json(link);
   }),
@@ -1379,6 +1384,11 @@ export const handlers = [
         permissionType: link.permissionType ?? "public",
         downloadEnabled: true,
         watermarkEnabled: false,
+        aiCopilotEnabled: Boolean(link.aiCopilotEnabled),
+        qaEnabled: Boolean(link.qaEnabled),
+        fileRequestsEnabled: Boolean(link.fileRequestsEnabled),
+        isBundle: Boolean(link.isBundle),
+        dealRoomId: link.dealRoomId,
       },
       document: publicDocument,
       documents: [publicDocument],
@@ -1389,6 +1399,33 @@ export const handlers = [
       requiresNda,
       sessionToken: "mock_session_token",
     });
+  }),
+
+  http.get("*/api/v1/public/links/:token/questions/me", ({ params }) => {
+    const token = params.token as string;
+    return HttpResponse.json({ data: mockPublicQuestions.get(token) ?? [] });
+  }),
+
+  http.post("*/api/v1/public/links/:token/questions", async ({ params, request }) => {
+    const token = params.token as string;
+    const body = (await request.json().catch(() => ({}))) as { question?: string };
+    const question = (body.question ?? "").trim();
+    if (!question) {
+      return HttpResponse.json({ code: "invalid_request", message: "question required" }, { status: 400 });
+    }
+    const row: VisitorQuestion = {
+      id: generateId("q"),
+      link_id: token,
+      visitor_id: "visitor_mock",
+      question,
+      status: "pending",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const list = mockPublicQuestions.get(token) ?? [];
+    list.push(row);
+    mockPublicQuestions.set(token, list);
+    return HttpResponse.json({ data: row }, { status: 201 });
   }),
 
   http.get("*/api/v1/public/documents/:documentId/pages", ({ params }) => {

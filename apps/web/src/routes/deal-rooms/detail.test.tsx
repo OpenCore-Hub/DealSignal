@@ -306,7 +306,7 @@ describe("DealRoomDetailPage", () => {
     });
 
     await waitFor(() => {
-      expect(uploadDocumentMock).toHaveBeenCalledWith(file);
+      expect(uploadDocumentMock).toHaveBeenCalledWith(file, undefined, { skipEmbedding: true });
     });
     expect(addDealRoomDocumentMock).toHaveBeenCalledWith("room-1", {
       document_id: "doc_new",

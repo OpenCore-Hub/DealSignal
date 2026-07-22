@@ -272,7 +272,7 @@ export function DealRoomDetailPage() {
       activeIntervalsRef.current.add(interval);
 
       try {
-        const doc = await api.uploadDocument(file);
+        const doc = await api.uploadDocument(file, undefined, { skipEmbedding: true });
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
 
@@ -508,6 +508,10 @@ export function DealRoomDetailPage() {
         >
           {tab === "documents" && (
             <DealRoomDocumentsHome
+              roomId={room.id}
+              isAdmin={true}
+              documents={allRoomDocuments}
+              folders={room.folders ?? []}
               activeLinkCount={activeLinkCount}
               failedDeliveries={navSignals.failedDeliveries}
               unreadQuestions={navSignals.unreadQuestions}
@@ -561,10 +565,12 @@ export function DealRoomDetailPage() {
 
           {tab === "analytics" && (
             <DealRoomAnalyticsTab
+              roomId={room.id}
               documentCount={room.documentCount}
               viewCount={viewCount}
               activeLinkCount={activeLinkCount}
               recentVisitors={room.recentVisitors}
+              links={roomLinks}
             />
           )}
 

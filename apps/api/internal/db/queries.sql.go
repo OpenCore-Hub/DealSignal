@@ -309,6 +309,46 @@ func (q *Queries) ConsumeLinkInvitation(ctx context.Context, id pgtype.UUID) (Co
 	return i, err
 }
 
+const countDocumentChunks = `-- name: CountDocumentChunks :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1
+`
+
+func (q *Queries) CountDocumentChunks(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentChunks, documentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countDocumentChunksWithEmbedding = `-- name: CountDocumentChunksWithEmbedding :one
+SELECT COUNT(*)::bigint
+FROM chunks
+WHERE document_id = $1
+  AND embedding IS NOT NULL
+`
+
+func (q *Queries) CountDocumentChunksWithEmbedding(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentChunksWithEmbedding, documentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countDocumentPages = `-- name: CountDocumentPages :one
+SELECT COUNT(*)::bigint
+FROM pages
+WHERE document_id = $1
+`
+
+func (q *Queries) CountDocumentPages(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDocumentPages, documentID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countDocumentsInFolder = `-- name: CountDocumentsInFolder :one
 SELECT COUNT(*) AS count
 FROM deal_room_documents
@@ -756,16 +796,21 @@ func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemPara
 }
 
 const createAssistantMessage = `-- name: CreateAssistantMessage :one
-INSERT INTO assistant_messages (session_id, role, content, evidence)
-VALUES ($1, $2, $3, $4)
-RETURNING id, session_id, role, content, evidence, created_at
+INSERT INTO assistant_messages (
+  session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
+RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 `
 
 type CreateAssistantMessageParams struct {
-	SessionID pgtype.UUID
-	Role      string
-	Content   string
-	Evidence  []byte
+	SessionID             pgtype.UUID
+	Role                  string
+	Content               string
+	Evidence              []byte
+	ResultStatus          pgtype.Text
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
 }
 
 func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistantMessageParams) (AssistantMessage, error) {
@@ -774,6 +819,9 @@ func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistan
 		arg.Role,
 		arg.Content,
 		arg.Evidence,
+		arg.ResultStatus,
+		arg.AuthorizedDocumentIds,
+		arg.RetrievalDocumentIds,
 	)
 	var i AssistantMessage
 	err := row.Scan(
@@ -783,6 +831,9 @@ func (q *Queries) CreateAssistantMessage(ctx context.Context, arg CreateAssistan
 		&i.Content,
 		&i.Evidence,
 		&i.CreatedAt,
+		&i.ResultStatus,
+		&i.AuthorizedDocumentIds,
+		&i.RetrievalDocumentIds,
 	)
 	return i, err
 }
@@ -1381,16 +1432,17 @@ func (q *Queries) CreateHubSpotSyncJob(ctx context.Context, arg CreateHubSpotSyn
 }
 
 const createIngestionJob = `-- name: CreateIngestionJob :one
-INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
-VALUES ($1, $2, $3, $4)
-RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status, skip_embedding)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 `
 
 type CreateIngestionJobParams struct {
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	DocumentID  pgtype.UUID
-	Status      string
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	DocumentID    pgtype.UUID
+	Status        string
+	SkipEmbedding bool
 }
 
 func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJobParams) (IngestionJob, error) {
@@ -1399,6 +1451,7 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		arg.WorkspaceID,
 		arg.DocumentID,
 		arg.Status,
+		arg.SkipEmbedding,
 	)
 	var i IngestionJob
 	err := row.Scan(
@@ -1411,6 +1464,7 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SkipEmbedding,
 	)
 	return i, err
 }
@@ -3021,6 +3075,21 @@ func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionPa
 	return err
 }
 
+const documentInAnyDealRoom = `-- name: DocumentInAnyDealRoom :one
+SELECT EXISTS(
+    SELECT 1 FROM deal_room_documents drd
+    JOIN documents d ON d.id = drd.document_id
+    WHERE drd.document_id = $1 AND d.deleted_at IS NULL
+) AS exists
+`
+
+func (q *Queries) DocumentInAnyDealRoom(ctx context.Context, documentID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, documentInAnyDealRoom, documentID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const existsLinkNameInDealRoom = `-- name: ExistsLinkNameInDealRoom :one
 SELECT EXISTS (
   SELECT 1
@@ -3270,6 +3339,35 @@ type GetAssistantSessionParams struct {
 
 func (q *Queries) GetAssistantSession(ctx context.Context, arg GetAssistantSessionParams) (AssistantSession, error) {
 	row := q.db.QueryRow(ctx, getAssistantSession, arg.ID, arg.WorkspaceID, arg.UserID)
+	var i AssistantSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.UserID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Title,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.VisitorID,
+	)
+	return i, err
+}
+
+const getAssistantSessionByIDAndLink = `-- name: GetAssistantSessionByIDAndLink :one
+SELECT id, workspace_id, user_id, link_id, document_id, title, created_at, updated_at, visitor_id
+FROM assistant_sessions
+WHERE id = $1 AND link_id = $2
+LIMIT 1
+`
+
+type GetAssistantSessionByIDAndLinkParams struct {
+	ID     pgtype.UUID
+	LinkID pgtype.UUID
+}
+
+func (q *Queries) GetAssistantSessionByIDAndLink(ctx context.Context, arg GetAssistantSessionByIDAndLinkParams) (AssistantSession, error) {
+	row := q.db.QueryRow(ctx, getAssistantSessionByIDAndLink, arg.ID, arg.LinkID)
 	var i AssistantSession
 	err := row.Scan(
 		&i.ID,
@@ -3723,6 +3821,34 @@ func (q *Queries) GetDealRoomFolderPaths(ctx context.Context, arg GetDealRoomFol
 	return folders, err
 }
 
+const getDealRoomKnowledgeBaseByRoom = `-- name: GetDealRoomKnowledgeBaseByRoom :one
+SELECT id, tenant_id, workspace_id, room_id, status, folder_paths, document_ids, active_document_ids, building_document_ids, active_generation, building_generation, error_message, created_at, updated_at
+FROM deal_room_knowledge_bases
+WHERE room_id = $1
+`
+
+func (q *Queries) GetDealRoomKnowledgeBaseByRoom(ctx context.Context, roomID pgtype.UUID) (DealRoomKnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, getDealRoomKnowledgeBaseByRoom, roomID)
+	var i DealRoomKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Status,
+		&i.FolderPaths,
+		&i.DocumentIds,
+		&i.ActiveDocumentIds,
+		&i.BuildingDocumentIds,
+		&i.ActiveGeneration,
+		&i.BuildingGeneration,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDocumentByID = `-- name: GetDocumentByID :one
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -4125,7 +4251,7 @@ func (q *Queries) GetFolderPermissionsByRoomAndEmail(ctx context.Context, arg Ge
 }
 
 const getIngestionJobByDocument = `-- name: GetIngestionJobByDocument :one
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1
@@ -4144,6 +4270,7 @@ func (q *Queries) GetIngestionJobByDocument(ctx context.Context, documentID pgty
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.SkipEmbedding,
 	)
 	return i, err
 }
@@ -7083,8 +7210,159 @@ func (q *Queries) ListArchivedDocumentsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const listAskDocsAuditSessionsByLink = `-- name: ListAskDocsAuditSessionsByLink :many
+SELECT
+  s.id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+WHERE s.link_id = $1
+  AND s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditSessionsByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
+
+type ListAskDocsAuditSessionsByLinkRow struct {
+	ID              pgtype.UUID
+	VisitorID       pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	QuestionPreview string
+	ResultStatus    string
+	EvidenceCount   int64
+}
+
+func (q *Queries) ListAskDocsAuditSessionsByLink(ctx context.Context, arg ListAskDocsAuditSessionsByLinkParams) ([]ListAskDocsAuditSessionsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByLink, arg.LinkID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditSessionsByLinkRow
+	for rows.Next() {
+		var i ListAskDocsAuditSessionsByLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitorID,
+			&i.CreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsAuditSessionsByRoom = `-- name: ListAskDocsAuditSessionsByRoom :many
+SELECT
+  s.id,
+  s.link_id,
+  s.visitor_id,
+  s.created_at,
+  COALESCE((
+    SELECT m.content
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'user'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS question_preview,
+  COALESCE((
+    SELECT m.result_status
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), '')::text AS result_status,
+  COALESCE((
+    SELECT COALESCE(jsonb_array_length(COALESCE(m.evidence, '[]'::jsonb)), 0)
+    FROM assistant_messages m
+    WHERE m.session_id = s.id AND m.role = 'assistant'
+    ORDER BY m.created_at DESC
+    LIMIT 1
+  ), 0)::bigint AS evidence_count
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
+WHERE s.visitor_id IS NOT NULL
+ORDER BY s.created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditSessionsByRoomParams struct {
+	DealRoomID pgtype.UUID
+	Limit      int32
+}
+
+type ListAskDocsAuditSessionsByRoomRow struct {
+	ID              pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       pgtype.Text
+	CreatedAt       pgtype.Timestamptz
+	QuestionPreview string
+	ResultStatus    string
+	EvidenceCount   int64
+}
+
+func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAskDocsAuditSessionsByRoomParams) ([]ListAskDocsAuditSessionsByRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByRoom, arg.DealRoomID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditSessionsByRoomRow
+	for rows.Next() {
+		var i ListAskDocsAuditSessionsByRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.CreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAssistantMessagesBySession = `-- name: ListAssistantMessagesBySession :many
-SELECT id, session_id, role, content, evidence, created_at
+SELECT id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 FROM assistant_messages
 WHERE session_id = $1
 ORDER BY created_at ASC
@@ -7112,6 +7390,9 @@ func (q *Queries) ListAssistantMessagesBySession(ctx context.Context, arg ListAs
 			&i.Content,
 			&i.Evidence,
 			&i.CreatedAt,
+			&i.ResultStatus,
+			&i.AuthorizedDocumentIds,
+			&i.RetrievalDocumentIds,
 		); err != nil {
 			return nil, err
 		}
@@ -8967,7 +9248,7 @@ func (q *Queries) ListPendingHubSpotSyncJobs(ctx context.Context, limit int32) (
 }
 
 const listPendingIngestionJobs = `-- name: ListPendingIngestionJobs :many
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
 FROM ingestion_jobs
 WHERE status = 'queued'
    OR (status = 'failed' AND attempts < 3)
@@ -8995,6 +9276,7 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.SkipEmbedding,
 		); err != nil {
 			return nil, err
 		}
@@ -11531,6 +11813,22 @@ func (q *Queries) SetFolderPermission(ctx context.Context, arg SetFolderPermissi
 	return i, err
 }
 
+const setIngestionJobSkipEmbedding = `-- name: SetIngestionJobSkipEmbedding :exec
+UPDATE ingestion_jobs
+SET skip_embedding = $2, updated_at = now()
+WHERE document_id = $1
+`
+
+type SetIngestionJobSkipEmbeddingParams struct {
+	DocumentID    pgtype.UUID
+	SkipEmbedding bool
+}
+
+func (q *Queries) SetIngestionJobSkipEmbedding(ctx context.Context, arg SetIngestionJobSkipEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, setIngestionJobSkipEmbedding, arg.DocumentID, arg.SkipEmbedding)
+	return err
+}
+
 const setLinkNDABinding = `-- name: SetLinkNDABinding :exec
 UPDATE links
 SET nda_template_id = $1,
@@ -11727,6 +12025,59 @@ type UpdateDealRoomDocumentsFolderPathParams struct {
 func (q *Queries) UpdateDealRoomDocumentsFolderPath(ctx context.Context, arg UpdateDealRoomDocumentsFolderPathParams) error {
 	_, err := q.db.Exec(ctx, updateDealRoomDocumentsFolderPath, arg.FolderPath, arg.RoomID, arg.FolderPath_2)
 	return err
+}
+
+const updateDealRoomKnowledgeBaseStatus = `-- name: UpdateDealRoomKnowledgeBaseStatus :one
+UPDATE deal_room_knowledge_bases
+SET status = $2,
+    active_document_ids = COALESCE($3::uuid[], active_document_ids),
+    building_document_ids = COALESCE($4::uuid[], building_document_ids),
+    active_generation = COALESCE($5::int, active_generation),
+    building_generation = $6::int,
+    error_message = $7,
+    updated_at = now()
+WHERE room_id = $1
+RETURNING id, tenant_id, workspace_id, room_id, status, folder_paths, document_ids, active_document_ids, building_document_ids, active_generation, building_generation, error_message, created_at, updated_at
+`
+
+type UpdateDealRoomKnowledgeBaseStatusParams struct {
+	RoomID              pgtype.UUID
+	Status              string
+	ActiveDocumentIds   []pgtype.UUID
+	BuildingDocumentIds []pgtype.UUID
+	ActiveGeneration    pgtype.Int4
+	BuildingGeneration  pgtype.Int4
+	ErrorMessage        pgtype.Text
+}
+
+func (q *Queries) UpdateDealRoomKnowledgeBaseStatus(ctx context.Context, arg UpdateDealRoomKnowledgeBaseStatusParams) (DealRoomKnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, updateDealRoomKnowledgeBaseStatus,
+		arg.RoomID,
+		arg.Status,
+		arg.ActiveDocumentIds,
+		arg.BuildingDocumentIds,
+		arg.ActiveGeneration,
+		arg.BuildingGeneration,
+		arg.ErrorMessage,
+	)
+	var i DealRoomKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Status,
+		&i.FolderPaths,
+		&i.DocumentIds,
+		&i.ActiveDocumentIds,
+		&i.BuildingDocumentIds,
+		&i.ActiveGeneration,
+		&i.BuildingGeneration,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateDealRoomSettings = `-- name: UpdateDealRoomSettings :exec
@@ -12641,6 +12992,74 @@ func (q *Queries) UpsertCrmSyncState(ctx context.Context, arg UpsertCrmSyncState
 		arg.Summary,
 	)
 	return err
+}
+
+const upsertDealRoomKnowledgeBase = `-- name: UpsertDealRoomKnowledgeBase :one
+INSERT INTO deal_room_knowledge_bases (
+  tenant_id, workspace_id, room_id, status, folder_paths, document_ids,
+  active_document_ids, building_document_ids, active_generation, building_generation, error_message
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+ON CONFLICT (room_id) DO UPDATE SET
+  status = EXCLUDED.status,
+  folder_paths = EXCLUDED.folder_paths,
+  document_ids = EXCLUDED.document_ids,
+  active_document_ids = EXCLUDED.active_document_ids,
+  building_document_ids = EXCLUDED.building_document_ids,
+  active_generation = EXCLUDED.active_generation,
+  building_generation = EXCLUDED.building_generation,
+  error_message = EXCLUDED.error_message,
+  updated_at = now()
+RETURNING id, tenant_id, workspace_id, room_id, status, folder_paths, document_ids, active_document_ids, building_document_ids, active_generation, building_generation, error_message, created_at, updated_at
+`
+
+type UpsertDealRoomKnowledgeBaseParams struct {
+	TenantID            pgtype.UUID
+	WorkspaceID         pgtype.UUID
+	RoomID              pgtype.UUID
+	Status              string
+	FolderPaths         []string
+	DocumentIds         []pgtype.UUID
+	ActiveDocumentIds   []pgtype.UUID
+	BuildingDocumentIds []pgtype.UUID
+	ActiveGeneration    int32
+	BuildingGeneration  pgtype.Int4
+	ErrorMessage        pgtype.Text
+}
+
+func (q *Queries) UpsertDealRoomKnowledgeBase(ctx context.Context, arg UpsertDealRoomKnowledgeBaseParams) (DealRoomKnowledgeBasis, error) {
+	row := q.db.QueryRow(ctx, upsertDealRoomKnowledgeBase,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.Status,
+		arg.FolderPaths,
+		arg.DocumentIds,
+		arg.ActiveDocumentIds,
+		arg.BuildingDocumentIds,
+		arg.ActiveGeneration,
+		arg.BuildingGeneration,
+		arg.ErrorMessage,
+	)
+	var i DealRoomKnowledgeBasis
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.Status,
+		&i.FolderPaths,
+		&i.DocumentIds,
+		&i.ActiveDocumentIds,
+		&i.BuildingDocumentIds,
+		&i.ActiveGeneration,
+		&i.BuildingGeneration,
+		&i.ErrorMessage,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertIntegrationToken = `-- name: UpsertIntegrationToken :exec

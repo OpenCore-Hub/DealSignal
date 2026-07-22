@@ -87,6 +87,13 @@ export interface Link {
   indexFileEnabled?: boolean;
   /** Screenshot protection feature toggle (available from v2.7+ backend). */
   screenshotProtectionEnabled?: boolean;
+  /** Soft warnings returned on create/update (e.g. Ask Docs auth ⊄ KB). */
+  warnings?: Array<{
+    code: string;
+    message: string;
+    missing_folder_paths?: string[];
+    missing_document_ids?: string[];
+  }>;
   requireEmailVerification?: boolean;
   maxAccessCount?: number;
   /** Allowed emails for whitelist (available from v2.5+ backend). */
@@ -137,6 +144,37 @@ export interface FileRequest {
   status: "pending" | "approved" | "rejected" | "fulfilled";
   created_at: string;
   updated_at: string;
+}
+
+/** Link- or room-level Ask Docs audit list row. */
+export interface AskDocsAuditEntry {
+  session_id: string;
+  link_id?: string;
+  visitor_id?: string;
+  question_preview: string;
+  result_status?: string;
+  evidence_count: number;
+  created_at: string;
+  archived: boolean;
+}
+
+export interface AskDocsAuditMessage {
+  role: string;
+  content: string;
+  created_at: string;
+}
+
+/** Full Ask Docs audit session detail. */
+export interface AskDocsAuditDetail {
+  session_id: string;
+  visitor_id?: string;
+  created_at: string;
+  archived: boolean;
+  messages: AskDocsAuditMessage[];
+  authorized_document_ids: string[];
+  retrieval_document_ids: string[];
+  evidence: Evidence[];
+  result_status?: string;
 }
 
 export interface LinkAccessRequest {
@@ -211,6 +249,10 @@ export interface ChatMessage {
   content: string;
   evidences?: Evidence[];
   createdAt: string;
+  /** Ask Docs audit/result status from public assistant API. */
+  resultStatus?: string;
+  /** When true, UI may offer switching to Ask Host after a refusal. */
+  suggestAskHost?: boolean;
 }
 
 export interface Evidence {
@@ -386,6 +428,33 @@ export interface DealRoomMember {
   status: "active" | "pending" | "suspended";
   name?: string;
   nda_signed_at?: string;
+}
+
+/** Deal-room knowledge base status for Ask Docs corpus. */
+export type DealRoomKnowledgeBaseStatus =
+  | "none"
+  | "building"
+  | "ready"
+  | "failed"
+  | "stale";
+
+export interface DealRoomKnowledgeBase {
+  room_id: string;
+  status: DealRoomKnowledgeBaseStatus;
+  folder_paths: string[];
+  document_ids: string[];
+  active_document_ids?: string[];
+  building_document_ids?: string[];
+  active_generation?: number;
+  building_generation?: number;
+  error_message?: string;
+  embedded_count: number;
+  folder_count: number;
+}
+
+export interface DealRoomKnowledgeBaseSelection {
+  folder_paths?: string[];
+  document_ids?: string[];
 }
 
 export interface DealRoomAccessRequest {

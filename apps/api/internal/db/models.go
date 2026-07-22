@@ -39,12 +39,15 @@ type ActionItem struct {
 }
 
 type AssistantMessage struct {
-	ID        pgtype.UUID
-	SessionID pgtype.UUID
-	Role      string
-	Content   string
-	Evidence  []byte
-	CreatedAt pgtype.Timestamptz
+	ID                    pgtype.UUID
+	SessionID             pgtype.UUID
+	Role                  string
+	Content               string
+	Evidence              []byte
+	CreatedAt             pgtype.Timestamptz
+	ResultStatus          pgtype.Text
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
 }
 
 type AssistantSession struct {
@@ -163,6 +166,23 @@ type DealRoomDocument struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type DealRoomKnowledgeBasis struct {
+	ID                  pgtype.UUID
+	TenantID            pgtype.UUID
+	WorkspaceID         pgtype.UUID
+	RoomID              pgtype.UUID
+	Status              string
+	FolderPaths         []string
+	DocumentIds         []pgtype.UUID
+	ActiveDocumentIds   []pgtype.UUID
+	BuildingDocumentIds []pgtype.UUID
+	ActiveGeneration    int32
+	BuildingGeneration  pgtype.Int4
+	ErrorMessage        pgtype.Text
+	CreatedAt           pgtype.Timestamptz
+	UpdatedAt           pgtype.Timestamptz
+}
+
 type Document struct {
 	ID          pgtype.UUID
 	TenantID    pgtype.UUID
@@ -219,15 +239,16 @@ type HubspotSyncJob struct {
 }
 
 type IngestionJob struct {
-	ID           pgtype.UUID
-	TenantID     pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	DocumentID   pgtype.UUID
-	Status       string
-	Attempts     pgtype.Int4
-	ErrorMessage pgtype.Text
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
+	ID            pgtype.UUID
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	DocumentID    pgtype.UUID
+	Status        string
+	Attempts      pgtype.Int4
+	ErrorMessage  pgtype.Text
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	SkipEmbedding bool
 }
 
 type IntegrationMapping struct {

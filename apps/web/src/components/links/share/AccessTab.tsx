@@ -22,6 +22,14 @@ import { cn } from "@/lib/utils";
 import { ContactEmailTagInput } from "./ContactEmailTagInput";
 import { CollapsibleSection } from "./CollapsibleSection";
 import type { DraftLink } from "./types";
+import {
+  STANDALONE_ADVANCED_KEYS,
+  countAdvancedEnabled,
+  visitorAskMasterEnabled,
+  visitorAskMasterPatch,
+} from "./visitorAskAdvanced";
+import { shouldBlockAskDocsForKnowledgeBase } from "./visitorAskKbGate";
+import type { DealRoomKnowledgeBaseStatus } from "@/types";
 
 interface AccessTabProps {
   draft: DraftLink;
@@ -33,6 +41,10 @@ interface AccessTabProps {
   passwordAlreadySet?: boolean;
   documents?: { id: string; title: string }[];
   ndaTemplates?: { id: string; name: string; sourceDocumentId: string }[];
+  /** Deal-room KB status for Q4 Ask Docs pre-gate. */
+  knowledgeBaseStatus?: DealRoomKnowledgeBaseStatus | null;
+  /** Link to the room documents / knowledge base panel. */
+  knowledgeBaseHref?: string;
 }
 
 function OptionSwitch({
@@ -84,27 +96,14 @@ function OptionSwitch({
   );
 }
 
-const ADVANCED_KEYS: Array<keyof DraftLink> = [
-  "aiCopilotEnabled",
-  "enableFileRequests",
-  "enableIndexFileGeneration",
-  "enableQaConversations",
-];
-
-const FUNCTIONAL_ADVANCED_KEYS: Array<keyof DraftLink> = [...ADVANCED_KEYS];
-
-const ADVANCED_LABELS: Record<string, string> = {
-  aiCopilotEnabled: "accessRules.advanced.aiAgents",
+const STANDALONE_ADVANCED_LABELS: Record<(typeof STANDALONE_ADVANCED_KEYS)[number], string> = {
   enableFileRequests: "accessRules.advanced.fileRequests",
   enableIndexFileGeneration: "accessRules.advanced.indexFile",
-  enableQaConversations: "accessRules.advanced.qaConversations",
 };
 
-const ADVANCED_DESCRIPTIONS: Record<string, string> = {
-  aiCopilotEnabled: "accessRules.advanced.aiAgentsDescription",
+const STANDALONE_ADVANCED_DESCRIPTIONS: Record<(typeof STANDALONE_ADVANCED_KEYS)[number], string> = {
   enableFileRequests: "accessRules.advanced.fileRequestsDescription",
   enableIndexFileGeneration: "accessRules.advanced.indexFileDescription",
-  enableQaConversations: "accessRules.advanced.qaConversationsDescription",
 };
 
 type PasswordStrengthLevel = 0 | 1 | 2 | 3 | 4;
@@ -151,6 +150,8 @@ export function AccessTab({
   passwordAlreadySet = false,
   documents = [],
   ndaTemplates = [],
+  knowledgeBaseStatus = null,
+  knowledgeBaseHref,
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
 
@@ -165,8 +166,13 @@ export function AccessTab({
     }
   }, [draft.requirePassword, passwordAlreadySet]);
 
-  const advancedCount = FUNCTIONAL_ADVANCED_KEYS.filter((key) => draft[key]).length;
+  const advancedCount = countAdvancedEnabled(draft);
+  const visitorAskOn = visitorAskMasterEnabled(draft);
   const verificationDisabled = !isDealRoomLink;
+  const askDocsBlocked = shouldBlockAskDocsForKnowledgeBase(
+    Boolean(isDealRoomLink),
+    knowledgeBaseStatus,
+  );
 
   const handleRequireEmailChange = (checked: boolean) => {
     updateDraft({
@@ -487,11 +493,84 @@ export function AccessTab({
         open={advancedOpen}
         onToggle={() => setAdvancedOpen((v) => !v)}
       >
-        {ADVANCED_KEYS.map((key) => (
+        <div
+          className={cn(
+            "space-y-3 rounded-md border border-border/60 p-3",
+            (isHighlighted("aiCopilotEnabled") || isHighlighted("enableQaConversations")) &&
+              "ring-2 ring-primary/40"
+          )}
+        >
+          <OptionSwitch
+            label={t("accessRules.advanced.visitorAsk")}
+            description={t("accessRules.advanced.visitorAskDescription")}
+            checked={visitorAskOn}
+            onCheckedChange={(checked) => {
+              if (!checked) {
+                updateDraft(visitorAskMasterPatch(false));
+                return;
+              }
+              // Q4: default to Ask Host when Ask Docs cannot be enabled yet.
+              if (askDocsBlocked) {
+                updateDraft({ aiCopilotEnabled: false, enableQaConversations: true });
+                return;
+              }
+              updateDraft(visitorAskMasterPatch(true));
+            }}
+            highlighted={isHighlighted("aiCopilotEnabled") || isHighlighted("enableQaConversations")}
+          />
+          {visitorAskOn && (
+            <div className="ml-1 space-y-2 border-l border-border/60 pl-3">
+              <OptionSwitch
+                label={t("accessRules.advanced.askDocs")}
+                description={t("accessRules.advanced.askDocsDescription")}
+                checked={draft.aiCopilotEnabled}
+                disabled={askDocsBlocked}
+                onCheckedChange={(checked) => {
+                  if (askDocsBlocked && checked) return;
+                  const nextQa = draft.enableQaConversations;
+                  if (!checked && !nextQa) {
+                    updateDraft(visitorAskMasterPatch(false));
+                    return;
+                  }
+                  updateDraft({ aiCopilotEnabled: checked });
+                }}
+                highlighted={isHighlighted("aiCopilotEnabled")}
+              />
+              {askDocsBlocked && (
+                <p className="text-xs text-muted-foreground">
+                  {t("accessRules.advanced.knowledgeBaseRequired")}{" "}
+                  {knowledgeBaseHref ? (
+                    <a
+                      href={knowledgeBaseHref}
+                      className="font-medium text-primary underline-offset-2 hover:underline"
+                    >
+                      {t("accessRules.advanced.openKnowledgeBase")}
+                    </a>
+                  ) : null}
+                </p>
+              )}
+              <OptionSwitch
+                label={t("accessRules.advanced.askHost")}
+                description={t("accessRules.advanced.askHostDescription")}
+                checked={draft.enableQaConversations}
+                onCheckedChange={(checked) => {
+                  const nextDocs = draft.aiCopilotEnabled;
+                  if (!checked && !nextDocs) {
+                    updateDraft(visitorAskMasterPatch(false));
+                    return;
+                  }
+                  updateDraft({ enableQaConversations: checked });
+                }}
+                highlighted={isHighlighted("enableQaConversations")}
+              />
+            </div>
+          )}
+        </div>
+        {STANDALONE_ADVANCED_KEYS.map((key) => (
           <OptionSwitch
             key={key}
-            label={t(ADVANCED_LABELS[key])}
-            description={t(ADVANCED_DESCRIPTIONS[key])}
+            label={t(STANDALONE_ADVANCED_LABELS[key])}
+            description={t(STANDALONE_ADVANCED_DESCRIPTIONS[key])}
             checked={draft[key] as boolean}
             onCheckedChange={(checked) => updateDraft({ [key]: checked } as Partial<DraftLink>)}
             highlighted={isHighlighted(key)}

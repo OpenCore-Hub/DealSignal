@@ -280,6 +280,33 @@
       "more": "+{{count}} more"
     }
   },
+  "knowledgeBase": {
+    "title": "Knowledge base",
+    "description": "Select documents for Ask Docs. Create or rebuild before enabling Ask Docs on links.",
+    "status": {
+      "none": "Not created — create a knowledge base before enabling Ask Docs",
+      "building": "Building {{done}}/{{total}}",
+      "ready": "Ready · {{count}} documents included",
+      "stale": "Out of date — rebuild recommended (Ask Docs still works)",
+      "failed": "Build failed — try creating again"
+    },
+    "create": "Create knowledge base",
+    "creating": "Creating...",
+    "rebuild": "Rebuild knowledge base",
+    "rebuilding": "Rebuilding...",
+    "selectDocuments": "Documents to include",
+    "selectFolders": "Folders to include",
+    "confirmCreate": "Create",
+    "confirmRebuild": "Rebuild",
+    "confirmRebuildTitle": "Rebuild knowledge base?",
+    "confirmRebuildBody": "Visitors keep using the previous index until rebuild finishes.",
+    "cancel": "Cancel",
+    "forbidden": "Only room owners and admins can manage the knowledge base.",
+    "loadFailed": "Failed to load knowledge base",
+    "createFailed": "Failed to create knowledge base",
+    "rebuildFailed": "Failed to rebuild knowledge base",
+    "rebuildHint": "Visitors keep using the previous index until rebuild finishes."
+  },
   "participants": {
     "title": "Participants"
   },

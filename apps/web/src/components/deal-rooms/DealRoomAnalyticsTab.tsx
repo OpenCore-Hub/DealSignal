@@ -3,22 +3,27 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/common/StatCard";
 import { TrendChart } from "@/components/common/TrendChart";
 import { VisitorList } from "@/components/common/VisitorList";
+import { AskDocsAuditPanel } from "@/components/links/share/AskDocsAuditPanel";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
-import type { HeatLevel } from "@/types";
+import type { HeatLevel, Link } from "@/types";
 
 interface DealRoomAnalyticsTabProps {
+  roomId: string;
   documentCount: number;
   viewCount?: number;
   activeLinkCount?: number;
   recentVisitors?: { email: string; name?: string; heatLevel: HeatLevel; lastSeenAt: string }[];
+  links?: Link[];
 }
 
 export function DealRoomAnalyticsTab({
+  roomId,
   documentCount,
   viewCount,
   activeLinkCount,
   recentVisitors,
+  links,
 }: DealRoomAnalyticsTabProps) {
   const { t } = useTranslation("dealRooms");
   const location = useLocation();
@@ -66,6 +71,12 @@ export function DealRoomAnalyticsTab({
           )}
         </CardContent>
       </Card>
+
+      <AskDocsAuditPanel
+        mode="room"
+        roomId={roomId}
+        links={(links ?? []).map((l) => ({ id: l.id, name: l.name || l.documentTitle }))}
+      />
 
       <p className="text-caption text-muted-foreground">{t("analytics.comingSoon")}</p>
     </div>
