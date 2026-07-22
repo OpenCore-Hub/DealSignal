@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useReducedMotion } from "motion/react";
@@ -17,7 +18,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
-import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, Link } from "@/types";
+import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, DealRoomKnowledgeBaseStatus, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
@@ -140,6 +141,7 @@ function DealRoomShareDialogContent({
 }: DealRoomShareDialogContentProps) {
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const reducedMotion = useReducedMotion();
   const [tab, setTab] = useState<"share" | "access" | "documents">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
@@ -147,6 +149,7 @@ function DealRoomShareDialogContent({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
   const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
+  const [knowledgeBaseStatus, setKnowledgeBaseStatus] = useState<DealRoomKnowledgeBaseStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -169,6 +172,25 @@ function DealRoomShareDialogContent({
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const kb = await api.getDealRoomKnowledgeBase(roomId);
+        if (!cancelled) setKnowledgeBaseStatus(kb.status);
+      } catch {
+        if (!cancelled) setKnowledgeBaseStatus("none");
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId]);
+
+  const knowledgeBaseHref = workspaceSlug
+    ? `/${workspaceSlug}/deal-rooms/${roomId}?tab=documents`
+    : undefined;
 
   // Unsaved-changes tracking. We use a mutable ref instead of a callback so
   // the data-sync effect does not depend on the comparison function, which
@@ -451,6 +473,8 @@ function DealRoomShareDialogContent({
                     isDealRoomLink={isDealRoomLink}
                     passwordAlreadySet={Boolean(selectedLink?.requirePassword)}
                     ndaTemplates={ndaTemplates}
+                    knowledgeBaseStatus={knowledgeBaseStatus}
+                    knowledgeBaseHref={knowledgeBaseHref}
                     documents={(data?.documents ?? [])
                       .flatMap((folder) => folder.documents ?? [])
                       .map((d) => ({ id: d.document_id, title: d.title }))}

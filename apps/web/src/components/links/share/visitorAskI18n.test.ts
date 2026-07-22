@@ -24,7 +24,9 @@ const LINK_SHARE_ADVANCED_KEYS = [
   "askHost",
   "askHostDescription",
   "knowledgeBaseRequired",
+  "openKnowledgeBase",
   "askDocsScopeNotInKb",
+  "askDocsScopeGaps",
 ] as const;
 
 describe("Visitor Ask i18n parity", () => {

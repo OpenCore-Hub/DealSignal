@@ -5,7 +5,7 @@ export type AskDocsCoverageWarning = {
   missing_document_ids?: string[];
 };
 
-type Translate = (key: string) => string;
+type Translate = (key: string, options?: Record<string, unknown>) => string;
 
 /** Hard gate when enabling Ask Docs without a ready/stale room KB. */
 export function visitorAskSaveErrorMessage(
@@ -18,6 +18,12 @@ export function visitorAskSaveErrorMessage(
   return null;
 }
 
+function formatCoverageGaps(warning: AskDocsCoverageWarning): string[] {
+  const folders = (warning.missing_folder_paths ?? []).map((p) => p.trim()).filter(Boolean);
+  const docs = (warning.missing_document_ids ?? []).map((id) => id.trim()).filter(Boolean);
+  return [...folders, ...docs];
+}
+
 /** Soft warning when link authorization is not covered by KB selection. */
 export function askDocsCoverageWarningMessage(
   warnings: AskDocsCoverageWarning[] | undefined | null,
@@ -25,7 +31,10 @@ export function askDocsCoverageWarningMessage(
 ): string | null {
   const hit = warnings?.find((w) => w.code === "ask_docs_scope_not_in_kb");
   if (!hit) return null;
-  return t("accessRules.advanced.askDocsScopeNotInKb");
+  const base = t("accessRules.advanced.askDocsScopeNotInKb");
+  const gaps = formatCoverageGaps(hit);
+  if (gaps.length === 0) return base;
+  return `${base} ${t("accessRules.advanced.askDocsScopeGaps", { items: gaps.join(", ") })}`;
 }
 
 export function extractAskDocsWarnings(payload: unknown): AskDocsCoverageWarning[] | undefined {
@@ -35,5 +44,19 @@ export function extractAskDocsWarnings(payload: unknown): AskDocsCoverageWarning
   return warnings.filter(
     (w): w is AskDocsCoverageWarning =>
       !!w && typeof w === "object" && typeof (w as AskDocsCoverageWarning).code === "string"
-  );
+  ).map((w) => {
+    const raw = w as AskDocsCoverageWarning & Record<string, unknown>;
+    const folders = Array.isArray(raw.missing_folder_paths)
+      ? raw.missing_folder_paths.filter((p): p is string => typeof p === "string")
+      : undefined;
+    const docs = Array.isArray(raw.missing_document_ids)
+      ? raw.missing_document_ids.filter((id): id is string => typeof id === "string")
+      : undefined;
+    return {
+      code: raw.code,
+      message: typeof raw.message === "string" ? raw.message : "",
+      missing_folder_paths: folders,
+      missing_document_ids: docs,
+    };
+  });
 }

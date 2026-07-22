@@ -28,7 +28,11 @@ function renderAccessTab(
   errors: Record<string, string> = {},
   isDealRoomLink = true,
   documents: { id: string; title: string }[] = [],
-  passwordAlreadySet = false
+  passwordAlreadySet = false,
+  extras: {
+    knowledgeBaseStatus?: import("@/types").DealRoomKnowledgeBaseStatus | null;
+    knowledgeBaseHref?: string;
+  } = {}
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -40,6 +44,8 @@ function renderAccessTab(
         isDealRoomLink={isDealRoomLink}
         documents={documents}
         passwordAlreadySet={passwordAlreadySet}
+        knowledgeBaseStatus={extras.knowledgeBaseStatus}
+        knowledgeBaseHref={extras.knowledgeBaseHref}
       />
     </Wrapper>
   );
@@ -256,6 +262,53 @@ describe("AccessTab", () => {
     expect(screen.getByRole("switch", { name: /Ask Host/i })).toBeInTheDocument();
     expect(screen.queryByText(/AI Agents/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
+  });
+
+  it("disables Ask Docs and shows KB guide when room knowledge base is missing", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, enableQaConversations: true },
+      {},
+      true,
+      [],
+      false,
+      {
+        knowledgeBaseStatus: "none",
+        knowledgeBaseHref: "/acme/deal-rooms/room-1?tab=documents",
+      }
+    );
+    fireEvent.click(screen.getByText(/advanced/i));
+
+    const askDocs = screen.getByRole("switch", { name: /Ask Docs/i });
+    expect(askDocs).toBeDisabled();
+    expect(
+      screen.getByText(/Create or rebuild the room knowledge base before enabling Ask Docs/i)
+    ).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Open knowledge base/i })).toHaveAttribute(
+      "href",
+      "/acme/deal-rooms/room-1?tab=documents"
+    );
+
+    fireEvent.click(askDocs);
+    expect(updateDraft).not.toHaveBeenCalledWith(
+      expect.objectContaining({ aiCopilotEnabled: true })
+    );
+  });
+
+  it("allows Ask Docs when room knowledge base is ready", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, enableQaConversations: true },
+      {},
+      true,
+      [],
+      false,
+      { knowledgeBaseStatus: "ready" }
+    );
+    fireEvent.click(screen.getByText(/advanced/i));
+
+    const askDocs = screen.getByRole("switch", { name: /Ask Docs/i });
+    expect(askDocs).not.toBeDisabled();
+    fireEvent.click(askDocs);
+    expect(updateDraft).toHaveBeenCalledWith({ aiCopilotEnabled: true });
   });
 
   it("turning off Visitor Ask master clears both Ask Docs and Ask Host", () => {
