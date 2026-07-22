@@ -130,6 +130,15 @@ export function KnowledgeBasePanel({
         toast.error(t("knowledgeBase.noSearchableChunks"));
         return;
       }
+      if (e instanceof ApiError && e.code === "knowledge_base_embed_failed") {
+        toast.error(t("knowledgeBase.embedFailed"));
+        try {
+          setKb(await api.getDealRoomKnowledgeBase(roomId));
+        } catch {
+          // keep prior status if refresh fails
+        }
+        return;
+      }
       const fallback =
         wizard === "create"
           ? t("knowledgeBase.createFailed")

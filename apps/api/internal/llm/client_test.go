@@ -188,6 +188,26 @@ func TestEmbedBatch(t *testing.T) {
 	}
 }
 
+func TestJoinOpenAIAPIURL(t *testing.T) {
+	cases := []struct {
+		base, path, want string
+	}{
+		{"https://api.openai.com/v1", "/v1/chat/completions", "https://api.openai.com/v1/chat/completions"},
+		{"https://openrouter.ai/api/v1/", "/v1/chat/completions", "https://openrouter.ai/api/v1/chat/completions"},
+		{"https://example.com", "/v1/chat/completions", "https://example.com/v1/chat/completions"},
+		{"https://example.com/v1", "/embeddings", "https://example.com/v1/embeddings"},
+	}
+	for _, tc := range cases {
+		got := joinOpenAIAPIURL(tc.base, tc.path)
+		if got != tc.want {
+			t.Fatalf("joinOpenAIAPIURL(%q, %q) = %q, want %q", tc.base, tc.path, got, tc.want)
+		}
+		if strings.Contains(got, "/v1/v1/") {
+			t.Fatalf("must not produce double /v1: %q", got)
+		}
+	}
+}
+
 func TestEmbedBatchViaChatCompletions(t *testing.T) {
 	var requestPath string
 	var requestBody map[string]interface{}
@@ -223,7 +243,7 @@ func TestEmbedBatchViaChatCompletions(t *testing.T) {
 
 	c, err := NewClient(Config{
 		APIKey:            "sk-test",
-		BaseURL:           ts.URL,
+		BaseURL:           ts.URL + "/v1", // SDK-style base must not become /v1/v1/...
 		EmbeddingModel:    "text-embedding-3-small",
 		EmbeddingEndpoint: "chat_completions",
 		ChatModel:         "gpt-4o-mini",
@@ -243,8 +263,8 @@ func TestEmbedBatchViaChatCompletions(t *testing.T) {
 	if len(vecs[0]) != 3 || len(vecs[1]) != 3 {
 		t.Fatalf("expected 3-dim embeddings, got %d and %d", len(vecs[0]), len(vecs[1]))
 	}
-	if !strings.HasSuffix(requestPath, "/chat/completions") {
-		t.Fatalf("expected path to end with /chat/completions, got %s", requestPath)
+	if requestPath != "/v1/chat/completions" {
+		t.Fatalf("expected /v1/chat/completions (no double /v1), got %s", requestPath)
 	}
 	input, ok := requestBody["input"].([]interface{})
 	if !ok || len(input) != 2 {

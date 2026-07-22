@@ -307,6 +307,7 @@
     "loadFailed": "Failed to load knowledge base",
     "createFailed": "Failed to create knowledge base",
     "rebuildFailed": "Failed to rebuild knowledge base",
+    "embedFailed": "Knowledge base embedding failed. Check the embedding provider configuration and try again.",
     "noSearchableChunks": "Some selected documents have no searchable text. Re-ingest them (preview pages alone are not enough) before building the knowledge base.",
     "rebuildHint": "Visitors keep using the previous index until rebuild finishes."
   },

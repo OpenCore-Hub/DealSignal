@@ -22,10 +22,11 @@ const (
 )
 
 var (
-	ErrKnowledgeBaseExists   = errors.New("knowledge base already exists")
-	ErrKnowledgeBaseNotFound = errors.New("knowledge base not found")
-	ErrKnowledgeBaseBuilding = errors.New("knowledge base is building")
-	ErrNoSearchableChunks    = errors.New("selected documents have no searchable text chunks")
+	ErrKnowledgeBaseExists      = errors.New("knowledge base already exists")
+	ErrKnowledgeBaseNotFound    = errors.New("knowledge base not found")
+	ErrKnowledgeBaseBuilding    = errors.New("knowledge base is building")
+	ErrNoSearchableChunks       = errors.New("selected documents have no searchable text chunks")
+	ErrKnowledgeBaseEmbedFailed = errors.New("knowledge base embedding failed")
 )
 
 // MissingChunksError lists documents that cannot be embedded (no text chunks).
@@ -156,7 +157,7 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, roomID, workspaceID, 
 		if upErr != nil {
 			return KnowledgeBase{}, upErr
 		}
-		return toKnowledgeBase(failed), nil
+		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
 	}
 
 	row, err := s.queries.UpsertDealRoomKnowledgeBase(ctx, db.UpsertDealRoomKnowledgeBaseParams{
@@ -282,7 +283,7 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 		if upErr != nil {
 			return KnowledgeBase{}, upErr
 		}
-		return toKnowledgeBase(failed), nil
+		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
 	}
 
 	// Promote staged vectors + switch KB metadata in one transaction so Ask Docs
@@ -323,7 +324,7 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 		if upErr != nil {
 			return KnowledgeBase{}, upErr
 		}
-		return toKnowledgeBase(failed), nil
+		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
 	}
 	return toKnowledgeBase(row), nil
 }

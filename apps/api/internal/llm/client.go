@@ -184,8 +184,7 @@ func (c *Client) embedBatchChatCompletions(ctx context.Context, texts []string) 
 	if baseURL == "" {
 		baseURL = openai.DefaultConfig("").BaseURL
 	}
-	baseURL = strings.TrimRight(baseURL, "/")
-	url := baseURL + "/v1/chat/completions"
+	url := joinOpenAIAPIURL(baseURL, "/v1/chat/completions")
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
 	if err != nil {
@@ -218,6 +217,17 @@ func (c *Client) embedBatchChatCompletions(ctx context.Context, texts []string) 
 		return nil, fmt.Errorf("parse chat-completions embedding response: %w", err)
 	}
 	return parseEmbeddingsResponse(parsed.Data, len(texts))
+}
+
+// joinOpenAIAPIURL joins an OpenAI-compatible base URL with an API path.
+// Bases often already end in /v1 (SDK convention); do not produce /v1/v1/...
+func joinOpenAIAPIURL(baseURL, apiPath string) string {
+	base := strings.TrimRight(strings.TrimSpace(baseURL), "/")
+	path := "/" + strings.TrimLeft(strings.TrimSpace(apiPath), "/")
+	if strings.HasSuffix(base, "/v1") && strings.HasPrefix(path, "/v1/") {
+		path = strings.TrimPrefix(path, "/v1")
+	}
+	return base + path
 }
 
 func parseEmbeddingsResponse(data []embeddingData, expected int) ([][]float32, error) {

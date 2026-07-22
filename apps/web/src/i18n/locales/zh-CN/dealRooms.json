@@ -304,6 +304,7 @@
     "loadFailed": "加载知识库失败",
     "createFailed": "创建知识库失败",
     "rebuildFailed": "重建知识库失败",
+    "embedFailed": "知识库向量化失败。请检查嵌入服务配置后重试。",
     "noSearchableChunks": "所选文档中有无可检索文本。请先重新入库（仅有预览页不够），再构建知识库。",
     "rebuildHint": "重建完成前，访客仍使用旧索引。"
   },

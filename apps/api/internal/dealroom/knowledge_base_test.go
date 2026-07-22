@@ -174,8 +174,8 @@ func TestCreateKnowledgeBaseFailsClosedWithoutEmbedderWhenDocsSelected(t *testin
 	kb, err := svc.CreateKnowledgeBase(context.Background(), roomID, wsID, ownerID, KnowledgeBaseSelection{
 		DocumentIDs: []string{docID},
 	})
-	if err != nil {
-		t.Fatalf("create should return failed KB projection, not transport error: %v", err)
+	if !errors.Is(err, ErrKnowledgeBaseEmbedFailed) {
+		t.Fatalf("create should return ErrKnowledgeBaseEmbedFailed, got %v", err)
 	}
 	if kb.Status != KBStatusFailed {
 		t.Fatalf("expected failed status when embedder missing, got %s (%s)", kb.Status, kb.ErrorMessage)
@@ -336,8 +336,8 @@ func TestRebuildKnowledgeBaseAtomicSwitchAndFailKeepsOld(t *testing.T) {
 	failed, err := svc.RebuildKnowledgeBase(context.Background(), roomID, wsID, ownerID, &KnowledgeBaseSelection{
 		DocumentIDs: []string{docA},
 	})
-	if err != nil {
-		t.Fatalf("rebuild failure should return restored kb, got err %v", err)
+	if !errors.Is(err, ErrKnowledgeBaseEmbedFailed) {
+		t.Fatalf("rebuild failure should return ErrKnowledgeBaseEmbedFailed, got %v", err)
 	}
 	if failed.Status != KBStatusReady {
 		t.Fatalf("failure must keep ready/stale, got %s", failed.Status)
