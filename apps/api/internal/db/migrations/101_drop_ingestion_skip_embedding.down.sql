@@ -1,0 +1,2 @@
+ALTER TABLE ingestion_jobs
+  ADD COLUMN IF NOT EXISTS skip_embedding BOOLEAN NOT NULL DEFAULT false;

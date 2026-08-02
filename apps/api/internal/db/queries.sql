@@ -156,29 +156,24 @@ SET deleted_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
 
 -- name: CreateIngestionJob :one
-INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status, skip_embedding)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding;
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at;
 
 -- name: GetIngestionJobByDocument :one
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1;
 
 -- name: ListPendingIngestionJobs :many
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
 FROM ingestion_jobs
 WHERE status = 'queued'
    OR (status = 'failed' AND attempts < 3)
    OR (status = 'processing' AND updated_at < now() - interval '5 minutes')
 ORDER BY created_at ASC
 LIMIT $1;
-
--- name: SetIngestionJobSkipEmbedding :exec
-UPDATE ingestion_jobs
-SET skip_embedding = $2, updated_at = now()
-WHERE document_id = $1;
 
 -- name: UpdateIngestionJob :exec
 UPDATE ingestion_jobs
@@ -201,14 +196,6 @@ SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, 
 FROM pages
 WHERE document_id = $1 AND page_number = $2
 LIMIT 1;
-
--- name: CreateChunk :exec
-INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox)
-VALUES ($1, $2, $3, $4, $5);
-
--- name: CreateChunkWithEmbedding :exec
-INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox, embedding, search_vector)
-VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('english', $4));
 
 -- name: UpdateChunkSearchVector :exec
 UPDATE chunks
@@ -1806,11 +1793,7 @@ INSERT INTO chunk_boxes (chunk_id, document_id, page_number, coordinate_space, x
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10);
 
 -- name: CreateChunkWithBBox :one
-INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_tsvector('english', $7))
-RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector;
-
--- name: CreateChunkWithBBoxNoEmbed :one
+-- Preview/ingest path: text + bbox only. Vectors are written later via KnowledgeBaseEmbedder.
 INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $7))
 RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector;

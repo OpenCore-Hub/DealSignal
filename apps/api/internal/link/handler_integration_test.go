@@ -335,10 +335,10 @@ func TestDocumentsForAccessResponse_StaleScopeAfterRemoval(t *testing.T) {
 	}
 }
 
-// TestAddDocument_FlagsPreviewOnlyIngest covers #96 at the deal-room owner seam:
-// adding a document to a room marks ingestion skip_embedding and membership so
-// ProcessDocument will not auto-embed.
-func TestAddDocument_FlagsPreviewOnlyIngest(t *testing.T) {
+// TestAddDocument_MembershipForIngest covers the deal-room owner seam: adding a
+// document records room membership (ingest always writes preview chunks only;
+// vectors come from KB create/rebuild).
+func TestAddDocument_MembershipForIngest(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()
 
@@ -374,18 +374,13 @@ func TestAddDocument_FlagsPreviewOnlyIngest(t *testing.T) {
 		t.Fatalf("create document: %v", err)
 	}
 
-	job, err := f.q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:      f.link.TenantID,
-		WorkspaceID:   f.workspace.ID,
-		DocumentID:    doc.ID,
-		Status:        "queued",
-		SkipEmbedding: false,
-	})
-	if err != nil {
+	if _, err := f.q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+		TenantID:    f.link.TenantID,
+		WorkspaceID: f.workspace.ID,
+		DocumentID:  doc.ID,
+		Status:      "queued",
+	}); err != nil {
 		t.Fatalf("create ingestion job: %v", err)
-	}
-	if job.SkipEmbedding {
-		t.Fatal("expected job to start with skip_embedding=false")
 	}
 
 	if _, err := drSvc.AddDocument(ctx, roomID, wsID, userID, uuid.UUID(doc.ID.Bytes).String(), "/general", 0); err != nil {
@@ -398,14 +393,6 @@ func TestAddDocument_FlagsPreviewOnlyIngest(t *testing.T) {
 	}
 	if !inRoom {
 		t.Fatal("expected document to be in a deal room")
-	}
-
-	updated, err := f.q.GetIngestionJobByDocument(ctx, doc.ID)
-	if err != nil {
-		t.Fatalf("reload ingestion job: %v", err)
-	}
-	if !updated.SkipEmbedding {
-		t.Fatal("AddDocument must set skip_embedding so ingest does not auto-embed")
 	}
 }
 

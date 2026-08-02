@@ -160,7 +160,6 @@ func (s *Server) registerRoutes() error {
 			}
 
 			var llmClient *llm.Client
-			var ingestionEmbedder ingestion.Embedder
 			var searchEmbedder search.Embedder
 			var chatCompleter assistant.ChatCompleter
 			if s.cfg.OpenAIAPIKey != "" {
@@ -185,13 +184,12 @@ func (s *Server) registerRoutes() error {
 					"embedding_endpoint", endpoint,
 					"base_url_set", s.cfg.OpenAIBaseURL != "",
 				)
-				ingestionEmbedder = llmClient
 				searchEmbedder = llmClient
 				chatCompleter = llmClient
 			}
 
 			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, s.cfg.OnlyOfficeJWTSecret, storageClient)
-			ingestionSvc := ingestion.NewService(queries, storageClient, converter, ingestionEmbedder).
+			ingestionSvc := ingestion.NewService(queries, storageClient, converter).
 				WithTableIngest(s.cfg.AskDocs.TableIngestEnabled, ingestion.TableIngestLimits{
 					MaxSheets:       s.cfg.AskDocs.TableMaxSheets,
 					MaxRowsPerSheet: s.cfg.AskDocs.TableMaxRowsPerSheet,

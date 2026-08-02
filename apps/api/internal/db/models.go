@@ -339,16 +339,15 @@ type HubspotSyncJob struct {
 }
 
 type IngestionJob struct {
-	ID            pgtype.UUID
-	TenantID      pgtype.UUID
-	WorkspaceID   pgtype.UUID
-	DocumentID    pgtype.UUID
-	Status        string
-	Attempts      pgtype.Int4
-	ErrorMessage  pgtype.Text
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	SkipEmbedding bool
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	DocumentID   pgtype.UUID
+	Status       string
+	Attempts     pgtype.Int4
+	ErrorMessage pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
 }
 
 type IntegrationMapping struct {

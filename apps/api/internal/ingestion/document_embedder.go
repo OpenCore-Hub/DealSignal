@@ -14,6 +14,12 @@ import (
 
 const defaultEmbedBatchSize = 32
 
+// Embedder generates vector embeddings for text.
+// Used by KnowledgeBaseEmbedder; ingest never calls this.
+type Embedder interface {
+	EmbedBatch(ctx context.Context, texts []string) ([][]float32, error)
+}
+
 // chunkEmbeddingStore is the DB surface needed to embed deal-room KB documents.
 type chunkEmbeddingStore interface {
 	ListChunksForEmbedding(ctx context.Context, arg db.ListChunksForEmbeddingParams) ([]db.ListChunksForEmbeddingRow, error)

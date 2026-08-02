@@ -5030,11 +5030,10 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	}
 
 	_, err = qtx.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:      link.TenantID,
-		WorkspaceID:   link.WorkspaceID,
-		DocumentID:    doc.ID,
-		Status:        "queued",
-		SkipEmbedding: true, // deal-room visitor uploads: preview only until KB embed
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		DocumentID:  doc.ID,
+		Status:      "queued",
 	})
 	if err != nil {
 		return fmt.Errorf("create ingestion job: %w", err)

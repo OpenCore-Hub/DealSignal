@@ -531,11 +531,10 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  uploadDocument: (file: File, category?: string, opts?: { skipEmbedding?: boolean }) => {
+  uploadDocument: (file: File, category?: string) => {
     const formData = new FormData();
     formData.append("file", file);
     if (category) formData.append("category", category);
-    if (opts?.skipEmbedding) formData.append("skip_embedding", "true");
     return request<Document>(getWorkspaceSlug(), "/documents", {
       method: "POST",
       body: formData,

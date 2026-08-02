@@ -933,8 +933,6 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 		}
 	case strings.Contains(sqlLower, "insert into room_nda_agreements"):
 		// Idempotent agreement insert; fake stores nothing beyond success.
-	case strings.Contains(sqlLower, "update ingestion_jobs") && strings.Contains(sqlLower, "skip_embedding"):
-		// Preview-only ingest flag; no-op in fake.
 	}
 	return pgconn.CommandTag{}, nil
 }

@@ -933,12 +933,6 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	if err != nil {
 		return db.DealRoomDocument{}, err
 	}
-	// Preview-only ingest: if the document is still queued/processing, ensure
-	// the worker will not auto-embed once it reaches the chunk-write step.
-	_ = s.queries.SetIngestionJobSkipEmbedding(ctx, db.SetIngestionJobSkipEmbeddingParams{
-		DocumentID:    doc.ID,
-		SkipEmbedding: true,
-	})
 	_ = s.MarkKnowledgeBaseStaleIfNeeded(ctx, room.ID, folderPath)
 	return row, nil
 }

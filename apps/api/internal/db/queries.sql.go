@@ -992,30 +992,6 @@ func (q *Queries) CreateAssistantSession(ctx context.Context, arg CreateAssistan
 	return i, err
 }
 
-const createChunk = `-- name: CreateChunk :exec
-INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox)
-VALUES ($1, $2, $3, $4, $5)
-`
-
-type CreateChunkParams struct {
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	PageID      pgtype.UUID
-	Text        string
-	Bbox        []byte
-}
-
-func (q *Queries) CreateChunk(ctx context.Context, arg CreateChunkParams) error {
-	_, err := q.db.Exec(ctx, createChunk,
-		arg.TenantID,
-		arg.WorkspaceID,
-		arg.PageID,
-		arg.Text,
-		arg.Bbox,
-	)
-	return err
-}
-
 const createChunkBox = `-- name: CreateChunkBox :exec
 INSERT INTO chunk_boxes (chunk_id, document_id, page_number, coordinate_space, x, y, w, h, source, confidence)
 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
@@ -1051,9 +1027,9 @@ func (q *Queries) CreateChunkBox(ctx context.Context, arg CreateChunkBoxParams) 
 }
 
 const createChunkWithBBox = `-- name: CreateChunkWithBBox :one
-INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, to_tsvector('english', $7))
-RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, embedding, search_vector
+INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $7))
+RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector
 `
 
 type CreateChunkWithBBoxParams struct {
@@ -1066,7 +1042,6 @@ type CreateChunkWithBBoxParams struct {
 	Text           string
 	NormalizedText pgtype.Text
 	Bbox           []byte
-	Embedding      pgvector.Vector
 }
 
 type CreateChunkWithBBoxRow struct {
@@ -1080,10 +1055,10 @@ type CreateChunkWithBBoxRow struct {
 	Text           string
 	NormalizedText pgtype.Text
 	Bbox           []byte
-	Embedding      pgvector.Vector
 	SearchVector   interface{}
 }
 
+// Preview/ingest path: text + bbox only. Vectors are written later via KnowledgeBaseEmbedder.
 func (q *Queries) CreateChunkWithBBox(ctx context.Context, arg CreateChunkWithBBoxParams) (CreateChunkWithBBoxRow, error) {
 	row := q.db.QueryRow(ctx, createChunkWithBBox,
 		arg.TenantID,
@@ -1095,7 +1070,6 @@ func (q *Queries) CreateChunkWithBBox(ctx context.Context, arg CreateChunkWithBB
 		arg.Text,
 		arg.NormalizedText,
 		arg.Bbox,
-		arg.Embedding,
 	)
 	var i CreateChunkWithBBoxRow
 	err := row.Scan(
@@ -1109,97 +1083,9 @@ func (q *Queries) CreateChunkWithBBox(ctx context.Context, arg CreateChunkWithBB
 		&i.Text,
 		&i.NormalizedText,
 		&i.Bbox,
-		&i.Embedding,
 		&i.SearchVector,
 	)
 	return i, err
-}
-
-const createChunkWithBBoxNoEmbed = `-- name: CreateChunkWithBBoxNoEmbed :one
-INSERT INTO chunks (tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, to_tsvector('english', $7))
-RETURNING id, tenant_id, workspace_id, page_id, document_id, chunk_index, chunk_type, text, normalized_text, bbox, search_vector
-`
-
-type CreateChunkWithBBoxNoEmbedParams struct {
-	TenantID       pgtype.UUID
-	WorkspaceID    pgtype.UUID
-	PageID         pgtype.UUID
-	DocumentID     pgtype.UUID
-	ChunkIndex     pgtype.Int4
-	ChunkType      pgtype.Text
-	Text           string
-	NormalizedText pgtype.Text
-	Bbox           []byte
-}
-
-type CreateChunkWithBBoxNoEmbedRow struct {
-	ID             pgtype.UUID
-	TenantID       pgtype.UUID
-	WorkspaceID    pgtype.UUID
-	PageID         pgtype.UUID
-	DocumentID     pgtype.UUID
-	ChunkIndex     pgtype.Int4
-	ChunkType      pgtype.Text
-	Text           string
-	NormalizedText pgtype.Text
-	Bbox           []byte
-	SearchVector   interface{}
-}
-
-func (q *Queries) CreateChunkWithBBoxNoEmbed(ctx context.Context, arg CreateChunkWithBBoxNoEmbedParams) (CreateChunkWithBBoxNoEmbedRow, error) {
-	row := q.db.QueryRow(ctx, createChunkWithBBoxNoEmbed,
-		arg.TenantID,
-		arg.WorkspaceID,
-		arg.PageID,
-		arg.DocumentID,
-		arg.ChunkIndex,
-		arg.ChunkType,
-		arg.Text,
-		arg.NormalizedText,
-		arg.Bbox,
-	)
-	var i CreateChunkWithBBoxNoEmbedRow
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.WorkspaceID,
-		&i.PageID,
-		&i.DocumentID,
-		&i.ChunkIndex,
-		&i.ChunkType,
-		&i.Text,
-		&i.NormalizedText,
-		&i.Bbox,
-		&i.SearchVector,
-	)
-	return i, err
-}
-
-const createChunkWithEmbedding = `-- name: CreateChunkWithEmbedding :exec
-INSERT INTO chunks (tenant_id, workspace_id, page_id, text, bbox, embedding, search_vector)
-VALUES ($1, $2, $3, $4, $5, $6, to_tsvector('english', $4))
-`
-
-type CreateChunkWithEmbeddingParams struct {
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	PageID      pgtype.UUID
-	Text        string
-	Bbox        []byte
-	Embedding   pgvector.Vector
-}
-
-func (q *Queries) CreateChunkWithEmbedding(ctx context.Context, arg CreateChunkWithEmbeddingParams) error {
-	_, err := q.db.Exec(ctx, createChunkWithEmbedding,
-		arg.TenantID,
-		arg.WorkspaceID,
-		arg.PageID,
-		arg.Text,
-		arg.Bbox,
-		arg.Embedding,
-	)
-	return err
 }
 
 const createContact = `-- name: CreateContact :one
@@ -1547,17 +1433,16 @@ func (q *Queries) CreateHubSpotSyncJob(ctx context.Context, arg CreateHubSpotSyn
 }
 
 const createIngestionJob = `-- name: CreateIngestionJob :one
-INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status, skip_embedding)
-VALUES ($1, $2, $3, $4, $5)
-RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
+INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)
+VALUES ($1, $2, $3, $4)
+RETURNING id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
 `
 
 type CreateIngestionJobParams struct {
-	TenantID      pgtype.UUID
-	WorkspaceID   pgtype.UUID
-	DocumentID    pgtype.UUID
-	Status        string
-	SkipEmbedding bool
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+	Status      string
 }
 
 func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJobParams) (IngestionJob, error) {
@@ -1566,7 +1451,6 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		arg.WorkspaceID,
 		arg.DocumentID,
 		arg.Status,
-		arg.SkipEmbedding,
 	)
 	var i IngestionJob
 	err := row.Scan(
@@ -1579,7 +1463,6 @@ func (q *Queries) CreateIngestionJob(ctx context.Context, arg CreateIngestionJob
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.SkipEmbedding,
 	)
 	return i, err
 }
@@ -4656,7 +4539,7 @@ func (q *Queries) GetFolderPermissionsByRoomAndEmail(ctx context.Context, arg Ge
 }
 
 const getIngestionJobByDocument = `-- name: GetIngestionJobByDocument :one
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
 FROM ingestion_jobs
 WHERE document_id = $1
 LIMIT 1
@@ -4675,7 +4558,6 @@ func (q *Queries) GetIngestionJobByDocument(ctx context.Context, documentID pgty
 		&i.ErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-		&i.SkipEmbedding,
 	)
 	return i, err
 }
@@ -10299,7 +10181,7 @@ func (q *Queries) ListPendingHubSpotSyncJobs(ctx context.Context, limit int32) (
 }
 
 const listPendingIngestionJobs = `-- name: ListPendingIngestionJobs :many
-SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at, skip_embedding
+SELECT id, tenant_id, workspace_id, document_id, status, attempts, error_message, created_at, updated_at
 FROM ingestion_jobs
 WHERE status = 'queued'
    OR (status = 'failed' AND attempts < 3)
@@ -10327,7 +10209,6 @@ func (q *Queries) ListPendingIngestionJobs(ctx context.Context, limit int32) ([]
 			&i.ErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-			&i.SkipEmbedding,
 		); err != nil {
 			return nil, err
 		}
@@ -12970,22 +12851,6 @@ func (q *Queries) SetFolderPermission(ctx context.Context, arg SetFolderPermissi
 		&i.UpdatedAt,
 	)
 	return i, err
-}
-
-const setIngestionJobSkipEmbedding = `-- name: SetIngestionJobSkipEmbedding :exec
-UPDATE ingestion_jobs
-SET skip_embedding = $2, updated_at = now()
-WHERE document_id = $1
-`
-
-type SetIngestionJobSkipEmbeddingParams struct {
-	DocumentID    pgtype.UUID
-	SkipEmbedding bool
-}
-
-func (q *Queries) SetIngestionJobSkipEmbedding(ctx context.Context, arg SetIngestionJobSkipEmbeddingParams) error {
-	_, err := q.db.Exec(ctx, setIngestionJobSkipEmbedding, arg.DocumentID, arg.SkipEmbedding)
-	return err
 }
 
 const setLinkNDABinding = `-- name: SetLinkNDABinding :exec
