@@ -137,9 +137,9 @@ var (
 	ErrNotFoundInWorkspace  = errors.New("link not found in workspace")
 
 	// Deal-room sharing / access-rule errors.
-	ErrDealRoomNotFound      = errors.New("deal room not found")
-	ErrBlockedEmail          = errors.New("email is blocked")
-	ErrNotAllowedEmail       = errors.New("email is not allowed")
+	ErrDealRoomNotFound = errors.New("deal room not found")
+	ErrBlockedEmail     = errors.New("email is blocked")
+	ErrNotAllowedEmail                = errors.New("email is not allowed")
 	// ErrDeliveryEmailMismatch means the visitor submitted an email that does not
 	// match the address bound to a valid verification code. Handlers MUST NOT
 	// expose AuthorizedEmail to clients (privacy); it is audit-only.
@@ -170,7 +170,7 @@ const ownerResendPendingStale = 2 * time.Minute
 
 // ResolvePublicLink validates a public token and returns the active link.
 // It checks status, expiry, and max access limits. It is intended for
-// public features (e.g. AI Copilot) that already hold a valid link session.
+// public features that already hold a valid link session.
 func (s *Service) ResolvePublicLink(ctx context.Context, publicToken string) (db.Link, error) {
 	link, err := s.queries.GetLinkByPublicToken(ctx, publicToken)
 	if err != nil {
@@ -235,8 +235,6 @@ type CreateLinkRequest struct {
 	MaxAccessCount              *int32
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
-	AICopilotEnabled            bool
-	AskDocsDDChipsEnabled       bool
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
@@ -274,8 +272,6 @@ type UpdateLinkRequest struct {
 	MaxAccessCount              *int32
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
-	AICopilotEnabled            bool
-	AskDocsDDChipsEnabled       bool
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
@@ -335,8 +331,6 @@ type DealRoomLinkRequest struct {
 	ExpiresAt                *time.Time
 	DownloadEnabled          bool
 	WatermarkEnabled         bool
-	AICopilotEnabled         bool
-	AskDocsDDChipsEnabled    bool
 	QaEnabled                bool
 	FileRequestsEnabled      bool
 	IndexFileEnabled         bool
@@ -449,10 +443,6 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		tenantID = dealRoom.TenantID
 		dealRoomID = dealRoom.ID
 
-		if err := ensureAskDocsKnowledgeBase(ctx, qtx, dealRoomID, req.AICopilotEnabled); err != nil {
-			return db.Link{}, err
-		}
-
 		// Deal-room links always use allowlist mode (empty = deny-all).
 		if err := s.validateDealRoomFolderPaths(ctx, qtx, workspaceUUID, dealRoomID, req.FolderPaths); err != nil {
 			return db.Link{}, err
@@ -533,7 +523,6 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		MaxAccessCount:              maxAccess,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		AiCopilotEnabled:            req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -553,7 +542,6 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		HasDocumentScope:            hasDocumentScope,
 		FolderScopePaths:            folderScopePaths,
 		FolderScopeMode:             folderScopeMode,
-		AskDocsDdChipsEnabled:       req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		Status:                      "active",
 		CreatedBy:                   userUUID,
 	})
@@ -733,7 +721,6 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		AICopilotEnabled:         req.AICopilotEnabled,
 		QaEnabled:                req.QaEnabled,
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
@@ -744,10 +731,6 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 
 	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
 	if err != nil {
-		return db.Link{}, err
-	}
-
-	if err := ensureAskDocsKnowledgeBase(ctx, s.queries, existing.DealRoomID, req.AICopilotEnabled); err != nil {
 		return db.Link{}, err
 	}
 
@@ -880,7 +863,6 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		RequireEmail:                requireEmail,
 		RequireEmailVerification:    requireEmailVerification,
 		RequireNda:                  requireNDA,
-		AiCopilotEnabled:            req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -896,7 +878,6 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		HasDocumentScope:            hasDocumentScope,
 		FolderScopePaths:            folderScopePaths,
 		FolderScopeMode:             folderScopeMode,
-		AskDocsDdChipsEnabled:       req.AskDocsDDChipsEnabled,
 		ID:                          existing.ID,
 		WorkspaceID:                 workspaceUUID,
 	})
@@ -1105,8 +1086,6 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		ExpiresAt:                req.ExpiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		AICopilotEnabled:            req.AICopilotEnabled,
-		AskDocsDDChipsEnabled:       req.AskDocsDDChipsEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -3369,8 +3348,6 @@ type PublicLinkMetadata struct {
 	WatermarkEnabled            bool
 	ScreenshotProtectionEnabled bool
 	CustomDomain                string
-	AiCopilotEnabled            bool
-	AskDocsDDChipsEnabled       bool
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
@@ -3410,8 +3387,6 @@ func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string)
 		WatermarkEnabled:            link.WatermarkEnabled,
 		ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
 		CustomDomain:                link.CustomDomain.String,
-		AiCopilotEnabled:            link.AiCopilotEnabled,
-		AskDocsDDChipsEnabled:       link.AskDocsDdChipsEnabled,
 		QaEnabled:                   link.QaEnabled,
 		FileRequestsEnabled:         link.FileRequestsEnabled,
 		IndexFileEnabled:            link.IndexFileEnabled,
@@ -3517,7 +3492,6 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		RequireEmail:             link.RequireEmail,
 		RequireEmailVerification: link.RequireEmailVerification,
 		RequireNda:               link.RequireNda,
-		AiCopilotEnabled:            link.AiCopilotEnabled,
 		RequirePassword:             link.RequirePassword,
 		PasswordHash:                link.PasswordHash,
 		CustomDomain:                link.CustomDomain,
@@ -3533,7 +3507,6 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		HasDocumentScope:            link.HasDocumentScope,
 		FolderScopePaths:            link.FolderScopePaths,
 		FolderScopeMode:             link.FolderScopeMode,
-		AskDocsDdChipsEnabled:       link.AskDocsDdChipsEnabled,
 		ID:                          link.ID,
 		WorkspaceID:                 link.WorkspaceID,
 	}); err != nil {

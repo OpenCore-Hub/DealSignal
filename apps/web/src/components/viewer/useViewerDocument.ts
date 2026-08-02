@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { api, type PublicLinkCredentials } from "@/lib/api";
-import { useAIStore } from "@/stores/aiStore";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import type { Document, Evidence, PageAnalytics } from "@/types";
 import type { WatermarkInfo } from "./WatermarkOverlay";
@@ -60,7 +59,6 @@ export function useViewerDocument({
   const [page, setPage] = useState(initialPage);
   const [zoom, setZoom] = useState(100);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const { highlightedPage } = useAIStore();
   const publicAccessCredentialsRef = useRef(publicAccessCredentials);
 
   // Keep the latest credentials in a ref so that credential rotations
@@ -108,14 +106,6 @@ export function useViewerDocument({
       setPage(validPage);
     }
   }, [pages.length, page]);
-
-  // Synchronize the viewer page with the AI highlight from the global store.
-  useEffect(() => {
-    if (highlightedPage && highlightedPage !== page) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- external store synchronization
-      setPage(highlightedPage);
-    }
-  }, [highlightedPage, page]);
 
   // Fetch a signed URL for the current page.
   useEffect(() => {

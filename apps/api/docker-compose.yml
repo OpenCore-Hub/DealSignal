@@ -5,7 +5,7 @@ name: dealsignal
 
 services:
   postgres:
-    image: pgvector/pgvector:pg18
+    image: postgres:17-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?postgres user required}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?postgres password required}

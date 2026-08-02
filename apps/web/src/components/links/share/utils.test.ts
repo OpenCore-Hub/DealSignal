@@ -16,7 +16,6 @@ const baseDraft: DraftLink = {
   ndaTemplateId: "",
   allowDownloading: false,
   enableScreenshotProtection: false,
-  aiCopilotEnabled: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
   enableQaConversations: false,

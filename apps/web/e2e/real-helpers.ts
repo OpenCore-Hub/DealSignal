@@ -334,7 +334,7 @@ export async function seedLink(
     watermarkEnabled?: boolean;
     expiresAt?: string;
     maxAccessCount?: number;
-    aiCopilotEnabled?: boolean;
+    watermarkEnabled?: boolean;
     contactEmail?: string;
     contactName?: string;
   } = {}
@@ -355,7 +355,6 @@ export async function seedLink(
   if (opts.expiresAt) body.expires_at = opts.expiresAt;
   if (typeof opts.maxAccessCount === "number") body.max_access_count = opts.maxAccessCount;
   if (typeof opts.watermarkEnabled === "boolean") body.watermark_enabled = opts.watermarkEnabled;
-  if (typeof opts.aiCopilotEnabled === "boolean") body.ai_copilot_enabled = opts.aiCopilotEnabled;
 
   let contactEmail: string | undefined;
   if (opts.requireEmailVerification || opts.requireNda) {

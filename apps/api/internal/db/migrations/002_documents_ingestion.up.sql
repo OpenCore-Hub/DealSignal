@@ -1,5 +1,3 @@
-CREATE EXTENSION IF NOT EXISTS vector;
-
 CREATE TABLE IF NOT EXISTS documents (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -52,8 +50,7 @@ CREATE TABLE IF NOT EXISTS chunks (
     workspace_id UUID NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
     page_id UUID NOT NULL REFERENCES pages(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
-    bbox JSONB,
-    embedding vector(1536)
+    bbox JSONB
 );
 
 CREATE INDEX IF NOT EXISTS idx_documents_tenant_workspace ON documents(tenant_id, workspace_id);

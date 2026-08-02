@@ -52,8 +52,10 @@ func TestPersistTypedChunksOmitsEmbeddings(t *testing.T) {
 		if i := strings.Index(lower, "values"); i >= 0 {
 			cols = lower[:i]
 		}
-		if strings.Contains(cols, "embedding") {
-			t.Fatalf("ingest chunk insert must omit embedding column:\n%s", sql)
+		for _, banned := range []string{"embedding", "search_vector", "normalized_text"} {
+			if strings.Contains(cols, banned) {
+				t.Fatalf("ingest chunk insert must omit %s:\n%s", banned, sql)
+			}
 		}
 	}
 }
@@ -86,8 +88,8 @@ type chunkInsertRow struct{}
 
 func (chunkInsertRow) Scan(dest ...interface{}) error {
 	// CreateChunkWithBBox RETURNING: id, tenant, workspace, page, document,
-	// chunk_index, chunk_type, text, normalized_text, bbox, search_vector
-	if len(dest) != 11 {
+	// chunk_index, chunk_type, text, bbox
+	if len(dest) != 9 {
 		return errors.New("unexpected CreateChunkWithBBox scan arity")
 	}
 	if id, ok := dest[0].(*pgtype.UUID); ok {

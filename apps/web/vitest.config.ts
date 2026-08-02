@@ -15,7 +15,6 @@ export default defineConfig({
       include: [
         "src/lib/**/*.ts",
         "src/i18n/**/*.ts",
-        "src/components/ai/AIAssistant.tsx",
         "src/components/common/ThemeToggle.tsx",
         "src/components/dashboard/ActionList.tsx",
         "src/components/layout/WorkspaceSwitcher.tsx",

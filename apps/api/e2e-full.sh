@@ -3,18 +3,16 @@
 # DealSignal Full E2E Test Suite — 100% API Coverage
 # =============================================================================
 # Covers: auth, workspace, documents, links, public-access, analytics,
-#         signals, search, suggestions, assistant, deal-rooms, domain, integrations
+#         signals, suggestions, deal-rooms, domain, integrations
 #
 # Usage:
-#   ./e2e-full.sh                  # P0 (no AI)
-#   RUN_AI=1 ./e2e-full.sh         # P0 + AI (requires OPENAI_API_KEY on server)
+#   ./e2e-full.sh
 #   BASE_URL=http://host:port ./e2e-full.sh
 # =============================================================================
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://localhost:8086}"
 PDF="${PDF:-e2e-test.pdf}"
-RUN_AI="${RUN_AI:-0}"
 PASS=0
 FAIL=0
 SKIP=0
@@ -136,7 +134,7 @@ fi
 echo "╔══════════════════════════════════════════════════════╗"
 echo "║   DealSignal Full E2E — 100% API Coverage           ║"
 echo "╚══════════════════════════════════════════════════════╝"
-echo "BASE_URL=$BASE_URL  RUN_AI=$RUN_AI  PDF=$PDF"
+echo "BASE_URL=$BASE_URL  PDF=$PDF"
 
 # =============================================================================
 # 1. Health
@@ -843,33 +841,9 @@ api_call BODY STATUS GET "$BASE_URL/api/workspaces/$WS/integrations/sync-logs" "
 assert_status "GET /integrations/sync-logs" 200 "$STATUS"
 
 # =============================================================================
-# 17. AI Search & Assistant (conditional)
+# 17. Document Deletion & Auth Logout
 # =============================================================================
-if [[ "$RUN_AI" == "1" ]]; then
-  section "17. AI — Search & Assistant (RUN_AI=1)"
-
-  # 17a. Search
-  api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/search" \
-    '{"q":"DealSignal","limit":5}' "$TOKEN"
-  assert_status "POST /search" 200 "$STATUS"
-  assert_json_not_empty "search query echo" '.query' "$BODY"
-
-  # 17b. Assistant chat
-  api_call BODY STATUS POST "$BASE_URL/api/workspaces/$WS/assistant/chat" \
-    '{"message":"What does the document say?"}' "$TOKEN"
-  assert_status "POST /assistant/chat" 200 "$STATUS"
-  assert_json_not_empty "session_id" '.session_id' "$BODY"
-  assert_json_not_empty "answer" '.answer' "$BODY"
-else
-  section "17. AI — Search & Assistant (skipped, RUN_AI=0)"
-  skip "AI search (set RUN_AI=1 to enable)"
-  skip "AI assistant (set RUN_AI=1 to enable)"
-fi
-
-# =============================================================================
-# 18. Document Deletion & Auth Logout
-# =============================================================================
-section "18. Cleanup — Delete Document & Logout"
+section "17. Cleanup — Delete Document & Logout"
 
 # 18a. Delete document
 api_call BODY STATUS DELETE "$BASE_URL/api/workspaces/$WS/documents/$DOC_ID" "" "$TOKEN"

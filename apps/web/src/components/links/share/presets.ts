@@ -19,7 +19,6 @@ export interface PresetValues {
   ndaTemplateId: string;
   allowDownloading: boolean;
   enableScreenshotProtection: boolean;
-  aiCopilotEnabled: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
   enableQaConversations: boolean;
@@ -37,7 +36,6 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     ndaTemplateId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
-    aiCopilotEnabled: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
     enableQaConversations: false,
@@ -53,7 +51,6 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     ndaTemplateId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
-    aiCopilotEnabled: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
     enableQaConversations: false,
@@ -69,7 +66,6 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     ndaTemplateId: "",
     allowDownloading: false,
     enableScreenshotProtection: false,
-    aiCopilotEnabled: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
     enableQaConversations: false,
@@ -94,7 +90,6 @@ export function applyPreset(
     "ndaDocumentId",
     "allowDownloading",
     "enableScreenshotProtection",
-    "aiCopilotEnabled",
     "enableFileRequests",
     "enableIndexFileGeneration",
     "enableQaConversations",
@@ -144,7 +139,6 @@ export function isPresetMatch(
     expected.requireNda === draft.requireNda &&
     expected.allowDownloading === draft.allowDownloading &&
     expected.enableScreenshotProtection === draft.enableScreenshotProtection &&
-    expected.aiCopilotEnabled === draft.aiCopilotEnabled &&
     expected.enableFileRequests === draft.enableFileRequests &&
     expected.enableIndexFileGeneration === draft.enableIndexFileGeneration &&
     expected.enableQaConversations === draft.enableQaConversations &&

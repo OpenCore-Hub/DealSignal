@@ -62,7 +62,6 @@ const baseLink: Link = {
   requireNda: false,
   downloadEnabled: false,
   watermarkEnabled: true,
-  aiCopilotEnabled: false,
   folderPaths: [],
   accessCount: 5,
   heatLevel: "warm",

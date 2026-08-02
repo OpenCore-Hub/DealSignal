@@ -27,9 +27,7 @@ interface RightSidebarProps {
   selectedDocIndex?: number;
   onSelectDoc?: (index: number) => void;
   activeDocumentId?: string;
-  aiCopilotEnabled?: boolean;
   qaEnabled?: boolean;
-  askDocsDDChipsEnabled?: boolean;
   fileRequestsEnabled?: boolean;
   publicToken?: string;
   publicSessionToken?: string;
@@ -76,15 +74,13 @@ export function RightSidebar({
   selectedDocIndex = 0,
   onSelectDoc,
   activeDocumentId,
-  aiCopilotEnabled,
   qaEnabled,
-  askDocsDDChipsEnabled,
   fileRequestsEnabled,
   publicToken,
   publicSessionToken,
 }: RightSidebarProps) {
   const { t } = useTranslation(["documents", "ai"]);
-  const qaAvailable = aiCopilotEnabled || qaEnabled;
+  const qaAvailable = Boolean(qaEnabled);
   const hasFolderStructure = shouldGroupDocumentsByFolder(documents ?? []);
   const [activeTab, setActiveTab] = useState<SidebarTab>(
     hasFolderStructure ? "documents" : qaAvailable ? "qa" : "documents"
@@ -285,10 +281,7 @@ export function RightSidebar({
               <UnifiedQAPanel
                 token={publicToken}
                 sessionToken={publicSessionToken}
-                documentId={activeDocumentId}
                 qaEnabled={qaEnabled}
-                aiCopilotEnabled={aiCopilotEnabled}
-                askDocsDDChipsEnabled={askDocsDDChipsEnabled}
               />
             )}
           </div>

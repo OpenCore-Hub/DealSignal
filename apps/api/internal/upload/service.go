@@ -64,7 +64,7 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 }
 
 // CreateDocument validates, stores the file and creates the document record.
-// Ingestion writes preview pages/chunks only; vectors are written via KB create/rebuild.
+// Ingestion writes preview pages/chunks (text + bbox) for document viewing.
 func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {

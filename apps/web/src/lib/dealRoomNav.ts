@@ -8,7 +8,6 @@ export const DEAL_ROOM_TAB_ROLE: Record<DealRoomTab, string> = {
   documents: "prepare", // content readiness, upload, folder tree
   participants: "outbound", // links, access codes, delivery remediates
   qa: "clarify", // buyer questions + answers
-  diligence: "cover", // financing DD checklist coverage (Ask Docs P2)
   activity: "audit", // who viewed what, when
   analytics: "insight", // room-level aggregates (deep dive)
   settings: "govern", // room policy (NDA, approval, status)
@@ -18,7 +17,6 @@ export const DEAL_ROOM_TAB_ORDER: DealRoomTab[] = [
   "documents",
   "participants",
   "qa",
-  "diligence",
   "activity",
   "analytics",
   "settings",

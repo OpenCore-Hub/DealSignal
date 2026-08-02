@@ -37,20 +37,7 @@ import type {
   WorkspaceSettings,
   VisitorQuestion,
   FileRequest,
-  AskDocsAuditEntry,
-  AskDocsAuditDetail,
   AskSecurityEvent,
-  DealRoomKnowledgeBase,
-  DealRoomKnowledgeBaseSelection,
-  DDCoverageRun,
-  DDCoverageSnapshot,
-  DDCoverageStartScanResponse,
-  DDCoverageChip,
-  DDCoveragePack,
-  DDCoveragePackItem,
-  DDCrossCheck,
-  DDPortfolioViewDetail,
-  DDPortfolioViewSummary,
 } from "@/types";
 import { request } from "@/lib/apiClient";
 import {
@@ -122,8 +109,6 @@ export interface CreateDealRoomLinkPayload {
   expires_at?: string;
   download_enabled?: boolean;
   watermark_enabled?: boolean;
-  ai_copilot_enabled?: boolean;
-  ask_docs_dd_chips_enabled?: boolean;
   qa_enabled?: boolean;
   file_requests_enabled?: boolean;
   index_file_enabled?: boolean;
@@ -297,7 +282,7 @@ export const api = {
     }
   ) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; askDocsDDChipsEnabled?: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
       documents: { id: string; title: string; pageCount: number; sourceType: string; folderPath?: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -696,35 +681,6 @@ export const api = {
       body: JSON.stringify({ status }),
     }),
 
-  // Ask Docs audit (link + room)
-  listLinkAskDocsAudit: (linkId: string, params: { archived?: boolean } = {}) => {
-    const search = new URLSearchParams();
-    if (params.archived) search.set("archived", "true");
-    const qs = search.toString();
-    return request<{ data: AskDocsAuditEntry[] }>(
-      getWorkspaceSlug(),
-      `/links/${linkId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
-    );
-  },
-  getLinkAskDocsAudit: (linkId: string, sessionId: string) =>
-    request<AskDocsAuditDetail>(
-      getWorkspaceSlug(),
-      `/links/${linkId}/ask-docs-audit/${sessionId}`,
-    ),
-  listRoomAskDocsAudit: (
-    roomId: string,
-    params: { archived?: boolean; linkId?: string } = {},
-  ) => {
-    const search = new URLSearchParams();
-    if (params.archived) search.set("archived", "true");
-    if (params.linkId) search.set("link_id", params.linkId);
-    const qs = search.toString();
-    return request<{ data: AskDocsAuditEntry[] }>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/ask-docs-audit${qs ? `?${qs}` : ""}`,
-    );
-  },
-
   // Visitor Ask high-risk security events (link + room)
   listLinkAskSecurityEvents: (linkId: string) =>
     request<{ data: AskSecurityEvent[] }>(
@@ -812,131 +768,6 @@ export const api = {
       method: "DELETE",
     }),
 
-  // Deal-room knowledge base (Ask Docs corpus)
-  getDealRoomKnowledgeBase: (roomId: string) =>
-    request<DealRoomKnowledgeBase>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge-base`),
-  createDealRoomKnowledgeBase: (roomId: string, selection: DealRoomKnowledgeBaseSelection = {}) =>
-    request<DealRoomKnowledgeBase>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge-base`, {
-      method: "POST",
-      body: JSON.stringify({
-        folder_paths: selection.folder_paths ?? [],
-        document_ids: selection.document_ids ?? [],
-      }),
-    }),
-  rebuildDealRoomKnowledgeBase: (roomId: string, selection?: DealRoomKnowledgeBaseSelection) =>
-    request<DealRoomKnowledgeBase>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/knowledge-base/rebuild`,
-      {
-        method: "POST",
-        body: JSON.stringify(
-          selection
-            ? {
-                folder_paths: selection.folder_paths ?? [],
-                document_ids: selection.document_ids ?? [],
-              }
-            : {},
-        ),
-      },
-    ),
-
-  // Deal-room DD Coverage (P2 Ask Docs checklist)
-  startDDCoverageScan: (
-    roomId: string,
-    payload: { pack_id?: string; link_id?: string; lang?: string } = {},
-  ) =>
-    request<DDCoverageStartScanResponse>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/dd-coverage/scans`,
-      {
-        method: "POST",
-        body: JSON.stringify(payload),
-      },
-    ),
-  getDDCoverageRun: (roomId: string, runId: string) =>
-    request<DDCoverageRun>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/dd-coverage/scans/${runId}`,
-    ),
-  getDDCoverageSnapshot: (roomId: string, params?: { pack_id?: string; link_id?: string }) => {
-    const qs = new URLSearchParams();
-    if (params?.pack_id) qs.set("pack_id", params.pack_id);
-    if (params?.link_id) qs.set("link_id", params.link_id);
-    const query = qs.toString();
-    return request<DDCoverageSnapshot>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/dd-coverage/snapshot${query ? `?${query}` : ""}`,
-    );
-  },
-  getDDCoveragePack: (roomId: string, packId?: string) => {
-    const qs = packId ? `?pack_id=${encodeURIComponent(packId)}` : "";
-    return request<DDCoveragePack>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/dd-coverage/pack${qs}`,
-    );
-  },
-  listDDCoveragePacks: (roomId: string) =>
-    request<{ data: DDCoveragePack[] }>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/dd-coverage/packs`,
-    ),
-  putDDCoveragePack: (roomId: string, items: DDCoveragePackItem[]) =>
-    request<DDCoveragePack>(getWorkspaceSlug(), `/deal-rooms/${roomId}/dd-coverage/pack`, {
-      method: "PUT",
-      body: JSON.stringify({ items }),
-    }),
-  resetDDCoveragePack: (roomId: string) =>
-    request<DDCoveragePack>(getWorkspaceSlug(), `/deal-rooms/${roomId}/dd-coverage/pack/reset`, {
-      method: "POST",
-    }),
-  startDDCrossCheck: (
-    roomId: string,
-    payload: {
-      pack_id?: string;
-      document_a_id: string;
-      document_b_id: string;
-      lang?: string;
-    },
-  ) =>
-    request<DDCrossCheck>(getWorkspaceSlug(), `/deal-rooms/${roomId}/dd-coverage/cross-checks`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  getDDCrossCheckLatest: (roomId: string, packId?: string) => {
-    const qs = packId ? `?pack_id=${encodeURIComponent(packId)}` : "";
-    return request<DDCrossCheck>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/dd-coverage/cross-checks/latest${qs}`,
-    );
-  },
-
-  // DD Portfolio (P3) — snapshot aggregation across rooms
-  listDDPortfolioViews: () =>
-    request<{ data: DDPortfolioViewSummary[] }>(getWorkspaceSlug(), `/dd-portfolio/views`),
-  getDDPortfolioView: (viewId: string) =>
-    request<DDPortfolioViewDetail>(getWorkspaceSlug(), `/dd-portfolio/views/${viewId}`),
-  createDDPortfolioView: (payload: {
-    name: string;
-    pack_id?: string;
-    room_ids: string[];
-  }) =>
-    request<DDPortfolioViewDetail>(getWorkspaceSlug(), `/dd-portfolio/views`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  updateDDPortfolioView: (
-    viewId: string,
-    payload: { name?: string; pack_id?: string; room_ids?: string[] },
-  ) =>
-    request<DDPortfolioViewDetail>(getWorkspaceSlug(), `/dd-portfolio/views/${viewId}`, {
-      method: "PUT",
-      body: JSON.stringify(payload),
-    }),
-  deleteDDPortfolioView: (viewId: string) =>
-    request<void>(getWorkspaceSlug(), `/dd-portfolio/views/${viewId}`, {
-      method: "DELETE",
-    }),
-
   // Deal room members
   getDealRoomMembers: (roomId: string) =>
     request<{ data: DealRoomMember[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/members`),
@@ -987,62 +818,6 @@ export const api = {
     ),
   getSuggestions: () =>
     request<{ data: Suggestion[] }>(getWorkspaceSlug(), "/insights/suggestions"),
-
-  assistantChat: (payload: {
-    message: string;
-    session_id?: string;
-  }) =>
-    request<{
-      session_id: string;
-      answer: string;
-      evidence?: Evidence[];
-    }>(getWorkspaceSlug(), "/assistant/chat", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-
-  publicAssistantChat: (
-    publicToken: string,
-    payload: { message: string; session_id?: string; checklist_item_id?: string },
-    sessionToken: string
-  ) =>
-    request<{
-      session_id: string;
-      answer: string;
-      evidence?: Evidence[];
-      result_status?: string;
-      suggest_ask_host?: boolean;
-    }>(undefined, `/v1/public/links/${encodeURIComponent(publicToken)}/assistant/chat`, {
-      method: "POST",
-      body: JSON.stringify(payload),
-      skipAuth: true,
-      headers: { "X-Link-Session": sessionToken },
-    }),
-
-  listPublicDDChips: (publicToken: string, sessionToken: string) =>
-    request<{ data: DDCoverageChip[] }>(
-      undefined,
-      `/v1/public/links/${encodeURIComponent(publicToken)}/assistant/dd-chips`,
-      {
-        skipAuth: true,
-        headers: { "X-Link-Session": sessionToken },
-      },
-    ),
-
-  searchDocument: (payload: {
-    query: string;
-    document_id?: string;
-    mode?: "exact" | "fulltext" | "vector" | "hybrid";
-    top_k?: number;
-  }) =>
-    request<{
-      document_id?: string;
-      query: string;
-      results: Evidence[];
-    }>(getWorkspaceSlug(), "/search", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
 
   getWorkspaceMembers: () =>
     request<{ data: WorkspaceMember[] }>(getWorkspaceSlug(), "/members"),

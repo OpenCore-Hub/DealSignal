@@ -4,7 +4,6 @@ import { FileText, Warning } from "@phosphor-icons/react";
 import { ThumbnailNav } from "./ThumbnailNav";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
-import { useAIStore } from "@/stores/aiStore";
 import { formatDuration } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import type { Document, Evidence, PageAnalytics } from "@/types";
@@ -45,7 +44,6 @@ export function ViewerCanvas({
   sidebar,
 }: ViewerCanvasProps) {
   const { t } = useTranslation("documents");
-  const { highlightedEvidence } = useAIStore();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
   const [printWarning, setPrintWarning] = useState(false);
@@ -158,11 +156,7 @@ export function ViewerCanvas({
   const pageWidth = Math.max(300, baseWidth * (zoom / 100));
   const pageHeight = pageWidth / aspectRatio;
 
-  const activeEvidence = (evidence ?? [])
-    .filter((e) => e.page_number === page)
-    .concat(
-      highlightedEvidence && highlightedEvidence.page_number === page ? [highlightedEvidence] : []
-    );
+  const activeEvidence = (evidence ?? []).filter((e) => e.page_number === page);
   const activeWatermark = watermark === null ? undefined : watermark ?? DEFAULT_WATERMARK;
   const pageAnalytics = analytics.find((a) => a.pageNumber === page);
 

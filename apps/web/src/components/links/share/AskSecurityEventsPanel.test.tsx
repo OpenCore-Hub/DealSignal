@@ -25,7 +25,7 @@ vi.mock("@/lib/api", () => ({
 const securityI18n = {
   "askSecurityEvents.title": "Visitor Ask security events",
   "askSecurityEvents.description":
-    "High-risk Ask Docs / Ask Host events: blocks, scope violations, and rate limits.",
+    "High-risk Ask Host events: blocks, scope violations, and rate limits.",
   "askSecurityEvents.roomTitle": "Visitor Ask security events",
   "askSecurityEvents.roomDescription":
     "Room-wide high-risk Ask events. Filter by link.",
@@ -44,7 +44,6 @@ const securityI18n = {
   "askSecurityEvents.eventTypes.blocked_email": "Blocked email",
   "askSecurityEvents.eventTypes.blocked_domain": "Blocked domain",
   "askSecurityEvents.eventTypes.not_in_allow_list": "Removed from allowlist",
-  "askSecurityEvents.reasons.ask_docs": "Ask Docs",
   "askSecurityEvents.reasons.ask_host": "Ask Host",
   "askSecurityEvents.reasons.out_of_scope_evidence": "Out-of-scope evidence",
 };
@@ -56,7 +55,7 @@ function makeEvent(overrides: Partial<AskSecurityEvent> = {}): AskSecurityEvent 
     event_type: "rate_limit_exceeded",
     visitor_id: "v1",
     email: "blocked@example.com",
-    reason: "ask_docs",
+    reason: "ask_host",
     created_at: "2026-07-18T10:00:00Z",
     ...overrides,
   };
@@ -105,7 +104,7 @@ describe("AskSecurityEventsPanel — link mode", () => {
     expect(screen.getByText("Removed from allowlist")).toBeInTheDocument();
     expect(screen.getByText("blocked@example.com")).toBeInTheDocument();
     expect(screen.getByText("removed@vc.com")).toBeInTheDocument();
-    expect(screen.getByText("Detail: Ask Docs")).toBeInTheDocument();
+    expect(screen.getByText("Detail: Ask Host")).toBeInTheDocument();
     expect(screen.getAllByText("High risk").length).toBeGreaterThanOrEqual(1);
   });
 

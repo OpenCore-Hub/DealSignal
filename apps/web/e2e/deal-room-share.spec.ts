@@ -7,7 +7,7 @@
  * - 链接名称、预设、过期时间、自定义域名、访问通知
  * - 访问控制：邮箱、邮箱验证码、密码、白名单 / 黑名单
  * - 内容保护：水印、NDA、下载控制、截图保护
- * - 高级功能：Visitor Ask（Ask Docs / Ask Host）、文件请求、索引文件
+ * - 高级功能：Visitor Ask（Ask Host）、文件请求、索引文件
  * - 激活 / 禁用开关与二次确认
  * - 未保存更改关闭确认
  * - 表单校验
@@ -275,15 +275,9 @@ test("creates a highly constrained link and verifies every public gate", async (
   await addEmailTag(page, "allowed", allowedEmail);
   await addEmailTag(page, "blocked", blockedEmail);
 
-  // Advanced features — Visitor Ask master + Ask Host; Ask Docs may require KB.
+  // Advanced features — Visitor Ask (Ask Host only).
   await page.getByRole("button", { name: /Advanced/i }).click();
   await setSwitch(page, /Visitor Ask/i, true);
-  // Master defaults to Ask Docs when KB allows; ensure Ask Host is also on.
-  const askHost = page.getByRole("switch", { name: /Ask Host/i });
-  if (await askHost.isVisible().catch(() => false)) {
-    const checked = await askHost.isChecked();
-    if (!checked) await askHost.click();
-  }
   await setSwitch(page, /Enable file requests/i, true);
   await setSwitch(page, /Enable index file generation/i, true);
 
@@ -315,7 +309,7 @@ test("creates a highly constrained link and verifies every public gate", async (
 
   // Advanced features should be exposed in the public sidebar.
   await allowedPage.getByRole("button", { name: /Open sidebar/i }).click().catch(() => {});
-  await expect(allowedPage.getByText(/Ask|Visitor Ask|Ask Docs|Ask Host/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
+  await expect(allowedPage.getByText(/Ask|Visitor Ask|Ask Host/i).first()).toBeVisible({ timeout: 5000 }).catch(() => {});
   await allowedPage.close();
 
   // Blocked visitor is denied even with correct credentials.

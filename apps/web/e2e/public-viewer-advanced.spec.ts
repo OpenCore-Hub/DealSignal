@@ -1,7 +1,7 @@
 /**
- * Public viewer advanced — email code send/resend, public assistant chat, NDA gate flow.
+ * Public viewer advanced — email code send/resend, NDA gate flow, public event recording.
  * Covers: POST /links/:token/send-email-code, POST /links/:token/resend-code,
- *         POST /links/:token/assistant/chat (public), public event recording
+ *         public event recording
  */
 import { test, expect } from "@playwright/test";
 import { seedRealBackend, seedDocument, seedLink, apiFetch } from "./real-helpers";
@@ -102,32 +102,6 @@ test.describe("Public viewer advanced (real backend)", () => {
     });
     const ok = res.ok || res.status === 204;
     expect(ok).toBe(true);
-  });
-
-  // ── Public assistant chat ──────────────────────────────────
-  test("public assistant chat endpoint", async () => {
-    // First get a session token by accessing the link
-    const accessRes = await apiFetch(`/api/v1/public/links/${publicToken}`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    let sessionToken = "";
-    if (accessRes.ok) {
-      const body = (await accessRes.json()) as { sessionToken?: string; session_token?: string };
-      sessionToken = body.sessionToken ?? body.session_token ?? "";
-    }
-
-    // Try the public assistant chat
-    if (sessionToken) {
-      const res = await apiFetch(`/api/v1/public/links/${publicToken}/assistant/chat`, {
-        method: "POST",
-        headers: { "X-Link-Session": sessionToken },
-        body: JSON.stringify({ message: "Summarize this document" }),
-      });
-      // May fail if AI is disabled or the link does not have the copilot enabled.
-      const ok = res.ok || res.status === 400 || res.status === 403 || res.status === 503;
-      expect(ok).toBe(true);
-    }
   });
 
   // ── Public document pages (signed URL) ──────────────────────

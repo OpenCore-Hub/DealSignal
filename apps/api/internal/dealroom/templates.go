@@ -174,7 +174,7 @@ var roomTemplates = []Template{
 			{Path: "/communication", Name: "Communication", Description: "Communication plan and meeting notes", SortOrder: 5},
 			{Path: "/risk-and-issues", Name: "Risk & Issues", Description: "Risk register and issue log", SortOrder: 6},
 			{Path: "/quality-and-testing", Name: "Quality & Testing", Description: "Quality plan and test results", SortOrder: 7},
-			{Path: "/documentation", Name: "Documentation", Description: "Project documentation and knowledge base", SortOrder: 8},
+			{Path: "/documentation", Name: "Documentation", Description: "Project documentation and reference materials", SortOrder: 8},
 			{Path: "/project-closure", Name: "Project Closure", Description: "Closure report and lessons learned", SortOrder: 9},
 		},
 	},

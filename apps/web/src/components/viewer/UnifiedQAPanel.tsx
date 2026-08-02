@@ -1,102 +1,43 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { useTranslation } from "react-i18next";
-import { ChatCenteredDots, PaperPlaneRight, Robot, Spinner, User } from "@phosphor-icons/react";
+import { ChatCenteredDots, PaperPlaneRight, Spinner, User } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import { useAIStore } from "@/stores/aiStore";
-import type { Evidence, VisitorQuestion, ChatMessage, DDCoverageChip } from "@/types";
-import { suggestAskHostFromDraft } from "./visitorAskChannelHint";
-
-function chipPrefillQuestion(lang: string, label: string): string {
-  const trimmed = label.trim();
-  if (!trimmed) return "";
-  if (lang.toLowerCase().startsWith("zh")) return `有没有${trimmed}`;
-  return `Is there documentation covering ${trimmed}?`;
-}
+import type { VisitorQuestion } from "@/types";
 
 interface UnifiedQAPanelProps {
   token: string;
   sessionToken?: string;
-  documentId?: string;
   qaEnabled?: boolean;
-  aiCopilotEnabled?: boolean;
-  askDocsDDChipsEnabled?: boolean;
 }
 
-type Source = "ai" | "owner" | "you";
+type Source = "owner" | "you";
 
 interface UIMessage {
   id: string;
   source: Source;
   content: string;
   createdAt: string;
-  evidences?: Evidence[];
-  resultStatus?: string;
-  suggestAskHost?: boolean;
   pendingReply?: boolean;
 }
 
 const creds = (token?: string) => (token ? { sessionToken: token } : undefined);
 
-function EvidenceCard({ evidence }: { evidence: Evidence }) {
-  const { t } = useTranslation("ai");
-  const { setHighlight } = useAIStore();
-  return (
-    <button
-      type="button"
-      className="mt-2 w-full rounded-md border border-border bg-muted/50 p-2 text-left text-xs transition-colors hover:bg-muted"
-      onClick={() => setHighlight(evidence, evidence.page_number)}
-    >
-      <span className="text-caption text-muted-foreground">
-        {t("evidence.page", { pageNumber: evidence.page_number })}
-      </span>
-      <p className="mt-0.5 line-clamp-2">{evidence.quote}</p>
-    </button>
-  );
-}
-
-function resolveAIMessage(msg: ChatMessage, t: (key: string, options?: Record<string, unknown>) => string): string {
-  if (typeof msg.content === "string" && msg.content.startsWith("ai:")) {
-    const key = msg.content;
-    const meta = msg as unknown as Record<string, unknown>;
-    const query = (meta._query as string) ?? "";
-    if (
-      key === "ai:search.results" ||
-      key === "ai:search.noResults" ||
-      key === "ai:search.error" ||
-      key === "ai:search.rateLimited" ||
-      key === "ai:search.limiterUnavailable"
-    ) {
-      return t(key, { query });
-    }
-    return t(key);
-  }
-  return msg.content;
-}
-
 export function UnifiedQAPanel({
   token,
   sessionToken,
-  documentId,
   qaEnabled,
-  aiCopilotEnabled,
-  askDocsDDChipsEnabled,
 }: UnifiedQAPanelProps) {
-  const { t, i18n } = useTranslation(["documents", "ai"]);
-  const { messages, pending: aiPending, sendMessage } = useAIStore();
+  const { t } = useTranslation("documents");
   const [questions, setQuestions] = useState<VisitorQuestion[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(() => Boolean(qaEnabled));
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<"ai" | "owner">(aiCopilotEnabled ? "ai" : "owner");
   const [ownerSubmitting, setOwnerSubmitting] = useState(false);
-  const [chips, setChips] = useState<DDCoverageChip[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
-  // Sliding session refresh rotates sessionToken frequently; keep a ref so the
-  // questions list effect does not re-fetch on every credential rotate.
   const sessionTokenRef = useRef(sessionToken);
   sessionTokenRef.current = sessionToken;
 
@@ -110,7 +51,7 @@ export function UnifiedQAPanel({
         const res = await api.listPublicQuestions(token, creds(sessionTokenRef.current));
         if (!cancelled) setQuestions(res.data ?? []);
       } catch {
-        if (!cancelled) setQuestionError(t("documents:viewer.qaLoadError"));
+        if (!cancelled) setQuestionError(t("viewer.qaLoadError"));
       } finally {
         if (!cancelled) setLoadingQuestions(false);
       }
@@ -119,47 +60,13 @@ export function UnifiedQAPanel({
   }, [token, qaEnabled, t, refreshKey]);
 
   useEffect(() => {
-    let cancelled = false;
-    if (!aiCopilotEnabled || !askDocsDDChipsEnabled || !sessionTokenRef.current) {
-      setChips([]);
-      return;
-    }
-    (async () => {
-      try {
-        const res = await api.listPublicDDChips(token, sessionTokenRef.current!);
-        if (!cancelled) setChips(res.data ?? []);
-      } catch {
-        if (!cancelled) setChips([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [token, aiCopilotEnabled, askDocsDDChipsEnabled, sessionToken]);
-
-  useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, questions, aiPending]);
+  }, [questions, ownerSubmitting]);
 
   const allMessages = useMemo<UIMessage[]>(() => {
     const list: UIMessage[] = [];
-    if (aiCopilotEnabled) {
-      messages.forEach((msg) => {
-        if (msg.id === "welcome") return;
-        const source: Source = msg.role === "user" ? "you" : "ai";
-        list.push({
-          id: msg.id,
-          source,
-          content: resolveAIMessage(msg, t),
-          createdAt: msg.createdAt,
-          evidences: msg.evidences,
-          resultStatus: msg.resultStatus,
-          suggestAskHost: msg.suggestAskHost,
-        });
-      });
-    }
     if (qaEnabled) {
       questions.forEach((q) => {
         list.push({
@@ -181,32 +88,7 @@ export function UnifiedQAPanel({
     }
     list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     return list;
-  }, [aiCopilotEnabled, messages, qaEnabled, questions, t]);
-
-  const sendAskDocs = useCallback(
-    async (text: string, checklistItemId?: string) => {
-      const trimmed = text.trim();
-      if (!trimmed) return;
-      setInput("");
-      await sendMessage(trimmed, {
-        documentId,
-        publicToken: token,
-        publicSessionToken: sessionTokenRef.current,
-        checklistItemId,
-      });
-    },
-    [documentId, sendMessage, token],
-  );
-
-  const handleChipClick = useCallback(
-    async (chip: DDCoverageChip) => {
-      if (aiPending || ownerSubmitting || mode !== "ai") return;
-      const question = chipPrefillQuestion(i18n.language, chip.label);
-      if (!question) return;
-      await sendAskDocs(question, chip.item_id);
-    },
-    [aiPending, i18n.language, mode, ownerSubmitting, sendAskDocs],
-  );
+  }, [qaEnabled, questions]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -214,13 +96,8 @@ export function UnifiedQAPanel({
       const text = input.trim();
       if (!text) return;
 
-      if (mode === "ai") {
-        await sendAskDocs(text);
-        return;
-      }
-
       if (text.length > 500) {
-        setQuestionError(t("documents:viewer.qaLengthError"));
+        setQuestionError(t("viewer.qaLengthError"));
         return;
       }
       setOwnerSubmitting(true);
@@ -232,31 +109,25 @@ export function UnifiedQAPanel({
       } catch (e: unknown) {
         if (e instanceof ApiError) {
           if (e.code === "qa_disabled") {
-            setQuestionError(t("documents:viewer.qaDisabled"));
+            setQuestionError(t("viewer.qaDisabled"));
           } else if (e.code === "rate_limit_exceeded") {
-            setQuestionError(t("documents:viewer.qaRateLimited"));
+            setQuestionError(t("viewer.qaRateLimited"));
           } else if (e.code === "limiter_unavailable") {
-            setQuestionError(t("documents:viewer.qaLimiterUnavailable"));
+            setQuestionError(t("viewer.qaLimiterUnavailable"));
           } else {
-            setQuestionError(t("documents:viewer.qaError"));
+            setQuestionError(t("viewer.qaError"));
           }
         } else {
-          setQuestionError(t("documents:viewer.qaError"));
+          setQuestionError(t("viewer.qaError"));
         }
       } finally {
         setOwnerSubmitting(false);
       }
     },
-    [input, mode, sendAskDocs, t, token]
+    [input, t, token]
   );
 
-  const showModeToggle = aiCopilotEnabled && qaEnabled;
-  const busy = aiPending || ownerSubmitting;
-  const placeholder = mode === "ai" ? t("documents:viewer.qaAIPlaceholder") : t("documents:viewer.qaOwnerPlaceholder");
-  const showChannelHint =
-    mode === "ai" && Boolean(qaEnabled) && Boolean(aiCopilotEnabled) && suggestAskHostFromDraft(input);
-  const showChips =
-    mode === "ai" && Boolean(aiCopilotEnabled) && Boolean(askDocsDDChipsEnabled) && chips.length > 0;
+  const busy = ownerSubmitting;
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -273,36 +144,7 @@ export function UnifiedQAPanel({
         ) : allMessages.length === 0 ? (
           <div className="flex flex-col items-center py-10 text-center text-muted-foreground">
             <ChatCenteredDots size={28} className="mb-3 opacity-25" />
-            <p className="text-sm font-medium">
-              {showModeToggle
-                ? t("documents:viewer.qaEmptyHint")
-                : t("documents:viewer.qaEmptyUnified")}
-            </p>
-            {showModeToggle && (
-              <div className="mt-4 flex w-full max-w-sm flex-col gap-2">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-auto whitespace-normal px-3 py-2 text-xs font-normal"
-                  onClick={() => {
-                    setMode("ai");
-                    setInput(t("documents:viewer.qaEmptyPromptSummarize"));
-                  }}
-                >
-                  {t("documents:viewer.qaEmptyPromptSummarize")}
-                </Button>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-auto whitespace-normal px-3 py-2 text-xs font-normal"
-                  onClick={() => setMode("owner")}
-                >
-                  {t("documents:viewer.qaEmptyPromptMissing")}
-                </Button>
-              </div>
-            )}
+            <p className="text-sm font-medium">{t("viewer.qaEmptyUnified")}</p>
           </div>
         ) : (
           allMessages.map((msg) => {
@@ -311,15 +153,9 @@ export function UnifiedQAPanel({
               <div key={msg.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[90%] ${isUser ? "items-end" : "items-start"} flex flex-col gap-1`}>
                   {!isUser && (
-                    <span
-                      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${
-                        msg.source === "ai"
-                          ? "bg-primary/10 text-primary"
-                          : "bg-warm-100 text-warm-700 dark:bg-warm-900 dark:text-warm-300"
-                      }`}
-                    >
-                      {msg.source === "ai" ? <Robot size={10} /> : <User size={10} />}
-                      {t(msg.source === "ai" ? "documents:viewer.qaSourceAI" : "documents:viewer.qaSourceOwner")}
+                    <span className="inline-flex items-center gap-1 rounded-full bg-warm-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warm-700 dark:bg-warm-900 dark:text-warm-300">
+                      <User size={10} />
+                      {t("viewer.qaSourceOwner")}
                     </span>
                   )}
                   <div
@@ -330,44 +166,16 @@ export function UnifiedQAPanel({
                     }`}
                   >
                     <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                    {msg.evidences?.map((ev) => (
-                      <EvidenceCard key={ev.chunk_id} evidence={ev} />
-                    ))}
                   </div>
                   {msg.pendingReply && (
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t("documents:viewer.qaPendingReply")}
+                      {t("viewer.qaPendingReply")}
                     </span>
                   )}
-                  {msg.source === "ai" &&
-                    (msg.resultStatus === "no_evidence" ||
-                      msg.resultStatus === "out_of_corpus" ||
-                      msg.resultStatus === "not_found_in_scope") &&
-                    msg.suggestAskHost &&
-                    qaEnabled &&
-                    mode === "ai" && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="mt-1 h-7 self-start text-xs"
-                        onClick={() => setMode("owner")}
-                      >
-                        {t("documents:viewer.qaSwitchToAskHost")}
-                      </Button>
-                    )}
                 </div>
               </div>
             );
           })
-        )}
-        {aiPending && (
-          <div className="flex justify-start">
-            <div className="flex items-center gap-2 rounded-lg bg-muted px-3 py-2 text-sm text-muted-foreground">
-              <Spinner size={14} className="animate-spin" />
-              {t("ai:viewer.thinking")}
-            </div>
-          </div>
         )}
       </div>
 
@@ -375,76 +183,12 @@ export function UnifiedQAPanel({
         <p className="px-3 pt-2 text-center text-xs text-destructive">{questionError}</p>
       )}
 
-      <div className="border-t border-border p-3 space-y-2">
-        {showModeToggle && (
-          <div className="flex rounded-md border border-border p-0.5">
-            <button
-              type="button"
-              onClick={() => setMode("ai")}
-              className={`flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                mode === "ai"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <Robot size={12} />
-              {t("documents:viewer.qaModeAI")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setMode("owner")}
-              className={`flex flex-1 items-center justify-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
-                mode === "owner"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              <User size={12} />
-              {t("documents:viewer.qaModeOwner")}
-            </button>
-          </div>
-        )}
-        {showChannelHint && (
-          <div
-            role="status"
-            className="rounded-md border border-border bg-muted/60 px-2.5 py-2 text-xs text-muted-foreground"
-          >
-            <p>{t("documents:viewer.qaChannelHint")}</p>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="mt-1.5 h-7 text-xs"
-              onClick={() => setMode("owner")}
-            >
-              {t("documents:viewer.qaChannelHintSwitch")}
-            </Button>
-          </div>
-        )}
-        {showChips && (
-          <div className="space-y-1.5" data-testid="ask-docs-dd-chips">
-            <p className="text-xs text-muted-foreground">{t("documents:viewer.qaDDChipsHint")}</p>
-            <div className="flex flex-wrap gap-1.5">
-              {chips.map((chip) => (
-                <button
-                  key={chip.item_id}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void handleChipClick(chip)}
-                  className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
-                  data-testid={`ask-docs-dd-chip-${chip.item_id}`}
-                >
-                  {chip.label}
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
+      <div className="space-y-2 border-t border-border p-3">
         <form onSubmit={handleSubmit} className="flex gap-2">
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={placeholder}
+            placeholder={t("viewer.qaOwnerPlaceholder")}
             maxLength={500}
             rows={2}
             className="min-h-0 flex-1 resize-none text-sm"
@@ -455,7 +199,7 @@ export function UnifiedQAPanel({
             size="icon"
             className="h-auto shrink-0"
             disabled={!input.trim() || busy}
-            aria-label={t("documents:viewer.qaSubmit")}
+            aria-label={t("viewer.qaSubmit")}
           >
             {busy ? <Spinner size={16} className="animate-spin" /> : <PaperPlaneRight size={16} weight="bold" />}
           </Button>

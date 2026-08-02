@@ -61,9 +61,7 @@ describe("ManagementTab", () => {
     await renderTab({ questions: [] });
     expect(screen.getByText("Ask Host inbox")).toBeInTheDocument();
     expect(
-      screen.getByText(
-        /not Ask Docs audit and not the Signal inbox/i
-      )
+      screen.getByText(/not the Signal inbox/i)
     ).toBeInTheDocument();
     expect(screen.getByText("No Ask Host questions yet.")).toBeInTheDocument();
   });

@@ -32,13 +32,11 @@ type Config struct {
 	OnlyOfficeURL       string
 	OnlyOfficeJWTSecret string
 
-	OpenAIAPIKey            string
-	OpenAIBaseURL           string
-	OpenAIEmbeddingModel    string
-	OpenAIEmbeddingEndpoint string // "embeddings" (default) or "chat_completions"
-	OpenAIChatModel         string
-	OpenAIReferer           string // optional, e.g. for OpenRouter
-	OpenAIAppTitle          string // optional, e.g. for OpenRouter
+	OpenAIAPIKey    string
+	OpenAIBaseURL   string
+	OpenAIChatModel string
+	OpenAIReferer   string // optional, e.g. for OpenRouter
+	OpenAIAppTitle  string // optional, e.g. for OpenRouter
 
 	BaseDomain             string
 	CNAMETarget            string
@@ -117,8 +115,8 @@ type Config struct {
 	MetricsEnabled     bool
 	PprofEnabled       bool
 
-	// AskDocs holds ASK_DOCS_* flags (D8). Populated in Load via AskDocsFromEnv.
-	AskDocs AskDocsConfig
+	// TableIngest holds TABLE_INGEST_* spreadsheet chunking flags.
+	TableIngest TableIngestConfig
 }
 
 // Load parses environment variables into Config and validates required fields.
@@ -146,13 +144,11 @@ func Load() (*Config, error) {
 		OnlyOfficeURL:       os.Getenv("ONLYOFFICE_URL"),
 		OnlyOfficeJWTSecret: os.Getenv("ONLYOFFICE_JWT_SECRET"),
 
-		OpenAIAPIKey:            os.Getenv("OPENAI_API_KEY"),
-		OpenAIBaseURL:           os.Getenv("OPENAI_BASE_URL"),
-		OpenAIEmbeddingModel:    os.Getenv("OPENAI_EMBEDDING_MODEL"),
-		OpenAIEmbeddingEndpoint: os.Getenv("OPENAI_EMBEDDING_ENDPOINT"),
-		OpenAIChatModel:         os.Getenv("OPENAI_CHAT_MODEL"),
-		OpenAIReferer:           os.Getenv("OPENAI_REFERER"),
-		OpenAIAppTitle:          os.Getenv("OPENAI_APP_TITLE"),
+		OpenAIAPIKey:    os.Getenv("OPENAI_API_KEY"),
+		OpenAIBaseURL:   os.Getenv("OPENAI_BASE_URL"),
+		OpenAIChatModel: os.Getenv("OPENAI_CHAT_MODEL"),
+		OpenAIReferer:   os.Getenv("OPENAI_REFERER"),
+		OpenAIAppTitle:  os.Getenv("OPENAI_APP_TITLE"),
 
 		BaseDomain:             getEnv("BASE_DOMAIN", "dealsignal.com"),
 		CNAMETarget:            getEnv("CNAME_TARGET", "cname.dealsignal.com"),
@@ -230,7 +226,7 @@ func Load() (*Config, error) {
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",
 		PprofEnabled:       strings.ToLower(getEnv("PPROF_ENABLED", "false")) == "true",
 	}
-	cfg.AskDocs = AskDocsFromEnv(cfg.AppEnv)
+	cfg.TableIngest = TableIngestFromEnv(cfg.AppEnv)
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

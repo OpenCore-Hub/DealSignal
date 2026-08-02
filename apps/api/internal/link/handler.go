@@ -159,6 +159,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:id/index-file", h.GetLinkIndexFile)
 	g.GET("/:id/questions", h.ListLinkVisitorQuestions)
 	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion)
+	g.GET("/:id/ask-security-events", h.ListAskSecurityEvents)
 	g.GET("/:id/file-requests", h.ListLinkFileRequests)
 	g.PATCH("/:id/file-requests/:requestId/status", h.UpdateFileRequestStatus)
 	g.GET("/:id/uploaded-files", h.ListUploadedFiles)
@@ -172,6 +173,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 	// Room-wide Ask Host inbox (across all links in the deal room).
 	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
+	r.GET("/deal-rooms/:roomId/ask-security-events", h.ListRoomAskSecurityEvents)
 }
 
 // RegisterPublicRoutes mounts public link routes.
@@ -313,8 +315,6 @@ type CreateRequest struct {
 	MaxAccessCount           *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
-	AskDocsDDChipsEnabled    bool     `json:"ask_docs_dd_chips_enabled,omitempty"`
 	ContactIDs               []string `json:"contact_ids,omitempty"`
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
@@ -342,8 +342,6 @@ type UpdateRequest struct {
 	MaxAccessCount              *int32   `json:"max_access_count,omitempty"`
 	DownloadEnabled             *bool    `json:"download_enabled,omitempty"`
 	WatermarkEnabled            *bool    `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled            *bool    `json:"ai_copilot_enabled,omitempty"`
-	AskDocsDDChipsEnabled       *bool    `json:"ask_docs_dd_chips_enabled,omitempty"`
 	ContactIDs                  []string `json:"contact_ids,omitempty"`
 	CustomDomain                string   `json:"custom_domain,omitempty"`
 	Tags                        []string `json:"tags,omitempty"`
@@ -503,17 +501,6 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.WatermarkEnabled != nil {
 		watermarkEnabled = *req.WatermarkEnabled
 	}
-	aiCopilotEnabled := existing.AiCopilotEnabled
-	if req.AICopilotEnabled != nil {
-		aiCopilotEnabled = *req.AICopilotEnabled
-	}
-	askDocsDDChipsEnabled := existing.AskDocsDdChipsEnabled
-	if req.AskDocsDDChipsEnabled != nil {
-		askDocsDDChipsEnabled = *req.AskDocsDDChipsEnabled
-	}
-	if !aiCopilotEnabled {
-		askDocsDDChipsEnabled = false
-	}
 	qaEnabled := existing.QaEnabled
 	if req.QaEnabled != nil {
 		qaEnabled = *req.QaEnabled
@@ -548,8 +535,6 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		MaxAccessCount:              req.MaxAccessCount,
 		DownloadEnabled:             downloadEnabled,
 		WatermarkEnabled:            watermarkEnabled,
-		AICopilotEnabled:            aiCopilotEnabled,
-		AskDocsDDChipsEnabled:       askDocsDDChipsEnabled,
 		QaEnabled:                   qaEnabled,
 		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
@@ -573,10 +558,6 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
 			return
 		}
-		if errors.Is(err, ErrKnowledgeBaseRequired) {
-			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_required", "message": err.Error()})
-			return
-		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
@@ -585,9 +566,6 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
-	}
-	if w := h.service.AskDocsCoverageWarning(c.Request.Context(), link); w != nil {
-		item["warnings"] = []AskDocsCoverageWarning{*w}
 	}
 	c.JSON(http.StatusOK, item)
 }
@@ -922,8 +900,6 @@ type CreateDealRoomLinkRequest struct {
 	ExpiresAt                   *string  `json:"expires_at,omitempty"`
 	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
-	AICopilotEnabled            bool     `json:"ai_copilot_enabled,omitempty"`
-	AskDocsDDChipsEnabled       bool     `json:"ask_docs_dd_chips_enabled,omitempty"`
 	QaEnabled                   bool     `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
@@ -968,8 +944,6 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		ExpiresAt:                   expiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		AICopilotEnabled:            req.AICopilotEnabled,
-		AskDocsDDChipsEnabled:       req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -985,11 +959,6 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
-		case errors.Is(err, ErrKnowledgeBaseRequired):
-			c.JSON(http.StatusConflict, gin.H{
-				"code":    "knowledge_base_required",
-				"message": err.Error(),
-			})
 		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		default:
@@ -1002,9 +971,6 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
-	}
-	if w := h.service.AskDocsCoverageWarning(c.Request.Context(), link); w != nil {
-		item["warnings"] = []AskDocsCoverageWarning{*w}
 	}
 	c.JSON(http.StatusCreated, item)
 }
@@ -1247,8 +1213,6 @@ func (h *Handler) Create(c *gin.Context) {
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		AICopilotEnabled:         req.AICopilotEnabled,
-		AskDocsDDChipsEnabled:    req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		QaEnabled:                req.QaEnabled,
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
@@ -1266,8 +1230,6 @@ func (h *Handler) Create(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
-		case errors.Is(err, ErrKnowledgeBaseRequired):
-			c.JSON(http.StatusConflict, gin.H{"code": "knowledge_base_required", "message": err.Error()})
 		case errors.Is(err, ErrInvalidPermission):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
 		default:
@@ -1309,8 +1271,6 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		"watermark_enabled":             meta.WatermarkEnabled,
 		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
 		"custom_domain":                 meta.CustomDomain,
-		"ai_copilot_enabled":            meta.AiCopilotEnabled,
-		"ask_docs_dd_chips_enabled":     meta.AskDocsDDChipsEnabled,
 		"qa_enabled":                    meta.QaEnabled,
 		"file_requests_enabled":         meta.FileRequestsEnabled,
 		"index_file_enabled":            meta.IndexFileEnabled,
@@ -1489,8 +1449,6 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"watermarkText":               h.watermarkTextFor(email, c.ClientIP()),
-		"aiCopilotEnabled":            link.AiCopilotEnabled,
-		"askDocsDDChipsEnabled":       link.AskDocsDdChipsEnabled,
 		"qaEnabled":                   link.QaEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
@@ -2487,8 +2445,6 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"downloadEnabled":             link.DownloadEnabled,
 		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
-		"aiCopilotEnabled":            link.AiCopilotEnabled,
-		"askDocsDDChipsEnabled":       link.AskDocsDdChipsEnabled,
 		"qaEnabled":                   link.QaEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
@@ -2727,6 +2683,37 @@ func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": questions})
+}
+
+// ListAskSecurityEvents returns Visitor Ask high-risk security events for a link.
+func (h *Handler) ListAskSecurityEvents(c *gin.Context) {
+	entries, err := h.service.ListAskSecurityEvents(
+		c.Request.Context(),
+		middleware.WorkspaceIDFrom(c),
+		c.Param("id"),
+		middleware.UserIDFrom(c),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": entries})
+}
+
+// ListRoomAskSecurityEvents returns Visitor Ask high-risk security events for a deal room.
+func (h *Handler) ListRoomAskSecurityEvents(c *gin.Context) {
+	entries, err := h.service.ListRoomAskSecurityEvents(
+		c.Request.Context(),
+		middleware.WorkspaceIDFrom(c),
+		c.Param("roomId"),
+		middleware.UserIDFrom(c),
+		c.Query("link_id"),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": entries})
 }
 
 // AnswerVisitorQuestion allows the owner to answer a visitor question.

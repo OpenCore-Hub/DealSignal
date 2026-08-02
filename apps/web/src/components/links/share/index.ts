@@ -3,7 +3,6 @@ export { ShareTab } from "./ShareTab";
 export { AccessTab } from "./AccessTab";
 export { AnalyticsTab } from "./AnalyticsTab";
 export { ManagementTab } from "./ManagementTab";
-export { AskDocsAuditPanel } from "./AskDocsAuditPanel";
 export { AskSecurityEventsPanel } from "./AskSecurityEventsPanel";
 export { DocumentsTab } from "./DocumentsTab";
 export { LinkShareDialog } from "./LinkShareDialog";

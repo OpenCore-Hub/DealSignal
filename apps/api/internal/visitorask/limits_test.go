@@ -43,28 +43,6 @@ func TestAllowAskHostAllowsWhenUnderLimit(t *testing.T) {
 	}
 }
 
-func TestAllowAskDocsDeniesOnBurst(t *testing.T) {
-	lim := &mockLimiter{allow: false}
-	ok, err := AllowAskDocs(context.Background(), lim, "link-1", "v1")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if ok {
-		t.Fatal("expected Ask Docs burst deny")
-	}
-}
-
-func TestAllowAskDocsFailsClosedOnRedisError(t *testing.T) {
-	lim := &mockLimiter{allow: true, err: errors.New("redis down")}
-	ok, err := AllowAskDocs(context.Background(), lim, "link-1", "v1")
-	if ok {
-		t.Fatal("expected Ask Docs deny when Redis errors")
-	}
-	if !errors.Is(err, ErrLimiterUnavailable) {
-		t.Fatalf("expected ErrLimiterUnavailable, got %v", err)
-	}
-}
-
 func TestAllowAskHostFailsClosedOnRedisError(t *testing.T) {
 	lim := &mockLimiter{allow: true, err: errors.New("redis down")}
 	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
@@ -76,9 +54,9 @@ func TestAllowAskHostFailsClosedOnRedisError(t *testing.T) {
 	}
 }
 
-func TestAllowAskDocsNilLimiterAllows(t *testing.T) {
-	ok, err := AllowAskDocs(context.Background(), nil, "link-1", "v1")
+func TestAllowAskHostNilLimiterAllows(t *testing.T) {
+	ok, err := AllowAskHost(context.Background(), nil, "link-1", "v1")
 	if err != nil || !ok {
-		t.Fatalf("nil limiter must skip enforcement, ok=%v err=%v", ok, err)
+		t.Fatalf("expected allow with nil limiter, ok=%v err=%v", ok, err)
 	}
 }

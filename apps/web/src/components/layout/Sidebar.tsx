@@ -62,7 +62,6 @@ export function Sidebar() {
       items: [
         { to: "dashboard", labelKey: "sidebar.nav.dashboard", icon: ChartPie },
         { to: "deal-rooms", labelKey: "sidebar.nav.dealRooms", icon: FolderOpen },
-        { to: "deal-rooms/portfolio", labelKey: "sidebar.nav.portfolio", icon: ClipboardText },
         { to: "documents", labelKey: "sidebar.nav.documents", icon: FileText },
         { to: "links", labelKey: "sidebar.nav.links", icon: LinkIcon },
       ],
@@ -89,7 +88,6 @@ export function Sidebar() {
     { value: "documents" as const, labelKey: "dealRooms:tabs.documents", icon: Files },
     { value: "participants" as const, labelKey: "dealRooms:tabs.participants", icon: ShareNetwork },
     { value: "qa" as const, labelKey: "dealRooms:tabs.qa", icon: ChatCircleText },
-    { value: "diligence" as const, labelKey: "dealRooms:tabs.diligence", icon: ClipboardText },
     { value: "activity" as const, labelKey: "dealRooms:tabs.activity", icon: Clock },
     { value: "analytics" as const, labelKey: "dealRooms:tabs.analytics", icon: ChartLineUp },
     { value: "settings" as const, labelKey: "dealRooms:tabs.settings", icon: Gear },

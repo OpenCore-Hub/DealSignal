@@ -31,7 +31,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
@@ -46,7 +45,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
@@ -61,7 +59,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: true,
     allowDownload: false,
     watermarkEnabled: true,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
@@ -76,7 +73,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: true,
     watermarkEnabled: true,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
@@ -91,7 +87,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
@@ -190,7 +185,7 @@ const SCORED_DIMENSION_NAMES = [
   "ndaEnabled",
   "allowDownload",
   "watermarkEnabled",
-  "aiCopilotEnabled",
+  "qaEnabled",
   "expiryDays",
   "maxViews",
 ] as const;
@@ -234,7 +229,7 @@ function presetMatchScore(
   if (config.ndaEnabled === template.ndaEnabled) score++;
   if (config.allowDownload === template.allowDownload) score++;
   if (config.watermarkEnabled === template.watermarkEnabled) score++;
-  if (config.aiCopilotEnabled === template.aiCopilotEnabled) score++;
+  if (config.qaEnabled === template.qaEnabled) score++;
   if (config.expiryDays === template.expiryDays) score++;
   if (config.maxViews === template.maxViews) score++;
 

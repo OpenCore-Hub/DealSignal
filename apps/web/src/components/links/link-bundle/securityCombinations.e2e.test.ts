@@ -55,7 +55,7 @@ interface StoreResult {
   requireNda: boolean;
   downloadEnabled: boolean;
   watermarkEnabled: boolean;
-  aiCopilotEnabled: boolean;
+  qaEnabled: boolean;
   expiresAt: string | null;
   maxAccessCount: number | null;
   contactIds: string[];
@@ -79,7 +79,7 @@ function normalizeAndStoreConfig(
     requireNda,
     downloadEnabled: payload.download_enabled ?? false,
     watermarkEnabled: payload.watermark_enabled ?? true,
-    aiCopilotEnabled: payload.ai_copilot_enabled ?? false,
+    qaEnabled: payload.qa_enabled ?? false,
     expiresAt: payload.expires_at ?? null,
     maxAccessCount: payload.max_access_count ?? null,
     contactIds: requireEmail && contactIds.length > 0 ? [...contactIds] : [],
@@ -179,7 +179,7 @@ describe("Exact JSON output (toCreateLinkPayload → JSON → backend parse)", (
       ndaEnabled: false,
       allowDownload: true,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
+      qaEnabled: false,
       qaEnabled: false,
       fileRequestsEnabled: false,
       indexFileEnabled: false,
@@ -199,7 +199,7 @@ describe("Exact JSON output (toCreateLinkPayload → JSON → backend parse)", (
     expect(payload.contact_ids).toBeUndefined();
     expect(payload.download_enabled).toBe(true);
     expect(payload.watermark_enabled).toBe(true);
-    expect(payload.ai_copilot_enabled).toBe(false);
+    expect(payload.qa_enabled).toBe(false);
     expect(payload.permission_type).toBe("public");
 
     const json = JSON.stringify(payload);
@@ -258,7 +258,7 @@ describe("normalizeAndStore → accessGate full chain", () => {
       ndaEnabled: false,
       allowDownload: true,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
+      qaEnabled: false,
       qaEnabled: false,
       fileRequestsEnabled: false,
       indexFileEnabled: false,
@@ -357,7 +357,7 @@ describe("Boolean switch cartesian product → backend storage correctness", () 
         ndaEnabled: combo.ndaEnabled,
         allowDownload: combo.allowDownload,
         watermarkEnabled: combo.watermarkEnabled,
-        aiCopilotEnabled: false,
+        qaEnabled: false,
         qaEnabled: false,
         fileRequestsEnabled: false,
         indexFileEnabled: false,

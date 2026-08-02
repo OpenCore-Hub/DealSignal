@@ -54,13 +54,13 @@ function Wrapper({ children }: { children: React.ReactNode }) {
 }
 
 describe("AccessSummaryCard", () => {
-  it("renders empty state when no restrictions", () => {
+  it("renders scoped empty state when allowlist has no folders", () => {
     render(
       <Wrapper>
         <AccessSummaryCard {...baseProps} />
       </Wrapper>
     );
-    expect(screen.getByText("No restrictions")).toBeInTheDocument();
+    expect(screen.getByText("Access summary")).toBeInTheDocument();
   });
 
   it("renders active protections", () => {

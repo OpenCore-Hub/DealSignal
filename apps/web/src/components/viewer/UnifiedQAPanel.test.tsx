@@ -1,533 +1,100 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
-import { I18nextProvider } from "react-i18next";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { I18nextProvider, initReactI18next } from "react-i18next";
+import i18n from "i18next";
 import { UnifiedQAPanel } from "./UnifiedQAPanel";
-import { createTestI18n } from "@/i18n/test-utils";
-import type { VisitorQuestion } from "@/types";
+import enDocuments from "@/i18n/locales/en/documents.json";
 
-const { listPublicQuestionsMock, createPublicQuestionMock, listPublicDDChipsMock } = vi.hoisted(() => ({
+const { listPublicQuestionsMock, createPublicQuestionMock } = vi.hoisted(() => ({
   listPublicQuestionsMock: vi.fn(),
   createPublicQuestionMock: vi.fn(),
-  listPublicDDChipsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     listPublicQuestions: listPublicQuestionsMock,
     createPublicQuestion: createPublicQuestionMock,
-    listPublicDDChips: listPublicDDChipsMock,
   },
 }));
 
-const sendMessageMock = vi.fn();
-const setHighlightMock = vi.fn();
-const useAIStoreMock = vi.fn(() => ({
-  messages: [] as Array<{
-    id: string;
-    role: "user" | "assistant";
-    content: string;
-    createdAt: string;
-    evidences?: unknown[];
-    resultStatus?: string;
-    suggestAskHost?: boolean;
-  }>,
-  pending: false,
-  sendMessage: sendMessageMock,
-  setHighlight: setHighlightMock,
-}));
-
-vi.mock("@/stores/aiStore", () => ({
-  useAIStore: () => useAIStoreMock(),
-}));
+const i18nInstance = i18n.createInstance();
+i18nInstance.use(initReactI18next).init({
+  lng: "en",
+  resources: { en: { documents: enDocuments } },
+  interpolation: { escapeValue: false },
+});
 
 async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAPanel>> = {}) {
-  const i18n = await createTestI18n({
-    common: {},
-    layout: {},
-    documents: {
-      "viewer.sidebarQA": "Ask",
-      "viewer.qaLoadError": "Could not load questions",
-      "viewer.qaLengthError": "Question must be 1–500 characters",
-      "viewer.qaDisabled": "Q&A is not available",
-      "viewer.qaError": "Failed to submit question",
-      "viewer.qaRateLimited": "Too many Ask Host questions. Please wait and try again.",
-      "viewer.qaLimiterUnavailable": "Ask Host is temporarily unavailable. Please try again later.",
-      "viewer.qaEmptyUnified": "No messages yet.",
-      "viewer.qaEmptyHint": "Ask Docs first; switch to Ask Host if you need missing materials.",
-      "viewer.qaEmptyPromptSummarize": "Summarize key points from authorized materials",
-      "viewer.qaEmptyPromptMissing": "Materials seem to be missing",
-      "viewer.qaPendingReply": "Awaiting reply",
-      "viewer.qaSourceAI": "AI",
-      "viewer.qaSourceOwner": "Host",
-      "viewer.qaModeAI": "Ask Docs",
-      "viewer.qaModeOwner": "Ask Host",
-      "viewer.qaAIPlaceholder": "Ask about authorized materials...",
-      "viewer.qaOwnerPlaceholder": "Ask the host...",
-      "viewer.qaSubmit": "Ask",
-      "viewer.qaNoEvidence": "I couldn't find supporting material in the documents you can access for this link.",
-      "viewer.qaSuggestAskHost": "You can ask the host instead.",
-      "viewer.qaSwitchToAskHost": "Ask the host instead",
-      "viewer.qaChannelHint":
-        "This looks like a request for missing materials. Ask Host may be a better fit — you can still send via Ask Docs.",
-      "viewer.qaChannelHintSwitch": "Switch to Ask Host",
-      "viewer.qaDDChipsHint": "Suggested checks (labels only)",
-    },
-    ai: {
-      "viewer.thinking": "Thinking...",
-      "evidence.page": "Page {{pageNumber}}",
-    },
-  });
-
-  const view = render(
-    <I18nextProvider i18n={i18n}>
-      <UnifiedQAPanel
-        token="token-1"
-        sessionToken="session-1"
-        documentId="doc-1"
-        qaEnabled
-        aiCopilotEnabled={false}
-        {...props}
-      />
+  render(
+    <I18nextProvider i18n={i18nInstance}>
+      <UnifiedQAPanel token="tok123" sessionToken="sess456" qaEnabled {...props} />
     </I18nextProvider>
   );
-
-  // Flush pending async state updates so tests don't warn about unwrapped act.
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+  await waitFor(() => {
+    expect(listPublicQuestionsMock).toHaveBeenCalled();
   });
-
-  return view;
 }
 
-describe("UnifiedQAPanel", () => {
+describe("UnifiedQAPanel (Ask Host only)", () => {
   beforeEach(() => {
     listPublicQuestionsMock.mockReset();
     createPublicQuestionMock.mockReset();
-    listPublicDDChipsMock.mockReset();
-    listPublicDDChipsMock.mockResolvedValue({ data: [] });
-    sendMessageMock.mockReset();
-    setHighlightMock.mockReset();
-    useAIStoreMock.mockReset();
-    useAIStoreMock.mockReturnValue({
-      messages: [],
-      pending: false,
-      sendMessage: sendMessageMock,
-      setHighlight: setHighlightMock,
-    });
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    createPublicQuestionMock.mockResolvedValue({ data: { id: "q1" } });
   });
 
-  it("renders owner questions and answers with source tags", async () => {
-    const questions: VisitorQuestion[] = [
-      {
-        id: "q1",
-        link_id: "link-1",
-        visitor_id: "v1",
-        question: "What is the pricing?",
-        answer: "Pricing starts at $99.",
-        status: "answered",
-        created_at: "2026-07-10T10:00:00Z",
-        updated_at: "2026-07-10T11:00:00Z",
-      },
-    ];
-    listPublicQuestionsMock.mockResolvedValue({ data: questions });
-
+  it("loads and shows empty state", async () => {
     await renderPanel();
-
-    await waitFor(() => {
-      expect(screen.getByText("What is the pricing?")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Pricing starts at $99.")).toBeInTheDocument();
-    expect(screen.getByText("Host")).toBeInTheDocument();
-    expect(screen.queryByText("Awaiting reply")).not.toBeInTheDocument();
+    expect(screen.getByText(/No messages yet/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Ask the host a question/i)).toBeInTheDocument();
   });
 
-  it("shows awaiting-reply on pending Host questions", async () => {
+  it("submits Ask Host question", async () => {
+    await renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/Ask the host a question/i), {
+      target: { value: "Can you share the model?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Ask/i }));
+    await waitFor(() => {
+      expect(createPublicQuestionMock).toHaveBeenCalledWith(
+        "tok123",
+        "Can you share the model?",
+        { sessionToken: "sess456" }
+      );
+    });
+  });
+
+  it("shows rate limit error", async () => {
+    const { ApiError } = await import("@/lib/apiClient");
+    createPublicQuestionMock.mockRejectedValue(
+      new ApiError({ status: 429, code: "rate_limit_exceeded", message: "rate limited", requestId: "r1" })
+    );
+    await renderPanel();
+    fireEvent.change(screen.getByPlaceholderText(/Ask the host a question/i), {
+      target: { value: "spam" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Ask/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/Too many Ask Host questions/i)).toBeInTheDocument();
+    });
+  });
+
+  it("renders answered questions", async () => {
     listPublicQuestionsMock.mockResolvedValue({
       data: [
         {
-          id: "q-pending",
-          link_id: "link-1",
-          visitor_id: "v1",
-          question: "Can you share the full model?",
-          status: "pending",
-          created_at: "2026-07-11T10:00:00Z",
-          updated_at: "2026-07-11T10:00:00Z",
+          id: "q1",
+          question: "Where is the cap table?",
+          answer: "In the Legal folder.",
+          status: "answered",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-02T00:00:00Z",
         },
       ],
     });
-
-    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
-
-    await waitFor(() => {
-      expect(screen.getByText("Can you share the full model?")).toBeInTheDocument();
-    });
-    expect(screen.getByText("Awaiting reply")).toBeInTheDocument();
-  });
-
-  it("submits a question to the owner and refreshes the list", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    createPublicQuestionMock.mockResolvedValue({
-      data: {
-        id: "q2",
-        link_id: "link-1",
-        visitor_id: "v1",
-        question: "Can I get a demo?",
-        status: "pending",
-        created_at: "2026-07-11T10:00:00Z",
-        updated_at: "2026-07-11T10:00:00Z",
-      },
-    });
-
     await renderPanel();
-    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1));
-
-    const input = screen.getByPlaceholderText("Ask the host...");
-    fireEvent.change(input, { target: { value: "Can I get a demo?" } });
-    fireEvent.click(screen.getByLabelText("Ask"));
-
-    await waitFor(() => {
-      expect(createPublicQuestionMock).toHaveBeenCalledWith("token-1", "Can I get a demo?", { sessionToken: "session-1" });
-    });
-    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalledTimes(2));
-  });
-
-  it("does not re-list questions when sessionToken rotates", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    const { rerender } = await renderPanel({ sessionToken: "session-1" });
-    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1));
-
-    const i18n = await createTestI18n({
-      common: {},
-      layout: {},
-      documents: {
-        "viewer.sidebarQA": "Ask",
-        "viewer.qaLoadError": "Could not load questions",
-        "viewer.qaLengthError": "Question must be 1–500 characters",
-        "viewer.qaDisabled": "Q&A is not available",
-        "viewer.qaError": "Failed to submit question",
-        "viewer.qaEmptyUnified": "No messages yet.",
-        "viewer.qaSourceAI": "AI",
-        "viewer.qaSourceOwner": "Host",
-        "viewer.qaModeAI": "Ask Docs",
-        "viewer.qaModeOwner": "Ask Host",
-        "viewer.qaAIPlaceholder": "Ask about authorized materials...",
-        "viewer.qaOwnerPlaceholder": "Ask the host...",
-        "viewer.qaSubmit": "Ask",
-      },
-      ai: {
-        "viewer.thinking": "Thinking...",
-        "evidence.page": "Page {{pageNumber}}",
-      },
-    });
-
-    rerender(
-      <I18nextProvider i18n={i18n}>
-        <UnifiedQAPanel
-          token="token-1"
-          sessionToken="session-2"
-          documentId="doc-1"
-          qaEnabled
-          aiCopilotEnabled={false}
-        />
-      </I18nextProvider>
-    );
-
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
-
-    expect(listPublicQuestionsMock).toHaveBeenCalledTimes(1);
-  });
-
-  it("defaults to Ask Docs when both channels are enabled", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-    expect(screen.getByPlaceholderText("Ask about authorized materials...")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ask Docs/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Ask Host/i })).toBeInTheDocument();
-  });
-
-  it("hides mode toggle when only Ask Host is enabled", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
-    expect(screen.queryByRole("button", { name: /Ask Docs/i })).not.toBeInTheDocument();
-    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
-  });
-
-  it("empty Ask Docs state does not deep-link to file requests", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: false });
-    expect(screen.getByText("No messages yet.")).toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.queryByText(/file request/i)).not.toBeInTheDocument();
-  });
-
-  it("Ask Docs-only empty state does not show dual-channel prompts", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: false });
-
-    expect(screen.getByText("No messages yet.")).toBeInTheDocument();
-    expect(
-      screen.queryByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Materials seem to be missing/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Summarize key points from authorized materials/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("Ask Host-only empty state does not show dual-channel prompts", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
-
-    expect(screen.getByText("No messages yet.")).toBeInTheDocument();
-    expect(
-      screen.queryByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Summarize key points from authorized materials/i }),
-    ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /Materials seem to be missing/i }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("dual-channel empty state offers summarize and missing-materials prompts", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-
-    expect(
-      screen.getByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /Summarize key points from authorized materials/i }),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    expect(screen.queryByText(/file request/i)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Materials seem to be missing/i }));
-    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
-  });
-
-  it("empty summarize prompt stays on Ask Docs and fills the draft", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-
-    fireEvent.click(
-      screen.getByRole("button", { name: /Summarize key points from authorized materials/i }),
-    );
-    expect(screen.getByPlaceholderText("Ask about authorized materials...")).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Summarize key points from authorized materials")).toBeInTheDocument();
-  });
-
-  it("offers Ask Host switch after no-evidence refusal when Ask Host is enabled", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    useAIStoreMock.mockReturnValue({
-      messages: [
-        {
-          id: "a1",
-          role: "assistant",
-          content: "I couldn't find supporting material in the documents you can access for this link.",
-          createdAt: "2026-07-22T00:00:00Z",
-          resultStatus: "no_evidence",
-          suggestAskHost: true,
-        },
-      ],
-      pending: false,
-      sendMessage: sendMessageMock,
-      setHighlight: setHighlightMock,
-    });
-
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-    const switchBtn = screen.getByRole("button", { name: /Ask the host instead/i });
-    expect(switchBtn).toBeInTheDocument();
-    fireEvent.click(switchBtn);
-    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
-  });
-
-  it("offers Ask Host switch after out_of_corpus refusal when Ask Host is enabled", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    useAIStoreMock.mockReturnValue({
-      messages: [
-        {
-          id: "a1",
-          role: "assistant",
-          content:
-            "This question is outside what the authorized materials can support, so I will not invent an answer. You can ask the host instead.",
-          createdAt: "2026-07-22T00:00:00Z",
-          resultStatus: "out_of_corpus",
-          suggestAskHost: true,
-        },
-      ],
-      pending: false,
-      sendMessage: sendMessageMock,
-      setHighlight: setHighlightMock,
-    });
-
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-    expect(screen.getByRole("button", { name: /Ask the host instead/i })).toBeInTheDocument();
-  });
-
-  it("offers Ask Host switch after not_found_in_scope refusal when Ask Host is enabled", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    useAIStoreMock.mockReturnValue({
-      messages: [
-        {
-          id: "a1",
-          role: "assistant",
-          content:
-            "I could not find that clause or topic in the authorized materials. You can ask the host instead.",
-          createdAt: "2026-07-22T00:00:00Z",
-          resultStatus: "not_found_in_scope",
-          suggestAskHost: true,
-        },
-      ],
-      pending: false,
-      sendMessage: sendMessageMock,
-      setHighlight: setHighlightMock,
-    });
-
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-    expect(screen.getByRole("button", { name: /Ask the host instead/i })).toBeInTheDocument();
-  });
-
-  it("suggests switching to Ask Host before send for missing-material drafts", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    sendMessageMock.mockResolvedValue(undefined);
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-
-    const input = screen.getByPlaceholderText("Ask about authorized materials...");
-    fireEvent.change(input, { target: { value: "能否提供完整财报？" } });
-
-    expect(
-      await screen.findByText(/Ask Host may be a better fit/i),
-    ).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("button", { name: /Switch to Ask Host/i }));
-    expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
-    expect(sendMessageMock).not.toHaveBeenCalled();
-  });
-
-  it("still allows sending via Ask Docs when the channel hint is visible", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    sendMessageMock.mockResolvedValue(undefined);
-    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
-
-    const input = screen.getByPlaceholderText("Ask about authorized materials...");
-    fireEvent.change(input, { target: { value: "能否提供完整财报？" } });
-    expect(await screen.findByText(/Ask Host may be a better fit/i)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByLabelText("Ask"));
-    await waitFor(() => {
-      expect(sendMessageMock).toHaveBeenCalledWith(
-        "能否提供完整财报？",
-        expect.objectContaining({ publicToken: "token-1" }),
-      );
-    });
-    expect(createPublicQuestionMock).not.toHaveBeenCalled();
-  });
-
-  it("maps Ask Host rate_limit_exceeded to a distinct error", async () => {
-    const { ApiError } = await import("@/lib/apiClient");
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    createPublicQuestionMock.mockRejectedValue(
-      new ApiError({
-        status: 429,
-        code: "rate_limit_exceeded",
-        message: "too many",
-        requestId: "req-1",
-      }),
-    );
-
-    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
-    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalled());
-
-    fireEvent.change(screen.getByPlaceholderText("Ask the host..."), {
-      target: { value: "__rate_limit__ spam" },
-    });
-    fireEvent.click(screen.getByLabelText("Ask"));
-
-    expect(
-      await screen.findByText(/Too many Ask Host questions/i),
-    ).toBeInTheDocument();
-  });
-
-  it("maps Ask Host limiter_unavailable to a distinct error", async () => {
-    const { ApiError } = await import("@/lib/apiClient");
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    createPublicQuestionMock.mockRejectedValue(
-      new ApiError({
-        status: 503,
-        code: "limiter_unavailable",
-        message: "down",
-        requestId: "req-2",
-      }),
-    );
-
-    await renderPanel({ aiCopilotEnabled: false, qaEnabled: true });
-    await waitFor(() => expect(listPublicQuestionsMock).toHaveBeenCalled());
-
-    fireEvent.change(screen.getByPlaceholderText("Ask the host..."), {
-      target: { value: "__limiter_down__ ping" },
-    });
-    fireEvent.click(screen.getByLabelText("Ask"));
-
-    expect(
-      await screen.findByText(/Ask Host is temporarily unavailable/i),
-    ).toBeInTheDocument();
-  });
-
-  it("does not fetch or show DD chips when the link switch is off", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    await renderPanel({
-      aiCopilotEnabled: true,
-      qaEnabled: false,
-      askDocsDDChipsEnabled: false,
-      sessionToken: "sess-1",
-    });
-    await waitFor(() => expect(listPublicQuestionsMock).not.toHaveBeenCalled());
-    expect(listPublicDDChipsMock).not.toHaveBeenCalled();
-    expect(screen.queryByTestId("ask-docs-dd-chips")).not.toBeInTheDocument();
-  });
-
-  it("renders DD chips as labels only and sends checklist_item_id on click", async () => {
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    listPublicDDChipsMock.mockResolvedValue({
-      data: [
-        { item_id: "financing_dd_v1.cap_table", label: "Cap table" },
-        { item_id: "financing_dd_v1.financials", label: "Financial statements" },
-      ],
-    });
-    sendMessageMock.mockResolvedValue(undefined);
-
-    await renderPanel({
-      aiCopilotEnabled: true,
-      qaEnabled: false,
-      askDocsDDChipsEnabled: true,
-      sessionToken: "sess-1",
-    });
-
-    expect(await screen.findByTestId("ask-docs-dd-chips")).toBeInTheDocument();
-    expect(screen.getByText("Suggested checks (labels only)")).toBeInTheDocument();
-    expect(screen.getByText("Cap table")).toBeInTheDocument();
-    expect(screen.queryByText(/absent|supported|insufficient/i)).not.toBeInTheDocument();
-
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("ask-docs-dd-chip-financing_dd_v1.cap_table"));
-    });
-
-    await waitFor(() => {
-      expect(sendMessageMock).toHaveBeenCalledWith(
-        "Is there documentation covering Cap table?",
-        expect.objectContaining({
-          checklistItemId: "financing_dd_v1.cap_table",
-          publicToken: "token-1",
-          publicSessionToken: "sess-1",
-        }),
-      );
-    });
+    expect(await screen.findByText("Where is the cap table?")).toBeInTheDocument();
+    expect(screen.getByText("In the Legal folder.")).toBeInTheDocument();
   });
 });

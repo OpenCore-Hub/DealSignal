@@ -1,13 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router";
-import { FileText, MagnifyingGlassPlus, MagnifyingGlass } from "@phosphor-icons/react";
+import { FileText, MagnifyingGlassPlus } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Card, CardContent } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { PageCard } from "./PageCard";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { PageAnalytics, Evidence } from "@/types";
 
@@ -26,9 +23,7 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
   const [pageImageUrl, setPageImageUrl] = useState<string | null>(null);
   const [loadingImageUrl, setLoadingImageUrl] = useState(false);
   const [highlightBoxes, setHighlightBoxes] = useState<Array<{ x: number; y: number; w: number; h: number }>>([]);
-  const [evidences, setEvidences] = useState<Evidence[]>(initialEvidences ?? []);
-  const [searchQuery, setSearchQuery] = useState("");
-  const [searching, setSearching] = useState(false);
+  const evidences = initialEvidences ?? [];
   const [imageSizeForPage, setImageSizeForPage] = useState<{
     page: number;
     size: { width: number; height: number };
@@ -44,21 +39,6 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
       hasEvidence: evidences?.some((e) => e.page_number === pageNumber) ?? false,
     };
   });
-
-  // Search for evidence within this document
-  const handleSearch = async () => {
-    const q = searchQuery.trim();
-    if (!q) return;
-    setSearching(true);
-    try {
-      const res = await api.searchDocument({ query: q, document_id: documentId });
-      setEvidences(res.results || []);
-    } catch {
-      setEvidences([]);
-    } finally {
-      setSearching(false);
-    }
-  };
 
   // Load signed URL for selected page (only depends on page + document, NOT evidences)
   useEffect(() => {
@@ -90,32 +70,8 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
     setHighlightBoxes(pageEvidence.flatMap((e) => e.boxes || []));
   }, [selectedPage, evidences]);
 
-  // Jump to a page with evidence and highlight its boxes
-  const jumpToEvidence = (pageNumber: number, boxes?: Array<{ x: number; y: number; w: number; h: number }>) => {
-    setSelectedPage(pageNumber);
-    // highlightBoxes will be set by the useEffect above when evidences updates,
-    // but we also set immediately for responsiveness
-    if (boxes && boxes.length > 0) {
-      setHighlightBoxes(boxes);
-    }
-  };
-
   return (
     <div className="space-y-4">
-      {/* Search bar for evidence retrieval with bbox highlight */}
-      <div className="flex gap-2">
-        <Input
-          placeholder={t("documents:content.searchPlaceholder")}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleSearch(); }}
-          className="flex-1"
-        />
-        <Button onClick={handleSearch} disabled={searching} size="icon">
-          <MagnifyingGlass size={16} />
-        </Button>
-      </div>
-
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
         {pages.map((page) => (
           <PageCard
@@ -169,7 +125,6 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
               })()}
             </div>
 
-            {/* Real page image preview with bbox highlight overlay */}
             <div className="mt-4 flex justify-center rounded-md border border-border bg-muted/30 p-4">
               {loadingImageUrl ? (
                 <Skeleton className="h-[400px] w-[300px]" />
@@ -187,7 +142,6 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
                       });
                     }}
                   />
-                  {/* Bounding box highlights - only render after image is loaded and dimensions are known */}
                   {imageSizeForPage?.page === selectedPage &&
                     highlightBoxes.map((box, idx) => {
                       const { width: w, height: h } = imageSizeForPage.size;
@@ -219,44 +173,10 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
                 {evidences
                   .filter((e) => e.page_number === selectedPage)
                   .map((ev) => (
-                    <div key={ev.chunk_id} className="text-sm">
-                      <span className="inline-block rounded bg-warning-500/20 px-1 py-0.5 text-xs font-medium text-warning-700">
-                        {t("documents:content.sourceLocation")}
-                      </span>
-                      <p className="mt-1">{ev.quote}</p>
-                      {ev.match_type && (
-                        <p className="mt-1 text-caption text-muted-foreground">
-                          {t("documents:content.matchType", { type: ev.match_type, score: (ev.score ?? 0).toFixed(4) })}
-                        </p>
-                      )}
-                    </div>
+                    <p key={ev.chunk_id} className="text-sm">
+                      {ev.quote}
+                    </p>
                   ))}
-              </div>
-            )}
-
-            {/* Evidence list with jump-to-page capability */}
-            {evidences && evidences.length > 0 && (
-              <div className="mt-4 rounded-md border border-border bg-muted/30 p-3">
-                <p className="text-caption mb-2 text-muted-foreground">{t("documents:content.allEvidence")}</p>
-                <div className="space-y-2">
-                  {evidences.map((ev, idx) => (
-                    <button
-                      key={ev.chunk_id || idx}
-                      onClick={() => jumpToEvidence(ev.page_number, ev.boxes)}
-                      className="block w-full rounded border border-border p-2 text-left text-sm transition-colors hover:bg-muted"
-                    >
-                      <div className="flex items-center gap-2">
-                        <Badge variant="secondary" className="text-caption">
-                          {t("documents:content.pageLabel", { pageNumber: ev.page_number })}
-                        </Badge>
-                        {ev.match_type && (
-                          <span className="text-caption text-muted-foreground">{ev.match_type}</span>
-                        )}
-                      </div>
-                      <p className="mt-1 line-clamp-2 text-muted-foreground">{ev.quote}</p>
-                    </button>
-                  ))}
-                </div>
               </div>
             )}
           </CardContent>

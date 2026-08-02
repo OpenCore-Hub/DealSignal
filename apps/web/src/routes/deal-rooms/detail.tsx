@@ -18,7 +18,6 @@ import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissi
 import { DealRoomAccessRequestsPanel } from "@/components/deal-rooms/DealRoomAccessRequestsPanel";
 import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsTab";
 import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
-import { DealRoomDiligenceTab } from "@/components/deal-rooms/DealRoomDiligenceTab";
 import { DealRoomDocumentsHome } from "@/components/deal-rooms/DealRoomDocumentsHome";
 import { DealRoomActivityTab } from "@/components/deal-rooms/DealRoomActivityTab";
 import { DealRoomSettingsTab } from "@/components/deal-rooms/DealRoomSettingsTab";
@@ -509,10 +508,6 @@ export function DealRoomDetailPage() {
         >
           {tab === "documents" && (
             <DealRoomDocumentsHome
-              roomId={room.id}
-              isAdmin={true}
-              documents={allRoomDocuments}
-              folders={room.folders ?? []}
               activeLinkCount={activeLinkCount}
               failedDeliveries={navSignals.failedDeliveries}
               unreadQuestions={navSignals.unreadQuestions}
@@ -554,8 +549,6 @@ export function DealRoomDetailPage() {
           )}
 
           {tab === "qa" && <DealRoomQATab roomId={room.id} />}
-
-          {tab === "diligence" && <DealRoomDiligenceTab roomId={room.id} />}
 
           {tab === "activity" && (
             <DealRoomActivityTab

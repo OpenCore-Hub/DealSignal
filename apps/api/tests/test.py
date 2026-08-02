@@ -49,20 +49,22 @@ if headers:
     client_kwargs["default_headers"] = headers
 
 client = OpenAI(**client_kwargs)
-embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+chat_model = os.getenv("OPENAI_CHAT_MODEL", "gpt-4o-mini")
 
-texts = [
-    "待测文本1...",
-    "待测文本2...",
-    # ...
+prompts = [
+    "Reply with the single word ok.",
+    "What is 2+2? Reply with only the number.",
 ]
 
-for i, t in enumerate(texts):
+for i, prompt in enumerate(prompts):
     try:
-        r = client.embeddings.create(model=embedding_model, input=t)
-        print(f"[{i}] ✅ 通过")
+        r = client.chat.completions.create(
+            model=chat_model,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        content = (r.choices[0].message.content or "").strip()
+        print(f"[{i}] OK: {content!r}")
     except Exception as e:
-        print(f"[{i}] ❌ 被拒: {e}")
-        # 把违规文本保存下来
+        print(f"[{i}] FAIL: {e}")
         with open(api_root / "tests" / "blocked_openai.txt", "a", encoding="utf-8") as f:
-            f.write(f"{i}: {t}\n---\n")
+            f.write(f"{i}: {prompt}\n---\n")

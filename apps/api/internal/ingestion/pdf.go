@@ -484,10 +484,3 @@ func splitTextChunks(page PageInfo) []Chunk {
 	}
 	return chunks
 }
-
-// normalizeText creates a normalized version of text for exact/fuzzy search.
-func normalizeText(text string) string {
-	lower := strings.ToLower(text)
-	reg := regexp.MustCompile(`[^a-z0-9\x{4e00}-\x{9fff}]`)
-	return strings.TrimSpace(reg.ReplaceAllString(lower, " "))
-}

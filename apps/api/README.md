@@ -38,7 +38,7 @@ Key variables in `.env`:
 | `REDIS_URL` | yes | Redis connection string |
 | `JWT_SECRET` | yes | Signing secret for JWT tokens |
 | `S3_BUCKET` / `S3_ACCESS_KEY` / `S3_SECRET_KEY` | yes | MinIO / S3-compatible storage |
-| `OPENAI_API_KEY` | no | OpenAI-compatible API key. Leave empty to disable vector search and assistant. |
+| `OPENAI_API_KEY` | no | OpenAI-compatible API key. Leave empty to disable LLM suggestion enrichment. Ask Docs / Diligence removed. |
 | `OPENAI_BASE_URL` | no | Custom base URL, e.g. `https://openrouter.ai/api/v1` |
 | `OPENAI_REFERER` / `OPENAI_APP_TITLE` | no | Optional headers for OpenRouter-compatible providers |
 | `ONLYOFFICE_URL` | yes | OnlyOffice Document Server URL |
@@ -52,11 +52,4 @@ cd apps/api
 ./e2e-test.sh
 ```
 
-`e2e-ai.sh` runs the same flow plus vector search and AI assistant against a local mock OpenAI-compatible server, so the AI paths can be verified without a real LLM key:
-
-```bash
-cd apps/api
-./e2e-ai.sh
-```
-
-To run the AI flow against a real provider, set `OPENAI_API_KEY` and `OPENAI_BASE_URL` in `.env` and restart the API container.
+Ask Docs / assistant chat E2E (`e2e-ai.sh`) was removed with the product surface; the script is a no-op skip for older CI callers.

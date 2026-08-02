@@ -10,19 +10,6 @@ import { badgeCountForTab } from "@/stores/dealRoomNavStore";
 import { deriveRoomStage } from "@/lib/dealRoomNav";
 import { findMissingRecommendedFiles } from "@/lib/dealRoomReadiness";
 
-vi.mock("@/lib/api", () => ({
-  api: {
-    getDealRoomKnowledgeBase: vi.fn().mockResolvedValue({
-      room_id: "room-1",
-      status: "none",
-      folder_paths: [],
-      document_ids: [],
-      embedded_count: 0,
-      folder_count: 0,
-    }),
-  },
-}));
-
 async function withI18n(ui: React.ReactElement) {
   const instance = i18n.createInstance();
   await instance.use(initReactI18next).init({
@@ -38,14 +25,6 @@ async function withI18n(ui: React.ReactElement) {
               unreadQuestions_one: "{{count}} unanswered question — open Q&A",
               unreadQuestions_other: "{{count}} unanswered questions — open Q&A",
             },
-          },
-          knowledgeBase: {
-            title: "Knowledge base",
-            description: "KB",
-            status: { none: "Not created" },
-            create: "Create knowledge base",
-            forbidden: "Only admins",
-            loadFailed: "Failed",
           },
           activity: {
             title: "Activity",
@@ -126,7 +105,6 @@ describe("deal room nav B′ pieces", () => {
     const onJumpTab = vi.fn();
     await withI18n(
       <DealRoomDocumentsHome
-        roomId="room-1"
         activeLinkCount={2}
         failedDeliveries={2}
         unreadQuestions={1}
@@ -148,7 +126,6 @@ describe("deal room nav B′ pieces", () => {
     const onJumpTab = vi.fn();
     await withI18n(
       <DealRoomDocumentsHome
-        roomId="room-1"
         activeLinkCount={0}
         failedDeliveries={0}
         unreadQuestions={0}
@@ -166,7 +143,6 @@ describe("deal room nav B′ pieces", () => {
   it("hides attention when room signals are healthy", async () => {
     await withI18n(
       <DealRoomDocumentsHome
-        roomId="room-1"
         activeLinkCount={1}
         failedDeliveries={0}
         unreadQuestions={0}

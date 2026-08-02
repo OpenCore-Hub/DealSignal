@@ -151,11 +151,8 @@ cd apps/web && pnpm security
 ## 端到端验证
 
 ```bash
-# 后端 P0 E2E（无需 AI key）
+# 后端 P0 E2E
 cd apps/api && ./e2e-test.sh
-
-# 后端 P0 + AI E2E（本地 mock LLM）
-cd apps/api && ./e2e-ai.sh
 
 # 前端真实后端 E2E（npm script）
 cd apps/web && pnpm test:e2e:real

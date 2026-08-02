@@ -95,17 +95,7 @@
       "title": "Advanced",
       "enabledCount": "{{count}} enabled",
       "visitorAsk": "Visitor Ask",
-      "visitorAskDescription": "Let visitors ask about documents or message the host",
-      "askDocs": "Ask Docs",
-      "askDocsDescription": "Instant answers grounded in authorized materials",
-      "ddChips": "Suggested checklist chips",
-      "ddChipsDescription": "Show financing DD checklist suggestions in Ask Docs (labels only; visitors never see your gap table)",
-      "askHost": "Ask Host",
-      "askHostDescription": "Async questions for the link owner to answer",
-      "knowledgeBaseRequired": "Create or rebuild the room knowledge base before enabling Ask Docs",
-      "openKnowledgeBase": "Open knowledge base",
-      "askDocsScopeNotInKb": "Some authorized folders or documents are outside the knowledge base; Ask Docs will only search the overlap",
-      "askDocsScopeGaps": "Outside KB: {{items}}",
+      "visitorAskDescription": "Let visitors send async questions to the link owner (Ask Host)",
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",
       "indexFile": "Enable index file generation",
@@ -163,7 +153,7 @@
     "loading": "Loading management data...",
     "loadFailed": "Failed to load management data",
     "questionsTitle": "Ask Host inbox",
-    "questionsDescription": "Reply to async Ask Host questions from visitors. This is not Ask Docs audit and not the Signal inbox.",
+    "questionsDescription": "Reply to async Ask Host questions from visitors. This is not the Signal inbox.",
     "noQuestions": "No Ask Host questions yet.",
     "anonymous": "Anonymous",
     "answerLabel": "Answer:",
@@ -189,85 +179,9 @@
       "fulfilled": "Fulfilled"
     }
   },
-  "askDocsAudit": {
-    "title": "Ask Docs audit",
-    "description": "Read-only ledger of visitor Ask Docs conversations. Not the Ask Host inbox. Intent Signals appear on the dashboard separately — this is not the Signal inbox.",
-    "roomTitle": "Ask Docs timeline",
-    "roomDescription": "Room-wide Ask Docs audit. Filter by link. Not the Ask Host inbox. Intent Signals appear on the dashboard separately — this is not the Signal inbox.",
-    "loading": "Loading Ask Docs audit...",
-    "loadFailed": "Failed to load Ask Docs audit",
-    "forbidden": "You do not have permission to view Ask Docs audit.",
-    "empty": "No Ask Docs sessions in the last 90 days.",
-    "emptyArchived": "No Ask Docs sessions found.",
-    "showArchived": "Include archived (older than 90 days)",
-    "hotWindowHint": "Showing the last 90 days by default.",
-    "channel": "Ask Docs",
-    "evidenceCount": "{{count}} citations",
-    "archivedBadge": "Archived",
-    "filterAllLinks": "All links",
-    "filterByLink": "Filter by link",
-    "anonymous": "Anonymous visitor",
-    "detailTitle": "Session detail",
-    "detailBack": "Back to list",
-    "detailLoading": "Loading session...",
-    "detailFailed": "Failed to load session detail",
-    "messages": "Conversation",
-    "evidence": "Evidence",
-    "noEvidence": "No evidence recorded",
-    "resultStatus": "Result",
-    "resultStatuses": {
-      "success": "Answered",
-      "no_evidence": "No evidence",
-      "kb_unavailable": "Knowledge base unavailable",
-      "scope_violation": "Scope violation",
-      "out_of_corpus": "Outside authorized materials",
-      "not_found_in_scope": "Not found in scope"
-    },
-    "routing": {
-      "title": "Routing",
-      "intent": "Doc intent",
-      "mode": "Generation mode",
-      "source": "Intent source",
-      "fallback": "Fallback from",
-      "slot": "Slot",
-      "party": "Party",
-      "checklistItem": "Checklist item",
-      "intentValues": {
-        "locate": "Locate",
-        "topic": "Topic",
-        "list": "List",
-        "qa": "Q&A",
-        "refuse_early": "Refuse early"
-      },
-      "modeValues": {
-        "extractive": "Extractive",
-        "abstractive": "Abstractive",
-        "refuse": "Refuse"
-      },
-      "sourceValues": {
-        "rule": "Rule",
-        "llm": "LLM",
-        "default": "Default"
-      },
-      "fallbackValues": {
-        "locate": "Locate"
-      },
-      "slotValues": {
-        "absence": "Absence"
-      },
-      "partyValues": {
-        "investor": "Investor",
-        "founder": "Founder",
-        "buyer": "Buyer",
-        "seller": "Seller",
-        "gp": "GP",
-        "lp": "LP"
-      }
-    }
-  },
   "askSecurityEvents": {
     "title": "Visitor Ask security events",
-    "description": "High-risk Ask Docs / Ask Host events: blocks (including allowlist removal), scope violations, and rate limits.",
+    "description": "High-risk Ask Host events: blocks (including allowlist removal), scope violations, and rate limits.",
     "roomTitle": "Visitor Ask security events",
     "roomDescription": "Room-wide high-risk Ask events (blocks, scope violations, rate limits). Filter by link.",
     "loading": "Loading security events...",
@@ -287,7 +201,6 @@
       "not_in_allow_list": "Removed from allowlist"
     },
     "reasons": {
-      "ask_docs": "Ask Docs",
       "ask_host": "Ask Host",
       "out_of_scope_evidence": "Out-of-scope evidence"
     }

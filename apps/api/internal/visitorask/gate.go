@@ -9,7 +9,6 @@ import (
 type Channel string
 
 const (
-	ChannelAskDocs Channel = "ask_docs"
 	ChannelAskHost Channel = "ask_host"
 )
 
@@ -32,13 +31,11 @@ const (
 	DecisionLimiterUnavailable
 )
 
-// Check enforces the channel limiter and returns a shared decision for Docs/Host handlers.
+// Check enforces the channel limiter and returns a shared decision for Ask Host handlers.
 func Check(ctx context.Context, lim Limiter, ch Channel, linkID, visitorID string) Decision {
 	var ok bool
 	var err error
 	switch ch {
-	case ChannelAskDocs:
-		ok, err = AllowAskDocs(ctx, lim, linkID, visitorID)
 	case ChannelAskHost:
 		ok, err = AllowAskHost(ctx, lim, linkID, visitorID)
 	default:
@@ -58,7 +55,7 @@ func ShouldRecordRateLimitEvent(d Decision) bool {
 	return d == DecisionRateLimited
 }
 
-// EventReason is the security_events.reason value for a channel (ask_docs / ask_host).
+// EventReason is the security_events.reason value for a channel.
 func EventReason(ch Channel) string {
 	return string(ch)
 }
@@ -91,19 +88,9 @@ func DenyCode(d Decision) string {
 func DenyMessage(ch Channel, d Decision) string {
 	switch d {
 	case DecisionLimiterUnavailable:
-		switch ch {
-		case ChannelAskHost:
-			return "Ask Host is temporarily unavailable, please try again later"
-		default:
-			return "Ask Docs is temporarily unavailable, please try again later"
-		}
+		return "Ask Host is temporarily unavailable, please try again later"
 	case DecisionRateLimited:
-		switch ch {
-		case ChannelAskHost:
-			return "too many Ask Host requests, please try again later"
-		default:
-			return "too many Ask Docs requests, please try again later"
-		}
+		return "too many Ask Host requests, please try again later"
 	default:
 		return ""
 	}

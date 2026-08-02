@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { useReducedMotion } from "motion/react";
@@ -18,7 +17,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
-import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, DealRoomKnowledgeBaseStatus, Link } from "@/types";
+import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
@@ -34,11 +33,6 @@ import {
   validateDraft,
 } from "@/components/links/share";
 import type { DraftLink } from "@/components/links/share";
-import {
-  askDocsCoverageWarningMessage,
-  extractAskDocsWarnings,
-  visitorAskSaveErrorMessage,
-} from "@/components/links/share/visitorAskSaveFeedback";
 
 const tabTransition = {
   initial: { opacity: 0, x: 8 },
@@ -141,7 +135,6 @@ function DealRoomShareDialogContent({
 }: DealRoomShareDialogContentProps) {
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
-  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const reducedMotion = useReducedMotion();
   const [tab, setTab] = useState<"share" | "access" | "documents">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
@@ -149,7 +142,6 @@ function DealRoomShareDialogContent({
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
   const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
-  const [knowledgeBaseStatus, setKnowledgeBaseStatus] = useState<DealRoomKnowledgeBaseStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -172,25 +164,6 @@ function DealRoomShareDialogContent({
       cancelled = true;
     };
   }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const kb = await api.getDealRoomKnowledgeBase(roomId);
-        if (!cancelled) setKnowledgeBaseStatus(kb.status);
-      } catch {
-        if (!cancelled) setKnowledgeBaseStatus("none");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId]);
-
-  const knowledgeBaseHref = workspaceSlug
-    ? `/${workspaceSlug}/deal-rooms/${roomId}?tab=documents`
-    : undefined;
 
   // Unsaved-changes tracking. We use a mutable ref instead of a callback so
   // the data-sync effect does not depend on the comparison function, which
@@ -288,7 +261,6 @@ function DealRoomShareDialogContent({
     setSaving(true);
     try {
       let link = selectedLink;
-      let savedPayload: unknown = link;
       if (!link) {
         const { allowedEmails, blockedEmails } = buildAllowedLists(draft);
         link = await api.createDealRoomLink(roomId, {
@@ -305,10 +277,6 @@ function DealRoomShareDialogContent({
           expires_at: toRFC3339(draft.expiresAt) || undefined,
           download_enabled: draft.allowDownloading,
           watermark_enabled: draft.watermarkEnabled,
-          ai_copilot_enabled: draft.aiCopilotEnabled,
-          ask_docs_dd_chips_enabled: draft.aiCopilotEnabled
-            ? Boolean(draft.askDocsDDChipsEnabled)
-            : false,
           qa_enabled: draft.enableQaConversations,
           file_requests_enabled: draft.enableFileRequests,
           index_file_enabled: draft.enableIndexFileGeneration,
@@ -317,9 +285,8 @@ function DealRoomShareDialogContent({
           notify_on_access: draft.notifyOnAccess,
           folder_paths: draft.folderPaths,
         });
-        savedPayload = link;
       } else {
-        savedPayload = await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
+        await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
         await api.setLinkAccessRules(link.id, buildRules(draft));
       }
 
@@ -327,19 +294,11 @@ function DealRoomShareDialogContent({
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 1500);
       toast.success(t(selectedLink ? "share.saveSuccess" : "share.createSuccess"));
-      const coverage = askDocsCoverageWarningMessage(extractAskDocsWarnings(savedPayload), lt);
-      if (coverage) {
-        toast.warning(coverage);
-      }
       await refetch();
       await onChanged?.();
       return link;
     } catch (err) {
-      const kbGate =
-        err instanceof ApiError ? visitorAskSaveErrorMessage(err, lt) : null;
-      if (kbGate) {
-        toast.error(kbGate);
-      } else if (err instanceof ApiError && err.code === "duplicate_name") {
+      if (err instanceof ApiError && err.code === "duplicate_name") {
         toast.error(lt("share.linkNameDuplicate"));
       } else {
         toast.error(t("common:error.saveFailed"));
@@ -476,8 +435,6 @@ function DealRoomShareDialogContent({
                     isDealRoomLink={isDealRoomLink}
                     passwordAlreadySet={Boolean(selectedLink?.requirePassword)}
                     ndaTemplates={ndaTemplates}
-                    knowledgeBaseStatus={knowledgeBaseStatus}
-                    knowledgeBaseHref={knowledgeBaseHref}
                     documents={(data?.documents ?? [])
                       .flatMap((folder) => folder.documents ?? [])
                       .map((d) => ({ id: d.document_id, title: d.title }))}

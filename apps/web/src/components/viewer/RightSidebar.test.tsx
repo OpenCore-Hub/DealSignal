@@ -120,30 +120,16 @@ describe("RightSidebar folder structure", () => {
     expect(screen.queryByText("Root")).toBeNull();
   });
 
-  it("shows Ask tab when either Ask Docs or Ask Host is enabled", async () => {
+  it("shows Ask tab when Ask Host is enabled", async () => {
     const i18n = await createTestI18n({
       documents: { "viewer.sidebarQA": "Ask", "viewer.sidebarDocuments": "Documents", "viewer.pages": "pages" },
       ai: { "viewer.close": "Close" },
     });
-    const { rerender } = render(
+    render(
       <I18nextProvider i18n={i18n}>
         <RightSidebar
           open
           onClose={() => {}}
-          aiCopilotEnabled
-          qaEnabled={false}
-          documents={[{ id: "d1", title: "Deck", pageCount: 1 }]}
-        />
-      </I18nextProvider>
-    );
-    expect(screen.getByRole("button", { name: /^Ask$/i })).toBeInTheDocument();
-
-    rerender(
-      <I18nextProvider i18n={i18n}>
-        <RightSidebar
-          open
-          onClose={() => {}}
-          aiCopilotEnabled={false}
           qaEnabled
           documents={[{ id: "d1", title: "Deck", pageCount: 1 }]}
         />
@@ -162,7 +148,6 @@ describe("RightSidebar folder structure", () => {
         <RightSidebar
           open
           onClose={() => {}}
-          aiCopilotEnabled={false}
           qaEnabled={false}
           documents={[{ id: "d1", title: "Deck", pageCount: 1 }]}
         />

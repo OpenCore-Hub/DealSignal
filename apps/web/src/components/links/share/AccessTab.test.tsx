@@ -29,10 +29,6 @@ function renderAccessTab(
   isDealRoomLink = true,
   documents: { id: string; title: string }[] = [],
   passwordAlreadySet = false,
-  extras: {
-    knowledgeBaseStatus?: import("@/types").DealRoomKnowledgeBaseStatus | null;
-    knowledgeBaseHref?: string;
-  } = {}
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -44,8 +40,6 @@ function renderAccessTab(
         isDealRoomLink={isDealRoomLink}
         documents={documents}
         passwordAlreadySet={passwordAlreadySet}
-        knowledgeBaseStatus={extras.knowledgeBaseStatus}
-        knowledgeBaseHref={extras.knowledgeBaseHref}
       />
     </Wrapper>
   );
@@ -64,7 +58,6 @@ const baseDraft: DraftLink = {
   ndaDocumentId: "",
   ndaTemplateId: "",
   allowDownloading: false,
-  aiCopilotEnabled: false,
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
@@ -238,96 +231,48 @@ describe("AccessTab", () => {
     expect(screen.queryByTitle(/reduce leak risk/i)).not.toBeInTheDocument();
   });
 
-  it("shows advanced count badge when Visitor Ask (Ask Docs) is enabled", () => {
-    renderAccessTab({ ...baseDraft, aiCopilotEnabled: true });
+  it("shows advanced count badge when Visitor Ask is enabled", () => {
+    renderAccessTab({ ...baseDraft, enableQaConversations: true });
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("counts Visitor Ask as one when both Ask Docs and Ask Host are enabled", () => {
+  it("counts Visitor Ask and file requests separately in advanced badge", () => {
     renderAccessTab({
       ...baseDraft,
-      aiCopilotEnabled: true,
       enableFileRequests: true,
       enableQaConversations: true,
     });
-    // Visitor Ask (Docs+Host) = 1, file requests = 1 → 2
     expect(screen.getByText("2 enabled")).toBeInTheDocument();
   });
 
-  it("renders Visitor Ask master with Ask Docs and Ask Host sub-channels", () => {
-    renderAccessTab({ ...baseDraft, aiCopilotEnabled: true });
+  it("renders Visitor Ask master toggle without Ask Docs sub-channels", () => {
+    renderAccessTab({ ...baseDraft, enableQaConversations: true });
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByText(/Visitor Ask/i)).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: /Ask Docs/i })).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: /Ask Host/i })).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Ask Docs/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/AI Agents/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
   });
 
-  it("disables Ask Docs and shows KB guide when room knowledge base is missing", () => {
-    const { updateDraft } = renderAccessTab(
-      { ...baseDraft, enableQaConversations: true },
-      {},
-      true,
-      [],
-      false,
-      {
-        knowledgeBaseStatus: "none",
-        knowledgeBaseHref: "/acme/deal-rooms/room-1?tab=documents",
-      }
-    );
+  it("enabling Visitor Ask sets enableQaConversations", () => {
+    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
-
-    const askDocs = screen.getByRole("switch", { name: /Ask Docs/i });
-    expect(askDocs).toBeDisabled();
-    expect(
-      screen.getByText(/Create or rebuild the room knowledge base before enabling Ask Docs/i)
-    ).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Open knowledge base/i })).toHaveAttribute(
-      "href",
-      "/acme/deal-rooms/room-1?tab=documents"
-    );
-
-    fireEvent.click(askDocs);
-    expect(updateDraft).not.toHaveBeenCalledWith(
-      expect.objectContaining({ aiCopilotEnabled: true })
-    );
+    fireEvent.click(screen.getByRole("switch", { name: /Visitor Ask/i }));
+    expect(updateDraft).toHaveBeenCalledWith({ enableQaConversations: true });
   });
 
-  it("allows Ask Docs when room knowledge base is ready", () => {
-    const { updateDraft } = renderAccessTab(
-      { ...baseDraft, enableQaConversations: true },
-      {},
-      true,
-      [],
-      false,
-      { knowledgeBaseStatus: "ready" }
-    );
-    fireEvent.click(screen.getByText(/advanced/i));
-
-    const askDocs = screen.getByRole("switch", { name: /Ask Docs/i });
-    expect(askDocs).not.toBeDisabled();
-    fireEvent.click(askDocs);
-    expect(updateDraft).toHaveBeenCalledWith({ aiCopilotEnabled: true });
-  });
-
-  it("turning off Visitor Ask master clears both Ask Docs and Ask Host", () => {
+  it("turning off Visitor Ask clears enableQaConversations", () => {
     const { updateDraft } = renderAccessTab({
       ...baseDraft,
-      aiCopilotEnabled: true,
       enableQaConversations: true,
     });
     fireEvent.click(screen.getByText(/advanced/i));
     fireEvent.click(screen.getByRole("switch", { name: /Visitor Ask/i }));
-    expect(updateDraft).toHaveBeenCalledWith({
-      aiCopilotEnabled: false,
-      enableQaConversations: false,
-    });
+    expect(updateDraft).toHaveBeenCalledWith({ enableQaConversations: false });
   });
 
   it("renders all advanced options when section is expanded", () => {
-    renderAccessTab({ ...baseDraft, aiCopilotEnabled: true });
-    // Click the Advanced section header to expand
+    renderAccessTab({ ...baseDraft, enableQaConversations: true });
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByText(/Visitor Ask/i)).toBeInTheDocument();
     expect(screen.getByText(/file requests/i)).toBeInTheDocument();

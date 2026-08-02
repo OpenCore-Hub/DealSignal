@@ -4,7 +4,6 @@ import { renderHook, waitFor, act } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import type { ReactNode } from "react";
 import { useViewerDocument } from "./useViewerDocument";
-import { useAIStore } from "@/stores/aiStore";
 import type { Document, PageAnalytics } from "@/types";
 
 const mockDocument: Document = {
@@ -68,7 +67,6 @@ function wrapper(route = "/viewer/doc-001") {
 
 describe("useViewerDocument", () => {
   beforeEach(() => {
-    useAIStore.getState().reset();
     vi.clearAllMocks();
   });
 
@@ -105,17 +103,6 @@ describe("useViewerDocument", () => {
 
     await waitFor(() => expect(result.current.error).toBe("network error"));
     expect(result.current.doc).toBeNull();
-  });
-
-  it("synchronizes page with AI highlight", async () => {
-    const { result } = renderHook(() => useViewerDocument(), { wrapper: wrapper() });
-    await waitFor(() => expect(result.current.loading).toBe(false));
-
-    act(() => {
-      useAIStore.getState().setHighlight(null, 2);
-    });
-
-    await waitFor(() => expect(result.current.page).toBe(2));
   });
 
   it("fetches signed URL for current page", async () => {

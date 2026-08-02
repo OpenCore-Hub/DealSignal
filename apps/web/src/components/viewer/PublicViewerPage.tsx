@@ -30,7 +30,7 @@ interface PublicDocumentSummary {
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; screenshotProtectionEnabled?: boolean; aiCopilotEnabled: boolean; qaEnabled: boolean; askDocsDDChipsEnabled?: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -1583,9 +1583,7 @@ export function PublicViewerPage() {
             selectedDocIndex={selectedDocIndex}
             onSelectDoc={setSelectedDocIndex}
             activeDocumentId={selectedDoc?.id}
-            aiCopilotEnabled={access.link.aiCopilotEnabled}
             qaEnabled={access.link.qaEnabled}
-            askDocsDDChipsEnabled={access.link.askDocsDDChipsEnabled}
             fileRequestsEnabled={access.link.fileRequestsEnabled}
             publicToken={token}
             publicSessionToken={accessCredentials.sessionToken}

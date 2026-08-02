@@ -16,7 +16,7 @@ i18n
   .init({
     fallbackLng: "en",
     supportedLngs: [...supportedLngs],
-    ns: ["common", "layout", "dashboard", "documents", "agreementDocuments", "links", "contacts", "insights", "settings", "dealRooms", "linkShare", "ai", "auth", "formatters"],
+    ns: ["common", "layout", "dashboard", "documents", "agreementDocuments", "links", "contacts", "insights", "settings", "dealRooms", "linkShare", "auth", "formatters"],
     defaultNS: "common",
     interpolation: {
       escapeValue: false,

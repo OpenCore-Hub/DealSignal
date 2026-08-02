@@ -20,7 +20,7 @@ type askHostAuthQuerier interface {
 }
 
 // authorizeAskHostOwnerView allows workspace owner/admin or an active deal-room member.
-// Mirrors Ask Docs audit / security-events authorization (SPEC US#26–27 / PLAN B10).
+// Shared by Ask Host inbox and Ask security-events list (SPEC US#26–27 / PLAN B10).
 func authorizeAskHostOwnerView(ctx context.Context, q askHostAuthQuerier, workspaceID, dealRoomID pgtype.UUID, userID string) error {
 	uid, err := uuid.Parse(userID)
 	if err != nil {

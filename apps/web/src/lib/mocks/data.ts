@@ -104,7 +104,6 @@ export const mockLinks: Link[] = [
     lastViewedAt: "2026-06-20T18:42:00Z",
     permissionType: "email",
     isBundle: false,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     dealRoomId: "room_1",
     documents: [
@@ -132,9 +131,7 @@ export const mockLinks: Link[] = [
     avgDurationSeconds: 0,
     permissionType: "public",
     isBundle: false,
-    aiCopilotEnabled: true,
     qaEnabled: true,
-    dealRoomId: "room_1",
     documents: [
       {
         id: "doc_1",
@@ -1067,7 +1064,7 @@ export const mockDealRoomTemplates: DealRoomTemplate[] = [
       { name: "06 Communication", description: "Communication plan and meeting notes" },
       { name: "07 Risk & Issues", description: "Risk register and issue log" },
       { name: "08 Quality & Testing", description: "Quality plan and test results" },
-      { name: "09 Documentation", description: "Project documentation and knowledge base" },
+      { name: "09 Documentation", description: "Project documentation and reference materials" },
       { name: "10 Project Closure", description: "Closure report and lessons learned" },
     ],
     recommendedFiles: ["Project Charter.pdf", "Project Plan.xlsx", "Requirements Doc.pdf"],

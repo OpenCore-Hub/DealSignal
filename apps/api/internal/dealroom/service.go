@@ -59,7 +59,6 @@ type Service struct {
 	cfg          *config.Config
 	actionSyncer ActionSyncer
 	rateLimiter  RateLimiter
-	embedder     DocumentEmbedder
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
@@ -933,7 +932,6 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	if err != nil {
 		return db.DealRoomDocument{}, err
 	}
-	_ = s.MarkKnowledgeBaseStaleIfNeeded(ctx, room.ID, folderPath)
 	return row, nil
 }
 

@@ -1,6 +1,5 @@
 import { Sidebar } from "./Sidebar";
 import { TopNav } from "./TopNav";
-import { AIAssistant } from "@/components/ai/AIAssistant";
 import { UploadDialog } from "@/components/upload/UploadDialog";
 import { PageTransition } from "@/components/common/PageTransition";
 import { useUIStore } from "@/stores/uiStore";
@@ -29,7 +28,6 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </main>
       </div>
-      <AIAssistant />
       <UploadDialog />
     </div>
   );

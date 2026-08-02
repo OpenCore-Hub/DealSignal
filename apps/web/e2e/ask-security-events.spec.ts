@@ -61,6 +61,6 @@ test.describe("Ask security events panel (MSW)", () => {
     await expect(panel.getByText(/Rate limit exceeded/i)).toBeVisible({ timeout: 10000 });
     await expect(panel.getByText(/Removed from allowlist/i)).toBeVisible();
     await expect(panel.getByText(/visitor@example.com/i)).toBeVisible();
-    await expect(panel.getByText(/Detail:\s*Ask Docs/i)).toBeVisible();
+    await expect(panel.getByText(/Detail:\s*Ask Host/i)).toBeVisible();
   });
 });

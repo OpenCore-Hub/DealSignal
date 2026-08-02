@@ -24,7 +24,7 @@ Readiness probe: `curl http://localhost:8080/readyz`
 - `URL_SIGNING_SECRET` — required. HMAC key for signed viewer asset URLs.
 - `INVITE_TOKEN_HASH_KEY` — required. HMAC key for hashing link invitation tokens.
 - `IP_HASH_KEY` — required in production. HMAC key for hashing visitor IP addresses.
-- `OPENAI_API_KEY` — optional. Leave empty to disable vector search and assistant.
+- `OPENAI_API_KEY` — optional. Leave empty to disable LLM-backed suggestion enrichment. Ask Docs / Diligence have been removed.
 - `OPENAI_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
 - `OPENAI_REFERER` / `OPENAI_APP_TITLE` — optional headers for OpenRouter-compatible providers.
 
@@ -36,8 +36,7 @@ Backend:
 cd apps/api
 go test ./...
 go test ./internal/link -tags=integration  # requires PostgreSQL (default: localhost:5435)
-./e2e-test.sh      # P0 backend E2E (no AI)
-./e2e-ai.sh        # P0 + AI E2E with mock LLM
+./e2e-test.sh      # P0 backend E2E
 ```
 
 Frontend:

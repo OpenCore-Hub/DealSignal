@@ -16,7 +16,6 @@ const DEFAULT_SECURITY_CONFIG: PermissionConfig = {
   ndaDocumentId: "",
   allowDownload: true,
   watermarkEnabled: true,
-  aiCopilotEnabled: false,
   qaEnabled: false,
   fileRequestsEnabled: false,
   indexFileEnabled: false,

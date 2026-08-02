@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { motion, AnimatePresence } from "motion/react";
@@ -17,7 +16,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import type { AccessRule, DealRoomKnowledgeBaseStatus, Link } from "@/types";
+import type { AccessRule, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
@@ -29,11 +28,6 @@ import {
   validateDraft,
   LinkAccessRequestsPanel,
 } from "./";
-import {
-  askDocsCoverageWarningMessage,
-  extractAskDocsWarnings,
-  visitorAskSaveErrorMessage,
-} from "./visitorAskSaveFeedback";
 import type { DraftLink } from "./types";
 
 interface LinkShareDialogProps {
@@ -89,11 +83,9 @@ function LinkShareDialogContent({
   registerCloseGuard: (guard: () => boolean) => void;
 }) {
   const { t } = useTranslation("linkShare");
-  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [tab, setTab] = useState<"share" | "access">(defaultTab);
   const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.link, data?.rules));
   const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
-  const [knowledgeBaseStatus, setKnowledgeBaseStatus] = useState<DealRoomKnowledgeBaseStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,32 +108,6 @@ function LinkShareDialogContent({
       cancelled = true;
     };
   }, []);
-
-  const dealRoomId = data?.link?.dealRoomId;
-
-  useEffect(() => {
-    if (!dealRoomId) {
-      setKnowledgeBaseStatus(null);
-      return;
-    }
-    let cancelled = false;
-    (async () => {
-      try {
-        const kb = await api.getDealRoomKnowledgeBase(dealRoomId);
-        if (!cancelled) setKnowledgeBaseStatus(kb.status);
-      } catch {
-        if (!cancelled) setKnowledgeBaseStatus("none");
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [dealRoomId]);
-
-  const knowledgeBaseHref =
-    dealRoomId && workspaceSlug
-      ? `/${workspaceSlug}/deal-rooms/${dealRoomId}?tab=documents`
-      : undefined;
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
@@ -218,24 +184,16 @@ function LinkShareDialogContent({
     if (!link) return false;
     setSaving(true);
     try {
-      const saved = await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
+      await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
       await api.setLinkAccessRules(link.id, buildRules(draft));
       toast.success(t("share.saveSuccess"));
-      const coverage = askDocsCoverageWarningMessage(extractAskDocsWarnings(saved), t);
-      if (coverage) {
-        toast.warning(coverage);
-      }
       markClean();
       await refetch();
       onChanged?.();
       return true;
     } catch (err) {
       console.error("saveLinkAndRules failed:", err);
-      const kbGate =
-        err instanceof ApiError ? visitorAskSaveErrorMessage(err, t) : null;
-      if (kbGate) {
-        toast.error(kbGate);
-      } else if (err instanceof ApiError && err.code === "duplicate_name") {
+      if (err instanceof ApiError && err.code === "duplicate_name") {
         toast.error(t("share.linkNameDuplicate"));
       } else {
         const message = err instanceof Error ? err.message : "";
@@ -364,8 +322,6 @@ function LinkShareDialogContent({
                     isDealRoomLink={!!link?.dealRoomId}
                     passwordAlreadySet={Boolean(link?.requirePassword)}
                     ndaTemplates={ndaTemplates}
-                    knowledgeBaseStatus={knowledgeBaseStatus}
-                    knowledgeBaseHref={knowledgeBaseHref}
                     documents={link?.documents.map((d) => ({ id: d.id, title: d.title })) ?? []}
                   />
                 </TabsContent>

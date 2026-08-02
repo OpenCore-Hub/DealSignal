@@ -1,5 +1,5 @@
 /**
- * Visitor Ask smoke (MSW) — dual-channel empty prompts, switch to Ask Host, pending badge.
+ * Visitor Ask smoke (MSW) — Ask Host empty state, submit question, pending badge.
  */
 import { test, expect } from "@playwright/test";
 import { resetMockState, attachDebug } from "./helpers";
@@ -7,7 +7,7 @@ import { resetMockState, attachDebug } from "./helpers";
 const SMOKE_TOKEN = "AskSmoke1";
 
 test.describe("Visitor Ask smoke (MSW)", () => {
-  test("dual-on empty → switch Ask Host → awaiting reply", async ({ page }) => {
+  test("Ask Host empty → submit → awaiting reply", async ({ page }) => {
     attachDebug(page);
     await resetMockState(page);
 
@@ -18,20 +18,10 @@ test.describe("Visitor Ask smoke (MSW)", () => {
     if (await openSidebar.isVisible().catch(() => false)) {
       await openSidebar.click();
     }
-    // Sidebar tab is type=button; composer submit is type=submit aria-label="Ask".
     const askTab = page.locator('button[type="button"]').filter({ hasText: /^Ask$/ });
     await expect(askTab).toBeVisible({ timeout: 10000 });
     await askTab.click();
 
-    await expect(
-      page.getByText(/Ask Docs first; switch to Ask Host if you need missing materials/i),
-    ).toBeVisible({ timeout: 10000 });
-    await expect(
-      page.getByRole("button", { name: /Summarize key points from authorized materials/i }),
-    ).toBeVisible();
-    await expect(page.getByRole("link", { name: /file request/i })).toHaveCount(0);
-
-    await page.getByRole("button", { name: /Materials seem to be missing/i }).click();
     const hostInput = page.getByPlaceholder(/Ask the host a question/i);
     await expect(hostInput).toBeVisible({ timeout: 5000 });
 
@@ -53,7 +43,6 @@ test.describe("Visitor Ask smoke (MSW)", () => {
       await openSidebar.click();
     }
     await page.locator('button[type="button"]').filter({ hasText: /^Ask$/ }).click();
-    await page.getByRole("button", { name: /Materials seem to be missing/i }).click();
 
     const hostInput = page.getByPlaceholder(/Ask the host a question/i);
     await hostInput.fill("__rate_limit__ spam");

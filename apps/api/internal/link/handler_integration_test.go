@@ -336,8 +336,7 @@ func TestDocumentsForAccessResponse_StaleScopeAfterRemoval(t *testing.T) {
 }
 
 // TestAddDocument_MembershipForIngest covers the deal-room owner seam: adding a
-// document records room membership (ingest always writes preview chunks only;
-// vectors come from KB create/rebuild).
+// document records room membership (ingest always writes preview chunks only).
 func TestAddDocument_MembershipForIngest(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()

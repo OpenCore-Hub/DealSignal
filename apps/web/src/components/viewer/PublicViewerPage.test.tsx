@@ -53,7 +53,6 @@ const successAccess = {
     permissionType: "email",
     downloadEnabled: false,
     watermarkEnabled: false,
-    aiCopilotEnabled: false,
     qaEnabled: false,
     fileRequestsEnabled: false,
     isBundle: false,

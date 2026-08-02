@@ -6,34 +6,17 @@ import zhLinkShare from "@/i18n/locales/zh-CN/linkShare.json";
 
 const DOCUMENT_VIEWER_KEYS = [
   "sidebarQA",
-  "qaModeAI",
-  "qaModeOwner",
-  "qaAIPlaceholder",
   "qaOwnerPlaceholder",
   "qaEmptyUnified",
-  "qaNoEvidence",
-  "qaSuggestAskHost",
-  "qaSwitchToAskHost",
-  "qaDDChipsHint",
 ] as const;
 
 const LINK_SHARE_ADVANCED_KEYS = [
   "visitorAsk",
   "visitorAskDescription",
-  "askDocs",
-  "askDocsDescription",
-  "askHost",
-  "askHostDescription",
-  "ddChips",
-  "ddChipsDescription",
-  "knowledgeBaseRequired",
-  "openKnowledgeBase",
-  "askDocsScopeNotInKb",
-  "askDocsScopeGaps",
 ] as const;
 
 describe("Visitor Ask i18n parity", () => {
-  it("keeps documents viewer Ask keys in en and zh-CN", () => {
+  it("keeps documents viewer Ask Host keys in en and zh-CN", () => {
     for (const key of DOCUMENT_VIEWER_KEYS) {
       expect(enDocuments.viewer[key], `en missing ${key}`).toBeTruthy();
       expect(zhDocuments.viewer[key], `zh-CN missing ${key}`).toBeTruthy();
@@ -64,20 +47,13 @@ describe("Visitor Ask i18n parity", () => {
     }
   });
 
-  it("separates Ask Host management copy from Ask Docs audit and Signal (B7)", () => {
+  it("separates Ask Host management copy from Signal inbox (B7)", () => {
     expect(enLinkShare.management.questionsTitle).toMatch(/Ask Host/i);
     expect(zhLinkShare.management.questionsTitle).toContain("问发起方");
-    expect(enLinkShare.management.questionsDescription).toMatch(/not Ask Docs audit/i);
     expect(enLinkShare.management.questionsDescription).toMatch(/not the Signal inbox/i);
-    expect(zhLinkShare.management.questionsDescription).toContain("问文档审计");
     expect(zhLinkShare.management.questionsDescription).toContain("信号");
 
     expect(enLinkShare.analytics.qaRecords).toMatch(/Ask Host/i);
     expect(zhLinkShare.analytics.qaRecords).toContain("问发起方");
-
-    expect(enLinkShare.askDocsAudit.description).toMatch(/Not the Ask Host inbox/i);
-    expect(enLinkShare.askDocsAudit.description).toMatch(/not the Signal inbox/i);
-    expect(zhLinkShare.askDocsAudit.description).toContain("问发起方");
-    expect(zhLinkShare.askDocsAudit.description).toContain("信号");
   });
 });

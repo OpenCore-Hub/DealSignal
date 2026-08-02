@@ -3,7 +3,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatCard } from "@/components/common/StatCard";
 import { TrendChart } from "@/components/common/TrendChart";
 import { VisitorList } from "@/components/common/VisitorList";
-import { AskDocsAuditPanel } from "@/components/links/share/AskDocsAuditPanel";
 import { AskSecurityEventsPanel } from "@/components/links/share/AskSecurityEventsPanel";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
@@ -72,12 +71,6 @@ export function DealRoomAnalyticsTab({
           )}
         </CardContent>
       </Card>
-
-      <AskDocsAuditPanel
-        mode="room"
-        roomId={roomId}
-        links={(links ?? []).map((l) => ({ id: l.id, name: l.name || l.documentTitle }))}
-      />
 
       <AskSecurityEventsPanel
         mode="room"

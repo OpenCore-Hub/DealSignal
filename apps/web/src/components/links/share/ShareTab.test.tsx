@@ -60,7 +60,6 @@ const baseDraft: DraftLink = {
   ndaDocumentId: "",
   ndaTemplateId: "",
   allowDownloading: false,
-  aiCopilotEnabled: false,
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,

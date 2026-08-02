@@ -6,7 +6,6 @@ package db
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/pgvector/pgvector-go"
 )
 
 type AccessLog struct {
@@ -38,135 +37,16 @@ type ActionItem struct {
 	SourceID    pgtype.Text
 }
 
-type AskDocsAuditArchive struct {
-	SessionID             pgtype.UUID
-	LinkID                pgtype.UUID
-	WorkspaceID           pgtype.UUID
-	DealRoomID            pgtype.UUID
-	TenantID              pgtype.UUID
-	VisitorID             string
-	QuestionPreview       string
-	ResultStatus          string
-	EvidenceCount         int32
-	Question              string
-	Answer                string
-	Evidence              []byte
-	AuthorizedDocumentIds []pgtype.UUID
-	RetrievalDocumentIds  []pgtype.UUID
-	Messages              []byte
-	SessionCreatedAt      pgtype.Timestamptz
-	ArchivedAt            pgtype.Timestamptz
-}
-
-type AskDocsDdCrossCheck struct {
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-	DealRoomID  pgtype.UUID
-	PackID      string
-	PackVersion string
-	DocumentAID pgtype.UUID
-	DocumentBID pgtype.UUID
-	TriggeredBy pgtype.UUID
-	Claims      []byte
-	CreatedAt   pgtype.Timestamptz
-}
-
-type AskDocsDdRoomPack struct {
-	DealRoomID   pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	BasePackID   string
-	PackVersion  string
-	ForkRevision int32
-	Items        []byte
-	UpdatedBy    pgtype.UUID
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-}
-
-type AskDocsDdRun struct {
-	ID           pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	DealRoomID   pgtype.UUID
-	LinkID       pgtype.UUID
-	PackID       string
-	PackVersion  string
-	Status       string
-	TriggeredBy  pgtype.UUID
-	ErrorMessage string
-	KbGeneration pgtype.Int4
-	StartedAt    pgtype.Timestamptz
-	FinishedAt   pgtype.Timestamptz
-	CreatedAt    pgtype.Timestamptz
-}
-
-type AskDocsDdSnapshot struct {
-	ID           pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	DealRoomID   pgtype.UUID
-	LinkID       pgtype.UUID
-	PackID       string
-	PackVersion  string
-	RunID        pgtype.UUID
-	KbGeneration pgtype.Int4
-	Stale        bool
-	CoverageRows []byte
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-}
-
-type AskDocsPortfolioView struct {
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Name        string
-	PackID      string
-	CreatedBy   pgtype.UUID
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-}
-
-type AskDocsPortfolioViewRoom struct {
-	ViewID     pgtype.UUID
-	DealRoomID pgtype.UUID
-	SortOrder  int32
-}
-
-type AssistantMessage struct {
-	ID                    pgtype.UUID
-	SessionID             pgtype.UUID
-	Role                  string
-	Content               string
-	Evidence              []byte
-	CreatedAt             pgtype.Timestamptz
-	ResultStatus          pgtype.Text
-	AuthorizedDocumentIds []pgtype.UUID
-	RetrievalDocumentIds  []pgtype.UUID
-}
-
-type AssistantSession struct {
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
-	UserID      pgtype.UUID
-	LinkID      pgtype.UUID
-	DocumentID  pgtype.UUID
-	Title       pgtype.Text
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-	VisitorID   pgtype.Text
-}
-
 type Chunk struct {
-	ID             pgtype.UUID
-	TenantID       pgtype.UUID
-	WorkspaceID    pgtype.UUID
-	PageID         pgtype.UUID
-	Text           string
-	Bbox           []byte
-	Embedding      pgvector.Vector
-	SearchVector   interface{}
-	DocumentID     pgtype.UUID
-	ChunkIndex     pgtype.Int4
-	NormalizedText pgtype.Text
-	ChunkType      pgtype.Text
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageID      pgtype.UUID
+	Text        string
+	Bbox        []byte
+	DocumentID  pgtype.UUID
+	ChunkIndex  pgtype.Int4
+	ChunkType   pgtype.Text
 }
 
 type ChunkBox struct {
@@ -182,14 +62,6 @@ type ChunkBox struct {
 	Source          string
 	Confidence      float64
 	CreatedAt       pgtype.Timestamptz
-}
-
-type ChunkEmbeddingBuild struct {
-	ChunkID     pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Generation  int32
-	Embedding   pgvector.Vector
-	CreatedAt   pgtype.Timestamptz
 }
 
 type ComplianceAuditLog struct {
@@ -264,23 +136,6 @@ type DealRoomDocument struct {
 	FolderPath  string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
-}
-
-type DealRoomKnowledgeBasis struct {
-	ID                  pgtype.UUID
-	TenantID            pgtype.UUID
-	WorkspaceID         pgtype.UUID
-	RoomID              pgtype.UUID
-	Status              string
-	FolderPaths         []string
-	DocumentIds         []pgtype.UUID
-	ActiveDocumentIds   []pgtype.UUID
-	BuildingDocumentIds []pgtype.UUID
-	ActiveGeneration    int32
-	BuildingGeneration  pgtype.Int4
-	ErrorMessage        pgtype.Text
-	CreatedAt           pgtype.Timestamptz
-	UpdatedAt           pgtype.Timestamptz
 }
 
 type Document struct {
@@ -408,7 +263,6 @@ type Link struct {
 	RequireEmail                bool
 	RequireNda                  bool
 	RequireEmailVerification    bool
-	AiCopilotEnabled            bool
 	DealRoomID                  pgtype.UUID
 	RequirePassword             bool
 	PasswordHash                pgtype.Text
@@ -428,7 +282,6 @@ type Link struct {
 	NdaDocumentID               pgtype.UUID
 	FolderScopeMode             string
 	NdaTemplateID               pgtype.UUID
-	AskDocsDdChipsEnabled       bool
 }
 
 type LinkAccessRequest struct {

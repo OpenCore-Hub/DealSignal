@@ -6,16 +6,13 @@ export const STANDALONE_ADVANCED_KEYS = [
   "enableIndexFileGeneration",
 ] as const satisfies ReadonlyArray<keyof DraftLink>;
 
-/**
- * Advanced enabled count: Visitor Ask (Ask Docs ∨ Ask Host) counts as one
- * capability, plus each remaining advanced toggle.
- */
+/** Advanced enabled count: Visitor Ask (Ask Host) counts as one capability, plus each remaining advanced toggle. */
 export function countAdvancedEnabled(draft: Pick<
   DraftLink,
-  "aiCopilotEnabled" | "enableQaConversations" | (typeof STANDALONE_ADVANCED_KEYS)[number]
+  "enableQaConversations" | (typeof STANDALONE_ADVANCED_KEYS)[number]
 >): number {
   let count = 0;
-  if (draft.aiCopilotEnabled || draft.enableQaConversations) {
+  if (draft.enableQaConversations) {
     count += 1;
   }
   for (const key of STANDALONE_ADVANCED_KEYS) {
@@ -24,14 +21,10 @@ export function countAdvancedEnabled(draft: Pick<
   return count;
 }
 
-export function visitorAskMasterEnabled(draft: Pick<DraftLink, "aiCopilotEnabled" | "enableQaConversations">): boolean {
-  return Boolean(draft.aiCopilotEnabled || draft.enableQaConversations);
+export function visitorAskMasterEnabled(draft: Pick<DraftLink, "enableQaConversations">): boolean {
+  return Boolean(draft.enableQaConversations);
 }
 
-/** Turning the master off clears both channels; turning on defaults to Ask Docs. */
 export function visitorAskMasterPatch(enabled: boolean): Partial<DraftLink> {
-  if (!enabled) {
-    return { aiCopilotEnabled: false, askDocsDDChipsEnabled: false, enableQaConversations: false };
-  }
-  return { aiCopilotEnabled: true, enableQaConversations: false };
+  return { enableQaConversations: enabled };
 }

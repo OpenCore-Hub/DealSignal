@@ -22,7 +22,8 @@ const maxIngestionAttempts = 3
 
 var ErrMaxAttemptsExceeded = errors.New("maximum ingestion attempts exceeded")
 
-// Service orchestrates document ingestion (preview pages/chunks only; vectors via KB).
+// Service orchestrates document ingestion (preview pages/chunks only).
+// Chunks store preview text + bbox only (document retrieval indexes removed).
 type Service struct {
 	queries     *db.Queries
 	storage     *storage.Client
@@ -45,7 +46,7 @@ func NewService(q *db.Queries, s *storage.Client, c *Converter) *Service {
 	}
 }
 
-// WithTableIngest enables P3.1a xlsx/csv → table_row chunking (ASK_DOCS_TABLE_INGEST).
+// WithTableIngest enables P3.1a xlsx/csv → table_row chunking (TABLE_INGEST_ENABLED).
 func (s *Service) WithTableIngest(enabled bool, limits TableIngestLimits) *Service {
 	if s == nil {
 		return nil
@@ -258,17 +259,15 @@ func (s *Service) persistTypedChunks(
 	}
 	for i := range chunks {
 		ct := chunkTypes[i]
-		normalized := normalizeText(chunks[i].Text)
 		row, err := s.queries.CreateChunkWithBBox(ctx, db.CreateChunkWithBBoxParams{
-			TenantID:       doc.TenantID,
-			WorkspaceID:    doc.WorkspaceID,
-			PageID:         pageID,
-			DocumentID:     doc.ID,
-			ChunkIndex:     pgtype.Int4{Int32: indexBase + int32(i), Valid: true},
-			ChunkType:      pgtype.Text{String: ct, Valid: true},
-			Text:           chunks[i].Text,
-			NormalizedText: pgtype.Text{String: normalized, Valid: normalized != ""},
-			Bbox:           chunks[i].Bbox,
+			TenantID:    doc.TenantID,
+			WorkspaceID: doc.WorkspaceID,
+			PageID:      pageID,
+			DocumentID:  doc.ID,
+			ChunkIndex:  pgtype.Int4{Int32: indexBase + int32(i), Valid: true},
+			ChunkType:   pgtype.Text{String: ct, Valid: true},
+			Text:        chunks[i].Text,
+			Bbox:        chunks[i].Bbox,
 		})
 		if err != nil {
 			return fmt.Errorf("create chunk: %w", err)

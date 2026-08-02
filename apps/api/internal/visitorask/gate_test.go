@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-func TestCheckAskDocsRateLimited(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{allow: false}, ChannelAskDocs, "link-1", "v1")
+func TestCheckAskHostRateLimited(t *testing.T) {
+	d := Check(context.Background(), &mockLimiter{allow: false}, ChannelAskHost, "link-1", "v1")
 	if d != DecisionRateLimited {
 		t.Fatalf("got %v, want RateLimited", d)
 	}
@@ -34,7 +34,7 @@ func TestCheckAskHostLimiterUnavailable(t *testing.T) {
 }
 
 func TestCheckAllow(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskDocs, "link-1", "v1")
+	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskHost, "link-1", "v1")
 	if d != DecisionAllow {
 		t.Fatalf("got %v, want Allow", d)
 	}
@@ -47,13 +47,12 @@ func TestCheckUnknownChannelFailsClosed(t *testing.T) {
 	}
 }
 
-func TestDenyMessageDistinctPerChannel(t *testing.T) {
-	docs := DenyMessage(ChannelAskDocs, DecisionRateLimited)
-	host := DenyMessage(ChannelAskHost, DecisionRateLimited)
-	if docs == host || docs == "" || host == "" {
-		t.Fatalf("expected distinct non-empty messages, docs=%q host=%q", docs, host)
+func TestDenyMessageAskHost(t *testing.T) {
+	msg := DenyMessage(ChannelAskHost, DecisionRateLimited)
+	if msg == "" {
+		t.Fatal("expected non-empty Ask Host message")
 	}
-	if EventReason(ChannelAskDocs) != "ask_docs" || EventReason(ChannelAskHost) != "ask_host" {
-		t.Fatal("unexpected event reasons")
+	if EventReason(ChannelAskHost) != "ask_host" {
+		t.Fatal("unexpected event reason")
 	}
 }

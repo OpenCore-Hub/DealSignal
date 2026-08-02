@@ -10,7 +10,6 @@ import { DetailLayout } from "@/components/common/DetailLayout";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { DocumentAnalytics } from "./DocumentAnalytics";
 import { DocumentContent } from "./DocumentContent";
-import { DocumentAIInsights } from "./DocumentAIInsights";
 import { DocumentStats } from "./DocumentStats";
 import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
@@ -130,7 +129,6 @@ export function DocumentDetail() {
             <TabsTrigger value="overview">{t("documents:detail.tabs.overview")}</TabsTrigger>
             <TabsTrigger value="content">{t("documents:detail.tabs.content")}</TabsTrigger>
             <TabsTrigger value="analytics">{t("documents:detail.tabs.analytics")}</TabsTrigger>
-            <TabsTrigger value="ai">{t("documents:detail.tabs.ai")}</TabsTrigger>
           </TabsList>
           <TabsContent value="overview" className="space-y-6">
             <DocumentAnalytics analytics={analytics} />
@@ -142,9 +140,6 @@ export function DocumentDetail() {
           </TabsContent>
           <TabsContent value="analytics">
             <DocumentAnalytics analytics={analytics} />
-          </TabsContent>
-          <TabsContent value="ai">
-            <DocumentAIInsights documentId={doc.id} analytics={analytics} />
           </TabsContent>
         </Tabs>
       </DetailLayout>

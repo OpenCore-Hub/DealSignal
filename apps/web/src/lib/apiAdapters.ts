@@ -19,8 +19,6 @@ export interface CreateLinkPayload {
   max_access_count?: number;
   download_enabled?: boolean;
   watermark_enabled?: boolean;
-  ai_copilot_enabled?: boolean;
-  ask_docs_dd_chips_enabled?: boolean;
   qa_enabled?: boolean;
   file_requests_enabled?: boolean;
   index_file_enabled?: boolean;
@@ -78,10 +76,7 @@ export function toCreateLinkPayload(
         : undefined,
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,
-    ai_copilot_enabled: config.aiCopilotEnabled,
-    ask_docs_dd_chips_enabled: config.aiCopilotEnabled
-      ? Boolean(config.askDocsDDChipsEnabled)
-      : false,
+    qa_enabled: config.qaEnabled,
     screenshot_protection_enabled: config.screenshotProtectionEnabled,
   };
 

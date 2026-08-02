@@ -46,6 +46,7 @@ vi.mock("@/lib/api", () => ({
     setLinkAccessRules: vi.fn(),
     updateLink: vi.fn(),
     getAccessLogs: vi.fn(),
+    listNDATemplates: vi.fn(),
   },
 }));
 
@@ -71,6 +72,7 @@ describe("DealRoomShareDialog", () => {
     vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
     vi.mocked(api.getContacts).mockResolvedValue({ data: [] });
     vi.mocked(api.getAccessLogs).mockResolvedValue({ data: [] });
+    vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
   });
 
   afterEach(() => {
@@ -165,7 +167,6 @@ describe("DealRoomShareDialog", () => {
       requireNda: false,
       downloadEnabled: false,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: [],
     } as unknown as Link);
     vi.mocked(api.setLinkAccessRules).mockResolvedValue(undefined);
@@ -221,7 +222,6 @@ describe("DealRoomShareDialog", () => {
       requireNda: true,
       downloadEnabled: false,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: [],
     } as unknown as Link);
 
@@ -441,7 +441,6 @@ describe("DealRoomShareDialog", () => {
       ndaDocumentId: "doc-1",
       downloadEnabled: true,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: [],
       accessCount: 3,
       heatLevel: "warm",
@@ -487,7 +486,8 @@ describe("DealRoomShareDialog", () => {
       expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
     });
 
-    expect(screen.getByLabelText(/Require email to view/i)).toBeChecked();
+    // Email self-report and verification are mutually exclusive; verification wins.
+    expect(screen.getByLabelText(/Require email to view/i)).not.toBeChecked();
     expect(screen.getByLabelText(/Require email verification/i)).toBeChecked();
     expect(screen.getByLabelText(/Require NDA to view/i)).toBeChecked();
     expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
@@ -508,7 +508,6 @@ describe("DealRoomShareDialog", () => {
       requireNda: false,
       downloadEnabled: true,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: [],
       accessCount: 3,
       heatLevel: "warm",
@@ -566,8 +565,10 @@ describe("DealRoomShareDialog", () => {
     });
 
     // After save/refetch the rules should still be echoed in the Access tab.
-    expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
-    expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("alice@vc.com")).toBeInTheDocument();
+      expect(screen.getByText("leaker@bad.com")).toBeInTheDocument();
+    });
   });
 
   it("falls back to getLinkById when the link is missing from the deal-room list", async () => {
@@ -584,7 +585,6 @@ describe("DealRoomShareDialog", () => {
       ndaDocumentId: "doc-1",
       downloadEnabled: true,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: [],
       accessCount: 3,
       heatLevel: "warm",
@@ -646,7 +646,6 @@ describe("DealRoomShareDialog", () => {
       requireNda: false,
       downloadEnabled: false,
       watermarkEnabled: false,
-      aiCopilotEnabled: false,
       folderPaths: [],
       accessCount: 0,
       heatLevel: "cold",
@@ -725,7 +724,6 @@ describe("DealRoomShareDialog", () => {
       requireNda: false,
       downloadEnabled: false,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: ["/financials"],
     } as unknown as Link);
 
@@ -786,7 +784,6 @@ describe("DealRoomShareDialog", () => {
       requireNda: false,
       downloadEnabled: true,
       watermarkEnabled: true,
-      aiCopilotEnabled: false,
       folderPaths: ["/financials"],
       accessCount: 3,
       heatLevel: "warm",
