@@ -93,7 +93,8 @@ test("edit mode backfills selected documents, security settings and review summa
   await expect(page.getByText("Bundle Edit Backfill")).toBeVisible();
   await expect(page.getByText(/NDA signing|Require NDA agreement/i)).toBeVisible();
   await expect(page.getByText(/Dynamic watermark/i)).toBeVisible();
-  await expect(page.getByText(/AI Copilot/i)).toBeVisible();
+  await expect(page.getByText(/Visitor Ask/i)).toBeVisible();
+  await expect(page.getByText(/Ask Docs/i)).toBeVisible();
   await expect(page.getByText(/Download disabled/i)).toBeVisible();
 
   // Edit: add doc2, disable NDA, enable download.

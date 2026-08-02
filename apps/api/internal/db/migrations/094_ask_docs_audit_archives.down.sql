@@ -1,0 +1,4 @@
+DROP INDEX IF EXISTS idx_ask_docs_audit_archives_workspace_created;
+DROP INDEX IF EXISTS idx_ask_docs_audit_archives_room_created;
+DROP INDEX IF EXISTS idx_ask_docs_audit_archives_link_created;
+DROP TABLE IF EXISTS ask_docs_audit_archives;

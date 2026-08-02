@@ -4,6 +4,7 @@ import { StatCard } from "@/components/common/StatCard";
 import { TrendChart } from "@/components/common/TrendChart";
 import { VisitorList } from "@/components/common/VisitorList";
 import { AskDocsAuditPanel } from "@/components/links/share/AskDocsAuditPanel";
+import { AskSecurityEventsPanel } from "@/components/links/share/AskSecurityEventsPanel";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
 import type { HeatLevel, Link } from "@/types";
@@ -52,7 +53,7 @@ export function DealRoomAnalyticsTab({
       <TrendChart
         title={t("analytics.trend")}
         data={trendData}
-        emptyDescription={t("analytics.comingSoon")}
+        emptyDescription={t("analytics.trendEmpty")}
       />
 
       <Card>
@@ -78,7 +79,11 @@ export function DealRoomAnalyticsTab({
         links={(links ?? []).map((l) => ({ id: l.id, name: l.name || l.documentTitle }))}
       />
 
-      <p className="text-caption text-muted-foreground">{t("analytics.comingSoon")}</p>
+      <AskSecurityEventsPanel
+        mode="room"
+        roomId={roomId}
+        links={(links ?? []).map((l) => ({ id: l.id, name: l.name || l.documentTitle }))}
+      />
     </div>
   );
 }

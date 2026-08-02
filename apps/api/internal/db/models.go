@@ -38,6 +38,98 @@ type ActionItem struct {
 	SourceID    pgtype.Text
 }
 
+type AskDocsAuditArchive struct {
+	SessionID             pgtype.UUID
+	LinkID                pgtype.UUID
+	WorkspaceID           pgtype.UUID
+	DealRoomID            pgtype.UUID
+	TenantID              pgtype.UUID
+	VisitorID             string
+	QuestionPreview       string
+	ResultStatus          string
+	EvidenceCount         int32
+	Question              string
+	Answer                string
+	Evidence              []byte
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
+	Messages              []byte
+	SessionCreatedAt      pgtype.Timestamptz
+	ArchivedAt            pgtype.Timestamptz
+}
+
+type AskDocsDdCrossCheck struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	DealRoomID  pgtype.UUID
+	PackID      string
+	PackVersion string
+	DocumentAID pgtype.UUID
+	DocumentBID pgtype.UUID
+	TriggeredBy pgtype.UUID
+	Claims      []byte
+	CreatedAt   pgtype.Timestamptz
+}
+
+type AskDocsDdRoomPack struct {
+	DealRoomID   pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	BasePackID   string
+	PackVersion  string
+	ForkRevision int32
+	Items        []byte
+	UpdatedBy    pgtype.UUID
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type AskDocsDdRun struct {
+	ID           pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	DealRoomID   pgtype.UUID
+	LinkID       pgtype.UUID
+	PackID       string
+	PackVersion  string
+	Status       string
+	TriggeredBy  pgtype.UUID
+	ErrorMessage string
+	KbGeneration pgtype.Int4
+	StartedAt    pgtype.Timestamptz
+	FinishedAt   pgtype.Timestamptz
+	CreatedAt    pgtype.Timestamptz
+}
+
+type AskDocsDdSnapshot struct {
+	ID           pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	DealRoomID   pgtype.UUID
+	LinkID       pgtype.UUID
+	PackID       string
+	PackVersion  string
+	RunID        pgtype.UUID
+	KbGeneration pgtype.Int4
+	Stale        bool
+	CoverageRows []byte
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type AskDocsPortfolioView struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Name        string
+	PackID      string
+	CreatedBy   pgtype.UUID
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+}
+
+type AskDocsPortfolioViewRoom struct {
+	ViewID     pgtype.UUID
+	DealRoomID pgtype.UUID
+	SortOrder  int32
+}
+
 type AssistantMessage struct {
 	ID                    pgtype.UUID
 	SessionID             pgtype.UUID
@@ -90,6 +182,14 @@ type ChunkBox struct {
 	Source          string
 	Confidence      float64
 	CreatedAt       pgtype.Timestamptz
+}
+
+type ChunkEmbeddingBuild struct {
+	ChunkID     pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	Embedding   pgvector.Vector
+	CreatedAt   pgtype.Timestamptz
 }
 
 type ComplianceAuditLog struct {
@@ -329,6 +429,7 @@ type Link struct {
 	NdaDocumentID               pgtype.UUID
 	FolderScopeMode             string
 	NdaTemplateID               pgtype.UUID
+	AskDocsDdChipsEnabled       bool
 }
 
 type LinkAccessRequest struct {

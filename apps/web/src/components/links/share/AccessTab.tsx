@@ -532,10 +532,23 @@ export function AccessTab({
                     updateDraft(visitorAskMasterPatch(false));
                     return;
                   }
-                  updateDraft({ aiCopilotEnabled: checked });
+                  updateDraft({
+                    aiCopilotEnabled: checked,
+                    ...(checked ? {} : { askDocsDDChipsEnabled: false }),
+                  });
                 }}
                 highlighted={isHighlighted("aiCopilotEnabled")}
               />
+              {draft.aiCopilotEnabled && !askDocsBlocked && (
+                <OptionSwitch
+                  label={t("accessRules.advanced.ddChips")}
+                  description={t("accessRules.advanced.ddChipsDescription")}
+                  checked={Boolean(draft.askDocsDDChipsEnabled)}
+                  onCheckedChange={(checked) =>
+                    updateDraft({ askDocsDDChipsEnabled: checked })
+                  }
+                />
+              )}
               {askDocsBlocked && (
                 <p className="text-xs text-muted-foreground">
                   {t("accessRules.advanced.knowledgeBaseRequired")}{" "}

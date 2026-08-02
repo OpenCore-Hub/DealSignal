@@ -46,7 +46,7 @@ const FEATURE_META: {
   { key: "email", icon: EnvelopeIcon, labelKey: "creator.featureEmailVerification" },
   { key: "nda", icon: FileTextIcon, labelKey: "creator.featureNDA" },
   { key: "watermark", icon: CopyIcon, labelKey: "creator.featureWatermark" },
-  { key: "aiCopilot", icon: RobotIcon, labelKey: "creator.featureAICopilot", activeClass: "bg-primary/10 border-primary/20 text-primary" },
+  { key: "askDocs", icon: RobotIcon, labelKey: "creator.featureAskDocs", activeClass: "bg-primary/10 border-primary/20 text-primary" },
 ];
 
 function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"]["config"]) {
@@ -54,7 +54,7 @@ function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"][
     email: config.requireEmailVerification,
     nda: config.ndaEnabled,
     watermark: config.watermarkEnabled,
-    aiCopilot: config.aiCopilotEnabled,
+    askDocs: config.aiCopilotEnabled,
     download: config.allowDownload,
   };
 }
@@ -278,14 +278,14 @@ export function StepReview() {
             </div>
           </div>
 
-          {/* AI Copilot toggle */}
+          {/* Ask Docs (Visitor Ask channel) toggle */}
           <div className="rounded-lg border border-border p-4">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <RobotIcon size={18} className="text-primary" />
                 <div className="space-y-0.5">
-                  <p className="text-sm font-medium">{t("creator.aiCopilot")}</p>
-                  <p className="text-xs text-muted-foreground">{t("creator.aiCopilotDescription")}</p>
+                  <p className="text-sm font-medium">{t("creator.visitorAsk")}</p>
+                  <p className="text-xs text-muted-foreground">{t("creator.visitorAskDescription")}</p>
                 </div>
               </div>
               <Switch

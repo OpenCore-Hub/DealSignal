@@ -42,29 +42,28 @@ export function useDealRoomNavSignals(roomId: string | undefined, refreshKey = 0
         let failedDeliveries = 0;
         let unreadQuestions = 0;
 
-        const sample = links.slice(0, ANALYTICS_LINK_CAP);
-        const results = await Promise.all(
-          sample.map(async (link) => {
-            const [analyticsRes, questions] = await Promise.all([
-              link.requireEmailVerification
-                ? api.getLinkAnalytics(link.id).catch(() => null)
-                : Promise.resolve(null),
-              api.listLinkQuestions(link.id).catch(() => ({ data: [] as { status: string }[] })),
-            ]);
-            const analytics = analyticsRes?.data ?? null;
-            return { analytics, questions: questions.data ?? [] };
-          })
-        );
+        const [roomQuestionsRes, analyticsResults] = await Promise.all([
+          api.listRoomQuestions(roomId!).catch(() => ({ data: [] as { status: string }[] })),
+          Promise.all(
+            links.slice(0, ANALYTICS_LINK_CAP).map(async (link) => {
+              if (!link.requireEmailVerification) return null;
+              return api.getLinkAnalytics(link.id).catch(() => null);
+            }),
+          ),
+        ]);
 
         if (cancelled || generation !== generationRef.current) return;
 
-        for (const { analytics, questions } of results) {
+        unreadQuestions = (roomQuestionsRes.data ?? []).filter((q) => q.status === "pending").length;
+
+        for (const analyticsRes of analyticsResults) {
+          const analytics = analyticsRes?.data ?? null;
+          if (!analytics) continue;
           failedDeliveries +=
-            analytics?.access_code_failed_count ??
-            (analytics?.access_code_contacts ?? []).filter(
+            analytics.access_code_failed_count ??
+            (analytics.access_code_contacts ?? []).filter(
               (c: { send_status: string }) => c.send_status === "failed",
             ).length;
-          unreadQuestions += questions.filter((q) => q.status === "pending").length;
         }
 
         setSignals({

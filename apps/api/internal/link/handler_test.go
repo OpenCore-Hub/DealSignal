@@ -595,6 +595,12 @@ func (denyAskLimiter) RateLimitAllow(context.Context, string, int, time.Duration
 	return false, 0, nil
 }
 
+type errorAskLimiter struct{}
+
+func (errorAskLimiter) RateLimitAllow(context.Context, string, int, time.Duration) (bool, int, error) {
+	return false, 0, errors.New("redis down")
+}
+
 func TestRejectIfAskHostLimitedReturns429(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := &Handler{askLimiter: denyAskLimiter{}}
@@ -619,6 +625,39 @@ func TestRejectIfAskHostLimitedReturns429(t *testing.T) {
 	}
 	if body["code"] != "rate_limit_exceeded" {
 		t.Fatalf("expected rate_limit_exceeded, got %v", body["code"])
+	}
+}
+
+func TestRejectIfAskHostLimitedUnavailableReturns503(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	sink := &askHostSecuritySink{}
+	h := &Handler{askLimiter: errorAskLimiter{}}
+	h.SetSecuritySink(sink)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/public/links/tok/questions", nil)
+
+	result := AccessResult{
+		Link:      db.Link{ID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true}, QaEnabled: true},
+		VisitorID: "v-infra",
+		Email:     "infra@example.com",
+	}
+	if !h.rejectIfAskHostLimited(c, result, "link-infra") {
+		t.Fatal("expected Ask Host limiter unavailable rejection")
+	}
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["code"] != "limiter_unavailable" {
+		t.Fatalf("expected limiter_unavailable, got %v", body["code"])
+	}
+	if len(sink.events) != 0 {
+		t.Fatalf("infra deny must not write rate_limit security event, got %+v", sink.events)
 	}
 }
 

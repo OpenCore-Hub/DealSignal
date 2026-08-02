@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -16,14 +17,43 @@ import (
 )
 
 type recordingEmbedder struct {
-	calls [][]uuid.UUID
-	err   error
+	calls    []embedCall
+	promotes []promoteCall
+	discards []discardCall
+	err      error
 }
 
-func (r *recordingEmbedder) EmbedDocuments(_ context.Context, _ string, documentIDs []uuid.UUID) error {
+type embedCall struct {
+	docs []uuid.UUID
+	gen  int32
+}
+
+type promoteCall struct {
+	docs []uuid.UUID
+	gen  int32
+}
+
+type discardCall struct {
+	docs []uuid.UUID
+	gen  int32
+}
+
+func (r *recordingEmbedder) EmbedDocuments(_ context.Context, _ string, documentIDs []uuid.UUID, generation int32) error {
 	cp := append([]uuid.UUID(nil), documentIDs...)
-	r.calls = append(r.calls, cp)
+	r.calls = append(r.calls, embedCall{docs: cp, gen: generation})
 	return r.err
+}
+
+func (r *recordingEmbedder) PromoteGeneration(_ context.Context, _ string, documentIDs []uuid.UUID, generation int32) error {
+	cp := append([]uuid.UUID(nil), documentIDs...)
+	r.promotes = append(r.promotes, promoteCall{docs: cp, gen: generation})
+	return r.err
+}
+
+func (r *recordingEmbedder) DiscardGeneration(_ context.Context, _ string, documentIDs []uuid.UUID, generation int32) error {
+	cp := append([]uuid.UUID(nil), documentIDs...)
+	r.discards = append(r.discards, discardCall{docs: cp, gen: generation})
+	return nil
 }
 
 func sortedUUIDStrings(ids []uuid.UUID) []string {
@@ -104,6 +134,55 @@ func TestCreateKnowledgeBaseDefaultEmptySelection(t *testing.T) {
 	if len(emb.calls) != 0 {
 		t.Fatalf("expected no embed calls for empty selection, got %d", len(emb.calls))
 	}
+	// NOT NULL uuid[] columns must never be written as Go nil (→ SQL NULL).
+	if len(fake.kbs) != 1 {
+		t.Fatalf("expected 1 kb row, got %d", len(fake.kbs))
+	}
+	if fake.kbs[0].ActiveDocumentIds == nil {
+		t.Fatal("active_document_ids must be non-nil empty slice, not nil")
+	}
+	if fake.kbs[0].BuildingDocumentIds == nil {
+		t.Fatal("building_document_ids must be non-nil empty slice, not nil")
+	}
+}
+
+func TestCoalescePGUUIDArrayNeverNil(t *testing.T) {
+	if coalescePGUUIDArray(nil) == nil {
+		t.Fatal("coalescePGUUIDArray(nil) must not return nil")
+	}
+	if emptyPGUUIDArray() == nil {
+		t.Fatal("emptyPGUUIDArray must not return nil")
+	}
+	if coalesceStringArray(nil) == nil {
+		t.Fatal("coalesceStringArray(nil) must not return nil")
+	}
+}
+
+func TestCreateKnowledgeBaseFailsClosedWithoutEmbedderWhenDocsSelected(t *testing.T) {
+	fake, _, ownerID, wsID, roomID := setupKBRoom(t)
+	svc := NewService(db.New(fake), nil, testCfg()) // no WithDocumentEmbedder
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID: pgUUID(docID), WorkspaceID: pgUUID(wsID), TenantID: fake.workspace.TenantID,
+		Title: "Deck", SourceType: "pdf", Status: "ready",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+
+	kb, err := svc.CreateKnowledgeBase(context.Background(), roomID, wsID, ownerID, KnowledgeBaseSelection{
+		DocumentIDs: []string{docID},
+	})
+	if !errors.Is(err, ErrKnowledgeBaseEmbedFailed) {
+		t.Fatalf("create should return ErrKnowledgeBaseEmbedFailed, got %v", err)
+	}
+	if kb.Status != KBStatusFailed {
+		t.Fatalf("expected failed status when embedder missing, got %s (%s)", kb.Status, kb.ErrorMessage)
+	}
+	if kb.ErrorMessage == "" || !strings.Contains(kb.ErrorMessage, "embedder") {
+		t.Fatalf("expected embedder error message, got %q", kb.ErrorMessage)
+	}
 }
 
 func TestCreateKnowledgeBaseEmbedsOnlySelectedReadyDocs(t *testing.T) {
@@ -146,9 +225,12 @@ func TestCreateKnowledgeBaseEmbedsOnlySelectedReadyDocs(t *testing.T) {
 	if len(emb.calls) != 1 {
 		t.Fatalf("expected 1 embed call, got %d", len(emb.calls))
 	}
-	got := sortedUUIDStrings(emb.calls[0])
+	got := sortedUUIDStrings(emb.calls[0].docs)
 	if len(got) != 1 || got[0] != readyIn {
 		t.Fatalf("embedded %v, want [%s] (readyOut unselected, processing skipped)", got, readyIn)
+	}
+	if emb.calls[0].gen != 0 {
+		t.Fatalf("create must write live embeddings (generation 0), got %d", emb.calls[0].gen)
 	}
 	if len(kb.ActiveDocumentIDs) != 1 || kb.ActiveDocumentIDs[0] != readyIn {
 		t.Fatalf("active docs %v, want [%s]", kb.ActiveDocumentIDs, readyIn)
@@ -241,13 +323,21 @@ func TestRebuildKnowledgeBaseAtomicSwitchAndFailKeepsOld(t *testing.T) {
 	if len(sortedStrings(rebuilt.ActiveDocumentIDs)) != 2 {
 		t.Fatalf("expected 2 active docs after switch, got %v", rebuilt.ActiveDocumentIDs)
 	}
+	if len(emb.calls) < 2 || emb.calls[1].gen != 2 {
+		t.Fatalf("rebuild must stage generation 2 embeddings, calls=%+v", emb.calls)
+	}
+	// Promote happens inside promoteAndActivate via SQL (same tx as metadata switch),
+	// not via the DocumentEmbedder hook when using the dealroom service path.
+	if rebuilt.Status != KBStatusReady || rebuilt.ActiveGeneration != 2 {
+		t.Fatalf("expected ready gen 2 after atomic switch, got %+v", rebuilt)
+	}
 
 	emb.err = errors.New("embed boom")
 	failed, err := svc.RebuildKnowledgeBase(context.Background(), roomID, wsID, ownerID, &KnowledgeBaseSelection{
 		DocumentIDs: []string{docA},
 	})
-	if err != nil {
-		t.Fatalf("rebuild failure should return restored kb, got err %v", err)
+	if !errors.Is(err, ErrKnowledgeBaseEmbedFailed) {
+		t.Fatalf("rebuild failure should return ErrKnowledgeBaseEmbedFailed, got %v", err)
 	}
 	if failed.Status != KBStatusReady {
 		t.Fatalf("failure must keep ready/stale, got %s", failed.Status)
@@ -257,6 +347,38 @@ func TestRebuildKnowledgeBaseAtomicSwitchAndFailKeepsOld(t *testing.T) {
 	}
 	if len(sortedStrings(failed.ActiveDocumentIDs)) != 2 {
 		t.Fatalf("failure must keep old active set, got %v", failed.ActiveDocumentIDs)
+	}
+	if len(emb.discards) == 0 || emb.discards[len(emb.discards)-1].gen != 3 {
+		t.Fatalf("failed rebuild must discard staged generation 3, discards=%+v", emb.discards)
+	}
+}
+
+func TestCreateKnowledgeBaseRejectsDocsWithoutChunks(t *testing.T) {
+	fake, _, ownerID, wsID, roomID := setupKBRoom(t)
+	emb := &recordingEmbedder{}
+	svc := NewService(db.New(fake), nil, testCfg(), WithDocumentEmbedder(emb))
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID: pgUUID(docID), WorkspaceID: pgUUID(wsID), TenantID: fake.workspace.TenantID,
+		Title: "Scan", SourceType: "pdf", Status: "ready",
+	})
+	fake.missingChunkDocs = append(fake.missingChunkDocs, pgUUID(docID))
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+
+	_, err := svc.CreateKnowledgeBase(context.Background(), roomID, wsID, ownerID, KnowledgeBaseSelection{
+		DocumentIDs: []string{docID},
+	})
+	if !errors.Is(err, ErrNoSearchableChunks) {
+		t.Fatalf("expected ErrNoSearchableChunks, got %v", err)
+	}
+	if len(emb.calls) != 0 {
+		t.Fatal("must not embed when chunk validation fails")
+	}
+	if len(fake.kbs) != 0 {
+		t.Fatal("must not enter building state when chunk validation fails")
 	}
 }
 

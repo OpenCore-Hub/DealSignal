@@ -4,7 +4,9 @@
   "search": {
     "results": "Here are the most relevant passages for \"{{query}}\":",
     "noResults": "No relevant passages found for \"{{query}}\" in this document.",
-    "error": "Sorry, the search failed. Please try again later."
+    "error": "Sorry, the search failed. Please try again later.",
+    "rateLimited": "Too many Ask Docs requests. Please wait and try again.",
+    "limiterUnavailable": "Ask Docs is temporarily unavailable. Please try again later."
   },
   "evidence": {
     "title": "Evidence & source location",

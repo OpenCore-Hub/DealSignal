@@ -18,6 +18,9 @@ const EditLinkPage = lazy(() => import("@/routes/links/edit").then((m) => ({ def
 const DealRoomsPage = lazy(() => import("@/routes/deal-rooms").then((m) => ({ default: m.DealRoomsPage })));
 const DealRoomDetailPage = lazy(() => import("@/routes/deal-rooms/detail").then((m) => ({ default: m.DealRoomDetailPage })));
 const NewDealRoomPage = lazy(() => import("@/routes/deal-rooms/new").then((m) => ({ default: m.NewDealRoomPage })));
+const DealRoomPortfolioPage = lazy(() =>
+  import("@/routes/deal-rooms/portfolio").then((m) => ({ default: m.DealRoomPortfolioPage })),
+);
 const ContactsPage = lazy(() => import("@/routes/contacts").then((m) => ({ default: m.ContactsPage })));
 const ContactDetailPage = lazy(() => import("@/routes/contacts/detail").then((m) => ({ default: m.ContactDetailPage })));
 const NewContactPage = lazy(() => import("@/routes/contacts/new").then((m) => ({ default: m.NewContactPage })));
@@ -179,6 +182,7 @@ export const router = createBrowserRouter([
       { path: "links/:linkId", element: <LinkDetailPage /> },
       { path: "deal-rooms", element: <DealRoomsPage /> },
       { path: "deal-rooms/new", element: <NewDealRoomPage /> },
+      { path: "deal-rooms/portfolio", element: <DealRoomPortfolioPage /> },
       { path: "deal-rooms/:roomId", element: <DealRoomDetailPage /> },
       { path: "contacts", element: <ContactsPage /> },
       { path: "contacts/new", element: <NewContactPage /> },

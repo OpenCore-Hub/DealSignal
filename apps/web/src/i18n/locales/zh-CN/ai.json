@@ -4,7 +4,9 @@
   "search": {
     "results": "以下是与 \"{{query}}\" 最相关的段落：",
     "noResults": "在该文档中未找到与 \"{{query}}\" 相关的内容。",
-    "error": "搜索失败，请稍后重试。"
+    "error": "搜索失败，请稍后重试。",
+    "rateLimited": "Ask Docs 请求过于频繁，请稍后再试。",
+    "limiterUnavailable": "Ask Docs 暂时不可用，请稍后再试。"
   },
   "evidence": {
     "title": "证据与原文定位",

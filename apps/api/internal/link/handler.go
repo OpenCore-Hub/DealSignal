@@ -81,25 +81,46 @@ func (h *Handler) visitorAskLimiter() visitorask.Limiter {
 }
 
 func (h *Handler) recordAskSecurityEvent(ctx context.Context, row db.Link, eventType, visitorID, email, ip, ua, reason string) {
+	var err error
 	if h.securitySink != nil {
-		_ = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
-		return
+		err = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	} else if h.analytics != nil {
+		err = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
 	}
-	if h.analytics != nil {
-		_ = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	if err != nil {
+		logger.ErrorCtx(ctx, "record ask security event failed", err,
+			logger.Attr("event_type", eventType),
+			logger.Attr("reason", reason),
+		)
 	}
 }
 
-// rejectIfAskHostLimited returns true when the visitor exceeded Ask Host limits
-// (response already written: 429 + high-risk security event).
+// rejectIfAskHostLimited returns true when Ask Host must be denied (response already written).
+// Uses the shared Visitor Ask gate (B8): over-limit → 429 + security event; Redis fail → 503, no event.
 func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
-	if visitorask.AllowAskHost(c.Request.Context(), h.visitorAskLimiter(), linkID, result.VisitorID) {
+	return h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskHost)
+}
+
+func (h *Handler) rejectIfAskLimited(c *gin.Context, result AccessResult, linkID string, ch visitorask.Channel) bool {
+	decision := visitorask.Check(c.Request.Context(), h.visitorAskLimiter(), ch, linkID, result.VisitorID)
+	if decision == visitorask.DecisionAllow {
 		return false
 	}
-	h.recordAskSecurityEvent(c.Request.Context(), result.Link, "rate_limit_exceeded", result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(), "ask_host")
-	c.JSON(http.StatusTooManyRequests, gin.H{
-		"code":    "rate_limit_exceeded",
-		"message": "too many Ask Host requests, please try again later",
+	if visitorask.ShouldRecordRateLimitEvent(decision) {
+		h.recordAskSecurityEvent(
+			c.Request.Context(),
+			result.Link,
+			visitorask.EventTypeRateLimited,
+			result.VisitorID,
+			result.Email,
+			c.ClientIP(),
+			c.Request.UserAgent(),
+			visitorask.EventReason(ch),
+		)
+	}
+	c.JSON(visitorask.DenyHTTPStatus(decision), gin.H{
+		"code":    visitorask.DenyCode(decision),
+		"message": visitorask.DenyMessage(ch, decision),
 	})
 	return true
 }
@@ -148,6 +169,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	dr := r.Group("/deal-rooms/:roomId/links")
 	dr.POST("", h.CreateDealRoomLink)
 	dr.GET("", h.ListDealRoomLinks)
+
+	// Room-wide Ask Host inbox (across all links in the deal room).
+	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
 }
 
 // RegisterPublicRoutes mounts public link routes.
@@ -290,6 +314,7 @@ type CreateRequest struct {
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
+	AskDocsDDChipsEnabled    bool     `json:"ask_docs_dd_chips_enabled,omitempty"`
 	ContactIDs               []string `json:"contact_ids,omitempty"`
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
@@ -318,6 +343,7 @@ type UpdateRequest struct {
 	DownloadEnabled             *bool    `json:"download_enabled,omitempty"`
 	WatermarkEnabled            *bool    `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled            *bool    `json:"ai_copilot_enabled,omitempty"`
+	AskDocsDDChipsEnabled       *bool    `json:"ask_docs_dd_chips_enabled,omitempty"`
 	ContactIDs                  []string `json:"contact_ids,omitempty"`
 	CustomDomain                string   `json:"custom_domain,omitempty"`
 	Tags                        []string `json:"tags,omitempty"`
@@ -481,6 +507,13 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.AICopilotEnabled != nil {
 		aiCopilotEnabled = *req.AICopilotEnabled
 	}
+	askDocsDDChipsEnabled := existing.AskDocsDdChipsEnabled
+	if req.AskDocsDDChipsEnabled != nil {
+		askDocsDDChipsEnabled = *req.AskDocsDDChipsEnabled
+	}
+	if !aiCopilotEnabled {
+		askDocsDDChipsEnabled = false
+	}
 	qaEnabled := existing.QaEnabled
 	if req.QaEnabled != nil {
 		qaEnabled = *req.QaEnabled
@@ -516,6 +549,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		DownloadEnabled:             downloadEnabled,
 		WatermarkEnabled:            watermarkEnabled,
 		AICopilotEnabled:            aiCopilotEnabled,
+		AskDocsDDChipsEnabled:       askDocsDDChipsEnabled,
 		QaEnabled:                   qaEnabled,
 		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
@@ -889,6 +923,7 @@ type CreateDealRoomLinkRequest struct {
 	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled            bool     `json:"ai_copilot_enabled,omitempty"`
+	AskDocsDDChipsEnabled       bool     `json:"ask_docs_dd_chips_enabled,omitempty"`
 	QaEnabled                   bool     `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
@@ -934,6 +969,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
 		AICopilotEnabled:            req.AICopilotEnabled,
+		AskDocsDDChipsEnabled:       req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -1212,6 +1248,7 @@ func (h *Handler) Create(c *gin.Context) {
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AICopilotEnabled:         req.AICopilotEnabled,
+		AskDocsDDChipsEnabled:    req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		QaEnabled:                req.QaEnabled,
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
@@ -1273,6 +1310,7 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
 		"custom_domain":                 meta.CustomDomain,
 		"ai_copilot_enabled":            meta.AiCopilotEnabled,
+		"ask_docs_dd_chips_enabled":     meta.AskDocsDDChipsEnabled,
 		"qa_enabled":                    meta.QaEnabled,
 		"file_requests_enabled":         meta.FileRequestsEnabled,
 		"index_file_enabled":            meta.IndexFileEnabled,
@@ -1452,6 +1490,7 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"watermarkText":               h.watermarkTextFor(email, c.ClientIP()),
 		"aiCopilotEnabled":            link.AiCopilotEnabled,
+		"askDocsDDChipsEnabled":       link.AskDocsDdChipsEnabled,
 		"qaEnabled":                   link.QaEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
@@ -2449,6 +2488,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"aiCopilotEnabled":            link.AiCopilotEnabled,
+		"askDocsDDChipsEnabled":       link.AskDocsDdChipsEnabled,
 		"qaEnabled":                   link.QaEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
@@ -2664,9 +2704,26 @@ func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 		return
 	}
-	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link.ID)
+	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link, middleware.UserIDFrom(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": questions})
+}
+
+// ListRoomVisitorQuestions returns Ask Host questions across a deal room (owner view).
+func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	questions, err := h.service.ListRoomVisitorQuestions(
+		c.Request.Context(),
+		wsID,
+		c.Param("roomId"),
+		middleware.UserIDFrom(c),
+		c.Query("link_id"),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": questions})
@@ -2675,6 +2732,12 @@ func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
 // AnswerVisitorQuestion allows the owner to answer a visitor question.
 func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
 	qUUID, err := uuid.Parse(c.Param("questionId"))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid question id"})
@@ -2687,17 +2750,30 @@ func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
 		return
 	}
-	wsUUID, _ := uuid.Parse(wsID)
-	uUUID, _ := uuid.Parse(middleware.UserIDFrom(c))
-	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
-	wID := pgtype.UUID{Bytes: wsUUID, Valid: true}
-	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
-	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), qID, wID, uID, body.Answer)
+	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
+		return
+	}
+	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
+	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
+	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), link, qID, uID, body.Answer)
+	if err != nil {
+		writeAskHostError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": q})
+}
+
+func writeAskHostError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrAskHostForbidden):
+		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "ask host inbox forbidden"})
+	case errors.Is(err, ErrNotFoundInWorkspace):
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+	}
 }
 
 // ListLinkFileRequests returns all file requests for a link (owner view).
@@ -2885,7 +2961,7 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 		return
 	}
 	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, body.Question)
-	c.JSON(http.StatusCreated, gin.H{"question": q})
+	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
 }
 
 // PublicListMyVisitorQuestions returns the visitor's own questions.
@@ -2901,7 +2977,7 @@ func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"questions": questions})
+	c.JSON(http.StatusOK, gin.H{"data": mapVisitorQuestions(questions)})
 }
 
 // PublicCreateFileRequest allows a visitor to request a file.

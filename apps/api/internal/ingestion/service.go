@@ -9,6 +9,7 @@ import (
 	"image"
 	"io"
 	"os"
+	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
@@ -29,15 +30,39 @@ type Embedder interface {
 
 // Service orchestrates document ingestion.
 type Service struct {
-	queries   *db.Queries
-	storage   *storage.Client
-	converter *Converter
-	embedder  Embedder
+	queries     *db.Queries
+	storage     *storage.Client
+	converter   *Converter
+	embedder    Embedder
+	tableIngest bool
+	tableLimits TableIngestLimits
 }
 
 // NewService creates an ingestion service.
 func NewService(q *db.Queries, s *storage.Client, c *Converter, e Embedder) *Service {
-	return &Service{queries: q, storage: s, converter: c, embedder: e}
+	return &Service{
+		queries:   q,
+		storage:   s,
+		converter: c,
+		embedder:  e,
+		tableLimits: TableIngestLimits{
+			MaxSheets:       20,
+			MaxRowsPerSheet: 5000,
+			MaxRowsPerFile:  20000,
+		},
+	}
+}
+
+// WithTableIngest enables P3.1a xlsx/csv → table_row chunking (ASK_DOCS_TABLE_INGEST).
+func (s *Service) WithTableIngest(enabled bool, limits TableIngestLimits) *Service {
+	if s == nil {
+		return nil
+	}
+	s.tableIngest = enabled
+	if limits.MaxSheets > 0 || limits.MaxRowsPerSheet > 0 || limits.MaxRowsPerFile > 0 {
+		s.tableLimits = limits.normalized()
+	}
+	return s
 }
 
 // ProcessDocument parses a document and populates pages and chunks.
@@ -78,6 +103,17 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow, skipEmbedd
 	}
 	defer os.Remove(tmpFile)
 
+	inDealRoom, err := s.queries.DocumentInAnyDealRoom(ctx, doc.ID)
+	if err != nil {
+		return fmt.Errorf("check deal room membership: %w", err)
+	}
+	writeEmbeddings := embedOnIngest(s.embedder != nil, inDealRoom || skipEmbedding)
+
+	// CSV has no reliable PDF preview path; synthetic page + optional table_row / text chunk.
+	if strings.EqualFold(doc.SourceType, "csv") {
+		return s.runCSV(ctx, doc, tmpFile, writeEmbeddings)
+	}
+
 	pdfPath := tmpFile
 	if doc.SourceType != "pdf" {
 		converted, err := s.converter.ConvertToPDF(ctx, doc.SourceType, doc.StorageKey)
@@ -97,15 +133,8 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow, skipEmbedd
 	workspaceID := uuidToString(doc.WorkspaceID)
 	docID := uuidToString(doc.ID)
 
-	inDealRoom, err := s.queries.DocumentInAnyDealRoom(ctx, doc.ID)
-	if err != nil {
-		return fmt.Errorf("check deal room membership: %w", err)
-	}
-	// skip_embedding is set at upload/AddDocument time so the worker does not
-	// race ahead of room association; membership is a second line of defense.
-	writeEmbeddings := embedOnIngest(s.embedder != nil, inDealRoom || skipEmbedding)
-
 	pageCount := int32(len(pages))
+	var firstPageID pgtype.UUID
 	for _, p := range pages {
 		key := pageObjectKey(tenantID, workspaceID, docID, p.Number)
 		img, bounds, err := s.renderAndUploadPage(ctx, key, p, pdfPath)
@@ -119,8 +148,6 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow, skipEmbedd
 			DocumentID:     doc.ID,
 			PageNumber:     int32(p.Number),
 			ImageObjectKey: pgtype.Text{String: key, Valid: true},
-			// Store the rendered image pixel dimensions so the viewer sizes the
-			// page to match the actual raster, not the PDF point size.
 			Width:          pgtype.Int4{Int32: int32(bounds.Dx()), Valid: true},
 			Height:         pgtype.Int4{Int32: int32(bounds.Dy()), Valid: true},
 			FileSize:       pgtype.Int8{Int64: int64(len(img)), Valid: true},
@@ -129,97 +156,202 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow, skipEmbedd
 		if err != nil {
 			return fmt.Errorf("create page record: %w", err)
 		}
+		if !firstPageID.Valid {
+			firstPageID = page.ID
+		}
 
 		chunks := splitTextChunks(p)
-		texts := make([]string, len(chunks))
-		for i, ch := range chunks {
-			texts[i] = ch.Text
+		if err := s.persistParagraphChunks(ctx, doc, page.ID, int32(p.Number), chunks, writeEmbeddings); err != nil {
+			return err
 		}
+	}
 
-		// Compute normalized texts for exact/fuzzy search
-		normalizedTexts := make([]string, len(chunks))
-		for i, ch := range chunks {
-			normalizedTexts[i] = normalizeText(ch.Text)
-		}
-
-		if !writeEmbeddings {
-			for i, ch := range chunks {
-				chunkRow, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
-					TenantID:       doc.TenantID,
-					WorkspaceID:    doc.WorkspaceID,
-					PageID:         page.ID,
-					DocumentID:     doc.ID,
-					ChunkIndex:     pgtype.Int4{Int32: int32(i), Valid: true},
-					ChunkType:      pgtype.Text{String: "paragraph", Valid: true},
-					Text:           ch.Text,
-					NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
-					Bbox:           ch.Bbox,
-				})
-				if err != nil {
-					return fmt.Errorf("create chunk: %w", err)
-				}
-				if err := s.createChunkBox(ctx, chunkRow.ID, doc.ID, int32(p.Number), ch.Bbox); err != nil {
-					return fmt.Errorf("create chunk box: %w", err)
-				}
-			}
-		} else {
-			var embeddings [][]float32
-			embedErr := error(nil)
-			if len(texts) > 0 {
-				embeddings, embedErr = s.embedder.EmbedBatch(ctx, texts)
-				if embedErr != nil {
-					logger.ErrorCtx(ctx, "embedding failed, continuing without vectors", embedErr,
-						logger.Attr("document_id", docID),
-					)
-				}
-			}
-
-			if embedErr != nil {
-				for i, ch := range chunks {
-					chunkRow, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
-						TenantID:       doc.TenantID,
-						WorkspaceID:    doc.WorkspaceID,
-						PageID:         page.ID,
-						DocumentID:     doc.ID,
-						ChunkIndex:     pgtype.Int4{Int32: int32(i), Valid: true},
-						ChunkType:      pgtype.Text{String: "paragraph", Valid: true},
-						Text:           ch.Text,
-						NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
-						Bbox:           ch.Bbox,
-					})
-					if err != nil {
-						return fmt.Errorf("create chunk: %w", err)
-					}
-					if err := s.createChunkBox(ctx, chunkRow.ID, doc.ID, int32(p.Number), ch.Bbox); err != nil {
-						return fmt.Errorf("create chunk box: %w", err)
-					}
-				}
-			} else {
-				for i, ch := range chunks {
-					chunkRow, err := s.queries.CreateChunkWithBBox(ctx, db.CreateChunkWithBBoxParams{
-						TenantID:       doc.TenantID,
-						WorkspaceID:    doc.WorkspaceID,
-						PageID:         page.ID,
-						DocumentID:     doc.ID,
-						ChunkIndex:     pgtype.Int4{Int32: int32(i), Valid: true},
-						ChunkType:      pgtype.Text{String: "paragraph", Valid: true},
-						Text:           ch.Text,
-						NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
-						Bbox:           ch.Bbox,
-						Embedding:      pgvector.NewVector(embeddings[i]),
-					})
-					if err != nil {
-						return fmt.Errorf("create chunk: %w", err)
-					}
-					if err := s.createChunkBox(ctx, chunkRow.ID, doc.ID, int32(p.Number), ch.Bbox); err != nil {
-						return fmt.Errorf("create chunk box: %w", err)
-					}
-				}
-			}
+	if s.tableIngest && isTableSourceType(doc.SourceType) && firstPageID.Valid {
+		if err := s.appendTableRows(ctx, doc, firstPageID, tmpFile, writeEmbeddings); err != nil {
+			return err
 		}
 	}
 
 	return s.updateDocumentStatus(ctx, doc.ID, "ready", &pageCount)
+}
+
+func (s *Service) runCSV(ctx context.Context, doc db.GetDocumentByIDRow, path string, writeEmbeddings bool) error {
+	page, err := s.queries.CreatePage(ctx, db.CreatePageParams{
+		TenantID:    doc.TenantID,
+		WorkspaceID: doc.WorkspaceID,
+		DocumentID:  doc.ID,
+		PageNumber:  1,
+		Title:       pgtype.Text{String: "Sheet1", Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("create csv page: %w", err)
+	}
+	pageCount := int32(1)
+
+	if s.tableIngest {
+		if err := s.appendTableRows(ctx, doc, page.ID, path, writeEmbeddings); err != nil {
+			return err
+		}
+		return s.updateDocumentStatus(ctx, doc.ID, "ready", &pageCount)
+	}
+
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read csv: %w", err)
+	}
+	text := string(raw)
+	if len([]rune(text)) > 8000 {
+		text = string([]rune(text)[:8000])
+	}
+	ch := Chunk{Text: text, Bbox: []byte(`{"x":0,"y":0,"w":1,"h":1}`)}
+	if err := s.persistParagraphChunks(ctx, doc, page.ID, 1, []Chunk{ch}, writeEmbeddings); err != nil {
+		return err
+	}
+	return s.updateDocumentStatus(ctx, doc.ID, "ready", &pageCount)
+}
+
+func (s *Service) appendTableRows(ctx context.Context, doc db.GetDocumentByIDRow, pageID pgtype.UUID, path string, writeEmbeddings bool) error {
+	var res TableIngestResult
+	var err error
+	switch strings.ToLower(doc.SourceType) {
+	case "xlsx":
+		res, err = ExtractTableRowsFromXLSX(path, s.tableLimits)
+	case "csv":
+		f, openErr := os.Open(path)
+		if openErr != nil {
+			return fmt.Errorf("open csv: %w", openErr)
+		}
+		defer f.Close()
+		res, err = ExtractTableRowsFromCSV(f, s.tableLimits)
+	default:
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("extract table rows: %w", err)
+	}
+	for _, w := range res.Warnings {
+		logger.InfoCtx(ctx, "table ingest truncation",
+			logger.Attr("document_id", uuidToString(doc.ID)),
+			logger.Attr("warning", w),
+		)
+	}
+	if len(res.Rows) == 0 {
+		return nil
+	}
+
+	// Place table_row after paragraph chunks: high chunk_index band.
+	const tableIndexBase int32 = 1_000_000
+	chunks := make([]Chunk, len(res.Rows))
+	types := make([]string, len(res.Rows))
+	for i, row := range res.Rows {
+		chunks[i] = Chunk{Text: row.Text, Bbox: row.BBox}
+		types[i] = chunkTypeTableRow
+	}
+	return s.persistTypedChunks(ctx, doc, pageID, 1, chunks, types, tableIndexBase, writeEmbeddings)
+}
+
+func (s *Service) persistParagraphChunks(ctx context.Context, doc db.GetDocumentByIDRow, pageID pgtype.UUID, pageNumber int32, chunks []Chunk, writeEmbeddings bool) error {
+	types := make([]string, len(chunks))
+	for i := range types {
+		types[i] = chunkTypeParagraph
+	}
+	return s.persistTypedChunks(ctx, doc, pageID, pageNumber, chunks, types, 0, writeEmbeddings)
+}
+
+func (s *Service) persistTypedChunks(
+	ctx context.Context,
+	doc db.GetDocumentByIDRow,
+	pageID pgtype.UUID,
+	pageNumber int32,
+	chunks []Chunk,
+	chunkTypes []string,
+	indexBase int32,
+	writeEmbeddings bool,
+) error {
+	if len(chunks) == 0 {
+		return nil
+	}
+	texts := make([]string, len(chunks))
+	normalizedTexts := make([]string, len(chunks))
+	for i, ch := range chunks {
+		texts[i] = ch.Text
+		normalizedTexts[i] = normalizeText(ch.Text)
+	}
+
+	if !writeEmbeddings {
+		for i := range chunks {
+			ct := chunkTypes[i]
+			row, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
+				TenantID:       doc.TenantID,
+				WorkspaceID:    doc.WorkspaceID,
+				PageID:         pageID,
+				DocumentID:     doc.ID,
+				ChunkIndex:     pgtype.Int4{Int32: indexBase + int32(i), Valid: true},
+				ChunkType:      pgtype.Text{String: ct, Valid: true},
+				Text:           chunks[i].Text,
+				NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
+				Bbox:           chunks[i].Bbox,
+			})
+			if err != nil {
+				return fmt.Errorf("create chunk: %w", err)
+			}
+			if err := s.createChunkBox(ctx, row.ID, doc.ID, pageNumber, chunks[i].Bbox); err != nil {
+				return fmt.Errorf("create chunk box: %w", err)
+			}
+		}
+		return nil
+	}
+
+	embeddings, embedErr := s.embedder.EmbedBatch(ctx, texts)
+	if embedErr != nil {
+		logger.ErrorCtx(ctx, "embedding failed, continuing without vectors", embedErr,
+			logger.Attr("document_id", uuidToString(doc.ID)),
+		)
+		for i := range chunks {
+			ct := chunkTypes[i]
+			row, err := s.queries.CreateChunkWithBBoxNoEmbed(ctx, db.CreateChunkWithBBoxNoEmbedParams{
+				TenantID:       doc.TenantID,
+				WorkspaceID:    doc.WorkspaceID,
+				PageID:         pageID,
+				DocumentID:     doc.ID,
+				ChunkIndex:     pgtype.Int4{Int32: indexBase + int32(i), Valid: true},
+				ChunkType:      pgtype.Text{String: ct, Valid: true},
+				Text:           chunks[i].Text,
+				NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
+				Bbox:           chunks[i].Bbox,
+			})
+			if err != nil {
+				return fmt.Errorf("create chunk: %w", err)
+			}
+			if err := s.createChunkBox(ctx, row.ID, doc.ID, pageNumber, chunks[i].Bbox); err != nil {
+				return fmt.Errorf("create chunk box: %w", err)
+			}
+		}
+		return nil
+	}
+
+	for i := range chunks {
+		ct := chunkTypes[i]
+		row, err := s.queries.CreateChunkWithBBox(ctx, db.CreateChunkWithBBoxParams{
+			TenantID:       doc.TenantID,
+			WorkspaceID:    doc.WorkspaceID,
+			PageID:         pageID,
+			DocumentID:     doc.ID,
+			ChunkIndex:     pgtype.Int4{Int32: indexBase + int32(i), Valid: true},
+			ChunkType:      pgtype.Text{String: ct, Valid: true},
+			Text:           chunks[i].Text,
+			NormalizedText: pgtype.Text{String: normalizedTexts[i], Valid: normalizedTexts[i] != ""},
+			Bbox:           chunks[i].Bbox,
+			Embedding:      pgvector.NewVector(embeddings[i]),
+		})
+		if err != nil {
+			return fmt.Errorf("create chunk: %w", err)
+		}
+		if err := s.createChunkBox(ctx, row.ID, doc.ID, pageNumber, chunks[i].Bbox); err != nil {
+			return fmt.Errorf("create chunk box: %w", err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) downloadOriginal(ctx context.Context, key string) (string, error) {
@@ -269,6 +401,9 @@ func (s *Service) createChunkBox(ctx context.Context, chunkID, docID pgtype.UUID
 	}
 	// Only create chunk_boxes for normalized coordinates (0-1 range)
 	if bbox.X < 0 || bbox.X > 1 || bbox.Y < 0 || bbox.Y > 1 {
+		return nil
+	}
+	if bbox.W <= 0 || bbox.H <= 0 {
 		return nil
 	}
 	return s.queries.CreateChunkBox(ctx, db.CreateChunkBoxParams{

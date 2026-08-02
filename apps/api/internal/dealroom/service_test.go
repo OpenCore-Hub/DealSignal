@@ -107,11 +107,11 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	if len(folders) != 7 {
 		t.Fatalf("expected 7 template folders, got %d", len(folders))
 	}
-	if folders[0].Path != "/01-corporate-or-investment-memo" {
-		t.Fatalf("expected first folder path /01-corporate-or-investment-memo, got %s", folders[0].Path)
+	if folders[0].Path != "/corporate-or-investment-memo" {
+		t.Fatalf("expected first folder path /corporate-or-investment-memo, got %s", folders[0].Path)
 	}
-	if folders[1].Path != "/02-corporate-documents" {
-		t.Fatalf("expected second folder path /01-corporate-or-investment-memo, got %s", folders[1].Path)
+	if folders[1].Path != "/corporate-documents" {
+		t.Fatalf("expected second folder path /corporate-documents, got %s", folders[1].Path)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 		SourceType:  "docx",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-corporate-or-investment-memo", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/corporate-or-investment-memo", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 	}
 	var memoDocs []RoomDocument
 	for _, fd := range docs {
-		if fd.Folder.Path == "/01-corporate-or-investment-memo" {
+		if fd.Folder.Path == "/corporate-or-investment-memo" {
 			memoDocs = fd.Documents
 		}
 	}
@@ -523,7 +523,7 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 		SourceType:  "pdf",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-corporate-or-investment-memo", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/corporate-or-investment-memo", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 
@@ -796,16 +796,17 @@ func TestSetFolderPermissionNormalizesEmail(t *testing.T) {
 
 // fakeDB is an in-memory DBTX implementation for dealroom service tests.
 type fakeDB struct {
-	t         *testing.T
-	tenant    db.Tenant
-	workspace db.Workspace
-	rooms     []db.DealRoom
-	members   []db.RoomMember
-	documents []db.Document
-	roomDocs  []db.DealRoomDocument
-	requests  []db.RoomAccessRequest
-	perms     []db.RoomMemberFolderPermission
-	kbs       []db.DealRoomKnowledgeBasis
+	t                *testing.T
+	tenant           db.Tenant
+	workspace        db.Workspace
+	rooms            []db.DealRoom
+	members          []db.RoomMember
+	documents        []db.Document
+	roomDocs         []db.DealRoomDocument
+	requests         []db.RoomAccessRequest
+	perms            []db.RoomMemberFolderPermission
+	kbs              []db.DealRoomKnowledgeBasis
+	missingChunkDocs []pgtype.UUID
 }
 
 func newFakeDB(t *testing.T) *fakeDB {
@@ -824,6 +825,10 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 				f.rooms[i].UpdatedAt = nowTs()
 			}
 		}
+	case strings.Contains(sqlLower, "update chunks") && strings.Contains(sqlLower, "chunk_embedding_builds"):
+		// PromoteChunkEmbeddingBuild — no-op in fake (vectors not stored).
+	case strings.Contains(sqlLower, "delete from chunk_embedding_builds"):
+		// DeleteChunkEmbeddingBuildsForDocuments — no-op in fake.
 	case strings.Contains(sqlLower, "delete from deal_room_documents"):
 		id := argUUID(arguments, 0)
 		roomID := argUUID(arguments, 1)
@@ -938,6 +943,14 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 	sqlLower := normalizeSQL(sql)
 
 	switch {
+	case strings.Contains(sqlLower, "from documents d") && strings.Contains(sqlLower, "not exists") && strings.Contains(sqlLower, "chunks"):
+		// ListDocumentsMissingEmbeddableChunks — default: no missing docs.
+		rows := make([][]interface{}, 0, len(f.missingChunkDocs))
+		for _, id := range f.missingChunkDocs {
+			rows = append(rows, []interface{}{id})
+		}
+		return &fakeRows{rows: rows}, nil
+
 	case strings.Contains(sqlLower, "from room_members rm"):
 		roomID := argUUID(args, 0)
 		rows := make([][]interface{}, 0)

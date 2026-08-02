@@ -116,6 +116,9 @@ type Config struct {
 	CORSAllowedOrigins string
 	MetricsEnabled     bool
 	PprofEnabled       bool
+
+	// AskDocs holds ASK_DOCS_* flags (D8). Populated in Load via AskDocsFromEnv.
+	AskDocs AskDocsConfig
 }
 
 // Load parses environment variables into Config and validates required fields.
@@ -211,8 +214,8 @@ func Load() (*Config, error) {
 
 		SignalRulesPath: getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
 
-		FeatureWorkerEnabled:  strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
-		FeatureWorkerInterval: time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
+		FeatureWorkerEnabled:     strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
+		FeatureWorkerInterval:    time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
 		HeatScoreRefreshInterval: time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
 
 		EventsEnabled:       strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
@@ -227,6 +230,7 @@ func Load() (*Config, error) {
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",
 		PprofEnabled:       strings.ToLower(getEnv("PPROF_ENABLED", "false")) == "true",
 	}
+	cfg.AskDocs = AskDocsFromEnv(cfg.AppEnv)
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

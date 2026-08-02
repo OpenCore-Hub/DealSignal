@@ -22,6 +22,7 @@ import { ApiError } from "@/lib/apiClient";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
 import { AskDocsAuditPanel } from "./AskDocsAuditPanel";
+import { AskSecurityEventsPanel } from "./AskSecurityEventsPanel";
 import type {
   AccessLog,
   FileRequest,
@@ -869,8 +870,6 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
             </CardContent>
           </Card>
 
-          <AskDocsAuditPanel mode="link" linkId={link.id} />
-
           <ManagementTab
             questions={questions}
             fileRequests={fileRequests}
@@ -882,6 +881,10 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
               {t("management.loading")}
             </div>
           )}
+
+          <AskDocsAuditPanel mode="link" linkId={link.id} />
+
+          <AskSecurityEventsPanel mode="link" linkId={link.id} />
         </TabsContent>
       </Tabs>
     </div>

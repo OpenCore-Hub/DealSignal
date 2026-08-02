@@ -106,6 +106,7 @@ export const mockLinks: Link[] = [
     isBundle: false,
     aiCopilotEnabled: false,
     qaEnabled: false,
+    dealRoomId: "room_1",
     documents: [
       {
         id: "doc_1",
@@ -133,6 +134,7 @@ export const mockLinks: Link[] = [
     isBundle: false,
     aiCopilotEnabled: true,
     qaEnabled: true,
+    dealRoomId: "room_1",
     documents: [
       {
         id: "doc_1",
@@ -521,6 +523,18 @@ const mockDealRoomFolderDocs: DealRoomFolderDocs[] = [
         page_count: 12,
         file_size: 1_800_000,
         created_at: "2026-06-17T14:20:00Z",
+      },
+      {
+        id: "rd_no_chunks",
+        document_id: "doc_no_chunks",
+        title: "Scanned Exhibit (no searchable text)",
+        folder_path: "/financials",
+        sort_order: 1,
+        source_type: "pdf",
+        status: "ready",
+        page_count: 2,
+        file_size: 900_000,
+        created_at: "2026-06-17T15:00:00Z",
       },
     ],
   },

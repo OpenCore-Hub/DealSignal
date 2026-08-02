@@ -2,6 +2,7 @@ package visitorask
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 )
@@ -22,7 +23,11 @@ func (m *mockLimiter) RateLimitAllow(_ context.Context, key string, _ int, _ tim
 
 func TestAllowAskHostDeniesWhenOverLimit(t *testing.T) {
 	lim := &mockLimiter{allow: false}
-	if AllowAskHost(context.Background(), lim, "link-1", "v1") {
+	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
 		t.Fatal("expected Ask Host to be denied when over daily limit")
 	}
 	if len(lim.keys) != 1 || lim.keys[0] != "ask_host_day:link-1:v1" {
@@ -32,14 +37,48 @@ func TestAllowAskHostDeniesWhenOverLimit(t *testing.T) {
 
 func TestAllowAskHostAllowsWhenUnderLimit(t *testing.T) {
 	lim := &mockLimiter{allow: true}
-	if !AllowAskHost(context.Background(), lim, "link-1", "v1") {
-		t.Fatal("expected Ask Host to be allowed")
+	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
+	if err != nil || !ok {
+		t.Fatalf("expected Ask Host allowed, ok=%v err=%v", ok, err)
 	}
 }
 
 func TestAllowAskDocsDeniesOnBurst(t *testing.T) {
 	lim := &mockLimiter{allow: false}
-	if AllowAskDocs(context.Background(), lim, "link-1", "v1") {
+	ok, err := AllowAskDocs(context.Background(), lim, "link-1", "v1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ok {
 		t.Fatal("expected Ask Docs burst deny")
+	}
+}
+
+func TestAllowAskDocsFailsClosedOnRedisError(t *testing.T) {
+	lim := &mockLimiter{allow: true, err: errors.New("redis down")}
+	ok, err := AllowAskDocs(context.Background(), lim, "link-1", "v1")
+	if ok {
+		t.Fatal("expected Ask Docs deny when Redis errors")
+	}
+	if !errors.Is(err, ErrLimiterUnavailable) {
+		t.Fatalf("expected ErrLimiterUnavailable, got %v", err)
+	}
+}
+
+func TestAllowAskHostFailsClosedOnRedisError(t *testing.T) {
+	lim := &mockLimiter{allow: true, err: errors.New("redis down")}
+	ok, err := AllowAskHost(context.Background(), lim, "link-1", "v1")
+	if ok {
+		t.Fatal("expected Ask Host deny when Redis errors")
+	}
+	if !errors.Is(err, ErrLimiterUnavailable) {
+		t.Fatalf("expected ErrLimiterUnavailable, got %v", err)
+	}
+}
+
+func TestAllowAskDocsNilLimiterAllows(t *testing.T) {
+	ok, err := AllowAskDocs(context.Background(), nil, "link-1", "v1")
+	if err != nil || !ok {
+		t.Fatalf("nil limiter must skip enforcement, ok=%v err=%v", ok, err)
 	}
 }

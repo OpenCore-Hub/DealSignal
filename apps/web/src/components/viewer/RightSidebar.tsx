@@ -29,6 +29,7 @@ interface RightSidebarProps {
   activeDocumentId?: string;
   aiCopilotEnabled?: boolean;
   qaEnabled?: boolean;
+  askDocsDDChipsEnabled?: boolean;
   fileRequestsEnabled?: boolean;
   publicToken?: string;
   publicSessionToken?: string;
@@ -77,6 +78,7 @@ export function RightSidebar({
   activeDocumentId,
   aiCopilotEnabled,
   qaEnabled,
+  askDocsDDChipsEnabled,
   fileRequestsEnabled,
   publicToken,
   publicSessionToken,
@@ -286,6 +288,7 @@ export function RightSidebar({
                 documentId={activeDocumentId}
                 qaEnabled={qaEnabled}
                 aiCopilotEnabled={aiCopilotEnabled}
+                askDocsDDChipsEnabled={askDocsDDChipsEnabled}
               />
             )}
           </div>

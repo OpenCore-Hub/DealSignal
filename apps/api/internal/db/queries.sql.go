@@ -176,7 +176,7 @@ func (q *Queries) AddWorkspaceMember(ctx context.Context, arg AddWorkspaceMember
 const answerVisitorQuestion = `-- name: AnswerVisitorQuestion :one
 UPDATE link_visitor_questions
 SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
-WHERE id = $3 AND workspace_id = $4
+WHERE id = $3 AND workspace_id = $4 AND link_id = $5
 RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag
 `
 
@@ -185,6 +185,7 @@ type AnswerVisitorQuestionParams struct {
 	AnsweredBy  pgtype.UUID
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
 }
 
 func (q *Queries) AnswerVisitorQuestion(ctx context.Context, arg AnswerVisitorQuestionParams) (LinkVisitorQuestion, error) {
@@ -193,6 +194,7 @@ func (q *Queries) AnswerVisitorQuestion(ctx context.Context, arg AnswerVisitorQu
 		arg.AnsweredBy,
 		arg.ID,
 		arg.WorkspaceID,
+		arg.LinkID,
 	)
 	var i LinkVisitorQuestion
 	err := row.Scan(
@@ -307,6 +309,19 @@ func (q *Queries) ConsumeLinkInvitation(ctx context.Context, id pgtype.UUID) (Co
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const countAskDocsPortfolioViews = `-- name: CountAskDocsPortfolioViews :one
+SELECT COUNT(*)::int AS count
+FROM ask_docs_portfolio_views
+WHERE workspace_id = $1
+`
+
+func (q *Queries) CountAskDocsPortfolioViews(ctx context.Context, workspaceID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countAskDocsPortfolioViews, workspaceID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countDocumentChunks = `-- name: CountDocumentChunks :one
@@ -795,11 +810,111 @@ func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemPara
 	return i, err
 }
 
+const createAskDocsDDRun = `-- name: CreateAskDocsDDRun :one
+INSERT INTO ask_docs_dd_runs (
+  workspace_id,
+  deal_room_id,
+  link_id,
+  pack_id,
+  pack_version,
+  status,
+  triggered_by,
+  kb_generation
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, workspace_id, deal_room_id, link_id, pack_id, pack_version, status, triggered_by, error_message, kb_generation, started_at, finished_at, created_at
+`
+
+type CreateAskDocsDDRunParams struct {
+	WorkspaceID  pgtype.UUID
+	DealRoomID   pgtype.UUID
+	LinkID       pgtype.UUID
+	PackID       string
+	PackVersion  string
+	Status       string
+	TriggeredBy  pgtype.UUID
+	KbGeneration pgtype.Int4
+}
+
+func (q *Queries) CreateAskDocsDDRun(ctx context.Context, arg CreateAskDocsDDRunParams) (AskDocsDdRun, error) {
+	row := q.db.QueryRow(ctx, createAskDocsDDRun,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+		arg.LinkID,
+		arg.PackID,
+		arg.PackVersion,
+		arg.Status,
+		arg.TriggeredBy,
+		arg.KbGeneration,
+	)
+	var i AskDocsDdRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.Status,
+		&i.TriggeredBy,
+		&i.ErrorMessage,
+		&i.KbGeneration,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createAskDocsPortfolioView = `-- name: CreateAskDocsPortfolioView :one
+INSERT INTO ask_docs_portfolio_views (
+  workspace_id,
+  name,
+  pack_id,
+  created_by
+) VALUES (
+  $1, $2, $3, $4
+)
+RETURNING id, workspace_id, name, pack_id, created_by, created_at, updated_at
+`
+
+type CreateAskDocsPortfolioViewParams struct {
+	WorkspaceID pgtype.UUID
+	Name        string
+	PackID      string
+	CreatedBy   pgtype.UUID
+}
+
+func (q *Queries) CreateAskDocsPortfolioView(ctx context.Context, arg CreateAskDocsPortfolioViewParams) (AskDocsPortfolioView, error) {
+	row := q.db.QueryRow(ctx, createAskDocsPortfolioView,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.PackID,
+		arg.CreatedBy,
+	)
+	var i AskDocsPortfolioView
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.PackID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createAssistantMessage = `-- name: CreateAssistantMessage :one
 INSERT INTO assistant_messages (
   session_id, role, content, evidence, result_status, authorized_document_ids, retrieval_document_ids
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+VALUES (
+  $1, $2, $3, $4, $5,
+  COALESCE($6::uuid[], '{}'::uuid[]),
+  COALESCE($7::uuid[], '{}'::uuid[])
+)
 RETURNING id, session_id, role, content, evidence, created_at, result_status, authorized_document_ids, retrieval_document_ids
 `
 
@@ -1558,9 +1673,10 @@ INSERT INTO links (
     qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
     link_type, target_folder_path,
     custom_domain, tags, notify_on_access,
-    has_document_scope, folder_scope_paths, folder_scope_mode, nda_document_id, nda_template_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+    has_document_scope, folder_scope_paths, folder_scope_mode, nda_document_id, nda_template_id,
+    ask_docs_dd_chips_enabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 `
 
 type CreateLinkParams struct {
@@ -1597,6 +1713,7 @@ type CreateLinkParams struct {
 	FolderScopeMode             string
 	NdaDocumentID               pgtype.UUID
 	NdaTemplateID               pgtype.UUID
+	AskDocsDdChipsEnabled       bool
 }
 
 func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, error) {
@@ -1634,6 +1751,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		arg.FolderScopeMode,
 		arg.NdaDocumentID,
 		arg.NdaTemplateID,
+		arg.AskDocsDdChipsEnabled,
 	)
 	var i Link
 	err := row.Scan(
@@ -1676,6 +1794,7 @@ func (q *Queries) CreateLink(ctx context.Context, arg CreateLinkParams) (Link, e
 		&i.NdaDocumentID,
 		&i.FolderScopeMode,
 		&i.NdaTemplateID,
+		&i.AskDocsDdChipsEnabled,
 	)
 	return i, err
 }
@@ -2815,6 +2934,82 @@ func (q *Queries) DeleteAccessLogsBefore(ctx context.Context, createdAt pgtype.T
 	return result.RowsAffected(), nil
 }
 
+const deleteAskDocsDDRoomPack = `-- name: DeleteAskDocsDDRoomPack :execrows
+DELETE FROM ask_docs_dd_room_packs
+WHERE deal_room_id = $1 AND workspace_id = $2
+`
+
+type DeleteAskDocsDDRoomPackParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) DeleteAskDocsDDRoomPack(ctx context.Context, arg DeleteAskDocsDDRoomPackParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAskDocsDDRoomPack, arg.DealRoomID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteAskDocsPortfolioView = `-- name: DeleteAskDocsPortfolioView :execrows
+DELETE FROM ask_docs_portfolio_views
+WHERE id = $1 AND workspace_id = $2
+`
+
+type DeleteAskDocsPortfolioViewParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) DeleteAskDocsPortfolioView(ctx context.Context, arg DeleteAskDocsPortfolioViewParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteAskDocsPortfolioView, arg.ID, arg.WorkspaceID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const deleteAskDocsPortfolioViewRooms = `-- name: DeleteAskDocsPortfolioViewRooms :exec
+DELETE FROM ask_docs_portfolio_view_rooms
+WHERE view_id = $1
+`
+
+func (q *Queries) DeleteAskDocsPortfolioViewRooms(ctx context.Context, viewID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAskDocsPortfolioViewRooms, viewID)
+	return err
+}
+
+const deleteAssistantSessionByID = `-- name: DeleteAssistantSessionByID :exec
+DELETE FROM assistant_sessions
+WHERE id = $1
+`
+
+func (q *Queries) DeleteAssistantSessionByID(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAssistantSessionByID, id)
+	return err
+}
+
+const deleteChunkEmbeddingBuildsForDocuments = `-- name: DeleteChunkEmbeddingBuildsForDocuments :exec
+DELETE FROM chunk_embedding_builds b
+USING chunks c
+WHERE b.chunk_id = c.id
+  AND b.workspace_id = $1
+  AND b.generation = $2
+  AND c.document_id = ANY($3::uuid[])
+`
+
+type DeleteChunkEmbeddingBuildsForDocumentsParams struct {
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	DocumentIds []pgtype.UUID
+}
+
+func (q *Queries) DeleteChunkEmbeddingBuildsForDocuments(ctx context.Context, arg DeleteChunkEmbeddingBuildsForDocumentsParams) error {
+	_, err := q.db.Exec(ctx, deleteChunkEmbeddingBuildsForDocuments, arg.WorkspaceID, arg.Generation, arg.DocumentIds)
+	return err
+}
+
 const deleteChunksByDocument = `-- name: DeleteChunksByDocument :exec
 DELETE FROM chunks WHERE chunks.document_id = $1 OR chunks.page_id IN (SELECT id FROM pages WHERE pages.document_id = $1)
 `
@@ -3320,6 +3515,216 @@ func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBy
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+	)
+	return i, err
+}
+
+const getAskDocsAuditArchive = `-- name: GetAskDocsAuditArchive :one
+SELECT session_id, link_id, workspace_id, deal_room_id, tenant_id, visitor_id, question_preview, result_status, evidence_count, question, answer, evidence, authorized_document_ids, retrieval_document_ids, messages, session_created_at, archived_at
+FROM ask_docs_audit_archives
+WHERE session_id = $1 AND link_id = $2
+LIMIT 1
+`
+
+type GetAskDocsAuditArchiveParams struct {
+	SessionID pgtype.UUID
+	LinkID    pgtype.UUID
+}
+
+func (q *Queries) GetAskDocsAuditArchive(ctx context.Context, arg GetAskDocsAuditArchiveParams) (AskDocsAuditArchive, error) {
+	row := q.db.QueryRow(ctx, getAskDocsAuditArchive, arg.SessionID, arg.LinkID)
+	var i AskDocsAuditArchive
+	err := row.Scan(
+		&i.SessionID,
+		&i.LinkID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.TenantID,
+		&i.VisitorID,
+		&i.QuestionPreview,
+		&i.ResultStatus,
+		&i.EvidenceCount,
+		&i.Question,
+		&i.Answer,
+		&i.Evidence,
+		&i.AuthorizedDocumentIds,
+		&i.RetrievalDocumentIds,
+		&i.Messages,
+		&i.SessionCreatedAt,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
+const getAskDocsDDCrossCheckLatest = `-- name: GetAskDocsDDCrossCheckLatest :one
+SELECT id, workspace_id, deal_room_id, pack_id, pack_version, document_a_id, document_b_id, triggered_by, claims, created_at FROM ask_docs_dd_cross_checks
+WHERE deal_room_id = $1
+  AND pack_id = $2
+`
+
+type GetAskDocsDDCrossCheckLatestParams struct {
+	DealRoomID pgtype.UUID
+	PackID     string
+}
+
+func (q *Queries) GetAskDocsDDCrossCheckLatest(ctx context.Context, arg GetAskDocsDDCrossCheckLatestParams) (AskDocsDdCrossCheck, error) {
+	row := q.db.QueryRow(ctx, getAskDocsDDCrossCheckLatest, arg.DealRoomID, arg.PackID)
+	var i AskDocsDdCrossCheck
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.DocumentAID,
+		&i.DocumentBID,
+		&i.TriggeredBy,
+		&i.Claims,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAskDocsDDRoomPack = `-- name: GetAskDocsDDRoomPack :one
+SELECT deal_room_id, workspace_id, base_pack_id, pack_version, fork_revision, items, updated_by, created_at, updated_at FROM ask_docs_dd_room_packs
+WHERE deal_room_id = $1
+`
+
+func (q *Queries) GetAskDocsDDRoomPack(ctx context.Context, dealRoomID pgtype.UUID) (AskDocsDdRoomPack, error) {
+	row := q.db.QueryRow(ctx, getAskDocsDDRoomPack, dealRoomID)
+	var i AskDocsDdRoomPack
+	err := row.Scan(
+		&i.DealRoomID,
+		&i.WorkspaceID,
+		&i.BasePackID,
+		&i.PackVersion,
+		&i.ForkRevision,
+		&i.Items,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAskDocsDDRun = `-- name: GetAskDocsDDRun :one
+SELECT id, workspace_id, deal_room_id, link_id, pack_id, pack_version, status, triggered_by, error_message, kb_generation, started_at, finished_at, created_at FROM ask_docs_dd_runs
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetAskDocsDDRunParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetAskDocsDDRun(ctx context.Context, arg GetAskDocsDDRunParams) (AskDocsDdRun, error) {
+	row := q.db.QueryRow(ctx, getAskDocsDDRun, arg.ID, arg.WorkspaceID)
+	var i AskDocsDdRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.Status,
+		&i.TriggeredBy,
+		&i.ErrorMessage,
+		&i.KbGeneration,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAskDocsDDSnapshotLink = `-- name: GetAskDocsDDSnapshotLink :one
+SELECT id, workspace_id, deal_room_id, link_id, pack_id, pack_version, run_id, kb_generation, stale, coverage_rows, created_at, updated_at FROM ask_docs_dd_snapshots
+WHERE deal_room_id = $1
+  AND link_id = $2
+  AND pack_id = $3
+`
+
+type GetAskDocsDDSnapshotLinkParams struct {
+	DealRoomID pgtype.UUID
+	LinkID     pgtype.UUID
+	PackID     string
+}
+
+func (q *Queries) GetAskDocsDDSnapshotLink(ctx context.Context, arg GetAskDocsDDSnapshotLinkParams) (AskDocsDdSnapshot, error) {
+	row := q.db.QueryRow(ctx, getAskDocsDDSnapshotLink, arg.DealRoomID, arg.LinkID, arg.PackID)
+	var i AskDocsDdSnapshot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.RunID,
+		&i.KbGeneration,
+		&i.Stale,
+		&i.CoverageRows,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAskDocsDDSnapshotRoom = `-- name: GetAskDocsDDSnapshotRoom :one
+SELECT id, workspace_id, deal_room_id, link_id, pack_id, pack_version, run_id, kb_generation, stale, coverage_rows, created_at, updated_at FROM ask_docs_dd_snapshots
+WHERE deal_room_id = $1
+  AND pack_id = $2
+  AND link_id IS NULL
+`
+
+type GetAskDocsDDSnapshotRoomParams struct {
+	DealRoomID pgtype.UUID
+	PackID     string
+}
+
+func (q *Queries) GetAskDocsDDSnapshotRoom(ctx context.Context, arg GetAskDocsDDSnapshotRoomParams) (AskDocsDdSnapshot, error) {
+	row := q.db.QueryRow(ctx, getAskDocsDDSnapshotRoom, arg.DealRoomID, arg.PackID)
+	var i AskDocsDdSnapshot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.RunID,
+		&i.KbGeneration,
+		&i.Stale,
+		&i.CoverageRows,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAskDocsPortfolioView = `-- name: GetAskDocsPortfolioView :one
+SELECT id, workspace_id, name, pack_id, created_by, created_at, updated_at
+FROM ask_docs_portfolio_views
+WHERE id = $1 AND workspace_id = $2
+`
+
+type GetAskDocsPortfolioViewParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetAskDocsPortfolioView(ctx context.Context, arg GetAskDocsPortfolioViewParams) (AskDocsPortfolioView, error) {
+	row := q.db.QueryRow(ctx, getAskDocsPortfolioView, arg.ID, arg.WorkspaceID)
+	var i AskDocsPortfolioView
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.PackID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -4758,7 +5163,7 @@ func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtyp
 }
 
 const getLinkByID = `-- name: GetLinkByID :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE id = $1
 LIMIT 1
@@ -4807,12 +5212,13 @@ func (q *Queries) GetLinkByID(ctx context.Context, id pgtype.UUID) (Link, error)
 		&i.NdaDocumentID,
 		&i.FolderScopeMode,
 		&i.NdaTemplateID,
+		&i.AskDocsDdChipsEnabled,
 	)
 	return i, err
 }
 
 const getLinkByIDAndWorkspace = `-- name: GetLinkByIDAndWorkspace :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1
@@ -4866,12 +5272,13 @@ func (q *Queries) GetLinkByIDAndWorkspace(ctx context.Context, arg GetLinkByIDAn
 		&i.NdaDocumentID,
 		&i.FolderScopeMode,
 		&i.NdaTemplateID,
+		&i.AskDocsDdChipsEnabled,
 	)
 	return i, err
 }
 
 const getLinkByPublicToken = `-- name: GetLinkByPublicToken :one
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE public_token = $1
 LIMIT 1
@@ -4920,6 +5327,7 @@ func (q *Queries) GetLinkByPublicToken(ctx context.Context, publicToken string) 
 		&i.NdaDocumentID,
 		&i.FolderScopeMode,
 		&i.NdaTemplateID,
+		&i.AskDocsDdChipsEnabled,
 	)
 	return i, err
 }
@@ -6766,6 +7174,22 @@ func (q *Queries) IncrementSuggestionOutboxAttempts(ctx context.Context, arg Inc
 	return err
 }
 
+const insertAskDocsPortfolioViewRoom = `-- name: InsertAskDocsPortfolioViewRoom :exec
+INSERT INTO ask_docs_portfolio_view_rooms (view_id, deal_room_id, sort_order)
+VALUES ($1, $2, $3)
+`
+
+type InsertAskDocsPortfolioViewRoomParams struct {
+	ViewID     pgtype.UUID
+	DealRoomID pgtype.UUID
+	SortOrder  int32
+}
+
+func (q *Queries) InsertAskDocsPortfolioViewRoom(ctx context.Context, arg InsertAskDocsPortfolioViewRoomParams) error {
+	_, err := q.db.Exec(ctx, insertAskDocsPortfolioViewRoom, arg.ViewID, arg.DealRoomID, arg.SortOrder)
+	return err
+}
+
 const insertLinkAccessRuleRevision = `-- name: InsertLinkAccessRuleRevision :exec
 INSERT INTO link_access_rule_revisions (
     tenant_id, workspace_id, link_id, changed_by, rules_snapshot
@@ -7112,6 +7536,46 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const listActiveAskDocsDDRunsForRoom = `-- name: ListActiveAskDocsDDRunsForRoom :many
+SELECT id, workspace_id, deal_room_id, link_id, pack_id, pack_version, status, triggered_by, error_message, kb_generation, started_at, finished_at, created_at FROM ask_docs_dd_runs
+WHERE deal_room_id = $1
+  AND status IN ('queued', 'running')
+`
+
+func (q *Queries) ListActiveAskDocsDDRunsForRoom(ctx context.Context, dealRoomID pgtype.UUID) ([]AskDocsDdRun, error) {
+	rows, err := q.db.Query(ctx, listActiveAskDocsDDRunsForRoom, dealRoomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AskDocsDdRun
+	for rows.Next() {
+		var i AskDocsDdRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DealRoomID,
+			&i.LinkID,
+			&i.PackID,
+			&i.PackVersion,
+			&i.Status,
+			&i.TriggeredBy,
+			&i.ErrorMessage,
+			&i.KbGeneration,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllNDATemplatesByWorkspace = `-- name: ListAllNDATemplatesByWorkspace :many
 SELECT id, tenant_id, workspace_id, name, source_document_id, content_sha256, require_signer_name, status, created_by, created_at, updated_at
 FROM nda_templates
@@ -7210,6 +7674,122 @@ func (q *Queries) ListArchivedDocumentsByWorkspace(ctx context.Context, workspac
 	return items, nil
 }
 
+const listAskDocsAuditArchivesByLink = `-- name: ListAskDocsAuditArchivesByLink :many
+SELECT
+  session_id,
+  link_id,
+  visitor_id,
+  session_created_at,
+  question_preview,
+  result_status,
+  evidence_count
+FROM ask_docs_audit_archives
+WHERE link_id = $1
+ORDER BY session_created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditArchivesByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
+
+type ListAskDocsAuditArchivesByLinkRow struct {
+	SessionID        pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        string
+	SessionCreatedAt pgtype.Timestamptz
+	QuestionPreview  string
+	ResultStatus     string
+	EvidenceCount    int32
+}
+
+func (q *Queries) ListAskDocsAuditArchivesByLink(ctx context.Context, arg ListAskDocsAuditArchivesByLinkParams) ([]ListAskDocsAuditArchivesByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditArchivesByLink, arg.LinkID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditArchivesByLinkRow
+	for rows.Next() {
+		var i ListAskDocsAuditArchivesByLinkRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.SessionCreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsAuditArchivesByRoom = `-- name: ListAskDocsAuditArchivesByRoom :many
+SELECT
+  session_id,
+  link_id,
+  visitor_id,
+  session_created_at,
+  question_preview,
+  result_status,
+  evidence_count
+FROM ask_docs_audit_archives
+WHERE deal_room_id = $1
+ORDER BY session_created_at DESC
+LIMIT $2
+`
+
+type ListAskDocsAuditArchivesByRoomParams struct {
+	DealRoomID pgtype.UUID
+	Limit      int32
+}
+
+type ListAskDocsAuditArchivesByRoomRow struct {
+	SessionID        pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        string
+	SessionCreatedAt pgtype.Timestamptz
+	QuestionPreview  string
+	ResultStatus     string
+	EvidenceCount    int32
+}
+
+func (q *Queries) ListAskDocsAuditArchivesByRoom(ctx context.Context, arg ListAskDocsAuditArchivesByRoomParams) ([]ListAskDocsAuditArchivesByRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsAuditArchivesByRoom, arg.DealRoomID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsAuditArchivesByRoomRow
+	for rows.Next() {
+		var i ListAskDocsAuditArchivesByRoomRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.SessionCreatedAt,
+			&i.QuestionPreview,
+			&i.ResultStatus,
+			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAskDocsAuditSessionsByLink = `-- name: ListAskDocsAuditSessionsByLink :many
 SELECT
   s.id,
@@ -7239,13 +7819,15 @@ SELECT
 FROM assistant_sessions s
 WHERE s.link_id = $1
   AND s.visitor_id IS NOT NULL
+  AND s.created_at >= $2
 ORDER BY s.created_at DESC
-LIMIT $2
+LIMIT $3
 `
 
 type ListAskDocsAuditSessionsByLinkParams struct {
-	LinkID pgtype.UUID
-	Limit  int32
+	LinkID    pgtype.UUID
+	CreatedAt pgtype.Timestamptz
+	Limit     int32
 }
 
 type ListAskDocsAuditSessionsByLinkRow struct {
@@ -7257,8 +7839,9 @@ type ListAskDocsAuditSessionsByLinkRow struct {
 	EvidenceCount   int64
 }
 
+// Hot window only (created_at >= $2). Older rows live in ask_docs_audit_archives after B2.
 func (q *Queries) ListAskDocsAuditSessionsByLink(ctx context.Context, arg ListAskDocsAuditSessionsByLinkParams) ([]ListAskDocsAuditSessionsByLinkRow, error) {
-	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByLink, arg.LinkID, arg.Limit)
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByLink, arg.LinkID, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -7314,12 +7897,14 @@ SELECT
 FROM assistant_sessions s
 INNER JOIN links l ON l.id = s.link_id AND l.deal_room_id = $1
 WHERE s.visitor_id IS NOT NULL
+  AND s.created_at >= $2
 ORDER BY s.created_at DESC
-LIMIT $2
+LIMIT $3
 `
 
 type ListAskDocsAuditSessionsByRoomParams struct {
 	DealRoomID pgtype.UUID
+	CreatedAt  pgtype.Timestamptz
 	Limit      int32
 }
 
@@ -7334,7 +7919,7 @@ type ListAskDocsAuditSessionsByRoomRow struct {
 }
 
 func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAskDocsAuditSessionsByRoomParams) ([]ListAskDocsAuditSessionsByRoomRow, error) {
-	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByRoom, arg.DealRoomID, arg.Limit)
+	rows, err := q.db.Query(ctx, listAskDocsAuditSessionsByRoom, arg.DealRoomID, arg.CreatedAt, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
@@ -7350,6 +7935,331 @@ func (q *Queries) ListAskDocsAuditSessionsByRoom(ctx context.Context, arg ListAs
 			&i.QuestionPreview,
 			&i.ResultStatus,
 			&i.EvidenceCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsDDSnapshotsForRooms = `-- name: ListAskDocsDDSnapshotsForRooms :many
+SELECT id, workspace_id, deal_room_id, link_id, pack_id, pack_version, run_id, kb_generation, stale, coverage_rows, created_at, updated_at
+FROM ask_docs_dd_snapshots
+WHERE workspace_id = $1
+  AND pack_id = $2
+  AND link_id IS NULL
+  AND deal_room_id = ANY($3::uuid[])
+`
+
+type ListAskDocsDDSnapshotsForRoomsParams struct {
+	WorkspaceID pgtype.UUID
+	PackID      string
+	DealRoomIds []pgtype.UUID
+}
+
+func (q *Queries) ListAskDocsDDSnapshotsForRooms(ctx context.Context, arg ListAskDocsDDSnapshotsForRoomsParams) ([]AskDocsDdSnapshot, error) {
+	rows, err := q.db.Query(ctx, listAskDocsDDSnapshotsForRooms, arg.WorkspaceID, arg.PackID, arg.DealRoomIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AskDocsDdSnapshot
+	for rows.Next() {
+		var i AskDocsDdSnapshot
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DealRoomID,
+			&i.LinkID,
+			&i.PackID,
+			&i.PackVersion,
+			&i.RunID,
+			&i.KbGeneration,
+			&i.Stale,
+			&i.CoverageRows,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsPortfolioViewRooms = `-- name: ListAskDocsPortfolioViewRooms :many
+SELECT deal_room_id, sort_order
+FROM ask_docs_portfolio_view_rooms
+WHERE view_id = $1
+ORDER BY sort_order ASC, deal_room_id ASC
+`
+
+type ListAskDocsPortfolioViewRoomsRow struct {
+	DealRoomID pgtype.UUID
+	SortOrder  int32
+}
+
+func (q *Queries) ListAskDocsPortfolioViewRooms(ctx context.Context, viewID pgtype.UUID) ([]ListAskDocsPortfolioViewRoomsRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsPortfolioViewRooms, viewID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsPortfolioViewRoomsRow
+	for rows.Next() {
+		var i ListAskDocsPortfolioViewRoomsRow
+		if err := rows.Scan(&i.DealRoomID, &i.SortOrder); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsPortfolioViews = `-- name: ListAskDocsPortfolioViews :many
+SELECT id, workspace_id, name, pack_id, created_by, created_at, updated_at
+FROM ask_docs_portfolio_views
+WHERE workspace_id = $1
+ORDER BY updated_at DESC
+`
+
+func (q *Queries) ListAskDocsPortfolioViews(ctx context.Context, workspaceID pgtype.UUID) ([]AskDocsPortfolioView, error) {
+	rows, err := q.db.Query(ctx, listAskDocsPortfolioViews, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AskDocsPortfolioView
+	for rows.Next() {
+		var i AskDocsPortfolioView
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.PackID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskDocsSessionsDueForArchive = `-- name: ListAskDocsSessionsDueForArchive :many
+SELECT
+  s.id,
+  s.link_id,
+  s.workspace_id,
+  s.visitor_id,
+  s.created_at,
+  l.deal_room_id,
+  l.tenant_id
+FROM assistant_sessions s
+INNER JOIN links l ON l.id = s.link_id
+WHERE s.visitor_id IS NOT NULL
+  AND s.link_id IS NOT NULL
+  AND s.created_at < $1
+  AND NOT EXISTS (
+    SELECT 1 FROM ask_docs_audit_archives a WHERE a.session_id = s.id
+  )
+ORDER BY s.created_at ASC
+LIMIT $2
+`
+
+type ListAskDocsSessionsDueForArchiveParams struct {
+	CreatedAt pgtype.Timestamptz
+	Limit     int32
+}
+
+type ListAskDocsSessionsDueForArchiveRow struct {
+	ID          pgtype.UUID
+	LinkID      pgtype.UUID
+	WorkspaceID pgtype.UUID
+	VisitorID   pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	DealRoomID  pgtype.UUID
+	TenantID    pgtype.UUID
+}
+
+func (q *Queries) ListAskDocsSessionsDueForArchive(ctx context.Context, arg ListAskDocsSessionsDueForArchiveParams) ([]ListAskDocsSessionsDueForArchiveRow, error) {
+	rows, err := q.db.Query(ctx, listAskDocsSessionsDueForArchive, arg.CreatedAt, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskDocsSessionsDueForArchiveRow
+	for rows.Next() {
+		var i ListAskDocsSessionsDueForArchiveRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.WorkspaceID,
+			&i.VisitorID,
+			&i.CreatedAt,
+			&i.DealRoomID,
+			&i.TenantID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskHighRiskSecurityEventsByLink = `-- name: ListAskHighRiskSecurityEventsByLink :many
+SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
+FROM security_events
+WHERE link_id = $1
+  AND event_type = ANY (ARRAY[
+    'rate_limit_exceeded',
+    'scope_violation',
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list'
+  ]::text[])
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListAskHighRiskSecurityEventsByLinkParams struct {
+	LinkID pgtype.UUID
+	Limit  int32
+}
+
+type ListAskHighRiskSecurityEventsByLinkRow struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        pgtype.Text
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+// Owner-visible Visitor Ask high-risk events (US#32): block (blocked_email /
+// blocked_domain / not_in_allow_list), scope_violation, rate_limit_exceeded.
+func (q *Queries) ListAskHighRiskSecurityEventsByLink(ctx context.Context, arg ListAskHighRiskSecurityEventsByLinkParams) ([]ListAskHighRiskSecurityEventsByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listAskHighRiskSecurityEventsByLink, arg.LinkID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskHighRiskSecurityEventsByLinkRow
+	for rows.Next() {
+		var i ListAskHighRiskSecurityEventsByLinkRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Ip,
+			&i.UserAgent,
+			&i.Reason,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAskHighRiskSecurityEventsByRoom = `-- name: ListAskHighRiskSecurityEventsByRoom :many
+SELECT
+    se.id,
+    se.link_id,
+    se.event_type,
+    se.visitor_id,
+    se.email,
+    se.ip,
+    se.user_agent,
+    se.reason,
+    se.created_at
+FROM security_events se
+INNER JOIN links l ON l.id = se.link_id
+WHERE l.deal_room_id = $1
+  AND l.workspace_id = $2
+  AND l.status NOT IN ('deleted', 'disabled')
+  AND ($4::uuid IS NULL OR se.link_id = $4)
+  AND se.event_type = ANY (ARRAY[
+    'rate_limit_exceeded',
+    'scope_violation',
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list'
+  ]::text[])
+ORDER BY se.created_at DESC
+LIMIT $3
+`
+
+type ListAskHighRiskSecurityEventsByRoomParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	LinkID      pgtype.UUID
+}
+
+type ListAskHighRiskSecurityEventsByRoomRow struct {
+	ID        pgtype.UUID
+	LinkID    pgtype.UUID
+	EventType string
+	VisitorID pgtype.Text
+	Email     pgtype.Text
+	Ip        pgtype.Text
+	UserAgent pgtype.Text
+	Reason    pgtype.Text
+	CreatedAt pgtype.Timestamptz
+}
+
+func (q *Queries) ListAskHighRiskSecurityEventsByRoom(ctx context.Context, arg ListAskHighRiskSecurityEventsByRoomParams) ([]ListAskHighRiskSecurityEventsByRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAskHighRiskSecurityEventsByRoom,
+		arg.DealRoomID,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.LinkID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAskHighRiskSecurityEventsByRoomRow
+	for rows.Next() {
+		var i ListAskHighRiskSecurityEventsByRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Ip,
+			&i.UserAgent,
+			&i.Reason,
+			&i.CreatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -7441,6 +8351,51 @@ func (q *Queries) ListChunksByDocumentIDs(ctx context.Context, documentIds []pgt
 			&i.PageNumber,
 			&i.DocumentID,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listChunksForEmbedding = `-- name: ListChunksForEmbedding :many
+SELECT
+    c.id,
+    c.document_id,
+    c.text
+FROM chunks c
+WHERE c.workspace_id = $1
+  AND c.document_id = ANY($2::uuid[])
+  AND c.text IS NOT NULL
+  AND btrim(c.text) <> ''
+ORDER BY c.document_id, c.chunk_index NULLS LAST, c.id
+`
+
+type ListChunksForEmbeddingParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentIds []pgtype.UUID
+}
+
+type ListChunksForEmbeddingRow struct {
+	ID         pgtype.UUID
+	DocumentID pgtype.UUID
+	Text       string
+}
+
+// Chunks with non-empty text for KB create/rebuild embedding.
+func (q *Queries) ListChunksForEmbedding(ctx context.Context, arg ListChunksForEmbeddingParams) ([]ListChunksForEmbeddingRow, error) {
+	rows, err := q.db.Query(ctx, listChunksForEmbedding, arg.WorkspaceID, arg.DocumentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListChunksForEmbeddingRow
+	for rows.Next() {
+		var i ListChunksForEmbeddingRow
+		if err := rows.Scan(&i.ID, &i.DocumentID, &i.Text); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -7730,6 +8685,56 @@ func (q *Queries) ListDealRoomDocumentsWithMeta(ctx context.Context, roomID pgty
 	return items, nil
 }
 
+const listDealRoomsByIDs = `-- name: ListDealRoomsByIDs :many
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+FROM deal_rooms
+WHERE workspace_id = $1
+  AND deleted_at IS NULL
+  AND id = ANY($2::uuid[])
+`
+
+type ListDealRoomsByIDsParams struct {
+	WorkspaceID pgtype.UUID
+	Ids         []pgtype.UUID
+}
+
+func (q *Queries) ListDealRoomsByIDs(ctx context.Context, arg ListDealRoomsByIDsParams) ([]DealRoom, error) {
+	rows, err := q.db.Query(ctx, listDealRoomsByIDs, arg.WorkspaceID, arg.Ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DealRoom
+	for rows.Next() {
+		var i DealRoom
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.TemplateType,
+			&i.Settings,
+			&i.RequiresNda,
+			&i.RequiresApproval,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDealRoomsByWorkspace = `-- name: ListDealRoomsByWorkspace :many
 SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
 FROM deal_rooms
@@ -7929,6 +8934,47 @@ func (q *Queries) ListDocumentsByWorkspace(ctx context.Context, workspaceID pgty
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentsMissingEmbeddableChunks = `-- name: ListDocumentsMissingEmbeddableChunks :many
+SELECT d.id
+FROM documents d
+WHERE d.workspace_id = $1
+  AND d.id = ANY($2::uuid[])
+  AND NOT EXISTS (
+    SELECT 1
+    FROM chunks c
+    WHERE c.workspace_id = $1
+      AND c.document_id = d.id
+      AND c.text IS NOT NULL
+      AND btrim(c.text) <> ''
+  )
+`
+
+type ListDocumentsMissingEmbeddableChunksParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentIds []pgtype.UUID
+}
+
+// Documents in the selection that have no non-empty text chunks (cannot be embedded).
+func (q *Queries) ListDocumentsMissingEmbeddableChunks(ctx context.Context, arg ListDocumentsMissingEmbeddableChunksParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listDocumentsMissingEmbeddableChunks, arg.WorkspaceID, arg.DocumentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -8642,7 +9688,7 @@ func (q *Queries) ListLinkNDAAgreementsByTemplate(ctx context.Context, arg ListL
 }
 
 const listLinksByDealRoom = `-- name: ListLinksByDealRoom :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE workspace_id = $1 AND deal_room_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -8702,6 +9748,7 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 			&i.NdaDocumentID,
 			&i.FolderScopeMode,
 			&i.NdaTemplateID,
+			&i.AskDocsDdChipsEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -8714,7 +9761,7 @@ func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRo
 }
 
 const listLinksByDealRoomID = `-- name: ListLinksByDealRoomID :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE deal_room_id = $1
 `
@@ -8768,6 +9815,7 @@ func (q *Queries) ListLinksByDealRoomID(ctx context.Context, dealRoomID pgtype.U
 			&i.NdaDocumentID,
 			&i.FolderScopeMode,
 			&i.NdaTemplateID,
+			&i.AskDocsDdChipsEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -8780,7 +9828,7 @@ func (q *Queries) ListLinksByDealRoomID(ctx context.Context, dealRoomID pgtype.U
 }
 
 const listLinksByDocument = `-- name: ListLinksByDocument :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -8840,6 +9888,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 			&i.NdaDocumentID,
 			&i.FolderScopeMode,
 			&i.NdaTemplateID,
+			&i.AskDocsDdChipsEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -8852,7 +9901,7 @@ func (q *Queries) ListLinksByDocument(ctx context.Context, arg ListLinksByDocume
 }
 
 const listLinksByWorkspace = `-- name: ListLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -8907,6 +9956,7 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 			&i.NdaDocumentID,
 			&i.FolderScopeMode,
 			&i.NdaTemplateID,
+			&i.AskDocsDdChipsEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -8919,7 +9969,7 @@ func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.U
 }
 
 const listLinksExpiringWithin = `-- name: ListLinksExpiringWithin :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id FROM links
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled FROM links
 WHERE status = 'active'
   AND expires_at IS NOT NULL
   AND expires_at > now()
@@ -8977,6 +10027,7 @@ func (q *Queries) ListLinksExpiringWithin(ctx context.Context, dollar_1 pgtype.T
 			&i.NdaDocumentID,
 			&i.FolderScopeMode,
 			&i.NdaTemplateID,
+			&i.AskDocsDdChipsEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -9770,7 +10821,7 @@ func (q *Queries) ListRecentDocumentsByWorkspace(ctx context.Context, arg ListRe
 }
 
 const listRecentLinksByWorkspace = `-- name: ListRecentLinksByWorkspace :many
-SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 FROM links
 WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
@@ -9831,6 +10882,7 @@ func (q *Queries) ListRecentLinksByWorkspace(ctx context.Context, arg ListRecent
 			&i.NdaDocumentID,
 			&i.FolderScopeMode,
 			&i.NdaTemplateID,
+			&i.AskDocsDdChipsEnabled,
 		); err != nil {
 			return nil, err
 		}
@@ -10789,6 +11841,55 @@ func (q *Queries) ListVisitorQuestionsByLink(ctx context.Context, linkID pgtype.
 	return items, nil
 }
 
+const listVisitorQuestionsByRoom = `-- name: ListVisitorQuestionsByRoom :many
+SELECT q.id, q.tenant_id, q.workspace_id, q.link_id, q.visitor_id, q.visitor_email, q.question, q.answer, q.answered_by, q.status, q.created_at, q.updated_at, q.intent_tag
+FROM link_visitor_questions q
+INNER JOIN links l ON l.id = q.link_id AND l.deal_room_id = $1
+WHERE q.workspace_id = $2
+ORDER BY q.created_at DESC
+LIMIT $3
+`
+
+type ListVisitorQuestionsByRoomParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Limit       int32
+}
+
+func (q *Queries) ListVisitorQuestionsByRoom(ctx context.Context, arg ListVisitorQuestionsByRoomParams) ([]LinkVisitorQuestion, error) {
+	rows, err := q.db.Query(ctx, listVisitorQuestionsByRoom, arg.DealRoomID, arg.WorkspaceID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkVisitorQuestion
+	for rows.Next() {
+		var i LinkVisitorQuestion
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.Question,
+			&i.Answer,
+			&i.AnsweredBy,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.IntentTag,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisitorQuestionsByVisitor = `-- name: ListVisitorQuestionsByVisitor :many
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, question, answer, answered_by, status, created_at, updated_at, intent_tag FROM link_visitor_questions
 WHERE link_id = $1 AND visitor_id = $2
@@ -11021,6 +12122,36 @@ func (q *Queries) ListWorkspacesWithCrmEnabled(ctx context.Context) ([]ListWorks
 	return items, nil
 }
 
+const markAllAskDocsDDSnapshotsStaleForRoom = `-- name: MarkAllAskDocsDDSnapshotsStaleForRoom :exec
+UPDATE ask_docs_dd_snapshots
+SET stale = true, updated_at = now()
+WHERE deal_room_id = $1
+  AND stale = false
+`
+
+func (q *Queries) MarkAllAskDocsDDSnapshotsStaleForRoom(ctx context.Context, dealRoomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markAllAskDocsDDSnapshotsStaleForRoom, dealRoomID)
+	return err
+}
+
+const markAskDocsDDSnapshotsStaleForRoom = `-- name: MarkAskDocsDDSnapshotsStaleForRoom :exec
+UPDATE ask_docs_dd_snapshots
+SET stale = true, updated_at = now()
+WHERE deal_room_id = $1
+  AND stale = false
+  AND (kb_generation IS DISTINCT FROM $2)
+`
+
+type MarkAskDocsDDSnapshotsStaleForRoomParams struct {
+	DealRoomID   pgtype.UUID
+	KbGeneration pgtype.Int4
+}
+
+func (q *Queries) MarkAskDocsDDSnapshotsStaleForRoom(ctx context.Context, arg MarkAskDocsDDSnapshotsStaleForRoomParams) error {
+	_, err := q.db.Exec(ctx, markAskDocsDDSnapshotsStaleForRoom, arg.DealRoomID, arg.KbGeneration)
+	return err
+}
+
 const markHubSpotSyncJobCompleted = `-- name: MarkHubSpotSyncJobCompleted :exec
 UPDATE hubspot_sync_jobs
 SET status = 'completed', attempts = attempts + 1, updated_at = now()
@@ -11139,6 +12270,28 @@ WHERE id = ANY($1::uuid[])
 
 func (q *Queries) MarkSuggestionsSynced(ctx context.Context, dollar_1 []pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markSuggestionsSynced, dollar_1)
+	return err
+}
+
+const promoteChunkEmbeddingBuild = `-- name: PromoteChunkEmbeddingBuild :exec
+UPDATE chunks c
+SET embedding = b.embedding
+FROM chunk_embedding_builds b
+WHERE c.id = b.chunk_id
+  AND b.workspace_id = $1
+  AND b.generation = $2
+  AND c.workspace_id = $1
+  AND c.document_id = ANY($3::uuid[])
+`
+
+type PromoteChunkEmbeddingBuildParams struct {
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	DocumentIds []pgtype.UUID
+}
+
+func (q *Queries) PromoteChunkEmbeddingBuild(ctx context.Context, arg PromoteChunkEmbeddingBuildParams) error {
+	_, err := q.db.Exec(ctx, promoteChunkEmbeddingBuild, arg.WorkspaceID, arg.Generation, arg.DocumentIds)
 	return err
 }
 
@@ -11333,6 +12486,7 @@ FROM chunks c
 JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND c.search_vector @@ plainto_tsquery('english', $3)
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2
 `
@@ -11392,6 +12546,7 @@ JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND p.document_id = ANY($4::uuid[])
   AND c.search_vector @@ plainto_tsquery('english', $3)
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2
 `
@@ -11459,6 +12614,7 @@ WHERE c.workspace_id = $1
   AND c.normalized_text IS NOT NULL
   AND c.normalized_text <> ''
   AND similarity(c.normalized_text, $3) > 0.1
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2
 `
@@ -11523,6 +12679,7 @@ WHERE c.workspace_id = $1
   AND c.normalized_text IS NOT NULL
   AND c.normalized_text <> ''
   AND similarity(c.normalized_text, $3) > 0.1
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2
 `
@@ -11589,6 +12746,7 @@ FROM chunks c
 JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND c.embedding IS NOT NULL
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY c.embedding <=> $3::vector
 LIMIT $2
 `
@@ -11648,6 +12806,7 @@ JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND p.document_id = ANY($4::uuid[])
   AND c.embedding IS NOT NULL
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY c.embedding <=> $3::vector
 LIMIT $2
 `
@@ -11949,6 +13108,88 @@ func (q *Queries) UpdateActionItemStatus(ctx context.Context, arg UpdateActionIt
 	return i, err
 }
 
+const updateAskDocsDDRunStatus = `-- name: UpdateAskDocsDDRunStatus :one
+UPDATE ask_docs_dd_runs
+SET status = $2,
+    error_message = COALESCE($3, error_message),
+    started_at = COALESCE($4, started_at),
+    finished_at = COALESCE($5, finished_at)
+WHERE id = $1
+RETURNING id, workspace_id, deal_room_id, link_id, pack_id, pack_version, status, triggered_by, error_message, kb_generation, started_at, finished_at, created_at
+`
+
+type UpdateAskDocsDDRunStatusParams struct {
+	ID           pgtype.UUID
+	Status       string
+	ErrorMessage pgtype.Text
+	StartedAt    pgtype.Timestamptz
+	FinishedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) UpdateAskDocsDDRunStatus(ctx context.Context, arg UpdateAskDocsDDRunStatusParams) (AskDocsDdRun, error) {
+	row := q.db.QueryRow(ctx, updateAskDocsDDRunStatus,
+		arg.ID,
+		arg.Status,
+		arg.ErrorMessage,
+		arg.StartedAt,
+		arg.FinishedAt,
+	)
+	var i AskDocsDdRun
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.Status,
+		&i.TriggeredBy,
+		&i.ErrorMessage,
+		&i.KbGeneration,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateAskDocsPortfolioView = `-- name: UpdateAskDocsPortfolioView :one
+UPDATE ask_docs_portfolio_views
+SET
+  name = $3,
+  pack_id = $4,
+  updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING id, workspace_id, name, pack_id, created_by, created_at, updated_at
+`
+
+type UpdateAskDocsPortfolioViewParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Name        string
+	PackID      string
+}
+
+func (q *Queries) UpdateAskDocsPortfolioView(ctx context.Context, arg UpdateAskDocsPortfolioViewParams) (AskDocsPortfolioView, error) {
+	row := q.db.QueryRow(ctx, updateAskDocsPortfolioView,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.PackID,
+	)
+	var i AskDocsPortfolioView
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.PackID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateAssistantSessionTitle = `-- name: UpdateAssistantSessionTitle :exec
 UPDATE assistant_sessions
 SET title = $1, updated_at = now()
@@ -11962,6 +13203,23 @@ type UpdateAssistantSessionTitleParams struct {
 
 func (q *Queries) UpdateAssistantSessionTitle(ctx context.Context, arg UpdateAssistantSessionTitleParams) error {
 	_, err := q.db.Exec(ctx, updateAssistantSessionTitle, arg.Title, arg.ID)
+	return err
+}
+
+const updateChunkEmbedding = `-- name: UpdateChunkEmbedding :exec
+UPDATE chunks
+SET embedding = $2
+WHERE id = $1 AND workspace_id = $3
+`
+
+type UpdateChunkEmbeddingParams struct {
+	ID          pgtype.UUID
+	Embedding   pgvector.Vector
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) UpdateChunkEmbedding(ctx context.Context, arg UpdateChunkEmbeddingParams) error {
+	_, err := q.db.Exec(ctx, updateChunkEmbedding, arg.ID, arg.Embedding, arg.WorkspaceID)
 	return err
 }
 
@@ -12363,9 +13621,10 @@ UPDATE links SET
     has_document_scope = $26,
     folder_scope_paths = $27,
     folder_scope_mode = $28,
+    ask_docs_dd_chips_enabled = $29,
     updated_at = now()
-WHERE id = $29 AND workspace_id = $30
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+WHERE id = $30 AND workspace_id = $31
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 `
 
 type UpdateLinkFullParams struct {
@@ -12397,6 +13656,7 @@ type UpdateLinkFullParams struct {
 	HasDocumentScope            bool
 	FolderScopePaths            []string
 	FolderScopeMode             string
+	AskDocsDdChipsEnabled       bool
 	ID                          pgtype.UUID
 	WorkspaceID                 pgtype.UUID
 }
@@ -12431,6 +13691,7 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		arg.HasDocumentScope,
 		arg.FolderScopePaths,
 		arg.FolderScopeMode,
+		arg.AskDocsDdChipsEnabled,
 		arg.ID,
 		arg.WorkspaceID,
 	)
@@ -12475,6 +13736,7 @@ func (q *Queries) UpdateLinkFull(ctx context.Context, arg UpdateLinkFullParams) 
 		&i.NdaDocumentID,
 		&i.FolderScopeMode,
 		&i.NdaTemplateID,
+		&i.AskDocsDdChipsEnabled,
 	)
 	return i, err
 }
@@ -12627,7 +13889,7 @@ const updateLinkStatus = `-- name: UpdateLinkStatus :one
 UPDATE links
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, ai_copilot_enabled, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id, ask_docs_dd_chips_enabled
 `
 
 type UpdateLinkStatusParams struct {
@@ -12679,6 +13941,7 @@ func (q *Queries) UpdateLinkStatus(ctx context.Context, arg UpdateLinkStatusPara
 		&i.NdaDocumentID,
 		&i.FolderScopeMode,
 		&i.NdaTemplateID,
+		&i.AskDocsDdChipsEnabled,
 	)
 	return i, err
 }
@@ -12935,6 +14198,349 @@ func (q *Queries) UpdateWorkspaceSecurity(ctx context.Context, arg UpdateWorkspa
 		&i.WebhookSecret,
 	)
 	return i, err
+}
+
+const upsertAskDocsAuditArchive = `-- name: UpsertAskDocsAuditArchive :exec
+INSERT INTO ask_docs_audit_archives (
+  session_id,
+  link_id,
+  workspace_id,
+  deal_room_id,
+  tenant_id,
+  visitor_id,
+  question_preview,
+  result_status,
+  evidence_count,
+  question,
+  answer,
+  evidence,
+  authorized_document_ids,
+  retrieval_document_ids,
+  messages,
+  session_created_at,
+  archived_at
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+)
+ON CONFLICT (session_id) DO NOTHING
+`
+
+type UpsertAskDocsAuditArchiveParams struct {
+	SessionID             pgtype.UUID
+	LinkID                pgtype.UUID
+	WorkspaceID           pgtype.UUID
+	DealRoomID            pgtype.UUID
+	TenantID              pgtype.UUID
+	VisitorID             string
+	QuestionPreview       string
+	ResultStatus          string
+	EvidenceCount         int32
+	Question              string
+	Answer                string
+	Evidence              []byte
+	AuthorizedDocumentIds []pgtype.UUID
+	RetrievalDocumentIds  []pgtype.UUID
+	Messages              []byte
+	SessionCreatedAt      pgtype.Timestamptz
+	ArchivedAt            pgtype.Timestamptz
+}
+
+func (q *Queries) UpsertAskDocsAuditArchive(ctx context.Context, arg UpsertAskDocsAuditArchiveParams) error {
+	_, err := q.db.Exec(ctx, upsertAskDocsAuditArchive,
+		arg.SessionID,
+		arg.LinkID,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+		arg.TenantID,
+		arg.VisitorID,
+		arg.QuestionPreview,
+		arg.ResultStatus,
+		arg.EvidenceCount,
+		arg.Question,
+		arg.Answer,
+		arg.Evidence,
+		arg.AuthorizedDocumentIds,
+		arg.RetrievalDocumentIds,
+		arg.Messages,
+		arg.SessionCreatedAt,
+		arg.ArchivedAt,
+	)
+	return err
+}
+
+const upsertAskDocsDDCrossCheck = `-- name: UpsertAskDocsDDCrossCheck :one
+INSERT INTO ask_docs_dd_cross_checks (
+  workspace_id,
+  deal_room_id,
+  pack_id,
+  pack_version,
+  document_a_id,
+  document_b_id,
+  triggered_by,
+  claims
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8
+)
+ON CONFLICT (deal_room_id, pack_id)
+DO UPDATE SET
+  pack_version = EXCLUDED.pack_version,
+  document_a_id = EXCLUDED.document_a_id,
+  document_b_id = EXCLUDED.document_b_id,
+  triggered_by = EXCLUDED.triggered_by,
+  claims = EXCLUDED.claims,
+  created_at = now()
+RETURNING id, workspace_id, deal_room_id, pack_id, pack_version, document_a_id, document_b_id, triggered_by, claims, created_at
+`
+
+type UpsertAskDocsDDCrossCheckParams struct {
+	WorkspaceID pgtype.UUID
+	DealRoomID  pgtype.UUID
+	PackID      string
+	PackVersion string
+	DocumentAID pgtype.UUID
+	DocumentBID pgtype.UUID
+	TriggeredBy pgtype.UUID
+	Claims      []byte
+}
+
+func (q *Queries) UpsertAskDocsDDCrossCheck(ctx context.Context, arg UpsertAskDocsDDCrossCheckParams) (AskDocsDdCrossCheck, error) {
+	row := q.db.QueryRow(ctx, upsertAskDocsDDCrossCheck,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+		arg.PackID,
+		arg.PackVersion,
+		arg.DocumentAID,
+		arg.DocumentBID,
+		arg.TriggeredBy,
+		arg.Claims,
+	)
+	var i AskDocsDdCrossCheck
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.DocumentAID,
+		&i.DocumentBID,
+		&i.TriggeredBy,
+		&i.Claims,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertAskDocsDDRoomPack = `-- name: UpsertAskDocsDDRoomPack :one
+INSERT INTO ask_docs_dd_room_packs (
+  deal_room_id,
+  workspace_id,
+  base_pack_id,
+  pack_version,
+  fork_revision,
+  items,
+  updated_by
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (deal_room_id)
+DO UPDATE SET
+  base_pack_id = EXCLUDED.base_pack_id,
+  pack_version = EXCLUDED.pack_version,
+  fork_revision = EXCLUDED.fork_revision,
+  items = EXCLUDED.items,
+  updated_by = EXCLUDED.updated_by,
+  updated_at = now()
+RETURNING deal_room_id, workspace_id, base_pack_id, pack_version, fork_revision, items, updated_by, created_at, updated_at
+`
+
+type UpsertAskDocsDDRoomPackParams struct {
+	DealRoomID   pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	BasePackID   string
+	PackVersion  string
+	ForkRevision int32
+	Items        []byte
+	UpdatedBy    pgtype.UUID
+}
+
+func (q *Queries) UpsertAskDocsDDRoomPack(ctx context.Context, arg UpsertAskDocsDDRoomPackParams) (AskDocsDdRoomPack, error) {
+	row := q.db.QueryRow(ctx, upsertAskDocsDDRoomPack,
+		arg.DealRoomID,
+		arg.WorkspaceID,
+		arg.BasePackID,
+		arg.PackVersion,
+		arg.ForkRevision,
+		arg.Items,
+		arg.UpdatedBy,
+	)
+	var i AskDocsDdRoomPack
+	err := row.Scan(
+		&i.DealRoomID,
+		&i.WorkspaceID,
+		&i.BasePackID,
+		&i.PackVersion,
+		&i.ForkRevision,
+		&i.Items,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAskDocsDDSnapshot = `-- name: UpsertAskDocsDDSnapshot :one
+INSERT INTO ask_docs_dd_snapshots (
+  workspace_id,
+  deal_room_id,
+  link_id,
+  pack_id,
+  pack_version,
+  run_id,
+  kb_generation,
+  stale,
+  coverage_rows
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, false, $8
+)
+ON CONFLICT (deal_room_id, pack_id) WHERE link_id IS NULL
+DO UPDATE SET
+  pack_version = EXCLUDED.pack_version,
+  run_id = EXCLUDED.run_id,
+  kb_generation = EXCLUDED.kb_generation,
+  stale = false,
+  coverage_rows = EXCLUDED.coverage_rows,
+  updated_at = now()
+RETURNING id, workspace_id, deal_room_id, link_id, pack_id, pack_version, run_id, kb_generation, stale, coverage_rows, created_at, updated_at
+`
+
+type UpsertAskDocsDDSnapshotParams struct {
+	WorkspaceID  pgtype.UUID
+	DealRoomID   pgtype.UUID
+	LinkID       pgtype.UUID
+	PackID       string
+	PackVersion  string
+	RunID        pgtype.UUID
+	KbGeneration pgtype.Int4
+	CoverageRows []byte
+}
+
+func (q *Queries) UpsertAskDocsDDSnapshot(ctx context.Context, arg UpsertAskDocsDDSnapshotParams) (AskDocsDdSnapshot, error) {
+	row := q.db.QueryRow(ctx, upsertAskDocsDDSnapshot,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+		arg.LinkID,
+		arg.PackID,
+		arg.PackVersion,
+		arg.RunID,
+		arg.KbGeneration,
+		arg.CoverageRows,
+	)
+	var i AskDocsDdSnapshot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.RunID,
+		&i.KbGeneration,
+		&i.Stale,
+		&i.CoverageRows,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAskDocsDDSnapshotForLink = `-- name: UpsertAskDocsDDSnapshotForLink :one
+INSERT INTO ask_docs_dd_snapshots (
+  workspace_id,
+  deal_room_id,
+  link_id,
+  pack_id,
+  pack_version,
+  run_id,
+  kb_generation,
+  stale,
+  coverage_rows
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, false, $8
+)
+ON CONFLICT (deal_room_id, link_id, pack_id) WHERE link_id IS NOT NULL
+DO UPDATE SET
+  pack_version = EXCLUDED.pack_version,
+  run_id = EXCLUDED.run_id,
+  kb_generation = EXCLUDED.kb_generation,
+  stale = false,
+  coverage_rows = EXCLUDED.coverage_rows,
+  updated_at = now()
+RETURNING id, workspace_id, deal_room_id, link_id, pack_id, pack_version, run_id, kb_generation, stale, coverage_rows, created_at, updated_at
+`
+
+type UpsertAskDocsDDSnapshotForLinkParams struct {
+	WorkspaceID  pgtype.UUID
+	DealRoomID   pgtype.UUID
+	LinkID       pgtype.UUID
+	PackID       string
+	PackVersion  string
+	RunID        pgtype.UUID
+	KbGeneration pgtype.Int4
+	CoverageRows []byte
+}
+
+func (q *Queries) UpsertAskDocsDDSnapshotForLink(ctx context.Context, arg UpsertAskDocsDDSnapshotForLinkParams) (AskDocsDdSnapshot, error) {
+	row := q.db.QueryRow(ctx, upsertAskDocsDDSnapshotForLink,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+		arg.LinkID,
+		arg.PackID,
+		arg.PackVersion,
+		arg.RunID,
+		arg.KbGeneration,
+		arg.CoverageRows,
+	)
+	var i AskDocsDdSnapshot
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DealRoomID,
+		&i.LinkID,
+		&i.PackID,
+		&i.PackVersion,
+		&i.RunID,
+		&i.KbGeneration,
+		&i.Stale,
+		&i.CoverageRows,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertChunkEmbeddingBuild = `-- name: UpsertChunkEmbeddingBuild :exec
+INSERT INTO chunk_embedding_builds (chunk_id, workspace_id, generation, embedding)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (chunk_id, generation) DO UPDATE
+SET embedding = EXCLUDED.embedding,
+    created_at = now()
+`
+
+type UpsertChunkEmbeddingBuildParams struct {
+	ChunkID     pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Generation  int32
+	Embedding   pgvector.Vector
+}
+
+func (q *Queries) UpsertChunkEmbeddingBuild(ctx context.Context, arg UpsertChunkEmbeddingBuildParams) error {
+	_, err := q.db.Exec(ctx, upsertChunkEmbeddingBuild,
+		arg.ChunkID,
+		arg.WorkspaceID,
+		arg.Generation,
+		arg.Embedding,
+	)
+	return err
 }
 
 const upsertContactByEmail = `-- name: UpsertContactByEmail :one

@@ -24,6 +24,8 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+
 const kbI18n = {
   "knowledgeBase.title": "Knowledge base",
   "knowledgeBase.description":
@@ -49,6 +51,8 @@ const kbI18n = {
   "knowledgeBase.loadFailed": "Failed to load knowledge base",
   "knowledgeBase.createFailed": "Failed to create knowledge base",
   "knowledgeBase.rebuildFailed": "Failed to rebuild knowledge base",
+  "knowledgeBase.embedFailed":
+    "Knowledge base embedding failed. Check the embedding provider configuration and try again.",
   "knowledgeBase.rebuildHint":
     "Visitors keep using the previous index until rebuild finishes.",
 };
@@ -297,5 +301,30 @@ describe("KnowledgeBasePanel", () => {
     expect(await screen.findByText(/Building 2\/3/i)).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Create knowledge base/i })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /Rebuild knowledge base/i })).not.toBeInTheDocument();
+  });
+
+  it("toasts a localized message when embedding fails", async () => {
+    const { toast } = await import("sonner");
+    const { ApiError } = await import("@/lib/apiClient");
+    createDealRoomKnowledgeBaseMock.mockRejectedValue(
+      new ApiError({
+        status: 502,
+        code: "knowledge_base_embed_failed",
+        message: "knowledge base embedding failed: Invalid URL",
+        requestId: "req-1",
+      }),
+    );
+
+    await renderPanel({});
+
+    fireEvent.click(await screen.findByRole("button", { name: /Create knowledge base/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Pitch Deck/i }));
+    fireEvent.click(screen.getByRole("button", { name: /^Create$/i }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Knowledge base embedding failed. Check the embedding provider configuration and try again.",
+      );
+    });
   });
 });

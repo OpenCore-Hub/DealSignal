@@ -31,7 +31,7 @@ export function visitorAskMasterEnabled(draft: Pick<DraftLink, "aiCopilotEnabled
 /** Turning the master off clears both channels; turning on defaults to Ask Docs. */
 export function visitorAskMasterPatch(enabled: boolean): Partial<DraftLink> {
   if (!enabled) {
-    return { aiCopilotEnabled: false, enableQaConversations: false };
+    return { aiCopilotEnabled: false, askDocsDDChipsEnabled: false, enableQaConversations: false };
   }
   return { aiCopilotEnabled: true, enableQaConversations: false };
 }

@@ -129,6 +129,23 @@ export function AskDocsAuditPanel(props: AskDocsAuditPanelProps) {
     return translated === key ? status : translated;
   };
 
+  const routingLabel = (kind: "intent" | "mode" | "source" | "fallback" | "party", value?: string) => {
+    if (!value) return null;
+    const key = `askDocsAudit.routing.${kind}Values.${value}`;
+    const translated = t(key);
+    return translated === key ? value : translated;
+  };
+
+  const hasRoutingMeta = (d: AskDocsAuditDetail) =>
+    Boolean(
+      d.doc_intent ||
+        d.generation_mode ||
+        d.intent_source ||
+        d.fallback_from ||
+        d.absence ||
+        d.party,
+    );
+
   return (
     <Card data-testid="ask-docs-audit-panel">
       <CardHeader className="pb-3">
@@ -178,6 +195,73 @@ export function AskDocsAuditPanel(props: AskDocsAuditPanelProps) {
                     <Badge variant="secondary">{t("askDocsAudit.archivedBadge")}</Badge>
                   ) : null}
                 </div>
+
+                {hasRoutingMeta(detail) || detail.checklist_item_id ? (
+                  <div
+                    className="rounded-lg border bg-muted/30 p-3"
+                    data-testid="ask-docs-audit-routing"
+                  >
+                    <p className="mb-2 text-sm font-medium">{t("askDocsAudit.routing.title")}</p>
+                    <dl className="grid gap-2 text-sm sm:grid-cols-2">
+                      {detail.doc_intent ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.intent")}
+                          </dt>
+                          <dd>{routingLabel("intent", detail.doc_intent)}</dd>
+                        </div>
+                      ) : null}
+                      {detail.generation_mode ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.mode")}
+                          </dt>
+                          <dd>{routingLabel("mode", detail.generation_mode)}</dd>
+                        </div>
+                      ) : null}
+                      {detail.intent_source ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.source")}
+                          </dt>
+                          <dd>{routingLabel("source", detail.intent_source)}</dd>
+                        </div>
+                      ) : null}
+                      {detail.fallback_from ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.fallback")}
+                          </dt>
+                          <dd>{routingLabel("fallback", detail.fallback_from)}</dd>
+                        </div>
+                      ) : null}
+                      {detail.absence ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.slot")}
+                          </dt>
+                          <dd>{t("askDocsAudit.routing.slotValues.absence")}</dd>
+                        </div>
+                      ) : null}
+                      {detail.party ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.party")}
+                          </dt>
+                          <dd>{routingLabel("party", detail.party)}</dd>
+                        </div>
+                      ) : null}
+                      {detail.checklist_item_id ? (
+                        <div>
+                          <dt className="text-xs text-muted-foreground">
+                            {t("askDocsAudit.routing.checklistItem")}
+                          </dt>
+                          <dd className="font-mono text-xs">{detail.checklist_item_id}</dd>
+                        </div>
+                      ) : null}
+                    </dl>
+                  </div>
+                ) : null}
 
                 <div>
                   <p className="mb-2 text-sm font-medium">{t("askDocsAudit.messages")}</p>
