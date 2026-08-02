@@ -5,6 +5,7 @@ export type DealRoomTab =
   | "documents"
   | "participants"
   | "qa"
+  | "diligence"
   | "activity"
   | "analytics"
   | "settings";
@@ -27,6 +28,7 @@ export function useDealRoomTab(): { tab: DealRoomTab; setTab: (tab: DealRoomTab)
       "documents",
       "participants",
       "qa",
+      "diligence",
       "activity",
       "analytics",
       "settings",

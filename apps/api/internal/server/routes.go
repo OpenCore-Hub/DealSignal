@@ -12,6 +12,9 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/coverage"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/jobs"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/portfolio"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/auth"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
@@ -188,7 +191,12 @@ func (s *Server) registerRoutes() error {
 			}
 
 			converter := ingestion.NewConverter(s.cfg.OnlyOfficeURL, s.cfg.OnlyOfficeJWTSecret, storageClient)
-			ingestionSvc := ingestion.NewService(queries, storageClient, converter, ingestionEmbedder)
+			ingestionSvc := ingestion.NewService(queries, storageClient, converter, ingestionEmbedder).
+				WithTableIngest(s.cfg.AskDocs.TableIngestEnabled, ingestion.TableIngestLimits{
+					MaxSheets:       s.cfg.AskDocs.TableMaxSheets,
+					MaxRowsPerSheet: s.cfg.AskDocs.TableMaxRowsPerSheet,
+					MaxRowsPerFile:  s.cfg.AskDocs.TableMaxRowsPerFile,
+				})
 			uploadSvc := upload.NewService(queries, storageClient)
 			uploadHandler := upload.NewHandler(uploadSvc, storageClient, workspaceSvc, s.cfg.AppBaseURL)
 
@@ -237,11 +245,30 @@ func (s *Server) registerRoutes() error {
 			s.registerWorker(suggestionWorker)
 			suggestionWorker.Start(s.shutdownCtx)
 
-			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc)
+			assistantSvc := assistant.NewService(queries, searchSvc, evidenceFormatter, chatCompleter, suggestionSvc).
+				WithAskDocsOptions(assistant.AskDocsOptionsFromConfig(s.cfg.AskDocs))
 			assistantHandler := assistant.NewHandler(assistantSvc)
 			askDocsArchiveWorker := assistant.NewAskDocsAuditArchiveWorker(assistantSvc, 6*time.Hour, 50)
 			s.registerWorker(askDocsArchiveWorker)
 			askDocsArchiveWorker.Start(s.shutdownCtx)
+
+			ddCoverageOpts := coverage.OptionsFromConfig(s.cfg.AskDocs)
+			var ddCoverageQueue coverage.Queue
+			if s.redisClient != nil && ddCoverageOpts.Enabled {
+				ddCoverageQueue = coverage.NewRedisQueue(s.redisClient.RDB(), coverage.StreamName)
+			}
+			ddCoverageSvc := coverage.NewService(queries, searchSvc, jobs.MustLoadBuiltinPacks(), ddCoverageQueue, ddCoverageOpts).
+				WithCompleter(chatCompleter)
+			ddCoverageHandler := coverage.NewHandler(ddCoverageSvc)
+			assistantSvc.WithRoomPackLookup(ddCoverageSvc)
+			if ddCoverageQueue != nil {
+				ddWorker := coverage.NewWorker(ddCoverageQueue, ddCoverageSvc, time.Second)
+				s.registerWorker(ddWorker)
+				ddWorker.Start(s.shutdownCtx)
+			}
+
+			portfolioOpts := portfolio.OptionsFromConfig(s.cfg.AskDocs)
+			portfolioHandler := portfolio.NewHandler(portfolio.NewService(queries, portfolioOpts))
 
 			actionSyncer := action.NewSyncer(queries)
 
@@ -288,7 +315,8 @@ func (s *Server) registerRoutes() error {
 			webhookHandler := crm.NewWebhookHandler()
 			public.POST("/webhooks/crm/deal-stage", webhookHandler.HandleDealStageChange)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
-			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkHandler, s.cfg)
+			assistantPublicHandler := assistant.NewPublicHandler(assistantSvc, linkHandler, s.cfg).
+				WithRoomPackLookup(ddCoverageSvc)
 			if s.redisClient != nil {
 				assistantPublicHandler.WithRateLimiter(s.redisClient)
 			}
@@ -324,6 +352,8 @@ func (s *Server) registerRoutes() error {
 			uploadHandler.RegisterRoutes(ws)
 			searchHandler.RegisterRoutes(ws)
 			assistantHandler.RegisterRoutes(ws)
+			ddCoverageHandler.RegisterRoutes(ws)
+			portfolioHandler.RegisterRoutes(ws)
 			linkHandler.RegisterWorkspaceRoutes(ws)
 			ndaHandler.RegisterRoutes(ws)
 			analyticsHandler.RegisterWorkspaceRoutes(ws)

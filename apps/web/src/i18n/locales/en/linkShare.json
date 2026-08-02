@@ -98,6 +98,8 @@
       "visitorAskDescription": "Let visitors ask about documents or message the host",
       "askDocs": "Ask Docs",
       "askDocsDescription": "Instant answers grounded in authorized materials",
+      "ddChips": "Suggested checklist chips",
+      "ddChipsDescription": "Show financing DD checklist suggestions in Ask Docs (labels only; visitors never see your gap table)",
       "askHost": "Ask Host",
       "askHostDescription": "Async questions for the link owner to answer",
       "knowledgeBaseRequired": "Create or rebuild the room knowledge base before enabling Ask Docs",
@@ -217,7 +219,50 @@
       "success": "Answered",
       "no_evidence": "No evidence",
       "kb_unavailable": "Knowledge base unavailable",
-      "scope_violation": "Scope violation"
+      "scope_violation": "Scope violation",
+      "out_of_corpus": "Outside authorized materials",
+      "not_found_in_scope": "Not found in scope"
+    },
+    "routing": {
+      "title": "Routing",
+      "intent": "Doc intent",
+      "mode": "Generation mode",
+      "source": "Intent source",
+      "fallback": "Fallback from",
+      "slot": "Slot",
+      "party": "Party",
+      "checklistItem": "Checklist item",
+      "intentValues": {
+        "locate": "Locate",
+        "topic": "Topic",
+        "list": "List",
+        "qa": "Q&A",
+        "refuse_early": "Refuse early"
+      },
+      "modeValues": {
+        "extractive": "Extractive",
+        "abstractive": "Abstractive",
+        "refuse": "Refuse"
+      },
+      "sourceValues": {
+        "rule": "Rule",
+        "llm": "LLM",
+        "default": "Default"
+      },
+      "fallbackValues": {
+        "locate": "Locate"
+      },
+      "slotValues": {
+        "absence": "Absence"
+      },
+      "partyValues": {
+        "investor": "Investor",
+        "founder": "Founder",
+        "buyer": "Buyer",
+        "seller": "Seller",
+        "gp": "GP",
+        "lp": "LP"
+      }
     }
   },
   "askSecurityEvents": {

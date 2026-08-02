@@ -474,6 +474,8 @@ func contentTypeForSourceType(sourceType string) string {
 		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
 	case "xlsx":
 		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	case "csv":
+		return "text/csv"
 	}
 	return "application/octet-stream"
 }

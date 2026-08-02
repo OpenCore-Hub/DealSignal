@@ -1,6 +1,8 @@
 import { http, HttpResponse } from "msw";
 import type {
   ActionItem,
+  AskDocsAuditDetail,
+  AskDocsAuditEntry,
   Contact,
   DealRoom,
   DealRoomDocumentItem,
@@ -64,7 +66,15 @@ function resetMockState() {
   mockPublicQuestions.clear();
   mockOwnerQuestions.clear();
   mockAskDocsBurst.clear();
+  mockAskDocsAuditByLink.clear();
+  mockAskDocsAuditDetails.clear();
   mockKnowledgeBases.clear();
+  mockDDCoverageRuns.clear();
+  mockDDCoverageRunsById.clear();
+  mockDDCoverageSnapshots.clear();
+  mockDDCoveragePacks.clear();
+  mockDDCrossChecks.clear();
+  mockDDPortfolioViews.clear();
   seedOwnerAskHostQuestions();
   mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
   mockDocuments.splice(0, mockDocuments.length, ...initialState.documents);
@@ -90,8 +100,281 @@ const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
 const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
 /** Per-link Ask Docs burst counters for rate-limit e2e. */
 const mockAskDocsBurst = new Map<string, number>();
+/** Per-link Ask Docs audit list rows (Owner analytics). */
+const mockAskDocsAuditByLink = new Map<string, AskDocsAuditEntry[]>();
+/** Keyed by `${linkId}:${sessionId}` for Ask Docs audit detail. */
+const mockAskDocsAuditDetails = new Map<string, AskDocsAuditDetail>();
 /** Per-room knowledge base state for owner KB e2e. */
 const mockKnowledgeBases = new Map<string, DealRoomKnowledgeBase>();
+/** DD Coverage runs keyed by `${roomId}:${linkId|room}`. */
+type MockDDCoverageRun = {
+  id: string;
+  pack_id: string;
+  pack_version: string;
+  scope: "room" | "link";
+  link_id?: string;
+  status: "queued" | "running" | "succeeded" | "failed";
+  triggered_by: string;
+  created_at: string;
+  started_at?: string;
+  finished_at?: string;
+};
+const mockDDCoverageRuns = new Map<string, MockDDCoverageRun>();
+const mockDDCoverageRunsById = new Map<string, { key: string; run: MockDDCoverageRun }>();
+const mockDDCoverageSnapshots = new Map<string, Record<string, unknown>>();
+const mockDDCoveragePacks = new Map<
+  string,
+  {
+    pack_id: string;
+    pack_version: string;
+    base_pack_id: string;
+    forked: boolean;
+    fork_revision?: number;
+    items: Array<{
+      id: string;
+      label_en: string;
+      label_zh: string;
+      query_en: string;
+      query_zh: string;
+      value_type?: string;
+    }>;
+  }
+>();
+
+const builtinDDPack = {
+  pack_id: "financing_dd_v1",
+  pack_version: "1",
+  base_pack_id: "financing_dd_v1",
+  forked: false,
+  items: [
+    {
+      id: "cap_table",
+      label_en: "Cap table",
+      label_zh: "股权结构表 / Cap table",
+      query_en: "capitalization table cap table share ownership",
+      query_zh: "股权结构表 股本结构 cap table 持股",
+    },
+    {
+      id: "option_pool",
+      label_en: "Option / ESOP pool",
+      label_zh: "期权池 / ESOP",
+      query_en: "option pool ESOP equity incentive plan percentage",
+      query_zh: "期权池 ESOP 员工激励 池比例",
+      value_type: "percent",
+    },
+  ],
+};
+
+const builtinMAPack = {
+  pack_id: "ma_redflag_v1",
+  pack_version: "1",
+  base_pack_id: "ma_redflag_v1",
+  forked: false,
+  items: [
+    {
+      id: "indemnity_cap",
+      label_en: "Indemnity / liability cap",
+      label_zh: "赔偿上限 / 责任上限",
+      query_en: "indemnity cap liability basket survival",
+      query_zh: "赔偿上限 责任上限 一揽子 存续期",
+    },
+  ],
+};
+
+const mockDDCrossChecks = new Map<string, Record<string, unknown>>();
+
+const mockDDPortfolioViews = new Map<
+  string,
+  {
+    id: string;
+    name: string;
+    pack_id: string;
+    room_ids: string[];
+    created_by: string;
+    created_at: string;
+    updated_at: string;
+  }
+>();
+
+type AskDocsChatPayload = {
+  session_id: string;
+  answer: string;
+  evidence: Array<{
+    chunk_id: string;
+    document_id: string;
+    quote: string;
+    page_number: number;
+    boxes: Array<{ x: number; y: number; w: number; h: number }>;
+    score: number;
+  }>;
+  result_status: string;
+  suggest_ask_host: boolean;
+};
+
+/** MSW fixtures mirroring Intent-first P0 DocIntent routing (no doc_intent in chat API). */
+function mockAskDocsIntentFirstResponse(
+  message: string,
+  sessionId: string,
+  link: Link,
+): AskDocsChatPayload | null {
+  const trimmed = message.trim();
+  const lower = trimmed.toLowerCase();
+  const docId = link.documentId ?? "doc_1";
+  const evidence = [
+    {
+      chunk_id: "chk_ask_docs_intent_001",
+      document_id: docId,
+      quote: "Revenue grew 3x year over year.",
+      page_number: 1,
+      boxes: [{ x: 0.12, y: 0.34, w: 0.45, h: 0.06 }],
+      score: 0.92,
+    },
+  ];
+
+  const refuse =
+    lower.includes("__intent_refuse__") ||
+    trimmed.includes("市场惯例") ||
+    lower.includes("investment advice") ||
+    trimmed.includes("投资建议");
+  if (refuse) {
+    return {
+      session_id: sessionId,
+      answer:
+        "This question is outside what the authorized materials can support (for example market practice or external legal advice), so I will not invent an answer. You can ask the host instead.",
+      evidence: [],
+      result_status: "out_of_corpus",
+      suggest_ask_host: Boolean(link.qaEnabled),
+    };
+  }
+
+  // Locate paste with no strong literal → degrade to topic (≤3 clues); audit fallback is server-side only.
+  if (lower.includes("__intent_locate_fallback__")) {
+    const topicHits = [
+      evidence[0],
+      {
+        chunk_id: "chk_ask_docs_intent_002",
+        document_id: docId,
+        quote: "Gross margin remained stable across quarters.",
+        page_number: 2,
+        boxes: [{ x: 0.1, y: 0.2, w: 0.4, h: 0.05 }],
+        score: 0.81,
+      },
+      {
+        chunk_id: "chk_ask_docs_intent_003",
+        document_id: docId,
+        quote: "Operating expenses tracked to plan.",
+        page_number: 3,
+        boxes: [{ x: 0.1, y: 0.25, w: 0.4, h: 0.05 }],
+        score: 0.74,
+      },
+    ];
+    return {
+      session_id: sessionId,
+      answer: `Found these related excerpts in the authorized materials:\n\n1. Document ${docId.slice(0, 8)} · page 1\n"${topicHits[0].quote}"\n\n2. Document ${docId.slice(0, 8)} · page 2\n"${topicHits[1].quote}"\n\n3. Document ${docId.slice(0, 8)} · page 3\n"${topicHits[2].quote}"`,
+      evidence: topicHits,
+      result_status: "success",
+      suggest_ask_host: false,
+    };
+  }
+
+  const locate =
+    lower.includes("__intent_locate__") ||
+    /第\s*\d+\s*条/.test(trimmed) ||
+    trimmed.length >= 80;
+  if (locate && !lower.includes("__intent_topic__")) {
+    return {
+      session_id: sessionId,
+      answer: `Located the following excerpt:\n\n1. Document ${docId.slice(0, 8)} · page 1\n"${evidence[0].quote}"`,
+      evidence: evidence.slice(0, 1),
+      result_status: "success",
+      suggest_ask_host: false,
+    };
+  }
+
+  const list =
+    lower.includes("__intent_list__") ||
+    trimmed.includes("有哪些") ||
+    lower.startsWith("what are") ||
+    lower.includes("list ");
+  if (list) {
+    return {
+      session_id: sessionId,
+      answer: "From the authorized materials:\n1. Revenue growth\n2. Gross margin\n3. Operating expenses",
+      evidence,
+      result_status: "success",
+      suggest_ask_host: false,
+    };
+  }
+
+  // P1b absence slot (qa + existence): MSW mirrors not_found_in_scope vs hit.
+  const absenceQuestion =
+    trimmed.includes("有没有") ||
+    trimmed.includes("是否有") ||
+    trimmed.includes("是否存在") ||
+    trimmed.includes("存不存在") ||
+    /^is there\b/i.test(trimmed) ||
+    /^are there\b/i.test(trimmed) ||
+    lower.includes("__absence_not_found__");
+  if (absenceQuestion) {
+    if (lower.includes("__absence_hit__")) {
+      const ncEvidence = [
+        {
+          ...evidence[0],
+          chunk_id: "chk_ask_docs_absence_001",
+          quote: "乙方不得从事与甲方相竞争的业务（竞业限制）。",
+        },
+      ];
+      return {
+        session_id: sessionId,
+        answer: "Based on the authorized materials, a non-compete / 竞业限制 clause is present.",
+        evidence: ncEvidence,
+        result_status: "success",
+        suggest_ask_host: false,
+      };
+    }
+    return {
+      session_id: sessionId,
+      answer:
+        "I could not find that clause or topic in the authorized materials. You can ask the host instead.",
+      evidence: [],
+      result_status: "not_found_in_scope",
+      suggest_ask_host: Boolean(link.qaEnabled),
+    };
+  }
+
+  const qa =
+    lower.includes("__intent_qa__") ||
+    trimmed.includes("是否") ||
+    lower.startsWith("whether") ||
+    lower.includes("can i transfer");
+  if (qa) {
+    return {
+      session_id: sessionId,
+      answer:
+        "Based on the authorized materials, transfer requires prior written consent of the other party.",
+      evidence,
+      result_status: "success",
+      suggest_ask_host: false,
+    };
+  }
+
+  const topic =
+    lower.includes("__intent_topic__") ||
+    trimmed === "财务数据" ||
+    trimmed === "financials" ||
+    trimmed === "财务";
+  if (topic) {
+    return {
+      session_id: sessionId,
+      answer: `Found these related excerpts in the authorized materials:\n\n1. Document ${docId.slice(0, 8)} · page 1\n"${evidence[0].quote}"`,
+      evidence,
+      result_status: "success",
+      suggest_ask_host: false,
+    };
+  }
+
+  return null;
+}
 
 function seedOwnerAskHostQuestions() {
   mockOwnerQuestions.clear();
@@ -517,6 +800,7 @@ export const handlers = [
       download_enabled?: boolean;
       watermark_enabled?: boolean;
       ai_copilot_enabled?: boolean;
+      ask_docs_dd_chips_enabled?: boolean;
       qa_enabled?: boolean;
     };
     // Update the in-memory link to reflect the edited values so subsequent reads
@@ -556,8 +840,15 @@ export const handlers = [
     if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
     if (typeof payload.watermark_enabled === "boolean") link.watermarkEnabled = payload.watermark_enabled;
     if (typeof payload.ai_copilot_enabled === "boolean") link.aiCopilotEnabled = payload.ai_copilot_enabled;
+    if (typeof payload.ask_docs_dd_chips_enabled === "boolean") {
+      link.askDocsDDChipsEnabled = payload.ask_docs_dd_chips_enabled;
+    }
     if (typeof payload.qa_enabled === "boolean") link.qaEnabled = payload.qa_enabled;
     if (payload.contact_ids) link.contactIds = payload.contact_ids;
+
+    if (!link.aiCopilotEnabled) {
+      link.askDocsDDChipsEnabled = false;
+    }
 
     const gate = knowledgeBaseRequiredResponse(link.dealRoomId, !!link.aiCopilotEnabled);
     if (gate) return gate;
@@ -862,6 +1153,7 @@ export const handlers = [
     const body = (await request.json()) as {
       name?: string;
       ai_copilot_enabled?: boolean;
+      ask_docs_dd_chips_enabled?: boolean;
       qa_enabled?: boolean;
       folder_paths?: string[];
       document_ids?: string[];
@@ -893,6 +1185,7 @@ export const handlers = [
       permissionType: "public",
       isBundle: documentIds.length > 1,
       aiCopilotEnabled: askDocs,
+      askDocsDDChipsEnabled: askDocs ? !!body.ask_docs_dd_chips_enabled : false,
       qaEnabled: !!body.qa_enabled,
       dealRoomId: roomId,
       requireEmail: !!body.require_email,
@@ -920,8 +1213,21 @@ export const handlers = [
   http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-docs-audit", ({ params }) => {
     const link = mockLinks.find((l) => l.id === params.id);
     if (!link) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json({ data: [] });
+    return HttpResponse.json({ data: mockAskDocsAuditByLink.get(params.id as string) ?? [] });
   }),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/links/:id/ask-docs-audit/:sessionId",
+    ({ params }) => {
+      const linkId = params.id as string;
+      const sessionId = params.sessionId as string;
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) return new HttpResponse(null, { status: 404 });
+      const detail = mockAskDocsAuditDetails.get(`${linkId}:${sessionId}`);
+      if (!detail) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json(detail);
+    },
+  ),
 
   http.get(
     "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/ask-docs-audit",
@@ -931,6 +1237,405 @@ export const handlers = [
       return HttpResponse.json({ data: [] });
     },
   ),
+
+  // Deal-room DD Coverage (P2) — in-memory snapshot/run for Owner diligence UI
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/scans",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json().catch(() => ({}))) as {
+        pack_id?: string;
+        link_id?: string;
+        lang?: string;
+      };
+      const packId = body.pack_id || "financing_dd_v1";
+      const key = `${roomId}:${packId}:${body.link_id ?? "room"}`;
+      const existing = mockDDCoverageRuns.get(key);
+      if (existing && (existing.status === "queued" || existing.status === "running")) {
+        return HttpResponse.json(
+          { code: "scan_in_progress", message: "a scan is already queued or running for this scope" },
+          { status: 409 },
+        );
+      }
+      const runId = `dd-run-${crypto.randomUUID()}`;
+      const now = new Date().toISOString();
+      const run = {
+        id: runId,
+        pack_id: packId,
+        pack_version: "1",
+        scope: body.link_id ? ("link" as const) : ("room" as const),
+        link_id: body.link_id,
+        status: "queued" as const,
+        triggered_by: "user-1",
+        created_at: now,
+      };
+      mockDDCoverageRuns.set(key, run);
+      mockDDCoverageRunsById.set(runId, { key, run });
+      // Complete asynchronously on next get — mark succeeded with sample rows.
+      queueMicrotask(() => {
+        const entry = mockDDCoverageRunsById.get(runId);
+        if (!entry) return;
+        const finished = {
+          ...entry.run,
+          status: "succeeded" as const,
+          started_at: now,
+          finished_at: new Date().toISOString(),
+        };
+        mockDDCoverageRuns.set(entry.key, finished);
+        mockDDCoverageRunsById.set(runId, { key: entry.key, run: finished });
+        mockDDCoverageSnapshots.set(entry.key, {
+          id: `dd-snap-${runId}`,
+          pack_id: finished.pack_id,
+          pack_version: finished.pack_version,
+          scope: finished.scope,
+          link_id: finished.link_id,
+          run_id: finished.id,
+          kb_generation: 1,
+          stale: false,
+          coverage_rows: [
+            {
+              item_id: "cap_table",
+              label: "Cap table",
+              status: "supported",
+              clues: [
+                {
+                  chunk_id: "chunk-cap-1",
+                  document_id: "doc-1",
+                  page_number: 2,
+                  quote: "Fully diluted capitalization table as of Series A.",
+                  score: 0.91,
+                  boxes: [],
+                },
+              ],
+            },
+            {
+              item_id: "option_pool",
+              label: "Option / ESOP pool",
+              status: "supported",
+              value_type: "percent",
+              extracted_value: "10%",
+              clues: [
+                {
+                  chunk_id: "chunk-opt-1",
+                  document_id: "doc-1",
+                  page_number: 5,
+                  quote: "ESOP pool remains at 10% post-money.",
+                  score: 0.87,
+                  boxes: [],
+                },
+              ],
+            },
+          ],
+          created_at: now,
+          updated_at: new Date().toISOString(),
+        });
+      });
+      return HttpResponse.json({ job_id: runId, run }, { status: 202 });
+    },
+  ),
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/scans/:runId",
+    ({ params }) => {
+      const roomId = params.roomId as string;
+      const runId = params.runId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const entry = mockDDCoverageRunsById.get(runId);
+      if (!entry) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json(entry.run);
+    },
+  ),
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/snapshot",
+    ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const url = new URL(request.url);
+      const linkId = url.searchParams.get("link_id") ?? undefined;
+      const packId = url.searchParams.get("pack_id") || "financing_dd_v1";
+      const key = `${roomId}:${packId}:${linkId ?? "room"}`;
+      const snap = mockDDCoverageSnapshots.get(key);
+      if (!snap) {
+        return HttpResponse.json({ code: "not_found", message: "not found" }, { status: 404 });
+      }
+      return HttpResponse.json(snap);
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/packs",
+    ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const financing = mockDDCoveragePacks.get(roomId) ?? builtinDDPack;
+      return HttpResponse.json({ data: [financing, builtinMAPack] });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/pack",
+    ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const packId = new URL(request.url).searchParams.get("pack_id") || "financing_dd_v1";
+      if (packId === "ma_redflag_v1") {
+        return HttpResponse.json(builtinMAPack);
+      }
+      return HttpResponse.json(mockDDCoveragePacks.get(roomId) ?? builtinDDPack);
+    },
+  ),
+  http.put(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/pack",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json()) as { items?: typeof builtinDDPack.items };
+      const prev = mockDDCoveragePacks.get(roomId);
+      const revision = (prev?.fork_revision ?? 0) + 1;
+      const pack = {
+        pack_id: "financing_dd_v1",
+        pack_version: `1.f${revision}`,
+        base_pack_id: "financing_dd_v1",
+        forked: true,
+        fork_revision: revision,
+        items: body.items ?? [],
+      };
+      mockDDCoveragePacks.set(roomId, pack);
+      for (const [key, snap] of mockDDCoverageSnapshots) {
+        if (key.startsWith(`${roomId}:`)) {
+          mockDDCoverageSnapshots.set(key, { ...snap, stale: true });
+        }
+      }
+      return HttpResponse.json(pack);
+    },
+  ),
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/pack/reset",
+    ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      mockDDCoveragePacks.delete(roomId);
+      for (const [key, snap] of mockDDCoverageSnapshots) {
+        if (key.startsWith(`${roomId}:`)) {
+          mockDDCoverageSnapshots.set(key, { ...snap, stale: true });
+        }
+      }
+      return HttpResponse.json(builtinDDPack);
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/cross-checks",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json()) as {
+        pack_id?: string;
+        document_a_id?: string;
+        document_b_id?: string;
+      };
+      if (!body.document_a_id || !body.document_b_id || body.document_a_id === body.document_b_id) {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "document ids must differ" },
+          { status: 400 },
+        );
+      }
+      const packId = body.pack_id || "financing_dd_v1";
+      const now = new Date().toISOString();
+      const view = {
+        id: `dd-cross-${crypto.randomUUID()}`,
+        pack_id: packId,
+        pack_version: "1",
+        document_a_id: body.document_a_id,
+        document_b_id: body.document_b_id,
+        triggered_by: "user-1",
+        claims: [
+          {
+            item_id: packId === "ma_redflag_v1" ? "indemnity_cap" : "cap_table",
+            label: packId === "ma_redflag_v1" ? "Indemnity / liability cap" : "Cap table",
+            status: "conflict",
+            clues_a: [
+              {
+                chunk_id: "xa1",
+                document_id: body.document_a_id,
+                page_number: 1,
+                quote: "Document A says one thing.",
+                score: 0.9,
+                boxes: [],
+              },
+            ],
+            clues_b: [
+              {
+                chunk_id: "xb1",
+                document_id: body.document_b_id,
+                page_number: 2,
+                quote: "Document B says the opposite.",
+                score: 0.88,
+                boxes: [],
+              },
+            ],
+          },
+        ],
+        created_at: now,
+      };
+      mockDDCrossChecks.set(`${roomId}:${packId}`, view);
+      return HttpResponse.json(view);
+    },
+  ),
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/dd-coverage/cross-checks/latest",
+    ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const packId = new URL(request.url).searchParams.get("pack_id") || "financing_dd_v1";
+      const view = mockDDCrossChecks.get(`${roomId}:${packId}`);
+      if (!view) {
+        return HttpResponse.json({ code: "not_found", message: "not found" }, { status: 404 });
+      }
+      return HttpResponse.json(view);
+    },
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/dd-portfolio/views", () => {
+    const data = Array.from(mockDDPortfolioViews.values()).map((v) => ({
+      id: v.id,
+      name: v.name,
+      pack_id: v.pack_id,
+      room_count: v.room_ids.length,
+      created_by: v.created_by,
+      created_at: v.created_at,
+      updated_at: v.updated_at,
+    }));
+    return HttpResponse.json({ data });
+  }),
+  http.post("*/api/workspaces/:workspaceSlug/dd-portfolio/views", async ({ request }) => {
+    const body = (await request.json()) as {
+      name?: string;
+      pack_id?: string;
+      room_ids?: string[];
+    };
+    if (!body.name?.trim() || !body.room_ids?.length) {
+      return HttpResponse.json(
+        { code: "invalid_input", message: "name and room_ids required" },
+        { status: 400 },
+      );
+    }
+    const now = new Date().toISOString();
+    const id = `pf-${crypto.randomUUID()}`;
+    const row = {
+      id,
+      name: body.name.trim(),
+      pack_id: body.pack_id || "financing_dd_v1",
+      room_ids: body.room_ids,
+      created_by: "user-1",
+      created_at: now,
+      updated_at: now,
+    };
+    mockDDPortfolioViews.set(id, row);
+    return HttpResponse.json(
+      {
+        id: row.id,
+        name: row.name,
+        pack_id: row.pack_id,
+        created_by: row.created_by,
+        created_at: row.created_at,
+        updated_at: row.updated_at,
+        rooms: row.room_ids.map((roomId, idx) => ({
+          deal_room_id: roomId,
+          deal_room_name: findRoom(roomId)?.name || roomId,
+          has_snapshot: idx === 0,
+          stale: false,
+          supported: idx === 0 ? 1 : 0,
+          absent: idx === 0 ? 2 : 0,
+          insufficient: idx === 0 ? 1 : 0,
+          total: idx === 0 ? 4 : 0,
+          top_absent:
+            idx === 0
+              ? [
+                  { item_id: "option_pool", label: "Option pool" },
+                  { item_id: "nda", label: "NDA" },
+                ]
+              : [],
+        })),
+      },
+      { status: 201 },
+    );
+  }),
+  http.get("*/api/workspaces/:workspaceSlug/dd-portfolio/views/:viewId", ({ params }) => {
+    const viewId = params.viewId as string;
+    const row = mockDDPortfolioViews.get(viewId);
+    if (!row) {
+      return HttpResponse.json({ code: "not_found", message: "not found" }, { status: 404 });
+    }
+    return HttpResponse.json({
+      id: row.id,
+      name: row.name,
+      pack_id: row.pack_id,
+      created_by: row.created_by,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      rooms: row.room_ids.map((roomId, idx) => ({
+        deal_room_id: roomId,
+        deal_room_name: findRoom(roomId)?.name || roomId,
+        has_snapshot: idx === 0,
+        stale: false,
+        supported: idx === 0 ? 1 : 0,
+        absent: idx === 0 ? 2 : 0,
+        insufficient: idx === 0 ? 1 : 0,
+        total: idx === 0 ? 4 : 0,
+        top_absent:
+          idx === 0
+            ? [
+                { item_id: "option_pool", label: "Option pool" },
+                { item_id: "nda", label: "NDA" },
+              ]
+            : [],
+      })),
+    });
+  }),
+  http.put("*/api/workspaces/:workspaceSlug/dd-portfolio/views/:viewId", async ({ params, request }) => {
+    const viewId = params.viewId as string;
+    const row = mockDDPortfolioViews.get(viewId);
+    if (!row) {
+      return HttpResponse.json({ code: "not_found", message: "not found" }, { status: 404 });
+    }
+    const body = (await request.json()) as {
+      name?: string;
+      pack_id?: string;
+      room_ids?: string[];
+    };
+    if (body.name !== undefined) row.name = body.name.trim();
+    if (body.pack_id) row.pack_id = body.pack_id;
+    if (body.room_ids) row.room_ids = body.room_ids;
+    row.updated_at = new Date().toISOString();
+    mockDDPortfolioViews.set(viewId, row);
+    return HttpResponse.json({
+      id: row.id,
+      name: row.name,
+      pack_id: row.pack_id,
+      created_by: row.created_by,
+      created_at: row.created_at,
+      updated_at: row.updated_at,
+      rooms: row.room_ids.map((roomId) => ({
+        deal_room_id: roomId,
+        deal_room_name: findRoom(roomId)?.name || roomId,
+        has_snapshot: false,
+        supported: 0,
+        absent: 0,
+        insufficient: 0,
+        total: 0,
+        top_absent: [],
+      })),
+    });
+  }),
+  http.delete("*/api/workspaces/:workspaceSlug/dd-portfolio/views/:viewId", ({ params }) => {
+    const viewId = params.viewId as string;
+    if (!mockDDPortfolioViews.has(viewId)) {
+      return HttpResponse.json({ code: "not_found", message: "not found" }, { status: 404 });
+    }
+    mockDDPortfolioViews.delete(viewId);
+    return new HttpResponse(null, { status: 204 });
+  }),
 
   http.get(
     "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/visitor-questions",
@@ -1594,12 +2299,48 @@ export const handlers = [
     return HttpResponse.json({ data: mockSuggestions });
   }),
 
-  // Assistant
+  // Assistant (owner Ask Docs)
   http.post("*/api/workspaces/:workspaceSlug/assistant/chat", async ({ request }) => {
-    const body = (await request.json()) as { query: string; document_id?: string; session_id?: string };
+    const body = (await request.json()) as {
+      message?: string;
+      query?: string;
+      document_id?: string;
+      session_id?: string;
+    };
+    const message = (body.message ?? body.query ?? "").trim();
+    const sessionId = body.session_id || generateId("sess");
+
+    if (
+      message.includes("投资建议") ||
+      message.toLowerCase().includes("investment advice") ||
+      message.toLowerCase().includes("__intent_refuse__") ||
+      message === "财务数据" ||
+      message.toLowerCase().includes("__intent_topic__") ||
+      message.toLowerCase().includes("__intent_locate__") ||
+      message.toLowerCase().includes("__intent_list__") ||
+      message.toLowerCase().includes("__intent_qa__") ||
+      message.includes("有哪些") ||
+      message.includes("是否")
+    ) {
+      const ownerLink = {
+        documentId: body.document_id ?? "doc_1",
+        qaEnabled: false,
+      } as Link;
+      const intentFixture = mockAskDocsIntentFirstResponse(message, sessionId, ownerLink);
+      if (intentFixture) {
+        // Owner refuse: same status, no Host CTA (G12).
+        if (intentFixture.result_status === "out_of_corpus") {
+          intentFixture.suggest_ask_host = false;
+          intentFixture.answer =
+            "This question is outside what the authorized materials can support (for example market practice or external legal advice), so I will not invent an answer. Please add materials or use human judgment.";
+        }
+        return HttpResponse.json(intentFixture);
+      }
+    }
+
     return HttpResponse.json({
-      session_id: body.session_id || generateId("sess"),
-      answer: `Based on the document, here's an answer to "${body.query}".`,
+      session_id: sessionId,
+      answer: `Based on the document, here's an answer to "${message}".`,
       evidence: body.document_id
         ? [
             {
@@ -1612,6 +2353,7 @@ export const handlers = [
           ]
         : [],
       follow_up_questions: ["Can you explain the growth drivers?", "What are the risks?"],
+      result_status: "success",
     });
   }),
 
@@ -1844,6 +2586,7 @@ export const handlers = [
         downloadEnabled: true,
         watermarkEnabled: false,
         aiCopilotEnabled: Boolean(link.aiCopilotEnabled),
+        askDocsDDChipsEnabled: Boolean(link.askDocsDDChipsEnabled),
         qaEnabled: Boolean(link.qaEnabled),
         fileRequestsEnabled: Boolean(link.fileRequestsEnabled),
         isBundle: Boolean(link.isBundle),
@@ -1863,6 +2606,26 @@ export const handlers = [
   http.get("*/api/v1/public/links/:token/questions/me", ({ params }) => {
     const token = params.token as string;
     return HttpResponse.json({ data: mockPublicQuestions.get(token) ?? [] });
+  }),
+
+  http.get("*/api/v1/public/links/:token/assistant/dd-chips", ({ params }) => {
+    const token = params.token as string;
+    const link = mockLinks.find((l) => l.shortUrl.endsWith(token));
+    if (!link) {
+      return HttpResponse.json({ code: "not_found", message: "link not found" }, { status: 404 });
+    }
+    if (!link.aiCopilotEnabled || !link.askDocsDDChipsEnabled) {
+      return HttpResponse.json(
+        { code: "not_found", message: "suggested checklist chips are not available" },
+        { status: 404 },
+      );
+    }
+    return HttpResponse.json({
+      data: [
+        { item_id: "financing_dd_v1.cap_table", label: "Cap table" },
+        { item_id: "financing_dd_v1.financials", label: "Financial statements" },
+      ],
+    });
   }),
 
   // Public Ask Docs (Visitor Ask / Ask Docs channel)
@@ -1892,10 +2655,17 @@ export const handlers = [
     const body = (await request.json().catch(() => ({}))) as {
       message?: string;
       session_id?: string;
+      checklist_item_id?: string;
     };
     const message = (body.message ?? "").trim();
     if (!message) {
       return HttpResponse.json({ code: "invalid_request", message: "message required" }, { status: 400 });
+    }
+    if (body.checklist_item_id && !link.askDocsDDChipsEnabled) {
+      return HttpResponse.json(
+        { code: "invalid_checklist_item", message: "checklist item is not enabled for this link" },
+        { status: 400 },
+      );
     }
 
     const sessionId = body.session_id?.trim() || generateId("sess");
@@ -1924,6 +2694,12 @@ export const handlers = [
         result_status: "no_evidence",
         suggest_ask_host: Boolean(link.qaEnabled),
       });
+    }
+
+    // Intent-first P0 acceptance fixtures (MSW mirrors backend DocIntent routing).
+    const intentFixture = mockAskDocsIntentFirstResponse(message, sessionId, link);
+    if (intentFixture) {
+      return HttpResponse.json(intentFixture);
     }
 
     return HttpResponse.json({

@@ -14,6 +14,7 @@ const DOCUMENT_VIEWER_KEYS = [
   "qaNoEvidence",
   "qaSuggestAskHost",
   "qaSwitchToAskHost",
+  "qaDDChipsHint",
 ] as const;
 
 const LINK_SHARE_ADVANCED_KEYS = [
@@ -23,6 +24,8 @@ const LINK_SHARE_ADVANCED_KEYS = [
   "askDocsDescription",
   "askHost",
   "askHostDescription",
+  "ddChips",
+  "ddChipsDescription",
   "knowledgeBaseRequired",
   "openKnowledgeBase",
   "askDocsScopeNotInKb",

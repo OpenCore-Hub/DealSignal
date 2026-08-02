@@ -291,6 +291,7 @@
     "qaSwitchToAskHost": "Ask the host instead",
     "qaChannelHint": "This looks like a request for missing materials. Ask Host may be a better fit — you can still send via Ask Docs.",
     "qaChannelHintSwitch": "Switch to Ask Host",
+    "qaDDChipsHint": "Suggested checks (labels only)",
     "sidebarRequests": "Requests",
     "printWarning": "Print and capture discouraged",
     "printWarningHint": "Content may include identifying watermarks and stay attributable.",

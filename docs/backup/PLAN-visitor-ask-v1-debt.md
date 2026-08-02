@@ -3,6 +3,7 @@
 > **关联**  
 > - 设计：`docs/designs/plan/visitor-ask-knowledge-base.md`（v1.3）  
 > - 规格：`docs/designs/plan/SPEC-visitor-ask-knowledge-base.md`  
+> - **后续 epic（草案）**：`docs/designs/plan/ask-docs-intent-first-clue-engine.md` — Ask Docs Intent-First 线索引擎（本文件批次 **F**；**不**计入 V1 发布门槛）  
 > - 审计基准：2026-07-22 代码对照 SPEC（含工作区未合入改动）  
 >
 > **文档用途**：迭代实现、排期、验收与进度追踪。完成一项即改状态并记日期；发现新缺口追加行并 bump 修订记录。  
@@ -34,12 +35,14 @@
 | C | 生产正确性 hotfix | 3 | 3 review | C1–C3 已实现，待合入 |
 | A | 假实现 / 空转 | 5 | 5 review | A1=C3；真双世代 + building Ask Docs + 无 chunk 校验 |
 | B | 半真 / 缺口 | 11 | 11 review | B1–B11 全部实现待合入（含 B2 冷归档 + B8 gate 统一） |
-| D | 文档与追踪 | 2 | 2 review | 本文 + SPEC 对齐 |
+| D | 文档与追踪 | 3 | 3 review | 本文 + SPEC 对齐 + Intent-First 链回（D3） |
 | E | Out of Scope（仅登记） | — | — | 不计入完成率 |
+| F | Ask Docs Intent-First（后续 epic） | 5 | 0 / 5 `deferred` | 见 §6.1；权威设计 `ask-docs-intent-first-clue-engine.md` |
 
-**滚动完成率**：以合入 `done` 为准；当前工作区 P0/P1/P2 债务项均 `review`。
+**滚动完成率**：以合入 `done` 为准；当前工作区 **V1** P0/P1/P2 债务项均 `review`。批次 **F** 不计入 V1 完成率。
 
-**当前建议下一刀**：合入部署 **C1–C3 + A2–A4 + B1–B11**（含 migration `092`/`093`/`094`）。
+**当前建议下一刀**：合入部署 **C1–C3 + A2–A4 + B1–B11**（含 migration `092`/`093`/`094`）。  
+**V1 合入后建议下一 epic**：批次 **F** P0（IntentRouter + topic/locate extractive + list/qa 分 prompt）——详见线索引擎方案 §8.1。
 
 ---
 
@@ -122,6 +125,7 @@
 |----|--------|------|------|------|------|----------|
 | D1 | P2 | `review` | 本任务计划文档（本文） | 可勾选、可修订 | — | 2026-07-22 |
 | D2 | P2 | `review` | SPEC / 设计状态与债务对齐；链到本文 | 读者不会误以为双世代仍未实现 | A5 | 2026-07-22 |
+| D3 | P2 | `review` | SPEC / V1 设计 / 本文链回 Intent-First 草案；登记批次 F | 三处互链 + OOS「通道间路由」澄清；F0–F4 可见 | D2 | 2026-07-23 |
 
 ---
 
@@ -157,10 +161,33 @@
 |----|------|
 | 独立 append-only 审计表 | SPEC OOS / Future |
 | 单文档链接正式 KB 产品 / V2 废弃 | SPEC OOS |
-| 全自动意图路由（无显式通道） | SPEC OOS |
+| **Ask Docs ↔ Ask Host 无显式通道的强制自动路由** | SPEC OOS（V1.5 *建议*已做；强制切换仍 OOS） |
 | File request 并入 Visitor Ask | SPEC OOS |
 | Per-link 物理向量索引 | SPEC OOS |
 | 扫描件 OCR（A4 可另开 epic） | 产品增量 |
+| DocIntent 与 Signal 销售意图混表 | 线索引擎方案 §10 |
+| 单室 Ask Docs 跨 Room 组合聚合 | 线索引擎方案 §6 / P3+ |
+
+> **澄清：** 「Ask Docs **通道内** DocIntent 路由（locate/topic/list/qa）」**不是**上表「无显式通道强制自动路由」项——见下方批次 **F**。
+
+---
+
+## 6.1 批次 F — Ask Docs Intent-First 线索引擎（后续 epic）
+
+> **权威设计**：`docs/designs/plan/ask-docs-intent-first-clue-engine.md` v1.0  
+> **与 V1 关系**：不重开 Gate-0 / Sec-0 / KB 红线；在 Access∩KB、quote≤320、`no_evidence`、Signal 隔离之上演进检索与生成。  
+> **SPEC 锚点**：`SPEC-visitor-ask-knowledge-base.md` → Ask Docs retrieval & answering（Post-V1 evolution）+ Out of Scope 澄清。  
+> **排期**：V1 批次 C/A/B 合入部署后再拉 `todo`；下列默认 `deferred`。
+
+| ID | 优先级 | 状态 | 任务 | 验收（摘要） | 依赖 | 更新日期 |
+|----|--------|------|------|--------------|------|----------|
+| F0 | P0 | `deferred` | IntentRouter：规则优先 + 短 LLM 兜底；枚举 `locate`/`topic`/`list`/`qa`/`refuse_early` | 黄金集意图分流；LLM 超时默认 `qa`；**裸词→topic 非字面** | V1 Ask Docs 合入 | 2026-07-23 |
+| F1 | P0 | `deferred` | `topic`/`locate` → extractive（禁释义）；`list`/`qa` → 分 prompt abstractive | 「财务数据」无下定义；条款粘贴 Top‑1 定位；列举题走 list | F0 | 2026-07-23 |
+| F2 | P0 | `deferred` | `refineEvidence`/`CluePipeline` 按 intent 配参（topic/locate 关激进 LLM filter） | 单测 + 不破坏 scope/quote 红线 | F0 | 2026-07-23 |
+| F3 | P1 | `deferred` | 审计字段 `intent` / `generation_mode` / `intent_source`；`absence` / 拒答码细分 | 审计 API/UI 可观测；与 Signal 文案分离 | F1 | 2026-07-23 |
+| F4 | P2 | `deferred` | Job 扩展起步：ClaimPack / checklist scan / 表数字轨（按垂直选一切片） | 见线索引擎方案 §6–§8.3；单独 PRD/SPEC 增量 | F3 | 2026-07-23 |
+
+**F0–F2 退出标准（epic P0）：** 线索引擎方案 §8.1 黄金用例全绿；既有 `assistant`/`public_handler` 回归绿；安全红线无回退。
 
 ---
 
@@ -171,6 +198,7 @@
 | 刀-0+1+2 | 合入部署 C1–C3 + A2–A4 + B1 | 有 chunk rebuild 出 embedding；building 可问旧集；无 chunk → 400；Redis 挂 → 503/`limiter_unavailable`（非 429） |
 | 刀-3 | B3 + B6 | 事件可见；MSW 覆盖 Ask Docs（B3/B6 已实现待合入） |
 | 刀-4 | B5/B7/B4/B9 | 命名、文案分离、quote、白名单撤销事件可见（均已实现待合入） |
+| 刀-F0（V1 后） | F0–F2 Intent-First P0 | 见 §6.1；设计 `ask-docs-intent-first-clue-engine.md` §8.1 |
 
 ---
 
@@ -202,3 +230,4 @@
 | 1.2 | 2026-07-22 | B1 taxonomy：Redis fail-closed → 503/`limiter_unavailable`；访客超限仍 429/`rate_limit_exceeded` |
 | 1.3 | 2026-07-22 | B11：访客 Ask Docs/Host 错误文案按 code 分流（超限 vs 限额器不可用） |
 | 1.4 | 2026-07-22 | B8：统一 `visitorask.Check` gate；B2：`094` 冷归档表 + worker + 热/冷 list/detail |
+| 1.5 | 2026-07-23 | 链回 Intent-First 线索引擎草案；新增批次 **F**（F0–F4 `deferred`）；澄清 OOS「通道间强制自动路由」≠ Ask Docs 内 DocIntent |

@@ -63,6 +63,7 @@ func (s *Service) archiveOneAskDocsSession(ctx context.Context, row db.ListAskDo
 	answer := ""
 	resultStatus := ""
 	var evidence []search.Evidence
+	var evidenceJSON []byte
 	authIDs := []pgtype.UUID{}
 	retrievalIDs := []pgtype.UUID{}
 	archivedMsgs := make([]archivedAuditMessage, 0, len(msgs))
@@ -84,11 +85,18 @@ func (s *Service) archiveOneAskDocsSession(ctx context.Context, row db.ListAskDo
 			authIDs = m.AuthorizedDocumentIds
 			retrievalIDs = m.RetrievalDocumentIds
 			if len(m.Evidence) > 0 {
-				var ev []search.Evidence
-				if err := json.Unmarshal(m.Evidence, &ev); err == nil {
-					truncateVisitorEvidenceQuotes(ev)
-					evidence = ev
-				}
+				ev, meta := decodeStoredEvidence(m.Evidence)
+				truncateVisitorEvidenceQuotes(ev)
+				evidence = ev
+				// Preserve intent envelope so cold GetAskDocsAudit still surfaces P0 meta.
+				evidenceJSON = marshalEvidenceWithAudit(ev, askDocsAuditSnapshot{
+					DocIntent:      meta.DocIntent,
+					GenerationMode: meta.GenerationMode,
+					IntentSource:   meta.IntentSource,
+					FallbackFrom:   meta.FallbackFrom,
+					Absence:        meta.Absence,
+					Party:          meta.Party,
+				})
 			}
 		}
 	}
@@ -97,9 +105,12 @@ func (s *Service) archiveOneAskDocsSession(ctx context.Context, row db.ListAskDo
 	if len([]rune(preview)) > 240 {
 		preview = string([]rune(preview)[:240])
 	}
-	evidenceJSON, err := json.Marshal(evidence)
-	if err != nil {
-		return err
+	if len(evidenceJSON) == 0 {
+		var err error
+		evidenceJSON, err = json.Marshal(evidence)
+		if err != nil {
+			return err
+		}
 	}
 	if evidenceJSON == nil {
 		evidenceJSON = []byte("[]")
@@ -162,11 +173,15 @@ func (s *Service) getAskDocsAuditFromArchive(ctx context.Context, linkID pgtype.
 		Messages:              []AskDocsAuditMessage{},
 	}
 	if len(row.Evidence) > 0 {
-		var ev []search.Evidence
-		if err := json.Unmarshal(row.Evidence, &ev); err == nil {
-			truncateVisitorEvidenceQuotes(ev)
-			detail.Evidence = ev
-		}
+		ev, meta := decodeStoredEvidence(row.Evidence)
+		truncateVisitorEvidenceQuotes(ev)
+		detail.Evidence = ev
+		detail.DocIntent = meta.DocIntent
+		detail.GenerationMode = meta.GenerationMode
+		detail.IntentSource = meta.IntentSource
+		detail.FallbackFrom = meta.FallbackFrom
+		detail.Absence = meta.Absence
+		detail.Party = meta.Party
 	}
 	if len(row.Messages) > 0 {
 		var msgs []archivedAuditMessage

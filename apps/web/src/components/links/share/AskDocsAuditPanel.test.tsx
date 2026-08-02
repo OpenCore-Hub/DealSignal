@@ -57,6 +57,26 @@ const auditI18n = {
   "askDocsAudit.resultStatuses.no_evidence": "No evidence",
   "askDocsAudit.resultStatuses.kb_unavailable": "Knowledge base unavailable",
   "askDocsAudit.resultStatuses.scope_violation": "Scope violation",
+  "askDocsAudit.resultStatuses.out_of_corpus": "Outside authorized materials",
+  "askDocsAudit.resultStatuses.not_found_in_scope": "Not found in scope",
+  "askDocsAudit.routing.title": "Routing",
+  "askDocsAudit.routing.intent": "Doc intent",
+  "askDocsAudit.routing.mode": "Generation mode",
+  "askDocsAudit.routing.source": "Intent source",
+  "askDocsAudit.routing.fallback": "Fallback from",
+  "askDocsAudit.routing.slot": "Slot",
+  "askDocsAudit.routing.party": "Party",
+  "askDocsAudit.routing.checklistItem": "Checklist item",
+  "askDocsAudit.routing.intentValues.topic": "Topic",
+  "askDocsAudit.routing.intentValues.locate": "Locate",
+  "askDocsAudit.routing.intentValues.list": "List",
+  "askDocsAudit.routing.intentValues.qa": "Q&A",
+  "askDocsAudit.routing.modeValues.extractive": "Extractive",
+  "askDocsAudit.routing.modeValues.abstractive": "Abstractive",
+  "askDocsAudit.routing.sourceValues.rule": "Rule",
+  "askDocsAudit.routing.fallbackValues.locate": "Locate",
+  "askDocsAudit.routing.slotValues.absence": "Absence",
+  "askDocsAudit.routing.partyValues.investor": "Investor",
 };
 
 function makeEntry(overrides: Partial<AskDocsAuditEntry> = {}): AskDocsAuditEntry {
@@ -157,6 +177,87 @@ describe("AskDocsAuditPanel — link mode", () => {
       await screen.findByText("Based on the memo, Series A is $40M."),
     ).toBeInTheDocument();
     expect(screen.getByText("Series A valuation $40M")).toBeInTheDocument();
+  });
+
+  it("shows intent routing meta on session detail when present", async () => {
+    getLinkAskDocsAuditMock.mockResolvedValue(
+      makeDetail({
+        doc_intent: "topic",
+        generation_mode: "extractive",
+        intent_source: "rule",
+        fallback_from: "locate",
+      }),
+    );
+    await renderPanel({ mode: "link", linkId: "link-1" });
+    await screen.findByText(/What is the valuation\?/);
+    fireEvent.click(screen.getByRole("button", { name: /What is the valuation/i }));
+
+    expect(await screen.findByTestId("ask-docs-audit-routing")).toBeInTheDocument();
+    expect(screen.getByText("Routing")).toBeInTheDocument();
+    expect(screen.getByText("Topic")).toBeInTheDocument();
+    expect(screen.getByText("Extractive")).toBeInTheDocument();
+    expect(screen.getByText("Rule")).toBeInTheDocument();
+    expect(screen.getAllByText("Locate").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("shows absence slot on session detail when present", async () => {
+    getLinkAskDocsAuditMock.mockResolvedValue(
+      makeDetail({
+        doc_intent: "qa",
+        generation_mode: "abstractive",
+        intent_source: "rule",
+        absence: true,
+        result_status: "not_found_in_scope",
+      }),
+    );
+    await renderPanel({ mode: "link", linkId: "link-1" });
+    await screen.findByText(/What is the valuation\?/);
+    fireEvent.click(screen.getByRole("button", { name: /What is the valuation/i }));
+
+    expect(await screen.findByTestId("ask-docs-audit-routing")).toBeInTheDocument();
+    expect(screen.getByText("Absence")).toBeInTheDocument();
+    expect(screen.getByText(/Not found in scope/i)).toBeInTheDocument();
+  });
+
+  it("shows party slot on session detail when present", async () => {
+    getLinkAskDocsAuditMock.mockResolvedValue(
+      makeDetail({
+        doc_intent: "list",
+        generation_mode: "abstractive",
+        intent_source: "rule",
+        party: "investor",
+      }),
+    );
+    await renderPanel({ mode: "link", linkId: "link-1" });
+    await screen.findByText(/What is the valuation\?/);
+    fireEvent.click(screen.getByRole("button", { name: /What is the valuation/i }));
+
+    expect(await screen.findByTestId("ask-docs-audit-routing")).toBeInTheDocument();
+    expect(screen.getByText("Investor")).toBeInTheDocument();
+    expect(screen.getByText("List")).toBeInTheDocument();
+  });
+
+  it("shows checklist_item_id on session detail when present", async () => {
+    getLinkAskDocsAuditMock.mockResolvedValue(
+      makeDetail({
+        checklist_item_id: "financing_dd_v1.cap_table",
+      }),
+    );
+    await renderPanel({ mode: "link", linkId: "link-1" });
+    await screen.findByText(/What is the valuation\?/);
+    fireEvent.click(screen.getByRole("button", { name: /What is the valuation/i }));
+
+    expect(await screen.findByTestId("ask-docs-audit-routing")).toBeInTheDocument();
+    expect(screen.getByText("Checklist item")).toBeInTheDocument();
+    expect(screen.getByText("financing_dd_v1.cap_table")).toBeInTheDocument();
+  });
+
+  it("omits routing block when intent meta is absent", async () => {
+    await renderPanel({ mode: "link", linkId: "link-1" });
+    await screen.findByText(/What is the valuation\?/);
+    fireEvent.click(screen.getByRole("button", { name: /What is the valuation/i }));
+    await screen.findByText("Based on the memo, Series A is $40M.");
+    expect(screen.queryByTestId("ask-docs-audit-routing")).not.toBeInTheDocument();
   });
 
   it("shows empty state when there are no sessions", async () => {

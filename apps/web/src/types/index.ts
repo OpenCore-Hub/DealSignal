@@ -79,6 +79,8 @@ export interface Link {
   downloadEnabled?: boolean;
   watermarkEnabled?: boolean;
   aiCopilotEnabled?: boolean;
+  /** P2c: visitor suggested-check chips (default off). */
+  askDocsDDChipsEnabled?: boolean;
   /** Q&A feature toggle (available from v2.7+ backend). */
   qaEnabled?: boolean;
   /** File request feature toggle (available from v2.7+ backend). */
@@ -175,6 +177,164 @@ export interface AskDocsAuditDetail {
   retrieval_document_ids: string[];
   evidence: Evidence[];
   result_status?: string;
+  /** Intent-first snapshot (Owner audit only; never on chat API). */
+  doc_intent?: string;
+  generation_mode?: string;
+  intent_source?: string;
+  fallback_from?: string;
+  /** P1b: qa absence slot (existence question). */
+  absence?: boolean;
+  /** P1d: party slot (investor|founder|buyer|seller|gp|lp). */
+  party?: string;
+  /** P2c: visitor chip checklist item id when turn started from a chip. */
+  checklist_item_id?: string;
+}
+
+/** P2 DD Coverage checklist row status. */
+export type DDCoverageRowStatus = "supported" | "absent_in_scope" | "insufficient";
+
+/** P2 DD Coverage run status. */
+export type DDCoverageRunStatus = "queued" | "running" | "succeeded" | "failed";
+
+/** One financing DD checklist row in a ClaimPack snapshot. */
+export interface DDCoverageRow {
+  item_id: string;
+  label: string;
+  status: DDCoverageRowStatus;
+  clues: Evidence[];
+  error?: string;
+  value_type?: "percent" | "money" | "share" | string;
+  extracted_value?: string;
+}
+
+/** Owner-facing DD scan run metadata. */
+export interface DDCoverageRun {
+  id: string;
+  pack_id: string;
+  pack_version: string;
+  scope: "room" | "link";
+  link_id?: string;
+  status: DDCoverageRunStatus;
+  triggered_by: string;
+  error_message?: string;
+  kb_generation?: number;
+  started_at?: string;
+  finished_at?: string;
+  created_at: string;
+}
+
+/** Latest ClaimPack snapshot for room or link scope. */
+export interface DDCoverageSnapshot {
+  id: string;
+  pack_id: string;
+  pack_version: string;
+  scope: "room" | "link";
+  link_id?: string;
+  run_id: string;
+  kb_generation?: number;
+  stale: boolean;
+  coverage_rows: DDCoverageRow[];
+  created_at: string;
+  updated_at: string;
+}
+
+/** Response from POST …/dd-coverage/scans (202). */
+export interface DDCoverageStartScanResponse {
+  job_id: string;
+  run: DDCoverageRun;
+}
+
+/** Visitor suggested-check chip (label only; never Owner gap status). */
+export interface DDCoverageChip {
+  item_id: string;
+  label: string;
+}
+
+/** Owner-editable room pack item (P2.1c fork). */
+export interface DDCoveragePackItem {
+  id: string;
+  label_en: string;
+  label_zh: string;
+  query_en: string;
+  query_zh: string;
+  value_type?: "" | "percent" | "money" | "share" | string;
+}
+
+/** Effective financing DD pack for a room (builtin or fork). */
+export interface DDCoveragePack {
+  pack_id: string;
+  pack_version: string;
+  base_pack_id: string;
+  forked: boolean;
+  fork_revision?: number;
+  items: DDCoveragePackItem[];
+}
+
+/** Cross-check claim status (P2.2 Owner dual-document compare). */
+export type DDCrossCheckClaimStatus =
+  | "aligned"
+  | "conflict"
+  | "absent_in_scope"
+  | "insufficient";
+
+export interface DDCrossCheckClaim {
+  item_id: string;
+  label: string;
+  status: DDCrossCheckClaimStatus;
+  clues_a: Evidence[];
+  clues_b: Evidence[];
+  error?: string;
+}
+
+/** Owner dual-document ClaimPack (P2.2). */
+export interface DDCrossCheck {
+  id: string;
+  pack_id: string;
+  pack_version: string;
+  document_a_id: string;
+  document_b_id: string;
+  triggered_by: string;
+  claims: DDCrossCheckClaim[];
+  created_at: string;
+}
+
+/** Cross-room portfolio view summary (P3). */
+export interface DDPortfolioViewSummary {
+  id: string;
+  name: string;
+  pack_id: string;
+  room_count: number;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DDPortfolioAbsentItem {
+  item_id: string;
+  label: string;
+}
+
+export interface DDPortfolioRoomSummary {
+  deal_room_id: string;
+  deal_room_name: string;
+  has_snapshot: boolean;
+  stale?: boolean;
+  supported: number;
+  absent: number;
+  insufficient: number;
+  total: number;
+  top_absent?: DDPortfolioAbsentItem[];
+  updated_at?: string;
+}
+
+export interface DDPortfolioViewDetail {
+  id: string;
+  name: string;
+  pack_id: string;
+  created_by: string;
+  created_at: string;
+  updated_at: string;
+  rooms: DDPortfolioRoomSummary[];
 }
 
 /** Owner-visible Visitor Ask high-risk security event (US#32). */
@@ -235,6 +395,8 @@ export interface PermissionFields {
   allowDownload: boolean;
   watermarkEnabled: boolean;
   aiCopilotEnabled: boolean;
+  /** Optional; only meaningful when Ask Docs is on. Defaults off. */
+  askDocsDDChipsEnabled?: boolean;
   qaEnabled: boolean;
   fileRequestsEnabled: boolean;
   indexFileEnabled: boolean;

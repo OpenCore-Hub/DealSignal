@@ -7,9 +7,12 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/coverage"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/jobs"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/search"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
@@ -38,16 +41,29 @@ type PublicAccessAuthorizer interface {
 
 // PublicHandler serves the anonymous AI copilot endpoint for public links.
 type PublicHandler struct {
-	service  *Service
-	access   PublicAccessAuthorizer
-	cfg      *config.Config
-	limiter  RateLimiter
-	security SecurityEventWriter
+	service       *Service
+	access        PublicAccessAuthorizer
+	cfg           *config.Config
+	limiter       RateLimiter
+	security      SecurityEventWriter
+	packs         *jobs.PackRegistry
+	coverageOpts  coverage.Options
+	packLookup    RoomPackLookup
 }
 
 // NewPublicHandler creates a public AI handler.
 func NewPublicHandler(s *Service, access PublicAccessAuthorizer, cfg *config.Config) *PublicHandler {
-	return &PublicHandler{service: s, access: access, cfg: cfg}
+	appEnv := ""
+	if cfg != nil {
+		appEnv = cfg.AppEnv
+	}
+	return &PublicHandler{
+		service:      s,
+		access:       access,
+		cfg:          cfg,
+		packs:        jobs.MustLoadBuiltinPacks(),
+		coverageOpts: coverage.OptionsFromEnv(appEnv),
+	}
 }
 
 // WithRateLimiter attaches visitor Ask rate limiting.
@@ -64,15 +80,23 @@ func (h *PublicHandler) WithSecurityEvents(w SecurityEventWriter) *PublicHandler
 	return h
 }
 
+// WithRoomPackLookup wires room-level DD pack forks for visitor chips labels.
+func (h *PublicHandler) WithRoomPackLookup(lookup RoomPackLookup) *PublicHandler {
+	h.packLookup = lookup
+	return h
+}
+
 // RegisterPublicRoutes mounts the public assistant endpoint.
 func (h *PublicHandler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.POST("/links/:publicToken/assistant/chat", h.Chat)
+	r.GET("/links/:publicToken/assistant/dd-chips", h.ListDDChips)
 }
 
 // PublicChatRequest is the HTTP body for the public endpoint.
 type PublicChatRequest struct {
-	SessionID string `json:"session_id"`
-	Message   string `json:"message"`
+	SessionID       string `json:"session_id"`
+	Message         string `json:"message"`
+	ChecklistItemID string `json:"checklist_item_id,omitempty"`
 }
 
 // Chat handles a message from a public viewer.
@@ -120,8 +144,9 @@ func (h *PublicHandler) Chat(c *gin.Context) {
 	}
 
 	resp, err := h.service.PublicChat(c.Request.Context(), result.Link, result.VisitorID, result.Email, ChatRequest{
-		SessionID: strings.TrimSpace(body.SessionID),
-		Message:   strings.TrimSpace(body.Message),
+		SessionID:       strings.TrimSpace(body.SessionID),
+		Message:         strings.TrimSpace(body.Message),
+		ChecklistItemID: strings.TrimSpace(body.ChecklistItemID),
 	})
 	if err != nil {
 		mapPublicChatError(c, err)
@@ -184,6 +209,8 @@ func mapPublicChatError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrAICopilotDisabled):
 		c.JSON(http.StatusForbidden, gin.H{"code": "ai_copilot_disabled", "message": err.Error()})
+	case errors.Is(err, ErrInvalidChecklistItem):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_checklist_item_id", "message": err.Error()})
 	case errors.Is(err, ErrMessageRequired):
 		c.JSON(http.StatusBadRequest, gin.H{"code": "message_required", "message": err.Error()})
 	case errors.Is(err, ErrInvalidSession):
@@ -195,4 +222,54 @@ func mapPublicChatError(c *gin.Context, err error) {
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to process chat"})
 	}
+}
+
+// ListDDChips returns visitor suggested-check labels (pack labels only; never Owner gap table).
+func (h *PublicHandler) ListDDChips(c *gin.Context) {
+	sessionToken := c.GetHeader("X-Link-Session")
+	if sessionToken == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "session_required", "message": "X-Link-Session header is required"})
+		return
+	}
+	session, ok := link.VerifyLinkSession(sessionToken, h.cfg.LinkSessionSecret)
+	if !ok {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_session", "message": "invalid or expired session"})
+		return
+	}
+	publicToken := c.Param("publicToken")
+	if publicToken == "" || session.PublicToken != publicToken {
+		c.JSON(http.StatusForbidden, gin.H{"code": "token_mismatch", "message": "session does not match link token"})
+		return
+	}
+	result, err := h.access.AuthorizePublicAccess(c, publicToken)
+	if err != nil {
+		link.WriteAccessError(c, err)
+		return
+	}
+	if result.SessionToken != "" {
+		c.Header("X-Link-Session-Refresh", result.SessionToken)
+	}
+	if !h.coverageOpts.Enabled || !result.Link.AiCopilotEnabled || !result.Link.AskDocsDdChipsEnabled {
+		c.JSON(http.StatusOK, gin.H{"data": []coverage.Chip{}})
+		return
+	}
+	lang := locale.FromContext(c.Request.Context())
+	if lang == "" {
+		lang = c.GetHeader("Accept-Language")
+	}
+	pack, ok := h.packs.Get(jobs.FinancingDDV1)
+	if !ok {
+		c.JSON(http.StatusOK, gin.H{"data": []coverage.Chip{}})
+		return
+	}
+	if result.Link.DealRoomID.Valid && h.packLookup != nil {
+		if forked, err := h.packLookup.EffectivePackForRoom(c.Request.Context(), result.Link.DealRoomID); err == nil {
+			pack = forked
+		}
+	}
+	chips := coverage.ChipsFromPack(pack, lang)
+	if chips == nil {
+		chips = []coverage.Chip{}
+	}
+	c.JSON(http.StatusOK, gin.H{"data": chips})
 }

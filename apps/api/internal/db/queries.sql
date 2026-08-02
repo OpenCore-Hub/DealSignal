@@ -285,6 +285,7 @@ FROM chunks c
 JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND c.embedding IS NOT NULL
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY c.embedding <=> sqlc.arg(embedding)::vector
 LIMIT $2;
 
@@ -300,6 +301,7 @@ FROM chunks c
 JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND c.search_vector @@ plainto_tsquery('english', sqlc.arg(query))
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2;
 
@@ -515,8 +517,9 @@ INSERT INTO links (
     qa_enabled, file_requests_enabled, index_file_enabled, screenshot_protection_enabled,
     link_type, target_folder_path,
     custom_domain, tags, notify_on_access,
-    has_document_scope, folder_scope_paths, folder_scope_mode, nda_document_id, nda_template_id
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33)
+    has_document_scope, folder_scope_paths, folder_scope_mode, nda_document_id, nda_template_id,
+    ask_docs_dd_chips_enabled
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34)
 RETURNING *;
 
 -- name: GetLinkByIDAndWorkspace :one
@@ -597,8 +600,9 @@ UPDATE links SET
     has_document_scope = $26,
     folder_scope_paths = $27,
     folder_scope_mode = $28,
+    ask_docs_dd_chips_enabled = $29,
     updated_at = now()
-WHERE id = $29 AND workspace_id = $30
+WHERE id = $30 AND workspace_id = $31
 RETURNING *;
 
 -- name: SetLinkNDABinding :exec
@@ -1826,6 +1830,7 @@ WHERE c.workspace_id = $1
   AND c.normalized_text IS NOT NULL
   AND c.normalized_text <> ''
   AND similarity(c.normalized_text, sqlc.arg(query)) > 0.1
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2;
 
@@ -1842,6 +1847,7 @@ JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
   AND c.embedding IS NOT NULL
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY c.embedding <=> sqlc.arg(embedding)::vector
 LIMIT $2;
 
@@ -1858,6 +1864,7 @@ JOIN pages p ON p.id = c.page_id
 WHERE c.workspace_id = $1
   AND p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
   AND c.search_vector @@ plainto_tsquery('english', sqlc.arg(query))
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2;
 
@@ -1889,6 +1896,7 @@ WHERE c.workspace_id = $1
   AND c.normalized_text IS NOT NULL
   AND c.normalized_text <> ''
   AND similarity(c.normalized_text, sqlc.arg(query)) > 0.1
+  AND COALESCE(c.chunk_type, 'paragraph') <> 'table_row'
 ORDER BY rank DESC
 LIMIT $2;
 
@@ -3118,3 +3126,236 @@ SET status = $2,
     updated_at = now()
 WHERE room_id = $1
 RETURNING *;
+
+-- name: CreateAskDocsDDRun :one
+INSERT INTO ask_docs_dd_runs (
+  workspace_id,
+  deal_room_id,
+  link_id,
+  pack_id,
+  pack_version,
+  status,
+  triggered_by,
+  kb_generation
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING *;
+
+-- name: GetAskDocsDDRun :one
+SELECT * FROM ask_docs_dd_runs
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListActiveAskDocsDDRunsForRoom :many
+SELECT * FROM ask_docs_dd_runs
+WHERE deal_room_id = $1
+  AND status IN ('queued', 'running');
+
+-- name: UpdateAskDocsDDRunStatus :one
+UPDATE ask_docs_dd_runs
+SET status = $2,
+    error_message = COALESCE(sqlc.narg(error_message), error_message),
+    started_at = COALESCE(sqlc.narg(started_at), started_at),
+    finished_at = COALESCE(sqlc.narg(finished_at), finished_at)
+WHERE id = $1
+RETURNING *;
+
+-- name: UpsertAskDocsDDSnapshot :one
+INSERT INTO ask_docs_dd_snapshots (
+  workspace_id,
+  deal_room_id,
+  link_id,
+  pack_id,
+  pack_version,
+  run_id,
+  kb_generation,
+  stale,
+  coverage_rows
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, false, $8
+)
+ON CONFLICT (deal_room_id, pack_id) WHERE link_id IS NULL
+DO UPDATE SET
+  pack_version = EXCLUDED.pack_version,
+  run_id = EXCLUDED.run_id,
+  kb_generation = EXCLUDED.kb_generation,
+  stale = false,
+  coverage_rows = EXCLUDED.coverage_rows,
+  updated_at = now()
+RETURNING *;
+
+-- name: UpsertAskDocsDDSnapshotForLink :one
+INSERT INTO ask_docs_dd_snapshots (
+  workspace_id,
+  deal_room_id,
+  link_id,
+  pack_id,
+  pack_version,
+  run_id,
+  kb_generation,
+  stale,
+  coverage_rows
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, false, $8
+)
+ON CONFLICT (deal_room_id, link_id, pack_id) WHERE link_id IS NOT NULL
+DO UPDATE SET
+  pack_version = EXCLUDED.pack_version,
+  run_id = EXCLUDED.run_id,
+  kb_generation = EXCLUDED.kb_generation,
+  stale = false,
+  coverage_rows = EXCLUDED.coverage_rows,
+  updated_at = now()
+RETURNING *;
+
+-- name: GetAskDocsDDSnapshotRoom :one
+SELECT * FROM ask_docs_dd_snapshots
+WHERE deal_room_id = $1
+  AND pack_id = $2
+  AND link_id IS NULL;
+
+-- name: GetAskDocsDDSnapshotLink :one
+SELECT * FROM ask_docs_dd_snapshots
+WHERE deal_room_id = $1
+  AND link_id = $2
+  AND pack_id = $3;
+
+-- name: MarkAskDocsDDSnapshotsStaleForRoom :exec
+UPDATE ask_docs_dd_snapshots
+SET stale = true, updated_at = now()
+WHERE deal_room_id = $1
+  AND stale = false
+  AND (kb_generation IS DISTINCT FROM $2);
+
+-- name: MarkAllAskDocsDDSnapshotsStaleForRoom :exec
+UPDATE ask_docs_dd_snapshots
+SET stale = true, updated_at = now()
+WHERE deal_room_id = $1
+  AND stale = false;
+
+-- name: GetAskDocsDDRoomPack :one
+SELECT * FROM ask_docs_dd_room_packs
+WHERE deal_room_id = $1;
+
+-- name: UpsertAskDocsDDRoomPack :one
+INSERT INTO ask_docs_dd_room_packs (
+  deal_room_id,
+  workspace_id,
+  base_pack_id,
+  pack_version,
+  fork_revision,
+  items,
+  updated_by
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7
+)
+ON CONFLICT (deal_room_id)
+DO UPDATE SET
+  base_pack_id = EXCLUDED.base_pack_id,
+  pack_version = EXCLUDED.pack_version,
+  fork_revision = EXCLUDED.fork_revision,
+  items = EXCLUDED.items,
+  updated_by = EXCLUDED.updated_by,
+  updated_at = now()
+RETURNING *;
+
+-- name: DeleteAskDocsDDRoomPack :execrows
+DELETE FROM ask_docs_dd_room_packs
+WHERE deal_room_id = $1 AND workspace_id = $2;
+
+-- name: UpsertAskDocsDDCrossCheck :one
+INSERT INTO ask_docs_dd_cross_checks (
+  workspace_id,
+  deal_room_id,
+  pack_id,
+  pack_version,
+  document_a_id,
+  document_b_id,
+  triggered_by,
+  claims
+) VALUES (
+  $1, $2, $3, $4, $5, $6, $7, $8
+)
+ON CONFLICT (deal_room_id, pack_id)
+DO UPDATE SET
+  pack_version = EXCLUDED.pack_version,
+  document_a_id = EXCLUDED.document_a_id,
+  document_b_id = EXCLUDED.document_b_id,
+  triggered_by = EXCLUDED.triggered_by,
+  claims = EXCLUDED.claims,
+  created_at = now()
+RETURNING *;
+
+-- name: GetAskDocsDDCrossCheckLatest :one
+SELECT * FROM ask_docs_dd_cross_checks
+WHERE deal_room_id = $1
+  AND pack_id = $2;
+
+-- name: ListAskDocsDDSnapshotsForRooms :many
+SELECT *
+FROM ask_docs_dd_snapshots
+WHERE workspace_id = $1
+  AND pack_id = $2
+  AND link_id IS NULL
+  AND deal_room_id = ANY(sqlc.arg(deal_room_ids)::uuid[]);
+
+-- name: ListDealRoomsByIDs :many
+SELECT *
+FROM deal_rooms
+WHERE workspace_id = $1
+  AND deleted_at IS NULL
+  AND id = ANY(sqlc.arg(ids)::uuid[]);
+
+-- name: CreateAskDocsPortfolioView :one
+INSERT INTO ask_docs_portfolio_views (
+  workspace_id,
+  name,
+  pack_id,
+  created_by
+) VALUES (
+  $1, $2, $3, $4
+)
+RETURNING *;
+
+-- name: GetAskDocsPortfolioView :one
+SELECT *
+FROM ask_docs_portfolio_views
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListAskDocsPortfolioViews :many
+SELECT *
+FROM ask_docs_portfolio_views
+WHERE workspace_id = $1
+ORDER BY updated_at DESC;
+
+-- name: CountAskDocsPortfolioViews :one
+SELECT COUNT(*)::int AS count
+FROM ask_docs_portfolio_views
+WHERE workspace_id = $1;
+
+-- name: UpdateAskDocsPortfolioView :one
+UPDATE ask_docs_portfolio_views
+SET
+  name = $3,
+  pack_id = $4,
+  updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+-- name: DeleteAskDocsPortfolioView :execrows
+DELETE FROM ask_docs_portfolio_views
+WHERE id = $1 AND workspace_id = $2;
+
+-- name: ListAskDocsPortfolioViewRooms :many
+SELECT deal_room_id, sort_order
+FROM ask_docs_portfolio_view_rooms
+WHERE view_id = $1
+ORDER BY sort_order ASC, deal_room_id ASC;
+
+-- name: DeleteAskDocsPortfolioViewRooms :exec
+DELETE FROM ask_docs_portfolio_view_rooms
+WHERE view_id = $1;
+
+-- name: InsertAskDocsPortfolioViewRoom :exec
+INSERT INTO ask_docs_portfolio_view_rooms (view_id, deal_room_id, sort_order)
+VALUES ($1, $2, $3);

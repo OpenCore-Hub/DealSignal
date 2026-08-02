@@ -6,8 +6,15 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { useAIStore } from "@/stores/aiStore";
-import type { Evidence, VisitorQuestion, ChatMessage } from "@/types";
+import type { Evidence, VisitorQuestion, ChatMessage, DDCoverageChip } from "@/types";
 import { suggestAskHostFromDraft } from "./visitorAskChannelHint";
+
+function chipPrefillQuestion(lang: string, label: string): string {
+  const trimmed = label.trim();
+  if (!trimmed) return "";
+  if (lang.toLowerCase().startsWith("zh")) return `有没有${trimmed}`;
+  return `Is there documentation covering ${trimmed}?`;
+}
 
 interface UnifiedQAPanelProps {
   token: string;
@@ -15,6 +22,7 @@ interface UnifiedQAPanelProps {
   documentId?: string;
   qaEnabled?: boolean;
   aiCopilotEnabled?: boolean;
+  askDocsDDChipsEnabled?: boolean;
 }
 
 type Source = "ai" | "owner" | "you";
@@ -74,8 +82,9 @@ export function UnifiedQAPanel({
   documentId,
   qaEnabled,
   aiCopilotEnabled,
+  askDocsDDChipsEnabled,
 }: UnifiedQAPanelProps) {
-  const { t } = useTranslation(["documents", "ai"]);
+  const { t, i18n } = useTranslation(["documents", "ai"]);
   const { messages, pending: aiPending, sendMessage } = useAIStore();
   const [questions, setQuestions] = useState<VisitorQuestion[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(() => Boolean(qaEnabled));
@@ -84,6 +93,7 @@ export function UnifiedQAPanel({
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<"ai" | "owner">(aiCopilotEnabled ? "ai" : "owner");
   const [ownerSubmitting, setOwnerSubmitting] = useState(false);
+  const [chips, setChips] = useState<DDCoverageChip[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
   // Sliding session refresh rotates sessionToken frequently; keep a ref so the
   // questions list effect does not re-fetch on every credential rotate.
@@ -107,6 +117,25 @@ export function UnifiedQAPanel({
     })();
     return () => { cancelled = true; };
   }, [token, qaEnabled, t, refreshKey]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!aiCopilotEnabled || !askDocsDDChipsEnabled || !sessionTokenRef.current) {
+      setChips([]);
+      return;
+    }
+    (async () => {
+      try {
+        const res = await api.listPublicDDChips(token, sessionTokenRef.current!);
+        if (!cancelled) setChips(res.data ?? []);
+      } catch {
+        if (!cancelled) setChips([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, aiCopilotEnabled, askDocsDDChipsEnabled, sessionToken]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -154,6 +183,31 @@ export function UnifiedQAPanel({
     return list;
   }, [aiCopilotEnabled, messages, qaEnabled, questions, t]);
 
+  const sendAskDocs = useCallback(
+    async (text: string, checklistItemId?: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setInput("");
+      await sendMessage(trimmed, {
+        documentId,
+        publicToken: token,
+        publicSessionToken: sessionTokenRef.current,
+        checklistItemId,
+      });
+    },
+    [documentId, sendMessage, token],
+  );
+
+  const handleChipClick = useCallback(
+    async (chip: DDCoverageChip) => {
+      if (aiPending || ownerSubmitting || mode !== "ai") return;
+      const question = chipPrefillQuestion(i18n.language, chip.label);
+      if (!question) return;
+      await sendAskDocs(question, chip.item_id);
+    },
+    [aiPending, i18n.language, mode, ownerSubmitting, sendAskDocs],
+  );
+
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
       e.preventDefault();
@@ -161,12 +215,7 @@ export function UnifiedQAPanel({
       if (!text) return;
 
       if (mode === "ai") {
-        setInput("");
-        await sendMessage(text, {
-          documentId,
-          publicToken: token,
-          publicSessionToken: sessionTokenRef.current,
-        });
+        await sendAskDocs(text);
         return;
       }
 
@@ -198,7 +247,7 @@ export function UnifiedQAPanel({
         setOwnerSubmitting(false);
       }
     },
-    [input, mode, documentId, sendMessage, t, token]
+    [input, mode, sendAskDocs, t, token]
   );
 
   const showModeToggle = aiCopilotEnabled && qaEnabled;
@@ -206,6 +255,8 @@ export function UnifiedQAPanel({
   const placeholder = mode === "ai" ? t("documents:viewer.qaAIPlaceholder") : t("documents:viewer.qaOwnerPlaceholder");
   const showChannelHint =
     mode === "ai" && Boolean(qaEnabled) && Boolean(aiCopilotEnabled) && suggestAskHostFromDraft(input);
+  const showChips =
+    mode === "ai" && Boolean(aiCopilotEnabled) && Boolean(askDocsDDChipsEnabled) && chips.length > 0;
 
   return (
     <div className="flex h-full flex-col bg-card">
@@ -289,7 +340,9 @@ export function UnifiedQAPanel({
                     </span>
                   )}
                   {msg.source === "ai" &&
-                    msg.resultStatus === "no_evidence" &&
+                    (msg.resultStatus === "no_evidence" ||
+                      msg.resultStatus === "out_of_corpus" ||
+                      msg.resultStatus === "not_found_in_scope") &&
                     msg.suggestAskHost &&
                     qaEnabled &&
                     mode === "ai" && (
@@ -366,6 +419,25 @@ export function UnifiedQAPanel({
             >
               {t("documents:viewer.qaChannelHintSwitch")}
             </Button>
+          </div>
+        )}
+        {showChips && (
+          <div className="space-y-1.5" data-testid="ask-docs-dd-chips">
+            <p className="text-xs text-muted-foreground">{t("documents:viewer.qaDDChipsHint")}</p>
+            <div className="flex flex-wrap gap-1.5">
+              {chips.map((chip) => (
+                <button
+                  key={chip.item_id}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void handleChipClick(chip)}
+                  className="rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground transition-colors hover:bg-muted disabled:opacity-50"
+                  data-testid={`ask-docs-dd-chip-${chip.item_id}`}
+                >
+                  {chip.label}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         <form onSubmit={handleSubmit} className="flex gap-2">

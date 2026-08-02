@@ -14,6 +14,8 @@ export interface AccessConfig {
   allowDownloading: boolean;
   enableScreenshotProtection: boolean;
   aiCopilotEnabled: boolean;
+  /** Visitor suggested-check chips; only meaningful when Ask Docs is on. */
+  askDocsDDChipsEnabled?: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
   enableQaConversations: boolean;

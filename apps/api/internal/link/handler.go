@@ -314,6 +314,7 @@ type CreateRequest struct {
 	DownloadEnabled          bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled         bool     `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled         bool     `json:"ai_copilot_enabled,omitempty"`
+	AskDocsDDChipsEnabled    bool     `json:"ask_docs_dd_chips_enabled,omitempty"`
 	ContactIDs               []string `json:"contact_ids,omitempty"`
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
@@ -342,6 +343,7 @@ type UpdateRequest struct {
 	DownloadEnabled             *bool    `json:"download_enabled,omitempty"`
 	WatermarkEnabled            *bool    `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled            *bool    `json:"ai_copilot_enabled,omitempty"`
+	AskDocsDDChipsEnabled       *bool    `json:"ask_docs_dd_chips_enabled,omitempty"`
 	ContactIDs                  []string `json:"contact_ids,omitempty"`
 	CustomDomain                string   `json:"custom_domain,omitempty"`
 	Tags                        []string `json:"tags,omitempty"`
@@ -505,6 +507,13 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.AICopilotEnabled != nil {
 		aiCopilotEnabled = *req.AICopilotEnabled
 	}
+	askDocsDDChipsEnabled := existing.AskDocsDdChipsEnabled
+	if req.AskDocsDDChipsEnabled != nil {
+		askDocsDDChipsEnabled = *req.AskDocsDDChipsEnabled
+	}
+	if !aiCopilotEnabled {
+		askDocsDDChipsEnabled = false
+	}
 	qaEnabled := existing.QaEnabled
 	if req.QaEnabled != nil {
 		qaEnabled = *req.QaEnabled
@@ -540,6 +549,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		DownloadEnabled:             downloadEnabled,
 		WatermarkEnabled:            watermarkEnabled,
 		AICopilotEnabled:            aiCopilotEnabled,
+		AskDocsDDChipsEnabled:       askDocsDDChipsEnabled,
 		QaEnabled:                   qaEnabled,
 		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
@@ -913,6 +923,7 @@ type CreateDealRoomLinkRequest struct {
 	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
 	AICopilotEnabled            bool     `json:"ai_copilot_enabled,omitempty"`
+	AskDocsDDChipsEnabled       bool     `json:"ask_docs_dd_chips_enabled,omitempty"`
 	QaEnabled                   bool     `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
@@ -958,6 +969,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
 		AICopilotEnabled:            req.AICopilotEnabled,
+		AskDocsDDChipsEnabled:       req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -1236,6 +1248,7 @@ func (h *Handler) Create(c *gin.Context) {
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
 		AICopilotEnabled:         req.AICopilotEnabled,
+		AskDocsDDChipsEnabled:    req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		QaEnabled:                req.QaEnabled,
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
@@ -1297,6 +1310,7 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
 		"custom_domain":                 meta.CustomDomain,
 		"ai_copilot_enabled":            meta.AiCopilotEnabled,
+		"ask_docs_dd_chips_enabled":     meta.AskDocsDDChipsEnabled,
 		"qa_enabled":                    meta.QaEnabled,
 		"file_requests_enabled":         meta.FileRequestsEnabled,
 		"index_file_enabled":            meta.IndexFileEnabled,
@@ -1476,6 +1490,7 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"watermarkText":               h.watermarkTextFor(email, c.ClientIP()),
 		"aiCopilotEnabled":            link.AiCopilotEnabled,
+		"askDocsDDChipsEnabled":       link.AskDocsDdChipsEnabled,
 		"qaEnabled":                   link.QaEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
@@ -2473,6 +2488,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"aiCopilotEnabled":            link.AiCopilotEnabled,
+		"askDocsDDChipsEnabled":       link.AskDocsDdChipsEnabled,
 		"qaEnabled":                   link.QaEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,

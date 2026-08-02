@@ -49,7 +49,10 @@ func (h *Handler) Chat(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
-	resp, err := h.service.Chat(c.Request.Context(), userID, workspaceID, ChatRequest(req))
+	resp, err := h.service.Chat(c.Request.Context(), userID, workspaceID, ChatRequest{
+		SessionID: req.SessionID,
+		Message:   req.Message,
+	})
 	if err != nil {
 		if errors.Is(err, ErrMessageRequired) || errors.Is(err, ErrInvalidSession) || errors.Is(err, ErrSessionNotFound) {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})

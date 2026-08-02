@@ -83,6 +83,7 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
       allowDownloading: link.downloadEnabled ?? false,
       enableScreenshotProtection: link.screenshotProtectionEnabled ?? false,
       aiCopilotEnabled: link.aiCopilotEnabled ?? false,
+      askDocsDDChipsEnabled: link.askDocsDDChipsEnabled ?? false,
       enableFileRequests: link.fileRequestsEnabled ?? false,
       enableIndexFileGeneration: link.indexFileEnabled ?? false,
       enableQaConversations: link.qaEnabled ?? false,
@@ -180,6 +181,9 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
     download_enabled: draft.allowDownloading,
     watermark_enabled: draft.watermarkEnabled,
     ai_copilot_enabled: draft.aiCopilotEnabled,
+    ask_docs_dd_chips_enabled: draft.aiCopilotEnabled
+      ? Boolean(draft.askDocsDDChipsEnabled)
+      : false,
     qa_enabled: draft.enableQaConversations,
     file_requests_enabled: draft.enableFileRequests,
     index_file_enabled: draft.enableIndexFileGeneration,

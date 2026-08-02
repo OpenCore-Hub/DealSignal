@@ -6,15 +6,17 @@ import { UnifiedQAPanel } from "./UnifiedQAPanel";
 import { createTestI18n } from "@/i18n/test-utils";
 import type { VisitorQuestion } from "@/types";
 
-const { listPublicQuestionsMock, createPublicQuestionMock } = vi.hoisted(() => ({
+const { listPublicQuestionsMock, createPublicQuestionMock, listPublicDDChipsMock } = vi.hoisted(() => ({
   listPublicQuestionsMock: vi.fn(),
   createPublicQuestionMock: vi.fn(),
+  listPublicDDChipsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     listPublicQuestions: listPublicQuestionsMock,
     createPublicQuestion: createPublicQuestionMock,
+    listPublicDDChips: listPublicDDChipsMock,
   },
 }));
 
@@ -69,6 +71,7 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
       "viewer.qaChannelHint":
         "This looks like a request for missing materials. Ask Host may be a better fit — you can still send via Ask Docs.",
       "viewer.qaChannelHintSwitch": "Switch to Ask Host",
+      "viewer.qaDDChipsHint": "Suggested checks (labels only)",
     },
     ai: {
       "viewer.thinking": "Thinking...",
@@ -101,6 +104,8 @@ describe("UnifiedQAPanel", () => {
   beforeEach(() => {
     listPublicQuestionsMock.mockReset();
     createPublicQuestionMock.mockReset();
+    listPublicDDChipsMock.mockReset();
+    listPublicDDChipsMock.mockResolvedValue({ data: [] });
     sendMessageMock.mockReset();
     setHighlightMock.mockReset();
     useAIStoreMock.mockReset();
@@ -343,6 +348,52 @@ describe("UnifiedQAPanel", () => {
     expect(screen.getByPlaceholderText("Ask the host...")).toBeInTheDocument();
   });
 
+  it("offers Ask Host switch after out_of_corpus refusal when Ask Host is enabled", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    useAIStoreMock.mockReturnValue({
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          content:
+            "This question is outside what the authorized materials can support, so I will not invent an answer. You can ask the host instead.",
+          createdAt: "2026-07-22T00:00:00Z",
+          resultStatus: "out_of_corpus",
+          suggestAskHost: true,
+        },
+      ],
+      pending: false,
+      sendMessage: sendMessageMock,
+      setHighlight: setHighlightMock,
+    });
+
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+    expect(screen.getByRole("button", { name: /Ask the host instead/i })).toBeInTheDocument();
+  });
+
+  it("offers Ask Host switch after not_found_in_scope refusal when Ask Host is enabled", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    useAIStoreMock.mockReturnValue({
+      messages: [
+        {
+          id: "a1",
+          role: "assistant",
+          content:
+            "I could not find that clause or topic in the authorized materials. You can ask the host instead.",
+          createdAt: "2026-07-22T00:00:00Z",
+          resultStatus: "not_found_in_scope",
+          suggestAskHost: true,
+        },
+      ],
+      pending: false,
+      sendMessage: sendMessageMock,
+      setHighlight: setHighlightMock,
+    });
+
+    await renderPanel({ aiCopilotEnabled: true, qaEnabled: true });
+    expect(screen.getByRole("button", { name: /Ask the host instead/i })).toBeInTheDocument();
+  });
+
   it("suggests switching to Ask Host before send for missing-material drafts", async () => {
     listPublicQuestionsMock.mockResolvedValue({ data: [] });
     sendMessageMock.mockResolvedValue(undefined);
@@ -427,5 +478,56 @@ describe("UnifiedQAPanel", () => {
     expect(
       await screen.findByText(/Ask Host is temporarily unavailable/i),
     ).toBeInTheDocument();
+  });
+
+  it("does not fetch or show DD chips when the link switch is off", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    await renderPanel({
+      aiCopilotEnabled: true,
+      qaEnabled: false,
+      askDocsDDChipsEnabled: false,
+      sessionToken: "sess-1",
+    });
+    await waitFor(() => expect(listPublicQuestionsMock).not.toHaveBeenCalled());
+    expect(listPublicDDChipsMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("ask-docs-dd-chips")).not.toBeInTheDocument();
+  });
+
+  it("renders DD chips as labels only and sends checklist_item_id on click", async () => {
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    listPublicDDChipsMock.mockResolvedValue({
+      data: [
+        { item_id: "financing_dd_v1.cap_table", label: "Cap table" },
+        { item_id: "financing_dd_v1.financials", label: "Financial statements" },
+      ],
+    });
+    sendMessageMock.mockResolvedValue(undefined);
+
+    await renderPanel({
+      aiCopilotEnabled: true,
+      qaEnabled: false,
+      askDocsDDChipsEnabled: true,
+      sessionToken: "sess-1",
+    });
+
+    expect(await screen.findByTestId("ask-docs-dd-chips")).toBeInTheDocument();
+    expect(screen.getByText("Suggested checks (labels only)")).toBeInTheDocument();
+    expect(screen.getByText("Cap table")).toBeInTheDocument();
+    expect(screen.queryByText(/absent|supported|insufficient/i)).not.toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("ask-docs-dd-chip-financing_dd_v1.cap_table"));
+    });
+
+    await waitFor(() => {
+      expect(sendMessageMock).toHaveBeenCalledWith(
+        "Is there documentation covering Cap table?",
+        expect.objectContaining({
+          checklistItemId: "financing_dd_v1.cap_table",
+          publicToken: "token-1",
+          publicSessionToken: "sess-1",
+        }),
+      );
+    });
   });
 });

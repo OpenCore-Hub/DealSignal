@@ -241,28 +241,76 @@ type mockSearcher struct {
 	inDocumentsCalled   bool
 	searchCalled        bool
 	lastDocumentIDs     []uuid.UUID
+	queries             []string
+	lastOpts            search.SearchOptions
+	// evidenceByQuery, when set, returns per-query hits (workspace Search).
+	evidenceByQuery map[string][]search.Evidence
+	// inDocsEvidenceByQuery, when set, returns per-query hits (SearchInDocuments).
+	inDocsEvidenceByQuery map[string][]search.Evidence
 }
 
-func (m *mockSearcher) Search(_ context.Context, _ pgtype.UUID, _ string, _ int) ([]search.Evidence, error) {
+func (m *mockSearcher) Search(_ context.Context, _ pgtype.UUID, query string, _ int, opts ...search.SearchOptions) ([]search.Evidence, error) {
 	m.searchCalled = true
+	m.queries = append(m.queries, query)
+	if len(opts) > 0 {
+		m.lastOpts = opts[0]
+	} else {
+		m.lastOpts = search.SearchOptions{}
+	}
+	if m.evidenceByQuery != nil {
+		if ev, ok := m.evidenceByQuery[query]; ok {
+			return append([]search.Evidence(nil), ev...), nil
+		}
+		return nil, nil
+	}
 	return m.evidence, nil
 }
 
-func (m *mockSearcher) SearchInDocuments(_ context.Context, _ pgtype.UUID, documentIDs []uuid.UUID, _ string, _ int) ([]search.Evidence, error) {
+func (m *mockSearcher) SearchInDocuments(_ context.Context, _ pgtype.UUID, documentIDs []uuid.UUID, query string, _ int, opts ...search.SearchOptions) ([]search.Evidence, error) {
 	m.inDocumentsCalled = true
+	m.queries = append(m.queries, query)
 	m.lastDocumentIDs = append([]uuid.UUID(nil), documentIDs...)
+	if len(opts) > 0 {
+		m.lastOpts = opts[0]
+	} else {
+		m.lastOpts = search.SearchOptions{}
+	}
+	if m.inDocsEvidenceByQuery != nil {
+		if ev, ok := m.inDocsEvidenceByQuery[query]; ok {
+			return append([]search.Evidence(nil), ev...), nil
+		}
+		return nil, nil
+	}
 	return m.inDocumentsEvidence, nil
 }
 
 type mockLLM struct {
-	answer  string
-	called  bool
-	history []llm.Message
+	answer        string
+	answers       []string // optional queue; consumed before falling back to answer
+	called        bool
+	calls         int
+	history       []llm.Message
+	err           error
+	errOnCall     int // 1-based call index that returns err; 0 disables
+	captureSystem bool
+	lastSystem    string
 }
 
-func (m *mockLLM) ChatCompletion(_ context.Context, _ string, history []llm.Message) (string, error) {
+func (m *mockLLM) ChatCompletion(_ context.Context, systemPrompt string, history []llm.Message) (string, error) {
 	m.called = true
+	m.calls++
 	m.history = history
+	if m.captureSystem {
+		m.lastSystem = systemPrompt
+	}
+	if m.errOnCall > 0 && m.calls == m.errOnCall && m.err != nil {
+		return "", m.err
+	}
+	if len(m.answers) > 0 {
+		out := m.answers[0]
+		m.answers = m.answers[1:]
+		return out, nil
+	}
 	return m.answer, nil
 }
 
@@ -317,19 +365,28 @@ func TestChatNoEvidenceReturnsNoBasis(t *testing.T) {
 		sessionID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
 	}
 	s := &mockSearcher{evidence: nil}
-	llmAnswer := "I could not find a basis for the answer in the workspace documents."
-	l := &mockLLM{answer: llmAnswer}
+	l := &mockLLM{answer: "should-not-be-used"}
 	svc := NewService(q, s, evidence.NewFormatter(), l)
 
 	resp, err := svc.Chat(ctx, "user-1", "ws-1", ChatRequest{Message: "What was Q3 revenue?"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if resp.Answer != llmAnswer {
-		t.Fatalf("expected answer %q, got %q", llmAnswer, resp.Answer)
+	want := noEvidenceAnswerEN
+	if resp.Answer != want {
+		t.Fatalf("expected answer %q, got %q", want, resp.Answer)
+	}
+	if resp.ResultStatus != ResultStatusNoEvidence {
+		t.Fatalf("expected no_evidence, got %q", resp.ResultStatus)
+	}
+	if resp.SuggestAskHost {
+		t.Fatal("owner Chat must not suggest Ask Host")
 	}
 	if len(resp.Evidence) != 0 {
 		t.Fatalf("expected empty evidence, got %d", len(resp.Evidence))
+	}
+	if l.calls != 0 {
+		t.Fatalf("empty evidence must not call answer LLM, got %d", l.calls)
 	}
 }
 
@@ -430,6 +487,90 @@ func TestPublicChatCreatesSessionAndUsesDocumentSearch(t *testing.T) {
 	}
 	if len(q.createdMsgs) != 2 {
 		t.Fatalf("expected 2 messages saved, got %d", len(q.createdMsgs))
+	}
+}
+
+func TestPublicChatLLMFilterKeepsOnlyRelevantEvidence(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+	docID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		publicLinkDocs: []db.ListLinkDocumentsByPublicTokenRow{
+			{DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
+		},
+	}
+	clause := "非因接收方违反本协议而成为公开领域的已知信息"
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c2", DocumentID: docID.String(), PageNumber: 1, Quote: "(2) 接收方在披露前合法持有的信息", Score: 0.03},
+		{ChunkID: "c1", DocumentID: docID.String(), PageNumber: 1, Quote: "(1) " + clause, Score: 0.02},
+		{ChunkID: "c4", DocumentID: docID.String(), PageNumber: 1, Quote: "(4) 接收方独立开发的信息", Score: 0.025},
+	}}
+	l := &mockLLM{
+		answers: []string{`{"relevant":[1]}`, "该条款指非因违约而成为公开信息的情形。"},
+	}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+		PublicToken:      "tok",
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: clause})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(resp.Evidence) != 1 {
+		t.Fatalf("expected 1 refined evidence card, got %d: %+v", len(resp.Evidence), resp.Evidence)
+	}
+	if resp.Evidence[0].ChunkID != "c1" {
+		t.Fatalf("expected c1, got %s", resp.Evidence[0].ChunkID)
+	}
+	if resp.Answer != "该条款指非因违约而成为公开信息的情形。" {
+		t.Fatalf("unexpected answer %q", resp.Answer)
+	}
+	if l.calls < 2 {
+		t.Fatalf("expected filter + answer LLM calls, got %d", l.calls)
+	}
+}
+
+func TestPublicChatLLMFilterEmptyRelevantRefuses(t *testing.T) {
+	ctx := context.Background()
+	sessionID := pgtype.UUID{Bytes: [16]byte{10}, Valid: true}
+	docID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+
+	q := &mockQuerier{
+		sessionID:       sessionID,
+		publicSessionID: sessionID,
+		publicLinkDocs: []db.ListLinkDocumentsByPublicTokenRow{
+			{DocumentID: pgtype.UUID{Bytes: docID, Valid: true}},
+		},
+	}
+	s := &mockSearcher{inDocumentsEvidence: []search.Evidence{
+		{ChunkID: "c1", DocumentID: docID.String(), PageNumber: 1, Quote: "weather forecast appendix", Score: 0.9},
+	}}
+	l := &mockLLM{answers: []string{`{"relevant":[]}`, "should-not-answer"}}
+	svc := NewService(q, s, evidence.NewFormatter(), l)
+
+	link := db.Link{
+		AiCopilotEnabled: true,
+		DocumentID:       pgtype.UUID{Bytes: docID, Valid: true},
+		PublicToken:      "tok",
+	}
+	resp, err := svc.PublicChat(ctx, link, "v1", "", ChatRequest{Message: "NDA exception about public domain"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if resp.ResultStatus != ResultStatusNoEvidence {
+		t.Fatalf("expected no_evidence, got %s", resp.ResultStatus)
+	}
+	if len(resp.Evidence) != 0 {
+		t.Fatalf("expected empty evidence, got %+v", resp.Evidence)
+	}
+	if l.calls != 1 {
+		t.Fatalf("answer LLM must not run after empty filter, calls=%d", l.calls)
 	}
 }
 

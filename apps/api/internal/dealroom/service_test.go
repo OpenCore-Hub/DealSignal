@@ -107,11 +107,11 @@ func TestCreateRoomPersistsTemplateFolders(t *testing.T) {
 	if len(folders) != 7 {
 		t.Fatalf("expected 7 template folders, got %d", len(folders))
 	}
-	if folders[0].Path != "/01-corporate-or-investment-memo" {
-		t.Fatalf("expected first folder path /01-corporate-or-investment-memo, got %s", folders[0].Path)
+	if folders[0].Path != "/corporate-or-investment-memo" {
+		t.Fatalf("expected first folder path /corporate-or-investment-memo, got %s", folders[0].Path)
 	}
-	if folders[1].Path != "/02-corporate-documents" {
-		t.Fatalf("expected second folder path /01-corporate-or-investment-memo, got %s", folders[1].Path)
+	if folders[1].Path != "/corporate-documents" {
+		t.Fatalf("expected second folder path /corporate-documents, got %s", folders[1].Path)
 	}
 }
 
@@ -175,7 +175,7 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 		SourceType:  "docx",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-corporate-or-investment-memo", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/corporate-or-investment-memo", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 
@@ -185,7 +185,7 @@ func TestTemplateRoomRootDocumentVisible(t *testing.T) {
 	}
 	var memoDocs []RoomDocument
 	for _, fd := range docs {
-		if fd.Folder.Path == "/01-corporate-or-investment-memo" {
+		if fd.Folder.Path == "/corporate-or-investment-memo" {
 			memoDocs = fd.Documents
 		}
 	}
@@ -523,7 +523,7 @@ func TestGetRoomDetailEnriched(t *testing.T) {
 		SourceType:  "pdf",
 		Status:      "ready",
 	})
-	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/01-corporate-or-investment-memo", 0); err != nil {
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/corporate-or-investment-memo", 0); err != nil {
 		t.Fatalf("add document: %v", err)
 	}
 

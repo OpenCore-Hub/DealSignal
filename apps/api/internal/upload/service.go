@@ -17,14 +17,15 @@ import (
 const maxFileSize = 100 * 1024 * 1024 // 100MB
 
 var (
-	ErrFileTooLarge      = errors.New("file exceeds 100MB limit")
-	ErrInvalidFileType   = errors.New("unsupported file type")
+	ErrFileTooLarge       = errors.New("file exceeds 100MB limit")
+	ErrInvalidFileType    = errors.New("unsupported file type")
 	ErrInvalidFileContent = errors.New("file content does not match extension")
-	allowedExtensions    = map[string]string{
+	allowedExtensions     = map[string]string{
 		".pdf":  "pdf",
 		".docx": "docx",
 		".pptx": "pptx",
 		".xlsx": "xlsx",
+		".csv":  "csv",
 	}
 )
 
@@ -114,11 +115,11 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	}
 
 	_, err = s.queries.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:       tenantUUID,
-		WorkspaceID:    workspaceUUID,
-		DocumentID:     d.ID,
-		Status:         "queued",
-		SkipEmbedding:  skipEmbedding,
+		TenantID:      tenantUUID,
+		WorkspaceID:   workspaceUUID,
+		DocumentID:    d.ID,
+		Status:        "queued",
+		SkipEmbedding: skipEmbedding,
 	})
 	if err != nil {
 		return Document{}, fmt.Errorf("create ingestion job: %w", err)
@@ -161,6 +162,11 @@ func validateFileContent(file multipart.File, sourceType string) error {
 		if buf[0] != 0x50 || buf[1] != 0x4B {
 			return ErrInvalidFileContent
 		}
+	case "csv":
+		// CSV is text; reject obvious ZIP/PDF magic only.
+		if string(buf[:4]) == "%PDF" || (buf[0] == 0x50 && buf[1] == 0x4B) {
+			return ErrInvalidFileContent
+		}
 	default:
 		return ErrInvalidFileContent
 	}
@@ -174,4 +180,3 @@ func pgUUID(id string) pgtype.UUID {
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}
 }
-

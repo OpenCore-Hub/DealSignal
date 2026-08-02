@@ -15,10 +15,32 @@ import (
 )
 
 const (
-	defaultTopK = 5
-	maxTopK     = 20
-	rrfK        = 60 // RRF constant for score fusion
+	defaultTopK               = 5
+	maxTopK                   = 20
+	rrfK                      = 60 // RRF constant for score fusion
+	defaultLiteralRRFWeight   = 1.75
 )
+
+// SearchOptions tunes hybrid fusion. The zero value preserves existing RRF behavior (H8).
+type SearchOptions struct {
+	// PreferLiteral tilts RRF toward FTS/trigram by LiteralRRFWeight (D9).
+	PreferLiteral bool
+	// LiteralRRFWeight is α for FTS/trigram contributions when PreferLiteral.
+	// Zero means defaultLiteralRRFWeight (1.75).
+	LiteralRRFWeight float64
+}
+
+func (o SearchOptions) rrfListWeights() []float64 {
+	if !o.PreferLiteral {
+		return nil
+	}
+	w := o.LiteralRRFWeight
+	if w <= 0 {
+		w = defaultLiteralRRFWeight
+	}
+	// Order must match Search/SearchInDocuments fuse call: vector, full-text, trigram.
+	return []float64{1.0, w, w}
+}
 
 // Embedder creates vector embeddings for text.
 type Embedder interface {
@@ -57,16 +79,20 @@ func NewService(q *db.Queries, e Embedder) *Service {
 
 // Search retrieves the most relevant evidence for a query within a workspace.
 // It performs three retrieval strategies (vector, full-text, trigram) and fuses
-// results using Reciprocal Rank Fusion (RRF).
-func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]Evidence, error) {
+// results using Reciprocal Rank Fusion (RRF). Optional SearchOptions tilts fusion
+// when PreferLiteral is set; omitting opts keeps current behavior.
+func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query string, topK int, opts ...SearchOptions) ([]Evidence, error) {
 	if topK <= 0 {
 		topK = defaultTopK
 	}
 	if topK > maxTopK {
 		topK = maxTopK
 	}
+	var o SearchOptions
+	if len(opts) > 0 {
+		o = opts[0]
+	}
 
-	// Run all three search strategies in parallel-like fashion (sequential but independent)
 	vectorResults, err := s.vectorSearch(ctx, workspaceID, query, topK)
 	if err != nil {
 		return nil, fmt.Errorf("vector search: %w", err)
@@ -82,18 +108,22 @@ func (s *Service) Search(ctx context.Context, workspaceID pgtype.UUID, query str
 		return nil, fmt.Errorf("trigram search: %w", err)
 	}
 
-	return rrfFuse(topK, vectorResults, textResults, trigramResults), nil
+	return rrfFuseWeighted(topK, o.rrfListWeights(), vectorResults, textResults, trigramResults), nil
 }
 
 // SearchInDocuments retrieves evidence restricted to a specific set of documents.
 // It is used by public AI Copilot so that anonymous users cannot access chunks
 // outside the link they were invited to view.
-func (s *Service) SearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []uuid.UUID, query string, topK int) ([]Evidence, error) {
+func (s *Service) SearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []uuid.UUID, query string, topK int, opts ...SearchOptions) ([]Evidence, error) {
 	if topK <= 0 {
 		topK = defaultTopK
 	}
 	if topK > maxTopK {
 		topK = maxTopK
+	}
+	var o SearchOptions
+	if len(opts) > 0 {
+		o = opts[0]
 	}
 
 	pgDocIDs := make([]pgtype.UUID, 0, len(documentIDs))
@@ -116,7 +146,7 @@ func (s *Service) SearchInDocuments(ctx context.Context, workspaceID pgtype.UUID
 		return nil, fmt.Errorf("trigram search: %w", err)
 	}
 
-	return rrfFuse(topK, vectorResults, textResults, trigramResults), nil
+	return rrfFuseWeighted(topK, o.rrfListWeights(), vectorResults, textResults, trigramResults), nil
 }
 
 // rankedEvidence holds an evidence item and its rank within a single strategy.
@@ -292,16 +322,26 @@ func rowToEvidence(chunkID, docID pgtype.UUID, pageNumber int32, text string, bb
 // rrfFuse combines multiple ranked lists using Reciprocal Rank Fusion.
 // score = Σ 1/(k + rank_i) for each list where the chunk appears.
 func rrfFuse(topK int, lists ...[]rankedEvidence) []Evidence {
+	return rrfFuseWeighted(topK, nil, lists...)
+}
+
+// rrfFuseWeighted is RRF with optional per-list weights (D9 PreferLiteral).
+// A nil/empty weights slice (or non-positive entry) uses weight 1.0 for that list.
+func rrfFuseWeighted(topK int, weights []float64, lists ...[]rankedEvidence) []Evidence {
 	scores := make(map[string]float64)
 	evidenceMap := make(map[string]Evidence)
 
-	for _, list := range lists {
+	for i, list := range lists {
+		w := 1.0
+		if i < len(weights) && weights[i] > 0 {
+			w = weights[i]
+		}
 		for _, re := range list {
 			id := re.evidence.ChunkID
 			if id == "" {
 				continue
 			}
-			scores[id] += 1.0 / float64(rrfK+re.rank)
+			scores[id] += w / float64(rrfK+re.rank)
 			// Keep first occurrence as the base evidence
 			if _, ok := evidenceMap[id]; !ok {
 				evidenceMap[id] = re.evidence
@@ -313,7 +353,6 @@ func rrfFuse(topK int, lists ...[]rankedEvidence) []Evidence {
 		}
 	}
 
-	// Build result slice sorted by RRF score
 	result := make([]Evidence, 0, len(scores))
 	for id, score := range scores {
 		ev := evidenceMap[id]

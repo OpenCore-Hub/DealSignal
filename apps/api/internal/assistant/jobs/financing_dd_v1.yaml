@@ -1,0 +1,107 @@
+# financing_dd_v1 — financing DD checklist (D15). item_id stable; do not renumber.
+pack_id: financing_dd_v1
+pack_version: "1"
+items:
+  - id: cap_table
+    label_en: Cap table
+    label_zh: 股权结构表 / Cap table
+    query_en: capitalization table cap table share ownership
+    query_zh: 股权结构表 股本结构 cap table 持股
+  - id: option_pool
+    label_en: Option / ESOP pool
+    label_zh: 期权池 / ESOP
+    query_en: option pool ESOP equity incentive plan percentage
+    query_zh: 期权池 ESOP 员工激励 池比例
+    value_type: percent
+  - id: outstanding_equity
+    label_en: Outstanding / fully diluted shares
+    label_zh: 已发行 / 完全稀释股本
+    query_en: outstanding shares fully diluted share capital
+    query_zh: 已发行股份 完全稀释 股本总数
+    value_type: share
+  - id: preferred_rights
+    label_en: Preferred / investor rights
+    label_zh: 优先股 / 投资人权利
+    query_en: preferred stock investor rights liquidation participation
+    query_zh: 优先股 投资人权利 优先权
+  - id: liquidation_preference
+    label_en: Liquidation preference
+    label_zh: 清算优先权
+    query_en: liquidation preference multiple seniority
+    query_zh: 清算优先权 清算倍数
+  - id: anti_dilution
+    label_en: Anti-dilution
+    label_zh: 反稀释
+    query_en: anti-dilution weighted average full ratchet
+    query_zh: 反稀释 加权平均 完全棘轮
+  - id: board_composition
+    label_en: Board composition
+    label_zh: 董事会构成
+    query_en: board of directors composition observer seats
+    query_zh: 董事会 组成 观察员席位
+  - id: protective_provisions
+    label_en: Protective provisions
+    label_zh: 保护性条款 / 否决权
+    query_en: protective provisions veto consent rights
+    query_zh: 保护性条款 一票否决 同意权
+  - id: transfer_restrictions
+    label_en: Transfer restrictions
+    label_zh: 股权转让限制
+    query_en: transfer restrictions lock-up share transfer
+    query_zh: 股权转让限制 锁定期 转让
+  - id: roa_co_sale
+    label_en: ROFR / co-sale
+    label_zh: 优先购买权 / 共售权
+    query_en: right of first refusal ROFR co-sale
+    query_zh: 优先购买权 共售权 ROFR
+  - id: drag_tag
+    label_en: Drag / tag along
+    label_zh: 拖售 / 随售权
+    query_en: drag-along tag-along
+    query_zh: 拖售权 随售权 跟随权
+  - id: ip_ownership
+    label_en: IP ownership / assignment
+    label_zh: 知识产权归属
+    query_en: intellectual property assignment ownership invention
+    query_zh: 知识产权 权属 转让 职务发明
+  - id: material_contracts
+    label_en: Material contracts
+    label_zh: 重大合同
+    query_en: material contracts key agreements customers
+    query_zh: 重大合同 重要协议 客户合同
+  - id: litigation
+    label_en: Litigation / disputes
+    label_zh: 诉讼 / 争议
+    query_en: litigation dispute arbitration claim proceeding
+    query_zh: 诉讼 仲裁 争议 索赔
+  - id: debt_liens
+    label_en: Debt / liens
+    label_zh: 债务 / 担保物权
+    query_en: indebtedness liens security interest encumbrance
+    query_zh: 债务 担保 质押 抵押 留置
+  - id: related_party
+    label_en: Related-party transactions
+    label_zh: 关联交易
+    query_en: related party transaction affiliate
+    query_zh: 关联交易 关联方
+  - id: key_employees
+    label_en: Key employees / retention
+    label_zh: 关键员工 / 留任
+    query_en: key employee retention non-solicit employment
+    query_zh: 关键员工 留任 竞业 雇佣
+  - id: nda_confidentiality
+    label_en: NDA / confidentiality
+    label_zh: 保密 / NDA
+    query_en: confidentiality non-disclosure NDA
+    query_zh: 保密协议 NDA 保密义务
+  - id: financial_statements
+    label_en: Financial statements
+    label_zh: 财务报表
+    query_en: financial statements audit balance sheet P&L
+    query_zh: 财务报表 审计报告 资产负债表 损益
+  - id: revenue_metrics
+    label_en: Revenue / ARR metrics
+    label_zh: 收入 / ARR 等指标
+    query_en: revenue ARR MRR financial metrics
+    query_zh: 收入 营收 ARR MRR 财务指标
+    value_type: money

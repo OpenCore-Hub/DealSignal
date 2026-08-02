@@ -3,12 +3,13 @@ package assistant
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/coverage"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/assistant/jobs"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/evidence"
 	linkpkg "github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
@@ -22,25 +23,30 @@ import (
 )
 
 var (
-	ErrMessageRequired   = errors.New("message is required")
-	ErrInvalidSession    = errors.New("invalid session id")
-	ErrSessionNotFound   = errors.New("session not found")
-	ErrLLMNotConfigured  = errors.New("llm not configured")
-	ErrAICopilotDisabled = errors.New("ai copilot disabled")
+	ErrMessageRequired      = errors.New("message is required")
+	ErrInvalidSession       = errors.New("invalid session id")
+	ErrSessionNotFound      = errors.New("session not found")
+	ErrLLMNotConfigured     = errors.New("llm not configured")
+	ErrAICopilotDisabled    = errors.New("ai copilot disabled")
+	ErrInvalidChecklistItem = errors.New("invalid checklist_item_id")
 )
 
 const (
-	maxContextMessages   = 20
-	maxEvidenceChars     = 12000 // approximate 3000 tokens
-	defaultSearchResults = 5
+	maxContextMessages = 20
+	maxEvidenceChars   = 12000 // approximate 3000 tokens
 
-	ResultStatusSuccess    = "success"
-	ResultStatusNoEvidence = "no_evidence"
+	ResultStatusSuccess         = "success"
+	ResultStatusNoEvidence      = "no_evidence"
+	ResultStatusOutOfCorpus     = "out_of_corpus"
+	ResultStatusScopeViolation  = "scope_violation"
+	ResultStatusNotFoundInScope = "not_found_in_scope"
 )
 
 // Fixed visitor-facing refusal (no "knowledge base" jargon).
 const noEvidenceAnswerEN = "I couldn't find supporting material in the documents you can access for this link."
 const noEvidenceAnswerZH = "在您可访问的材料中未找到依据。"
+const notFoundInScopeAnswerEN = "I could not find that clause or topic in the authorized materials."
+const notFoundInScopeAnswerZH = "在授权材料中未发现该条款。"
 const noEvidenceAskHostHintEN = " You can ask the host instead."
 const noEvidenceAskHostHintZH = " 您可以改问发起方。"
 
@@ -92,14 +98,15 @@ type Querier interface {
 
 // Searcher retrieves evidence for a query.
 type Searcher interface {
-	Search(ctx context.Context, workspaceID pgtype.UUID, query string, topK int) ([]search.Evidence, error)
-	SearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []uuid.UUID, query string, topK int) ([]search.Evidence, error)
+	Search(ctx context.Context, workspaceID pgtype.UUID, query string, topK int, opts ...search.SearchOptions) ([]search.Evidence, error)
+	SearchInDocuments(ctx context.Context, workspaceID pgtype.UUID, documentIDs []uuid.UUID, query string, topK int, opts ...search.SearchOptions) ([]search.Evidence, error)
 }
 
 // ChatRequest is the service-level chat input.
 type ChatRequest struct {
-	SessionID string
-	Message   string
+	SessionID         string
+	Message           string
+	ChecklistItemID   string // optional P2c visitor chip id; audit-only
 }
 
 // ChatResponse is the service-level chat output.
@@ -119,15 +126,35 @@ type Service struct {
 	formatter     *evidence.Formatter
 	llm           ChatCompleter
 	signalCreator SignalCreator
+	askDocs       AskDocsOptions
+	packLookup    RoomPackLookup
+}
+
+// RoomPackLookup resolves the effective DD checklist pack for a deal room (P2.1c fork).
+type RoomPackLookup interface {
+	EffectivePackForRoom(ctx context.Context, dealRoomID pgtype.UUID) (jobs.Pack, error)
 }
 
 // NewService creates an assistant service.
+// Intent-first is off by default (unit tests / callers); production wiring uses WithAskDocsOptions.
 func NewService(q Querier, s Searcher, f *evidence.Formatter, l ChatCompleter, signalCreator ...SignalCreator) *Service {
-	svc := &Service{queries: q, search: s, formatter: f, llm: l}
+	svc := &Service{queries: q, search: s, formatter: f, llm: l, askDocs: defaultAskDocsOptions()}
 	if len(signalCreator) > 0 {
 		svc.signalCreator = signalCreator[0]
 	}
 	return svc
+}
+
+// WithAskDocsOptions configures Intent-first Ask Docs behavior (P0+).
+func (s *Service) WithAskDocsOptions(opts AskDocsOptions) *Service {
+	s.askDocs = opts.normalized()
+	return s
+}
+
+// WithRoomPackLookup wires room-level DD pack forks for visitor checklist chips validation.
+func (s *Service) WithRoomPackLookup(lookup RoomPackLookup) *Service {
+	s.packLookup = lookup
+	return s
 }
 
 // Chat processes a user message and returns an evidence-backed answer.
@@ -162,13 +189,17 @@ func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req Chat
 		return nil, fmt.Errorf("list messages: %w", err)
 	}
 
-	evidenceList, err := s.search.Search(ctx, workspaceUUID, req.Message, defaultSearchResults)
-	if err != nil {
-		return nil, fmt.Errorf("search evidence: %w", err)
-	}
-
-	resp, err := s.complete(ctx, session.ID, req.Message, msgs, evidenceList, askDocsAuditSnapshot{
-		ResultStatus: ResultStatusSuccess,
+	resp, _, err := s.runDocsTurn(ctx, docsTurnParams{
+		SessionID: session.ID,
+		Message:   req.Message,
+		History:   msgs,
+		Search: docsTurnSearch{
+			WorkspaceSearch: true,
+			WorkspaceID:     workspaceUUID,
+		},
+		Audit:          askDocsAuditSnapshot{ResultStatus: ResultStatusSuccess},
+		SuggestAskHost: false,
+		Lang:           requestLang(ctx),
 	})
 	if err != nil {
 		return nil, err
@@ -190,7 +221,7 @@ func (s *Service) Chat(ctx context.Context, userID, workspaceID string, req Chat
 		SessionID:   resp.SessionID,
 		UserID:      userID,
 		Question:    req.Message,
-		Lang:        "en",
+		Lang:        requestLang(ctx),
 	})
 
 	return resp, nil
@@ -238,32 +269,43 @@ func (s *Service) PublicChat(ctx context.Context, link db.Link, visitorID, visit
 		return nil, fmt.Errorf("list authorized documents: %w", err)
 	}
 
-	// Fail closed: empty Access∩KB scope never falls back to workspace-wide search.
-	var evidenceList []search.Evidence
-	var scopeViolations int
-	if len(documentIDs) > 0 {
-		evidenceList, err = s.search.SearchInDocuments(ctx, link.WorkspaceID, documentIDs, req.Message, defaultSearchResults)
-		if err != nil {
-			return nil, fmt.Errorf("search evidence: %w", err)
+	checklistItemID := strings.TrimSpace(req.ChecklistItemID)
+	if checklistItemID != "" {
+		if !link.AskDocsDdChipsEnabled || !link.AiCopilotEnabled {
+			return nil, ErrInvalidChecklistItem
 		}
-		evidenceList, scopeViolations = filterEvidenceToDocuments(evidenceList, documentIDs)
+		pack, ok := jobs.MustLoadBuiltinPacks().Get(jobs.FinancingDDV1)
+		if !ok {
+			return nil, ErrInvalidChecklistItem
+		}
+		if link.DealRoomID.Valid && s.packLookup != nil {
+			if forked, err := s.packLookup.EffectivePackForRoom(ctx, link.DealRoomID); err == nil {
+				pack = forked
+			}
+		}
+		if !coverage.ValidItemInPack(pack, checklistItemID) {
+			return nil, ErrInvalidChecklistItem
+		}
 	}
 
-	audit := askDocsAuditSnapshot{
-		AuthorizedDocumentIDs: authorizedIDs,
-		RetrievalDocumentIDs:  documentIDs,
-	}
-	var resp *ChatResponse
-	if len(evidenceList) == 0 {
-		audit.ResultStatus = ResultStatusNoEvidence
-		resp, err = s.refuseNoEvidence(ctx, session.ID, link, audit)
-	} else {
-		audit.ResultStatus = ResultStatusSuccess
-		if scopeViolations > 0 {
-			audit.ResultStatus = "scope_violation"
-		}
-		resp, err = s.complete(ctx, session.ID, req.Message, msgs, evidenceList, audit)
-	}
+	// Fail closed: empty Access∩KB scope never falls back to workspace-wide search
+	// (runDocsTurn skips search when DocumentIDs is empty and WorkspaceSearch is false).
+	resp, scopeViolations, err := s.runDocsTurn(ctx, docsTurnParams{
+		SessionID: session.ID,
+		Message:   req.Message,
+		History:   msgs,
+		Search: docsTurnSearch{
+			WorkspaceID: link.WorkspaceID,
+			DocumentIDs: documentIDs,
+		},
+		Audit: askDocsAuditSnapshot{
+			AuthorizedDocumentIDs: authorizedIDs,
+			RetrievalDocumentIDs:  documentIDs,
+			ChecklistItemID:       checklistItemID,
+		},
+		SuggestAskHost: link.QaEnabled,
+		Lang:           requestLang(ctx),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -449,35 +491,19 @@ func filterEvidenceToDocuments(evidenceList []search.Evidence, documentIDs []uui
 	return out, dropped
 }
 
-func (s *Service) refuseNoEvidence(ctx context.Context, sessionID pgtype.UUID, link db.Link, audit askDocsAuditSnapshot) (*ChatResponse, error) {
-	answer := noEvidenceAnswer(requestLang(ctx), link.QaEnabled)
-	evBytes, _ := json.Marshal([]search.Evidence{})
-	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
-		SessionID:             sessionID,
-		Role:                  "assistant",
-		Content:               answer,
-		Evidence:              evBytes,
-		ResultStatus:          pgtype.Text{String: audit.ResultStatus, Valid: audit.ResultStatus != ""},
-		AuthorizedDocumentIds: uuidsToPG(audit.AuthorizedDocumentIDs),
-		RetrievalDocumentIds:  uuidsToPG(audit.RetrievalDocumentIDs),
-	}); err != nil {
-		return nil, fmt.Errorf("save assistant message: %w", err)
-	}
-	return &ChatResponse{
-		SessionID:      pgUUIDToString(sessionID),
-		Answer:         answer,
-		Evidence:       []search.Evidence{},
-		ResultStatus:   ResultStatusNoEvidence,
-		SuggestAskHost: link.QaEnabled,
-	}, nil
+func noEvidenceAnswer(lang string, suggestAskHost bool) string {
+	return refuseAnswerWithOptionalHost(lang, suggestAskHost, noEvidenceAnswerEN, noEvidenceAnswerZH)
 }
 
-func noEvidenceAnswer(lang string, suggestAskHost bool) string {
-	zh := strings.HasPrefix(strings.ToLower(lang), "zh")
-	answer := noEvidenceAnswerEN
+func notFoundInScopeAnswer(lang string, suggestAskHost bool) string {
+	return refuseAnswerWithOptionalHost(lang, suggestAskHost, notFoundInScopeAnswerEN, notFoundInScopeAnswerZH)
+}
+
+func refuseAnswerWithOptionalHost(lang string, suggestAskHost bool, en, zh string) string {
+	answer := en
 	hint := noEvidenceAskHostHintEN
-	if zh {
-		answer = noEvidenceAnswerZH
+	if strings.HasPrefix(strings.ToLower(lang), "zh") {
+		answer = zh
 		hint = noEvidenceAskHostHintZH
 	}
 	if suggestAskHost {
@@ -490,6 +516,13 @@ type askDocsAuditSnapshot struct {
 	AuthorizedDocumentIDs []uuid.UUID
 	RetrievalDocumentIDs  []uuid.UUID
 	ResultStatus          string
+	DocIntent             string
+	GenerationMode        string
+	IntentSource          string
+	FallbackFrom          string
+	Absence               bool
+	Party                 string
+	ChecklistItemID       string
 }
 
 func uuidsToPG(ids []uuid.UUID) []pgtype.UUID {
@@ -501,41 +534,7 @@ func uuidsToPG(ids []uuid.UUID) []pgtype.UUID {
 }
 
 func (s *Service) complete(ctx context.Context, sessionID pgtype.UUID, currentUserMessage string, msgs []db.AssistantMessage, evidenceList []search.Evidence, audit askDocsAuditSnapshot) (*ChatResponse, error) {
-	evContext := s.formatter.BuildContext(evidenceList)
-	evContext = truncateToLength(evContext, maxEvidenceChars)
-
-	if s.llm == nil {
-		return nil, ErrLLMNotConfigured
-	}
-
-	history := buildHistory(msgs, currentUserMessage, evContext)
-	answer, err := s.llm.ChatCompletion(ctx, systemPrompt, history)
-	if err != nil {
-		return nil, fmt.Errorf("llm completion: %w", err)
-	}
-
-	// Persist and return visitor-safe quotes (US#20 / B4). LLM context above keeps full text.
-	truncateVisitorEvidenceQuotes(evidenceList)
-
-	evBytes, _ := json.Marshal(evidenceList)
-	if _, err := s.queries.CreateAssistantMessage(ctx, db.CreateAssistantMessageParams{
-		SessionID:             sessionID,
-		Role:                  "assistant",
-		Content:               answer,
-		Evidence:              evBytes,
-		ResultStatus:          pgtype.Text{String: audit.ResultStatus, Valid: audit.ResultStatus != ""},
-		AuthorizedDocumentIds: uuidsToPG(audit.AuthorizedDocumentIDs),
-		RetrievalDocumentIds:  uuidsToPG(audit.RetrievalDocumentIDs),
-	}); err != nil {
-		return nil, fmt.Errorf("save assistant message: %w", err)
-	}
-
-	return &ChatResponse{
-		SessionID:    pgUUIDToString(sessionID),
-		Answer:       answer,
-		Evidence:     evidenceList,
-		ResultStatus: audit.ResultStatus,
-	}, nil
+	return s.completeWithPrompt(ctx, sessionID, currentUserMessage, msgs, evidenceList, audit, systemPrompt)
 }
 
 func (s *Service) convertQuestionToSignalAsync(ctx context.Context, input suggestions.CreateQuestionSignalInput) {

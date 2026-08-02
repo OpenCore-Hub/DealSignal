@@ -1,0 +1,95 @@
+# ma_redflag_v1 — M&A red-flag checklist (D17). item_id stable; do not renumber.
+# Built-in read-only in P2.2 (no room fork).
+pack_id: ma_redflag_v1
+pack_version: "1"
+items:
+  - id: change_of_control
+    label_en: Change of control
+    label_zh: 控制权变更
+    query_en: change of control assignment consent
+    query_zh: 控制权变更 转让 同意
+  - id: mac_mae
+    label_en: MAC / MAE
+    label_zh: 重大不利变化
+    query_en: material adverse change MAC MAE effect
+    query_zh: 重大不利变化 MAC MAE
+  - id: reps_warranty_survival
+    label_en: Reps & warranty survival
+    label_zh: 陈述保证存续
+    query_en: representations warranties survival basket deductible
+    query_zh: 陈述与保证 存续期 篮筐 免赔
+  - id: indemnity_cap
+    label_en: Indemnity cap / escrow
+    label_zh: 赔偿上限 / 托管
+    query_en: indemnity cap escrow holdback limitation of liability
+    query_zh: 赔偿上限 托管 扣留 责任限制
+  - id: closing_conditions
+    label_en: Closing conditions
+    label_zh: 交割条件
+    query_en: closing conditions conditions precedent
+    query_zh: 交割条件 先决条件
+  - id: termination_fees
+    label_en: Termination / break fees
+    label_zh: 终止费 / 分手费
+    query_en: termination fee break-up fee reverse break fee
+    query_zh: 终止费 分手费 反向分手费
+  - id: non_compete
+    label_en: Non-compete / non-solicit
+    label_zh: 竞业 / 禁止招揽
+    query_en: non-compete non-solicitation restrictive covenant
+    query_zh: 竞业限制 禁止招揽 限制性条款
+  - id: key_customer_concentration
+    label_en: Customer concentration
+    label_zh: 客户集中度
+    query_en: key customer concentration top customers revenue
+    query_zh: 客户集中度 主要客户 收入占比
+  - id: key_supplier
+    label_en: Key suppliers
+    label_zh: 关键供应商
+    query_en: key supplier sole source dependency
+    query_zh: 关键供应商 单一来源 依赖
+  - id: litigation_disputes
+    label_en: Material litigation
+    label_zh: 重大诉讼
+    query_en: material litigation dispute arbitration claim
+    query_zh: 重大诉讼 争议 仲裁 索赔
+  - id: regulatory_approvals
+    label_en: Regulatory approvals
+    label_zh: 监管 / 反垄断审批
+    query_en: regulatory approval antitrust HSR competition
+    query_zh: 监管审批 反垄断 经营者集中
+  - id: ip_infringement
+    label_en: IP infringement / licenses
+    label_zh: IP 侵权 / 许可
+    query_en: intellectual property infringement license dispute
+    query_zh: 知识产权侵权 许可 争议
+  - id: data_privacy
+    label_en: Data privacy / security
+    label_zh: 数据隐私 / 安全事件
+    query_en: data privacy security breach personal information GDPR
+    query_zh: 数据隐私 安全事件 个人信息 泄露
+  - id: employment_claims
+    label_en: Employment claims
+    label_zh: 劳动争议 / 工会
+    query_en: employment claim labor union collective bargaining
+    query_zh: 劳动争议 工会 集体协商
+  - id: environmental
+    label_en: Environmental liabilities
+    label_zh: 环境责任
+    query_en: environmental liability contamination remediation
+    query_zh: 环境责任 污染 修复
+  - id: debt_change_terms
+    label_en: Debt change-of-control
+    label_zh: 债务控制权变更条款
+    query_en: debt change of control acceleration default
+    query_zh: 债务 控制权变更 加速到期 违约
+  - id: related_party_ma
+    label_en: Related-party (deal)
+    label_zh: 关联交易（交易语境）
+    query_en: related party transaction affiliate deal
+    query_zh: 关联交易 关联方
+  - id: disclosure_schedules
+    label_en: Disclosure schedules
+    label_zh: 披露函 / 附表
+    query_en: disclosure schedule exception schedule annex
+    query_zh: 披露函 披露附表 例外清单

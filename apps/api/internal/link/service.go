@@ -236,6 +236,7 @@ type CreateLinkRequest struct {
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
 	AICopilotEnabled            bool
+	AskDocsDDChipsEnabled       bool
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
@@ -274,6 +275,7 @@ type UpdateLinkRequest struct {
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
 	AICopilotEnabled            bool
+	AskDocsDDChipsEnabled       bool
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
@@ -334,6 +336,7 @@ type DealRoomLinkRequest struct {
 	DownloadEnabled          bool
 	WatermarkEnabled         bool
 	AICopilotEnabled         bool
+	AskDocsDDChipsEnabled    bool
 	QaEnabled                bool
 	FileRequestsEnabled      bool
 	IndexFileEnabled         bool
@@ -550,6 +553,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		HasDocumentScope:            hasDocumentScope,
 		FolderScopePaths:            folderScopePaths,
 		FolderScopeMode:             folderScopeMode,
+		AskDocsDdChipsEnabled:       req.AskDocsDDChipsEnabled && req.AICopilotEnabled,
 		Status:                      "active",
 		CreatedBy:                   userUUID,
 	})
@@ -892,6 +896,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		HasDocumentScope:            hasDocumentScope,
 		FolderScopePaths:            folderScopePaths,
 		FolderScopeMode:             folderScopeMode,
+		AskDocsDdChipsEnabled:       req.AskDocsDDChipsEnabled,
 		ID:                          existing.ID,
 		WorkspaceID:                 workspaceUUID,
 	})
@@ -1101,6 +1106,7 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
 		AICopilotEnabled:            req.AICopilotEnabled,
+		AskDocsDDChipsEnabled:       req.AskDocsDDChipsEnabled,
 		QaEnabled:                   req.QaEnabled,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
@@ -3364,6 +3370,7 @@ type PublicLinkMetadata struct {
 	ScreenshotProtectionEnabled bool
 	CustomDomain                string
 	AiCopilotEnabled            bool
+	AskDocsDDChipsEnabled       bool
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
@@ -3404,6 +3411,7 @@ func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string)
 		ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
 		CustomDomain:                link.CustomDomain.String,
 		AiCopilotEnabled:            link.AiCopilotEnabled,
+		AskDocsDDChipsEnabled:       link.AskDocsDdChipsEnabled,
 		QaEnabled:                   link.QaEnabled,
 		FileRequestsEnabled:         link.FileRequestsEnabled,
 		IndexFileEnabled:            link.IndexFileEnabled,
@@ -3509,21 +3517,25 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 		RequireEmail:             link.RequireEmail,
 		RequireEmailVerification: link.RequireEmailVerification,
 		RequireNda:               link.RequireNda,
-		AiCopilotEnabled:         link.AiCopilotEnabled,
-		RequirePassword:          link.RequirePassword,
-		PasswordHash:             link.PasswordHash,
-		CustomDomain:             link.CustomDomain,
-		Tags:                     link.Tags,
-		NotifyOnAccess:           link.NotifyOnAccess,
-		QaEnabled:                link.QaEnabled,
-		FileRequestsEnabled:      link.FileRequestsEnabled,
-		IndexFileEnabled:         link.IndexFileEnabled,
-		SecurityVersion:          newVersion,
-		HasDocumentScope:         link.HasDocumentScope,
-		FolderScopePaths:         link.FolderScopePaths,
-		FolderScopeMode:          link.FolderScopeMode,
-		ID:                       link.ID,
-		WorkspaceID:              link.WorkspaceID,
+		AiCopilotEnabled:            link.AiCopilotEnabled,
+		RequirePassword:             link.RequirePassword,
+		PasswordHash:                link.PasswordHash,
+		CustomDomain:                link.CustomDomain,
+		Tags:                        link.Tags,
+		NotifyOnAccess:              link.NotifyOnAccess,
+		QaEnabled:                   link.QaEnabled,
+		FileRequestsEnabled:         link.FileRequestsEnabled,
+		IndexFileEnabled:            link.IndexFileEnabled,
+		ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
+		LinkType:                    link.LinkType,
+		TargetFolderPath:            link.TargetFolderPath,
+		SecurityVersion:             newVersion,
+		HasDocumentScope:            link.HasDocumentScope,
+		FolderScopePaths:            link.FolderScopePaths,
+		FolderScopeMode:             link.FolderScopeMode,
+		AskDocsDdChipsEnabled:       link.AskDocsDdChipsEnabled,
+		ID:                          link.ID,
+		WorkspaceID:                 link.WorkspaceID,
 	}); err != nil {
 		return db.Link{}, fmt.Errorf("renew link: %w", err)
 	}

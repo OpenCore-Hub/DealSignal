@@ -2,6 +2,7 @@
 
 > Source design: `docs/designs/plan/visitor-ask-knowledge-base.md` (v1.3)  
 > Status: **V1 shipped** — dual-gen rebuild, embedder wiring, building-period Ask Docs, Redis fail-closed limits landed; residual P1/P2 in `docs/designs/plan/PLAN-visitor-ask-v1-debt.md`  
+> **Next epic (draft):** Ask Docs Intent-First 线索引擎 — `docs/designs/plan/ask-docs-intent-first-clue-engine.md`（V1 安全/KB/通道红线之上的检索与生成演进；**不**取消 Ask Docs / Ask Host 显式通道）  
 > Test seams (agreed): (1) Public visitor API (2) Deal-room owner + link save API (3) Owner audit read API
 
 ## Problem Statement
@@ -81,6 +82,8 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 - No evidence → refuse with fixed copy; audit `no_evidence`; optional Host switch CTA.
 - Evidence quotes returned to visitors truncated to **320** characters; page jump remains. The same cap is applied when persisting assistant evidence and when projecting Ask Docs audit detail (historical long quotes truncated on read).
 - Post-filter evidence document IDs; log `scope_violation` on any drop.
+- **V1 answering model (current):** hybrid retrieve → optional post-rank/filter → single grounded assistant completion. This remains the V1 contract.
+- **Post-V1 evolution (not V1 gate):** Intent-first clue engine (`ask-docs-intent-first-clue-engine.md`) — DocIntent router *inside* Ask Docs (`locate` / `topic` / `list` / `qa` / `refuse_early`), CluePack-first delivery, extractive vs abstractive generation modes. Must preserve all bullets above (scope, refusal, quote cap, no workspace-wide search). Tracked as debt batch **F** in `PLAN-visitor-ask-v1-debt.md`.
 
 ### Anti-bypass / access
 - Ask Docs and Ask Host must use the same public access resolution path as page assets (session, security version, gates).
@@ -105,6 +108,7 @@ Unify visitor-facing AI and human Q&A into one **Visitor Ask / 沟通** capabili
 - Gate-0 (anti-bypass) + Sec-0 (scope alignment) + Audit-1 + Ingest-1 + KB-1 + Mig-1 — **done in code**; remaining UX/test debt in `PLAN-visitor-ask-v1-debt.md` (B3–B7 naming, MSW, security-events UI).
 - UX phases (naming/card, visitor polish, room audit summary) + V1.5 channel hint + smoke e2e + SPEC #36 blur — **done**.
 - Still open (not this epic / OOS): fully independent append-only live audit ledger (cold archive table is B2); single-document KB product / V2 deprecation.
+- **Follow-on epic (draft, not V1 gate):** Intent-first Ask Docs — see `ask-docs-intent-first-clue-engine.md` and PLAN batch **F**.
 
 ## Testing Decisions
 
@@ -137,17 +141,21 @@ Seam 1 is the release-blocking core; 2 and 3 are required for the full product p
 
 - Merging file requests into Visitor Ask.
 - Per-link physical vector indexes.
-- Fully automatic intent routing without an explicit Ask Docs / Ask Host control (V1.5 maybe).
+- Fully automatic intent routing **between Ask Docs and Ask Host** without an explicit channel control (V1.5 channel *hint* is allowed; forced auto-switch remains OOS).
+  - **Clarification:** DocIntent routing *within* Ask Docs (locate/topic/list/qa) is **not** this OOS item — it is the follow-on epic in `ask-docs-intent-first-clue-engine.md` / PLAN batch **F**.
 - Expanding visible link scope via KB.
 - Explicit KB product for single-document links (V2 deprecation track).
 - V1 dedicated append-only audit table (projection first).
 - Training models on audit text.
 - Changing NDA/password/email product rules beyond applying the same gates to Ask APIs.
+- Conflating Ask Docs DocIntent with Signal sales intent (`pricing` / `objection` / …).
+- Cross-room portfolio aggregation inside single-room Ask Docs (separate product surface if ever).
 
 ## Further Notes
 
-- Design authority: `docs/designs/plan/visitor-ask-knowledge-base.md` v1.3 (grilling Q1–Q25; V1 shipped with debt).
-- Implementation debt / progress: `docs/designs/plan/PLAN-visitor-ask-v1-debt.md`.
-- Domain language: Deal Room, Link, Access, Visitor Ask / 沟通, Ask Docs / 问文档, Ask Host / 问发起方, Knowledge Base, folder allowlist, Link session, Signal, security event.
+- Design authority (V1 Visitor Ask / KB / anti-bypass): `docs/designs/plan/visitor-ask-knowledge-base.md` v1.3 (grilling Q1–Q25; V1 shipped with debt).
+- Implementation debt / progress (V1): `docs/designs/plan/PLAN-visitor-ask-v1-debt.md`.
+- Follow-on design (Ask Docs quality / diligence clue engine): `docs/designs/plan/ask-docs-intent-first-clue-engine.md` v1.0 draft — does not reopen V1 gate; extends retrieval/generation under the same security contract.
+- Domain language: Deal Room, Link, Access, Visitor Ask / 沟通, Ask Docs / 问文档, Ask Host / 问发起方, Knowledge Base, folder allowlist, Link session, Signal, security event; DocIntent / CluePack / JobProfile (post-V1).
 - Hide “RAG/knowledge base” jargon from visitors; owners see KB controls on the deal-room documents page.
 - i18n mandatory for all new user-facing strings (en + zh-CN).

@@ -2,7 +2,6 @@ package assistant
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"sort"
 	"time"
@@ -47,6 +46,15 @@ type AskDocsAuditDetail struct {
 	RetrievalDocumentIDs  []string             `json:"retrieval_document_ids"`
 	Evidence              []search.Evidence    `json:"evidence"`
 	ResultStatus          string               `json:"result_status,omitempty"`
+	// Intent-first snapshot fields (P0+; omitted when absent / legacy rows).
+	DocIntent      string `json:"doc_intent,omitempty"`
+	GenerationMode string `json:"generation_mode,omitempty"`
+	IntentSource   string `json:"intent_source,omitempty"`
+	FallbackFrom   string `json:"fallback_from,omitempty"`
+	Absence        bool   `json:"absence,omitempty"`
+	Party          string `json:"party,omitempty"`
+	// P2c: visitor suggested-check chip id when the turn was started from a chip.
+	ChecklistItemID string `json:"checklist_item_id,omitempty"`
 }
 
 // AskDocsAuditMessage is one chat turn in an audit detail.
@@ -352,11 +360,32 @@ func (s *Service) GetAskDocsAudit(ctx context.Context, workspaceID, linkID, sess
 		detail.AuthorizedDocumentIDs = pgUUIDsToStrings(m.AuthorizedDocumentIds)
 		detail.RetrievalDocumentIDs = pgUUIDsToStrings(m.RetrievalDocumentIds)
 		if len(m.Evidence) > 0 {
-			var ev []search.Evidence
-			if err := json.Unmarshal(m.Evidence, &ev); err == nil {
+			ev, meta := decodeStoredEvidence(m.Evidence)
+			if ev != nil || meta.DocIntent != "" || meta.GenerationMode != "" || meta.Absence || meta.Party != "" || meta.ChecklistItemID != "" {
 				// Defense in depth for pre-B4 rows that stored longer quotes (US#20).
 				truncateVisitorEvidenceQuotes(ev)
 				detail.Evidence = ev
+				if meta.DocIntent != "" {
+					detail.DocIntent = meta.DocIntent
+				}
+				if meta.GenerationMode != "" {
+					detail.GenerationMode = meta.GenerationMode
+				}
+				if meta.IntentSource != "" {
+					detail.IntentSource = meta.IntentSource
+				}
+				if meta.FallbackFrom != "" {
+					detail.FallbackFrom = meta.FallbackFrom
+				}
+				if meta.Absence {
+					detail.Absence = true
+				}
+				if meta.Party != "" {
+					detail.Party = meta.Party
+				}
+				if meta.ChecklistItemID != "" {
+					detail.ChecklistItemID = meta.ChecklistItemID
+				}
 			}
 		}
 	}

@@ -18,6 +18,7 @@ interface ChatContext {
   pageNumber?: number;
   publicToken?: string;
   publicSessionToken?: string;
+  checklistItemId?: string;
 }
 
 interface AIState {
@@ -90,7 +91,11 @@ export const useAIStore = create<AIState>((set, get) => ({
       if (context?.publicSessionToken && context.publicToken) {
         const res = await api.publicAssistantChat(
           context.publicToken,
-          { message: content, session_id: get().sessionId ?? undefined },
+          {
+            message: content,
+            session_id: get().sessionId ?? undefined,
+            checklist_item_id: context.checklistItemId,
+          },
           context.publicSessionToken
         );
         assistantMessage = {

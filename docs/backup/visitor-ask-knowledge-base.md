@@ -3,7 +3,8 @@
 > 版本：v1.3  
 > 日期：2026-07-22  
 > 状态：**已落地（V1）** — 发布门槛 + Phase 0–2 + V1.5 通道建议已实现；Future 项仍见 §八  
-> 范围：链接「沟通」能力整合 · 数据室知识库 · Ask Docs 作用域红线 · 审计可信 · 防绕过访问控制
+> 范围：链接「沟通」能力整合 · 数据室知识库 · Ask Docs 作用域红线 · 审计可信 · 防绕过访问控制  
+> **后续 epic（草案）**：Ask Docs Intent-First 线索引擎 — `docs/designs/plan/ask-docs-intent-first-clue-engine.md`（通道**内** DocIntent / CluePack；不取消问文档/问发起方显式切换；进度见 `PLAN-visitor-ask-v1-debt.md` 批次 F）
 
 ---
 
@@ -442,6 +443,7 @@ V1：以 public `assistant_sessions` / `assistant_messages` 为审计投影，�
 | Phase 2 | 室级审计汇总；访客空态/Host 待回复打磨 | P2 | ✅ |
 | V1.5 | 发送前通道建议（非强制） | 可选 | ✅ |
 | Future | 独立审计表；单文档链接废弃（V2.0） | 后续 | 未做 |
+| **Future / V1.x+** | **Ask Docs Intent-First 线索引擎**（DocIntent、CluePack、模式化生成、Job 扩展） | 质量 epic | 草案 → `ask-docs-intent-first-clue-engine.md`；债务批次 **F** |
 
 **发布门槛：** Gate-0 + Sec-0 + Audit-1 +（数据室）KB-1/Mig-1/Ingest-1 已满足；可对客户承诺「可审计且不可绕过门禁的室级 Ask Docs」（单文档链接仍按过渡策略，无室级 KB UI）。
 
@@ -495,3 +497,4 @@ V1：以 public `assistant_sessions` / `assistant_messages` 为审计投影，�
 | v1.1 | 2026-07-22 | Grilling Q1–Q19 共识写入：室级显式勾选 KB、embedding 门控、软过期、保存拦截、存量迁移、审计/Signal/留存/拒答/检索范围等 |
 | v1.2 | 2026-07-22 | Grilling Q20–Q25：防绕过——门禁同构、allow/block 重算、硬限额、quote 截断、API 绑 publicToken、高危 security_events；新增 §4.7 与 Gate-0 |
 | v1.3 | 2026-07-22 | V1 epic 收工：发布门槛与 Phase 0–2 / V1.5 标为已落地；Future 仍开放 |
+| v1.3.1 | 2026-07-23 | 文档链：头注与 §八 Future 指向 Intent-First 线索引擎草案与债务批次 F（正文 V1 契约不变） |

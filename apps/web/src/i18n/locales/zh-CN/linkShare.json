@@ -98,6 +98,8 @@
       "visitorAskDescription": "允许访客就文档提问或留言给发起方",
       "askDocs": "问文档",
       "askDocsDescription": "基于授权材料的即时问答",
+      "ddChips": "建议核查 chips",
+      "ddChipsDescription": "在问文档中展示融资尽调清单建议（仅标签；访客看不到缺口汇总表）",
       "askHost": "问发起方",
       "askHostDescription": "异步留言，由链接所有者回复",
       "knowledgeBaseRequired": "请先在文档页创建或重建知识库，再开启「问文档」",
@@ -217,7 +219,50 @@
       "success": "已回答",
       "no_evidence": "无证据",
       "kb_unavailable": "知识库不可用",
-      "scope_violation": "作用域违规"
+      "scope_violation": "作用域违规",
+      "out_of_corpus": "超出授权材料",
+      "not_found_in_scope": "作用域内未找到"
+    },
+    "routing": {
+      "title": "路由",
+      "intent": "文档意图",
+      "mode": "生成模式",
+      "source": "意图来源",
+      "fallback": "降级自",
+      "slot": "槽位",
+      "party": "主体",
+      "checklistItem": "清单项",
+      "intentValues": {
+        "locate": "定位",
+        "topic": "主题",
+        "list": "列举",
+        "qa": "问答",
+        "refuse_early": "提前拒答"
+      },
+      "modeValues": {
+        "extractive": "摘录式",
+        "abstractive": "综括式",
+        "refuse": "拒答"
+      },
+      "sourceValues": {
+        "rule": "规则",
+        "llm": "模型",
+        "default": "默认"
+      },
+      "fallbackValues": {
+        "locate": "定位"
+      },
+      "slotValues": {
+        "absence": "存在性"
+      },
+      "partyValues": {
+        "investor": "投资人",
+        "founder": "创始人",
+        "buyer": "买方",
+        "seller": "卖方",
+        "gp": "GP",
+        "lp": "LP"
+      }
     }
   },
   "askSecurityEvents": {

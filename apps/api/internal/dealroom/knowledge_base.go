@@ -176,6 +176,7 @@ func (s *Service) CreateKnowledgeBase(ctx context.Context, roomID, workspaceID, 
 	if err != nil {
 		return KnowledgeBase{}, err
 	}
+	s.markAskDocsDDSnapshotsStaleByGeneration(ctx, room.ID, buildingGen)
 	return toKnowledgeBase(row), nil
 }
 
@@ -326,6 +327,7 @@ func (s *Service) RebuildKnowledgeBase(ctx context.Context, roomID, workspaceID,
 		}
 		return toKnowledgeBase(failed), fmt.Errorf("%w: %v", ErrKnowledgeBaseEmbedFailed, err)
 	}
+	s.markAskDocsDDSnapshotsStaleByGeneration(ctx, room.ID, nextGen)
 	return toKnowledgeBase(row), nil
 }
 
@@ -362,7 +364,20 @@ func (s *Service) MarkKnowledgeBaseStaleIfNeeded(ctx context.Context, roomID pgt
 		BuildingGeneration:  row.BuildingGeneration,
 		ErrorMessage:        row.ErrorMessage,
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	_ = s.queries.MarkAllAskDocsDDSnapshotsStaleForRoom(ctx, roomID)
+	return nil
+}
+
+// markAskDocsDDSnapshotsStaleByGeneration marks DD coverage snapshots whose
+// kb_generation differs from the live KB generation (P2 stale prompt).
+func (s *Service) markAskDocsDDSnapshotsStaleByGeneration(ctx context.Context, roomID pgtype.UUID, activeGeneration int32) {
+	_ = s.queries.MarkAskDocsDDSnapshotsStaleForRoom(ctx, db.MarkAskDocsDDSnapshotsStaleForRoomParams{
+		DealRoomID:   roomID,
+		KbGeneration: pgtype.Int4{Int32: activeGeneration, Valid: true},
+	})
 }
 
 func (s *Service) runEmbed(ctx context.Context, workspaceID string, documentIDs []uuid.UUID, generation int32) error {
