@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
 // Handler exposes deal room endpoints.
@@ -76,7 +78,7 @@ type CreateRequest struct {
 func (h *Handler) List(c *gin.Context) {
 	rooms, err := h.service.ListRooms(c.Request.Context(), middleware.WorkspaceIDFrom(c))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -118,7 +120,7 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 func (h *Handler) Create(c *gin.Context) {
 	var req CreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -126,11 +128,11 @@ func (h *Handler) Create(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidSlug):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": httpx.SafeMessage("invalid_slug", err)})
 		case errors.Is(err, ErrDuplicateSlug):
-			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_slug", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_slug", "message": httpx.SafeMessage("duplicate_slug", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -147,14 +149,14 @@ func (h *Handler) Get(c *gin.Context) {
 	)
 	if err != nil {
 		if errors.Is(err, ErrRoomNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 			return
 		}
 		if errors.Is(err, ErrApprovalRequired) {
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, roomDetailResponse(detail))
@@ -170,7 +172,7 @@ type AddMemberRequest struct {
 func (h *Handler) AddMember(c *gin.Context) {
 	var req AddMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	if req.Role == "" {
@@ -180,11 +182,11 @@ func (h *Handler) AddMember(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrInvalidEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -197,11 +199,11 @@ func (h *Handler) ApproveRequest(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrRequestNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": httpx.SafeMessage("request_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -226,7 +228,7 @@ func (h *Handler) PublicView(c *gin.Context) {
 	folders, _ := h.service.ListFolders(ctx, roomID, workspaceID)
 	docs, err := h.service.ListDocuments(ctx, roomID, workspaceID, email)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": httpx.SafeMessage("access_denied", err)})
 		return
 	}
 
@@ -248,22 +250,22 @@ type AccessRequestRequest struct {
 func (h *Handler) CreateAccessRequest(c *gin.Context) {
 	var req AccessRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	request, err := h.service.CreateAccessRequest(c.Request.Context(), c.Param("slug"), req.Email, req.Reason, c.ClientIP())
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		case errors.Is(err, ErrInvalidEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
 		case errors.Is(err, ErrRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": err.Error()})
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
 		case errors.Is(err, ErrAccessRequestExists):
-			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": httpx.SafeMessage("access_request_exists", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -279,21 +281,21 @@ type NDARequest struct {
 func (h *Handler) RecordNDA(c *gin.Context) {
 	var req NDARequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	if err := h.service.RecordNDA(c.Request.Context(), c.Param("slug"), req.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
 		switch {
 		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		case errors.Is(err, ErrMemberNotFound):
-			c.JSON(http.StatusForbidden, gin.H{"code": "member_not_found", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
 		case errors.Is(err, ErrNDANotRequired):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_not_required", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "nda_not_required", "message": httpx.SafeMessage("nda_not_required", err)})
 		case errors.Is(err, ErrInvalidEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -311,13 +313,13 @@ type AddDocumentRequest struct {
 func (h *Handler) AddDocument(c *gin.Context) {
 	var req AddDocumentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	if req.FolderPath == "" || req.FolderPath == "/" {
 		folders, ferr := h.service.ListFolders(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c))
 		if ferr != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": ferr.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", ferr)})
 			return
 		}
 		if len(folders) == 0 {
@@ -330,9 +332,9 @@ func (h *Handler) AddDocument(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -350,22 +352,22 @@ type SetFolderPermissionRequest struct {
 func (h *Handler) SetFolderPermission(c *gin.Context) {
 	var req SetFolderPermissionRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	perm, err := h.service.SetFolderPermission(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Email, req.FolderPath, req.Permission)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrMemberNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
 		case errors.Is(err, ErrInvalidEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_email", "message": httpx.SafeMessage("invalid_email", err)})
 		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -382,14 +384,14 @@ func (h *Handler) ListFolders(c *gin.Context) {
 	)
 	if err != nil {
 		if errors.Is(err, ErrRoomNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 			return
 		}
 		if errors.Is(err, ErrApprovalRequired) {
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": folderListResponse(folders)})
@@ -405,20 +407,20 @@ type CreateFolderRequest struct {
 func (h *Handler) CreateFolder(c *gin.Context) {
 	var req CreateFolderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	folders, err := h.service.CreateFolder(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), req.Name, req.ParentPath)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrFolderExists):
-			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": httpx.SafeMessage("folder_exists", err)})
 		case errors.Is(err, ErrFolderNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -434,20 +436,20 @@ type RenameFolderRequest struct {
 func (h *Handler) RenameFolder(c *gin.Context) {
 	var req RenameFolderRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	folders, err := h.service.RenameFolder(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), path.Join("/", c.Param("path")), req.Name)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrFolderNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrFolderExists):
-			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": httpx.SafeMessage("folder_exists", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -460,13 +462,13 @@ func (h *Handler) DeleteFolder(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrFolderNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrFolderNotEmpty):
-			c.JSON(http.StatusConflict, gin.H{"code": "folder_not_empty", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "folder_not_empty", "message": httpx.SafeMessage("folder_not_empty", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -479,11 +481,11 @@ func (h *Handler) GetRoomDocuments(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		case errors.Is(err, ErrApprovalRequired):
-			c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": httpx.SafeMessage("access_denied", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -495,9 +497,9 @@ func (h *Handler) RemoveDocument(c *gin.Context) {
 	if err := h.service.RemoveDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId")); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -514,7 +516,7 @@ type UpdateDocumentRequest struct {
 func (h *Handler) UpdateDocument(c *gin.Context) {
 	var req UpdateDocumentRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	if req.FolderPath == "" && req.SortOrder == nil {
@@ -529,11 +531,11 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 		if err := h.service.MoveDocument(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("docId"), req.FolderPath, req.SortOrder); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):
-				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			case errors.Is(err, ErrFolderNotFound):
-				c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": err.Error()})
+				c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			}
 			return
 		}
@@ -541,9 +543,9 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 		if err := h.service.ReorderDocuments(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), []DocumentOrder{{DocumentID: c.Param("docId"), SortOrder: *req.SortOrder}}); err != nil {
 			switch {
 			case errors.Is(err, ErrNotRoomAdmin):
-				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			default:
-				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			}
 			return
 		}
@@ -557,11 +559,11 @@ func (h *Handler) ListMembers(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -573,11 +575,11 @@ func (h *Handler) RemoveMember(c *gin.Context) {
 	if err := h.service.RemoveMember(c.Request.Context(), c.Param("roomId"), middleware.WorkspaceIDFrom(c), middleware.UserIDFrom(c), c.Param("memberId")); err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrMemberNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "member_not_found", "message": httpx.SafeMessage("member_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -590,11 +592,11 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -607,11 +609,11 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case errors.Is(err, ErrRequestNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "request_not_found", "message": httpx.SafeMessage("request_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -621,13 +623,13 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 func mapPublicError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrRoomNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
 	case errors.Is(err, ErrNDARequired):
-		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": httpx.SafeMessage("nda_required", err)})
 	case errors.Is(err, ErrApprovalRequired):
-		c.JSON(http.StatusForbidden, gin.H{"code": "approval_required", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "approval_required", "message": httpx.SafeMessage("approval_required", err)})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 	}
 }
 

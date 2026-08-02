@@ -17,20 +17,22 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/suggestions"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Handler exposes link endpoints.
@@ -217,13 +219,13 @@ type EventRequest struct {
 func (h *Handler) RecordEvent(c *gin.Context) {
 	var req EventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
 	res, err := h.resolvePublicAccess(c, req.PublicToken)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": httpx.SafeMessage("access_denied", err)})
 		return
 	}
 	h.writeSessionRefreshHeader(c, res)
@@ -255,7 +257,7 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 	}
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -373,7 +375,7 @@ func (h *Handler) List(c *gin.Context) {
 		links, err = h.service.List(ctx, workspaceID)
 	}
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -381,7 +383,7 @@ func (h *Handler) List(c *gin.Context) {
 	for _, link := range links {
 		item, err := h.linkResponse(c, link)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			return
 		}
 		out = append(out, item)
@@ -395,15 +397,15 @@ func (h *Handler) Get(c *gin.Context) {
 	link, err := h.service.GetByID(c.Request.Context(), c.Param("id"), workspaceID)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	item, err := h.linkResponse(c, link)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, item)
@@ -416,7 +418,7 @@ func (h *Handler) Update(c *gin.Context) {
 		IsActive *bool  `json:"isActive" binding:"omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	if req.Status == "" && req.IsActive == nil {
@@ -469,7 +471,7 @@ func parseExpiresAt(s *string) (*time.Time, error) {
 func (h *Handler) UpdateFull(c *gin.Context) {
 	var req UpdateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -489,7 +491,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -551,20 +553,20 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			return
 		}
 		if errors.Is(err, ErrDocumentNotReady) {
-			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
 			return
 		}
 		if errors.Is(err, ErrDuplicateName) {
-			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
 	item, err := h.linkResponse(c, link)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, item)
@@ -585,10 +587,10 @@ func (h *Handler) GetAccessRules(c *gin.Context) {
 	rules, err := h.service.ListAccessRules(c.Request.Context(), workspaceID, c.Param("id"))
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": rules})
@@ -598,7 +600,7 @@ func (h *Handler) GetAccessRules(c *gin.Context) {
 func (h *Handler) SetAccessRules(c *gin.Context) {
 	var req AccessRulesRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -616,11 +618,11 @@ func (h *Handler) SetAccessRules(c *gin.Context) {
 	if err := h.service.UpdateAccessRules(c.Request.Context(), userID, workspaceID, c.Param("id"), rules); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrInvalidAccessRule), errors.Is(err, ErrConflictingAccessRule):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_access_rules", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_access_rules", "message": httpx.SafeMessage("invalid_access_rules", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -638,10 +640,10 @@ func (h *Handler) ListInvitations(c *gin.Context) {
 	invitations, err := h.service.ListInvitations(c.Request.Context(), workspaceID, c.Param("id"))
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": invitations})
@@ -651,7 +653,7 @@ func (h *Handler) ListInvitations(c *gin.Context) {
 func (h *Handler) CreateInvitations(c *gin.Context) {
 	var req CreateInvitationsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -661,11 +663,11 @@ func (h *Handler) CreateInvitations(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrLinkDisabled):
-			c.JSON(http.StatusConflict, gin.H{"code": "link_disabled", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "link_disabled", "message": httpx.SafeMessage("link_disabled", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -693,9 +695,9 @@ func (h *Handler) RevokeInvitation(c *gin.Context) {
 	if err := h.service.RevokeInvitation(c.Request.Context(), workspaceID, c.Param("invitationId"), removeFromAllowList); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -724,7 +726,7 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 		case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
 			code, status = "link_revoked", http.StatusGone
 		}
-		c.JSON(status, gin.H{"code": code, "message": err.Error()})
+		c.JSON(status, gin.H{"code": code, "message": httpx.SafeMessage(code, err)})
 		return
 	}
 
@@ -739,7 +741,7 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 
 	var req CreateAccessRequestRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -747,13 +749,13 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAccessRequestBlocked):
-			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
 		case errors.Is(err, ErrAccessRequestExists):
-			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "access_request_exists", "message": httpx.SafeMessage("access_request_exists", err)})
 		case errors.Is(err, ErrAccessAlreadyAllowed):
-			c.JSON(http.StatusConflict, gin.H{"code": "access_already_allowed", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "access_already_allowed", "message": httpx.SafeMessage("access_already_allowed", err)})
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		}
 		return
 	}
@@ -769,7 +771,7 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 		Email string `json:"email" binding:"required,email"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	link, err := h.service.CheckPublicEmail(ctx, token, req.Email, c.ClientIP())
@@ -784,17 +786,17 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 		}
 		switch {
 		case errors.Is(err, ErrLinkNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrLinkExpired):
-			c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": err.Error()})
+			c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": httpx.SafeMessage("link_expired", err)})
 		case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
-			c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": err.Error()})
+			c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": httpx.SafeMessage("link_revoked", err)})
 		case errors.Is(err, ErrLinkMaxAccessReached):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": err.Error()})
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": httpx.SafeMessage("link_max_access_reached", err)})
 		case errors.Is(err, ErrRequiresEmail):
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":                      "requires_email",
-				"message":                   err.Error(),
+				"message":                   httpx.SafeMessage("requires_email", err),
 				"requiresEmail":             requiresEmail,
 				"requiresEmailVerification": requiresEmailVerification,
 				"requiresPassword":          requiresPassword,
@@ -804,7 +806,7 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 		case errors.Is(err, ErrBlockedEmail):
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":                      "blocked_email",
-				"message":                   err.Error(),
+				"message":                   httpx.SafeMessage("blocked_email", err),
 				"requiresEmail":             requiresEmail,
 				"requiresEmailVerification": requiresEmailVerification,
 				"requiresPassword":          requiresPassword,
@@ -814,7 +816,7 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 		case errors.Is(err, ErrNotAllowedEmail):
 			c.JSON(http.StatusForbidden, gin.H{
 				"code":                      "not_allowed",
-				"message":                   err.Error(),
+				"message":                   httpx.SafeMessage("not_allowed", err),
 				"requiresEmail":             requiresEmail,
 				"requiresEmailVerification": requiresEmailVerification,
 				"requiresPassword":          requiresPassword,
@@ -824,7 +826,7 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 		case err.Error() == "rate limit exceeded":
 			c.JSON(http.StatusTooManyRequests, gin.H{"code": "too_many_attempts", "message": "Too many attempts. Please try again later."})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -837,10 +839,10 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 	requests, err := h.service.ListAccessRequests(c.Request.Context(), workspaceID, c.Param("id"))
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": requests})
@@ -854,14 +856,14 @@ func (h *Handler) ApproveAccessRequest(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrAccessRequestBlocked):
-			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
 		case errors.Is(err, ErrAccessCodeSendFailed):
 			// Approval already committed; owner should resend the access code.
-			c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": err.Error()})
+			c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": httpx.SafeMessage("access_code_send_failed", err)})
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
 		}
 		return
 	}
@@ -876,9 +878,9 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		default:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
 		}
 		return
 	}
@@ -916,7 +918,7 @@ type CreateDealRoomLinkRequest struct {
 func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	var req CreateDealRoomLinkRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -956,20 +958,20 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrDealRoomNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
 		case errors.Is(err, ErrDuplicateName):
-			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
 		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
 
 	item, err := h.linkResponse(c, link)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusCreated, item)
@@ -981,10 +983,10 @@ func (h *Handler) ListDealRoomLinks(c *gin.Context) {
 	links, err := h.service.ListDealRoomLinks(c.Request.Context(), workspaceID, c.Param("roomId"))
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -992,7 +994,7 @@ func (h *Handler) ListDealRoomLinks(c *gin.Context) {
 	for _, link := range links {
 		item, err := h.linkResponse(c, link)
 		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			return
 		}
 		out = append(out, item)
@@ -1038,10 +1040,10 @@ func (h *Handler) AccessLogs(c *gin.Context) {
 	page, err := h.service.ListAccessLogs(c.Request.Context(), c.Param("id"), workspaceID, limit, offset)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -1056,10 +1058,10 @@ func (h *Handler) LinkAnalytics(c *gin.Context) {
 	analytics, err := h.service.GetLinkAnalytics(c.Request.Context(), c.Param("id"), workspaceID)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": analytics})
@@ -1084,10 +1086,10 @@ func (h *Handler) LinkAnalyticsVisitors(c *gin.Context) {
 	page, err := h.service.ListRecentVisitors(c.Request.Context(), c.Param("id"), workspaceID, limit, offset)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -1115,10 +1117,10 @@ func (h *Handler) LinkAnalyticsAccessCodeContacts(c *gin.Context) {
 	page, err := h.service.ListAccessCodeContacts(c.Request.Context(), c.Param("id"), workspaceID, limit, offset)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
@@ -1135,24 +1137,24 @@ func (h *Handler) OwnerResendAccessCode(c *gin.Context) {
 		Force bool   `json:"force"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
 	if err := h.service.OwnerResendAccessCode(c.Request.Context(), c.Param("id"), workspaceID, body.Email, body.Force); err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrAccessCodeContactNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
 		case errors.Is(err, ErrEmailVerificationDisabled):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": httpx.SafeMessage("verification_disabled", err)})
 		case errors.Is(err, ErrAccessCodeResendNotNeeded):
-			c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": httpx.SafeMessage("resend_not_needed", err)})
 		case errors.Is(err, ErrEmailCodeRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": err.Error()})
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
 		case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access code"})
 		}
@@ -1168,9 +1170,9 @@ func (h *Handler) OwnerResendFailedAccessCodes(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrEmailVerificationDisabled):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": httpx.SafeMessage("verification_disabled", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access codes"})
 		}
@@ -1183,7 +1185,7 @@ func (h *Handler) OwnerResendFailedAccessCodes(c *gin.Context) {
 func (h *Handler) Create(c *gin.Context) {
 	var req CreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -1227,20 +1229,20 @@ func (h *Handler) Create(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrDocumentNotReady):
-			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
 		case errors.Is(err, ErrDuplicateName):
-			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
 		case errors.Is(err, ErrInvalidPermission):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_permission_config", "message": httpx.SafeMessage("invalid_permission_config", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
 
 	item, err := h.linkResponse(c, link)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusCreated, item)
@@ -1334,7 +1336,7 @@ func (h *Handler) Access(c *gin.Context) {
 		InviteToken string `json:"invite_token"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -1384,9 +1386,10 @@ func (h *Handler) Access(c *gin.Context) {
 				if errors.Is(err, ErrInviteExpired) {
 					status = http.StatusGone
 				}
+				code := accessErrorCode(err)
 				payload := gin.H{
-					"code":                      accessErrorCode(err),
-					"message":                   err.Error(),
+					"code":                      code,
+					"message":                   httpx.SafeMessage(code, err),
 					"requiresEmail":             requiresEmail,
 					"requiresEmailVerification": requiresEmailVerification,
 					"requiresPassword":          link.RequirePassword,
@@ -1407,7 +1410,7 @@ func (h *Handler) Access(c *gin.Context) {
 	}
 
 	if err := h.analytics.RecordLinkOpened(c.Request.Context(), result.Link, result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	_ = h.service.EvaluateNotificationRules(c.Request.Context(), result.Link, "first_open", result.VisitorID, result.Email, nil)
@@ -1601,7 +1604,7 @@ func (h *Handler) PublicNDASignedDownload(c *gin.Context) {
 	}
 	obj, err := h.storage.GetObject(c.Request.Context(), row.SignedFileKey)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	defer obj.Close()
@@ -1660,22 +1663,22 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 		Email string `json:"email" binding:"required,email"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
 	if err := h.service.SendEmailVerificationCode(c.Request.Context(), token, body.Email, h.cfg.ViewerBaseURL); err != nil {
 		switch {
 		case errors.Is(err, ErrLinkNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		case errors.Is(err, ErrRequiresEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": httpx.SafeMessage("email_required", err)})
 		case errors.Is(err, ErrBlockedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": httpx.SafeMessage("blocked_email", err)})
 		case errors.Is(err, ErrNotAllowedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
 		case errors.Is(err, ErrEmailCodeRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": err.Error()})
+			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
 		}
@@ -1748,7 +1751,7 @@ func (h *Handler) PublicSignedURL(c *gin.Context) {
 		PageNumber: int32(pageNum),
 	})
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "page_not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "page_not_found", "message": httpx.SafeMessage("page_not_found", err)})
 		return
 	}
 
@@ -1793,7 +1796,7 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		WorkspaceID: result.Link.WorkspaceID,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -1867,7 +1870,7 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 		c.Query("sig"),
 	)
 	if err != nil {
-		c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signature", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signature", "message": httpx.SafeMessage("invalid_signature", err)})
 		return
 	}
 
@@ -1875,7 +1878,7 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 	watermark := c.Query(watermarkQueryParam)
 	if watermark != "" {
 		if err := VerifyDownloadWatermark(h.cfg.URLSigningSecret, key, c.Query("token"), c.Query("vid"), expires, watermark, c.Query(watermarkSigQueryParam)); err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signature", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signature", "message": httpx.SafeMessage("invalid_signature", err)})
 			return
 		}
 	}
@@ -1883,7 +1886,7 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 	ctx := c.Request.Context()
 	obj, err := h.storage.GetObject(ctx, key)
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
 		return
 	}
 	defer obj.Close()
@@ -1905,7 +1908,7 @@ func (h *Handler) ServeSignedFile(c *gin.Context) {
 	if watermark != "" && shouldApplyServerWatermark(key) {
 		var buf bytes.Buffer
 		if err := applyPDFWatermark(obj, &buf, watermark); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "watermark_failed", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "watermark_failed", "message": httpx.SafeMessage("watermark_failed", err)})
 			return
 		}
 		c.Header("Content-Length", strconv.Itoa(buf.Len()))
@@ -1941,7 +1944,7 @@ func (h *Handler) PublicDocumentPages(c *gin.Context) {
 	docIDPG := pgtype.UUID{Bytes: docID, Valid: true}
 	rows, err := h.service.queries.ListPagesByDocument(ctx, docIDPG)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -2122,45 +2125,45 @@ func publicAccessRequestFromContext(c *gin.Context) AccessRequest {
 func mapAccessError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrLinkNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 	case errors.Is(err, ErrLinkExpired):
-		c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": err.Error()})
+		c.JSON(http.StatusGone, gin.H{"code": "link_expired", "message": httpx.SafeMessage("link_expired", err)})
 	case errors.Is(err, ErrLinkRevoked):
-		c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": err.Error()})
+		c.JSON(http.StatusGone, gin.H{"code": "link_revoked", "message": httpx.SafeMessage("link_revoked", err)})
 	case errors.Is(err, ErrLinkDisabled):
-		c.JSON(http.StatusGone, gin.H{"code": "link_disabled", "message": err.Error()})
+		c.JSON(http.StatusGone, gin.H{"code": "link_disabled", "message": httpx.SafeMessage("link_disabled", err)})
 	case errors.Is(err, ErrLinkArchived):
-		c.JSON(http.StatusGone, gin.H{"code": "link_archived", "message": err.Error()})
+		c.JSON(http.StatusGone, gin.H{"code": "link_archived", "message": httpx.SafeMessage("link_archived", err)})
 	case errors.Is(err, ErrLinkMaxAccessReached):
-		c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": err.Error()})
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "link_max_access_reached", "message": httpx.SafeMessage("link_max_access_reached", err)})
 	case errors.Is(err, ErrRequiresEmail):
-		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email", "message": httpx.SafeMessage("requires_email", err)})
 	case errors.Is(err, ErrRequiresEmailCode):
-		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email_code", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "requires_email_code", "message": httpx.SafeMessage("requires_email_code", err)})
 	case errors.Is(err, ErrInvalidEmailCode):
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_email_code", "message": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_email_code", "message": httpx.SafeMessage("invalid_email_code", err)})
 	case errors.Is(err, ErrRequiresNDA):
-		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "nda_required", "message": httpx.SafeMessage("nda_required", err)})
 	case errors.Is(err, ErrInvalidSignerName):
-		c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signer_name", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "invalid_signer_name", "message": httpx.SafeMessage("invalid_signer_name", err)})
 	case errors.Is(err, ErrRequiresPassword):
-		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "requires_password", "message": httpx.SafeMessage("requires_password", err)})
 	case errors.Is(err, ErrInvalidPassword):
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_password", "message": err.Error()})
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "invalid_password", "message": httpx.SafeMessage("invalid_password", err)})
 	case errors.Is(err, ErrBlockedEmail):
-		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": httpx.SafeMessage("blocked_email", err)})
 	case errors.Is(err, ErrNotAllowedEmail):
-		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
 	case errors.Is(err, ErrDeliveryEmailMismatch):
-		c.JSON(http.StatusForbidden, gin.H{"code": "email_mismatch", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "email_mismatch", "message": httpx.SafeMessage("email_mismatch", err)})
 	case errors.Is(err, ErrInviteExpired):
-		c.JSON(http.StatusGone, gin.H{"code": "invite_expired", "message": err.Error()})
+		c.JSON(http.StatusGone, gin.H{"code": "invite_expired", "message": httpx.SafeMessage("invite_expired", err)})
 	case errors.Is(err, ErrInviteRevoked):
-		c.JSON(http.StatusForbidden, gin.H{"code": "invite_revoked", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "invite_revoked", "message": httpx.SafeMessage("invite_revoked", err)})
 	case errors.Is(err, ErrInviteAlreadyUsed):
-		c.JSON(http.StatusForbidden, gin.H{"code": "invite_already_used", "message": err.Error()})
+		c.JSON(http.StatusForbidden, gin.H{"code": "invite_already_used", "message": httpx.SafeMessage("invite_already_used", err)})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 	}
 }
 
@@ -2530,7 +2533,7 @@ func (h *Handler) ReverseFunnel(c *gin.Context) {
 	}
 	links, err := h.service.ListDormantLinks(c.Request.Context(), pgtype.UUID{Bytes: wUUID, Valid: true})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	type rec struct {
@@ -2578,7 +2581,7 @@ func (h *Handler) ReverseFunnel(c *gin.Context) {
 func (h *Handler) ArchiveLink(c *gin.Context) {
 	wsID, lID := middleware.WorkspaceIDFrom(c), c.Param("id")
 	if _, err := h.service.ArchiveLink(c.Request.Context(), wsID, lID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "archived"})
@@ -2606,7 +2609,7 @@ func (h *Handler) RenewLink(c *gin.Context) {
 	}
 
 	if _, err := h.service.RenewLink(c.Request.Context(), wsID, lID, expiresAt); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "renewed"})
@@ -2734,7 +2737,7 @@ func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 		Answer string `json:"answer" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
@@ -2759,7 +2762,7 @@ func writeAskHostError(c *gin.Context, err error) {
 	case errors.Is(err, ErrNotFoundInWorkspace):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
 	default:
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 	}
 }
 
@@ -2774,7 +2777,7 @@ func (h *Handler) ListLinkFileRequests(c *gin.Context) {
 	}
 	reqs, err := h.service.ListLinkFileRequests(c.Request.Context(), link.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": reqs})
@@ -2791,17 +2794,17 @@ func (h *Handler) UpdateFileRequestStatus(c *gin.Context) {
 		Status string `json:"status" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	rID := pgtype.UUID{Bytes: rid, Valid: true}
 	if err := h.service.UpdateFileRequestStatus(c.Request.Context(), rID, body.Status); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	req, err := h.service.GetFileRequestByID(c.Request.Context(), rID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": req})
@@ -2844,7 +2847,7 @@ func (h *Handler) ListUploadedFiles(c *gin.Context) {
 	}
 	files, err := h.service.ListUploadedFiles(c.Request.Context(), link.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	items := make([]uploadedFileResponse, len(files))
@@ -2873,7 +2876,7 @@ func (h *Handler) ApproveUploadedFile(c *gin.Context) {
 	}
 	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
 	if err := h.service.ApproveUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "approved"})
@@ -2898,7 +2901,7 @@ func (h *Handler) RejectUploadedFile(c *gin.Context) {
 	}
 	uID, _ := uuid.Parse(middleware.UserIDFrom(c))
 	if err := h.service.RejectUploadedFile(c.Request.Context(), pgtype.UUID{Bytes: fID, Valid: true}, pgtype.UUID{Bytes: uID, Valid: true}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"status": "rejected"})
@@ -2939,12 +2942,12 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 		Question string `json:"question" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	q, err := h.service.CreateVisitorQuestion(c.Request.Context(), result.Link, result.VisitorID, result.Email, body.Question)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, body.Question)
@@ -2961,7 +2964,7 @@ func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
 	h.writeSessionRefreshHeader(c, result)
 	questions, err := h.service.ListMyVisitorQuestions(c.Request.Context(), result.Link.ID, result.VisitorID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": mapVisitorQuestions(questions)})
@@ -2983,12 +2986,12 @@ func (h *Handler) PublicCreateFileRequest(c *gin.Context) {
 		Description string `json:"description" binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	req, err := h.service.CreateFileRequest(c.Request.Context(), result.Link, result.VisitorID, result.Email, body.Description)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusCreated, gin.H{"fileRequest": req})
@@ -3004,7 +3007,7 @@ func (h *Handler) PublicListMyFileRequests(c *gin.Context) {
 	h.writeSessionRefreshHeader(c, result)
 	reqs, err := h.service.ListMyFileRequests(c.Request.Context(), result.Link.ID, result.VisitorID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"fileRequests": reqs})
@@ -3063,15 +3066,15 @@ func (h *Handler) PublicUploadFile(c *gin.Context) {
 	if err != nil {
 		switch {
 		case strings.Contains(err.Error(), "not a file request link"):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_file_request_link", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "not_file_request_link", "message": httpx.SafeMessage("not_file_request_link", err)})
 		case strings.Contains(err.Error(), "unsupported file type"):
-			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_type", "message": err.Error()})
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_type", "message": httpx.SafeMessage("unsupported_type", err)})
 		case strings.Contains(err.Error(), "too large"):
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "file_too_large", "message": err.Error()})
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "file_too_large", "message": httpx.SafeMessage("file_too_large", err)})
 		case strings.Contains(err.Error(), "empty"):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "file_empty", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "file_empty", "message": httpx.SafeMessage("file_empty", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}

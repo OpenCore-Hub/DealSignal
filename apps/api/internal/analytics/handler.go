@@ -9,14 +9,16 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Handler exposes analytics endpoints.
@@ -49,7 +51,7 @@ func (h *Handler) GetScore(c *gin.Context) {
 
 	score, err := h.service.GetScore(c.Request.Context(), pgUUID(linkID), pgUUID(workspaceID), circleFromQuery(c))
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		return
 	}
 
@@ -68,7 +70,7 @@ func (h *Handler) GetDashboardStats(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	stats, err := h.service.DashboardStats(c.Request.Context(), workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -93,7 +95,7 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	overview, err := h.service.InsightsOverview(c.Request.Context(), workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -110,7 +112,7 @@ func (h *Handler) GetDocumentVisitors(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	visitors, err := h.service.DocumentVisitors(c.Request.Context(), c.Param("documentId"), workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -133,7 +135,7 @@ func (h *Handler) GetPageAnalytics(c *gin.Context) {
 	rows, err := h.service.PageAnalytics(c.Request.Context(), c.Param("documentId"), workspaceID)
 	if err != nil {
 		slog.Error("GetPageAnalytics failed", "document_id", c.Param("documentId"), "workspace_id", workspaceID, "error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -162,7 +164,7 @@ type viewerEventRequest struct {
 func (h *Handler) RecordViewerEvent(c *gin.Context) {
 	var req viewerEventRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -177,7 +179,7 @@ func (h *Handler) RecordViewerEvent(c *gin.Context) {
 			c.Status(http.StatusNoContent)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 

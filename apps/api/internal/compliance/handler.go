@@ -3,11 +3,13 @@ package compliance
 import (
 	"net/http"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
 )
 
 // Handler exposes workspace compliance endpoints.
@@ -37,7 +39,7 @@ func (h *Handler) ExportVisitorData(c *gin.Context) {
 	email := c.Query("visitor_email")
 	data, err := h.service.ExportVisitorData(c.Request.Context(), wsID, userID, email)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "export_failed", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "export_failed", "message": httpx.SafeMessage("export_failed", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": data})
@@ -52,12 +54,12 @@ func (h *Handler) AnonymizeVisitorData(c *gin.Context) {
 		VisitorEmail string `json:"visitor_email" binding:"required,email"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
 		return
 	}
 	summary, err := h.service.AnonymizeVisitorData(c.Request.Context(), wsID, userID, req.VisitorEmail)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "anonymize_failed", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "anonymize_failed", "message": httpx.SafeMessage("anonymize_failed", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": summary})
@@ -71,7 +73,7 @@ func (h *Handler) DeleteVisitorData(c *gin.Context) {
 	email := c.Query("visitor_email")
 	summary, err := h.service.DeleteVisitorData(c.Request.Context(), wsID, userID, email)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "delete_failed", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "delete_failed", "message": httpx.SafeMessage("delete_failed", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": summary})
@@ -81,7 +83,7 @@ func (h *Handler) requireManager(c *gin.Context) (pgtype.UUID, pgtype.UUID, bool
 	userID := middleware.UserIDFrom(c)
 	wsID, err := workspaceUUIDFrom(c)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": httpx.SafeMessage("invalid_workspace", err)})
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
 	if !h.workspaceSvc.IsManager(c.Request.Context(), userID, uuid.UUID(wsID.Bytes).String()) {
@@ -90,7 +92,7 @@ func (h *Handler) requireManager(c *gin.Context) (pgtype.UUID, pgtype.UUID, bool
 	}
 	actorUUID, err := uuid.Parse(userID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_user", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_user", "message": httpx.SafeMessage("invalid_user", err)})
 		return pgtype.UUID{}, pgtype.UUID{}, false
 	}
 	return wsID, pgtype.UUID{Bytes: actorUUID, Valid: true}, true

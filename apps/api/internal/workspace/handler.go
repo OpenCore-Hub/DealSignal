@@ -1,10 +1,15 @@
 package workspace
 
 import (
+	"errors"
 	"net/http"
+	"strings"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
+	"github.com/jackc/pgx/v5/pgconn"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
 type createWorkspaceRequest struct {
@@ -74,7 +79,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) Create(c *gin.Context) {
 	var req createWorkspaceRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -83,11 +88,20 @@ func (h *Handler) Create(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case ErrInvalidSlug:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_slug", "message": httpx.SafeMessage("invalid_slug", err)})
 		case ErrSlugExists:
-			c.JSON(http.StatusConflict, gin.H{"code": "slug_conflict", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "slug_conflict", "message": httpx.SafeMessage("slug_conflict", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			// Stale JWT / missing user row commonly surfaces as FK violation on workspace_members.
+			var pgErr *pgconn.PgError
+			if errors.As(err, &pgErr) && pgErr.Code == "23503" && strings.Contains(pgErr.ConstraintName, "user") {
+				c.JSON(http.StatusUnauthorized, gin.H{
+					"code":    "unauthorized",
+					"message": "session is no longer valid; please sign in again",
+				})
+				return
+			}
+			httpx.Internal(c, err, "create workspace")
 		}
 		return
 	}
@@ -100,7 +114,7 @@ func (h *Handler) List(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
 	workspaces, err := h.service.List(c.Request.Context(), userID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": workspaces})
@@ -114,10 +128,10 @@ func (h *Handler) Get(c *gin.Context) {
 	ws, err := h.service.Get(c.Request.Context(), userID, workspaceID, tenantID)
 	if err != nil {
 		if err == ErrNotMember {
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			return
 		}
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
 		return
 	}
 	c.JSON(http.StatusOK, ws)
@@ -138,7 +152,7 @@ func (h *Handler) ListMembers(c *gin.Context) {
 func (h *Handler) AddMember(c *gin.Context) {
 	var req addMemberRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -150,13 +164,13 @@ func (h *Handler) AddMember(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case ErrNotMember, ErrNotManager:
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case ErrAlreadyMember:
-			c.JSON(http.StatusConflict, gin.H{"code": "already_member", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "already_member", "message": httpx.SafeMessage("already_member", err)})
 		case ErrInvalidRole:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -167,7 +181,7 @@ func (h *Handler) AddMember(c *gin.Context) {
 func (h *Handler) CreateInvitation(c *gin.Context) {
 	var req createInvitationRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -179,11 +193,11 @@ func (h *Handler) CreateInvitation(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case ErrNotMember, ErrNotManager:
-			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": err.Error()})
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 		case ErrInvalidRole:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_role", "message": httpx.SafeMessage("invalid_role", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -199,13 +213,13 @@ func (h *Handler) AcceptInvitation(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case ErrInvitationNotFound:
-			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "invitation_not_found", "message": httpx.SafeMessage("invitation_not_found", err)})
 		case ErrInvitationExpired:
-			c.JSON(http.StatusGone, gin.H{"code": "invitation_expired", "message": err.Error()})
+			c.JSON(http.StatusGone, gin.H{"code": "invitation_expired", "message": httpx.SafeMessage("invitation_expired", err)})
 		case ErrInvitationUsed:
-			c.JSON(http.StatusConflict, gin.H{"code": "invitation_used", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "invitation_used", "message": httpx.SafeMessage("invitation_used", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -227,7 +241,7 @@ func (h *Handler) GetSettings(c *gin.Context) {
 func (h *Handler) UpdateSettings(c *gin.Context) {
 	var req updateSettingsRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	userID := middleware.UserIDFrom(c)
@@ -259,7 +273,7 @@ func (h *Handler) GetSecurity(c *gin.Context) {
 func (h *Handler) UpdateSecurity(c *gin.Context) {
 	var req updateSecurityRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	userID := middleware.UserIDFrom(c)

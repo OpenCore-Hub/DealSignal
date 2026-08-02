@@ -12,15 +12,17 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/watermark"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
 var errInvalidDocumentID = errors.New("invalid document id")
@@ -64,7 +66,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) Create(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_file", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_file", "message": httpx.SafeMessage("invalid_file", err)})
 		return
 	}
 
@@ -77,11 +79,11 @@ func (h *Handler) Create(c *gin.Context) {
 	if err != nil {
 		switch err {
 		case ErrFileTooLarge:
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": err.Error()})
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": httpx.SafeMessage("payload_too_large", err)})
 		case ErrInvalidFileType, ErrInvalidFileContent:
-			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": err.Error()})
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": httpx.SafeMessage("unsupported_media_type", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -92,12 +94,12 @@ func (h *Handler) Create(c *gin.Context) {
 		TenantID:    pgUUID(tenantID),
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	job, err := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), dbDoc.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusCreated, documentResponse(docInfo{
@@ -139,7 +141,7 @@ func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	wsUUID, err := uuid.Parse(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": httpx.SafeMessage("invalid_workspace", err)})
 		return
 	}
 
@@ -311,7 +313,7 @@ func (h *Handler) Archive(c *gin.Context) {
 		WorkspaceID: pgUUID(workspaceID),
 		TenantID:    pgUUID(tenantID),
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -345,7 +347,7 @@ func (h *Handler) Unarchive(c *gin.Context) {
 		WorkspaceID: pgUUID(workspaceID),
 		TenantID:    pgUUID(tenantID),
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -362,7 +364,7 @@ func (h *Handler) Delete(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	wsUUID, err := uuid.Parse(workspaceID)
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": httpx.SafeMessage("invalid_workspace", err)})
 		return
 	}
 
@@ -382,7 +384,7 @@ func (h *Handler) Delete(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": "document not found"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -390,7 +392,7 @@ func (h *Handler) Delete(c *gin.Context) {
 		ID:          pgtype.UUID{Bytes: docID, Valid: true},
 		WorkspaceID: pgtype.UUID{Bytes: wsUUID, Valid: true},
 	}); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -410,7 +412,7 @@ func (h *Handler) ListPages(c *gin.Context) {
 
 	pages, err := h.uploadService.queries.ListPagesByDocument(c.Request.Context(), doc.ID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"document_id": uuidToString(doc.ID), "pages": pageList(pages), "total": len(pages)})
@@ -451,7 +453,7 @@ func (h *Handler) DownloadURL(c *gin.Context) {
 	expiry := 15 * time.Minute
 	url, err := h.storage.PresignedGetURL(ctx, doc.StorageKey, expiry)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": httpx.SafeMessage("signature_error", err)})
 		return
 	}
 
@@ -500,7 +502,7 @@ func (h *Handler) Download(c *gin.Context) {
 
 	obj, err := h.storage.GetObject(ctx, doc.StorageKey)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "storage_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "storage_error", "message": httpx.SafeMessage("storage_error", err)})
 		return
 	}
 	defer obj.Close()
@@ -515,7 +517,7 @@ func (h *Handler) Download(c *gin.Context) {
 
 		var buf bytes.Buffer
 		if err := watermark.ApplyPDF(obj, &buf, wmText); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "watermark_failed", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "watermark_failed", "message": httpx.SafeMessage("watermark_failed", err)})
 			return
 		}
 		c.Header("Content-Length", strconv.Itoa(buf.Len()))
@@ -546,7 +548,7 @@ func (h *Handler) SignedURL(c *gin.Context) {
 		Purpose    string `json:"purpose,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -565,7 +567,7 @@ func (h *Handler) SignedURL(c *gin.Context) {
 		PageNumber: int32(req.PageNumber),
 	})
 	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "page_not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "page_not_found", "message": httpx.SafeMessage("page_not_found", err)})
 		return
 	}
 
@@ -574,7 +576,7 @@ func (h *Handler) SignedURL(c *gin.Context) {
 	_ = req.Purpose // reserved for future thumbnail purpose handling
 	url, err := h.storage.PresignedGetURL(c.Request.Context(), key, expiry)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "signature_error", "message": httpx.SafeMessage("signature_error", err)})
 		return
 	}
 
@@ -635,7 +637,7 @@ func (h *Handler) UpdateCategory(c *gin.Context) {
 		Category string `json:"category" binding:"required,oneof=general agreement"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -646,7 +648,7 @@ func (h *Handler) UpdateCategory(c *gin.Context) {
 		WorkspaceID: pgUUID(workspaceID),
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -660,10 +662,10 @@ func (h *Handler) UpdateCategory(c *gin.Context) {
 
 func (h *Handler) handleDocError(c *gin.Context, err error) {
 	if err == errInvalidDocumentID {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": httpx.SafeMessage("invalid_id", err)})
 		return
 	}
-	c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": err.Error()})
+	c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": httpx.SafeMessage("document_not_found", err)})
 }
 
 // docInfo holds the common document fields needed for API responses.

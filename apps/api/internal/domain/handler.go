@@ -4,16 +4,18 @@ import (
 	"errors"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/workspace"
-	"github.com/gin-gonic/gin"
 )
 
 // Handler exposes tenant domain HTTP endpoints.
 type Handler struct {
-	service       *Service
-	workspaceSvc  *workspace.Service
-	validator     middleware.TokenValidator
+	service      *Service
+	workspaceSvc *workspace.Service
+	validator    middleware.TokenValidator
 }
 
 // NewHandler creates a domain handler.
@@ -60,7 +62,7 @@ func (h *Handler) requireTenantAdmin(c *gin.Context, tenantID string) (string, b
 func (h *Handler) Register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -73,11 +75,11 @@ func (h *Handler) Register(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrInvalidDomain), errors.Is(err, ErrInvalidSubdomain):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_domain", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_domain", "message": httpx.SafeMessage("invalid_domain", err)})
 		case errors.Is(err, ErrDomainExists):
-			c.JSON(http.StatusConflict, gin.H{"code": "domain_exists", "message": err.Error()})
+			c.JSON(http.StatusConflict, gin.H{"code": "domain_exists", "message": httpx.SafeMessage("domain_exists", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -92,7 +94,7 @@ func (h *Handler) List(c *gin.Context) {
 
 	domains, err := h.service.List(c.Request.Context(), tenantID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": domains})
@@ -108,11 +110,11 @@ func (h *Handler) Verify(c *gin.Context) {
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrDomainNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
 		case errors.Is(err, ErrNotVerified):
-			c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "not_verified", "message": err.Error()})
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"code": "not_verified", "message": httpx.SafeMessage("not_verified", err)})
 		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
@@ -126,7 +128,7 @@ func (h *Handler) Delete(c *gin.Context) {
 	}
 
 	if err := h.service.Delete(c.Request.Context(), tenantID, c.Param("id")); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)

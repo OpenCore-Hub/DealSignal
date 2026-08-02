@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
 // Handler exposes marketing HTTP endpoints.
@@ -29,7 +31,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 func (h *Handler) SendBatch(c *gin.Context) {
 	var req SendBatchRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -40,10 +42,10 @@ func (h *Handler) SendBatch(c *gin.Context) {
 	result, err := h.service.SendBatch(ctx, workspaceID, req)
 	if err != nil {
 		if errors.Is(err, ErrNoRecipients) || errors.Is(err, ErrSubjectRequired) {
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": result})

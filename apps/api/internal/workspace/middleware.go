@@ -4,8 +4,10 @@ import (
 	"context"
 	"net/http"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
 // AuthMiddleware validates that the authenticated user is a member of the
@@ -26,7 +28,7 @@ func AuthMiddleware(svc *Service) gin.HandlerFunc {
 				c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "not a member of this workspace"})
 				return
 			}
-			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"code": "workspace_not_found", "message": err.Error()})
+			c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"code": "workspace_not_found", "message": httpx.SafeMessage("workspace_not_found", err)})
 			return
 		}
 

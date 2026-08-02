@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 )
 
 // WebhookHandler receives CRM deal stage change notifications.
@@ -21,7 +23,7 @@ func (h *WebhookHandler) HandleDealStageChange(c *gin.Context) {
 		WorkspaceID  string `json:"workspace_id"  binding:"required"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_payload", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_payload", "message": httpx.SafeMessage("invalid_payload", err)})
 		return
 	}
 

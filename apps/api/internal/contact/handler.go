@@ -5,8 +5,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
 // Handler exposes contact endpoints.
@@ -34,7 +36,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Name  string `json:"name,omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 
@@ -44,7 +46,7 @@ func (h *Handler) Create(c *gin.Context) {
 		Name:  req.Name,
 	})
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusCreated, contact)
@@ -55,7 +57,7 @@ func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	contacts, err := h.service.ListContacts(c.Request.Context(), workspaceID)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": contacts})
@@ -67,10 +69,10 @@ func (h *Handler) Get(c *gin.Context) {
 	contact, err := h.service.GetContact(c.Request.Context(), workspaceID, c.Param("id"))
 	if err != nil {
 		if errors.Is(err, ErrContactNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, contact)
@@ -82,10 +84,10 @@ func (h *Handler) ListActivities(c *gin.Context) {
 	activities, err := h.service.ListActivities(c.Request.Context(), workspaceID, c.Param("id"), 100)
 	if err != nil {
 		if errors.Is(err, ErrContactNotFound) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": err.Error()})
+			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": activities})

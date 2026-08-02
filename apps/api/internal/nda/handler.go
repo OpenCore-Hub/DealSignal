@@ -5,8 +5,10 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
 // Handler exposes workspace NDA template and response APIs.
@@ -35,7 +37,7 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 	includeArchived := c.Query("include_archived") == "true"
 	items, err := h.svc.ListTemplates(c.Request.Context(), wsID, includeArchived)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -50,7 +52,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 		RequireSignerName *bool  `json:"require_signer_name"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	requireName := true
@@ -80,7 +82,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 		RequireSignerName *bool  `json:"require_signer_name"`
 	}
 	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
 	requireName := true
@@ -107,7 +109,7 @@ func (h *Handler) ArchiveTemplate(c *gin.Context) {
 func (h *Handler) ListResponses(c *gin.Context) {
 	items, err := h.svc.ListResponses(c.Request.Context(), c.Param("workspaceId"), c.Param("templateId"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -116,7 +118,7 @@ func (h *Handler) ListResponses(c *gin.Context) {
 func (h *Handler) ListLinkResponses(c *gin.Context) {
 	items, err := h.svc.ListLinkResponses(c.Request.Context(), c.Param("workspaceId"), c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": err.Error()})
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": items})
@@ -143,14 +145,14 @@ func (h *Handler) DownloadResponse(c *gin.Context) {
 func mapNDAError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrTemplateNotFound), errors.Is(err, ErrAgreementNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": err.Error()})
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
 	case errors.Is(err, ErrTemplateArchived):
-		c.JSON(http.StatusConflict, gin.H{"code": "template_archived", "message": err.Error()})
+		c.JSON(http.StatusConflict, gin.H{"code": "template_archived", "message": httpx.SafeMessage("template_archived", err)})
 	case errors.Is(err, ErrTemplateHasResponses):
-		c.JSON(http.StatusConflict, gin.H{"code": "template_locked", "message": err.Error()})
+		c.JSON(http.StatusConflict, gin.H{"code": "template_locked", "message": httpx.SafeMessage("template_locked", err)})
 	case errors.Is(err, ErrInvalidSignerName):
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_signer_name", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_signer_name", "message": httpx.SafeMessage("invalid_signer_name", err)})
 	default:
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": err.Error()})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 	}
 }
