@@ -56,7 +56,7 @@
 - ChatGPT 气泡墙 / 人格化 / 无出处闲聊
 - 来源默认收缩为「来源 N >」侧栏
 - 访客 AI Ask Docs 通道（可预留 `actor` 字段，本里程碑不做）
-- SSE 流式（同一 turn 模型可后续挂接）
+- 上游 docling 原生 token 流（阻塞 JSON 时已合成 `…/query/stream`：phase→sources?→token*→done）
 - 与 Ask Host（`link_visitor_questions`）混为同一面板
 
 ---
@@ -183,8 +183,8 @@
 
 ### 6.4 保留策略
 
-- Recommended Default：**热数据 90 天**（可配置）。
-- 超期 archive job：本里程碑不做；预留与旧 Ask Docs 冷热分层同思路。
+- Recommended Default：**热数据 90 天**（`KNOWLEDGE_QA_RETENTION_DAYS`，`0` 关闭）。
+- 日更 purge：`knowledge.RetentionCleaner` 按 `COALESCE(last_turn_at, updated_at)` 删除过期 session（turns/feedback CASCADE）。冷热分层归档仍可后置。
 
 ---
 
@@ -200,19 +200,24 @@
 | `POST` | `/deal-rooms/:roomId/knowledge/sessions` | 显式建会话（「新会话」）；通常可省略，由 query 懒创建 |
 | `GET` | `/deal-rooms/:roomId/knowledge/sessions` | 列表：`limit` + cursor；摘要含 title、last_turn_at、turn_count、question_preview |
 | `GET` | `/deal-rooms/:roomId/knowledge/sessions/:sessionId` | session + turns（含 hits） |
-| `POST` | `/deal-rooms/:roomId/knowledge/sessions/:sessionId/query` | 执行检索/生成，**原子追加 turn**，返回 `{ turn, …queryFields }` |
-| `POST` | `/deal-rooms/:roomId/knowledge/query` | **保留**无会话探测；产品主路径走 session query |
+| `POST` | `/deal-rooms/:roomId/knowledge/sessions/query` | JSON：执行检索/生成，**原子追加 turn**，返回 `{ sessionId, turn, … }` |
+| `POST` | `/deal-rooms/:roomId/knowledge/sessions/query/stream` | SSE（Phase-2）：`phase(retrieving)` → `phase(generating)?` → `sources?` → `token*` → `done`；token 由已审计答案切分（上游仍阻塞）；拒答不发 grounded sources；落库规则同 JSON |
+| `POST` | `/deal-rooms/:roomId/knowledge/query` | **保留**无会话探测；产品主路径走 session query/stream |
 
 **懒创建约定（推荐实现）**
 
 ```
 POST /deal-rooms/:roomId/knowledge/sessions/query
-body: { session_id?: string, query, answer?, top_k? }
+body: { sessionId?: string, query, answer?, top_k? }
+
+POST /deal-rooms/:roomId/knowledge/sessions/query/stream
+body: 同上；Accept: text/event-stream
 ```
 
-- 无 `session_id` 或 session 已 `closed` → 创建新 `active` session 再提问  
-- 有有效 `session_id` → 追加 turn  
-- 响应带 `session_id`，前端写入 store  
+- 无 `sessionId` 或 session 已 `closed` → 创建新 `active` session 再提问  
+- 有有效 `sessionId` → 追加 turn  
+- 响应带 `sessionId`，前端写入 store  
+- 客户端 Abort：上游可能仍落库；UI 应在 Stop 后 hydrate `sessions/active`（审计连续）
 
 （若希望 REST 更碎，可拆成「先 POST sessions 再 POST …/sessions/:id/query」；懒创建减少空会话。）
 
@@ -364,7 +369,7 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 | 项 | 说明 |
 |----|------|
 | 懒创建单路由 vs 两步 REST | 实现期二选一，契约以「首次提问建 session」为准 |
-| 90 天清理 job | 后置 |
+| 90 天清理 job | 已落地热数据 purge；冷归档分层仍后置 |
 | 建议追问 V2（LLM） | 后置；须评测出室风险 |
 | Visitor / Viewer 复用 | 组件白名单对齐哲学；本里程碑不做通道 |
 
@@ -376,4 +381,8 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 |------|------|
 | 2026-08-03 | 初稿定稿：Phase A/B/C + 已拍板三项默认 |
 | 2026-08-03 | Phase A 实现：migration `111`、session query API、Turn 时间线 + 刷新恢复 |
+| 2026-08-03 | MSW e2e：A1–A5 / B1–B2 / C1–C2（`e2e/deal-room-knowledge-qa.spec.ts`）+ coarse SSE stream |
+| 2026-08-03 | A5：corpus override 经 Cache 跨导航；e2e `waitForMsw` 消除 worker.start 竞态；B1 `askOnDesk` 先填再点 |
+| 2026-08-03 | Stream Phase-2：`token*` 合成（`answerTokenChunks`）；顺序 phase→sources?→token*→done |
+| 2026-08-03 | 保留：`KNOWLEDGE_QA_RETENTION_DAYS` + `RetentionCleaner` + migration `113` |
 | 2026-08-03 | A.1 / B / C：session 列表、建议追问、feedback `112`；§1.1 现状表同步 |

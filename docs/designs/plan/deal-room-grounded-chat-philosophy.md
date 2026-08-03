@@ -160,10 +160,11 @@ Agent/后端只许发：`phase | sources | token | done | error` 与上述 paylo
 
 待演进：
 
-- `KnowledgeStreamEvent` + reducer（本设计配套代码）。  
-- `GroundedChatShell` 抽壳（答案+证据+Composer）。  
-- 后端 SSE；前端 AbortController 停止。  
-- 多轮 turns。
+- 上游 docling **原生** token 流（仍为阻塞 JSON 时，服务端按已审计答案切分 `token*`）。  
+
+已具备（相对初稿）：
+
+- `KnowledgeStreamEvent` + reducer、`GroundedChatShell`、多轮 turns、`…/sessions/query/stream`（phase→sources?→token*→done）。
 
 ---
 
