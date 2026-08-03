@@ -385,4 +385,9 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 | 2026-08-03 | A5：corpus override 经 Cache 跨导航；e2e `waitForMsw` 消除 worker.start 竞态；B1 `askOnDesk` 先填再点 |
 | 2026-08-03 | Stream Phase-2：`token*` 合成（`answerTokenChunks`）；顺序 phase→sources?→token*→done |
 | 2026-08-03 | 保留：`KNOWLEDGE_QA_RETENTION_DAYS` + `RetentionCleaner` + migration `113` |
+| 2026-08-03 | 可观测：`dealsignal_knowledge_qa_*` Prometheus + `POST …/knowledge/events` cite_open |
+| 2026-08-03 | P5：`appendTurn` 用 `WithoutCancel`；FE `askingRef` + Stop 后 hydrate 重试 |
+| 2026-08-03 | 成员单飞 gate（`knowledge_query_busy` 429）+ handler SSE httptest 契约测试 |
+| 2026-08-03 | 成员 RPM：`KNOWLEDGE_QA_MEMBER_RPM`（Redis 跨副本 / 内存回退）；`knowledge_query_rate_limited` |
 | 2026-08-03 | A.1 / B / C：session 列表、建议追问、feedback `112`；§1.1 现状表同步 |
+| 2026-08-03 | Answers 配额：`knowledge_qa_turns` 时间窗计数（migration `114`）+ session/legacy query 前强制；`knowledge_query_quota_exceeded`；语料卡不再用 visitor 指标冒充 answers；MSW/e2e 覆盖开 SSE 前 429 |

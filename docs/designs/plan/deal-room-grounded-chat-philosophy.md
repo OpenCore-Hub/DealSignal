@@ -177,6 +177,20 @@ Agent/后端只许发：`phase | sources | token | done | error` 与上述 paylo
 | viewer 后退后继续追问率 | 审计连续是否成立 |
 | 同步中提问后的负反馈 | 是否需阻断或强提示 |
 
+**服务端底座（已落地 Prometheus）**
+
+| 指标 | 用途 |
+|------|------|
+| `dealsignal_knowledge_qa_turns_total{result_status,transport}` | 问答量 / 拒答率 / JSON vs SSE |
+| `dealsignal_knowledge_qa_turn_duration_seconds` | 检索+落库延迟 |
+| `dealsignal_knowledge_qa_stream_errors_total{code}` | SSE 失败与客户端取消 |
+| `dealsignal_knowledge_qa_feedback_total{kind}` | 反馈分布 |
+| `dealsignal_knowledge_qa_retention_*` | 热数据 purge 健康度 |
+| `dealsignal_knowledge_qa_cite_opens_total{turn_outcome}` | 出处/文档打开（`POST …/knowledge/events`） |
+| `dealsignal_knowledge_qa_gate_rejects_total{transport,reason}` | 单飞 busy / RPM rate_limited |
+
+出处点击率 ≈ cite_opens / turns；拒答后误导打开 ≈ cite_opens{refused} / turns{refused}。
+
 ---
 
 ## 10. 决策摘要
