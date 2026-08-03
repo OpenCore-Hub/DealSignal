@@ -136,6 +136,32 @@ type DealRoomDocument struct {
 	FolderPath  string
 	SortOrder   int32
 	CreatedAt   pgtype.Timestamptz
+	Locked      bool
+}
+
+type DealRoomRagCorpora struct {
+	RoomID             pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	ExternalTenantSlug string
+	ExternalKbSlug     string
+	Status             string
+	LastSyncedAt       pgtype.Timestamptz
+	ErrorMessage       pgtype.Text
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
+}
+
+type DealRoomRagDocument struct {
+	RoomID             pgtype.UUID
+	DocumentID         pgtype.UUID
+	WorkspaceID        pgtype.UUID
+	ExternalName       string
+	ExternalDocumentID pgtype.Text
+	Status             string
+	ChunkCount         int32
+	LastError          pgtype.Text
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }
 
 type Document struct {
@@ -241,6 +267,19 @@ type IntegrationToken struct {
 	ExternalID   pgtype.Text
 	CreatedAt    pgtype.Timestamptz
 	UpdatedAt    pgtype.Timestamptz
+}
+
+type KnowledgeSyncJob struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	JobType     string
+	Status      string
+	Attempts    int32
+	LastError   pgtype.Text
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type Link struct {
@@ -762,4 +801,12 @@ type WorkspaceMember struct {
 	UserID      pgtype.UUID
 	Role        string
 	JoinedAt    pgtype.Timestamptz
+}
+
+type WorkspaceRagTenant struct {
+	WorkspaceID        pgtype.UUID
+	ExternalTenantSlug string
+	TenantApiKey       string
+	CreatedAt          pgtype.Timestamptz
+	UpdatedAt          pgtype.Timestamptz
 }

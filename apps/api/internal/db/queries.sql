@@ -1094,6 +1094,7 @@ SELECT
     drd.folder_path,
     drd.sort_order,
     drd.created_at,
+    drd.locked,
     COALESCE(d.title, ''::text) AS document_title,
     d.page_count,
     COALESCE(d.file_size, 0::bigint) AS file_size,
@@ -1142,13 +1143,30 @@ WHERE ld.document_id = $1
 -- name: AddDealRoomDocument :one
 INSERT INTO deal_room_documents (tenant_id, workspace_id, room_id, document_id, folder_path, sort_order)
 VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at;
+RETURNING id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at, locked;
 
 -- name: ListDealRoomDocuments :many
-SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at
+SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at, locked
 FROM deal_room_documents
 WHERE room_id = $1
 ORDER BY folder_path, sort_order;
+
+-- name: GetDealRoomDocument :one
+SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at, locked
+FROM deal_room_documents
+WHERE id = $1 AND room_id = $2;
+
+-- name: GetDealRoomDocumentByDocumentID :one
+SELECT id, tenant_id, workspace_id, room_id, document_id, folder_path, sort_order, created_at, locked
+FROM deal_room_documents
+WHERE room_id = $1 AND document_id = $2;
+
+-- name: SetDealRoomDocumentsLocked :exec
+UPDATE deal_room_documents
+SET locked = sqlc.arg(locked)
+WHERE room_id = sqlc.arg(room_id)
+  AND document_id = ANY(sqlc.arg(document_ids)::uuid[]);
+
 
 -- name: GetDealRoomAggregatesByWorkspace :many
 SELECT
@@ -2165,7 +2183,7 @@ ORDER BY created_at DESC;
 -- blocked_domain / not_in_allow_list), scope_violation, rate_limit_exceeded.
 SELECT id, link_id, event_type, visitor_id, email, ip, user_agent, reason, created_at
 FROM security_events
-WHERE link_id = $1
+WHERE link_id = sqlc.arg(link_id)
   AND event_type = ANY (ARRAY[
     'rate_limit_exceeded',
     'scope_violation',
@@ -2173,8 +2191,11 @@ WHERE link_id = $1
     'blocked_domain',
     'not_in_allow_list'
   ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(created_after)::timestamptz IS NULL OR created_at >= sqlc.narg(created_after))
+  AND (sqlc.narg(created_before)::timestamptz IS NULL OR created_at < sqlc.narg(created_before))
 ORDER BY created_at DESC
-LIMIT $2;
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: ListAskHighRiskSecurityEventsByRoom :many
 SELECT
@@ -2189,8 +2210,8 @@ SELECT
     se.created_at
 FROM security_events se
 INNER JOIN links l ON l.id = se.link_id
-WHERE l.deal_room_id = $1
-  AND l.workspace_id = $2
+WHERE l.deal_room_id = sqlc.arg(deal_room_id)
+  AND l.workspace_id = sqlc.arg(workspace_id)
   AND l.status NOT IN ('deleted', 'disabled')
   AND (sqlc.narg(link_id)::uuid IS NULL OR se.link_id = sqlc.narg(link_id))
   AND se.event_type = ANY (ARRAY[
@@ -2200,8 +2221,11 @@ WHERE l.deal_room_id = $1
     'blocked_domain',
     'not_in_allow_list'
   ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(created_after)::timestamptz IS NULL OR se.created_at >= sqlc.narg(created_after))
+  AND (sqlc.narg(created_before)::timestamptz IS NULL OR se.created_at < sqlc.narg(created_before))
 ORDER BY se.created_at DESC
-LIMIT $3;
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CreateEmailLog :one
 INSERT INTO email_logs (recipient, email_type, provider, status, subject, workspace_id)
@@ -2240,6 +2264,101 @@ SELECT *
 FROM links
 WHERE workspace_id = $1 AND deal_room_id = $2 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC;
+
+-- name: GetDealRoomAnalytics :one
+WITH room_links AS (
+    SELECT l.id, l.status
+    FROM links l
+    WHERE l.workspace_id = sqlc.arg(workspace_id)
+      AND l.deal_room_id = sqlc.arg(deal_room_id)
+      AND l.status NOT IN ('deleted', 'disabled')
+),
+link_access AS (
+    SELECT al.visitor_id, al.created_at
+    FROM access_logs al
+    WHERE al.link_id IN (SELECT id FROM room_links)
+      AND al.event_type = 'link_opened'
+),
+daily_views AS (
+    SELECT DATE(la.created_at)::text AS day, COUNT(*)::bigint AS views
+    FROM link_access la
+    WHERE la.created_at >= now() - interval '30 days'
+    GROUP BY DATE(la.created_at)
+    ORDER BY day
+)
+SELECT
+    COALESCE((SELECT COUNT(*) FROM link_access), 0)::bigint AS total_views,
+    COALESCE(
+        (SELECT COUNT(DISTINCT la.visitor_id)
+         FROM link_access la
+         WHERE la.visitor_id IS NOT NULL AND la.visitor_id <> ''),
+        0
+    )::bigint AS unique_visitors,
+    COALESCE(
+        (SELECT COUNT(*) FROM room_links rl WHERE rl.status = 'active'),
+        0
+    )::bigint AS active_link_count,
+    COALESCE(
+        (SELECT COUNT(*)::bigint
+         FROM deal_room_documents drd
+         WHERE drd.room_id = sqlc.arg(deal_room_id)),
+        0
+    )::bigint AS document_count,
+    COALESCE(
+        (SELECT jsonb_agg(jsonb_build_object('day', dv.day, 'views', dv.views) ORDER BY dv.day)
+         FROM daily_views dv),
+        '[]'::jsonb
+    )::jsonb AS views_over_time;
+
+-- name: ListRecentVisitorsByDealRoom :many
+SELECT
+    COALESCE(al.visitor_id, '')::text AS visitor_id,
+    COALESCE(MAX(al.visitor_email), '')::text AS visitor_email,
+    MIN(al.created_at)::timestamptz AS first_access_at,
+    MAX(al.created_at)::timestamptz AS last_access_at,
+    COUNT(*) FILTER (WHERE al.event_type = 'link_opened')::bigint AS total_views
+FROM access_logs al
+WHERE al.link_id IN (
+        SELECT l.id
+        FROM links l
+        WHERE l.workspace_id = sqlc.arg(workspace_id)
+          AND l.deal_room_id = sqlc.arg(deal_room_id)
+          AND l.status NOT IN ('deleted', 'disabled')
+    )
+  AND al.visitor_id IS NOT NULL
+  AND al.visitor_id <> ''
+GROUP BY al.visitor_id
+ORDER BY last_access_at DESC, al.visitor_id ASC
+LIMIT sqlc.arg(page_limit);
+
+-- name: CountLinksByDealRoomFiltered :one
+SELECT count(*)::bigint
+FROM links
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND deal_room_id = sqlc.arg(deal_room_id)
+  AND status NOT IN ('deleted', 'disabled')
+  AND (
+    sqlc.arg(query)::text = ''
+    OR coalesce(name, '') ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
+    OR public_token ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
+  );
+
+-- name: ListLinksByDealRoomPage :many
+SELECT *
+FROM links
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND deal_room_id = sqlc.arg(deal_room_id)
+  AND status NOT IN ('deleted', 'disabled')
+  AND (
+    sqlc.arg(query)::text = ''
+    OR coalesce(name, '') ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
+    OR public_token ILIKE '%' || sqlc.arg(query) || '%' ESCAPE '\'
+  )
+ORDER BY
+  CASE WHEN sqlc.arg(sort_asc)::boolean THEN created_at END ASC NULLS LAST,
+  CASE WHEN NOT sqlc.arg(sort_asc)::boolean THEN created_at END DESC NULLS LAST,
+  id ASC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CreateLinkAccessRule :exec
 INSERT INTO link_access_rules (
@@ -2682,4 +2801,138 @@ FROM deal_rooms
 WHERE workspace_id = $1
   AND deleted_at IS NULL
   AND id = ANY(sqlc.arg(ids)::uuid[]);
+
+-- ---------------------------------------------------------------------------
+-- External docling-rag knowledge base mapping
+-- ---------------------------------------------------------------------------
+
+-- name: GetWorkspaceRagTenant :one
+SELECT *
+FROM workspace_rag_tenants
+WHERE workspace_id = $1;
+
+-- name: UpsertWorkspaceRagTenant :one
+INSERT INTO workspace_rag_tenants (workspace_id, external_tenant_slug, tenant_api_key)
+VALUES ($1, $2, $3)
+ON CONFLICT (workspace_id) DO UPDATE
+SET external_tenant_slug = EXCLUDED.external_tenant_slug,
+    tenant_api_key = EXCLUDED.tenant_api_key,
+    updated_at = now()
+RETURNING *;
+
+-- name: GetDealRoomRagCorpus :one
+SELECT *
+FROM deal_room_rag_corpora
+WHERE room_id = $1;
+
+-- name: UpsertDealRoomRagCorpus :one
+INSERT INTO deal_room_rag_corpora (
+    room_id, workspace_id, external_tenant_slug, external_kb_slug, status, error_message
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (room_id) DO UPDATE
+SET external_tenant_slug = EXCLUDED.external_tenant_slug,
+    external_kb_slug = EXCLUDED.external_kb_slug,
+    status = EXCLUDED.status,
+    error_message = EXCLUDED.error_message,
+    updated_at = now()
+RETURNING *;
+
+-- name: UpdateDealRoomRagCorpusStatus :one
+UPDATE deal_room_rag_corpora
+SET status = $2,
+    error_message = $3,
+    last_synced_at = CASE WHEN $2 = 'ready' OR $2 = 'degraded' THEN now() ELSE last_synced_at END,
+    updated_at = now()
+WHERE room_id = $1
+RETURNING *;
+
+-- name: UpsertDealRoomRagDocument :one
+INSERT INTO deal_room_rag_documents (
+    room_id, document_id, workspace_id, external_name, status, last_error
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (room_id, document_id) DO UPDATE
+SET external_name = EXCLUDED.external_name,
+    status = EXCLUDED.status,
+    last_error = EXCLUDED.last_error,
+    updated_at = now()
+RETURNING *;
+
+-- name: UpdateDealRoomRagDocumentSync :one
+UPDATE deal_room_rag_documents
+SET status = $3,
+    external_document_id = COALESCE(sqlc.narg(external_document_id), external_document_id),
+    chunk_count = COALESCE(sqlc.narg(chunk_count), chunk_count),
+    last_error = $4,
+    updated_at = now()
+WHERE room_id = $1 AND document_id = $2
+RETURNING *;
+
+-- name: ListDealRoomRagDocuments :many
+SELECT *
+FROM deal_room_rag_documents
+WHERE room_id = $1
+ORDER BY updated_at DESC;
+
+-- name: GetDealRoomRagDocument :one
+SELECT *
+FROM deal_room_rag_documents
+WHERE room_id = $1 AND document_id = $2;
+
+-- name: MarkMissingRagDocumentsDeleted :exec
+UPDATE deal_room_rag_documents
+SET status = 'deleted',
+    updated_at = now()
+WHERE room_id = $1
+  AND status <> 'deleted'
+  AND NOT (document_id = ANY(sqlc.arg(active_document_ids)::uuid[]));
+
+-- name: EnqueueKnowledgeSyncJob :one
+INSERT INTO knowledge_sync_jobs (workspace_id, room_id, document_id, job_type)
+VALUES ($1, $2, $3, $4)
+RETURNING *;
+
+-- name: ListPendingKnowledgeSyncJobs :many
+SELECT *
+FROM knowledge_sync_jobs
+WHERE status = 'pending'
+ORDER BY
+  CASE job_type
+    WHEN 'delete_doc' THEN 0
+    WHEN 'sync_room' THEN 1
+    ELSE 2
+  END,
+  created_at ASC
+LIMIT $1;
+
+-- name: CancelPendingKnowledgeIngestJobs :exec
+UPDATE knowledge_sync_jobs
+SET status = 'done',
+    last_error = 'superseded by delete',
+    updated_at = now()
+WHERE room_id = $1
+  AND document_id = $2
+  AND job_type = 'ingest_doc'
+  AND status = 'pending';
+
+-- name: ClaimKnowledgeSyncJob :one
+UPDATE knowledge_sync_jobs
+SET status = 'running',
+    attempts = attempts + 1,
+    updated_at = now()
+WHERE id = $1 AND status = 'pending'
+RETURNING *;
+
+-- name: FinishKnowledgeSyncJob :exec
+UPDATE knowledge_sync_jobs
+SET status = $2,
+    last_error = $3,
+    updated_at = now()
+WHERE id = $1;
+
+-- name: GetLatestKnowledgeSyncJobForRoom :one
+SELECT *
+FROM knowledge_sync_jobs
+WHERE room_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
 
