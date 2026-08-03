@@ -52,7 +52,10 @@ describe("LinkActivityDialog window controls", () => {
 
     const title = screen.getByText("Link activity");
     expect(title).toHaveClass("sr-only");
-    expect(screen.getByRole("toolbar", { name: "Window size" })).toBeInTheDocument();
+    const toolbar = screen.getByRole("toolbar", { name: "Window size" });
+    expect(toolbar).toBeInTheDocument();
+    // Close lives in the non-scrolling toolbar so it never overlaps the body scrollbar.
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
 
     const shrink = screen.getByRole("button", { name: "Shrink window" });
     const enlarge = screen.getByRole("button", { name: "Enlarge window" });

@@ -94,7 +94,7 @@ export function MarketingBatchDialog({ contacts }: MarketingBatchDialogProps) {
                 onChange={(e) => setBody(e.target.value)}
                 placeholder={t("marketingBatch.bodyPlaceholder")}
                 rows={6}
-                className="w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                className="focus-ring-field w-full rounded-lg border border-input bg-transparent px-3 py-2 text-sm outline-none placeholder:text-muted-foreground"
               />
             </div>
             <div className="flex flex-col gap-2">

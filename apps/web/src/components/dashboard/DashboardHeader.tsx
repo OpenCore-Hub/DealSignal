@@ -13,6 +13,7 @@ function displayWorkspaceName(slug: string, name?: string | null): string {
     .join(" ");
 }
 
+/** Compact welcome block for the global TopNav on the dashboard route. */
 export function DashboardHeader({ workspaceSlug }: DashboardHeaderProps) {
   const { t, i18n } = useTranslation("dashboard");
   const currentWorkspace = useUIStore((state) => state.currentWorkspace);
@@ -30,15 +31,15 @@ export function DashboardHeader({ workspaceSlug }: DashboardHeaderProps) {
   );
 
   return (
-    <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-      <div>
-        <h1 className="text-h1">{t("welcome.title")}</h1>
-        <p className="text-body mt-1 text-muted-foreground">
-          <span className="font-medium text-foreground">{workspaceName}</span>
-          <span className="mx-2">·</span>
-          <span>{today}</span>
-        </p>
-      </div>
+    <div className="min-w-0" data-testid="dashboard-welcome-header">
+      <h1 className="truncate text-base font-semibold leading-tight tracking-tight text-foreground md:text-lg">
+        {t("welcome.title")}
+      </h1>
+      <p className="mt-0.5 truncate text-xs text-muted-foreground md:text-sm">
+        <span className="font-medium text-foreground/80">{workspaceName}</span>
+        <span className="mx-1.5 text-muted-foreground/50">·</span>
+        <span>{today}</span>
+      </p>
     </div>
   );
 }

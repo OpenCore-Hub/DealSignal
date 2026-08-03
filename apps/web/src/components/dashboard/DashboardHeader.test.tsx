@@ -19,8 +19,9 @@ async function renderHeader() {
 }
 
 describe("DashboardHeader", () => {
-  it("renders workspace name and title", async () => {
+  it("renders workspace name and title in the compact header block", async () => {
     await renderHeader();
+    expect(screen.getByTestId("dashboard-welcome-header")).toBeInTheDocument();
     expect(screen.getByText("Welcome back")).toBeInTheDocument();
     expect(screen.getByText("Acme")).toBeInTheDocument();
   });

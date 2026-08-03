@@ -24,6 +24,10 @@ interface UIState {
   breadcrumbs: BreadcrumbItem[];
   setBreadcrumbs: (items: BreadcrumbItem[]) => void;
 
+  /** Optional trailing crumb for nested pages (e.g. deal room name). */
+  breadcrumbTail: BreadcrumbItem | null;
+  setBreadcrumbTail: (item: BreadcrumbItem | null) => void;
+
   reset: () => void;
 }
 
@@ -46,7 +50,16 @@ export const useUIStore = create<UIState>()(
       breadcrumbs: [],
       setBreadcrumbs: (items) => set({ breadcrumbs: items }),
 
-      reset: () => set({ currentWorkspace: null, uploadDialogOpen: false, breadcrumbs: [] }),
+      breadcrumbTail: null,
+      setBreadcrumbTail: (item) => set({ breadcrumbTail: item }),
+
+      reset: () =>
+        set({
+          currentWorkspace: null,
+          uploadDialogOpen: false,
+          breadcrumbs: [],
+          breadcrumbTail: null,
+        }),
     }),
     {
       name: "dealsignal-ui",

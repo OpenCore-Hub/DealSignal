@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import { Link, useLocation, useMatch, useNavigate, useParams } from "react-router";
 import { List, Bell, SignOut, Gear, CaretRight } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { ThemeToggle } from "@/components/common/ThemeToggle";
@@ -13,6 +13,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { DashboardHeader } from "@/components/dashboard/DashboardHeader";
+import { resolveWorkspaceNavBreadcrumbs } from "@/lib/workspaceBreadcrumbs";
 import { useUIStore } from "@/stores/uiStore";
 import { cn } from "@/lib/utils";
 import { api } from "@/lib/api";
@@ -20,10 +22,30 @@ import type { WorkspaceSettings } from "@/types";
 
 export function TopNav() {
   const { t } = useTranslation("layout");
+  const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
+  const location = useLocation();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
-  const { toggleSidebar, reset: resetUI, breadcrumbs } = useUIStore();
+  const isDashboard = Boolean(useMatch("/:workspaceSlug/dashboard"));
+  const { toggleSidebar, reset: resetUI, breadcrumbTail } = useUIStore();
   const [settings, setSettings] = useState<WorkspaceSettings | null>(null);
+
+  const breadcrumbs = useMemo(() => {
+    if (!workspaceSlug || isDashboard) return [];
+    const base = resolveWorkspaceNavBreadcrumbs(location.pathname, workspaceSlug, {
+      home: tc("home"),
+      section: (navKey) => t(navKey),
+    });
+    if (base.length === 0) return [];
+    // Last base crumb is the section root; drop its link when it is the current page.
+    const items = base.map((item, index) => {
+      if (index === base.length - 1 && !breadcrumbTail) {
+        return { label: item.label };
+      }
+      return item;
+    });
+    return breadcrumbTail ? [...items, breadcrumbTail] : items;
+  }, [workspaceSlug, isDashboard, location.pathname, breadcrumbTail, t, tc]);
 
   useEffect(() => {
     async function loadSettings() {
@@ -54,38 +76,46 @@ export function TopNav() {
         <List size={20} />
       </button>
 
-      {/* Workspace breadcrumb on mobile when sidebar collapsed */}
-      <div className="md:hidden">
-        <span className="text-h3">DealSignal</span>
-      </div>
+      {/* Dashboard welcome in the global header; breadcrumbs on other pages. */}
+      {isDashboard && workspaceSlug ? (
+        <div className="min-w-0 flex-1">
+          <DashboardHeader workspaceSlug={workspaceSlug} />
+        </div>
+      ) : (
+        <>
+          <div className="md:hidden">
+            <span className="text-h3">DealSignal</span>
+          </div>
 
-      {/* Page breadcrumb */}
-      {breadcrumbs.length > 0 && (
-        <nav
-          aria-label={t("topNav.breadcrumb")}
-          className="hidden items-center gap-1.5 text-sm md:inline-flex"
-        >
-          {breadcrumbs.map((item, index) => {
-            const isLast = index === breadcrumbs.length - 1;
-            return (
-              <span key={`${item.label}-${index}`} className="flex items-center gap-1.5">
-                {item.to ? (
-                  <Link
-                    to={item.to}
-                    className="text-muted-foreground/80 transition-colors duration-200 hover:text-foreground"
-                  >
-                    {item.label}
-                  </Link>
-                ) : (
-                  <span className="font-semibold text-foreground">{item.label}</span>
-                )}
-                {!isLast && (
-                  <CaretRight weight="regular" className="text-muted-foreground/40" size={14} />
-                )}
-              </span>
-            );
-          })}
-        </nav>
+          {breadcrumbs.length > 0 && (
+            <nav
+              aria-label={t("topNav.breadcrumb")}
+              className="hidden min-w-0 flex-1 items-center gap-1.5 text-sm md:inline-flex"
+              data-testid="workspace-breadcrumbs"
+            >
+              {breadcrumbs.map((item, index) => {
+                const isLast = index === breadcrumbs.length - 1;
+                return (
+                  <span key={`${item.label}-${index}`} className="flex items-center gap-1.5">
+                    {item.to ? (
+                      <Link
+                        to={item.to}
+                        className="text-muted-foreground/80 transition-colors duration-200 hover:text-foreground"
+                      >
+                        {item.label}
+                      </Link>
+                    ) : (
+                      <span className="font-semibold text-foreground">{item.label}</span>
+                    )}
+                    {!isLast && (
+                      <CaretRight weight="regular" className="text-muted-foreground/40" size={14} />
+                    )}
+                  </span>
+                );
+              })}
+            </nav>
+          )}
+        </>
       )}
 
       {/* Right actions */}

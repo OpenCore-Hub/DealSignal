@@ -259,7 +259,7 @@ export function SendVerificationCodeDialog({
                     onChange={(e) => setQuery(e.target.value)}
                     placeholder={t("permissions.links.sendCode.searchPlaceholder")}
                     disabled={sending}
-                    className="h-9 pl-8 focus-visible:border-ring focus-visible:ring-0 focus-visible:ring-offset-0"
+                    className="h-9 pl-8"
                     aria-label={t("permissions.links.sendCode.searchAriaLabel")}
                   />
                 </div>

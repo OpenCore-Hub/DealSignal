@@ -5,6 +5,7 @@ import {
   ArrowsOut,
   MagnifyingGlassMinus,
   MagnifyingGlassPlus,
+  X,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import {
@@ -47,6 +48,7 @@ export function LinkActivityDialog({
   onOpenChange,
 }: LinkActivityDialogProps) {
   const { t } = useTranslation("linkShare");
+  const { t: tc } = useTranslation("common");
   const [openState, setOpenState] = useState(false);
   const open = openProp ?? openState;
   const setOpen = (value: boolean) => {
@@ -85,15 +87,18 @@ export function LinkActivityDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {children && <DialogTrigger render={children} />}
       <DialogContent
+        showCloseButton={false}
         className={cn(
-          "flex flex-col",
+          // Keep chrome (toolbar/close) outside the scrollport so the
+          // scrollbar never sits under the window controls.
+          "flex flex-col gap-0 overflow-hidden p-0",
           fullscreen ? SIZE_CLASS.full : SIZE_CLASS[size],
         )}
       >
         <DialogTitle className="sr-only">{t("activity.title")}</DialogTitle>
 
         <div
-          className="absolute top-2 right-12 flex items-center gap-0.5"
+          className="flex shrink-0 items-center justify-end gap-0.5 border-b border-border/60 px-3 py-2"
           role="toolbar"
           aria-label={t("activity.windowControls")}
         >
@@ -134,9 +139,19 @@ export function LinkActivityDialog({
           >
             {fullscreen ? <ArrowsIn size={16} /> : <ArrowsOut size={16} />}
           </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setOpen(false)}
+            aria-label={tc("close")}
+            title={tc("close")}
+          >
+            <X size={16} />
+          </Button>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto py-2">
+        <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {open ? <AnalyticsTab link={link} logs={[]} /> : null}
         </div>
       </DialogContent>

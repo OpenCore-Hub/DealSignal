@@ -135,7 +135,7 @@ export function FileRequestPanel({ token, sessionToken }: FileRequestPanelProps)
           placeholder={t("documents:viewer.fileRequestPlaceholder", "Describe what you need...")}
           maxLength={500}
           rows={2}
-          className="w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          className="focus-ring-field w-full resize-none rounded-md border border-input bg-background px-3 py-2 text-sm placeholder:text-muted-foreground"
           disabled={submitting}
         />
         <div className="flex items-center justify-between">

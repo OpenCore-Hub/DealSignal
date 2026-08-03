@@ -12,7 +12,6 @@ import { api, type DashboardStats, type InsightsOverview } from "@/lib/api";
 import { useSignalStore } from "@/stores/signalStore";
 import { sortSignals } from "@/lib/sortSignals";
 import type { ActionItem, DealRoom } from "@/types";
-import { DashboardHeader } from "./DashboardHeader";
 import { MetricsCards } from "./MetricsCards";
 import { AttentionZone } from "./AttentionZone";
 import { ActiveRoomsSection } from "./ActiveRoomsSection";
@@ -141,8 +140,6 @@ export function DashboardPage() {
       transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
       className="space-y-10"
     >
-      <DashboardHeader workspaceSlug={slug} />
-
       <MetricsCards
         workspaceSlug={slug}
         activeRooms={activeRoomsCount}

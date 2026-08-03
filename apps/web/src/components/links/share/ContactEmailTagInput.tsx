@@ -245,10 +245,9 @@ export function ContactEmailTagInput({
     <div className="w-full space-y-2">
       <div
         className={cn(
-          "flex max-w-full min-h-[80px] flex-wrap items-start gap-2 overflow-hidden rounded-md border border-input bg-background p-2 focus-within:ring-1 focus-within:ring-ring",
+          "flex max-w-full min-h-[80px] flex-wrap items-start gap-2 overflow-hidden rounded-md border border-input bg-background p-2 focus-within:ring-0",
           disabled && "cursor-not-allowed opacity-50",
-          invalid.length > 0 &&
-            "border-destructive focus-within:ring-destructive"
+          invalid.length > 0 && "border-destructive"
         )}
         onClick={() => textareaRef.current?.focus()}
       >

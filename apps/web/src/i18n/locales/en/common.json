@@ -22,6 +22,7 @@
   "createLink": "Create link",
   "addToDealRoom": "Add to Deal Room",
   "reload": "Refresh page",
+  "home": "Home",
   "backToHome": "Back to home",
   "breadcrumb": "Breadcrumb",
   "overdue": {
@@ -38,6 +39,10 @@
     "duplicateSlug": "This URL is already taken. Please choose a different name.",
     "invalidSlug": "The URL can only contain lowercase letters, numbers, and hyphens."
   },
+  "emDash": "—",
+  "trendEmptyTitle": "No trend data yet",
+  "start": "Start",
+  "now": "Now",
   "empty": {
     "title": "No data",
     "description": "No data available at the moment."
