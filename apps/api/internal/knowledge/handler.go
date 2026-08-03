@@ -1,7 +1,9 @@
 package knowledge
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -35,6 +37,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:roomId/knowledge/sessions", h.ListSessions)
 	g.POST("/:roomId/knowledge/sessions", h.CreateSession)
 	g.POST("/:roomId/knowledge/sessions/query", h.QuerySession)
+	g.POST("/:roomId/knowledge/sessions/query/stream", h.QuerySessionStream)
 	g.GET("/:roomId/knowledge/sessions/:sessionId", h.GetSession)
 	g.POST("/:roomId/knowledge/sessions/:sessionId/close", h.CloseSession)
 	g.PUT("/:roomId/knowledge/turns/:turnId/feedback", h.UpsertTurnFeedback)
@@ -109,6 +112,87 @@ func (h *Handler) QuerySession(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, res)
+}
+
+// QuerySessionStream wraps QueryWithSession as SSE (phase → sources? → token* → done).
+// Upstream docling search is still blocking; events are synthesized after the turn is audited.
+func (h *Handler) QuerySessionStream(c *gin.Context) {
+	var req SessionQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+
+	flusher, ok := c.Writer.(http.Flusher)
+	if !ok {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "streaming not supported"})
+		return
+	}
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Status(http.StatusOK)
+
+	writeEvent := func(name string, payload any) {
+		data, err := json.Marshal(payload)
+		if err != nil {
+			logger.ErrorCtx(c.Request.Context(), "knowledge stream marshal", err)
+			return
+		}
+		fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", name, data)
+		flusher.Flush()
+	}
+
+	writeEvent("phase", streamPhasePayload{Phase: "retrieving"})
+
+	res, err := h.service.QueryWithSession(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		req,
+	)
+	if err != nil {
+		writeEvent("error", streamErrorFrom(err))
+		return
+	}
+
+	// Leave retrieving once the audited answer exists (philosophy §5).
+	if req.Answer || strings.TrimSpace(res.Answer) != "" {
+		writeEvent("phase", streamPhasePayload{Phase: "generating"})
+	}
+
+	hits := res.Turn.Hits
+	if hits == nil {
+		hits = []QueryHit{}
+	}
+	// Emit sources only after refuse classification (shouldEmitGroundedSources).
+	if shouldEmitGroundedSources(res.Turn) {
+		writeEvent("sources", streamSourcesPayload{Results: hits, Grounded: true})
+	}
+
+	// Token* before done so liveTurn can grow; done still carries the full answer.
+	if shouldEmitAnswerTokens(res.Answer, res.Turn) {
+		for _, chunk := range answerTokenChunks(res.Answer, defaultAnswerTokenRunes) {
+			if err := c.Request.Context().Err(); err != nil {
+				return
+			}
+			writeEvent("token", streamTokenPayload{Text: chunk})
+		}
+	}
+
+	writeEvent("done", streamDonePayload{
+		SessionID:    res.SessionID,
+		Turn:         res.Turn,
+		Query:        res.Query,
+		Mode:         res.Mode,
+		Answer:       res.Answer,
+		Results:      res.Results,
+		Refused:      res.Turn.Refused,
+		ResultStatus: res.Turn.ResultStatus,
+	})
 }
 
 // ListSessions returns a keyset page of session summaries for the room.
