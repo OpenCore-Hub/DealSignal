@@ -546,6 +546,9 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		CreatedBy:                   userUUID,
 	})
 	if err != nil {
+		if mapped := mapLinkNameUniqueViolation(err); mapped != nil {
+			return db.Link{}, mapped
+		}
 		return db.Link{}, fmt.Errorf("create link: %w", err)
 	}
 
@@ -882,6 +885,9 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		WorkspaceID:                 workspaceUUID,
 	})
 	if err != nil {
+		if mapped := mapLinkNameUniqueViolation(err); mapped != nil {
+			return db.Link{}, mapped
+		}
 		return db.Link{}, fmt.Errorf("update link: %w", err)
 	}
 	if err := qtx.SetLinkNDABinding(ctx, db.SetLinkNDABindingParams{
@@ -1279,6 +1285,122 @@ func (s *Service) ListDealRoomLinks(ctx context.Context, workspaceID, dealRoomID
 		WorkspaceID: workspaceUUID,
 		DealRoomID:  pgtype.UUID{Bytes: drUUID, Valid: true},
 	})
+}
+
+const (
+	dealRoomLinksDefaultPageSize = 10
+	dealRoomLinksMaxPageSize     = 100
+	dealRoomLinksMaxQueryLen     = 200
+)
+
+// DealRoomLinksPage is a paginated deal-room share-link list.
+type DealRoomLinksPage struct {
+	Links    []db.Link
+	Page     int
+	PageSize int
+	Total    int64
+}
+
+// escapeILIKEPattern escapes \, %, and _ so user search input is matched literally
+// against ILIKE ... ESCAPE '\' predicates.
+func escapeILIKEPattern(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s) + 8)
+	for _, r := range s {
+		switch r {
+		case '\\', '%', '_':
+			b.WriteByte('\\')
+			b.WriteRune(r)
+		default:
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// normalizeDealRoomLinksPaging clamps page/pageSize and returns a safe OFFSET.
+func normalizeDealRoomLinksPaging(page, pageSize int, total int64) (normPage, normSize, offset int) {
+	normPage = page
+	normSize = pageSize
+	if normPage < 1 {
+		normPage = 1
+	}
+	if normSize < 1 {
+		normSize = dealRoomLinksDefaultPageSize
+	}
+	if normSize > dealRoomLinksMaxPageSize {
+		normSize = dealRoomLinksMaxPageSize
+	}
+	offset = (normPage - 1) * normSize
+	if total > 0 && int64(offset) >= total {
+		lastPage := int((total + int64(normSize) - 1) / int64(normSize))
+		if lastPage < 1 {
+			lastPage = 1
+		}
+		normPage = lastPage
+		offset = (normPage - 1) * normSize
+	}
+	return normPage, normSize, offset
+}
+
+func normalizeDealRoomLinksQuery(query string) string {
+	query = strings.TrimSpace(query)
+	if query == "" {
+		return ""
+	}
+	if len(query) > dealRoomLinksMaxQueryLen {
+		query = query[:dealRoomLinksMaxQueryLen]
+	}
+	return escapeILIKEPattern(query)
+}
+
+// ListDealRoomLinksPage returns a filtered/sorted page of deal-room share links.
+func (s *Service) ListDealRoomLinksPage(
+	ctx context.Context,
+	workspaceID, dealRoomID string,
+	page, pageSize int,
+	sortAsc bool,
+	query string,
+) (DealRoomLinksPage, error) {
+	workspaceUUID := pgUUID(workspaceID)
+	drUUID, err := uuid.Parse(dealRoomID)
+	if err != nil {
+		return DealRoomLinksPage{}, errors.New("invalid deal room id")
+	}
+	query = normalizeDealRoomLinksQuery(query)
+	dealRoomUUID := pgtype.UUID{Bytes: drUUID, Valid: true}
+
+	total, err := s.queries.CountLinksByDealRoomFiltered(ctx, db.CountLinksByDealRoomFilteredParams{
+		WorkspaceID: workspaceUUID,
+		DealRoomID:  dealRoomUUID,
+		Query:       query,
+	})
+	if err != nil {
+		return DealRoomLinksPage{}, err
+	}
+
+	page, pageSize, offset := normalizeDealRoomLinksPaging(page, pageSize, total)
+
+	links, err := s.queries.ListLinksByDealRoomPage(ctx, db.ListLinksByDealRoomPageParams{
+		WorkspaceID: workspaceUUID,
+		DealRoomID:  dealRoomUUID,
+		Query:       query,
+		SortAsc:     sortAsc,
+		PageOffset:  int32(offset),
+		PageLimit:   int32(pageSize),
+	})
+	if err != nil {
+		return DealRoomLinksPage{}, err
+	}
+	return DealRoomLinksPage{
+		Links:    links,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+	}, nil
 }
 
 // ResolveDealRoomSlug looks up a deal room by slug and returns the public token
@@ -4441,6 +4563,24 @@ func pgUUID(id string) pgtype.UUID {
 		return pgtype.UUID{}
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+// mapLinkNameUniqueViolation converts DB unique-index conflicts on link names
+// into ErrDuplicateName. Returns nil when err is not a name uniqueness conflict.
+func mapLinkNameUniqueViolation(err error) error {
+	var pgErr *pgconn.PgError
+	if !errors.As(err, &pgErr) || pgErr.Code != "23505" {
+		return nil
+	}
+	constraint := pgErr.ConstraintName
+	if constraint == "" {
+		constraint = pgErr.Message
+	}
+	if strings.Contains(constraint, "idx_links_unique_name_deal_room") ||
+		strings.Contains(constraint, "idx_links_unique_name_workspace") {
+		return ErrDuplicateName
+	}
+	return nil
 }
 
 // ensureUniqueLinkName rejects duplicate link names within the relevant scope.

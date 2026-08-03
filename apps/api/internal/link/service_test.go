@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -664,4 +665,100 @@ func TestEnsureUniqueLinkName(t *testing.T) {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
+}
+
+func TestMapLinkNameUniqueViolation(t *testing.T) {
+	t.Parallel()
+
+	t.Run("maps deal-room unique index", func(t *testing.T) {
+		err := mapLinkNameUniqueViolation(&pgconn.PgError{
+			Code:           "23505",
+			ConstraintName: "idx_links_unique_name_deal_room",
+		})
+		if !errors.Is(err, ErrDuplicateName) {
+			t.Fatalf("expected ErrDuplicateName, got %v", err)
+		}
+	})
+
+	t.Run("maps workspace unique index", func(t *testing.T) {
+		err := mapLinkNameUniqueViolation(&pgconn.PgError{
+			Code:           "23505",
+			ConstraintName: "idx_links_unique_name_workspace",
+		})
+		if !errors.Is(err, ErrDuplicateName) {
+			t.Fatalf("expected ErrDuplicateName, got %v", err)
+		}
+	})
+
+	t.Run("ignores other unique violations", func(t *testing.T) {
+		err := mapLinkNameUniqueViolation(&pgconn.PgError{
+			Code:           "23505",
+			ConstraintName: "links_public_token_key",
+		})
+		if err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+
+	t.Run("ignores non-unique errors", func(t *testing.T) {
+		err := mapLinkNameUniqueViolation(errors.New("boom"))
+		if err != nil {
+			t.Fatalf("expected nil, got %v", err)
+		}
+	})
+}
+
+func TestEscapeILIKEPattern(t *testing.T) {
+	cases := []struct {
+		in, want string
+	}{
+		{"", ""},
+		{"bank", "bank"},
+		{"100%", `100\%`},
+		{`a\b`, `a\\b`},
+		{"a_b", `a\_b`},
+		{`%_\`, `\%\_\\`},
+	}
+	for _, tc := range cases {
+		if got := escapeILIKEPattern(tc.in); got != tc.want {
+			t.Fatalf("escapeILIKEPattern(%q)=%q, want %q", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestNormalizeDealRoomLinksQuery(t *testing.T) {
+	if got := normalizeDealRoomLinksQuery("  10%  "); got != `10\%` {
+		t.Fatalf("unexpected trimmed/escaped query: %q", got)
+	}
+	long := make([]byte, dealRoomLinksMaxQueryLen+20)
+	for i := range long {
+		long[i] = 'a'
+	}
+	got := normalizeDealRoomLinksQuery(string(long))
+	if len(got) != dealRoomLinksMaxQueryLen {
+		t.Fatalf("expected truncated length %d, got %d", dealRoomLinksMaxQueryLen, len(got))
+	}
+}
+
+func TestNormalizeDealRoomLinksPaging(t *testing.T) {
+	page, size, offset := normalizeDealRoomLinksPaging(0, 0, 25)
+	if page != 1 || size != dealRoomLinksDefaultPageSize || offset != 0 {
+		t.Fatalf("defaults: page=%d size=%d offset=%d", page, size, offset)
+	}
+
+	page, size, offset = normalizeDealRoomLinksPaging(99, 10, 25)
+	if page != 3 || size != 10 || offset != 20 {
+		t.Fatalf("clamp past end: page=%d size=%d offset=%d", page, size, offset)
+	}
+
+	page, size, offset = normalizeDealRoomLinksPaging(2, 500, 25)
+	if page != 1 || size != dealRoomLinksMaxPageSize || offset != 0 {
+		// total 25 with pageSize 100 → only page 1; requested page 2 clamps to 1
+		t.Fatalf("max page size + clamp: page=%d size=%d offset=%d", page, size, offset)
+	}
+
+	page, size, offset = normalizeDealRoomLinksPaging(1, 10, 0)
+	if page != 1 || size != 10 || offset != 0 {
+		t.Fatalf("empty total: page=%d size=%d offset=%d", page, size, offset)
+	}
 }

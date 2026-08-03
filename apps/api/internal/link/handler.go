@@ -22,12 +22,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
@@ -978,28 +978,89 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 }
 
 // ListDealRoomLinks returns active share links for a deal room.
+// Optional query params enable server-side pagination:
+//   - page (1-based; when omitted, returns the full list for backward compatibility)
+//   - page_size (default 10, max 100)
+//   - sort=created_at_asc|created_at_desc (default created_at_desc)
+//   - q (name/token search)
 func (h *Handler) ListDealRoomLinks(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	links, err := h.service.ListDealRoomLinks(c.Request.Context(), workspaceID, c.Param("roomId"))
-	if err != nil {
-		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+	roomID := c.Param("roomId")
+
+	pageRaw := strings.TrimSpace(c.Query("page"))
+	if pageRaw == "" {
+		links, err := h.service.ListDealRoomLinks(c.Request.Context(), workspaceID, roomID)
+		if err != nil {
+			h.writeDealRoomLinksError(c, err)
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-		return
-	}
-
-	out := make([]gin.H, 0, len(links))
-	for _, link := range links {
-		item, err := h.linkResponse(c, link)
+		out, err := h.encodeDealRoomLinks(c, links)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			return
 		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+		return
+	}
+
+	page, err := strconv.Atoi(pageRaw)
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page must be a positive integer"})
+		return
+	}
+	pageSize := dealRoomLinksDefaultPageSize
+	if raw := strings.TrimSpace(c.Query("page_size")); raw != "" {
+		n, perr := strconv.Atoi(raw)
+		if perr != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page_size must be a positive integer"})
+			return
+		}
+		pageSize = n
+	}
+	sortAsc := strings.EqualFold(strings.TrimSpace(c.Query("sort")), "created_at_asc")
+	query := strings.TrimSpace(c.Query("q"))
+
+	result, err := h.service.ListDealRoomLinksPage(c.Request.Context(), workspaceID, roomID, page, pageSize, sortAsc, query)
+	if err != nil {
+		h.writeDealRoomLinksError(c, err)
+		return
+	}
+
+	out, err := h.encodeDealRoomLinks(c, result.Links)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	hasMore := int64(result.Page*result.PageSize) < result.Total
+	c.JSON(http.StatusOK, gin.H{
+		"data": out,
+		"pagination": gin.H{
+			"page":      result.Page,
+			"page_size": result.PageSize,
+			"total":     result.Total,
+			"has_more":  hasMore,
+		},
+	})
+}
+
+func (h *Handler) writeDealRoomLinksError(c *gin.Context, err error) {
+	if errors.Is(err, ErrNotFoundInWorkspace) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+}
+
+func (h *Handler) encodeDealRoomLinks(c *gin.Context, links []db.Link) ([]gin.H, error) {
+	out := make([]gin.H, 0, len(links))
+	for _, link := range links {
+		item, err := h.linkResponse(c, link)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, item)
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	return out, nil
 }
 
 // Delete soft-deletes a link within a workspace.
@@ -2689,34 +2750,66 @@ func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
 }
 
 // ListAskSecurityEvents returns Visitor Ask high-risk security events for a link.
+// Optional query: limit/offset, event_type, since/until (RFC3339).
 func (h *Handler) ListAskSecurityEvents(c *gin.Context) {
-	entries, err := h.service.ListAskSecurityEvents(
+	q, err := parseAskSecurityEventsQuery(
+		c.Query("limit"),
+		c.Query("offset"),
+		c.Query("event_type"),
+		c.Query("since"),
+		c.Query("until"),
+	)
+	if err != nil {
+		writeAskSecurityEventsQueryError(c, err)
+		return
+	}
+	page, err := h.service.ListAskSecurityEvents(
 		c.Request.Context(),
 		middleware.WorkspaceIDFrom(c),
 		c.Param("id"),
 		middleware.UserIDFrom(c),
+		q,
 	)
 	if err != nil {
 		writeAskHostError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": entries})
+	c.JSON(http.StatusOK, gin.H{
+		"data":     page.Items,
+		"has_more": page.HasMore,
+	})
 }
 
 // ListRoomAskSecurityEvents returns Visitor Ask high-risk security events for a deal room.
+// Optional query: link_id, limit/offset, event_type, since/until (RFC3339).
 func (h *Handler) ListRoomAskSecurityEvents(c *gin.Context) {
-	entries, err := h.service.ListRoomAskSecurityEvents(
+	q, err := parseAskSecurityEventsQuery(
+		c.Query("limit"),
+		c.Query("offset"),
+		c.Query("event_type"),
+		c.Query("since"),
+		c.Query("until"),
+	)
+	if err != nil {
+		writeAskSecurityEventsQueryError(c, err)
+		return
+	}
+	q.LinkID = c.Query("link_id")
+	page, err := h.service.ListRoomAskSecurityEvents(
 		c.Request.Context(),
 		middleware.WorkspaceIDFrom(c),
 		c.Param("roomId"),
 		middleware.UserIDFrom(c),
-		c.Query("link_id"),
+		q,
 	)
 	if err != nil {
 		writeAskHostError(c, err)
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": entries})
+	c.JSON(http.StatusOK, gin.H{
+		"data":     page.Items,
+		"has_more": page.HasMore,
+	})
 }
 
 // AnswerVisitorQuestion allows the owner to answer a visitor question.
@@ -2763,6 +2856,25 @@ func writeAskHostError(c *gin.Context, err error) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
 	default:
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	}
+}
+
+func writeAskSecurityEventsQueryError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, errInvalidAskSecurityEventType):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_event_type", "message": "invalid event_type"})
+	case errors.Is(err, errInvalidAskSecurityLimit):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_limit", "message": "limit must be a positive integer"})
+	case errors.Is(err, errInvalidAskSecurityOffset):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_offset", "message": "offset must be a non-negative integer"})
+	case errors.Is(err, errInvalidAskSecuritySince):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_since", "message": "since must be RFC3339"})
+	case errors.Is(err, errInvalidAskSecurityUntil):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_until", "message": "until must be RFC3339"})
+	case errors.Is(err, errInvalidAskSecurityTimeRange):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_time_range", "message": "until must be after since"})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_query", "message": "invalid query"})
 	}
 }
 
