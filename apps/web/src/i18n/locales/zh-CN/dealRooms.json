@@ -208,7 +208,10 @@
       "knowledge_unavailable": "知识库不可用",
       "forbidden": "没有权限提问",
       "not_found": "会话不存在",
-      "query_failed": "知识库检索失败"
+      "query_failed": "知识库检索失败",
+      "knowledge_query_busy": "已有提问进行中，请等待完成或先停止",
+      "knowledge_query_rate_limited": "提问过于频繁，请稍后再试",
+      "knowledge_query_quota_exceeded": "当前套餐回答额度已用完，请升级或明天再试"
     },
     "status": {
       "none": "未开通",

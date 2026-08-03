@@ -170,6 +170,7 @@ vi.mock("@/lib/api", () => ({
     streamDealRoomKnowledgeSession: vi.fn(),
     closeDealRoomKnowledgeSession: vi.fn(),
     upsertDealRoomKnowledgeTurnFeedback: vi.fn(),
+    recordDealRoomKnowledgeDeskEvent: vi.fn(),
     getDealRoomAnalytics: vi.fn(),
     listRoomQuestions: vi.fn(),
     getDealRoomLinks: vi.fn(),
@@ -231,6 +232,7 @@ function mockRoomMetrics() {
       note: body.note,
     }),
   );
+  vi.mocked(api.recordDealRoomKnowledgeDeskEvent).mockResolvedValue(undefined);
 }
 
 describe("DealRoomKnowledgeTab", () => {
@@ -515,7 +517,8 @@ describe("DealRoomKnowledgeTab", () => {
         }),
     );
     vi.mocked(api.getActiveDealRoomKnowledgeSession)
-      .mockResolvedValueOnce({ session: null, turns: [] })
+      .mockResolvedValueOnce({ session: null, turns: [] }) // mount hydrate
+      .mockResolvedValueOnce({ session: null, turns: [] }) // abort: server still writing
       .mockResolvedValueOnce({
         session: {
           id: "sess-aborted",
@@ -546,7 +549,65 @@ describe("DealRoomKnowledgeTab", () => {
     expect(await screen.findByTestId("grounded-chat-stop")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("grounded-chat-stop"));
     expect(await screen.findByText(/Persisted after abort/)).toBeInTheDocument();
-    expect(api.getActiveDealRoomKnowledgeSession).toHaveBeenCalledTimes(2);
+    // mount + empty abort poll + successful poll
+    expect(api.getActiveDealRoomKnowledgeSession.mock.calls.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it("ignores a second Ask click while a stream is already in flight", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        { documentId: "doc-1", title: "Memo.pdf", status: "synced", chunkCount: 3 },
+      ],
+    });
+    let resolveStream: ((value: Awaited<ReturnType<typeof api.streamDealRoomKnowledgeSession>>) => void) | undefined;
+    vi.mocked(api.streamDealRoomKnowledgeSession).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStream = resolve;
+        }),
+    );
+
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-knowledge-ask-entry-start")).toBeEnabled();
+    });
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-ask-entry-start"));
+    fireEvent.change(await screen.findByLabelText("Question"), {
+      target: { value: "first" },
+    });
+    const ask = screen.getByTestId("deal-room-knowledge-ask");
+    fireEvent.click(ask);
+    fireEvent.click(ask);
+    fireEvent.click(ask);
+    expect(api.streamDealRoomKnowledgeSession).toHaveBeenCalledTimes(1);
+    resolveStream?.({
+      sessionId: "sess-1",
+      turn: {
+        id: "t1",
+        sessionId: "sess-1",
+        sequence: 1,
+        question: "first",
+        answer: "ok",
+        refused: false,
+        resultStatus: "answered",
+        hits: [],
+        createdAt: "2026-08-03T00:00:00Z",
+      },
+      query: "first",
+      mode: "hybrid",
+      answer: "ok",
+      results: [],
+    });
+    expect(await screen.findByText("ok")).toBeInTheDocument();
   });
 
   it("disables start-ask until the vector library is truly ready", async () => {

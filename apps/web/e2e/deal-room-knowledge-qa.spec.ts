@@ -7,6 +7,7 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   setupAuthenticatedPage,
   attachDebug,
+  setMockKnowledgeAskGate,
   setMockKnowledgeCorpus,
   WORKSPACE_SLUG,
 } from "./helpers";
@@ -183,6 +184,27 @@ test.describe("Deal room knowledge Q&A (MSW)", () => {
     // Sending the follow-up continues the same session (second turn).
     await page.getByTestId("deal-room-knowledge-ask").click();
     await expect(page.getByTestId("grounded-chat-turn")).toHaveCount(2, { timeout: 10000 });
+  });
+
+  test("surfaces answer-quota 429 before SSE opens", async ({ page }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+    await setMockKnowledgeAskGate(page, {
+      code: "knowledge_query_quota_exceeded",
+      httpStatus: 429,
+    });
+
+    await openKnowledgeDesk(page);
+    await page.getByLabel("Question").fill("What is the valuation cap?");
+    await page.getByTestId("deal-room-knowledge-ask").click();
+
+    // Prefer role=status (sonner); fall back to copy match for locale variants.
+    await expect(
+      page.getByText(/answer quota is used up|回答额度已用完/i),
+    ).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("grounded-chat-turn")).toHaveCount(0);
+    // Ask control returns (not stuck on Stop).
+    await expect(page.getByTestId("deal-room-knowledge-ask")).toBeVisible();
   });
 
   test("disables start-ask when corpus is not ready (A5)", async ({ page }) => {

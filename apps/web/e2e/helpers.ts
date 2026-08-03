@@ -54,6 +54,26 @@ export async function setupAuthenticatedPage(page: Page) {
   await page.goto(`/${WORKSPACE_SLUG}/dashboard`);
 }
 
+/** Force MSW session ask to return JSON 429 before opening SSE (busy / RPM / quota). */
+export async function setMockKnowledgeAskGate(
+  page: Page,
+  opts: { code: string; httpStatus?: number } | { clear: true },
+) {
+  await page.goto("/");
+  await waitForMsw(page);
+  const res = await page.evaluate(async (payload) => {
+    const r = await fetch("/__e2e/reset", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "knowledge-ask-gate", ...payload }),
+    });
+    return r.status;
+  }, opts);
+  if (res !== 204) {
+    throw new Error(`setMockKnowledgeAskGate failed: HTTP ${res}`);
+  }
+}
+
 /** Force MSW knowledge corpus status for a room (A5: building / not ready). */
 export async function setMockKnowledgeCorpus(
   page: Page,

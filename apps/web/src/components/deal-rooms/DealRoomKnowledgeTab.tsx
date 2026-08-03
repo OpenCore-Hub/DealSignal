@@ -79,9 +79,6 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
-  const openViewer = (documentId: string, page?: number) => {
-    navigate(viewerPath(documentId, page));
-  };
   const { data, loading, error, refetch } = useAsyncData(
     () => api.getDealRoomKnowledge(roomId),
     [roomId],
@@ -114,6 +111,8 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const [sessionHydrated, setSessionHydrated] = useState(false);
   const [liveTurn, setLiveTurn] = useState<KnowledgeTurn | null>(null);
   const askAbortRef = useRef<AbortController | null>(null);
+  /** Sync guard — React state `asking` alone cannot block rapid double Ask/Enter. */
+  const askingRef = useRef(false);
 
   // Single store snapshot — avoid `?? []` selectors that allocate each read.
   const draft = useKnowledgeQueryStore((s) => s.byRoom[roomId]);
@@ -121,6 +120,29 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const activeSessionId = draft?.activeSessionId ?? null;
   const turns = draft?.turns ?? EMPTY_TURNS;
   const activeCite = draft?.activeCite ?? null;
+
+  const openViewer = (documentId: string, page?: number) => {
+    // Prefer in-flight live turn; else last persisted audit turn.
+    let turnOutcome: "grounded" | "refused" | "unknown" = "unknown";
+    if (liveTurn) {
+      turnOutcome = liveTurn.refused
+        ? "refused"
+        : liveTurn.results.length > 0
+          ? "grounded"
+          : "unknown";
+    } else {
+      const last = turns[turns.length - 1];
+      if (last?.refused) turnOutcome = "refused";
+      else if ((last?.hits?.length ?? 0) > 0) turnOutcome = "grounded";
+    }
+    void api
+      .recordDealRoomKnowledgeDeskEvent(roomId, { type: "cite_open", turnOutcome })
+      .catch(() => {
+        /* metrics must not block navigation */
+      });
+    navigate(viewerPath(documentId, page));
+  };
+
   const setQuery = (value: string) =>
     useKnowledgeQueryStore.getState().setDraft(roomId, { query: value });
   const setActiveCite = (value: number | null) =>
@@ -198,15 +220,43 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     askAbortRef.current?.abort();
   };
 
+  /** Poll active session until turn count grows past baseline (server may still be writing). */
+  const hydrateAfterAbort = async (baselineTurnCount: number) => {
+    const deadline = Date.now() + 4000;
+    let delayMs = 120;
+    while (Date.now() < deadline) {
+      try {
+        const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
+        const serverTurns = detail.turns ?? [];
+        const sessionId = detail.session?.id ?? null;
+        if (sessionId && serverTurns.length > baselineTurnCount) {
+          useKnowledgeQueryStore.getState().setDraft(roomId, {
+            activeSessionId: sessionId,
+            turns: serverTurns,
+            activeCite: null,
+          });
+          return;
+        }
+      } catch {
+        /* retry until deadline */
+      }
+      await new Promise((r) => setTimeout(r, delayMs));
+      delayMs = Math.min(Math.round(delayMs * 1.6), 700);
+    }
+  };
+
   const onQuery = async () => {
     const q = query.trim();
-    if (!q || asking) return;
+    if (!q || askingRef.current) return;
+    askingRef.current = true;
     askAbortRef.current?.abort();
     const ac = new AbortController();
     askAbortRef.current = ac;
     setAsking(true);
     setActiveCite(null);
     setLiveTurn(createKnowledgeTurn(q));
+    const baselineTurnCount =
+      useKnowledgeQueryStore.getState().byRoom[roomId]?.turns?.length ?? 0;
     try {
       const res = await api.streamDealRoomKnowledgeSession(
         roomId,
@@ -244,30 +294,18 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
         // Server may still finish QueryWithSession and persist the turn — hydrate so
         // the audit timeline does not lose a completed answer after Stop (P5).
         setLiveTurn(null);
-        try {
-          const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
-          const serverTurns = detail.turns ?? [];
-          const sessionId = detail.session?.id ?? null;
-          if (sessionId && serverTurns.length > 0) {
-            useKnowledgeQueryStore.getState().setDraft(roomId, {
-              activeSessionId: sessionId,
-              turns: serverTurns,
-              activeCite: null,
-            });
-          }
-        } catch {
-          /* non-fatal: desk stays usable for a fresh ask */
-        }
+        await hydrateAfterAbort(baselineTurnCount);
         return;
       }
-      if (e instanceof ApiError && (e.status === 503 || e.code === "knowledge_unavailable")) {
-        toast.error(t("knowledge.unavailable"));
+      if (e instanceof ApiError) {
+        toast.error(knowledgeErrorMessage(t, e.code));
       } else {
         toast.error(t("knowledge.queryFailed"));
       }
       setLiveTurn(null);
     } finally {
       if (askAbortRef.current === ac) askAbortRef.current = null;
+      askingRef.current = false;
       setAsking(false);
     }
   };

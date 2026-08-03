@@ -993,6 +993,16 @@ export const api = {
       `/deal-rooms/${roomId}/knowledge/turns/${turnId}/feedback`,
       { method: "PUT", body: JSON.stringify(body) },
     ),
+  /** Fire-and-forget product funnel signal (204). Errors are ignored by callers. */
+  recordDealRoomKnowledgeDeskEvent: (
+    roomId: string,
+    body: { type: "cite_open"; turnOutcome?: "grounded" | "refused" | "unknown" },
+  ) =>
+    request<void>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/events`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   createDealRoom: (payload: {
     name: string;
     slug: string;

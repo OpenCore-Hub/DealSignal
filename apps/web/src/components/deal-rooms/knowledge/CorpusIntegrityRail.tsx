@@ -135,12 +135,13 @@ export function CorpusIntegrityRail({
         DEFAULT_QUOTA_LIMITS.documents,
       ),
       answers: pair(
-        q?.answers.used ?? metrics.askUniqueVisitors,
+        // Never fall back to visitor Ask Host metrics — those are a different product.
+        q?.answers.used ?? 0,
         q?.answers.limit,
         DEFAULT_QUOTA_LIMITS.answers,
       ),
     };
-  }, [corpus.quota, metrics.documentCount, metrics.askUniqueVisitors]);
+  }, [corpus.quota, metrics.documentCount]);
 
   const status = displayCorpusStatus(corpus);
   const docsInFlight = corpus.documents.some(

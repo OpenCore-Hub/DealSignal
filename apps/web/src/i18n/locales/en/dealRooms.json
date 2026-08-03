@@ -211,7 +211,10 @@
       "knowledge_unavailable": "Knowledge base is unavailable",
       "forbidden": "You do not have permission to ask",
       "not_found": "Session not found",
-      "query_failed": "Failed to query knowledge base"
+      "query_failed": "Failed to query knowledge base",
+      "knowledge_query_busy": "A question is already in progress — wait for it to finish or stop it",
+      "knowledge_query_rate_limited": "Too many questions in a short time — try again in a minute",
+      "knowledge_query_quota_exceeded": "This plan’s answer quota is used up — upgrade or try again tomorrow"
     },
     "status": {
       "none": "Not provisioned",

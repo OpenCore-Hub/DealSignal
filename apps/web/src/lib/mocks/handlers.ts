@@ -113,6 +113,9 @@ type MockKnowledgeCorpusOverride = {
 };
 const mockKnowledgeCorpusOverrideByRoom = new Map<string, MockKnowledgeCorpusOverride>();
 
+/** Test-only: force session ask to return JSON 429 before SSE (busy / rate / quota). */
+let mockKnowledgeAskGate: { code: string; status: number } | null = null;
+
 function resetMockState() {
   mockUsers.clear();
   mockPublicQuestions.clear();
@@ -149,10 +152,12 @@ async function hydrateKnowledgeQAState() {
             sessions?: [string, MockKnowledgeSession[]][];
             turns?: [string, MockKnowledgeTurn[]][];
             corpusOverrides?: [string, MockKnowledgeCorpusOverride][];
+            askGate?: { code: string; status: number } | null;
           };
           mockKnowledgeSessionsByRoom.clear();
           mockKnowledgeTurnsBySession.clear();
           mockKnowledgeCorpusOverrideByRoom.clear();
+          mockKnowledgeAskGate = data.askGate ?? null;
           for (const [roomId, sessions] of data.sessions ?? []) {
             mockKnowledgeSessionsByRoom.set(roomId, sessions);
           }
@@ -184,6 +189,7 @@ async function persistKnowledgeQAState() {
           sessions: [...mockKnowledgeSessionsByRoom.entries()],
           turns: [...mockKnowledgeTurnsBySession.entries()],
           corpusOverrides: [...mockKnowledgeCorpusOverrideByRoom.entries()],
+          askGate: mockKnowledgeAskGate,
         }),
         { headers: { "Content-Type": "application/json" } },
       ),
@@ -197,6 +203,7 @@ async function resetKnowledgeQAState() {
   mockKnowledgeSessionsByRoom.clear();
   mockKnowledgeTurnsBySession.clear();
   mockKnowledgeCorpusOverrideByRoom.clear();
+  mockKnowledgeAskGate = null;
   knowledgeQAHydrated = true;
   knowledgeQAHydratePromise = null;
   if (typeof caches === "undefined") return;
@@ -245,6 +252,17 @@ async function executeMockKnowledgeSessionQuery(
   | { ok: true; payload: Record<string, unknown> }
   | { ok: false; status: number; body: Record<string, unknown> }
 > {
+  await hydrateKnowledgeQAState();
+  if (mockKnowledgeAskGate) {
+    return {
+      ok: false,
+      status: mockKnowledgeAskGate.status,
+      body: {
+        code: mockKnowledgeAskGate.code,
+        message: mockKnowledgeAskGate.code,
+      },
+    };
+  }
   const room = findRoom(roomId);
   if (!room) return { ok: false, status: 404, body: { code: "not_found" } };
   const rawQuery = (body.query || "").trim();
@@ -488,6 +506,9 @@ export const handlers = [
       status?: string;
       documentStatus?: string;
       jobStatus?: string;
+      code?: string;
+      httpStatus?: number;
+      clear?: boolean;
     } | null = null;
     try {
       const text = await request.text();
@@ -496,6 +517,18 @@ export const handlers = [
       body = null;
     }
     if (body?.action === "ping") {
+      return new HttpResponse(null, { status: 204 });
+    }
+    if (body?.action === "knowledge-ask-gate") {
+      await hydrateKnowledgeQAState();
+      if (body.clear) {
+        mockKnowledgeAskGate = null;
+      } else {
+        const code = (body.code || "knowledge_query_quota_exceeded").trim();
+        const status = body.httpStatus && body.httpStatus >= 400 ? body.httpStatus : 429;
+        mockKnowledgeAskGate = { code, status };
+      }
+      await persistKnowledgeQAState();
       return new HttpResponse(null, { status: 204 });
     }
     if (body?.action === "knowledge-corpus") {
@@ -1104,6 +1137,12 @@ export const handlers = [
         status: documentStatus,
         chunkCount: busy ? 0 : 3,
       })),
+      quota: {
+        planCode: "partner",
+        knowledgeBases: { used: 1, limit: 100 },
+        documents: { used: busy ? 0 : docs.length, limit: 5000 },
+        answers: { used: 0, limit: 10_000 },
+      },
     });
   }),
 
@@ -1315,6 +1354,27 @@ export const handlers = [
       if (!target) return new HttpResponse(null, { status: 404 });
       await persistKnowledgeQAState();
       return HttpResponse.json(target);
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/events",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      let body: { type?: string; turnOutcome?: string } = {};
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        /* empty */
+      }
+      if ((body.type || "").trim() !== "cite_open") {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "unknown desk event type" },
+          { status: 400 },
+        );
+      }
+      return new HttpResponse(null, { status: 204 });
     },
   ),
 
