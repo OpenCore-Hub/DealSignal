@@ -12,7 +12,12 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
-import { isDealRoomPageTab, useDealRoomTab } from "@/hooks/useDealRoomTab";
+import {
+  DEAL_ROOM_PAGE_TAB_LABEL_KEY,
+  isDealRoomPageTab,
+  orderDealRoomPageTabs,
+  useDealRoomTab,
+} from "@/hooks/useDealRoomTab";
 import type { DealRoomTab } from "@/hooks/useDealRoomTab";
 import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissionsSection";
 import { DealRoomAccessControlTab } from "@/components/deal-rooms/DealRoomAccessControlTab";
@@ -463,6 +468,8 @@ export function DealRoomDetailPage() {
   const descriptionLong = description.length > 120;
 
   const showPageTabs = isDealRoomPageTab(tab);
+  // Plain derivation (not a hook) so it can sit after loading early-returns safely.
+  const pageTabs = orderDealRoomPageTabs(tab);
 
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
@@ -501,21 +508,16 @@ export function DealRoomDetailPage() {
             className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-none border-b border-border bg-transparent p-0"
             data-testid="deal-room-page-tabs"
           >
-            <TabsTrigger value="documents" className="rounded-none px-3 pb-2.5">
-              {t("pageTabs.resources")}
-            </TabsTrigger>
-            <TabsTrigger value="access" className="rounded-none px-3 pb-2.5">
-              {t("pageTabs.access")}
-            </TabsTrigger>
-            <TabsTrigger value="links" className="rounded-none px-3 pb-2.5">
-              {t("pageTabs.links")}
-            </TabsTrigger>
-            <TabsTrigger value="analytics" className="rounded-none px-3 pb-2.5">
-              {t("pageTabs.analytics")}
-            </TabsTrigger>
-            <TabsTrigger value="knowledge" className="rounded-none px-3 pb-2.5">
-              {t("pageTabs.knowledge")}
-            </TabsTrigger>
+            {pageTabs.map((pageTab) => (
+              <TabsTrigger
+                key={pageTab}
+                value={pageTab}
+                className="rounded-none px-3 pb-2.5"
+                data-testid={`deal-room-page-tab-${pageTab}`}
+              >
+                {t(DEAL_ROOM_PAGE_TAB_LABEL_KEY[pageTab])}
+              </TabsTrigger>
+            ))}
           </TabsList>
         </Tabs>
       )}

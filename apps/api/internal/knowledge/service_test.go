@@ -51,3 +51,24 @@ func TestMapUpstreamAPIError(t *testing.T) {
 		t.Fatalf("err = %v, want ErrUnavailable", err)
 	}
 }
+
+func TestReconcileCorpusStatusHealsStuckProvisioning(t *testing.T) {
+	got := reconcileCorpusStatus("provisioning", SyncProgress{
+		Total: 2, Pending: 0, Syncing: 0, Synced: 2, Failed: 0,
+	})
+	if got != "ready" {
+		t.Fatalf("got %q, want ready", got)
+	}
+	got = reconcileCorpusStatus("syncing", SyncProgress{
+		Total: 2, Pending: 0, Syncing: 0, Synced: 1, Failed: 1,
+	})
+	if got != "degraded" {
+		t.Fatalf("got %q, want degraded", got)
+	}
+	got = reconcileCorpusStatus("provisioning", SyncProgress{
+		Total: 2, Pending: 1, Syncing: 0, Synced: 1, Failed: 0,
+	})
+	if got != "provisioning" {
+		t.Fatalf("got %q, want provisioning while pending remains", got)
+	}
+}

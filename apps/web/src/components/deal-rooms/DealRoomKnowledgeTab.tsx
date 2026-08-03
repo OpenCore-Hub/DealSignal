@@ -1,27 +1,42 @@
-import { useEffect, useState } from "react";
-import { Books, MagnifyingGlass, ArrowsClockwise } from "@phosphor-icons/react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowLeft, LockKey, SealCheck } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import {
+  CorpusIntegrityRail,
+  resolveCorpusAttentionStage,
+  type KnowledgeRoomMetrics,
+} from "@/components/deal-rooms/knowledge/CorpusIntegrityRail";
+import { GroundedChatShell } from "@/components/deal-rooms/knowledge/GroundedChatShell";
+import { KnowledgeAskEntryCard } from "@/components/deal-rooms/knowledge/KnowledgeAskEntryCard";
+import { KnowledgeSessionHistoryMenu } from "@/components/deal-rooms/knowledge/KnowledgeSessionHistoryMenu";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import { formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import {
+  formatHitLocusLabel,
+  formatPagesLabel,
+  renderAnswerWithCitations,
+  viewerPath,
+} from "@/lib/knowledge/citations";
+import { knowledgeErrorMessage } from "@/lib/knowledge/errors";
+import { asFeedbackKind } from "@/lib/knowledge/feedback";
+import { turnFromQATurn } from "@/lib/knowledge/streamEvents";
 import { useKnowledgeQueryStore } from "@/stores/knowledgeQueryStore";
 import type {
-  DealRoomKnowledgeQueryHit,
-  DealRoomKnowledgeQueryResult,
+  DealRoomKnowledgeFeedbackKind,
+  DealRoomKnowledgeQATurn,
 } from "@/types";
-import { cn } from "@/lib/utils";
 
 interface DealRoomKnowledgeTabProps {
   roomId: string;
 }
+
+const EMPTY_TURNS: DealRoomKnowledgeQATurn[] = [];
+
+export { knowledgeErrorMessage };
 
 function isKnowledgeBusy(status?: string, jobStatus?: string) {
   if (status === "syncing" || status === "provisioning") return true;
@@ -47,65 +62,13 @@ export function isUngroundedKnowledgeAnswer(answer?: string | null): boolean {
   return needles.some((n) => text.includes(n));
 }
 
-/** Format page numbers without implying missing pages exist in the span. */
-export function formatPagesLabel(pages: number[]): string {
-  const sorted = [...new Set(pages.filter((p) => p > 0))].sort((a, b) => a - b);
-  if (sorted.length === 0) return "";
-  // Page numbers are viewer/preview pages (native PDF or OnlyOffice preview PDF).
-  if (sorted.length === 1) return `第${sorted[0]}页`;
-  const lo = sorted[0];
-  const hi = sorted[sorted.length - 1];
-  const contiguous = hi - lo + 1 === sorted.length;
-  if (contiguous) return `第${lo}–${hi}页`;
-  return `第${sorted.join("、")}页`;
-}
-
-/** Human-readable citation locus: file · pages|sheet. Never invents missing pages. */
-export function formatHitLocusLabel(
-  hit: DealRoomKnowledgeQueryHit,
-  opts?: { sheetPrefix?: string },
-): string | null {
-  const parts: string[] = [];
-  if (hit.sourceName) parts.push(hit.sourceName);
-  if (hit.pages && hit.pages.length > 0) {
-    const pagesLabel = formatPagesLabel(hit.pages);
-    if (pagesLabel) parts.push(pagesLabel);
-  } else if (hit.sheet) {
-    const prefix = opts?.sheetPrefix?.trim() || "Sheet";
-    parts.push(`${prefix} ${hit.sheet}`);
-  }
-  return parts.length ? parts.join(" · ") : null;
-}
-
-/** Same-tab viewer path (keeps in-memory workspace slug for authenticated APIs). */
-export function viewerPath(documentId: string, page?: number): string {
-  const qs = page && page > 0 ? `?page=${page}` : "";
-  return `/viewer/${documentId}${qs}`;
-}
-
-/** Split answer text so `[n]` citations become clickable markers. */
-export function renderAnswerWithCitations(
-  answer: string,
-  onCite: (n: number) => void,
-) {
-  const parts = answer.split(/(\[\d+\])/g);
-  return parts.map((part, i) => {
-    const m = /^\[(\d+)\]$/.exec(part);
-    if (!m) return <span key={i}>{part}</span>;
-    const n = Number(m[1]);
-    return (
-      <button
-        key={i}
-        type="button"
-        className="mx-0.5 rounded bg-primary/10 px-1 font-medium text-primary hover:bg-primary/20"
-        data-testid={`knowledge-cite-${n}`}
-        onClick={() => onCite(n)}
-      >
-        [{n}]
-      </button>
-    );
-  });
-}
+// Re-export citation helpers for existing tests / callers.
+export {
+  formatHitLocusLabel,
+  formatPagesLabel,
+  renderAnswerWithCitations,
+  viewerPath,
+};
 
 export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const { t } = useTranslation("dealRooms");
@@ -118,20 +81,56 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     () => api.getDealRoomKnowledge(roomId),
     [roomId],
   );
+  const { data: roomMetrics } = useAsyncData(async () => {
+    const [analytics, questionsRes, linksRes] = await Promise.all([
+      api.getDealRoomAnalytics(roomId),
+      api.listRoomQuestions(roomId),
+      api.getDealRoomLinks(roomId, { page_size: 100 }),
+    ]);
+    const questions = questionsRes.data ?? [];
+    const links = linksRes.data ?? [];
+    const askKeys = new Set<string>();
+    for (const q of questions) {
+      const key = (q.visitor_id || q.visitor_email || "").trim();
+      if (key) askKeys.add(key);
+    }
+    const visitedLinkIds = new Set(
+      links.filter((l) => (l.accessCount ?? 0) > 0).map((l) => l.id),
+    );
+    return {
+      documentCount: analytics.documentCount,
+      askUniqueVisitors: askKeys.size,
+      visitedLinkCount: visitedLinkIds.size,
+    } satisfies KnowledgeRoomMetrics;
+  }, [roomId]);
+
   const [syncing, setSyncing] = useState(false);
   const [asking, setAsking] = useState(false);
-  // Keep Q&A in a room-scoped store so viewer → browser Back remount restores it.
-  const query = useKnowledgeQueryStore((s) => s.byRoom[roomId]?.query ?? "");
-  const result = useKnowledgeQueryStore((s) => s.byRoom[roomId]?.result ?? null);
-  const activeCite = useKnowledgeQueryStore(
-    (s) => s.byRoom[roomId]?.activeCite ?? null,
-  );
-  const setDraft = useKnowledgeQueryStore((s) => s.setDraft);
-  const setQuery = (value: string) => setDraft(roomId, { query: value });
-  const setResult = (value: DealRoomKnowledgeQueryResult | null) =>
-    setDraft(roomId, { result: value });
+  const [sessionHydrated, setSessionHydrated] = useState(false);
+
+  // Single store snapshot — avoid `?? []` selectors that allocate each read.
+  const draft = useKnowledgeQueryStore((s) => s.byRoom[roomId]);
+  const query = draft?.query ?? "";
+  const activeSessionId = draft?.activeSessionId ?? null;
+  const turns = draft?.turns ?? EMPTY_TURNS;
+  const activeCite = draft?.activeCite ?? null;
+  const setQuery = (value: string) =>
+    useKnowledgeQueryStore.getState().setDraft(roomId, { query: value });
   const setActiveCite = (value: number | null) =>
-    setDraft(roomId, { activeCite: value });
+    useKnowledgeQueryStore.getState().setDraft(roomId, { activeCite: value });
+
+  // Landing shows corpus + ask-entry; restore desk when store already has turns
+  // (viewer → Back) or after active-session hydrate.
+  const [chatOpen, setChatOpen] = useState(
+    () => (useKnowledgeQueryStore.getState().byRoom[roomId]?.turns.length ?? 0) > 0,
+  );
+
+  const viewTurns = useMemo(() => {
+    const lastIdx = turns.length - 1;
+    return turns.map((row, idx) =>
+      turnFromQATurn(row, idx === lastIdx ? activeCite : null),
+    );
+  }, [turns, activeCite]);
 
   useEffect(() => {
     if (!isKnowledgeBusy(data?.status, data?.progress?.jobStatus)) return;
@@ -140,6 +139,35 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     }, 2500);
     return () => window.clearInterval(timer);
   }, [data?.status, data?.progress?.jobStatus, refetch]);
+
+  // Hydrate newest active session from server (refresh recovery).
+  useEffect(() => {
+    let cancelled = false;
+    setSessionHydrated(false);
+    void (async () => {
+      try {
+        const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
+        if (cancelled) return;
+        const serverTurns = detail.turns ?? [];
+        const sessionId = detail.session?.id ?? null;
+        if (sessionId && serverTurns.length > 0) {
+          useKnowledgeQueryStore.getState().setDraft(roomId, {
+            activeSessionId: sessionId,
+            turns: serverTurns,
+            activeCite: null,
+          });
+          setChatOpen(true);
+        }
+      } catch {
+        // Non-fatal: desk still works for a fresh session on first ask.
+      } finally {
+        if (!cancelled) setSessionHydrated(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roomId]);
 
   const onSync = async () => {
     setSyncing(true);
@@ -164,12 +192,24 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     setAsking(true);
     setActiveCite(null);
     try {
-      const res = await api.queryDealRoomKnowledge(roomId, {
+      const res = await api.queryDealRoomKnowledgeSession(roomId, {
+        sessionId: activeSessionId ?? undefined,
         query: q,
         answer: true,
         top_k: 8,
       });
-      setResult(res);
+      const merged = [...turns.filter((x) => x.id !== res.turn.id), res.turn].sort(
+        (a, b) => a.sequence - b.sequence,
+      );
+      useKnowledgeQueryStore.getState().setDraft(roomId, {
+        activeSessionId: res.sessionId,
+        turns: merged,
+        query: "",
+        activeCite: null,
+      });
+      if (res.turn.resultStatus === "error") {
+        toast.error(knowledgeErrorMessage(t, res.turn.errorSummary));
+      }
     } catch (e) {
       if (e instanceof ApiError && e.status === 503) {
         toast.error(t("knowledge.unavailable"));
@@ -181,9 +221,58 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     }
   };
 
+  const onNewSession = async () => {
+    if (activeSessionId) {
+      try {
+        await api.closeDealRoomKnowledgeSession(roomId, activeSessionId);
+      } catch {
+        toast.error(t("knowledge.sessionCloseFailed"));
+        return;
+      }
+    }
+    useKnowledgeQueryStore.getState().setDraft(roomId, {
+      activeSessionId: null,
+      turns: [],
+      query: "",
+      activeCite: null,
+    });
+  };
+
+  const onOpenSession = async (sessionId: string) => {
+    const detail = await api.getDealRoomKnowledgeSession(roomId, sessionId);
+    const serverTurns = detail.turns ?? [];
+    const id = detail.session?.id ?? sessionId;
+    useKnowledgeQueryStore.getState().setDraft(roomId, {
+      activeSessionId: id,
+      turns: serverTurns,
+      query: "",
+      activeCite: null,
+    });
+    setChatOpen(true);
+  };
+
+  const onFeedback = async (
+    turnId: string,
+    body: { kind: DealRoomKnowledgeFeedbackKind; note?: string },
+  ) => {
+    try {
+      const fb = await api.upsertDealRoomKnowledgeTurnFeedback(roomId, turnId, body);
+      const kind = asFeedbackKind(fb.kind) ?? body.kind;
+      const next = turns.map((row) =>
+        row.id === turnId
+          ? { ...row, feedback: { kind, note: fb.note } }
+          : row,
+      );
+      useKnowledgeQueryStore.getState().setDraft(roomId, { turns: next });
+    } catch {
+      toast.error(t("knowledge.feedback.saveFailed"));
+      throw new Error("feedback_failed");
+    }
+  };
+
   if (loading && !data) {
     return (
-      <div className="rounded-lg border border-border px-4 py-10 text-center text-sm text-muted-foreground">
+      <div className="rounded-xl border border-border/80 bg-muted/20 px-4 py-14 text-center text-sm text-muted-foreground">
         {tc("loading")}
       </div>
     );
@@ -192,7 +281,7 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   if (error && !data) {
     return (
       <div
-        className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-6 text-center"
+        className="rounded-xl border border-destructive/25 bg-destructive/[0.04] px-4 py-8 text-center"
         role="alert"
       >
         <p className="text-sm text-destructive">{t("knowledge.loadFailed")}</p>
@@ -206,227 +295,150 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const corpus = data!;
   if (!corpus.enabled) {
     return (
-      <Card data-testid="deal-room-knowledge-tab">
-        <CardContent className="flex flex-col items-center justify-center gap-3 px-6 py-16 text-center">
-          <span className="flex h-12 w-12 items-center justify-center rounded-full bg-muted text-muted-foreground">
-            <Books size={24} />
-          </span>
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium text-foreground">{t("knowledge.disabledTitle")}</p>
-            <p className="max-w-md text-sm text-muted-foreground">
-              {t("knowledge.disabledDescription")}
-            </p>
-          </div>
-        </CardContent>
-      </Card>
+      <div
+        className="relative overflow-hidden rounded-2xl border border-border/70 bg-[linear-gradient(180deg,#f8fafc_0%,#ffffff_55%)] px-6 py-16 text-center"
+        data-testid="deal-room-knowledge-tab"
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/15 to-transparent"
+        />
+        <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-border/80 bg-background text-foreground shadow-[0_1px_0_rgba(15,23,42,0.04)]">
+          <LockKey size={22} weight="duotone" />
+        </span>
+        <div className="mx-auto mt-4 max-w-md space-y-2">
+          <p className="text-[15px] font-semibold tracking-tight text-foreground">
+            {t("knowledge.disabledTitle")}
+          </p>
+          <p className="text-sm leading-relaxed text-muted-foreground">
+            {t("knowledge.disabledDescription")}
+          </p>
+        </div>
+      </div>
     );
   }
 
-  const statusLabel = t(`knowledge.status.${corpus.status}`, {
-    defaultValue: corpus.status,
-  });
-  const ungroundedAnswer = isUngroundedKnowledgeAnswer(result?.answer);
-  const showKnowledgeSources =
-    !!result && !ungroundedAnswer && result.results.length > 0;
-  const showKnowledgeNoHits =
-    !!result && !showKnowledgeSources && !result.answer;
+  const metrics: KnowledgeRoomMetrics = {
+    documentCount: roomMetrics?.documentCount ?? corpus.documents.length,
+    askUniqueVisitors: roomMetrics?.askUniqueVisitors ?? 0,
+    visitedLinkCount: roomMetrics?.visitedLinkCount ?? 0,
+  };
+  const corpusReady = resolveCorpusAttentionStage(corpus) === "ready";
 
-  return (
-    <div className="space-y-4" data-testid="deal-room-knowledge-tab">
-      <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-3 space-y-0 pb-3">
-          <div className="space-y-1">
-            <CardTitle className="flex items-center gap-2 text-h3">
-              <Books size={20} />
-              {t("knowledge.title")}
-            </CardTitle>
-            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <Badge variant="secondary">{statusLabel}</Badge>
-              {corpus.lastSyncedAt ? (
-                <span>
-                  {t("knowledge.lastSynced", {
-                    time: formatRelativeTime(corpus.lastSyncedAt),
-                  })}
-                </span>
-              ) : null}
-            </div>
-            {corpus.status === "degraded" || corpus.status === "failed" ? (
-              <p className="text-xs text-destructive">{t("knowledge.syncIssue")}</p>
-            ) : null}
-            {isKnowledgeBusy(corpus.status, corpus.progress?.jobStatus) ? (
-              <p className="text-xs text-muted-foreground">
-                {t("knowledge.syncProgress", {
-                  synced: corpus.progress?.synced ?? 0,
-                  total: corpus.progress?.total ?? 0,
-                  pending: corpus.progress?.pending ?? 0,
-                  failed: corpus.progress?.failed ?? 0,
-                })}
-              </p>
-            ) : null}
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={syncing}
-            onClick={() => {
+  if (!chatOpen) {
+    return (
+      <div className="relative space-y-6" data-testid="deal-room-knowledge-tab">
+        <div className="grid max-w-4xl gap-4 sm:grid-cols-2">
+          <CorpusIntegrityRail
+            corpus={corpus}
+            metrics={metrics}
+            syncing={syncing}
+            onSync={() => {
               void onSync();
             }}
-            data-testid="deal-room-knowledge-sync"
-          >
-            <ArrowsClockwise size={16} className="mr-1.5" />
-            {syncing ? t("knowledge.syncing") : t("knowledge.sync")}
-          </Button>
-        </CardHeader>
-        <CardContent>
-          {corpus.documents.length === 0 ? (
-            <p className="py-6 text-center text-sm text-muted-foreground">
-              {t("knowledge.emptyDocuments")}
-            </p>
-          ) : (
-            <ul className="divide-y divide-border rounded-lg border border-border">
-              {corpus.documents.map((doc) => (
-                <li
-                  key={doc.documentId}
-                  className="flex items-start justify-between gap-3 px-3 py-2.5 text-sm"
-                  data-testid="deal-room-knowledge-doc-row"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">
-                      {doc.title || doc.documentId}
-                    </p>
-                    {doc.status === "failed" ? (
-                      <p className="text-xs text-destructive">{t("knowledge.docSyncFailed")}</p>
-                    ) : (
-                      <p className="text-xs text-muted-foreground">
-                        {t("knowledge.chunkCount", { count: doc.chunkCount })}
-                      </p>
-                    )}
-                  </div>
-                  <Badge variant="outline">
-                    {t(`knowledge.docStatus.${doc.status}`, {
-                      defaultValue: doc.status,
-                    })}
-                  </Badge>
-                </li>
-              ))}
-            </ul>
-          )}
-        </CardContent>
-      </Card>
+          />
+          <KnowledgeAskEntryCard
+            ready={corpusReady && sessionHydrated}
+            onStartAsk={() => setChatOpen(true)}
+          />
+        </div>
+        <div className="flex max-w-4xl justify-end">
+          <KnowledgeSessionHistoryMenu
+            roomId={roomId}
+            activeSessionId={activeSessionId}
+            onOpenSession={onOpenSession}
+          />
+        </div>
+      </div>
+    );
+  }
 
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-h3">{t("knowledge.queryTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="space-y-1.5">
-            <Label htmlFor="deal-room-knowledge-query">{t("knowledge.queryLabel")}</Label>
-            <div className="flex gap-2">
-              <Input
-                id="deal-room-knowledge-query"
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={t("knowledge.queryPlaceholder")}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void onQuery();
-                }}
-              />
-              <Button
-                disabled={asking || !query.trim()}
-                onClick={() => {
-                  void onQuery();
-                }}
-                data-testid="deal-room-knowledge-ask"
+  return (
+    <div className="relative space-y-6" data-testid="deal-room-knowledge-tab">
+      <section
+        className="relative overflow-hidden rounded-2xl border border-border/70 bg-[linear-gradient(165deg,#f8fafc_0%,#ffffff_42%,#ffffff_100%)]"
+        data-testid="deal-room-knowledge-desk"
+      >
+        <div
+          aria-hidden
+          className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle_at_center,rgba(15,23,42,0.06),transparent_68%)]"
+        />
+        <div
+          aria-hidden
+          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/12 to-transparent"
+        />
+
+        <div className="relative space-y-5 px-5 py-6 sm:px-7 sm:py-7">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 max-w-2xl space-y-2.5">
+              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
+                {t("knowledge.heroEyebrow")}
+              </p>
+              <h2 className="text-[1.65rem] font-semibold tracking-tight text-foreground sm:text-[1.85rem]">
+                {t("knowledge.heroTitle")}
+              </h2>
+              <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
+                {t("knowledge.heroDescription")}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setChatOpen(false)}
+                data-testid="deal-room-knowledge-back-to-corpus"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                <MagnifyingGlass size={16} className="mr-1.5" />
-                {asking ? t("knowledge.querying") : t("knowledge.ask")}
-              </Button>
+                <ArrowLeft size={12} weight="bold" className="text-foreground/55" />
+                {t("knowledge.backToCorpus")}
+              </button>
+              {turns.length > 0 ? (
+                <span
+                  className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm"
+                  data-testid="deal-room-knowledge-session-meta"
+                >
+                  {t("knowledge.sessionTurns", { count: turns.length })}
+                </span>
+              ) : null}
+              <KnowledgeSessionHistoryMenu
+                roomId={roomId}
+                activeSessionId={activeSessionId}
+                onOpenSession={onOpenSession}
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  void onNewSession();
+                }}
+                data-testid="deal-room-knowledge-new-session"
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {t("knowledge.newSession")}
+              </button>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
+                <LockKey size={12} weight="bold" className="text-foreground/55" />
+                {t("knowledge.trustScoped")}
+              </span>
+              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
+                <SealCheck size={12} weight="bold" className="text-foreground/55" />
+                {t("knowledge.trustGrounded")}
+              </span>
             </div>
           </div>
 
-          {result ? (
-            <div className="space-y-3">
-              {result.answer ? (
-                <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
-                  {renderAnswerWithCitations(result.answer, (n) => {
-                    // Spec: [n] highlights the hit card; jump is via the card button.
-                    setActiveCite(n);
-                  })}
-                </div>
-              ) : null}
-              {showKnowledgeSources ? (
-                <ul className="space-y-2">
-                  {result.results.map((hit, idx) => {
-                    const n = idx + 1;
-                    const locus = formatHitLocusLabel(hit, {
-                      sheetPrefix: t("knowledge.sheetLabel", { defaultValue: "Sheet" }),
-                    });
-                    const canJump = !!(hit.documentId && hit.viewerPage);
-                    // DOCX / unmapped sheet: open the document home — never invent a page.
-                    const canOpenDoc = !!(hit.documentId && !hit.viewerPage);
-                    return (
-                      <li
-                        key={hit.chunkId || idx}
-                        className={cn(
-                          "rounded-lg border border-border p-3 text-sm",
-                          activeCite === n ? "border-primary ring-1 ring-primary/40" : null,
-                        )}
-                        data-testid="deal-room-knowledge-hit"
-                      >
-                        <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                          <span>[{n}]</span>
-                          <span>{hit.score.toFixed(3)}</span>
-                        </div>
-                        {locus ? (
-                          <p
-                            className="mb-1 text-xs font-medium text-foreground/80"
-                            data-testid="deal-room-knowledge-locus"
-                          >
-                            {locus}
-                          </p>
-                        ) : null}
-                        <p className="whitespace-pre-wrap">{hit.text}</p>
-                        {canJump ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="mt-2"
-                            data-testid="deal-room-knowledge-jump"
-                            onClick={() => openViewer(hit.documentId!, hit.viewerPage)}
-                          >
-                            {t("knowledge.openPage", {
-                              page: hit.viewerPage,
-                            })}
-                          </Button>
-                        ) : null}
-                        {canOpenDoc ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="mt-2"
-                            title={
-                              hit.sheet
-                                ? t("knowledge.sheetMapMissing")
-                                : t("knowledge.noPageLocus")
-                            }
-                            data-testid="deal-room-knowledge-jump-doc"
-                            onClick={() => openViewer(hit.documentId!)}
-                          >
-                            {t("knowledge.openDocument")}
-                          </Button>
-                        ) : null}
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-              {showKnowledgeNoHits ? (
-                <p className="text-sm text-muted-foreground">{t("knowledge.noHits")}</p>
-              ) : null}
-            </div>
-          ) : null}
-        </CardContent>
-      </Card>
+          <GroundedChatShell
+            query={query}
+            onQueryChange={setQuery}
+            turns={viewTurns}
+            asking={asking}
+            onAsk={() => {
+              void onQuery();
+            }}
+            onActiveCite={setActiveCite}
+            onOpenViewer={openViewer}
+            onFeedback={onFeedback}
+          />
+        </div>
+      </section>
     </div>
   );
 }

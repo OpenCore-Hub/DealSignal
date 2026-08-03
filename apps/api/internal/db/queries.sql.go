@@ -311,6 +311,48 @@ func (q *Queries) ClaimKnowledgeSyncJob(ctx context.Context, id pgtype.UUID) (Kn
 	return i, err
 }
 
+const closeActiveKnowledgeQASessionsForRoom = `-- name: CloseActiveKnowledgeQASessionsForRoom :exec
+UPDATE knowledge_qa_sessions
+SET status = 'closed',
+    updated_at = now()
+WHERE room_id = $1 AND status = 'active'
+`
+
+func (q *Queries) CloseActiveKnowledgeQASessionsForRoom(ctx context.Context, roomID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, closeActiveKnowledgeQASessionsForRoom, roomID)
+	return err
+}
+
+const closeKnowledgeQASession = `-- name: CloseKnowledgeQASession :one
+UPDATE knowledge_qa_sessions
+SET status = 'closed',
+    updated_at = now()
+WHERE id = $1 AND room_id = $2 AND status = 'active'
+RETURNING id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+`
+
+type CloseKnowledgeQASessionParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) CloseKnowledgeQASession(ctx context.Context, arg CloseKnowledgeQASessionParams) (KnowledgeQaSession, error) {
+	row := q.db.QueryRow(ctx, closeKnowledgeQASession, arg.ID, arg.RoomID)
+	var i KnowledgeQaSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastTurnAt,
+	)
+	return i, err
+}
+
 const consumeLinkInvitation = `-- name: ConsumeLinkInvitation :one
 UPDATE link_invitations
 SET status = 'used',
@@ -434,6 +476,19 @@ func (q *Queries) CountEmailEventsByLogID(ctx context.Context, emailLogID pgtype
 		return nil, err
 	}
 	return items, nil
+}
+
+const countKnowledgeQATurnsForSession = `-- name: CountKnowledgeQATurnsForSession :one
+SELECT COUNT(*)::int AS count
+FROM knowledge_qa_turns
+WHERE session_id = $1
+`
+
+func (q *Queries) CountKnowledgeQATurnsForSession(ctx context.Context, sessionID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, countKnowledgeQATurnsForSession, sessionID)
+	var count int32
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countLinkAccessCodeFailedByLink = `-- name: CountLinkAccessCodeFailedByLink :one
@@ -1402,6 +1457,135 @@ func (q *Queries) CreateInvitation(ctx context.Context, arg CreateInvitationPara
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const createKnowledgeQASession = `-- name: CreateKnowledgeQASession :one
+INSERT INTO knowledge_qa_sessions (
+    workspace_id, room_id, created_by, title, status
+) VALUES (
+    $1, $2, $3, $4, 'active'
+)
+RETURNING id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+`
+
+type CreateKnowledgeQASessionParams struct {
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       pgtype.Text
+}
+
+func (q *Queries) CreateKnowledgeQASession(ctx context.Context, arg CreateKnowledgeQASessionParams) (KnowledgeQaSession, error) {
+	row := q.db.QueryRow(ctx, createKnowledgeQASession,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.CreatedBy,
+		arg.Title,
+	)
+	var i KnowledgeQaSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastTurnAt,
+	)
+	return i, err
+}
+
+const createKnowledgeQATurn = `-- name: CreateKnowledgeQATurn :one
+INSERT INTO knowledge_qa_turns (
+    session_id,
+    room_id,
+    workspace_id,
+    sequence,
+    question,
+    answer,
+    refused,
+    result_status,
+    corpus_status_snapshot,
+    hits,
+    mode,
+    top_k,
+    error_summary,
+    created_by
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9::jsonb,
+    $10::jsonb,
+    $11,
+    $12,
+    $13,
+    $14
+)
+RETURNING id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by
+`
+
+type CreateKnowledgeQATurnParams struct {
+	SessionID            pgtype.UUID
+	RoomID               pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sequence             int32
+	Question             string
+	Answer               pgtype.Text
+	Refused              bool
+	ResultStatus         string
+	CorpusStatusSnapshot []byte
+	Hits                 []byte
+	Mode                 pgtype.Text
+	TopK                 pgtype.Int4
+	ErrorSummary         pgtype.Text
+	CreatedBy            pgtype.UUID
+}
+
+func (q *Queries) CreateKnowledgeQATurn(ctx context.Context, arg CreateKnowledgeQATurnParams) (KnowledgeQaTurn, error) {
+	row := q.db.QueryRow(ctx, createKnowledgeQATurn,
+		arg.SessionID,
+		arg.RoomID,
+		arg.WorkspaceID,
+		arg.Sequence,
+		arg.Question,
+		arg.Answer,
+		arg.Refused,
+		arg.ResultStatus,
+		arg.CorpusStatusSnapshot,
+		arg.Hits,
+		arg.Mode,
+		arg.TopK,
+		arg.ErrorSummary,
+		arg.CreatedBy,
+	)
+	var i KnowledgeQaTurn
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.Sequence,
+		&i.Question,
+		&i.Answer,
+		&i.Refused,
+		&i.ResultStatus,
+		&i.CorpusStatusSnapshot,
+		&i.Hits,
+		&i.Mode,
+		&i.TopK,
+		&i.ErrorSummary,
+		&i.CreatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
@@ -3242,6 +3426,31 @@ func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBy
 	return i, err
 }
 
+const getActiveKnowledgeQASessionForRoom = `-- name: GetActiveKnowledgeQASessionForRoom :one
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+FROM knowledge_qa_sessions
+WHERE room_id = $1 AND status = 'active'
+ORDER BY COALESCE(last_turn_at, created_at) DESC
+LIMIT 1
+`
+
+func (q *Queries) GetActiveKnowledgeQASessionForRoom(ctx context.Context, roomID pgtype.UUID) (KnowledgeQaSession, error) {
+	row := q.db.QueryRow(ctx, getActiveKnowledgeQASessionForRoom, roomID)
+	var i KnowledgeQaSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastTurnAt,
+	)
+	return i, err
+}
+
 const getAverageDurationByLink = `-- name: GetAverageDurationByLink :one
 SELECT COALESCE(AVG(duration_seconds), 0)::float8 AS avg_duration_seconds
 FROM page_views
@@ -4307,6 +4516,69 @@ func (q *Queries) GetInvitationByToken(ctx context.Context, token pgtype.UUID) (
 		&i.ExpiresAt,
 		&i.UsedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getKnowledgeQASession = `-- name: GetKnowledgeQASession :one
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+FROM knowledge_qa_sessions
+WHERE id = $1 AND room_id = $2
+`
+
+type GetKnowledgeQASessionParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) GetKnowledgeQASession(ctx context.Context, arg GetKnowledgeQASessionParams) (KnowledgeQaSession, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeQASession, arg.ID, arg.RoomID)
+	var i KnowledgeQaSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastTurnAt,
+	)
+	return i, err
+}
+
+const getKnowledgeQATurnForRoom = `-- name: GetKnowledgeQATurnForRoom :one
+SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by
+FROM knowledge_qa_turns
+WHERE id = $1 AND room_id = $2
+`
+
+type GetKnowledgeQATurnForRoomParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) GetKnowledgeQATurnForRoom(ctx context.Context, arg GetKnowledgeQATurnForRoomParams) (KnowledgeQaTurn, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeQATurnForRoom, arg.ID, arg.RoomID)
+	var i KnowledgeQaTurn
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.Sequence,
+		&i.Question,
+		&i.Answer,
+		&i.Refused,
+		&i.ResultStatus,
+		&i.CorpusStatusSnapshot,
+		&i.Hits,
+		&i.Mode,
+		&i.TopK,
+		&i.ErrorSummary,
+		&i.CreatedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
@@ -8224,6 +8496,192 @@ func (q *Queries) ListFileRequestsByVisitor(ctx context.Context, arg ListFileReq
 	return items, nil
 }
 
+const listKnowledgeQAFeedbackForSessionUser = `-- name: ListKnowledgeQAFeedbackForSessionUser :many
+SELECT f.id, f.turn_id, f.user_id, f.kind, f.note, f.created_at, f.updated_at
+FROM knowledge_qa_feedback f
+INNER JOIN knowledge_qa_turns t ON t.id = f.turn_id
+WHERE t.session_id = $1
+  AND f.user_id = $2
+`
+
+type ListKnowledgeQAFeedbackForSessionUserParams struct {
+	SessionID pgtype.UUID
+	UserID    pgtype.UUID
+}
+
+func (q *Queries) ListKnowledgeQAFeedbackForSessionUser(ctx context.Context, arg ListKnowledgeQAFeedbackForSessionUserParams) ([]KnowledgeQaFeedback, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeQAFeedbackForSessionUser, arg.SessionID, arg.UserID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnowledgeQaFeedback
+	for rows.Next() {
+		var i KnowledgeQaFeedback
+		if err := rows.Scan(
+			&i.ID,
+			&i.TurnID,
+			&i.UserID,
+			&i.Kind,
+			&i.Note,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeQASessionSummariesForRoom = `-- name: ListKnowledgeQASessionSummariesForRoom :many
+SELECT
+    s.id,
+    s.workspace_id,
+    s.room_id,
+    s.created_by,
+    s.title,
+    s.status,
+    s.created_at,
+    s.updated_at,
+    s.last_turn_at,
+    (
+        SELECT COUNT(*)::int
+        FROM knowledge_qa_turns t
+        WHERE t.session_id = s.id
+    ) AS turn_count,
+    COALESCE(
+        (
+            SELECT t.question
+            FROM knowledge_qa_turns t
+            WHERE t.session_id = s.id
+            ORDER BY t.sequence ASC
+            LIMIT 1
+        ),
+        ''
+    )::text AS question_preview
+FROM knowledge_qa_sessions s
+WHERE s.room_id = $1
+  AND (
+    NOT $2::bool
+    OR COALESCE(s.last_turn_at, s.created_at) < $3
+    OR (
+        COALESCE(s.last_turn_at, s.created_at) = $3
+        AND s.id < $4
+    )
+  )
+ORDER BY COALESCE(s.last_turn_at, s.created_at) DESC, s.id DESC
+LIMIT $5
+`
+
+type ListKnowledgeQASessionSummariesForRoomParams struct {
+	RoomID    pgtype.UUID
+	HasCursor bool
+	CursorAt  pgtype.Timestamptz
+	CursorID  pgtype.UUID
+	PageLimit int32
+}
+
+type ListKnowledgeQASessionSummariesForRoomRow struct {
+	ID              pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	RoomID          pgtype.UUID
+	CreatedBy       pgtype.UUID
+	Title           pgtype.Text
+	Status          string
+	CreatedAt       pgtype.Timestamptz
+	UpdatedAt       pgtype.Timestamptz
+	LastTurnAt      pgtype.Timestamptz
+	TurnCount       int32
+	QuestionPreview string
+}
+
+// Keyset page: pass has_cursor=false for the first page.
+func (q *Queries) ListKnowledgeQASessionSummariesForRoom(ctx context.Context, arg ListKnowledgeQASessionSummariesForRoomParams) ([]ListKnowledgeQASessionSummariesForRoomRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeQASessionSummariesForRoom,
+		arg.RoomID,
+		arg.HasCursor,
+		arg.CursorAt,
+		arg.CursorID,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListKnowledgeQASessionSummariesForRoomRow
+	for rows.Next() {
+		var i ListKnowledgeQASessionSummariesForRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastTurnAt,
+			&i.TurnCount,
+			&i.QuestionPreview,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeQATurnsForSession = `-- name: ListKnowledgeQATurnsForSession :many
+SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by
+FROM knowledge_qa_turns
+WHERE session_id = $1
+ORDER BY sequence ASC
+`
+
+func (q *Queries) ListKnowledgeQATurnsForSession(ctx context.Context, sessionID pgtype.UUID) ([]KnowledgeQaTurn, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeQATurnsForSession, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnowledgeQaTurn
+	for rows.Next() {
+		var i KnowledgeQaTurn
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.RoomID,
+			&i.WorkspaceID,
+			&i.Sequence,
+			&i.Question,
+			&i.Answer,
+			&i.Refused,
+			&i.ResultStatus,
+			&i.CorpusStatusSnapshot,
+			&i.Hits,
+			&i.Mode,
+			&i.TopK,
+			&i.ErrorSummary,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLinkAccessCodeContactsByLink = `-- name: ListLinkAccessCodeContactsByLink :many
 SELECT
     c.email::text AS contact_email,
@@ -11393,6 +11851,30 @@ func (q *Queries) ListWorkspacesWithCrmEnabled(ctx context.Context) ([]ListWorks
 	return items, nil
 }
 
+const lockKnowledgeQASession = `-- name: LockKnowledgeQASession :one
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+FROM knowledge_qa_sessions
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) LockKnowledgeQASession(ctx context.Context, id pgtype.UUID) (KnowledgeQaSession, error) {
+	row := q.db.QueryRow(ctx, lockKnowledgeQASession, id)
+	var i KnowledgeQaSession
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastTurnAt,
+	)
+	return i, err
+}
+
 const markHubSpotSyncJobCompleted = `-- name: MarkHubSpotSyncJobCompleted :exec
 UPDATE hubspot_sync_jobs
 SET status = 'completed', attempts = attempts + 1, updated_at = now()
@@ -11531,6 +12013,19 @@ WHERE id = ANY($1::uuid[])
 func (q *Queries) MarkSuggestionsSynced(ctx context.Context, dollar_1 []pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markSuggestionsSynced, dollar_1)
 	return err
+}
+
+const nextKnowledgeQATurnSequence = `-- name: NextKnowledgeQATurnSequence :one
+SELECT COALESCE(MAX(sequence), 0)::int AS max_sequence
+FROM knowledge_qa_turns
+WHERE session_id = $1
+`
+
+func (q *Queries) NextKnowledgeQATurnSequence(ctx context.Context, sessionID pgtype.UUID) (int32, error) {
+	row := q.db.QueryRow(ctx, nextKnowledgeQATurnSequence, sessionID)
+	var max_sequence int32
+	err := row.Scan(&max_sequence)
+	return max_sequence, err
 }
 
 const recordLinkOpened = `-- name: RecordLinkOpened :execrows
@@ -11808,6 +12303,25 @@ type SoftDeleteDocumentParams struct {
 
 func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocumentParams) error {
 	_, err := q.db.Exec(ctx, softDeleteDocument, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const touchKnowledgeQASessionAfterTurn = `-- name: TouchKnowledgeQASessionAfterTurn :exec
+UPDATE knowledge_qa_sessions
+SET last_turn_at = $1,
+    title = COALESCE(NULLIF(title, ''), $2),
+    updated_at = now()
+WHERE id = $3
+`
+
+type TouchKnowledgeQASessionAfterTurnParams struct {
+	LastTurnAt    pgtype.Timestamptz
+	TitleFallback pgtype.Text
+	ID            pgtype.UUID
+}
+
+func (q *Queries) TouchKnowledgeQASessionAfterTurn(ctx context.Context, arg TouchKnowledgeQASessionAfterTurnParams) error {
+	_, err := q.db.Exec(ctx, touchKnowledgeQASessionAfterTurn, arg.LastTurnAt, arg.TitleFallback, arg.ID)
 	return err
 }
 
@@ -13078,6 +13592,49 @@ func (q *Queries) UpsertIntegrationToken(ctx context.Context, arg UpsertIntegrat
 		arg.ExternalID,
 	)
 	return err
+}
+
+const upsertKnowledgeQAFeedback = `-- name: UpsertKnowledgeQAFeedback :one
+INSERT INTO knowledge_qa_feedback (
+    turn_id, user_id, kind, note
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4
+)
+ON CONFLICT (turn_id, user_id) DO UPDATE SET
+    kind = EXCLUDED.kind,
+    note = EXCLUDED.note,
+    updated_at = now()
+RETURNING id, turn_id, user_id, kind, note, created_at, updated_at
+`
+
+type UpsertKnowledgeQAFeedbackParams struct {
+	TurnID pgtype.UUID
+	UserID pgtype.UUID
+	Kind   string
+	Note   pgtype.Text
+}
+
+func (q *Queries) UpsertKnowledgeQAFeedback(ctx context.Context, arg UpsertKnowledgeQAFeedbackParams) (KnowledgeQaFeedback, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeQAFeedback,
+		arg.TurnID,
+		arg.UserID,
+		arg.Kind,
+		arg.Note,
+	)
+	var i KnowledgeQaFeedback
+	err := row.Scan(
+		&i.ID,
+		&i.TurnID,
+		&i.UserID,
+		&i.Kind,
+		&i.Note,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertLinkFeature = `-- name: UpsertLinkFeature :one

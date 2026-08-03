@@ -65,8 +65,12 @@ export function DealRoomsPage() {
     });
   }, [rooms, search, selectedTag]);
 
-  const navigateToRoom = (roomId: string, addDocuments = false) => {
-    navigate(`/${workspaceSlug}/deal-rooms/${roomId}${addDocuments ? "?addDocuments=1" : ""}`, {
+  const navigateToRoom = (roomId: string, opts?: { addDocuments?: boolean; tab?: string }) => {
+    const params = new URLSearchParams();
+    if (opts?.addDocuments) params.set("addDocuments", "1");
+    if (opts?.tab) params.set("tab", opts.tab);
+    const qs = params.toString();
+    navigate(`/${workspaceSlug}/deal-rooms/${roomId}${qs ? `?${qs}` : ""}`, {
       state: {
         returnTo: location.pathname + location.search,
         returnLabel: t("detail.back"),
@@ -76,7 +80,12 @@ export function DealRoomsPage() {
 
   const handleAddDocuments = (roomId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    navigateToRoom(roomId, true);
+    navigateToRoom(roomId, { addDocuments: true });
+  };
+
+  const handleViewDocuments = (roomId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    navigateToRoom(roomId, { tab: "documents" });
   };
 
   const handleCardClick = (roomId: string) => {
@@ -235,7 +244,7 @@ export function DealRoomsPage() {
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between border-t border-border pt-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border pt-3">
                       <p className="text-caption text-muted-foreground">
                         {room.lastAccessedAt
                           ? t("lastAccessed", {
@@ -243,14 +252,24 @@ export function DealRoomsPage() {
                             })
                           : t("card.noViewsYet")}
                       </p>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8"
-                        onClick={(e) => handleAddDocuments(room.id, e)}
-                      >
-                        {t("card.addDocuments")}
-                      </Button>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={(e) => handleAddDocuments(room.id, e)}
+                        >
+                          {t("card.addDocuments")}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8"
+                          onClick={(e) => handleViewDocuments(room.id, e)}
+                        >
+                          {t("card.viewDocuments")}
+                        </Button>
+                      </div>
                     </div>
                   </CardContent>
                 </Card>

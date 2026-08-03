@@ -1,16 +1,18 @@
 import { create } from "zustand";
-import type { DealRoomKnowledgeQueryResult } from "@/types";
+import type { DealRoomKnowledgeQATurn } from "@/types";
 
-/** In-memory Q&A draft so SPA navigations (viewer → back) keep the last answer. */
+/** Room-scoped Q&A draft: composer + active session + turn timeline. */
 export interface KnowledgeQueryDraft {
   query: string;
-  result: DealRoomKnowledgeQueryResult | null;
+  activeSessionId: string | null;
+  turns: DealRoomKnowledgeQATurn[];
   activeCite: number | null;
 }
 
 const emptyDraft = (): KnowledgeQueryDraft => ({
   query: "",
-  result: null,
+  activeSessionId: null,
+  turns: [],
   activeCite: null,
 });
 

@@ -2958,3 +2958,166 @@ WHERE room_id = $1
 ORDER BY created_at DESC
 LIMIT 1;
 
+-- name: CreateKnowledgeQASession :one
+INSERT INTO knowledge_qa_sessions (
+    workspace_id, room_id, created_by, title, status
+) VALUES (
+    $1, $2, $3, $4, 'active'
+)
+RETURNING *;
+
+-- name: GetKnowledgeQASession :one
+SELECT *
+FROM knowledge_qa_sessions
+WHERE id = $1 AND room_id = $2;
+
+-- name: GetActiveKnowledgeQASessionForRoom :one
+SELECT *
+FROM knowledge_qa_sessions
+WHERE room_id = $1 AND status = 'active'
+ORDER BY COALESCE(last_turn_at, created_at) DESC
+LIMIT 1;
+
+-- name: ListKnowledgeQASessionSummariesForRoom :many
+-- Keyset page: pass has_cursor=false for the first page.
+SELECT
+    s.id,
+    s.workspace_id,
+    s.room_id,
+    s.created_by,
+    s.title,
+    s.status,
+    s.created_at,
+    s.updated_at,
+    s.last_turn_at,
+    (
+        SELECT COUNT(*)::int
+        FROM knowledge_qa_turns t
+        WHERE t.session_id = s.id
+    ) AS turn_count,
+    COALESCE(
+        (
+            SELECT t.question
+            FROM knowledge_qa_turns t
+            WHERE t.session_id = s.id
+            ORDER BY t.sequence ASC
+            LIMIT 1
+        ),
+        ''
+    )::text AS question_preview
+FROM knowledge_qa_sessions s
+WHERE s.room_id = sqlc.arg(room_id)
+  AND (
+    NOT sqlc.arg(has_cursor)::bool
+    OR COALESCE(s.last_turn_at, s.created_at) < sqlc.arg(cursor_at)
+    OR (
+        COALESCE(s.last_turn_at, s.created_at) = sqlc.arg(cursor_at)
+        AND s.id < sqlc.arg(cursor_id)
+    )
+  )
+ORDER BY COALESCE(s.last_turn_at, s.created_at) DESC, s.id DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: CloseKnowledgeQASession :one
+UPDATE knowledge_qa_sessions
+SET status = 'closed',
+    updated_at = now()
+WHERE id = $1 AND room_id = $2 AND status = 'active'
+RETURNING *;
+
+-- name: CloseActiveKnowledgeQASessionsForRoom :exec
+UPDATE knowledge_qa_sessions
+SET status = 'closed',
+    updated_at = now()
+WHERE room_id = $1 AND status = 'active';
+
+-- name: LockKnowledgeQASession :one
+SELECT *
+FROM knowledge_qa_sessions
+WHERE id = $1
+FOR UPDATE;
+
+-- name: TouchKnowledgeQASessionAfterTurn :exec
+UPDATE knowledge_qa_sessions
+SET last_turn_at = sqlc.arg(last_turn_at),
+    title = COALESCE(NULLIF(title, ''), sqlc.arg(title_fallback)),
+    updated_at = now()
+WHERE id = sqlc.arg(id);
+
+-- name: NextKnowledgeQATurnSequence :one
+SELECT COALESCE(MAX(sequence), 0)::int AS max_sequence
+FROM knowledge_qa_turns
+WHERE session_id = $1;
+
+-- name: CreateKnowledgeQATurn :one
+INSERT INTO knowledge_qa_turns (
+    session_id,
+    room_id,
+    workspace_id,
+    sequence,
+    question,
+    answer,
+    refused,
+    result_status,
+    corpus_status_snapshot,
+    hits,
+    mode,
+    top_k,
+    error_summary,
+    created_by
+) VALUES (
+    sqlc.arg(session_id),
+    sqlc.arg(room_id),
+    sqlc.arg(workspace_id),
+    sqlc.arg(sequence),
+    sqlc.arg(question),
+    sqlc.narg(answer),
+    sqlc.arg(refused),
+    sqlc.arg(result_status),
+    sqlc.narg(corpus_status_snapshot)::jsonb,
+    sqlc.arg(hits)::jsonb,
+    sqlc.narg(mode),
+    sqlc.narg(top_k),
+    sqlc.narg(error_summary),
+    sqlc.arg(created_by)
+)
+RETURNING *;
+
+-- name: ListKnowledgeQATurnsForSession :many
+SELECT *
+FROM knowledge_qa_turns
+WHERE session_id = $1
+ORDER BY sequence ASC;
+
+-- name: CountKnowledgeQATurnsForSession :one
+SELECT COUNT(*)::int AS count
+FROM knowledge_qa_turns
+WHERE session_id = $1;
+
+-- name: GetKnowledgeQATurnForRoom :one
+SELECT *
+FROM knowledge_qa_turns
+WHERE id = $1 AND room_id = $2;
+
+-- name: UpsertKnowledgeQAFeedback :one
+INSERT INTO knowledge_qa_feedback (
+    turn_id, user_id, kind, note
+) VALUES (
+    sqlc.arg(turn_id),
+    sqlc.arg(user_id),
+    sqlc.arg(kind),
+    sqlc.narg(note)
+)
+ON CONFLICT (turn_id, user_id) DO UPDATE SET
+    kind = EXCLUDED.kind,
+    note = EXCLUDED.note,
+    updated_at = now()
+RETURNING *;
+
+-- name: ListKnowledgeQAFeedbackForSessionUser :many
+SELECT f.id, f.turn_id, f.user_id, f.kind, f.note, f.created_at, f.updated_at
+FROM knowledge_qa_feedback f
+INNER JOIN knowledge_qa_turns t ON t.id = f.turn_id
+WHERE t.session_id = sqlc.arg(session_id)
+  AND f.user_id = sqlc.arg(user_id);
+

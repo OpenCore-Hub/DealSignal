@@ -12,13 +12,24 @@ export type DealRoomTab =
   | "settings";
 
 /** Horizontal page tabs under the deal-room header (not left-nav-only sections). */
-export const DEAL_ROOM_PAGE_TABS: DealRoomTab[] = [
+export const DEAL_ROOM_PAGE_TABS = [
   "documents",
   "access",
   "links",
   "analytics",
   "knowledge",
-];
+] as const satisfies readonly DealRoomTab[];
+
+export type DealRoomPageTab = (typeof DEAL_ROOM_PAGE_TABS)[number];
+
+/** i18n keys under `dealRooms` for each horizontal page tab. */
+export const DEAL_ROOM_PAGE_TAB_LABEL_KEY: Record<DealRoomPageTab, string> = {
+  documents: "pageTabs.resources",
+  access: "pageTabs.access",
+  links: "pageTabs.links",
+  analytics: "pageTabs.analytics",
+  knowledge: "pageTabs.knowledge",
+};
 
 const VALID_TABS: DealRoomTab[] = [
   "documents",
@@ -31,8 +42,17 @@ const VALID_TABS: DealRoomTab[] = [
   "settings",
 ];
 
-export function isDealRoomPageTab(tab: DealRoomTab): boolean {
-  return DEAL_ROOM_PAGE_TABS.includes(tab);
+export function isDealRoomPageTab(tab: DealRoomTab): tab is DealRoomPageTab {
+  return (DEAL_ROOM_PAGE_TABS as readonly DealRoomTab[]).includes(tab);
+}
+
+/**
+ * Active page tab is always first; remaining tabs keep canonical order.
+ * Non-page tabs fall back to the canonical list unchanged.
+ */
+export function orderDealRoomPageTabs(active: DealRoomTab): DealRoomPageTab[] {
+  if (!isDealRoomPageTab(active)) return [...DEAL_ROOM_PAGE_TABS];
+  return [active, ...DEAL_ROOM_PAGE_TABS.filter((t) => t !== active)];
 }
 
 export function useDealRoomTab(): { tab: DealRoomTab; setTab: (tab: DealRoomTab) => void } {

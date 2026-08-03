@@ -276,6 +276,47 @@ type IntegrationToken struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type KnowledgeQaFeedback struct {
+	ID        pgtype.UUID
+	TurnID    pgtype.UUID
+	UserID    pgtype.UUID
+	Kind      string
+	Note      pgtype.Text
+	CreatedAt pgtype.Timestamptz
+	UpdatedAt pgtype.Timestamptz
+}
+
+type KnowledgeQaSession struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RoomID      pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       pgtype.Text
+	Status      string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	LastTurnAt  pgtype.Timestamptz
+}
+
+type KnowledgeQaTurn struct {
+	ID                   pgtype.UUID
+	SessionID            pgtype.UUID
+	RoomID               pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sequence             int32
+	Question             string
+	Answer               pgtype.Text
+	Refused              bool
+	ResultStatus         string
+	CorpusStatusSnapshot []byte
+	Hits                 []byte
+	Mode                 pgtype.Text
+	TopK                 pgtype.Int4
+	ErrorSummary         pgtype.Text
+	CreatedAt            pgtype.Timestamptz
+	CreatedBy            pgtype.UUID
+}
+
 type KnowledgeSyncJob struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID

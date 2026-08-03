@@ -459,6 +459,12 @@ export interface DealRoomAnalytics {
   }[];
 }
 
+/** Plan quota pair for the vector library card. */
+export interface KnowledgeQuotaPair {
+  used: number;
+  limit: number;
+}
+
 /** External docling-rag knowledge corpus status for a deal room. */
 export interface DealRoomKnowledgeCorpus {
   enabled: boolean;
@@ -480,6 +486,13 @@ export interface DealRoomKnowledgeCorpus {
     chunkCount: number;
     lastError?: string;
   }>;
+  /** Entitlement snapshot (best-effort from docling-rag). */
+  quota?: {
+    planCode?: string;
+    knowledgeBases: KnowledgeQuotaPair;
+    documents: KnowledgeQuotaPair;
+    answers: KnowledgeQuotaPair;
+  };
 }
 
 export interface DealRoomKnowledgeQueryHit {
@@ -494,6 +507,65 @@ export interface DealRoomKnowledgeQueryHit {
 }
 
 export interface DealRoomKnowledgeQueryResult {
+  query: string;
+  mode: string;
+  answer?: string;
+  results: DealRoomKnowledgeQueryHit[];
+}
+
+/** Persisted research session for the knowledge tab audit timeline. */
+export interface DealRoomKnowledgeQASession {
+  id: string;
+  roomId: string;
+  title?: string;
+  status: "active" | "closed" | string;
+  createdAt: string;
+  updatedAt: string;
+  lastTurnAt?: string;
+  turnCount?: number;
+  questionPreview?: string;
+}
+
+export interface DealRoomKnowledgeSessionList {
+  items: DealRoomKnowledgeQASession[];
+  nextCursor?: string;
+}
+
+export type DealRoomKnowledgeFeedbackKind =
+  | "helpful"
+  | "wrong_citation"
+  | "not_answering";
+
+export interface DealRoomKnowledgeTurnFeedback {
+  kind: DealRoomKnowledgeFeedbackKind;
+  note?: string;
+}
+
+export interface DealRoomKnowledgeQATurn {
+  id: string;
+  sessionId: string;
+  sequence: number;
+  question: string;
+  answer?: string;
+  refused: boolean;
+  resultStatus: "answered" | "refused" | "no_hits" | "error" | string;
+  hits: DealRoomKnowledgeQueryHit[];
+  mode?: string;
+  topK?: number;
+  errorSummary?: string;
+  createdAt: string;
+  /** Current user's feedback (Phase C); omitted when unset. */
+  feedback?: DealRoomKnowledgeTurnFeedback;
+}
+
+export interface DealRoomKnowledgeSessionDetail {
+  session: DealRoomKnowledgeQASession | null;
+  turns: DealRoomKnowledgeQATurn[];
+}
+
+export interface DealRoomKnowledgeSessionQueryResult {
+  sessionId: string;
+  turn: DealRoomKnowledgeQATurn;
   query: string;
   mode: string;
   answer?: string;

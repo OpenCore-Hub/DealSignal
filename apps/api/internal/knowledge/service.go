@@ -21,9 +21,10 @@ import (
 )
 
 var (
-	ErrUnavailable = errors.New("knowledge base unavailable")
-	ErrForbidden   = errors.New("knowledge base forbidden")
-	ErrNotFound    = errors.New("knowledge base not found")
+	ErrUnavailable  = errors.New("knowledge base unavailable")
+	ErrForbidden    = errors.New("knowledge base forbidden")
+	ErrNotFound     = errors.New("knowledge base not found")
+	ErrInvalidInput = errors.New("invalid input")
 )
 
 // ObjectStore reads document bytes from object storage.
@@ -76,9 +77,15 @@ func (a roomAccessAdapter) RequireActiveRoomMember(ctx context.Context, roomID, 
 	return nil
 }
 
+// Beginner starts a database transaction (pgx pool).
+type Beginner interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
 // Service orchestrates local mapping + docling-rag sync/query.
 type Service struct {
 	queries   *db.Queries
+	pool      Beginner
 	cfg       config.DoclingRAGConfig
 	client    *docling.Client
 	store     ObjectStore
@@ -100,6 +107,14 @@ func NewService(queries *db.Queries, cfg config.DoclingRAGConfig, client *doclin
 	}
 }
 
+// WithDBPool enables transactional session/turn writes.
+func (s *Service) WithDBPool(pool Beginner) *Service {
+	if s != nil {
+		s.pool = pool
+	}
+	return s
+}
+
 // WithPreviewPDFConverter sets the OnlyOffice converter used for Word/PowerPoint
 // knowledge ingest (preview-page locus). Required for DOCX/PPTX sync.
 func (s *Service) WithPreviewPDFConverter(c PreviewPDFConverter) *Service {
@@ -114,6 +129,20 @@ func (s *Service) Enabled() bool {
 	return s != nil && s.client != nil && s.client.Enabled()
 }
 
+// QuotaPair is used/limit for one entitlement dimension.
+type QuotaPair struct {
+	Used  int `json:"used"`
+	Limit int `json:"limit"`
+}
+
+// CorpusQuota is the plan entitlement snapshot for the vector library card.
+type CorpusQuota struct {
+	PlanCode       string    `json:"planCode,omitempty"`
+	KnowledgeBases QuotaPair `json:"knowledgeBases"`
+	Documents      QuotaPair `json:"documents"`
+	Answers        QuotaPair `json:"answers"`
+}
+
 // CorpusStatus is the owner-facing knowledge snapshot.
 type CorpusStatus struct {
 	Enabled      bool               `json:"enabled"`
@@ -122,6 +151,7 @@ type CorpusStatus struct {
 	ErrorMessage string             `json:"errorMessage,omitempty"`
 	Progress     SyncProgress       `json:"progress"`
 	Documents    []DocumentSyncItem `json:"documents"`
+	Quota        *CorpusQuota       `json:"quota,omitempty"`
 }
 
 // SyncProgress summarizes room corpus sync for the UI.
@@ -250,7 +280,74 @@ func (s *Service) GetCorpus(ctx context.Context, roomID, workspaceID, userID str
 			out.Status = "failed"
 		}
 	}
+	// Heal stuck provisioning/syncing when every non-deleted doc already settled.
+	// ingest_doc jobs historically left the corpus row at "provisioning".
+	if healed := reconcileCorpusStatus(out.Status, out.Progress); healed != out.Status {
+		out.Status = healed
+		_, _ = s.queries.UpdateDealRoomRagCorpusStatus(ctx, db.UpdateDealRoomRagCorpusStatusParams{
+			RoomID:       pgUUID(roomID),
+			Status:       healed,
+			ErrorMessage: pgtype.Text{},
+		})
+	}
+	out.Quota = s.loadCorpusQuota(ctx, room.WorkspaceID, out.Progress)
 	return out, nil
+}
+
+// loadCorpusQuota best-effort fills plan limits + usage for the vector library card.
+func (s *Service) loadCorpusQuota(ctx context.Context, workspaceID pgtype.UUID, progress SyncProgress) *CorpusQuota {
+	def := docling.DefaultPartnerEntitlements()
+	q := &CorpusQuota{
+		PlanCode:       def.PlanCode,
+		KnowledgeBases: QuotaPair{Limit: int(def.MaxKBs)},
+		Documents:      QuotaPair{Used: progress.Synced, Limit: int(def.MaxDocs)},
+		Answers:        QuotaPair{Limit: int(def.DailyAnswers)},
+	}
+	tenant, err := s.queries.GetWorkspaceRagTenant(ctx, workspaceID)
+	if err != nil {
+		return q
+	}
+	tenantSlug := tenant.ExternalTenantSlug
+	if s.cfg.PlatformAdminKey != "" {
+		if ent, eerr := s.client.GetEntitlements(ctx, tenantSlug); eerr == nil {
+			q.PlanCode = ent.PlanCode
+			q.KnowledgeBases.Limit = int(ent.Entitlements.MaxKBs)
+			q.Documents.Limit = int(ent.Entitlements.MaxDocs)
+			if ent.Entitlements.DailyAnswers > 0 {
+				q.Answers.Limit = int(ent.Entitlements.DailyAnswers)
+			} else if ent.Entitlements.MonthlySearches > 0 {
+				q.Answers.Limit = int(ent.Entitlements.MonthlySearches)
+			}
+		}
+	}
+	apiKey, oerr := openSecret(s.secretKey, tenant.TenantApiKey)
+	if oerr != nil || apiKey == "" {
+		return q
+	}
+	if kbs, lerr := s.client.ListKnowledgeBases(ctx, tenantSlug, apiKey); lerr == nil {
+		q.KnowledgeBases.Used = len(kbs)
+	}
+	return q
+}
+
+// reconcileCorpusStatus derives a truthful badge when the corpus row lags document rows.
+func reconcileCorpusStatus(status string, p SyncProgress) string {
+	if status != "provisioning" && status != "syncing" {
+		return status
+	}
+	if p.Total <= 0 {
+		return status
+	}
+	if p.Pending > 0 || p.Syncing > 0 {
+		return status
+	}
+	if p.Failed > 0 {
+		return "degraded"
+	}
+	if p.Synced == p.Total {
+		return "ready"
+	}
+	return status
 }
 
 // EnqueueRoomSync queues a full room sync job and marks pending docs.

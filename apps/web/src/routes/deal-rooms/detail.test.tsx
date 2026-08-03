@@ -12,7 +12,20 @@ import type { DealRoom, DealRoomFolder, DealRoomFolderDocs, DealRoomMember, Deal
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocumentByIdMock, uploadDocumentMock, addDealRoomDocumentMock, createDealRoomFolderMock, getDealRoomLinksMock, getLinkAnalyticsMock, listRoomQuestionsMock } = vi.hoisted(() => ({
+const {
+  getDealRoomByIdMock,
+  getDealRoomTemplatesMock,
+  getDocumentsMock,
+  getDocumentByIdMock,
+  uploadDocumentMock,
+  addDealRoomDocumentMock,
+  createDealRoomFolderMock,
+  getDealRoomLinksMock,
+  getLinkAnalyticsMock,
+  listRoomQuestionsMock,
+  getDealRoomKnowledgeMock,
+  getDealRoomAnalyticsMock,
+} = vi.hoisted(() => ({
   getDealRoomByIdMock: vi.fn(),
   getDealRoomTemplatesMock: vi.fn(),
   getDocumentsMock: vi.fn(),
@@ -23,6 +36,8 @@ const { getDealRoomByIdMock, getDealRoomTemplatesMock, getDocumentsMock, getDocu
   getDealRoomLinksMock: vi.fn(),
   getLinkAnalyticsMock: vi.fn(),
   listRoomQuestionsMock: vi.fn(),
+  getDealRoomKnowledgeMock: vi.fn(),
+  getDealRoomAnalyticsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -37,6 +52,8 @@ vi.mock("@/lib/api", () => ({
     getDealRoomLinks: getDealRoomLinksMock,
     getLinkAnalytics: getLinkAnalyticsMock,
     listRoomQuestions: listRoomQuestionsMock,
+    getDealRoomKnowledge: getDealRoomKnowledgeMock,
+    getDealRoomAnalytics: getDealRoomAnalyticsMock,
     answerQuestion: vi.fn(),
   },
 }));
@@ -197,11 +214,26 @@ describe("DealRoomDetailPage", () => {
     getDealRoomLinksMock.mockReset();
     getLinkAnalyticsMock.mockReset();
     listRoomQuestionsMock.mockReset();
+    getDealRoomKnowledgeMock.mockReset();
+    getDealRoomAnalyticsMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
     getDealRoomLinksMock.mockResolvedValue({ data: [] });
     getLinkAnalyticsMock.mockResolvedValue({ data: { access_code_contacts: [] } });
     listRoomQuestionsMock.mockResolvedValue({ data: [] });
+    getDealRoomKnowledgeMock.mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [],
+    });
+    getDealRoomAnalyticsMock.mockResolvedValue({
+      totalViews: 0,
+      uniqueVisitors: 0,
+      activeLinkCount: 0,
+      documentCount: 0,
+      viewsOverTime: [],
+      recentVisitors: [],
+    });
   });
 
   it("renders loading skeleton", async () => {
@@ -237,6 +269,20 @@ describe("DealRoomDetailPage", () => {
     expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
     expect(screen.getByTestId("deal-room-page-tabs")).toBeInTheDocument();
     expect(screen.queryByText("Invitees")).not.toBeInTheDocument();
+  });
+
+  it("moves the active page tab to the first position", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    await renderPage("/acme/deal-rooms/room-1?tab=knowledge");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-page-tabs")).toBeInTheDocument();
+    });
+    const tabs = screen.getByTestId("deal-room-page-tabs");
+    const triggers = Array.from(tabs.querySelectorAll('[role="tab"]')).map(
+      (el) => el.getAttribute("data-testid"),
+    );
+    expect(triggers[0]).toBe("deal-room-page-tab-knowledge");
   });
 
   it("migrates legacy participants tab to links", async () => {

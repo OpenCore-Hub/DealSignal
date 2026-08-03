@@ -279,7 +279,7 @@ func (s *Server) registerRoutes() error {
 				doclingClient,
 				storageClient,
 				s.cfg.URLSigningSecret,
-			).WithPreviewPDFConverter(converter)
+			).WithDBPool(s.dbPool).WithPreviewPDFConverter(converter)
 			knowledgeHandler := knowledge.NewHandler(knowledgeSvc)
 			if knowledgeSvc.Enabled() {
 				knowledgeWorker := knowledge.NewWorker(knowledgeSvc, 3*time.Second)

@@ -10,6 +10,12 @@ import type {
   DealRoomAnalytics,
   DealRoomKnowledgeCorpus,
   DealRoomKnowledgeQueryResult,
+  DealRoomKnowledgeSessionDetail,
+  DealRoomKnowledgeSessionList,
+  DealRoomKnowledgeSessionQueryResult,
+  DealRoomKnowledgeQASession,
+  DealRoomKnowledgeTurnFeedback,
+  DealRoomKnowledgeFeedbackKind,
   DealRoomDocumentItem,
   DealRoomFolder,
   DealRoomFolderDocs,
@@ -791,6 +797,60 @@ export const api = {
       getWorkspaceSlug(),
       `/deal-rooms/${roomId}/knowledge/query`,
       { method: "POST", body: JSON.stringify(body) },
+    ),
+  getActiveDealRoomKnowledgeSession: (roomId: string) =>
+    request<DealRoomKnowledgeSessionDetail>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions/active`,
+    ),
+  listDealRoomKnowledgeSessions: (
+    roomId: string,
+    params?: { limit?: number; cursor?: string },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    if (params?.cursor) qs.set("cursor", params.cursor);
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return request<DealRoomKnowledgeSessionList>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions${suffix}`,
+    );
+  },
+  getDealRoomKnowledgeSession: (roomId: string, sessionId: string) =>
+    request<DealRoomKnowledgeSessionDetail>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions/${sessionId}`,
+    ),
+  createDealRoomKnowledgeSession: (roomId: string, body?: { title?: string }) =>
+    request<DealRoomKnowledgeQASession>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions`,
+      { method: "POST", body: JSON.stringify(body ?? {}) },
+    ),
+  queryDealRoomKnowledgeSession: (
+    roomId: string,
+    body: { sessionId?: string; query: string; answer?: boolean; top_k?: number },
+  ) =>
+    request<DealRoomKnowledgeSessionQueryResult>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions/query`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
+  closeDealRoomKnowledgeSession: (roomId: string, sessionId: string) =>
+    request<DealRoomKnowledgeQASession>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions/${sessionId}/close`,
+      { method: "POST" },
+    ),
+  upsertDealRoomKnowledgeTurnFeedback: (
+    roomId: string,
+    turnId: string,
+    body: { kind: DealRoomKnowledgeFeedbackKind; note?: string },
+  ) =>
+    request<DealRoomKnowledgeTurnFeedback>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/turns/${turnId}/feedback`,
+      { method: "PUT", body: JSON.stringify(body) },
     ),
   createDealRoom: (payload: {
     name: string;
