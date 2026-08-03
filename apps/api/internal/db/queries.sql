@@ -3121,3 +3121,8 @@ INNER JOIN knowledge_qa_turns t ON t.id = f.turn_id
 WHERE t.session_id = sqlc.arg(session_id)
   AND f.user_id = sqlc.arg(user_id);
 
+-- name: DeleteExpiredKnowledgeQASessions :execrows
+-- Turns + feedback cascade via FK. Cutoff is exclusive (activity strictly older).
+DELETE FROM knowledge_qa_sessions
+WHERE COALESCE(last_turn_at, updated_at) < sqlc.arg(cutoff);
+

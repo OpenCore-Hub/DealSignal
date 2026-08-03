@@ -99,6 +99,8 @@ type Config struct {
 	AccessLogsRetentionDays     int
 	PageViewsRetentionDays      int
 	SecurityEventsRetentionDays int
+	// KnowledgeQARetentionDays is hot-data retention for knowledge_qa_sessions (0 disables).
+	KnowledgeQARetentionDays int
 
 	SignalRulesPath string
 
@@ -224,6 +226,7 @@ func Load() (*Config, error) {
 		AccessLogsRetentionDays:     getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
 		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
 		SecurityEventsRetentionDays: getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
+		KnowledgeQARetentionDays:    getEnvInt("KNOWLEDGE_QA_RETENTION_DAYS", 90),
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",

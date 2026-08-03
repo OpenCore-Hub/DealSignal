@@ -248,8 +248,18 @@ func (s *Server) registerRoutes() error {
 				analyticsSvc.WithCache(analytics.NewRedisCache(s.redisClient))
 			}
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
-			s.registerWorker(link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour))
-			s.registerWorker(analytics.NewRetentionCleaner(s.dbPool, queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays))
+			expiryReminder := link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour)
+			s.registerWorker(expiryReminder)
+			expiryReminder.Start(s.shutdownCtx)
+
+			analyticsRetention := analytics.NewRetentionCleaner(s.dbPool, queries, s.cfg.AccessLogsRetentionDays, s.cfg.PageViewsRetentionDays, s.cfg.SecurityEventsRetentionDays)
+			s.registerWorker(analyticsRetention)
+			analyticsRetention.Start(s.shutdownCtx)
+
+			knowledgeRetention := knowledge.NewRetentionCleaner(queries, s.cfg.KnowledgeQARetentionDays)
+			s.registerWorker(knowledgeRetention)
+			knowledgeRetention.Start(s.shutdownCtx)
+
 			heatScoreWorker := analytics.NewHeatScoreRefreshWorker(s.dbPool, s.cfg.HeatScoreRefreshInterval)
 			s.registerWorker(heatScoreWorker)
 			heatScoreWorker.Start(s.shutdownCtx)
@@ -260,8 +270,10 @@ func (s *Server) registerRoutes() error {
 			ssePublisher := sse.NewLinkPublisher(sseHub)
 			linkHandler.SetEventPublisher(ssePublisher)
 
-			// Register CRM aggregation worker (30min window).
-			s.registerWorker(crm.NewWindowAggregator(queries, 30*time.Minute))
+			// CRM aggregation worker (30min window).
+			crmAggregator := crm.NewWindowAggregator(queries, 30*time.Minute)
+			s.registerWorker(crmAggregator)
+			crmAggregator.Start(s.shutdownCtx)
 
 			// CRM webhook endpoint (CRM → DealSignal deal stage changes).
 			webhookHandler := crm.NewWebhookHandler()

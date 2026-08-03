@@ -2877,6 +2877,20 @@ func (q *Queries) DeleteDealRoomDocument(ctx context.Context, arg DeleteDealRoom
 	return err
 }
 
+const deleteExpiredKnowledgeQASessions = `-- name: DeleteExpiredKnowledgeQASessions :execrows
+DELETE FROM knowledge_qa_sessions
+WHERE COALESCE(last_turn_at, updated_at) < $1
+`
+
+// Turns + feedback cascade via FK. Cutoff is exclusive (activity strictly older).
+func (q *Queries) DeleteExpiredKnowledgeQASessions(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredKnowledgeQASessions, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const deleteIntegrationToken = `-- name: DeleteIntegrationToken :exec
 DELETE FROM integration_tokens WHERE workspace_id = $1 AND provider = $2
 `
