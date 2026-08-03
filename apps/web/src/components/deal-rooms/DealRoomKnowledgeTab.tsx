@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Books, MagnifyingGlass, ArrowsClockwise } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,12 @@ import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { formatRelativeTime } from "@/lib/formatters";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import type { DealRoomKnowledgeQueryResult } from "@/types";
+import { useKnowledgeQueryStore } from "@/stores/knowledgeQueryStore";
+import type {
+  DealRoomKnowledgeQueryHit,
+  DealRoomKnowledgeQueryResult,
+} from "@/types";
+import { cn } from "@/lib/utils";
 
 interface DealRoomKnowledgeTabProps {
   roomId: string;
@@ -41,17 +47,91 @@ export function isUngroundedKnowledgeAnswer(answer?: string | null): boolean {
   return needles.some((n) => text.includes(n));
 }
 
+/** Format page numbers without implying missing pages exist in the span. */
+export function formatPagesLabel(pages: number[]): string {
+  const sorted = [...new Set(pages.filter((p) => p > 0))].sort((a, b) => a - b);
+  if (sorted.length === 0) return "";
+  // Page numbers are viewer/preview pages (native PDF or OnlyOffice preview PDF).
+  if (sorted.length === 1) return `第${sorted[0]}页`;
+  const lo = sorted[0];
+  const hi = sorted[sorted.length - 1];
+  const contiguous = hi - lo + 1 === sorted.length;
+  if (contiguous) return `第${lo}–${hi}页`;
+  return `第${sorted.join("、")}页`;
+}
+
+/** Human-readable citation locus: file · pages|sheet. Never invents missing pages. */
+export function formatHitLocusLabel(
+  hit: DealRoomKnowledgeQueryHit,
+  opts?: { sheetPrefix?: string },
+): string | null {
+  const parts: string[] = [];
+  if (hit.sourceName) parts.push(hit.sourceName);
+  if (hit.pages && hit.pages.length > 0) {
+    const pagesLabel = formatPagesLabel(hit.pages);
+    if (pagesLabel) parts.push(pagesLabel);
+  } else if (hit.sheet) {
+    const prefix = opts?.sheetPrefix?.trim() || "Sheet";
+    parts.push(`${prefix} ${hit.sheet}`);
+  }
+  return parts.length ? parts.join(" · ") : null;
+}
+
+/** Same-tab viewer path (keeps in-memory workspace slug for authenticated APIs). */
+export function viewerPath(documentId: string, page?: number): string {
+  const qs = page && page > 0 ? `?page=${page}` : "";
+  return `/viewer/${documentId}${qs}`;
+}
+
+/** Split answer text so `[n]` citations become clickable markers. */
+export function renderAnswerWithCitations(
+  answer: string,
+  onCite: (n: number) => void,
+) {
+  const parts = answer.split(/(\[\d+\])/g);
+  return parts.map((part, i) => {
+    const m = /^\[(\d+)\]$/.exec(part);
+    if (!m) return <span key={i}>{part}</span>;
+    const n = Number(m[1]);
+    return (
+      <button
+        key={i}
+        type="button"
+        className="mx-0.5 rounded bg-primary/10 px-1 font-medium text-primary hover:bg-primary/20"
+        data-testid={`knowledge-cite-${n}`}
+        onClick={() => onCite(n)}
+      >
+        [{n}]
+      </button>
+    );
+  });
+}
+
 export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
+  const navigate = useNavigate();
+  const openViewer = (documentId: string, page?: number) => {
+    navigate(viewerPath(documentId, page));
+  };
   const { data, loading, error, refetch } = useAsyncData(
     () => api.getDealRoomKnowledge(roomId),
     [roomId],
   );
   const [syncing, setSyncing] = useState(false);
-  const [query, setQuery] = useState("");
   const [asking, setAsking] = useState(false);
-  const [result, setResult] = useState<DealRoomKnowledgeQueryResult | null>(null);
+  // Keep Q&A in a room-scoped store so viewer → browser Back remount restores it.
+  const query = useKnowledgeQueryStore((s) => s.byRoom[roomId]?.query ?? "");
+  const result = useKnowledgeQueryStore((s) => s.byRoom[roomId]?.result ?? null);
+  const activeCite = useKnowledgeQueryStore(
+    (s) => s.byRoom[roomId]?.activeCite ?? null,
+  );
+  const setDraft = useKnowledgeQueryStore((s) => s.setDraft);
+  const setQuery = (value: string) => setDraft(roomId, { query: value });
+  const setResult = (value: DealRoomKnowledgeQueryResult | null) =>
+    setDraft(roomId, { result: value });
+  const setActiveCite = (value: number | null) =>
+    setDraft(roomId, { activeCite: value });
 
   useEffect(() => {
     if (!isKnowledgeBusy(data?.status, data?.progress?.jobStatus)) return;
@@ -82,6 +162,7 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     const q = query.trim();
     if (!q) return;
     setAsking(true);
+    setActiveCite(null);
     try {
       const res = await api.queryDealRoomKnowledge(roomId, {
         query: q,
@@ -267,24 +348,76 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
             <div className="space-y-3">
               {result.answer ? (
                 <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm whitespace-pre-wrap">
-                  {result.answer}
+                  {renderAnswerWithCitations(result.answer, (n) => {
+                    // Spec: [n] highlights the hit card; jump is via the card button.
+                    setActiveCite(n);
+                  })}
                 </div>
               ) : null}
               {showKnowledgeSources ? (
                 <ul className="space-y-2">
-                  {result.results.map((hit, idx) => (
-                    <li
-                      key={hit.chunkId || idx}
-                      className="rounded-lg border border-border p-3 text-sm"
-                      data-testid="deal-room-knowledge-hit"
-                    >
-                      <div className="mb-1 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                        <span>[{idx + 1}]</span>
-                        <span>{hit.score.toFixed(3)}</span>
-                      </div>
-                      <p className="whitespace-pre-wrap">{hit.text}</p>
-                    </li>
-                  ))}
+                  {result.results.map((hit, idx) => {
+                    const n = idx + 1;
+                    const locus = formatHitLocusLabel(hit, {
+                      sheetPrefix: t("knowledge.sheetLabel", { defaultValue: "Sheet" }),
+                    });
+                    const canJump = !!(hit.documentId && hit.viewerPage);
+                    // DOCX / unmapped sheet: open the document home — never invent a page.
+                    const canOpenDoc = !!(hit.documentId && !hit.viewerPage);
+                    return (
+                      <li
+                        key={hit.chunkId || idx}
+                        className={cn(
+                          "rounded-lg border border-border p-3 text-sm",
+                          activeCite === n ? "border-primary ring-1 ring-primary/40" : null,
+                        )}
+                        data-testid="deal-room-knowledge-hit"
+                      >
+                        <div className="mb-1 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                          <span>[{n}]</span>
+                          <span>{hit.score.toFixed(3)}</span>
+                        </div>
+                        {locus ? (
+                          <p
+                            className="mb-1 text-xs font-medium text-foreground/80"
+                            data-testid="deal-room-knowledge-locus"
+                          >
+                            {locus}
+                          </p>
+                        ) : null}
+                        <p className="whitespace-pre-wrap">{hit.text}</p>
+                        {canJump ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2"
+                            data-testid="deal-room-knowledge-jump"
+                            onClick={() => openViewer(hit.documentId!, hit.viewerPage)}
+                          >
+                            {t("knowledge.openPage", {
+                              page: hit.viewerPage,
+                            })}
+                          </Button>
+                        ) : null}
+                        {canOpenDoc ? (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="mt-2"
+                            title={
+                              hit.sheet
+                                ? t("knowledge.sheetMapMissing")
+                                : t("knowledge.noPageLocus")
+                            }
+                            data-testid="deal-room-knowledge-jump-doc"
+                            onClick={() => openViewer(hit.documentId!)}
+                          >
+                            {t("knowledge.openDocument")}
+                          </Button>
+                        ) : null}
+                      </li>
+                    );
+                  })}
                 </ul>
               ) : null}
               {showKnowledgeNoHits ? (

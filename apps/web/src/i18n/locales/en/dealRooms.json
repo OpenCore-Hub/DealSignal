@@ -123,6 +123,11 @@
     "querying": "Asking…",
     "queryFailed": "Failed to query knowledge base",
     "noHits": "No matching passages found.",
+    "openPage": "Open page {{page}}",
+    "openDocument": "Open document",
+    "sheetLabel": "Sheet",
+    "sheetMapMissing": "Page map not ready — open document home",
+    "noPageLocus": "No page locus for this format — open document",
     "status": {
       "none": "Not provisioned",
       "provisioning": "Provisioning",

@@ -120,6 +120,11 @@
     "querying": "提问中…",
     "queryFailed": "知识库检索失败",
     "noHits": "未找到匹配段落。",
+    "openPage": "打开第 {{page}} 页",
+    "openDocument": "打开文档",
+    "sheetLabel": "工作表",
+    "sheetMapMissing": "页码映射未就绪，将打开文档首页",
+    "noPageLocus": "暂无可定位页码，将打开文档",
     "status": {
       "none": "未开通",
       "provisioning": "开通中",

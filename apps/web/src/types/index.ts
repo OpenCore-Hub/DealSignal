@@ -482,16 +482,22 @@ export interface DealRoomKnowledgeCorpus {
   }>;
 }
 
+export interface DealRoomKnowledgeQueryHit {
+  chunkId: string;
+  documentId?: string;
+  text: string;
+  score: number;
+  sourceName?: string;
+  pages?: number[];
+  sheet?: string;
+  viewerPage?: number;
+}
+
 export interface DealRoomKnowledgeQueryResult {
   query: string;
   mode: string;
   answer?: string;
-  results: Array<{
-    chunkId: string;
-    documentId?: string;
-    text: string;
-    score: number;
-  }>;
+  results: DealRoomKnowledgeQueryHit[];
 }
 
 export interface WorkspaceMember {
