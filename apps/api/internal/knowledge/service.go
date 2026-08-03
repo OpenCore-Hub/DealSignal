@@ -297,27 +297,26 @@ func (s *Service) GetCorpus(ctx context.Context, roomID, workspaceID, userID str
 // loadCorpusQuota best-effort fills plan limits + usage for the vector library card.
 func (s *Service) loadCorpusQuota(ctx context.Context, workspaceID pgtype.UUID, progress SyncProgress) *CorpusQuota {
 	def := docling.DefaultPartnerEntitlements()
+	answers := s.answersQuotaSnapshot(ctx, workspaceID)
 	q := &CorpusQuota{
 		PlanCode:       def.PlanCode,
 		KnowledgeBases: QuotaPair{Limit: int(def.MaxKBs)},
 		Documents:      QuotaPair{Used: progress.Synced, Limit: int(def.MaxDocs)},
-		Answers:        QuotaPair{Limit: int(def.DailyAnswers)},
+		Answers:        QuotaPair{Used: answers.Used, Limit: answers.Limit},
 	}
 	tenant, err := s.queries.GetWorkspaceRagTenant(ctx, workspaceID)
 	if err != nil {
 		return q
 	}
 	tenantSlug := tenant.ExternalTenantSlug
-	if s.cfg.PlatformAdminKey != "" {
+	if s.cfg.PlatformAdminKey != "" && s.client != nil {
 		if ent, eerr := s.client.GetEntitlements(ctx, tenantSlug); eerr == nil {
 			q.PlanCode = ent.PlanCode
 			q.KnowledgeBases.Limit = int(ent.Entitlements.MaxKBs)
 			q.Documents.Limit = int(ent.Entitlements.MaxDocs)
-			if ent.Entitlements.DailyAnswers > 0 {
-				q.Answers.Limit = int(ent.Entitlements.DailyAnswers)
-			} else if ent.Entitlements.MonthlySearches > 0 {
-				q.Answers.Limit = int(ent.Entitlements.MonthlySearches)
-			}
+			// Answers limit/used already resolved in answersQuotaSnapshot (same entitlements).
+			q.Answers.Limit = answers.Limit
+			q.Answers.Used = answers.Used
 		}
 	}
 	apiKey, oerr := openSecret(s.secretKey, tenant.TenantApiKey)
@@ -502,6 +501,10 @@ func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string,
 		return QueryResponse{}, ErrUnavailable
 	}
 	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+		return QueryResponse{}, err
+	}
+	// Same plan meter as session asks — legacy /knowledge/query must not bypass.
+	if err := s.enforceAnswersQuota(ctx, workspaceID); err != nil {
 		return QueryResponse{}, err
 	}
 	q := strings.TrimSpace(req.Query)

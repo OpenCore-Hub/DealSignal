@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -15,14 +16,85 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// sessionQueryRunner runs audited session asks (JSON or SSE transport label).
+type sessionQueryRunner interface {
+	runSessionQuery(
+		ctx context.Context,
+		roomID, workspaceID, userID string,
+		req SessionQueryRequest,
+		transport string,
+	) (SessionQueryResponse, error)
+}
+
+// answersQuotaChecker rejects asks when plan answer entitlement is exhausted.
+type answersQuotaChecker interface {
+	enforceAnswersQuota(ctx context.Context, workspaceID string) error
+}
+
 // Handler exposes knowledge BFF routes.
 type Handler struct {
-	service *Service
+	service   *Service
+	runner    sessionQueryRunner
+	admission AskAdmission
+	quota     answersQuotaChecker
+}
+
+// HandlerOption configures NewHandler.
+type HandlerOption func(*Handler)
+
+// WithAskAdmission overrides the default process-local admission controller.
+func WithAskAdmission(a AskAdmission) HandlerOption {
+	return func(h *Handler) {
+		if a != nil {
+			h.admission = a
+		}
+	}
 }
 
 // NewHandler constructs a knowledge handler.
-func NewHandler(service *Service) *Handler {
-	return &Handler{service: service}
+func NewHandler(service *Service, opts ...HandlerOption) *Handler {
+	h := &Handler{
+		service:   service,
+		runner:    service,
+		quota:     service,
+		admission: newMemoryAskAdmission(defaultKnowledgeQAMemberRPM),
+	}
+	for _, opt := range opts {
+		opt(h)
+	}
+	return h
+}
+
+func (h *Handler) checkAnswersQuota(ctx context.Context, workspaceID, transport string) error {
+	var err error
+	switch {
+	case h.quota != nil:
+		err = h.quota.enforceAnswersQuota(ctx, workspaceID)
+	case h.service != nil:
+		err = h.service.enforceAnswersQuota(ctx, workspaceID)
+	}
+	if err != nil {
+		recordKnowledgeQAGateReject(transport, "quota_exceeded")
+	}
+	return err
+}
+
+// admitAsk enforces single-flight + RPM before starting JSON/SSE work.
+func (h *Handler) admitAsk(ctx context.Context, roomID, userID, transport string) error {
+	if h.admission == nil {
+		return nil
+	}
+	err := h.admission.Admit(ctx, roomID, userID)
+	if err != nil {
+		recordKnowledgeQAGateReject(transport, errAdmissionKind(err))
+	}
+	return err
+}
+
+func (h *Handler) releaseAsk(ctx context.Context, roomID, userID string) {
+	if h.admission != nil {
+		h.admission.Release(ctx, roomID, userID)
+	}
 }
 
 // RegisterWorkspaceRoutes mounts knowledge routes under deal-rooms.
@@ -41,6 +113,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:roomId/knowledge/sessions/:sessionId", h.GetSession)
 	g.POST("/:roomId/knowledge/sessions/:sessionId/close", h.CloseSession)
 	g.PUT("/:roomId/knowledge/turns/:turnId/feedback", h.UpsertTurnFeedback)
+	g.POST("/:roomId/knowledge/events", h.RecordDeskEvent)
 }
 
 // Get returns corpus sync status.
@@ -79,6 +152,11 @@ func (h *Handler) Query(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
+	// Fail closed on plan quota before upstream search (service also enforces).
+	if err := h.checkAnswersQuota(c.Request.Context(), middleware.WorkspaceIDFrom(c), "json"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
 	res, err := h.service.Query(
 		c.Request.Context(),
 		c.Param("roomId"),
@@ -100,12 +178,27 @@ func (h *Handler) QuerySession(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
-	res, err := h.service.QueryWithSession(
+	roomID := c.Param("roomId")
+	userID := middleware.UserIDFrom(c)
+	wsID := middleware.WorkspaceIDFrom(c)
+	// Plan quota before single-flight so exhausted plans do not occupy the slot.
+	if err := h.checkAnswersQuota(c.Request.Context(), wsID, "json"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	if err := h.admitAsk(c.Request.Context(), roomID, userID, "json"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	defer h.releaseAsk(c.Request.Context(), roomID, userID)
+
+	res, err := h.runner.runSessionQuery(
 		c.Request.Context(),
-		c.Param("roomId"),
-		middleware.WorkspaceIDFrom(c),
-		middleware.UserIDFrom(c),
+		roomID,
+		wsID,
+		userID,
 		req,
+		"json",
 	)
 	if err != nil {
 		writeKnowledgeError(c, err)
@@ -122,6 +215,20 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
+
+	roomID := c.Param("roomId")
+	userID := middleware.UserIDFrom(c)
+	wsID := middleware.WorkspaceIDFrom(c)
+	// Reject before SSE headers so clients get a normal 429 JSON body.
+	if err := h.checkAnswersQuota(c.Request.Context(), wsID, "stream"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	if err := h.admitAsk(c.Request.Context(), roomID, userID, "stream"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	defer h.releaseAsk(c.Request.Context(), roomID, userID)
 
 	flusher, ok := c.Writer.(http.Flusher)
 	if !ok {
@@ -147,15 +254,18 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 
 	writeEvent("phase", streamPhasePayload{Phase: "retrieving"})
 
-	res, err := h.service.QueryWithSession(
+	res, err := h.runner.runSessionQuery(
 		c.Request.Context(),
-		c.Param("roomId"),
-		middleware.WorkspaceIDFrom(c),
-		middleware.UserIDFrom(c),
+		roomID,
+		wsID,
+		userID,
 		req,
+		"stream",
 	)
 	if err != nil {
-		writeEvent("error", streamErrorFrom(err))
+		payload := streamErrorFrom(err)
+		recordKnowledgeQAStreamError(payload.Code)
+		writeEvent("error", payload)
 		return
 	}
 
@@ -177,6 +287,7 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 	if shouldEmitAnswerTokens(res.Answer, res.Turn) {
 		for _, chunk := range answerTokenChunks(res.Answer, defaultAnswerTokenRunes) {
 			if err := c.Request.Context().Err(); err != nil {
+				recordKnowledgeQAStreamError("client_cancelled")
 				return
 			}
 			writeEvent("token", streamTokenPayload{Text: chunk})
@@ -299,6 +410,32 @@ func (h *Handler) UpsertTurnFeedback(c *gin.Context) {
 	c.JSON(http.StatusOK, fb)
 }
 
+// DeskEventRequest is a fire-and-forget product signal from the research desk.
+type DeskEventRequest struct {
+	Type        string `json:"type"`
+	TurnOutcome string `json:"turnOutcome,omitempty"` // grounded | refused | unknown
+}
+
+// RecordDeskEvent increments Prometheus counters for product funnels (no persistence).
+func (h *Handler) RecordDeskEvent(c *gin.Context) {
+	var req DeskEventRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	if err := h.service.RecordDeskEvent(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		req,
+	); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.Status(http.StatusNoContent)
+}
+
 // CloseSession closes an active session.
 func (h *Handler) CloseSession(c *gin.Context) {
 	session, err := h.service.CloseSession(
@@ -330,6 +467,21 @@ func writeKnowledgeError(c *gin.Context, err error) {
 		c.JSON(http.StatusBadRequest, gin.H{
 			"code":    "invalid_input",
 			"message": httpx.SafeMessage("invalid_input", err),
+		})
+	case errors.Is(err, ErrQueryBusy):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    "knowledge_query_busy",
+			"message": "a question is already in progress",
+		})
+	case errors.Is(err, ErrQueryRateLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    "knowledge_query_rate_limited",
+			"message": "too many questions, please try again shortly",
+		})
+	case errors.Is(err, ErrQueryQuotaExceeded):
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"code":    "knowledge_query_quota_exceeded",
+			"message": "answer quota for this plan is exhausted",
 		})
 	default:
 		logger.ErrorCtx(c.Request.Context(), "knowledge handler error", err)

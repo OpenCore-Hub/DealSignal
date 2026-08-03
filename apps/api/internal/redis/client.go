@@ -76,6 +76,17 @@ func (c *Client) SetNX(ctx context.Context, key string, value interface{}, ttl t
 	return c.rdb.SetNX(ctx, key, value, ttl).Result()
 }
 
+// Del removes one or more keys.
+func (c *Client) Del(ctx context.Context, keys ...string) error {
+	if c == nil || c.rdb == nil {
+		return errors.New("redis client not available")
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+	return c.rdb.Del(ctx, keys...).Err()
+}
+
 // BlocklistToken stores a token hash with its remaining TTL.
 func (c *Client) BlocklistToken(ctx context.Context, token string, ttl time.Duration) error {
 	return c.rdb.Set(ctx, "token:blocklist:"+hashToken(token), "1", ttl).Err()

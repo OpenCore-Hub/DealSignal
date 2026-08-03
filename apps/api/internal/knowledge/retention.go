@@ -61,10 +61,12 @@ func (r *RetentionCleaner) runOnce(ctx context.Context) {
 	}
 	n, err := PurgeExpiredSessions(ctx, r.q, r.retentionDays, r.now())
 	if err != nil {
+		recordKnowledgeQARetentionError()
 		logger.ErrorCtx(ctx, "knowledge qa retention: purge failed", err,
 			slog.Int("retention_days", r.retentionDays))
 		return
 	}
+	recordKnowledgeQARetentionDeleted(n)
 	if n > 0 {
 		logger.InfoCtx(ctx, "knowledge qa retention: purged expired sessions",
 			slog.Int64("deleted", n),

@@ -101,6 +101,8 @@ type Config struct {
 	SecurityEventsRetentionDays int
 	// KnowledgeQARetentionDays is hot-data retention for knowledge_qa_sessions (0 disables).
 	KnowledgeQARetentionDays int
+	// KnowledgeQAMemberRPM caps session asks per room member per minute (0 disables RPM; single-flight remains).
+	KnowledgeQAMemberRPM int
 
 	SignalRulesPath string
 
@@ -227,6 +229,7 @@ func Load() (*Config, error) {
 		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
 		SecurityEventsRetentionDays: getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
 		KnowledgeQARetentionDays:    getEnvInt("KNOWLEDGE_QA_RETENTION_DAYS", 90),
+		KnowledgeQAMemberRPM:        getEnvInt("KNOWLEDGE_QA_MEMBER_RPM", 20),
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",

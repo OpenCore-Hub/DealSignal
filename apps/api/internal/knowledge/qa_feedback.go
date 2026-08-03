@@ -67,6 +67,7 @@ func (s *Service) UpsertTurnFeedback(
 	if err != nil {
 		return QAFeedback{}, err
 	}
+	recordKnowledgeQAFeedback(kind)
 	return mapQAFeedback(row), nil
 }
 

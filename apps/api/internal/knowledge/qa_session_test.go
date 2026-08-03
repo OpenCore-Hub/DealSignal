@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"context"
 	"errors"
 	"testing"
 	"time"
@@ -17,6 +18,8 @@ func TestClassifyQueryErrorCode(t *testing.T) {
 		{ErrUnavailable, "knowledge_unavailable"},
 		{ErrForbidden, "forbidden"},
 		{ErrNotFound, "not_found"},
+		{context.Canceled, "client_cancelled"},
+		{context.DeadlineExceeded, "query_timeout"},
 		{errors.New("boom"), "query_failed"},
 		{errors.Join(ErrUnavailable, errors.New("wrap")), "knowledge_unavailable"},
 	}
@@ -25,6 +28,20 @@ func TestClassifyQueryErrorCode(t *testing.T) {
 		if got != tc.want {
 			t.Fatalf("classifyQueryErrorCode(%v)=%q want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+func TestAuditWriteContextSurvivesParentCancel(t *testing.T) {
+	t.Parallel()
+	parent, cancel := context.WithCancel(context.Background())
+	cancel()
+	if parent.Err() == nil {
+		t.Fatal("parent should be cancelled")
+	}
+	ctx, stop := auditWriteContext(parent)
+	defer stop()
+	if err := ctx.Err(); err != nil {
+		t.Fatalf("audit write ctx must survive parent cancel, got %v", err)
 	}
 }
 

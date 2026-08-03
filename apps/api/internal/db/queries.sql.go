@@ -491,6 +491,25 @@ func (q *Queries) CountKnowledgeQATurnsForSession(ctx context.Context, sessionID
 	return count, err
 }
 
+const countKnowledgeQATurnsForWorkspaceSince = `-- name: CountKnowledgeQATurnsForWorkspaceSince :one
+SELECT COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+`
+
+type CountKnowledgeQATurnsForWorkspaceSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+func (q *Queries) CountKnowledgeQATurnsForWorkspaceSince(ctx context.Context, arg CountKnowledgeQATurnsForWorkspaceSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countKnowledgeQATurnsForWorkspaceSince, arg.WorkspaceID, arg.Since)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countLinkAccessCodeFailedByLink = `-- name: CountLinkAccessCodeFailedByLink :one
 SELECT COUNT(*)::bigint AS count
 FROM link_contacts

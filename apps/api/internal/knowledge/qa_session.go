@@ -94,13 +94,34 @@ type SessionQueryResponse struct {
 	Results   []QueryHit `json:"results"`
 }
 
-// QueryWithSession runs knowledge Query and appends an audit turn.
+// QueryWithSession runs knowledge Query and appends an audit turn (JSON transport).
 // Empty sessionId creates a new active session (first question).
 func (s *Service) QueryWithSession(
 	ctx context.Context,
 	roomID, workspaceID, userID string,
 	req SessionQueryRequest,
 ) (SessionQueryResponse, error) {
+	return s.queryWithSession(ctx, roomID, workspaceID, userID, req, "json")
+}
+
+// runSessionQuery implements sessionQueryRunner for the HTTP handler.
+func (s *Service) runSessionQuery(
+	ctx context.Context,
+	roomID, workspaceID, userID string,
+	req SessionQueryRequest,
+	transport string,
+) (SessionQueryResponse, error) {
+	return s.queryWithSession(ctx, roomID, workspaceID, userID, req, transport)
+}
+
+// queryWithSession is the shared audit path for JSON and SSE transports.
+func (s *Service) queryWithSession(
+	ctx context.Context,
+	roomID, workspaceID, userID string,
+	req SessionQueryRequest,
+	transport string,
+) (SessionQueryResponse, error) {
+	started := time.Now()
 	if !s.Enabled() {
 		return SessionQueryResponse{}, ErrUnavailable
 	}
@@ -112,6 +133,9 @@ func (s *Service) QueryWithSession(
 	if q == "" {
 		return SessionQueryResponse{}, fmt.Errorf("query is required")
 	}
+	if err := s.enforceAnswersQuota(ctx, workspaceID); err != nil {
+		return SessionQueryResponse{}, err
+	}
 
 	session, err := s.resolveWritableSession(ctx, roomID, workspaceID, userID, req.SessionID, q)
 	if err != nil {
@@ -121,7 +145,11 @@ func (s *Service) QueryWithSession(
 	queryReq := QueryRequest{Query: q, Answer: req.Answer, TopK: req.TopK}
 	res, qerr := s.Query(ctx, roomID, workspaceID, userID, queryReq)
 
-	turn, err := s.appendTurn(ctx, session, roomID, workspaceID, userID, q, queryReq, res, qerr)
+	// Client Stop / disconnect cancels the request ctx. Persist the audit turn
+	// anyway so the desk can hydrate (P5) — same pattern as assistant/link.
+	auditCtx, auditCancel := auditWriteContext(ctx)
+	defer auditCancel()
+	turn, err := s.appendTurn(auditCtx, session, roomID, workspaceID, userID, q, queryReq, res, qerr)
 	if err != nil {
 		return SessionQueryResponse{}, err
 	}
@@ -133,6 +161,7 @@ func (s *Service) QueryWithSession(
 	// Always 200-path when the audit turn was written — UI reads resultStatus/errorSummary.
 	// Upstream unavailability is reflected on the turn, not as a dropped response.
 	_ = qerr
+	recordKnowledgeQATurn(turn.ResultStatus, transport, started)
 	return SessionQueryResponse{
 		SessionID: turn.SessionID,
 		Turn:      turn,
@@ -452,6 +481,13 @@ func (s *Service) appendTurn(
 	return mapQATurn(row), nil
 }
 
+const knowledgeQAAuditWriteTimeout = 10 * time.Second
+
+// auditWriteContext survives parent cancel (SSE abort) with a bounded write window.
+func auditWriteContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(parent), knowledgeQAAuditWriteTimeout)
+}
+
 func classifyQueryErrorCode(err error) string {
 	switch {
 	case errors.Is(err, ErrUnavailable):
@@ -460,6 +496,10 @@ func classifyQueryErrorCode(err error) string {
 		return "forbidden"
 	case errors.Is(err, ErrNotFound):
 		return "not_found"
+	case errors.Is(err, context.Canceled):
+		return "client_cancelled"
+	case errors.Is(err, context.DeadlineExceeded):
+		return "query_timeout"
 	default:
 		return "query_failed"
 	}

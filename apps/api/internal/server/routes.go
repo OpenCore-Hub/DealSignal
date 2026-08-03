@@ -292,7 +292,17 @@ func (s *Server) registerRoutes() error {
 				storageClient,
 				s.cfg.URLSigningSecret,
 			).WithDBPool(s.dbPool).WithPreviewPDFConverter(converter)
-			knowledgeHandler := knowledge.NewHandler(knowledgeSvc)
+			var knowledgeOpts []knowledge.HandlerOption
+			if s.redisClient != nil {
+				knowledgeOpts = append(knowledgeOpts, knowledge.WithAskAdmission(
+					knowledge.NewRedisAskAdmission(s.redisClient, s.redisClient, s.cfg.KnowledgeQAMemberRPM),
+				))
+			} else {
+				knowledgeOpts = append(knowledgeOpts, knowledge.WithAskAdmission(
+					knowledge.NewMemoryAskAdmission(s.cfg.KnowledgeQAMemberRPM),
+				))
+			}
+			knowledgeHandler := knowledge.NewHandler(knowledgeSvc, knowledgeOpts...)
 			if knowledgeSvc.Enabled() {
 				knowledgeWorker := knowledge.NewWorker(knowledgeSvc, 3*time.Second)
 				s.registerWorker(knowledgeWorker)

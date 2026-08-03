@@ -3126,3 +3126,9 @@ WHERE t.session_id = sqlc.arg(session_id)
 DELETE FROM knowledge_qa_sessions
 WHERE COALESCE(last_turn_at, updated_at) < sqlc.arg(cutoff);
 
+-- name: CountKnowledgeQATurnsForWorkspaceSince :one
+SELECT COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since);
+

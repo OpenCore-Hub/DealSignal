@@ -87,6 +87,12 @@ func streamErrorFrom(err error) streamErrorPayload {
 		return streamErrorPayload{Code: "not_found", Message: "not found"}
 	case errors.Is(err, ErrInvalidInput):
 		return streamErrorPayload{Code: "invalid_input", Message: "invalid input"}
+	case errors.Is(err, ErrQueryBusy):
+		return streamErrorPayload{Code: "knowledge_query_busy", Message: "a question is already in progress"}
+	case errors.Is(err, ErrQueryRateLimited):
+		return streamErrorPayload{Code: "knowledge_query_rate_limited", Message: "too many questions, please try again shortly"}
+	case errors.Is(err, ErrQueryQuotaExceeded):
+		return streamErrorPayload{Code: "knowledge_query_quota_exceeded", Message: "answer quota for this plan is exhausted"}
 	default:
 		return streamErrorPayload{Code: "internal_error", Message: "internal error"}
 	}
