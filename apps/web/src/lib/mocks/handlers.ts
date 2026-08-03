@@ -58,21 +58,6 @@ const initialState = {
   security: structuredClone(securitySettings),
 };
 
-function resetMockState() {
-  mockUsers.clear();
-  mockPublicQuestions.clear();
-  mockOwnerQuestions.clear();
-  seedOwnerAskHostQuestions();
-  mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
-  mockDocuments.splice(0, mockDocuments.length, ...initialState.documents);
-  mockLinks.splice(0, mockLinks.length, ...initialState.links);
-  mockDealRooms.splice(0, mockDealRooms.length, ...initialState.dealRooms);
-  mockWorkspaceMembers.splice(0, mockWorkspaceMembers.length, ...initialState.members);
-  workspaceSettings = { ...initialState.settings };
-  integrationsStatus = { ...initialState.integrations };
-  securitySettings = { ...initialState.security };
-}
-
 // In-memory auth store for the mock environment.
 interface MockUser {
   id: string;
@@ -85,6 +70,277 @@ const mockUsers = new Map<string, MockUser>();
 const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
 /** Per-link Ask Host questions for owner inbox (room + link). */
 const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
+
+/** In-memory knowledge Q&A sessions/turns/feedback for MSW e2e (Phase A–C). */
+type MockKnowledgeFeedback = { kind: string; note?: string };
+type MockKnowledgeTurn = {
+  id: string;
+  sessionId: string;
+  sequence: number;
+  question: string;
+  answer?: string;
+  refused: boolean;
+  resultStatus: string;
+  hits: Array<{
+    chunkId: string;
+    documentId?: string;
+    text: string;
+    score: number;
+    sourceName?: string;
+    pages?: number[];
+    viewerPage?: number;
+  }>;
+  createdAt: string;
+  feedback?: MockKnowledgeFeedback;
+};
+type MockKnowledgeSession = {
+  id: string;
+  roomId: string;
+  title: string;
+  status: "active" | "closed";
+  createdAt: string;
+  updatedAt: string;
+  lastTurnAt?: string;
+  turnCount: number;
+};
+const mockKnowledgeSessionsByRoom = new Map<string, MockKnowledgeSession[]>();
+const mockKnowledgeTurnsBySession = new Map<string, MockKnowledgeTurn[]>();
+/** E2E override for GET …/knowledge corpus status (A5). Survives reload via Cache. */
+type MockKnowledgeCorpusOverride = {
+  status: string;
+  documentStatus: string;
+  jobStatus: string;
+};
+const mockKnowledgeCorpusOverrideByRoom = new Map<string, MockKnowledgeCorpusOverride>();
+
+function resetMockState() {
+  mockUsers.clear();
+  mockPublicQuestions.clear();
+  mockOwnerQuestions.clear();
+  void resetKnowledgeQAState();
+  seedOwnerAskHostQuestions();
+  mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
+  mockDocuments.splice(0, mockDocuments.length, ...initialState.documents);
+  mockLinks.splice(0, mockLinks.length, ...initialState.links);
+  mockDealRooms.splice(0, mockDealRooms.length, ...initialState.dealRooms);
+  mockWorkspaceMembers.splice(0, mockWorkspaceMembers.length, ...initialState.members);
+  workspaceSettings = { ...initialState.settings };
+  integrationsStatus = { ...initialState.integrations };
+  securitySettings = { ...initialState.security };
+}
+const KNOWLEDGE_QA_CACHE = "msw-e2e-knowledge-qa";
+const KNOWLEDGE_QA_STATE_URL = "https://msw.local/knowledge-qa-state";
+let knowledgeQAHydrated = false;
+let knowledgeQAHydratePromise: Promise<void> | null = null;
+
+async function hydrateKnowledgeQAState() {
+  if (knowledgeQAHydrated) return;
+  if (typeof caches === "undefined") {
+    knowledgeQAHydrated = true;
+    return;
+  }
+  if (!knowledgeQAHydratePromise) {
+    knowledgeQAHydratePromise = (async () => {
+      try {
+        const cache = await caches.open(KNOWLEDGE_QA_CACHE);
+        const res = await cache.match(KNOWLEDGE_QA_STATE_URL);
+        if (res) {
+          const data = (await res.json()) as {
+            sessions?: [string, MockKnowledgeSession[]][];
+            turns?: [string, MockKnowledgeTurn[]][];
+            corpusOverrides?: [string, MockKnowledgeCorpusOverride][];
+          };
+          mockKnowledgeSessionsByRoom.clear();
+          mockKnowledgeTurnsBySession.clear();
+          mockKnowledgeCorpusOverrideByRoom.clear();
+          for (const [roomId, sessions] of data.sessions ?? []) {
+            mockKnowledgeSessionsByRoom.set(roomId, sessions);
+          }
+          for (const [sessionId, turns] of data.turns ?? []) {
+            mockKnowledgeTurnsBySession.set(sessionId, turns);
+          }
+          for (const [roomId, override] of data.corpusOverrides ?? []) {
+            mockKnowledgeCorpusOverrideByRoom.set(roomId, override);
+          }
+        }
+      } catch {
+        /* ignore cache hydrate failures in non-SW contexts */
+      } finally {
+        knowledgeQAHydrated = true;
+      }
+    })();
+  }
+  await knowledgeQAHydratePromise;
+}
+
+async function persistKnowledgeQAState() {
+  if (typeof caches === "undefined") return;
+  try {
+    const cache = await caches.open(KNOWLEDGE_QA_CACHE);
+    await cache.put(
+      KNOWLEDGE_QA_STATE_URL,
+      new Response(
+        JSON.stringify({
+          sessions: [...mockKnowledgeSessionsByRoom.entries()],
+          turns: [...mockKnowledgeTurnsBySession.entries()],
+          corpusOverrides: [...mockKnowledgeCorpusOverrideByRoom.entries()],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function resetKnowledgeQAState() {
+  mockKnowledgeSessionsByRoom.clear();
+  mockKnowledgeTurnsBySession.clear();
+  mockKnowledgeCorpusOverrideByRoom.clear();
+  knowledgeQAHydrated = true;
+  knowledgeQAHydratePromise = null;
+  if (typeof caches === "undefined") return;
+  try {
+    await caches.delete(KNOWLEDGE_QA_CACHE);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Mirror apps/api answerTokenChunks — keep e2e stream contract aligned. */
+function chunkMockAnswerTokens(answer: string, maxChars = 36): string[] {
+  if (!answer) return [];
+  if (maxChars < 8) maxChars = 8;
+  if (answer.length <= maxChars) return [answer];
+  const out: string[] = [];
+  let i = 0;
+  while (i < answer.length) {
+    let end = Math.min(i + maxChars, answer.length);
+    if (end < answer.length) {
+      const minKeep = i + Math.floor(maxChars / 2);
+      let j = end;
+      while (j > minKeep && !/\s/.test(answer[j - 1]!)) j -= 1;
+      if (j > minKeep) end = j;
+    }
+    out.push(answer.slice(i, end));
+    i = end;
+  }
+  return out;
+}
+
+async function roomSessions(roomId: string): Promise<MockKnowledgeSession[]> {
+  await hydrateKnowledgeQAState();
+  let list = mockKnowledgeSessionsByRoom.get(roomId);
+  if (!list) {
+    list = [];
+    mockKnowledgeSessionsByRoom.set(roomId, list);
+  }
+  return list;
+}
+
+async function executeMockKnowledgeSessionQuery(
+  roomId: string,
+  body: { sessionId?: string; query?: string; answer?: boolean; top_k?: number },
+): Promise<
+  | { ok: true; payload: Record<string, unknown> }
+  | { ok: false; status: number; body: Record<string, unknown> }
+> {
+  const room = findRoom(roomId);
+  if (!room) return { ok: false, status: 404, body: { code: "not_found" } };
+  const rawQuery = (body.query || "").trim();
+  if (!rawQuery) {
+    return {
+      ok: false,
+      status: 400,
+      body: { code: "invalid_input", message: "query is required" },
+    };
+  }
+  // MSW refuse probe (A2): prefix `@refuse ` → refused turn with empty hits.
+  const refuseProbe = /^@refuse\s+/i.test(rawQuery);
+  const displayQuery = refuseProbe
+    ? rawQuery.replace(/^@refuse\s+/i, "").trim() || rawQuery
+    : rawQuery;
+  const now = new Date().toISOString();
+  const sessions = await roomSessions(roomId);
+  let session = body.sessionId
+    ? sessions.find((s) => s.id === body.sessionId)
+    : undefined;
+  if (!session || session.status !== "active") {
+    for (const s of sessions) {
+      if (s.status === "active") {
+        s.status = "closed";
+        s.updatedAt = now;
+      }
+    }
+    session = {
+      id: generateId("kqa_sess"),
+      roomId,
+      title: displayQuery.slice(0, 80),
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+      lastTurnAt: now,
+      turnCount: 0,
+    };
+    sessions.unshift(session);
+    mockKnowledgeTurnsBySession.set(session.id, []);
+  }
+  const doc = (room.documents ?? []).flatMap((folder) => folder.documents ?? [])[0];
+  const hits =
+    refuseProbe || !doc
+      ? []
+      : [
+          {
+            chunkId: generateId("chunk"),
+            documentId: doc.document_id || doc.id,
+            text: `Relevant passage from ${doc.title || "document"} about ${displayQuery}.`,
+            score: 0.91,
+            sourceName: doc.title || "Document",
+            pages: [3, 4],
+            viewerPage: 3,
+          },
+        ];
+  const refused = refuseProbe;
+  const answer = refused
+    ? `The provided context does not contain an answer to the question '${displayQuery}'.`
+    : body.answer === false
+      ? undefined
+      : `Grounded answer for: ${displayQuery}`;
+  const resultStatus = refused ? "refused" : hits.length ? "answered" : "no_hits";
+  const turns = mockKnowledgeTurnsBySession.get(session.id) ?? [];
+  const turn: MockKnowledgeTurn = {
+    id: generateId("kqa_turn"),
+    sessionId: session.id,
+    sequence: turns.length + 1,
+    question: displayQuery,
+    answer,
+    refused,
+    resultStatus,
+    hits,
+    createdAt: now,
+  };
+  turns.push(turn);
+  mockKnowledgeTurnsBySession.set(session.id, turns);
+  session.lastTurnAt = now;
+  session.updatedAt = now;
+  session.turnCount = turns.length;
+  if (!session.title) session.title = displayQuery.slice(0, 80);
+  await persistKnowledgeQAState();
+  return {
+    ok: true,
+    payload: {
+      sessionId: session.id,
+      turn,
+      query: displayQuery,
+      mode: "hybrid",
+      answer: turn.answer,
+      results: hits,
+      refused: turn.refused,
+      resultStatus: turn.resultStatus,
+    },
+  };
+}
+
 function seedOwnerAskHostQuestions() {
   mockOwnerQuestions.clear();
   const now = new Date().toISOString();
@@ -223,8 +479,42 @@ export const handlers = [
     return HttpResponse.json({ code: "verified", message: "email verified successfully" });
   }),
 
-  // Test-only reset endpoint used by E2E suites to isolate cases.
-  http.post("*/__e2e/reset", () => {
+  // Test-only reset (+ optional corpus override for A5). Same path always — MSW
+  // already intercepts `/__e2e/reset` reliably in Playwright.
+  http.post("*/__e2e/reset", async ({ request }) => {
+    let body: {
+      action?: string;
+      roomId?: string;
+      status?: string;
+      documentStatus?: string;
+      jobStatus?: string;
+    } | null = null;
+    try {
+      const text = await request.text();
+      if (text.trim()) body = JSON.parse(text) as NonNullable<typeof body>;
+    } catch {
+      body = null;
+    }
+    if (body?.action === "ping") {
+      return new HttpResponse(null, { status: 204 });
+    }
+    if (body?.action === "knowledge-corpus") {
+      const roomId = (body.roomId || "").trim();
+      if (!roomId) {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "roomId is required" },
+          { status: 400 },
+        );
+      }
+      await hydrateKnowledgeQAState();
+      mockKnowledgeCorpusOverrideByRoom.set(roomId, {
+        status: body.status || "syncing",
+        documentStatus: body.documentStatus || "syncing",
+        jobStatus: body.jobStatus || "running",
+      });
+      await persistKnowledgeQAState();
+      return new HttpResponse(null, { status: 204 });
+    }
     resetMockState();
     return new HttpResponse(null, { status: 204 });
   }),
@@ -786,27 +1076,33 @@ export const handlers = [
     });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge", ({ params }) => {
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge", async ({ params }) => {
+    await hydrateKnowledgeQAState();
     const room = findRoom(params.roomId as string);
     if (!room) return new HttpResponse(null, { status: 404 });
     const docs = (room.documents ?? []).flatMap((folder) => folder.documents ?? []).slice(0, 5);
+    const override = mockKnowledgeCorpusOverrideByRoom.get(params.roomId as string);
+    const status = override?.status ?? "ready";
+    const documentStatus = override?.documentStatus ?? "synced";
+    const jobStatus = override?.jobStatus ?? "done";
+    const busy = status === "syncing" || status === "provisioning" || documentStatus === "syncing";
     return HttpResponse.json({
       enabled: true,
-      status: "ready",
-      lastSyncedAt: new Date().toISOString(),
+      status,
+      lastSyncedAt: busy ? undefined : new Date().toISOString(),
       progress: {
         total: docs.length,
-        pending: 0,
-        syncing: 0,
-        synced: docs.length,
+        pending: busy ? docs.length : 0,
+        syncing: busy ? docs.length : 0,
+        synced: busy ? 0 : docs.length,
         failed: 0,
-        jobStatus: "done",
+        jobStatus,
       },
       documents: docs.map((d) => ({
         documentId: d.document_id || d.id,
         title: d.title || "Document",
-        status: "synced",
-        chunkCount: 3,
+        status: documentStatus,
+        chunkCount: busy ? 0 : 3,
       })),
     });
   }),
@@ -836,10 +1132,218 @@ export const handlers = [
                 documentId: doc.document_id || doc.id,
                 text: `Relevant passage from ${doc.title || "document"}.`,
                 score: 0.91,
+                sourceName: doc.title || "Document",
+                pages: [1, 2],
+                viewerPage: 1,
               },
             ]
           : [],
       });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/active",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const sessions = await roomSessions(roomId);
+      const active = sessions
+        .filter((s) => s.status === "active")
+        .sort((a, b) => (b.lastTurnAt || b.createdAt).localeCompare(a.lastTurnAt || a.createdAt))[0];
+      if (!active) {
+        return HttpResponse.json({ session: null, turns: [] });
+      }
+      return HttpResponse.json({
+        session: active,
+        turns: mockKnowledgeTurnsBySession.get(active.id) ?? [],
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const url = new URL(request.url);
+      const limit = Math.min(50, Math.max(1, Number(url.searchParams.get("limit") || 20)));
+      const sessions = await roomSessions(roomId);
+      const items = sessions
+        .slice()
+        .sort((a, b) => (b.lastTurnAt || b.createdAt).localeCompare(a.lastTurnAt || a.createdAt))
+        .slice(0, limit)
+        .map((s) => {
+          const turns = mockKnowledgeTurnsBySession.get(s.id) ?? [];
+          return {
+            ...s,
+            turnCount: turns.length,
+            questionPreview: turns[0]?.question || s.title,
+          };
+        });
+      return HttpResponse.json({ items });
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      let title = "";
+      try {
+        const body = (await request.json()) as { title?: string };
+        title = (body.title || "").trim();
+      } catch {
+        /* empty body ok */
+      }
+      const now = new Date().toISOString();
+      const sessions = await roomSessions(roomId);
+      for (const s of sessions) {
+        if (s.status === "active") {
+          s.status = "closed";
+          s.updatedAt = now;
+        }
+      }
+      const session: MockKnowledgeSession = {
+        id: generateId("kqa_sess"),
+        roomId,
+        title,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+        turnCount: 0,
+      };
+      sessions.unshift(session);
+      mockKnowledgeTurnsBySession.set(session.id, []);
+      await persistKnowledgeQAState();
+      return HttpResponse.json(session, { status: 201 });
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/query",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      const body = (await request.json()) as {
+        sessionId?: string;
+        query?: string;
+        answer?: boolean;
+        top_k?: number;
+      };
+      const result = await executeMockKnowledgeSessionQuery(roomId, body);
+      if (!result.ok) {
+        return HttpResponse.json(result.body, { status: result.status });
+      }
+      return HttpResponse.json(result.payload);
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/query/stream",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      const body = (await request.json()) as {
+        sessionId?: string;
+        query?: string;
+        answer?: boolean;
+        top_k?: number;
+      };
+      const result = await executeMockKnowledgeSessionQuery(roomId, body);
+      if (!result.ok) {
+        return HttpResponse.json(result.body, { status: result.status });
+      }
+      const payload = result.payload;
+      const turn = payload.turn as MockKnowledgeTurn;
+      const hits = (payload.results as MockKnowledgeTurn["hits"]) ?? [];
+      const grounded = !turn.refused && hits.length > 0;
+      const answer = typeof turn.answer === "string" ? turn.answer : "";
+      const tokenFrames = chunkMockAnswerTokens(answer, 36)
+        .map((text) => `event: token\ndata: ${JSON.stringify({ text })}\n\n`)
+        .join("");
+      const frames = [
+        `event: phase\ndata: ${JSON.stringify({ phase: "retrieving" })}\n\n`,
+        answer
+          ? `event: phase\ndata: ${JSON.stringify({ phase: "generating" })}\n\n`
+          : "",
+        grounded
+          ? `event: sources\ndata: ${JSON.stringify({ results: hits, grounded: true })}\n\n`
+          : "",
+        tokenFrames,
+        `event: done\ndata: ${JSON.stringify(payload)}\n\n`,
+      ].join("");
+      return new HttpResponse(frames, {
+        status: 200,
+        headers: {
+          "Content-Type": "text/event-stream",
+          "Cache-Control": "no-cache",
+        },
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/:sessionId",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      const sessionId = params.sessionId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const session = (await roomSessions(roomId)).find((s) => s.id === sessionId);
+      if (!session) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({
+        session,
+        turns: mockKnowledgeTurnsBySession.get(session.id) ?? [],
+      });
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/:sessionId/close",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      const sessionId = params.sessionId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const now = new Date().toISOString();
+      let target: MockKnowledgeSession | undefined;
+      for (const s of await roomSessions(roomId)) {
+        if (s.status === "active") {
+          s.status = "closed";
+          s.updatedAt = now;
+        }
+        if (s.id === sessionId) target = s;
+      }
+      if (!target) return new HttpResponse(null, { status: 404 });
+      await persistKnowledgeQAState();
+      return HttpResponse.json(target);
+    },
+  ),
+
+  http.put(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/turns/:turnId/feedback",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      const turnId = params.turnId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json()) as { kind?: string; note?: string };
+      const kind = (body.kind || "").trim();
+      if (!["helpful", "wrong_citation", "not_answering"].includes(kind)) {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "invalid feedback kind" },
+          { status: 400 },
+        );
+      }
+      const note = (body.note || "").trim() || undefined;
+      await hydrateKnowledgeQAState();
+      for (const session of await roomSessions(roomId)) {
+        const turns = mockKnowledgeTurnsBySession.get(session.id) ?? [];
+        const turn = turns.find((t) => t.id === turnId);
+        if (turn) {
+          turn.feedback = { kind, note };
+          await persistKnowledgeQAState();
+          return HttpResponse.json(turn.feedback);
+        }
+      }
+      return new HttpResponse(null, { status: 404 });
     },
   ),
 
