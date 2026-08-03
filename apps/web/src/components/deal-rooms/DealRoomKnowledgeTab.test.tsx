@@ -167,6 +167,7 @@ vi.mock("@/lib/api", () => ({
     getDealRoomKnowledgeSession: vi.fn(),
     createDealRoomKnowledgeSession: vi.fn(),
     queryDealRoomKnowledgeSession: vi.fn(),
+    streamDealRoomKnowledgeSession: vi.fn(),
     closeDealRoomKnowledgeSession: vi.fn(),
     upsertDealRoomKnowledgeTurnFeedback: vi.fn(),
     getDealRoomAnalytics: vi.fn(),
@@ -174,6 +175,28 @@ vi.mock("@/lib/api", () => ({
     getDealRoomLinks: vi.fn(),
   },
 }));
+
+function mockStreamQueryResult(
+  result: Awaited<ReturnType<typeof api.streamDealRoomKnowledgeSession>>,
+) {
+  vi.mocked(api.streamDealRoomKnowledgeSession).mockImplementation(
+    async (_roomId, _body, opts) => {
+      opts.onEvent({ type: "phase", phase: "retrieving" });
+      const grounded = !result.turn.refused && (result.results?.length ?? 0) > 0;
+      if (grounded) {
+        opts.onEvent({ type: "sources", results: result.results, grounded: true });
+      }
+      opts.onEvent({
+        type: "done",
+        answer: result.answer,
+        results: result.results,
+        refused: result.turn.refused,
+        resultStatus: result.turn.resultStatus,
+      });
+      return result;
+    },
+  );
+}
 
 function mockRoomMetrics() {
   vi.mocked(api.getDealRoomAnalytics).mockResolvedValue({
@@ -257,7 +280,7 @@ describe("DealRoomKnowledgeTab", () => {
       pages: [3, 4],
       viewerPage: 3,
     };
-    vi.mocked(api.queryDealRoomKnowledgeSession).mockResolvedValue({
+    mockStreamQueryResult({
       sessionId: "sess-1",
       query: "valuation",
       mode: "hybrid",
@@ -317,12 +340,16 @@ describe("DealRoomKnowledgeTab", () => {
     });
     fireEvent.click(screen.getByTestId("deal-room-knowledge-ask"));
     await waitFor(() => {
-      expect(api.queryDealRoomKnowledgeSession).toHaveBeenCalledWith("room-1", {
-        sessionId: undefined,
-        query: "valuation",
-        answer: true,
-        top_k: 8,
-      });
+      expect(api.streamDealRoomKnowledgeSession).toHaveBeenCalledWith(
+        "room-1",
+        {
+          sessionId: undefined,
+          query: "valuation",
+          answer: true,
+          top_k: 8,
+        },
+        expect.objectContaining({ onEvent: expect.any(Function) }),
+      );
     });
     expect(await screen.findByText(/The cap is \$10M/)).toBeInTheDocument();
     const hit = screen.getByTestId("deal-room-knowledge-hit");
@@ -450,6 +477,78 @@ describe("DealRoomKnowledgeTab", () => {
     expect(await screen.findByText(/Archived answer/)).toBeInTheDocument();
   });
 
+  it("hydrates active session after stop so a persisted turn is not lost", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        { documentId: "doc-1", title: "Memo.pdf", status: "synced", chunkCount: 3 },
+      ],
+    });
+    const persisted = {
+      id: "turn-aborted",
+      sessionId: "sess-aborted",
+      sequence: 1,
+      question: "valuation",
+      answer: "Persisted after abort [1]",
+      refused: false,
+      resultStatus: "answered" as const,
+      hits: [
+        {
+          chunkId: "c1",
+          documentId: "doc-1",
+          text: "cap",
+          score: 0.9,
+          sourceName: "Memo.pdf",
+          viewerPage: 3,
+        },
+      ],
+      createdAt: "2026-08-03T00:00:00Z",
+    };
+    vi.mocked(api.streamDealRoomKnowledgeSession).mockImplementation(
+      (_roomId, _body, opts) =>
+        new Promise((_resolve, reject) => {
+          opts.onEvent({ type: "phase", phase: "retrieving" });
+          opts.signal?.addEventListener("abort", () => {
+            reject(new DOMException("Aborted", "AbortError"));
+          });
+        }),
+    );
+    vi.mocked(api.getActiveDealRoomKnowledgeSession)
+      .mockResolvedValueOnce({ session: null, turns: [] })
+      .mockResolvedValueOnce({
+        session: {
+          id: "sess-aborted",
+          roomId: "room-1",
+          status: "active",
+          createdAt: "2026-08-03T00:00:00Z",
+          updatedAt: "2026-08-03T00:00:00Z",
+        },
+        turns: [persisted],
+      });
+
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-knowledge-ask-entry-start")).toBeEnabled();
+    });
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-ask-entry-start"));
+    fireEvent.change(await screen.findByLabelText("Question"), {
+      target: { value: "valuation" },
+    });
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-ask"));
+    expect(await screen.findByTestId("grounded-chat-stop")).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId("grounded-chat-stop"));
+    expect(await screen.findByText(/Persisted after abort/)).toBeInTheDocument();
+    expect(api.getActiveDealRoomKnowledgeSession).toHaveBeenCalledTimes(2);
+  });
+
   it("disables start-ask until the vector library is truly ready", async () => {
     vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
       enabled: true,
@@ -480,7 +579,7 @@ describe("DealRoomKnowledgeTab", () => {
         { documentId: "doc-1", title: "NDA.pdf", status: "synced", chunkCount: 2 },
       ],
     });
-    vi.mocked(api.queryDealRoomKnowledgeSession).mockResolvedValue({
+    mockStreamQueryResult({
       sessionId: "sess-1",
       query: "是",
       mode: "hybrid",
@@ -516,6 +615,9 @@ describe("DealRoomKnowledgeTab", () => {
       target: { value: "是" },
     });
     fireEvent.click(screen.getByTestId("deal-room-knowledge-ask"));
+    await waitFor(() => {
+      expect(api.streamDealRoomKnowledgeSession).toHaveBeenCalled();
+    });
     expect(
       await screen.findByText(/does not contain an answer/i),
     ).toBeInTheDocument();
@@ -632,7 +734,7 @@ describe("docx citation open without page", () => {
       score: 0.867,
       sourceName: "单向保密协议 (NDA).docx",
     };
-    vi.mocked(api.queryDealRoomKnowledgeSession).mockResolvedValue({
+    mockStreamQueryResult({
       sessionId: "sess-1",
       query: "保密条款",
       mode: "hybrid",

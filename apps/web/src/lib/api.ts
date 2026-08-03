@@ -48,7 +48,7 @@ import type {
   FileRequest,
   AskSecurityEvent,
 } from "@/types";
-import { request } from "@/lib/apiClient";
+import { ApiError, openStream, request } from "@/lib/apiClient";
 import {
   toBackendIntegrationStatus,
   toCreateDealRoomPayload,
@@ -57,6 +57,8 @@ import {
   type BackendIntegrationStatus,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
+import { createSSEParser } from "@/lib/knowledge/parseSSE";
+import type { KnowledgeStreamEvent } from "@/lib/knowledge/streamEvents";
 import { useUIStore } from "@/stores/uiStore";
 
 export interface RecentActivityItem {
@@ -178,6 +180,133 @@ function getWorkspaceSlug(): string {
   const slug = useUIStore.getState().currentWorkspace?.slug;
   if (slug) return slug;
   throw new Error("No workspace selected");
+}
+
+type StreamDonePayload = DealRoomKnowledgeSessionQueryResult & {
+  refused?: boolean;
+  resultStatus?: string;
+};
+
+async function streamDealRoomKnowledgeSession(
+  roomId: string,
+  body: { sessionId?: string; query: string; answer?: boolean; top_k?: number },
+  opts: {
+    signal?: AbortSignal;
+    onEvent: (event: KnowledgeStreamEvent) => void;
+  },
+): Promise<DealRoomKnowledgeSessionQueryResult> {
+  const response = await openStream(
+    getWorkspaceSlug(),
+    `/deal-rooms/${encodeURIComponent(roomId)}/knowledge/sessions/query/stream`,
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+      signal: opts.signal,
+      headers: { Accept: "text/event-stream" },
+    },
+  );
+
+  if (!response.body) {
+    throw new ApiError({
+      status: response.status,
+      code: "stream_incomplete",
+      message: "stream_incomplete",
+      requestId: "",
+    });
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  const parser = createSSEParser();
+  let doneResult: DealRoomKnowledgeSessionQueryResult | null = null;
+
+  const handleFrames = (frames: { event: string; data: string }[]) => {
+    for (const frame of frames) {
+      let payload: unknown;
+      try {
+        payload = JSON.parse(frame.data) as unknown;
+      } catch {
+        continue;
+      }
+      if (frame.event === "phase") {
+        const phase = (payload as { phase?: string }).phase;
+        if (phase === "retrieving" || phase === "generating") {
+          opts.onEvent({ type: "phase", phase });
+        }
+        continue;
+      }
+      if (frame.event === "sources") {
+        const src = payload as {
+          results?: DealRoomKnowledgeSessionQueryResult["results"];
+          grounded?: boolean;
+        };
+        opts.onEvent({
+          type: "sources",
+          results: src.results ?? [],
+          grounded: !!src.grounded,
+        });
+        continue;
+      }
+      if (frame.event === "token") {
+        const text = (payload as { text?: string }).text ?? "";
+        if (text) opts.onEvent({ type: "token", text });
+        continue;
+      }
+      if (frame.event === "error") {
+        const err = payload as { code?: string; message?: string };
+        const code = err.code ?? "stream_error";
+        opts.onEvent({ type: "error", message: code });
+        throw new ApiError({
+          status: 0,
+          code,
+          message: code,
+          requestId: "",
+        });
+      }
+      if (frame.event === "done") {
+        const data = payload as StreamDonePayload;
+        opts.onEvent({
+          type: "done",
+          answer: data.answer,
+          results: data.results ?? data.turn?.hits ?? [],
+          refused: data.refused ?? data.turn?.refused,
+          resultStatus: data.resultStatus ?? data.turn?.resultStatus,
+        });
+        doneResult = {
+          sessionId: data.sessionId,
+          turn: data.turn,
+          query: data.query,
+          mode: data.mode,
+          answer: data.answer,
+          results: data.results ?? [],
+        };
+      }
+    }
+  };
+
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      handleFrames(parser.push(decoder.decode(value, { stream: true })));
+    }
+    handleFrames(parser.flush());
+  } catch (err) {
+    if (opts.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+      throw err;
+    }
+    throw err;
+  }
+
+  if (!doneResult) {
+    throw new ApiError({
+      status: 0,
+      code: "stream_incomplete",
+      message: "stream_incomplete",
+      requestId: "",
+    });
+  }
+  return doneResult;
 }
 
 export const api = {
@@ -836,6 +965,18 @@ export const api = {
       `/deal-rooms/${roomId}/knowledge/sessions/query`,
       { method: "POST", body: JSON.stringify(body) },
     ),
+  /**
+   * Coarse SSE query (phase → sources → done). Prefer this for the Knowledge desk;
+   * JSON `queryDealRoomKnowledgeSession` remains for non-streaming clients.
+   */
+  streamDealRoomKnowledgeSession: (
+    roomId: string,
+    body: { sessionId?: string; query: string; answer?: boolean; top_k?: number },
+    opts: {
+      signal?: AbortSignal;
+      onEvent: (event: KnowledgeStreamEvent) => void;
+    },
+  ) => streamDealRoomKnowledgeSession(roomId, body, opts),
   closeDealRoomKnowledgeSession: (roomId: string, sessionId: string) =>
     request<DealRoomKnowledgeQASession>(
       getWorkspaceSlug(),

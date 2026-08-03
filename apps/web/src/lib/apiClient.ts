@@ -152,11 +152,12 @@ function isBaseResponse<T>(value: unknown): value is BaseResponse<T> {
   );
 }
 
-export async function request<T>(
+async function executeAuthorizedFetch(
   workspaceSlug: string | undefined,
   path: string,
-  options: RequestOptions = {}
-): Promise<T> {
+  options: RequestOptions = {},
+  defaultAccept: string,
+): Promise<{ response: Response; requestId: string }> {
   const normalizedPath = path.startsWith("/") ? path : `/${path}`;
   const prefix = workspaceSlug
     ? `/api/workspaces/${encodeURIComponent(workspaceSlug)}`
@@ -170,7 +171,7 @@ export async function request<T>(
     headers.set("Content-Type", "application/json");
   }
   if (!headers.has("Accept")) {
-    headers.set("Accept", "application/json");
+    headers.set("Accept", defaultAccept);
   }
 
   const requestId = generateRequestId();
@@ -191,10 +192,13 @@ export async function request<T>(
   try {
     response = await execute();
   } catch (err) {
+    if (options.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
+      throw err;
+    }
     throw new ApiError({
       status: 0,
       code: "network_error",
-      message: err instanceof Error ? err.message : "Network error",
+      message: err instanceof Error ? err.message : "network_error",
       requestId,
     });
   }
@@ -209,11 +213,26 @@ export async function request<T>(
       throw new ApiError({
         status: 401,
         code: "unauthorized",
-        message: "Session expired. Please sign in again.",
+        message: "unauthorized",
         requestId,
       });
     }
   }
+
+  return { response, requestId };
+}
+
+export async function request<T>(
+  workspaceSlug: string | undefined,
+  path: string,
+  options: RequestOptions = {}
+): Promise<T> {
+  const { response, requestId } = await executeAuthorizedFetch(
+    workspaceSlug,
+    path,
+    options,
+    "application/json",
+  );
 
   if (!response.ok) {
     let body: BaseResponse<unknown> | null = null;
@@ -248,6 +267,42 @@ export async function request<T>(
     return payload.data as T;
   }
   return payload as T;
+}
+
+/**
+ * Authenticated fetch that returns a live Response for streaming bodies (SSE).
+ * Shares request-id / Accept-Language / 401 refresh with `request`.
+ */
+export async function openStream(
+  workspaceSlug: string | undefined,
+  path: string,
+  options: RequestOptions = {},
+): Promise<Response> {
+  const { response, requestId } = await executeAuthorizedFetch(
+    workspaceSlug,
+    path,
+    options,
+    "text/event-stream",
+  );
+
+  if (!response.ok) {
+    let body: BaseResponse<unknown> | null = null;
+    try {
+      body = (await response.json()) as BaseResponse<unknown>;
+    } catch {
+      /* non-JSON */
+    }
+    throw new ApiError({
+      status: response.status,
+      code: body?.code ?? "http_error",
+      message: body?.message ?? body?.code ?? "http_error",
+      requestId: body?.request_id ?? requestId,
+      details: body?.details,
+    });
+  }
+
+  handleSessionRefresh(response, options);
+  return response;
 }
 
 function handleSessionRefresh(response: Response, options: RequestOptions) {

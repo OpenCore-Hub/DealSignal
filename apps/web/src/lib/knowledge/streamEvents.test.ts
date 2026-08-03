@@ -1,5 +1,65 @@
 import { describe, expect, it } from "vitest";
-import { turnFromQATurn } from "./streamEvents";
+import {
+  createKnowledgeTurn,
+  reduceKnowledgeStream,
+  turnFromQATurn,
+} from "./streamEvents";
+
+describe("reduceKnowledgeStream", () => {
+  it("never keeps evidence after a refuse done event", () => {
+    let turn = createKnowledgeTurn("q");
+    turn = reduceKnowledgeStream(turn, { type: "phase", phase: "retrieving" });
+    turn = reduceKnowledgeStream(turn, {
+      type: "sources",
+      results: [{ chunkId: "c", text: "noise", score: 0.2 }],
+      grounded: true,
+    });
+    turn = reduceKnowledgeStream(turn, {
+      type: "done",
+      answer: "does not contain an answer",
+      refused: true,
+      results: [{ chunkId: "c", text: "noise", score: 0.2 }],
+    });
+    expect(turn.phase).toBe("refused");
+    expect(turn.refused).toBe(true);
+    expect(turn.results).toEqual([]);
+  });
+
+  it("ignores ungrounded sources frames", () => {
+    let turn = createKnowledgeTurn("q");
+    turn = reduceKnowledgeStream(turn, {
+      type: "sources",
+      results: [{ chunkId: "c", text: "x", score: 0.1 }],
+      grounded: false,
+    });
+    expect(turn.results).toEqual([]);
+  });
+
+  it("grows answer from token* then reconciles done", () => {
+    let turn = createKnowledgeTurn("q");
+    turn = reduceKnowledgeStream(turn, { type: "phase", phase: "retrieving" });
+    turn = reduceKnowledgeStream(turn, { type: "phase", phase: "generating" });
+    turn = reduceKnowledgeStream(turn, {
+      type: "sources",
+      results: [{ chunkId: "c", text: "cap", score: 0.9, sourceName: "Memo.pdf" }],
+      grounded: true,
+    });
+    turn = reduceKnowledgeStream(turn, { type: "token", text: "Grounded " });
+    turn = reduceKnowledgeStream(turn, { type: "token", text: "answer" });
+    expect(turn.phase).toBe("generating");
+    expect(turn.answer).toBe("Grounded answer");
+    turn = reduceKnowledgeStream(turn, {
+      type: "done",
+      answer: "Grounded answer for: q",
+      refused: false,
+      resultStatus: "answered",
+      results: [{ chunkId: "c", text: "cap", score: 0.9, sourceName: "Memo.pdf" }],
+    });
+    expect(turn.phase).toBe("done");
+    expect(turn.answer).toBe("Grounded answer for: q");
+    expect(turn.results).toHaveLength(1);
+  });
+});
 
 describe("turnFromQATurn", () => {
   it("preserves no_hits for follow-up templates without inventing evidence", () => {

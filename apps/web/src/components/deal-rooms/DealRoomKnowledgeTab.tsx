@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, LockKey, SealCheck } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router";
@@ -23,7 +23,12 @@ import {
 } from "@/lib/knowledge/citations";
 import { knowledgeErrorMessage } from "@/lib/knowledge/errors";
 import { asFeedbackKind } from "@/lib/knowledge/feedback";
-import { turnFromQATurn } from "@/lib/knowledge/streamEvents";
+import {
+  createKnowledgeTurn,
+  reduceKnowledgeStream,
+  turnFromQATurn,
+  type KnowledgeTurn,
+} from "@/lib/knowledge/streamEvents";
 import { useKnowledgeQueryStore } from "@/stores/knowledgeQueryStore";
 import type {
   DealRoomKnowledgeFeedbackKind,
@@ -107,6 +112,8 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const [syncing, setSyncing] = useState(false);
   const [asking, setAsking] = useState(false);
   const [sessionHydrated, setSessionHydrated] = useState(false);
+  const [liveTurn, setLiveTurn] = useState<KnowledgeTurn | null>(null);
+  const askAbortRef = useRef<AbortController | null>(null);
 
   // Single store snapshot — avoid `?? []` selectors that allocate each read.
   const draft = useKnowledgeQueryStore((s) => s.byRoom[roomId]);
@@ -127,10 +134,11 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
 
   const viewTurns = useMemo(() => {
     const lastIdx = turns.length - 1;
-    return turns.map((row, idx) =>
-      turnFromQATurn(row, idx === lastIdx ? activeCite : null),
+    const mapped = turns.map((row, idx) =>
+      turnFromQATurn(row, idx === lastIdx && !liveTurn ? activeCite : null),
     );
-  }, [turns, activeCite]);
+    return liveTurn ? [...mapped, liveTurn] : mapped;
+  }, [turns, activeCite, liveTurn]);
 
   useEffect(() => {
     if (!isKnowledgeBusy(data?.status, data?.progress?.jobStatus)) return;
@@ -186,19 +194,38 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     }
   };
 
+  const onStopAsk = () => {
+    askAbortRef.current?.abort();
+  };
+
   const onQuery = async () => {
     const q = query.trim();
-    if (!q) return;
+    if (!q || asking) return;
+    askAbortRef.current?.abort();
+    const ac = new AbortController();
+    askAbortRef.current = ac;
     setAsking(true);
     setActiveCite(null);
+    setLiveTurn(createKnowledgeTurn(q));
     try {
-      const res = await api.queryDealRoomKnowledgeSession(roomId, {
-        sessionId: activeSessionId ?? undefined,
-        query: q,
-        answer: true,
-        top_k: 8,
-      });
-      const merged = [...turns.filter((x) => x.id !== res.turn.id), res.turn].sort(
+      const res = await api.streamDealRoomKnowledgeSession(
+        roomId,
+        {
+          sessionId: activeSessionId ?? undefined,
+          query: q,
+          answer: true,
+          top_k: 8,
+        },
+        {
+          signal: ac.signal,
+          onEvent: (event) => {
+            setLiveTurn((prev) => (prev ? reduceKnowledgeStream(prev, event) : prev));
+          },
+        },
+      );
+      const current =
+        useKnowledgeQueryStore.getState().byRoom[roomId]?.turns ?? [];
+      const merged = [...current.filter((x) => x.id !== res.turn.id), res.turn].sort(
         (a, b) => a.sequence - b.sequence,
       );
       useKnowledgeQueryStore.getState().setDraft(roomId, {
@@ -207,16 +234,40 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
         query: "",
         activeCite: null,
       });
+      // Clear optimistic stream turn only after audit row is in the store.
+      setLiveTurn(null);
       if (res.turn.resultStatus === "error") {
         toast.error(knowledgeErrorMessage(t, res.turn.errorSummary));
       }
     } catch (e) {
-      if (e instanceof ApiError && e.status === 503) {
+      if (ac.signal.aborted) {
+        // Server may still finish QueryWithSession and persist the turn — hydrate so
+        // the audit timeline does not lose a completed answer after Stop (P5).
+        setLiveTurn(null);
+        try {
+          const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
+          const serverTurns = detail.turns ?? [];
+          const sessionId = detail.session?.id ?? null;
+          if (sessionId && serverTurns.length > 0) {
+            useKnowledgeQueryStore.getState().setDraft(roomId, {
+              activeSessionId: sessionId,
+              turns: serverTurns,
+              activeCite: null,
+            });
+          }
+        } catch {
+          /* non-fatal: desk stays usable for a fresh ask */
+        }
+        return;
+      }
+      if (e instanceof ApiError && (e.status === 503 || e.code === "knowledge_unavailable")) {
         toast.error(t("knowledge.unavailable"));
       } else {
         toast.error(t("knowledge.queryFailed"));
       }
+      setLiveTurn(null);
     } finally {
+      if (askAbortRef.current === ac) askAbortRef.current = null;
       setAsking(false);
     }
   };
@@ -433,6 +484,7 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
             onAsk={() => {
               void onQuery();
             }}
+            onStop={asking ? onStopAsk : undefined}
             onActiveCite={setActiveCite}
             onOpenViewer={openViewer}
             onFeedback={onFeedback}
