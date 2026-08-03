@@ -35,9 +35,10 @@ var (
 	ErrFolderAccessDenied = errors.New("folder access denied")
 	ErrInvalidEmail       = errors.New("invalid email")
 	ErrFolderNotEmpty     = errors.New("folder is not empty")
-	ErrFolderNotFound     = errors.New("folder not found")
-	ErrFolderExists       = errors.New("folder already exists")
-	ErrNDANotRequired     = errors.New("nda is not required for this room")
+	ErrFolderNotFound      = errors.New("folder not found")
+	ErrFolderExists        = errors.New("folder already exists")
+	ErrResourceLocked      = errors.New("resource is locked")
+	ErrNDANotRequired      = errors.New("nda is not required for this room")
 	ErrAccessRequestExists = errors.New("access request already exists")
 	ErrRateLimited         = errors.New("too many requests")
 )
@@ -54,16 +55,23 @@ type RateLimiter interface {
 
 // Service handles data rooms.
 type Service struct {
-	queries      *db.Queries
-	pool         Beginner
-	cfg          *config.Config
-	actionSyncer ActionSyncer
-	rateLimiter  RateLimiter
+	queries           *db.Queries
+	pool              Beginner
+	cfg               *config.Config
+	actionSyncer      ActionSyncer
+	rateLimiter       RateLimiter
+	knowledgeEnqueuer KnowledgeEnqueuer
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
 type ActionSyncer interface {
 	ResolveBySource(ctx context.Context, workspaceID, sourceType, sourceID string)
+}
+
+// KnowledgeEnqueuer schedules external knowledge-base ingest/delete jobs.
+type KnowledgeEnqueuer interface {
+	EnqueueIngestDocument(ctx context.Context, roomID, workspaceID, documentID string) error
+	EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID, documentID string) error
 }
 
 // ServiceOption configures a Service.
@@ -77,6 +85,11 @@ func WithActionSyncer(a ActionSyncer) ServiceOption {
 // WithRateLimiter wires a rate limiter for public access-request throttling.
 func WithRateLimiter(r RateLimiter) ServiceOption {
 	return func(s *Service) { s.rateLimiter = r }
+}
+
+// WithKnowledgeEnqueuer wires knowledge-base sync hooks for room document changes.
+func WithKnowledgeEnqueuer(k KnowledgeEnqueuer) ServiceOption {
+	return func(s *Service) { s.knowledgeEnqueuer = k }
 }
 
 // NewService creates a deal room service.
@@ -105,6 +118,8 @@ type Folder struct {
 	Name        string `json:"name"`
 	Description string `json:"description,omitempty"`
 	SortOrder   int    `json:"sort_order"`
+	// Locked protects structure edits (rename/delete/upload/create child).
+	Locked bool `json:"locked,omitempty"`
 }
 
 // DocumentOrder is used to reorder documents within a folder.
@@ -124,7 +139,14 @@ type RoomDocument struct {
 	Status     string    `json:"status"`
 	FolderPath string    `json:"folder_path"`
 	SortOrder  int32     `json:"sort_order"`
+	Locked     bool      `json:"locked"`
 	CreatedAt  time.Time `json:"created_at"`
+}
+
+// SetResourceLocksRequest toggles structure locks for folders and/or documents.
+type SetResourceLocksRequest struct {
+	FolderPaths []string `json:"folder_paths"`
+	DocumentIDs []string `json:"document_ids"`
 }
 
 // FolderDocs groups documents by folder for the room detail response.
@@ -189,7 +211,12 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 	if req.TemplateType != "" {
 		if tmplFolders := templateFolders(req.TemplateType); len(tmplFolders) > 0 {
 			for _, f := range tmplFolders {
-				folders = append(folders, Folder(f))
+				folders = append(folders, Folder{
+					Path:        f.Path,
+					Name:        f.Name,
+					Description: f.Description,
+					SortOrder:   f.SortOrder,
+				})
 			}
 		}
 	}
@@ -309,6 +336,93 @@ func (s *Service) GetRoom(ctx context.Context, roomID, workspaceID string) (db.D
 		return db.DealRoom{}, err
 	}
 	return room, nil
+}
+
+const dealRoomRecentVisitorsLimit = 20
+
+// RoomDailyView is one day in the deal-room views-over-time series.
+type RoomDailyView struct {
+	Day   string `json:"day"`
+	Views int64  `json:"views"`
+}
+
+// RoomRecentVisitor is an aggregated visitor across all share links in a room.
+type RoomRecentVisitor struct {
+	VisitorID     string    `json:"visitorId"`
+	VisitorEmail  string    `json:"visitorEmail,omitempty"`
+	FirstAccessAt time.Time `json:"firstAccessAt"`
+	LastAccessAt  time.Time `json:"lastAccessAt"`
+	TotalViews    int64     `json:"totalViews"`
+}
+
+// RoomAnalytics is the deal-room analytics snapshot for the Analytics tab.
+type RoomAnalytics struct {
+	TotalViews     int64               `json:"totalViews"`
+	UniqueVisitors int64               `json:"uniqueVisitors"`
+	ActiveLinkCount int64              `json:"activeLinkCount"`
+	DocumentCount  int64               `json:"documentCount"`
+	ViewsOverTime  []RoomDailyView     `json:"viewsOverTime"`
+	RecentVisitors []RoomRecentVisitor `json:"recentVisitors"`
+}
+
+// GetRoomAnalytics returns aggregated view/visitor metrics for a deal room.
+func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, userID string) (RoomAnalytics, error) {
+	room, err := s.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return RoomAnalytics{}, err
+	}
+	if err := s.requireActiveRoomMember(ctx, room.ID, userID); err != nil {
+		return RoomAnalytics{}, err
+	}
+
+	row, err := s.queries.GetDealRoomAnalytics(ctx, db.GetDealRoomAnalyticsParams{
+		WorkspaceID: pgUUID(workspaceID),
+		DealRoomID:  room.ID,
+	})
+	if err != nil {
+		return RoomAnalytics{}, fmt.Errorf("get deal room analytics: %w", err)
+	}
+
+	out := RoomAnalytics{
+		TotalViews:      row.TotalViews,
+		UniqueVisitors:  row.UniqueVisitors,
+		ActiveLinkCount: row.ActiveLinkCount,
+		DocumentCount:   row.DocumentCount,
+		ViewsOverTime:   []RoomDailyView{},
+		RecentVisitors:  []RoomRecentVisitor{},
+	}
+	if len(row.ViewsOverTime) > 0 {
+		if err := json.Unmarshal(row.ViewsOverTime, &out.ViewsOverTime); err != nil {
+			return RoomAnalytics{}, fmt.Errorf("unmarshal views_over_time: %w", err)
+		}
+	}
+
+	visitors, err := s.queries.ListRecentVisitorsByDealRoom(ctx, db.ListRecentVisitorsByDealRoomParams{
+		WorkspaceID: pgUUID(workspaceID),
+		DealRoomID:  room.ID,
+		PageLimit:   dealRoomRecentVisitorsLimit,
+	})
+	if err != nil {
+		return RoomAnalytics{}, fmt.Errorf("list deal room recent visitors: %w", err)
+	}
+	out.RecentVisitors = make([]RoomRecentVisitor, 0, len(visitors))
+	for _, v := range visitors {
+		item := RoomRecentVisitor{
+			VisitorID:  v.VisitorID,
+			TotalViews: v.TotalViews,
+		}
+		if v.VisitorEmail != "" {
+			item.VisitorEmail = v.VisitorEmail
+		}
+		if v.FirstAccessAt.Valid {
+			item.FirstAccessAt = v.FirstAccessAt.Time
+		}
+		if v.LastAccessAt.Valid {
+			item.LastAccessAt = v.LastAccessAt.Time
+		}
+		out.RecentVisitors = append(out.RecentVisitors, item)
+	}
+	return out, nil
 }
 
 // GetRoomSummary returns a room scoped to a workspace with computed aggregates.
@@ -907,6 +1021,9 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	if !folderExists(folders, folderPath) {
 		return db.DealRoomDocument{}, ErrFolderNotFound
 	}
+	if folderIsLocked(folders, folderPath) {
+		return db.DealRoomDocument{}, ErrResourceLocked
+	}
 	docID, err := uuid.Parse(documentID)
 	if err != nil {
 		return db.DealRoomDocument{}, errors.New("invalid document id")
@@ -932,6 +1049,16 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	if err != nil {
 		return db.DealRoomDocument{}, err
 	}
+	if s.knowledgeEnqueuer != nil {
+		if kerr := s.knowledgeEnqueuer.EnqueueIngestDocument(
+			ctx,
+			uuid.UUID(room.ID.Bytes).String(),
+			uuid.UUID(room.WorkspaceID.Bytes).String(),
+			uuid.UUID(doc.ID.Bytes).String(),
+		); kerr != nil {
+			logger.ErrorCtx(ctx, "enqueue knowledge ingest after add document", kerr)
+		}
+	}
 	return row, nil
 }
 
@@ -948,6 +1075,19 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 	if err != nil {
 		return errors.New("invalid document id")
 	}
+	existing, err := s.queries.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
+		RoomID:     room.ID,
+		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("document not found")
+		}
+		return err
+	}
+	if existing.Locked {
+		return ErrResourceLocked
+	}
 	if err := s.queries.DeleteDealRoomDocument(ctx, db.DeleteDealRoomDocumentParams{
 		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
 		RoomID:     room.ID,
@@ -956,10 +1096,23 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 	}
 	// Also remove the document from any deal-room share-link scopes so that
 	// scoped links do not continue serving a document that is no longer in the room.
-	return s.queries.DeleteLinkDocumentsByDealRoomDocument(ctx, db.DeleteLinkDocumentsByDealRoomDocumentParams{
+	if err := s.queries.DeleteLinkDocumentsByDealRoomDocument(ctx, db.DeleteLinkDocumentsByDealRoomDocumentParams{
 		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
 		DealRoomID: room.ID,
-	})
+	}); err != nil {
+		return err
+	}
+	if s.knowledgeEnqueuer != nil {
+		if kerr := s.knowledgeEnqueuer.EnqueueDeleteDocument(
+			ctx,
+			uuid.UUID(room.ID.Bytes).String(),
+			uuid.UUID(room.WorkspaceID.Bytes).String(),
+			id.String(),
+		); kerr != nil {
+			logger.ErrorCtx(ctx, "enqueue knowledge delete after remove document", kerr)
+		}
+	}
+	return nil
 }
 
 // MoveDocument moves a document to another folder. Only admins can move.
@@ -978,14 +1131,30 @@ func (s *Service) MoveDocument(ctx context.Context, roomID, workspaceID, userID,
 	if !folderExists(folders, folderPath) {
 		return ErrFolderNotFound
 	}
+	if folderIsLocked(folders, folderPath) {
+		return ErrResourceLocked
+	}
 
 	id, err := uuid.Parse(documentID)
 	if err != nil {
 		return errors.New("invalid document id")
 	}
+	existing, err := s.queries.GetDealRoomDocument(ctx, db.GetDealRoomDocumentParams{
+		ID:     pgtype.UUID{Bytes: id, Valid: true},
+		RoomID: room.ID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errors.New("document not found")
+		}
+		return err
+	}
+	if existing.Locked {
+		return ErrResourceLocked
+	}
 	if err := s.queries.UpdateDealRoomDocumentFolder(ctx, db.UpdateDealRoomDocumentFolderParams{
 		FolderPath: folderPath,
-		ID:         pgtype.UUID{Bytes: id, Valid: true},
+		ID:         existing.ID,
 		RoomID:     room.ID,
 	}); err != nil {
 		return err
@@ -993,7 +1162,7 @@ func (s *Service) MoveDocument(ctx context.Context, roomID, workspaceID, userID,
 	if sortOrder != nil {
 		return s.queries.UpdateDealRoomDocumentSortOrder(ctx, db.UpdateDealRoomDocumentSortOrderParams{
 			SortOrder: *sortOrder,
-			ID:        pgtype.UUID{Bytes: id, Valid: true},
+			ID:        existing.ID,
 			RoomID:    room.ID,
 		})
 	}
@@ -1072,6 +1241,7 @@ func (s *Service) ListDocuments(ctx context.Context, roomID, workspaceID, email 
 			Status:     r.Status,
 			FolderPath: r.FolderPath,
 			SortOrder:  r.SortOrder,
+			Locked:     r.Locked,
 			CreatedAt:  r.CreatedAt.Time,
 		}
 		docsByFolder[r.FolderPath] = append(docsByFolder[r.FolderPath], d)
@@ -1165,6 +1335,7 @@ func (s *Service) GetRoomDocuments(ctx context.Context, roomID, workspaceID, use
 			Status:     r.Status,
 			FolderPath: r.FolderPath,
 			SortOrder:  r.SortOrder,
+			Locked:     r.Locked,
 			CreatedAt:  r.CreatedAt.Time,
 		}
 		docsByFolder[r.FolderPath] = append(docsByFolder[r.FolderPath], d)
@@ -1264,6 +1435,9 @@ func (s *Service) CreateFolder(ctx context.Context, roomID, workspaceID, userID,
 	if parentPath != "/" && !folderExists(folders, parentPath) {
 		return nil, ErrFolderNotFound
 	}
+	if parentPath != "/" && folderIsLocked(folders, parentPath) {
+		return nil, ErrResourceLocked
+	}
 
 	newPath := joinFolderPath(parentPath, slugify(name))
 	if folderExists(folders, newPath) {
@@ -1320,6 +1494,9 @@ func (s *Service) RenameFolder(ctx context.Context, roomID, workspaceID, userID,
 	idx := folderIndex(folders, oldPath)
 	if idx < 0 {
 		return nil, ErrFolderNotFound
+	}
+	if folders[idx].Locked {
+		return nil, ErrResourceLocked
 	}
 
 	parentPath := parentFolder(oldPath)
@@ -1401,6 +1578,122 @@ func (s *Service) RenameFolder(ctx context.Context, roomID, workspaceID, userID,
 	return folders, nil
 }
 
+// SetResourceLocks locks or unlocks folders and documents in a room (admin only).
+// Folder locks live in settings JSON; document locks live on deal_room_documents.locked.
+func (s *Service) SetResourceLocks(
+	ctx context.Context,
+	roomID, workspaceID, userID string,
+	req SetResourceLocksRequest,
+	locked bool,
+) error {
+	room, err := s.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.requireRoomAdmin(ctx, room.ID, userID); err != nil {
+		return err
+	}
+	if len(req.FolderPaths) == 0 && len(req.DocumentIDs) == 0 {
+		return errors.New("folder_paths or document_ids required")
+	}
+
+	knowledgeDocIDs := make([]string, 0)
+	seenKnowledgeDocs := map[string]bool{}
+	enqueueKnowledgeDoc := func(docID string) {
+		if docID == "" || seenKnowledgeDocs[docID] {
+			return
+		}
+		seenKnowledgeDocs[docID] = true
+		knowledgeDocIDs = append(knowledgeDocIDs, docID)
+	}
+
+	if len(req.FolderPaths) > 0 {
+		folders, err := s.loadFolders(room)
+		if err != nil {
+			return err
+		}
+		normalizedFolders := make([]string, 0, len(req.FolderPaths))
+		for _, raw := range req.FolderPaths {
+			p := normalizeFolderPath(raw)
+			idx := folderIndex(folders, p)
+			if idx < 0 {
+				return ErrFolderNotFound
+			}
+			folders[idx].Locked = locked
+			normalizedFolders = append(normalizedFolders, p)
+		}
+		if err := s.saveFolders(ctx, room, folders); err != nil {
+			return err
+		}
+		// Folder lock cascades to knowledge corpus for docs in that folder tree.
+		roomDocs, err := s.queries.ListDealRoomDocumentsWithMeta(ctx, room.ID)
+		if err != nil {
+			return err
+		}
+		for _, d := range roomDocs {
+			if !documentUnderLockedFolders(d.FolderPath, normalizedFolders) {
+				continue
+			}
+			enqueueKnowledgeDoc(uuid.UUID(d.DocumentID.Bytes).String())
+		}
+	}
+
+	if len(req.DocumentIDs) > 0 {
+		ids := make([]pgtype.UUID, 0, len(req.DocumentIDs))
+		for _, raw := range req.DocumentIDs {
+			parsed, err := uuid.Parse(raw)
+			if err != nil {
+				return errors.New("invalid document id")
+			}
+			ids = append(ids, pgtype.UUID{Bytes: parsed, Valid: true})
+			enqueueKnowledgeDoc(parsed.String())
+		}
+		if err := s.queries.SetDealRoomDocumentsLocked(ctx, db.SetDealRoomDocumentsLockedParams{
+			Locked:      locked,
+			RoomID:      room.ID,
+			DocumentIds: ids,
+		}); err != nil {
+			return err
+		}
+	}
+
+	// Knowledge corpus: lock → purge from external index; unlock → re-ingest.
+	if s.knowledgeEnqueuer != nil && len(knowledgeDocIDs) > 0 {
+		roomIDStr := uuid.UUID(room.ID.Bytes).String()
+		wsIDStr := uuid.UUID(room.WorkspaceID.Bytes).String()
+		for _, docID := range knowledgeDocIDs {
+			var kerr error
+			if locked {
+				kerr = s.knowledgeEnqueuer.EnqueueDeleteDocument(ctx, roomIDStr, wsIDStr, docID)
+			} else {
+				kerr = s.knowledgeEnqueuer.EnqueueIngestDocument(ctx, roomIDStr, wsIDStr, docID)
+			}
+			if kerr != nil {
+				logger.ErrorCtx(ctx, "enqueue knowledge sync after resource lock change", kerr,
+					logger.Attr("document_id", docID),
+					logger.Attr("locked", locked),
+				)
+			}
+		}
+	}
+	return nil
+}
+
+// documentUnderLockedFolders reports whether folderPath equals or is under any path.
+func documentUnderLockedFolders(folderPath string, folderPaths []string) bool {
+	p := normalizeFolderPath(folderPath)
+	for _, raw := range folderPaths {
+		locked := normalizeFolderPath(raw)
+		if locked == "/" {
+			continue
+		}
+		if p == locked || strings.HasPrefix(p, locked+"/") {
+			return true
+		}
+	}
+	return false
+}
+
 // DeleteFolder removes a folder from a room. Only admins can delete folders.
 // Rejects deletion if the folder or its descendants contain documents.
 func (s *Service) DeleteFolder(ctx context.Context, roomID, workspaceID, userID, path string) ([]Folder, error) {
@@ -1422,6 +1715,9 @@ func (s *Service) DeleteFolder(ctx context.Context, roomID, workspaceID, userID,
 	}
 	if !folderExists(folders, path) {
 		return nil, ErrFolderNotFound
+	}
+	if folderIsLocked(folders, path) {
+		return nil, ErrResourceLocked
 	}
 
 	count, err := s.queries.CountDocumentsInFolder(ctx, db.CountDocumentsInFolderParams{
@@ -1612,6 +1908,14 @@ func folderIndex(folders []Folder, path string) int {
 		}
 	}
 	return -1
+}
+
+func folderIsLocked(folders []Folder, path string) bool {
+	idx := folderIndex(folders, path)
+	if idx < 0 {
+		return false
+	}
+	return folders[idx].Locked
 }
 
 func normalizeFolderPath(p string) string {

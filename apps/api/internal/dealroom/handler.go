@@ -11,8 +11,8 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
@@ -43,6 +43,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.DELETE("/:roomId/documents/:docId", h.RemoveDocument)
 	g.PATCH("/:roomId/documents/:docId", h.UpdateDocument)
 
+	g.POST("/:roomId/resources/lock", h.LockResources)
+	g.POST("/:roomId/resources/unlock", h.UnlockResources)
+
 	g.GET("/:roomId/members", h.ListMembers)
 	g.POST("/:roomId/members", h.AddMember)
 	g.DELETE("/:roomId/members/:memberId", h.RemoveMember)
@@ -52,6 +55,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:roomId/access-requests/:requestId/reject", h.RejectAccessRequest)
 
 	g.POST("/:roomId/folder-permissions", h.SetFolderPermission)
+
+	g.GET("/:roomId/analytics", h.Analytics)
 
 	r.GET("/deal-room-templates", h.ListTemplates)
 }
@@ -137,6 +142,30 @@ func (h *Handler) Create(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, roomResponse(room))
+}
+
+// Analytics returns aggregated view/visitor metrics for a deal room.
+func (h *Handler) Analytics(c *gin.Context) {
+	analytics, err := h.service.GetRoomAnalytics(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+	)
+	if err != nil {
+		if errors.Is(err, ErrRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+			return
+		}
+		if errors.Is(err, ErrApprovalRequired) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+
+	c.JSON(http.StatusOK, analytics)
 }
 
 // Get returns a data room with full detail.
@@ -333,6 +362,10 @@ func (h *Handler) AddDocument(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		case errors.Is(err, ErrFolderNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
+		case errors.Is(err, ErrResourceLocked):
+			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
@@ -419,6 +452,8 @@ func (h *Handler) CreateFolder(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": httpx.SafeMessage("folder_exists", err)})
 		case errors.Is(err, ErrFolderNotFound):
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
+		case errors.Is(err, ErrResourceLocked):
+			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
@@ -448,6 +483,8 @@ func (h *Handler) RenameFolder(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrFolderExists):
 			c.JSON(http.StatusConflict, gin.H{"code": "folder_exists", "message": httpx.SafeMessage("folder_exists", err)})
+		case errors.Is(err, ErrResourceLocked):
+			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
@@ -467,12 +504,57 @@ func (h *Handler) DeleteFolder(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrFolderNotEmpty):
 			c.JSON(http.StatusConflict, gin.H{"code": "folder_not_empty", "message": httpx.SafeMessage("folder_not_empty", err)})
+		case errors.Is(err, ErrResourceLocked):
+			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": folderListResponse(folders)})
+}
+
+// LockResources locks selected folders and/or documents.
+func (h *Handler) LockResources(c *gin.Context) {
+	h.setResourceLocks(c, true)
+}
+
+// UnlockResources unlocks selected folders and/or documents.
+func (h *Handler) UnlockResources(c *gin.Context) {
+	h.setResourceLocks(c, false)
+}
+
+func (h *Handler) setResourceLocks(c *gin.Context, locked bool) {
+	var req SetResourceLocksRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	if err := h.service.SetResourceLocks(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		req,
+		locked,
+	); err != nil {
+		switch {
+		case errors.Is(err, ErrNotRoomAdmin):
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		case errors.Is(err, ErrRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "room_not_found", "message": httpx.SafeMessage("room_not_found", err)})
+		case errors.Is(err, ErrFolderNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
+		default:
+			if strings.Contains(err.Error(), "required") || strings.Contains(err.Error(), "invalid") {
+				c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.Status(http.StatusNoContent)
 }
 
 // GetRoomDocuments returns documents grouped by folder for a room.
@@ -498,6 +580,8 @@ func (h *Handler) RemoveDocument(c *gin.Context) {
 		switch {
 		case errors.Is(err, ErrNotRoomAdmin):
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
+		case errors.Is(err, ErrResourceLocked):
+			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
@@ -534,6 +618,8 @@ func (h *Handler) UpdateDocument(c *gin.Context) {
 				c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": httpx.SafeMessage("forbidden", err)})
 			case errors.Is(err, ErrFolderNotFound):
 				c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
+			case errors.Is(err, ErrResourceLocked):
+				c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
 			default:
 				c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 			}
@@ -725,6 +811,7 @@ func documentResponse(d db.DealRoomDocument) gin.H {
 		"document_id": uuid.UUID(d.DocumentID.Bytes).String(),
 		"folder_path": d.FolderPath,
 		"sort_order":  d.SortOrder,
+		"locked":      d.Locked,
 		"created_at":  d.CreatedAt.Time.Format(time.RFC3339),
 	}
 }
@@ -743,6 +830,7 @@ func folderResponse(f Folder) gin.H {
 		"path":       f.Path,
 		"name":       f.Name,
 		"sort_order": f.SortOrder,
+		"locked":     f.Locked,
 	}
 	if f.Description != "" {
 		resp["description"] = f.Description
@@ -767,6 +855,7 @@ func documentMetaResponse(d RoomDocument) gin.H {
 		"sort_order":  d.SortOrder,
 		"source_type": d.SourceType,
 		"status":      d.Status,
+		"locked":      d.Locked,
 		"created_at":  d.CreatedAt.Format(time.RFC3339),
 	}
 	if d.PageCount > 0 {

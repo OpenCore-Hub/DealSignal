@@ -21,7 +21,9 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/events"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/integration"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
@@ -266,9 +268,29 @@ func (s *Server) registerRoutes() error {
 			public.POST("/webhooks/crm/deal-stage", webhookHandler.HandleDealStageChange)
 			analyticsHandler := analytics.NewHandler(analyticsSvc, s.cfg)
 
+			doclingClient := docling.NewClient(
+				s.cfg.DoclingRAG.BaseURL,
+				s.cfg.DoclingRAG.PlatformAdminKey,
+				s.cfg.DoclingRAG.HTTPTimeout,
+			)
+			knowledgeSvc := knowledge.NewService(
+				queries,
+				s.cfg.DoclingRAG,
+				doclingClient,
+				storageClient,
+				s.cfg.URLSigningSecret,
+			)
+			knowledgeHandler := knowledge.NewHandler(knowledgeSvc)
+			if knowledgeSvc.Enabled() {
+				knowledgeWorker := knowledge.NewWorker(knowledgeSvc, 3*time.Second)
+				s.registerWorker(knowledgeWorker)
+				knowledgeWorker.Start(s.shutdownCtx)
+			}
+
 			dealroomOpts := []dealroom.ServiceOption{
 				dealroom.WithActionSyncer(actionSyncer),
 				dealroom.WithRateLimiter(s.redisClient),
+				dealroom.WithKnowledgeEnqueuer(knowledgeSvc),
 			}
 			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg, dealroomOpts...)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
@@ -295,6 +317,7 @@ func (s *Server) registerRoutes() error {
 			ws.GET("/reverse-funnel", linkHandler.ReverseFunnel)
 			ws.GET("/events", sseHandler.StreamEvents)
 			dealroomHandler.RegisterWorkspaceRoutes(ws)
+			knowledgeHandler.RegisterWorkspaceRoutes(ws)
 			complianceHandler.RegisterRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)

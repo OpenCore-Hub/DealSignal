@@ -117,6 +117,9 @@ type Config struct {
 
 	// TableIngest holds TABLE_INGEST_* spreadsheet chunking flags.
 	TableIngest TableIngestConfig
+
+	// DoclingRAG holds DOCLING_RAG_* external knowledge-base settings.
+	DoclingRAG DoclingRAGConfig
 }
 
 // Load parses environment variables into Config and validates required fields.
@@ -227,6 +230,7 @@ func Load() (*Config, error) {
 		PprofEnabled:       strings.ToLower(getEnv("PPROF_ENABLED", "false")) == "true",
 	}
 	cfg.TableIngest = TableIngestFromEnv(cfg.AppEnv)
+	cfg.DoclingRAG = DoclingRAGFromEnv()
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

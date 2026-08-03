@@ -1,0 +1,816 @@
+package knowledge
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+var (
+	ErrUnavailable = errors.New("knowledge base unavailable")
+	ErrForbidden   = errors.New("knowledge base forbidden")
+	ErrNotFound    = errors.New("knowledge base not found")
+)
+
+// ObjectStore reads document bytes from object storage.
+type ObjectStore interface {
+	GetObject(ctx context.Context, key string) (io.ReadCloser, error)
+}
+
+// RoomAccess checks deal-room membership for knowledge endpoints.
+type RoomAccess interface {
+	GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error)
+	RequireActiveRoomMember(ctx context.Context, roomID, workspaceID, userID string) error
+}
+
+type roomAccessAdapter struct {
+	queries *db.Queries
+}
+
+func (a roomAccessAdapter) GetRoom(ctx context.Context, roomID, workspaceID string) (db.DealRoom, error) {
+	room, err := a.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+		ID:          pgUUID(roomID),
+		WorkspaceID: pgUUID(workspaceID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.DealRoom{}, ErrNotFound
+		}
+		return db.DealRoom{}, err
+	}
+	return room, nil
+}
+
+func (a roomAccessAdapter) RequireActiveRoomMember(ctx context.Context, roomID, workspaceID, userID string) error {
+	room, err := a.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return err
+	}
+	member, err := a.queries.GetRoomMemberByUserID(ctx, db.GetRoomMemberByUserIDParams{
+		RoomID: room.ID,
+		UserID: pgUUID(userID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrForbidden
+		}
+		return err
+	}
+	if member.Status != "active" {
+		return ErrForbidden
+	}
+	return nil
+}
+
+// Service orchestrates local mapping + docling-rag sync/query.
+type Service struct {
+	queries   *db.Queries
+	cfg       config.DoclingRAGConfig
+	client    *docling.Client
+	store     ObjectStore
+	access    RoomAccess
+	secretKey string // used to seal tenant API keys at rest
+}
+
+// NewService constructs a knowledge service. client may be nil/disabled.
+// secretKey should be a long-lived server secret (e.g. URL_SIGNING_SECRET).
+func NewService(queries *db.Queries, cfg config.DoclingRAGConfig, client *docling.Client, store ObjectStore, secretKey string) *Service {
+	return &Service{
+		queries:   queries,
+		cfg:       cfg,
+		client:    client,
+		store:     store,
+		access:    roomAccessAdapter{queries: queries},
+		secretKey: secretKey,
+	}
+}
+
+// Enabled reports whether external RAG is configured.
+func (s *Service) Enabled() bool {
+	return s != nil && s.client != nil && s.client.Enabled()
+}
+
+// CorpusStatus is the owner-facing knowledge snapshot.
+type CorpusStatus struct {
+	Enabled      bool               `json:"enabled"`
+	Status       string             `json:"status"`
+	LastSyncedAt *time.Time         `json:"lastSyncedAt,omitempty"`
+	ErrorMessage string             `json:"errorMessage,omitempty"`
+	Progress     SyncProgress       `json:"progress"`
+	Documents    []DocumentSyncItem `json:"documents"`
+}
+
+// SyncProgress summarizes room corpus sync for the UI.
+type SyncProgress struct {
+	Total     int    `json:"total"`
+	Pending   int    `json:"pending"`
+	Syncing   int    `json:"syncing"`
+	Synced    int    `json:"synced"`
+	Failed    int    `json:"failed"`
+	JobStatus string `json:"jobStatus,omitempty"` // pending|running|failed|done
+}
+
+// DocumentSyncItem is one room document's sync state.
+type DocumentSyncItem struct {
+	DocumentID string `json:"documentId"`
+	Title      string `json:"title,omitempty"`
+	Status     string `json:"status"`
+	ChunkCount int32  `json:"chunkCount"`
+	LastError  string `json:"lastError,omitempty"`
+}
+
+// QueryRequest is the BFF search body.
+type QueryRequest struct {
+	Query  string `json:"query"`
+	Answer bool   `json:"answer"`
+	TopK   int    `json:"top_k"`
+}
+
+// QueryResponse is sanitized search output for the UI.
+type QueryResponse struct {
+	Query   string      `json:"query"`
+	Mode    string      `json:"mode"`
+	Answer  string      `json:"answer,omitempty"`
+	Results []QueryHit  `json:"results"`
+}
+
+// QueryHit is one citation-friendly hit.
+type QueryHit struct {
+	ChunkID    string  `json:"chunkId"`
+	DocumentID string  `json:"documentId,omitempty"`
+	Text       string  `json:"text"`
+	Score      float64 `json:"score"`
+}
+
+// GetCorpus returns local sync state for a room.
+func (s *Service) GetCorpus(ctx context.Context, roomID, workspaceID, userID string) (CorpusStatus, error) {
+	if !s.Enabled() {
+		return CorpusStatus{Enabled: false, Status: "none", Documents: []DocumentSyncItem{}}, nil
+	}
+	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+		return CorpusStatus{}, err
+	}
+	out := CorpusStatus{Enabled: true, Status: "none", Documents: []DocumentSyncItem{}}
+	corpus, err := s.queries.GetDealRoomRagCorpus(ctx, pgUUID(roomID))
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return CorpusStatus{}, err
+	}
+	if err == nil {
+		out.Status = corpus.Status
+		out.ErrorMessage = textOrEmpty(corpus.ErrorMessage)
+		if corpus.LastSyncedAt.Valid {
+			t := corpus.LastSyncedAt.Time.UTC()
+			out.LastSyncedAt = &t
+		}
+	}
+
+	titleByDoc := map[string]string{}
+	excludedDocs := map[string]bool{}
+	room, roomErr := s.access.GetRoom(ctx, roomID, workspaceID)
+	if roomErr != nil {
+		return CorpusStatus{}, roomErr
+	}
+	lockedFolders := lockedFolderPathSet(room.Settings)
+	roomDocs, err := s.queries.ListDealRoomDocumentsWithMeta(ctx, pgUUID(roomID))
+	if err != nil {
+		return CorpusStatus{}, err
+	}
+	for _, d := range roomDocs {
+		docID := uuid.UUID(d.DocumentID.Bytes).String()
+		titleByDoc[docID] = d.DocumentTitle
+		if knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
+			excludedDocs[docID] = true
+		}
+	}
+
+	rows, err := s.queries.ListDealRoomRagDocuments(ctx, pgUUID(roomID))
+	if err != nil {
+		return CorpusStatus{}, err
+	}
+	for _, row := range rows {
+		if row.Status == "deleted" {
+			continue
+		}
+		docID := uuid.UUID(row.DocumentID.Bytes).String()
+		// Locked / folder-locked documents are excluded from the searchable corpus.
+		if excludedDocs[docID] {
+			continue
+		}
+		out.Documents = append(out.Documents, DocumentSyncItem{
+			DocumentID: docID,
+			Title:      titleByDoc[docID],
+			Status:     row.Status,
+			ChunkCount: row.ChunkCount,
+			LastError:  textOrEmpty(row.LastError),
+		})
+		out.Progress.Total++
+		switch row.Status {
+		case "pending":
+			out.Progress.Pending++
+		case "syncing":
+			out.Progress.Syncing++
+		case "synced":
+			out.Progress.Synced++
+		case "failed":
+			out.Progress.Failed++
+		}
+	}
+	if job, jerr := s.queries.GetLatestKnowledgeSyncJobForRoom(ctx, pgUUID(roomID)); jerr == nil {
+		out.Progress.JobStatus = job.Status
+		// Surface a terminal job failure even if corpus row was left mid-flight historically.
+		if job.Status == "failed" && (out.Status == "syncing" || out.Status == "provisioning") {
+			out.Status = "failed"
+		}
+	}
+	return out, nil
+}
+
+// EnqueueRoomSync queues a full room sync job and marks pending docs.
+// Tenant/KB provisioning happens in the worker so the BFF returns quickly
+// and does not fail the click when docling-rag is temporarily unreachable.
+func (s *Service) EnqueueRoomSync(ctx context.Context, roomID, workspaceID, userID string) error {
+	if !s.Enabled() {
+		return ErrUnavailable
+	}
+	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+		return err
+	}
+	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
+		return err
+	}
+	if err := s.alignRoomDocuments(ctx, room); err != nil {
+		return err
+	}
+	_, err = s.queries.UpdateDealRoomRagCorpusStatus(ctx, db.UpdateDealRoomRagCorpusStatusParams{
+		RoomID:       room.ID,
+		Status:       "syncing",
+		ErrorMessage: pgtype.Text{},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.EnqueueKnowledgeSyncJob(ctx, db.EnqueueKnowledgeSyncJobParams{
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		DocumentID:  pgtype.UUID{},
+		JobType:     "sync_room",
+	})
+	return err
+}
+
+// EnqueueIngestDocument queues ingest for one room document (lifecycle hook).
+// Locked room documents are never enqueued for ingest.
+func (s *Service) EnqueueIngestDocument(ctx context.Context, roomID, workspaceID, documentID string) error {
+	if !s.Enabled() {
+		return nil
+	}
+	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return err
+	}
+	docUUID := pgUUID(documentID)
+	binding, err := s.queries.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
+		RoomID:     room.ID,
+		DocumentID: docUUID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	lockedFolders := lockedFolderPathSet(room.Settings)
+	if knowledgeExcluded(binding.Locked, binding.FolderPath, lockedFolders) {
+		return nil
+	}
+	if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
+		logger.ErrorCtx(ctx, "knowledge ensure local corpus", err)
+		return nil
+	}
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docUUID,
+		WorkspaceID: room.WorkspaceID,
+	})
+	if err != nil {
+		return err
+	}
+	extName := externalDocName(documentID, doc.Title, doc.StorageKey)
+	_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
+		RoomID:       room.ID,
+		DocumentID:   doc.ID,
+		WorkspaceID:  room.WorkspaceID,
+		ExternalName: extName,
+		Status:       "pending",
+		LastError:    pgtype.Text{},
+	})
+	if err != nil {
+		return err
+	}
+	_, err = s.queries.EnqueueKnowledgeSyncJob(ctx, db.EnqueueKnowledgeSyncJobParams{
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		DocumentID:  doc.ID,
+		JobType:     "ingest_doc",
+	})
+	return err
+}
+
+// EnqueueDeleteDocument queues deletion from the external KB.
+// Always creates/updates a local binding so the worker can resolve the remote
+// document by stable external_name even if ingest mapping was missing.
+func (s *Service) EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID, documentID string) error {
+	if !s.Enabled() {
+		return nil
+	}
+	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return err
+	}
+	if err := s.ensureLocalCorpusRow(ctx, room); err != nil {
+		logger.ErrorCtx(ctx, "knowledge ensure local corpus for delete", err)
+		return err
+	}
+	docUUID := pgUUID(documentID)
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docUUID,
+		WorkspaceID: room.WorkspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	extName := externalDocName(documentID, doc.Title, doc.StorageKey)
+	_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
+		RoomID:       room.ID,
+		DocumentID:   doc.ID,
+		WorkspaceID:  room.WorkspaceID,
+		ExternalName: extName,
+		Status:       "deleted",
+		LastError:    pgtype.Text{},
+	})
+	if err != nil {
+		return err
+	}
+	// Prefer delete over any still-pending ingest for the same document.
+	_ = s.queries.CancelPendingKnowledgeIngestJobs(ctx, db.CancelPendingKnowledgeIngestJobsParams{
+		RoomID:     room.ID,
+		DocumentID: doc.ID,
+	})
+	_, err = s.queries.EnqueueKnowledgeSyncJob(ctx, db.EnqueueKnowledgeSyncJobParams{
+		WorkspaceID: room.WorkspaceID,
+		RoomID:      room.ID,
+		DocumentID:  doc.ID,
+		JobType:     "delete_doc",
+	})
+	return err
+}
+
+// Query proxies search/answer to docling-rag.
+func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string, req QueryRequest) (QueryResponse, error) {
+	if !s.Enabled() {
+		return QueryResponse{}, ErrUnavailable
+	}
+	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
+		return QueryResponse{}, err
+	}
+	q := strings.TrimSpace(req.Query)
+	if q == "" {
+		return QueryResponse{}, fmt.Errorf("query is required")
+	}
+	room, err := s.access.GetRoom(ctx, roomID, workspaceID)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	cred, err := s.ensureProvisioned(ctx, room)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	topK := req.TopK
+	if topK <= 0 {
+		topK = s.cfg.DefaultTopK
+	}
+	mode := s.cfg.DefaultMode
+	res, err := s.client.Search(ctx, cred.tenantSlug, cred.kbSlug, cred.apiKey, docling.SearchRequest{
+		Query:  q,
+		Mode:   mode,
+		TopK:   topK,
+		Answer: req.Answer,
+	})
+	if err != nil {
+		var apiErr *docling.APIError
+		if errors.As(err, &apiErr) && (apiErr.Code == "INDEX_NOT_READY" || apiErr.Status == http.StatusServiceUnavailable) {
+			_, _ = s.queries.UpdateDealRoomRagCorpusStatus(ctx, db.UpdateDealRoomRagCorpusStatusParams{
+				RoomID:       room.ID,
+				Status:       "syncing",
+				ErrorMessage: pgtype.Text{},
+			})
+		}
+		return QueryResponse{}, mapUpstream(err)
+	}
+
+	lockedIDs, err := s.lockedDocumentIDs(ctx, room)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	bindings, err := s.queries.ListDealRoomRagDocuments(ctx, room.ID)
+	if err != nil {
+		return QueryResponse{}, err
+	}
+	byExtID := map[string]string{}
+	byName := map[string]string{}
+	for _, b := range bindings {
+		docID := uuid.UUID(b.DocumentID.Bytes).String()
+		byName[b.ExternalName] = docID
+		if b.ExternalDocumentID.Valid {
+			byExtID[b.ExternalDocumentID.String] = docID
+		}
+	}
+	return applyLockedSearchFilter(res, byExtID, byName, lockedIDs), nil
+}
+
+type ragCredentials struct {
+	tenantSlug string
+	kbSlug     string
+	apiKey     string
+}
+
+// ensureLocalCorpusRow creates a placeholder corpus mapping without calling docling-rag.
+func (s *Service) ensureLocalCorpusRow(ctx context.Context, room db.DealRoom) error {
+	_, err := s.queries.GetDealRoomRagCorpus(ctx, room.ID)
+	if err == nil {
+		return nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return err
+	}
+	wsID := uuid.UUID(room.WorkspaceID.Bytes).String()
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	_, err = s.queries.UpsertDealRoomRagCorpus(ctx, db.UpsertDealRoomRagCorpusParams{
+		RoomID:             room.ID,
+		WorkspaceID:        room.WorkspaceID,
+		ExternalTenantSlug: "pending-ds-ws-" + strings.ReplaceAll(wsID, "-", ""),
+		ExternalKbSlug:     roomID,
+		Status:             "provisioning",
+		ErrorMessage:       pgtype.Text{},
+	})
+	return err
+}
+
+// verifyOrReissueTenantKey ensures the stored tenant key can call the control/data API.
+// On 401/403 it mints a new key with the platform admin credential and persists it sealed.
+func (s *Service) verifyOrReissueTenantKey(ctx context.Context, workspaceID pgtype.UUID, tenantSlug string, apiKey *string) error {
+	if apiKey == nil || *apiKey == "" {
+		return ErrUnavailable
+	}
+	if _, err := s.client.ListKnowledgeBases(ctx, tenantSlug, *apiKey); err == nil {
+		return nil
+	} else {
+		var apiErr *docling.APIError
+		if !errors.As(err, &apiErr) || (apiErr.Status != http.StatusUnauthorized && apiErr.Status != http.StatusForbidden) {
+			return mapUpstream(err)
+		}
+		logger.ErrorCtx(ctx, "knowledge tenant key rejected; reissuing", err,
+			logger.Attr("tenant", tenantSlug),
+			logger.Attr("upstream_status", apiErr.Status),
+			logger.Attr("upstream_code", apiErr.Code),
+		)
+	}
+	if s.cfg.PlatformAdminKey == "" {
+		return ErrUnavailable
+	}
+	issued, err := s.client.CreateAPIKey(ctx, tenantSlug, "dealsignal-"+uuid.NewString(), []docling.APIKeyGrant{{
+		KB:      "*",
+		Actions: []string{"read", "ingest", "answer", "admin"},
+	}})
+	if err != nil || issued.Key == "" {
+		if err == nil {
+			err = errors.New("docling-rag did not return api key on reissue")
+		}
+		return mapUpstream(err)
+	}
+	*apiKey = issued.Key
+	sealed, serr := sealSecret(s.secretKey, *apiKey)
+	if serr != nil {
+		return fmt.Errorf("seal tenant api key: %w", serr)
+	}
+	_, err = s.queries.UpsertWorkspaceRagTenant(ctx, db.UpsertWorkspaceRagTenantParams{
+		WorkspaceID:        workspaceID,
+		ExternalTenantSlug: tenantSlug,
+		TenantApiKey:       sealed,
+	})
+	return err
+}
+
+func (s *Service) ensureProvisioned(ctx context.Context, room db.DealRoom) (ragCredentials, error) {
+	wsID := uuid.UUID(room.WorkspaceID.Bytes).String()
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	tenantRow, err := s.queries.GetWorkspaceRagTenant(ctx, room.WorkspaceID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return ragCredentials{}, err
+	}
+	apiKey := ""
+	tenantSlug := ""
+	if err == nil {
+		opened, oerr := openSecret(s.secretKey, tenantRow.TenantApiKey)
+		if oerr != nil {
+			return ragCredentials{}, fmt.Errorf("decrypt tenant api key: %w", oerr)
+		}
+		apiKey = opened
+		tenantSlug = tenantRow.ExternalTenantSlug
+	}
+	if apiKey == "" {
+		if s.cfg.PlatformAdminKey == "" {
+			return ragCredentials{}, ErrUnavailable
+		}
+		ws, werr := s.queries.GetWorkspaceByID(ctx, room.WorkspaceID)
+		if werr != nil {
+			return ragCredentials{}, werr
+		}
+		slug := "ds-ws-" + strings.ReplaceAll(wsID, "-", "")
+		created, cerr := s.client.CreateTenant(ctx, docling.CreateTenantRequest{
+			Name:        ws.Name,
+			Slug:        slug,
+			ExternalRef: "dealsignal-ws-" + wsID,
+			IssueAPIKey: true,
+		})
+		if cerr != nil {
+			var apiErr *docling.APIError
+			if errors.As(cerr, &apiErr) && apiErr.Status == 409 {
+				tenantSlug = slug
+				issued, kerr := s.client.CreateAPIKey(ctx, tenantSlug, "dealsignal-"+wsID, []docling.APIKeyGrant{{
+					KB:      "*",
+					Actions: []string{"read", "ingest", "answer", "admin"},
+				}})
+				if kerr != nil || issued.Key == "" {
+					return ragCredentials{}, mapUpstream(cerr)
+				}
+				apiKey = issued.Key
+			} else {
+				return ragCredentials{}, mapUpstream(cerr)
+			}
+		} else {
+			tenantSlug = created.TenantSlug
+			if tenantSlug == "" {
+				tenantSlug = slug
+			}
+			if created.APIKey == nil || created.APIKey.Key == "" {
+				return ragCredentials{}, fmt.Errorf("docling-rag did not issue api key")
+			}
+			apiKey = created.APIKey.Key
+		}
+		sealed, serr := sealSecret(s.secretKey, apiKey)
+		if serr != nil {
+			return ragCredentials{}, fmt.Errorf("seal tenant api key: %w", serr)
+		}
+		_, err = s.queries.UpsertWorkspaceRagTenant(ctx, db.UpsertWorkspaceRagTenantParams{
+			WorkspaceID:        room.WorkspaceID,
+			ExternalTenantSlug: tenantSlug,
+			TenantApiKey:       sealed,
+		})
+		if err != nil {
+			return ragCredentials{}, err
+		}
+	}
+
+	if err := s.verifyOrReissueTenantKey(ctx, room.WorkspaceID, tenantSlug, &apiKey); err != nil {
+		return ragCredentials{}, err
+	}
+
+	// CreateTenant always creates a "default" KB under trial max_kbs=1; raise
+	// quotas before creating the per-room KB (1 workspace → 1 tenant, 1 room → 1 KB).
+	if bumpErr := s.client.EnsureMinEntitlements(ctx, tenantSlug, docling.DefaultPartnerEntitlements()); bumpErr != nil {
+		logger.ErrorCtx(ctx, "knowledge ensure entitlements failed", bumpErr,
+			logger.Attr("tenant", tenantSlug),
+		)
+		return ragCredentials{}, mapUpstream(bumpErr)
+	}
+
+	kbSlug := roomID
+	_, err = s.client.EnsureKnowledgeBase(ctx, tenantSlug, apiKey, kbSlug, room.Name)
+	if err != nil {
+		logger.ErrorCtx(ctx, "knowledge ensure KB failed", err,
+			logger.Attr("tenant", tenantSlug),
+			logger.Attr("kb", kbSlug),
+		)
+		return ragCredentials{}, mapUpstream(err)
+	}
+	_, err = s.queries.UpsertDealRoomRagCorpus(ctx, db.UpsertDealRoomRagCorpusParams{
+		RoomID:             room.ID,
+		WorkspaceID:        room.WorkspaceID,
+		ExternalTenantSlug: tenantSlug,
+		ExternalKbSlug:     kbSlug,
+		Status:             "provisioning",
+		ErrorMessage:       pgtype.Text{},
+	})
+	if err != nil {
+		return ragCredentials{}, err
+	}
+	return ragCredentials{tenantSlug: tenantSlug, kbSlug: kbSlug, apiKey: apiKey}, nil
+}
+
+func (s *Service) alignRoomDocuments(ctx context.Context, room db.DealRoom) error {
+	roomDocs, err := s.queries.ListDealRoomDocumentsWithMeta(ctx, room.ID)
+	if err != nil {
+		return err
+	}
+	lockedFolders := lockedFolderPathSet(room.Settings)
+	// Only searchable documents remain active. Locked document/folder bindings
+	// fall out of active and are marked deleted for remote purge.
+	active := make([]pgtype.UUID, 0, len(roomDocs))
+	for _, d := range roomDocs {
+		if knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
+			continue
+		}
+		active = append(active, d.DocumentID)
+		docID := uuid.UUID(d.DocumentID.Bytes).String()
+		doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+			ID:          d.DocumentID,
+			WorkspaceID: room.WorkspaceID,
+		})
+		if err != nil {
+			return err
+		}
+		_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
+			RoomID:       room.ID,
+			DocumentID:   d.DocumentID,
+			WorkspaceID:  room.WorkspaceID,
+			ExternalName: externalDocName(docID, doc.Title, doc.StorageKey),
+			Status:       "pending",
+			LastError:    pgtype.Text{},
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return s.queries.MarkMissingRagDocumentsDeleted(ctx, db.MarkMissingRagDocumentsDeletedParams{
+		RoomID:            room.ID,
+		ActiveDocumentIds: active,
+	})
+}
+
+func (s *Service) lockedDocumentIDs(ctx context.Context, room db.DealRoom) (map[string]bool, error) {
+	rows, err := s.queries.ListDealRoomDocuments(ctx, room.ID)
+	if err != nil {
+		return nil, err
+	}
+	lockedFolders := lockedFolderPathSet(room.Settings)
+	out := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		if knowledgeExcluded(row.Locked, row.FolderPath, lockedFolders) {
+			out[uuid.UUID(row.DocumentID.Bytes).String()] = true
+		}
+	}
+	return out, nil
+}
+
+// applyLockedSearchFilter drops hits from locked documents and discards grounded
+// answers that may have been produced from those passages.
+func applyLockedSearchFilter(
+	res docling.SearchResponse,
+	byExtID, byName map[string]string,
+	lockedIDs map[string]bool,
+) QueryResponse {
+	out := QueryResponse{
+		Query:   res.Query,
+		Mode:    res.Mode,
+		Results: make([]QueryHit, 0, len(res.Results)),
+	}
+	sawLockedHit := false
+	sawUnmappedWhileLocks := false
+	for _, hit := range res.Results {
+		localDoc := byExtID[hit.Chunk.DocID]
+		if localDoc == "" {
+			if name, _ := hit.Chunk.Metadata["name"].(string); name != "" {
+				localDoc = byName[name]
+			}
+			if localDoc == "" {
+				if src, _ := hit.Chunk.Metadata["source_uri"].(string); src != "" {
+					localDoc = byName[strings.TrimPrefix(src, "upload:///")]
+				}
+			}
+		}
+		if localDoc != "" && lockedIDs[localDoc] {
+			sawLockedHit = true
+			continue
+		}
+		if localDoc == "" && len(lockedIDs) > 0 {
+			// Cannot prove the hit is unlocked while the room has excluded docs.
+			sawUnmappedWhileLocks = true
+			continue
+		}
+		out.Results = append(out.Results, QueryHit{
+			ChunkID:    hit.Chunk.ID,
+			DocumentID: localDoc,
+			Text:       hit.Chunk.Text,
+			Score:      hit.Score,
+		})
+	}
+	if res.Answer != "" && !sawLockedHit && !sawUnmappedWhileLocks {
+		out.Answer = res.Answer
+	}
+	return out
+}
+
+// isRoomDocumentKnowledgeExcluded reports whether a room document must not be ingested.
+func (s *Service) isRoomDocumentKnowledgeExcluded(ctx context.Context, room db.DealRoom, documentID pgtype.UUID) (bool, error) {
+	row, err := s.queries.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
+		RoomID:     room.ID,
+		DocumentID: documentID,
+	})
+	if err != nil {
+		return false, err
+	}
+	return knowledgeExcluded(row.Locked, row.FolderPath, lockedFolderPathSet(room.Settings)), nil
+}
+
+func mapUpstream(err error) error {
+	if err == nil {
+		return nil
+	}
+	var apiErr *docling.APIError
+	if errors.As(err, &apiErr) {
+		switch {
+		case apiErr.Status == 401 || apiErr.Status == 403:
+			return fmt.Errorf("%w: upstream denied", ErrUnavailable)
+		case apiErr.Status == 404:
+			return ErrNotFound
+		default:
+			return fmt.Errorf("%w: %s", ErrUnavailable, apiErr.Code)
+		}
+	}
+	// Dial/timeout failures from an unreachable docling-rag host.
+	var netErr net.Error
+	if errors.As(err, &netErr) {
+		return fmt.Errorf("%w: upstream unreachable", ErrUnavailable)
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "connection refused") ||
+		strings.Contains(msg, "no such host") ||
+		strings.Contains(msg, "i/o timeout") ||
+		strings.Contains(msg, "Client.Timeout") {
+		return fmt.Errorf("%w: upstream unreachable", ErrUnavailable)
+	}
+	return err
+}
+
+func externalDocName(documentID, title, storageKey string) string {
+	ext := strings.TrimPrefix(path.Ext(title), ".")
+	if ext == "" {
+		ext = strings.TrimPrefix(path.Ext(storageKey), ".")
+	}
+	if ext == "" {
+		ext = "bin"
+	}
+	return documentID + "." + strings.ToLower(ext)
+}
+
+func pgUUID(id string) pgtype.UUID {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}
+}
+
+func textOrEmpty(t pgtype.Text) string {
+	if !t.Valid {
+		return ""
+	}
+	return t.String
+}
+
+func contentTypeForName(name string) string {
+	switch strings.ToLower(path.Ext(name)) {
+	case ".pdf":
+		return "application/pdf"
+	case ".docx":
+		return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+	case ".pptx":
+		return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+	case ".xlsx":
+		return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+	default:
+		return "application/octet-stream"
+	}
+}

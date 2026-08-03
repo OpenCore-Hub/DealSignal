@@ -252,6 +252,178 @@ func TestFolderCRUD(t *testing.T) {
 	}
 }
 
+type recordingKnowledgeEnqueuer struct {
+	ingests []string
+	deletes []string
+}
+
+func (r *recordingKnowledgeEnqueuer) EnqueueIngestDocument(_ context.Context, _, _, documentID string) error {
+	r.ingests = append(r.ingests, documentID)
+	return nil
+}
+
+func (r *recordingKnowledgeEnqueuer) EnqueueDeleteDocument(_ context.Context, _, _, documentID string) error {
+	r.deletes = append(r.deletes, documentID)
+	return nil
+}
+
+func TestResourceLocksBlockStructureEdits(t *testing.T) {
+	fake := newFakeDB(t)
+	kb := &recordingKnowledgeEnqueuer{}
+	svc := NewService(db.New(fake), nil, testCfg(), WithKnowledgeEnqueuer(kb))
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "lock-room",
+		Name: "Lock Room",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	folders, err := svc.CreateFolder(context.Background(), roomID, wsID, ownerID, "Locked Folder", "/")
+	if err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+	if !folderExists(folders, "/locked-folder") {
+		t.Fatalf("expected /locked-folder, got %#v", folders)
+	}
+
+	kb.deletes = nil
+	kb.ingests = nil
+	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
+		FolderPaths: []string{"/locked-folder"},
+	}, true); err != nil {
+		t.Fatalf("lock folder: %v", err)
+	}
+	// Empty folder lock should not enqueue knowledge jobs.
+	if len(kb.deletes) != 0 || len(kb.ingests) != 0 {
+		t.Fatalf("expected no knowledge jobs for empty locked folder, got deletes=%v ingests=%v", kb.deletes, kb.ingests)
+	}
+
+	if _, err := svc.RenameFolder(context.Background(), roomID, wsID, ownerID, "/locked-folder", "Nope"); !errors.Is(err, ErrResourceLocked) {
+		t.Fatalf("expected ErrResourceLocked on rename, got %v", err)
+	}
+	if _, err := svc.DeleteFolder(context.Background(), roomID, wsID, ownerID, "/locked-folder"); !errors.Is(err, ErrResourceLocked) {
+		t.Fatalf("expected ErrResourceLocked on delete, got %v", err)
+	}
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, ownerID, "Child", "/locked-folder"); !errors.Is(err, ErrResourceLocked) {
+		t.Fatalf("expected ErrResourceLocked on create child, got %v", err)
+	}
+
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "Locked Doc",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/general", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+	if len(kb.ingests) != 1 || kb.ingests[0] != docID {
+		t.Fatalf("expected ingest enqueue on add, got %#v", kb.ingests)
+	}
+	kb.ingests = nil
+	kb.deletes = nil
+
+	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
+		DocumentIDs: []string{docID},
+	}, true); err != nil {
+		t.Fatalf("lock document: %v", err)
+	}
+	if len(kb.deletes) != 1 || kb.deletes[0] != docID {
+		t.Fatalf("expected delete enqueue on lock, got %#v", kb.deletes)
+	}
+	if err := svc.RemoveDocument(context.Background(), roomID, wsID, ownerID, docID); !errors.Is(err, ErrResourceLocked) {
+		t.Fatalf("expected ErrResourceLocked on remove, got %v", err)
+	}
+
+	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
+		FolderPaths: []string{"/locked-folder"},
+		DocumentIDs: []string{docID},
+	}, false); err != nil {
+		t.Fatalf("unlock resources: %v", err)
+	}
+	if len(kb.ingests) != 1 || kb.ingests[0] != docID {
+		t.Fatalf("expected ingest enqueue on unlock, got %#v", kb.ingests)
+	}
+	if _, err := svc.RenameFolder(context.Background(), roomID, wsID, ownerID, "/locked-folder", "Unlocked Folder"); err != nil {
+		t.Fatalf("rename after unlock: %v", err)
+	}
+	if err := svc.RemoveDocument(context.Background(), roomID, wsID, ownerID, docID); err != nil {
+		t.Fatalf("remove after unlock: %v", err)
+	}
+	if len(kb.deletes) < 2 || kb.deletes[len(kb.deletes)-1] != docID {
+		t.Fatalf("expected delete enqueue on remove, got %#v", kb.deletes)
+	}
+}
+
+func TestFolderLockCascadesKnowledgeDelete(t *testing.T) {
+	fake := newFakeDB(t)
+	kb := &recordingKnowledgeEnqueuer{}
+	svc := NewService(db.New(fake), nil, testCfg(), WithKnowledgeEnqueuer(kb))
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "folder-lock-kb",
+		Name: "Folder Lock KB",
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+	if _, err := svc.CreateFolder(context.Background(), roomID, wsID, ownerID, "Legal", "/"); err != nil {
+		t.Fatalf("create folder: %v", err)
+	}
+	docID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(docID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "NDA.pdf",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomID, wsID, ownerID, docID, "/legal", 0); err != nil {
+		t.Fatalf("add document: %v", err)
+	}
+	kb.deletes = nil
+	kb.ingests = nil
+
+	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
+		FolderPaths: []string{"/legal"},
+	}, true); err != nil {
+		t.Fatalf("lock folder: %v", err)
+	}
+	if len(kb.deletes) != 1 || kb.deletes[0] != docID {
+		t.Fatalf("expected folder lock to enqueue knowledge delete, got %#v", kb.deletes)
+	}
+
+	kb.deletes = nil
+	kb.ingests = nil
+	if err := svc.SetResourceLocks(context.Background(), roomID, wsID, ownerID, SetResourceLocksRequest{
+		FolderPaths: []string{"/legal"},
+	}, false); err != nil {
+		t.Fatalf("unlock folder: %v", err)
+	}
+	if len(kb.ingests) != 1 || kb.ingests[0] != docID {
+		t.Fatalf("expected folder unlock to enqueue knowledge ingest, got %#v", kb.ingests)
+	}
+}
+
 func TestDeleteFolderRejectsNonEmpty(t *testing.T) {
 	fake := newFakeDB(t)
 	svc := NewService(db.New(fake), nil, testCfg())
@@ -425,8 +597,8 @@ func TestDocumentMoveRemoveReorder(t *testing.T) {
 		t.Fatalf("reorder documents: %v", err)
 	}
 
-	// Remove document
-	if err := svc.RemoveDocument(context.Background(), roomID, wsID, ownerID, roomDocID); err != nil {
+	// Remove document (API takes workspace document id)
+	if err := svc.RemoveDocument(context.Background(), roomID, wsID, ownerID, docID); err != nil {
 		t.Fatalf("remove document: %v", err)
 	}
 	docs, err = svc.GetRoomDocuments(context.Background(), roomID, wsID, ownerID)
@@ -824,15 +996,29 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 			}
 		}
 	case strings.Contains(sqlLower, "delete from deal_room_documents"):
-		id := argUUID(arguments, 0)
+		docID := argUUID(arguments, 0)
 		roomID := argUUID(arguments, 1)
 		filtered := f.roomDocs[:0]
 		for _, d := range f.roomDocs {
-			if d.ID != id || d.RoomID != roomID {
+			// DeleteDealRoomDocument matches document_id + room_id.
+			if d.DocumentID != docID || d.RoomID != roomID {
 				filtered = append(filtered, d)
 			}
 		}
 		f.roomDocs = filtered
+	case strings.Contains(sqlLower, "update deal_room_documents") && strings.Contains(sqlLower, "set locked"):
+		locked := argBool(arguments, 0)
+		roomID := argUUID(arguments, 1)
+		ids := argUUIDSlice(arguments, 2)
+		wanted := make(map[[16]byte]bool, len(ids))
+		for _, id := range ids {
+			wanted[id.Bytes] = true
+		}
+		for i := range f.roomDocs {
+			if f.roomDocs[i].RoomID == roomID && wanted[f.roomDocs[i].DocumentID.Bytes] {
+				f.roomDocs[i].Locked = locked
+			}
+		}
 	case strings.Contains(sqlLower, "update deal_room_documents") && strings.Contains(sqlLower, "where id = $2 and room_id = $3") && strings.Contains(sqlLower, "set folder_path"):
 		folderPath := argString(arguments, 0)
 		id := argUUID(arguments, 1)
@@ -969,7 +1155,7 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 			}
 			rows = append(rows, []interface{}{
 				rd.ID, rd.TenantID, rd.WorkspaceID, rd.RoomID, rd.DocumentID,
-				rd.FolderPath, rd.SortOrder, rd.CreatedAt,
+				rd.FolderPath, rd.SortOrder, rd.CreatedAt, rd.Locked,
 				doc.Title, pageCount, fileSize, doc.SourceType, doc.Status,
 			})
 		}
@@ -1002,7 +1188,7 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 			if d.RoomID == roomID {
 				rows = append(rows, []interface{}{
 					d.ID, d.TenantID, d.WorkspaceID, d.RoomID, d.DocumentID,
-					d.FolderPath, d.SortOrder, d.CreatedAt,
+					d.FolderPath, d.SortOrder, d.CreatedAt, d.Locked,
 				})
 			}
 		}
@@ -1240,6 +1426,16 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 		}
 		return fakeRow{err: pgx.ErrNoRows}
 
+	case strings.Contains(sqlLower, "from deal_room_documents") && strings.Contains(sqlLower, "where room_id = $1 and document_id"):
+		roomID := argUUID(args, 0)
+		docID := argUUID(args, 1)
+		for _, d := range f.roomDocs {
+			if d.RoomID == roomID && d.DocumentID == docID {
+				return fakeRow{values: roomDocRow(d)}
+			}
+		}
+		return fakeRow{err: pgx.ErrNoRows}
+
 	case strings.Contains(sqlLower, "from documents") && strings.Contains(sqlLower, "where id = $1 and workspace_id"):
 		id := argUUID(args, 0)
 		wsID := argUUID(args, 1)
@@ -1341,7 +1537,7 @@ func requestRow(r db.RoomAccessRequest) []interface{} {
 func roomDocRow(d db.DealRoomDocument) []interface{} {
 	return []interface{}{
 		d.ID, d.TenantID, d.WorkspaceID, d.RoomID, d.DocumentID,
-		d.FolderPath, d.SortOrder, d.CreatedAt,
+		d.FolderPath, d.SortOrder, d.CreatedAt, d.Locked,
 	}
 }
 
