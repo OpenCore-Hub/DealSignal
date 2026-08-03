@@ -47,7 +47,7 @@ test.describe("Ask security events panel (MSW)", () => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
 
-    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=participants`);
+    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=links`);
     const row = page.getByTestId("deal-room-link-row-link_1");
     await expect(row).toBeVisible({ timeout: 15000 });
     // Row click opens LinkActivityDialog (AnalyticsTab).

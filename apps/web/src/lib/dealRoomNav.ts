@@ -6,7 +6,9 @@ import type { DealRoomTab } from "@/hooks/useDealRoomTab";
  */
 export const DEAL_ROOM_TAB_ROLE: Record<DealRoomTab, string> = {
   documents: "prepare", // content readiness, upload, folder tree
-  participants: "outbound", // links, access codes, delivery remediates
+  access: "gate", // access requests / allowlist remediates
+  links: "outbound", // share links, access codes, delivery remediates
+  knowledge: "reference", // knowledge base surface (UI shell)
   qa: "clarify", // buyer questions + answers
   activity: "audit", // who viewed what, when
   analytics: "insight", // room-level aggregates (deep dive)
@@ -15,7 +17,7 @@ export const DEAL_ROOM_TAB_ROLE: Record<DealRoomTab, string> = {
 
 export const DEAL_ROOM_TAB_ORDER: DealRoomTab[] = [
   "documents",
-  "participants",
+  "links",
   "qa",
   "activity",
   "analytics",

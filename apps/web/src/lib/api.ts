@@ -7,6 +7,9 @@ import type {
   Contact,
   DealRoom,
   DealRoomAccessRequest,
+  DealRoomAnalytics,
+  DealRoomKnowledgeCorpus,
+  DealRoomKnowledgeQueryResult,
   DealRoomDocumentItem,
   DealRoomFolder,
   DealRoomFolderDocs,
@@ -626,8 +629,32 @@ export const api = {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  getDealRoomLinks: (roomId: string) =>
-    request<{ data: Link[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/links`),
+  getDealRoomLinks: (
+    roomId: string,
+    opts?: {
+      page?: number;
+      page_size?: number;
+      /** created_at_desc (default) | created_at_asc */
+      sort?: "created_at_desc" | "created_at_asc";
+      q?: string;
+    },
+  ) => {
+    const params = new URLSearchParams();
+    if (opts?.page != null) params.set("page", String(opts.page));
+    if (opts?.page_size != null) params.set("page_size", String(opts.page_size));
+    if (opts?.sort) params.set("sort", opts.sort);
+    if (opts?.q) params.set("q", opts.q);
+    const qs = params.toString();
+    return request<{
+      data: Link[];
+      pagination?: {
+        page: number;
+        page_size: number;
+        total: number;
+        has_more: boolean;
+      };
+    }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/links${qs ? `?${qs}` : ""}`);
+  },
 
   // Link access rules.
   getLinkAccessRules: (linkId: string) =>
@@ -682,19 +709,48 @@ export const api = {
     }),
 
   // Visitor Ask high-risk security events (link + room)
-  listLinkAskSecurityEvents: (linkId: string) =>
-    request<{ data: AskSecurityEvent[] }>(
+  listLinkAskSecurityEvents: (
+    linkId: string,
+    params: {
+      limit?: number;
+      offset?: number;
+      eventType?: string;
+      since?: string;
+      until?: string;
+    } = {},
+  ) => {
+    const search = new URLSearchParams();
+    if (params.limit != null) search.set("limit", String(params.limit));
+    if (params.offset != null) search.set("offset", String(params.offset));
+    if (params.eventType) search.set("event_type", params.eventType);
+    if (params.since) search.set("since", params.since);
+    if (params.until) search.set("until", params.until);
+    const qs = search.toString();
+    return request<{ data: AskSecurityEvent[]; has_more: boolean }>(
       getWorkspaceSlug(),
-      `/links/${linkId}/ask-security-events`,
-    ),
+      `/links/${linkId}/ask-security-events${qs ? `?${qs}` : ""}`,
+    );
+  },
   listRoomAskSecurityEvents: (
     roomId: string,
-    params: { linkId?: string } = {},
+    params: {
+      linkId?: string;
+      limit?: number;
+      offset?: number;
+      eventType?: string;
+      since?: string;
+      until?: string;
+    } = {},
   ) => {
     const search = new URLSearchParams();
     if (params.linkId) search.set("link_id", params.linkId);
+    if (params.limit != null) search.set("limit", String(params.limit));
+    if (params.offset != null) search.set("offset", String(params.offset));
+    if (params.eventType) search.set("event_type", params.eventType);
+    if (params.since) search.set("since", params.since);
+    if (params.until) search.set("until", params.until);
     const qs = search.toString();
-    return request<{ data: AskSecurityEvent[] }>(
+    return request<{ data: AskSecurityEvent[]; has_more: boolean }>(
       getWorkspaceSlug(),
       `/deal-rooms/${roomId}/ask-security-events${qs ? `?${qs}` : ""}`,
     );
@@ -719,6 +775,23 @@ export const api = {
     request<{ data: DealRoom[] }>(getWorkspaceSlug(), "/deal-rooms"),
   getDealRoomById: (id: string) =>
     request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${id}`),
+  getDealRoomAnalytics: (roomId: string) =>
+    request<DealRoomAnalytics>(getWorkspaceSlug(), `/deal-rooms/${roomId}/analytics`),
+  getDealRoomKnowledge: (roomId: string) =>
+    request<DealRoomKnowledgeCorpus>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge`),
+  syncDealRoomKnowledge: (roomId: string) =>
+    request<{ status: string }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/knowledge/sync`, {
+      method: "POST",
+    }),
+  queryDealRoomKnowledge: (
+    roomId: string,
+    body: { query: string; answer?: boolean; top_k?: number },
+  ) =>
+    request<DealRoomKnowledgeQueryResult>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/query`,
+      { method: "POST", body: JSON.stringify(body) },
+    ),
   createDealRoom: (payload: {
     name: string;
     slug: string;
@@ -748,6 +821,23 @@ export const api = {
   deleteDealRoomFolder: (roomId: string, path: string) =>
     request<{ data: DealRoomFolder[] }>(getWorkspaceSlug(), `/deal-rooms/${roomId}/folders/${encodeURIComponent(path)}`, {
       method: "DELETE",
+    }),
+
+  lockDealRoomResources: (
+    roomId: string,
+    payload: { folder_paths?: string[]; document_ids?: string[] },
+  ) =>
+    request<void>(getWorkspaceSlug(), `/deal-rooms/${roomId}/resources/lock`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  unlockDealRoomResources: (
+    roomId: string,
+    payload: { folder_paths?: string[]; document_ids?: string[] },
+  ) =>
+    request<void>(getWorkspaceSlug(), `/deal-rooms/${roomId}/resources/unlock`, {
+      method: "POST",
+      body: JSON.stringify(payload),
     }),
 
   // Deal room documents

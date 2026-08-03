@@ -741,11 +741,144 @@ export const handlers = [
     return HttpResponse.json(room);
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/links", ({ params }) => {
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/analytics", ({ params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const roomLinks = mockLinks.filter(
+      (l) =>
+        l.dealRoomId === room.id &&
+        l.status !== "deleted" &&
+        l.status !== "disabled",
+    );
+    const activeLinkCount = roomLinks.filter((l) => {
+      if (l.isActive === false) return false;
+      return (
+        l.status !== "revoked" &&
+        l.status !== "expired" &&
+        (l.status === "active" || l.status == null)
+      );
+    }).length;
+    const totalViews = roomLinks.reduce((sum, l) => sum + (l.accessCount ?? 0), 0);
+    const recentVisitors = (room.recentVisitors ?? []).map((v, idx) => ({
+      visitorId: `visitor-${idx}-${v.email}`,
+      visitorEmail: v.email,
+      firstAccessAt: v.lastSeenAt,
+      lastAccessAt: v.lastSeenAt,
+      totalViews: 1,
+    }));
+    const uniqueVisitors = Math.max(room.visitorCount ?? 0, recentVisitors.length);
+    const viewsOverTime =
+      totalViews > 0
+        ? [
+            {
+              day: new Date().toISOString().slice(0, 10),
+              views: totalViews,
+            },
+          ]
+        : [];
+    return HttpResponse.json({
+      totalViews: totalViews || room.viewCount || 0,
+      uniqueVisitors,
+      activeLinkCount: activeLinkCount || room.activeLinkCount || 0,
+      documentCount: room.documentCount ?? 0,
+      viewsOverTime,
+      recentVisitors,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge", ({ params }) => {
+    const room = findRoom(params.roomId as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const docs = (room.documents ?? []).flatMap((folder) => folder.documents ?? []).slice(0, 5);
+    return HttpResponse.json({
+      enabled: true,
+      status: "ready",
+      lastSyncedAt: new Date().toISOString(),
+      progress: {
+        total: docs.length,
+        pending: 0,
+        syncing: 0,
+        synced: docs.length,
+        failed: 0,
+        jobStatus: "done",
+      },
+      documents: docs.map((d) => ({
+        documentId: d.document_id || d.id,
+        title: d.title || "Document",
+        status: "synced",
+        chunkCount: 3,
+      })),
+    });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sync", ({ params }) => {
+    const room = findRoom(params.roomId as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({ status: "queued" }, { status: 202 });
+  }),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/query",
+    async ({ params, request }) => {
+      const room = findRoom(params.roomId as string);
+      if (!room) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json()) as { query?: string; answer?: boolean; top_k?: number };
+      const query = (body.query || "").trim() || "query";
+      const doc = (room.documents ?? []).flatMap((folder) => folder.documents ?? [])[0];
+      return HttpResponse.json({
+        query,
+        mode: "hybrid",
+        answer: body.answer === false ? undefined : `Mock answer for: ${query}`,
+        results: doc
+          ? [
+              {
+                chunkId: "chunk-1",
+                documentId: doc.document_id || doc.id,
+                text: `Relevant passage from ${doc.title || "document"}.`,
+                score: 0.91,
+              },
+            ]
+          : [],
+      });
+    },
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/links", ({ params, request }) => {
     const roomId = params.id as string;
     if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
-    const data = mockLinks.filter((l) => l.dealRoomId === roomId);
-    return HttpResponse.json({ data });
+    const url = new URL(request.url);
+    const pageRaw = url.searchParams.get("page");
+    let data = mockLinks.filter((l) => l.dealRoomId === roomId);
+    const q = (url.searchParams.get("q") || "").trim().toLowerCase();
+    if (q) {
+      data = data.filter(
+        (l) =>
+          (l.name || "").toLowerCase().includes(q) ||
+          l.shortUrl.toLowerCase().includes(q),
+      );
+    }
+    const sortAsc = url.searchParams.get("sort") === "created_at_asc";
+    data = [...data].sort((a, b) => {
+      const delta = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      return sortAsc ? delta : -delta;
+    });
+    if (!pageRaw) {
+      return HttpResponse.json({ data });
+    }
+    const page = Math.max(1, Number(pageRaw) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("page_size")) || 10));
+    const total = data.length;
+    const start = (page - 1) * pageSize;
+    const slice = data.slice(start, start + pageSize);
+    return HttpResponse.json({
+      data: slice,
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        has_more: start + pageSize < total,
+      },
+    });
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/links", async ({ params, request }) => {
@@ -967,6 +1100,42 @@ export const handlers = [
     return HttpResponse.json({ data: folders });
   }),
 
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/resources/lock", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { folder_paths?: string[]; document_ids?: string[] };
+    const folders = getRoomFolders(room).map((f) =>
+      body.folder_paths?.includes(f.path) ? { ...f, locked: true } : f,
+    );
+    room.folders = folders;
+    const docs = getRoomFolderDocs(room).map((fd) => ({
+      ...fd,
+      documents: fd.documents.map((d) =>
+        body.document_ids?.includes(d.document_id) ? { ...d, locked: true } : d,
+      ),
+    }));
+    room.documents = docs;
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/resources/unlock", async ({ request, params }) => {
+    const room = findRoom(params.id as string);
+    if (!room) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { folder_paths?: string[]; document_ids?: string[] };
+    const folders = getRoomFolders(room).map((f) =>
+      body.folder_paths?.includes(f.path) ? { ...f, locked: false } : f,
+    );
+    room.folders = folders;
+    const docs = getRoomFolderDocs(room).map((fd) => ({
+      ...fd,
+      documents: fd.documents.map((d) =>
+        body.document_ids?.includes(d.document_id) ? { ...d, locked: false } : d,
+      ),
+    }));
+    room.documents = docs;
+    return new HttpResponse(null, { status: 204 });
+  }),
+
   // Deal room documents
   http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents", ({ params }) => {
     const room = findRoom(params.id as string);
@@ -975,30 +1144,45 @@ export const handlers = [
   }),
 
   // Visitor Ask high-risk security events (owner analytics)
-  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-security-events", ({ params }) => {
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-security-events", ({ params, request }) => {
     const linkId = params.id as string;
     const link = mockLinks.find((l) => l.id === linkId);
     if (!link) return new HttpResponse(null, { status: 404 });
+    const url = new URL(request.url);
+    const limit = Math.max(1, Number(url.searchParams.get("limit") || 20));
+    const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+    const eventType = url.searchParams.get("event_type");
+    const since = url.searchParams.get("since");
+    const until = url.searchParams.get("until");
+    const all = [
+      {
+        id: `ask-sec-${linkId}-1`,
+        link_id: linkId,
+        event_type: "rate_limit_exceeded",
+        visitor_id: "visitor-ask-1",
+        email: "visitor@example.com",
+        reason: "ask_host",
+        created_at: new Date().toISOString(),
+      },
+      {
+        id: `ask-sec-${linkId}-2`,
+        link_id: linkId,
+        event_type: "not_in_allow_list",
+        visitor_id: "visitor-ask-2",
+        email: "removed@vc.com",
+        created_at: new Date().toISOString(),
+      },
+    ].filter((ev) => {
+      if (eventType && ev.event_type !== eventType) return false;
+      const ts = Date.parse(ev.created_at);
+      if (since && !(ts >= Date.parse(since))) return false;
+      if (until && !(ts < Date.parse(until))) return false;
+      return true;
+    });
+    const data = all.slice(offset, offset + limit);
     return HttpResponse.json({
-      data: [
-        {
-          id: `ask-sec-${linkId}-1`,
-          link_id: linkId,
-          event_type: "rate_limit_exceeded",
-          visitor_id: "visitor-ask-1",
-          email: "visitor@example.com",
-          reason: "ask_host",
-          created_at: new Date().toISOString(),
-        },
-        {
-          id: `ask-sec-${linkId}-2`,
-          link_id: linkId,
-          event_type: "not_in_allow_list",
-          visitor_id: "visitor-ask-2",
-          email: "removed@vc.com",
-          created_at: new Date().toISOString(),
-        },
-      ],
+      data,
+      has_more: offset + data.length < all.length,
     });
   }),
 
@@ -1008,11 +1192,16 @@ export const handlers = [
     if (!room) return new HttpResponse(null, { status: 404 });
     const url = new URL(request.url);
     const filterLinkId = url.searchParams.get("link_id");
+    const limit = Math.max(1, Number(url.searchParams.get("limit") || 20));
+    const offset = Math.max(0, Number(url.searchParams.get("offset") || 0));
+    const eventType = url.searchParams.get("event_type");
+    const since = url.searchParams.get("since");
+    const until = url.searchParams.get("until");
     const roomLinks = mockLinks.filter((l) => l.dealRoomId === roomId);
     const source = roomLinks.length > 0
       ? roomLinks
       : [{ id: `${roomId}-synthetic-link` } as { id: string }];
-    const events = source
+    const all = source
       .filter((l) => !filterLinkId || l.id === filterLinkId)
       .flatMap((l, idx) => [
         {
@@ -1041,8 +1230,19 @@ export const handlers = [
           email: `removed${idx}@vc.com`,
           created_at: new Date().toISOString(),
         },
-      ]);
-    return HttpResponse.json({ data: events });
+      ])
+      .filter((ev) => {
+        if (eventType && ev.event_type !== eventType) return false;
+        const ts = Date.parse(ev.created_at);
+        if (since && !(ts >= Date.parse(since))) return false;
+        if (until && !(ts < Date.parse(until))) return false;
+        return true;
+      });
+    const data = all.slice(offset, offset + limit);
+    return HttpResponse.json({
+      data,
+      has_more: offset + data.length < all.length,
+    });
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/deal-rooms/:id/documents", async ({ request, params }) => {

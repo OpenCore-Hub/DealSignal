@@ -70,21 +70,21 @@ describe("deal room nav B′ pieces", () => {
 
   it("badgeCountForTab maps share failures, outbound setup, and qa", () => {
     expect(
-      badgeCountForTab("participants", {
+      badgeCountForTab("links", {
         failedDeliveries: 3,
         unreadQuestions: 1,
         activeLinkCount: 0,
       })
     ).toBe(3);
     expect(
-      badgeCountForTab("participants", {
+      badgeCountForTab("links", {
         failedDeliveries: 0,
         unreadQuestions: 0,
         activeLinkCount: 0,
       })
     ).toBe(1);
     expect(
-      badgeCountForTab("participants", {
+      badgeCountForTab("links", {
         failedDeliveries: 0,
         unreadQuestions: 0,
         activeLinkCount: 2,
@@ -119,7 +119,7 @@ describe("deal room nav B′ pieces", () => {
     expect(screen.getByTestId("deal-room-attention-banner")).toBeInTheDocument();
     expect(screen.getByText(/2 access codes failed/i)).toBeInTheDocument();
     fireEvent.click(screen.getByText(/2 access codes failed/i));
-    expect(onJumpTab).toHaveBeenCalledWith("participants");
+    expect(onJumpTab).toHaveBeenCalledWith("links");
   });
 
   it("shows no-link attention when outbound is missing", async () => {
@@ -137,7 +137,7 @@ describe("deal room nav B′ pieces", () => {
 
     expect(screen.getByText(/no active share links/i)).toBeInTheDocument();
     fireEvent.click(screen.getByText(/no active share links/i));
-    expect(onJumpTab).toHaveBeenCalledWith("participants");
+    expect(onJumpTab).toHaveBeenCalledWith("links");
   });
 
   it("hides attention when room signals are healthy", async () => {
@@ -153,6 +153,8 @@ describe("deal room nav B′ pieces", () => {
     );
 
     expect(screen.queryByTestId("deal-room-attention-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-documents-chrome")).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-resources-toolbar-host")).toBeInTheDocument();
   });
 
   it("activity tab lists recent visitors", async () => {

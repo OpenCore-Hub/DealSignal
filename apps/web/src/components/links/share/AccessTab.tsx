@@ -1,10 +1,17 @@
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, type ReactNode } from "react";
 import { Question } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Select,
   SelectContent,
@@ -29,6 +36,8 @@ import {
   visitorAskMasterPatch,
 } from "./visitorAskAdvanced";
 
+export type AccessTabLayout = "compact" | "sections";
+
 interface AccessTabProps {
   draft: DraftLink;
   updateDraft: (patch: Partial<DraftLink>) => void;
@@ -39,6 +48,11 @@ interface AccessTabProps {
   passwordAlreadySet?: boolean;
   documents?: { id: string; title: string }[];
   ndaTemplates?: { id: string; name: string; sourceDocumentId: string }[];
+  /**
+   * `compact` — stacked blocks for dialogs.
+   * `sections` — numbered cards for the deal-room Access Control page.
+   */
+  layout?: AccessTabLayout;
 }
 
 function OptionSwitch({
@@ -57,13 +71,15 @@ function OptionSwitch({
   highlighted?: boolean;
 }) {
   return (
-    <div className={cn(
-      "flex items-start justify-between gap-4 rounded-md p-1",
-      disabled && "opacity-50",
-      highlighted && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
-    )}>
+    <div
+      className={cn(
+        "flex items-center justify-between gap-4 rounded-md p-1",
+        disabled && "opacity-50",
+        highlighted && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
+      )}
+    >
       <div className="flex min-w-0 items-center gap-1.5">
-        <Label className="font-normal text-foreground">{label}</Label>
+        <Label className="leading-none font-normal text-foreground">{label}</Label>
         {description && (
           <TooltipProvider delay={150}>
             <Tooltip>
@@ -86,6 +102,71 @@ function OptionSwitch({
         onCheckedChange={onCheckedChange}
         disabled={disabled}
       />
+    </div>
+  );
+}
+
+function SettingsSection({
+  step,
+  title,
+  description,
+  children,
+  id,
+}: {
+  step?: string;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  id: string;
+}) {
+  return (
+    <Card data-testid={`access-section-${id}`}>
+      <CardHeader className="gap-0 pb-3">
+        <div className="flex items-center gap-3">
+          {step ? (
+            <span
+              className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-xs font-semibold leading-none text-muted-foreground"
+              aria-hidden
+            >
+              {step}
+            </span>
+          ) : null}
+          <CardTitle id={`${id}-heading`} className="min-w-0 text-base leading-none">
+            {title}
+          </CardTitle>
+        </div>
+        {description ? (
+          <CardDescription className="mt-1.5">{description}</CardDescription>
+        ) : null}
+      </CardHeader>
+      <CardContent className="space-y-4" aria-labelledby={`${id}-heading`}>
+        {children}
+      </CardContent>
+    </Card>
+  );
+}
+
+function CompactSection({
+  title,
+  description,
+  children,
+  id,
+}: {
+  step?: string;
+  title: string;
+  description?: string;
+  children: ReactNode;
+  id: string;
+}) {
+  return (
+    <div className="space-y-4" data-testid={`access-section-${id}`}>
+      <div className="space-y-1">
+        <h4 id={`${id}-heading`} className="text-sm font-medium">
+          {title}
+        </h4>
+        {description ? <p className="text-xs text-muted-foreground">{description}</p> : null}
+      </div>
+      {children}
     </div>
   );
 }
@@ -144,11 +225,13 @@ export function AccessTab({
   passwordAlreadySet = false,
   documents = [],
   ndaTemplates = [],
+  layout = "compact",
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
+  const sections = layout === "sections";
 
   const isHighlighted = (field: string) => highlightedFields.includes(field);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [advancedOpen, setAdvancedOpen] = useState(sections);
   /** When a stored password is masked, focus clears the mask so the owner can type a replacement. */
   const [editingStoredPassword, setEditingStoredPassword] = useState(false);
 
@@ -255,13 +338,16 @@ export function AccessTab({
   const allowedViewersNeedEmail =
     draft.allowedViewers.length > 0 && !draft.requireEmail && !draft.requireEmailVerification;
 
-  return (
-    <div className="space-y-6 py-2">
-      <div className="space-y-4">
-        <h4 className="text-sm font-medium">{t("accessRules.authentication.title")}</h4>
+  const Section = sections ? SettingsSection : CompactSection;
+
+  const authBody = (
+    <>
+      {!sections ? (
         <p className="text-xs text-muted-foreground">
           {t("accessRules.authentication.emailIdentityHint")}
         </p>
+      ) : null}
+      <div className="space-y-1 rounded-lg border border-border/70 bg-muted/20 p-3">
         <OptionSwitch
           label={t("accessRules.authentication.requireEmail")}
           description={t("accessRules.authentication.requireEmailDescription")}
@@ -282,75 +368,86 @@ export function AccessTab({
           highlighted={isHighlighted("requireEmailVerification")}
         />
         {errors.requireVerificationContacts && (
-          <p className="text-xs text-destructive">{errors.requireVerificationContacts}</p>
+          <p className="px-1 text-xs text-destructive">{errors.requireVerificationContacts}</p>
         )}
-        <div className={cn("space-y-2 rounded-md p-1", isHighlighted("requirePassword") && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200")}>
-          <OptionSwitch
-            label={t("accessRules.authentication.requirePassword")}
-            description={t("accessRules.authentication.requirePasswordDescription")}
-            checked={draft.requirePassword}
-            onCheckedChange={(checked) => updateDraft({ requirePassword: checked })}
-          />
-          {draft.requirePassword && (
-            <div className="space-y-2">
-              <Input
-                type="password"
-                value={passwordFieldValue}
-                onChange={(e) => handlePasswordChange(e.target.value)}
-                onFocus={handlePasswordFocus}
-                onBlur={handlePasswordBlur}
-                placeholder={passwordFieldPlaceholder}
-                autoComplete="new-password"
-                aria-describedby={
-                  passwordAlreadySet && draft.password.length === 0
-                    ? "password-set-hint"
-                    : "password-strength-hint"
-                }
-              />
-              {passwordAlreadySet && draft.password.length === 0 && (
-                <p id="password-set-hint" className="text-xs text-muted-foreground">
-                  {t("accessRules.authentication.passwordSetHint")}
-                </p>
-              )}
-              {draft.password.length > 0 && (
-                <div className="space-y-1">
-                  <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={cn(
-                        "motion-safe:transition-all motion-safe:duration-300",
-                        strengthBarColor(passwordStrength.level)
-                      )}
-                      style={{ width: `${(passwordStrength.level / 4) * 100}%` }}
-                      aria-hidden="true"
-                    />
-                  </div>
-                  <p id="password-strength-hint" className="text-xs text-muted-foreground">
-                    {t("accessRules.passwordStrength.label", {
-                      level: t(`accessRules.passwordStrength.level${passwordStrength.level}`),
-                    })}
-                  </p>
-                </div>
-              )}
-              {draft.password.length > 0 && draft.password.length < 8 && !errors.password && (
-                <p className="text-xs text-destructive">
-                  {t("accessRules.errors.passwordMinLength")}
-                </p>
-              )}
-              {errors.password && (
-                <p className="text-xs text-destructive">{errors.password}</p>
-              )}
-            </div>
-          )}
-        </div>
       </div>
+      <div
+        className={cn(
+          "space-y-2 rounded-lg border border-border/70 p-3",
+          isHighlighted("requirePassword") &&
+            "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
+        )}
+      >
+        <OptionSwitch
+          label={t("accessRules.authentication.requirePassword")}
+          description={t("accessRules.authentication.requirePasswordDescription")}
+          checked={draft.requirePassword}
+          onCheckedChange={(checked) => updateDraft({ requirePassword: checked })}
+        />
+        {draft.requirePassword && (
+          <div className="space-y-2 pt-1">
+            <Input
+              type="password"
+              value={passwordFieldValue}
+              onChange={(e) => handlePasswordChange(e.target.value)}
+              onFocus={handlePasswordFocus}
+              onBlur={handlePasswordBlur}
+              placeholder={passwordFieldPlaceholder}
+              autoComplete="new-password"
+              aria-describedby={
+                passwordAlreadySet && draft.password.length === 0
+                  ? "password-set-hint"
+                  : "password-strength-hint"
+              }
+            />
+            {passwordAlreadySet && draft.password.length === 0 && (
+              <p id="password-set-hint" className="text-xs text-muted-foreground">
+                {t("accessRules.authentication.passwordSetHint")}
+              </p>
+            )}
+            {draft.password.length > 0 && (
+              <div className="space-y-1">
+                <div className="flex h-1.5 overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={cn(
+                      "motion-safe:transition-all motion-safe:duration-300",
+                      strengthBarColor(passwordStrength.level)
+                    )}
+                    style={{ width: `${(passwordStrength.level / 4) * 100}%` }}
+                    aria-hidden="true"
+                  />
+                </div>
+                <p id="password-strength-hint" className="text-xs text-muted-foreground">
+                  {t("accessRules.passwordStrength.label", {
+                    level: t(`accessRules.passwordStrength.level${passwordStrength.level}`),
+                  })}
+                </p>
+              </div>
+            )}
+            {draft.password.length > 0 && draft.password.length < 8 && !errors.password && (
+              <p className="text-xs text-destructive">
+                {t("accessRules.errors.passwordMinLength")}
+              </p>
+            )}
+            {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
+          </div>
+        )}
+      </div>
+    </>
+  );
 
+  const viewersBody = (
+    <>
       <div className="space-y-3">
-        <h4 className="text-sm font-medium">{t("accessRules.allowedViewers.title")}</h4>
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">{t("accessRules.allowedViewers.title")}</Label>
+          <p className="text-xs text-muted-foreground">{t("accessRules.allowedViewers.hint")}</p>
+        </div>
         <ContactEmailTagInput
           values={draft.allowedViewers}
           onChange={handleAllowedViewersChange}
           placeholder={t("accessRules.allowedViewers.placeholder")}
-          hint={t("accessRules.allowedViewers.hint")}
+          hint={undefined}
           conflictValues={conflicts}
           allowDomains={false}
         />
@@ -364,13 +461,18 @@ export function AccessTab({
         )}
       </div>
 
+      <div className="border-t border-border/60" />
+
       <div className="space-y-3">
-        <h4 className="text-sm font-medium">{t("accessRules.blockedViewers.title")}</h4>
+        <div className="space-y-1">
+          <Label className="text-sm font-medium">{t("accessRules.blockedViewers.title")}</Label>
+          <p className="text-xs text-muted-foreground">{t("accessRules.blockedViewers.hint")}</p>
+        </div>
         <ContactEmailTagInput
           values={draft.blockedViewers}
           onChange={(values) => updateDraft({ blockedViewers: values })}
           placeholder={t("accessRules.blockedViewers.placeholder")}
-          hint={t("accessRules.blockedViewers.hint")}
+          hint={undefined}
           conflictValues={conflicts}
           allowDomains={false}
         />
@@ -384,9 +486,12 @@ export function AccessTab({
           {t("accessRules.errors.conflict", { value: conflicts.join(", ") })}
         </p>
       )}
+    </>
+  );
 
-      <div className="space-y-4">
-        <h4 className="text-sm font-medium">{t("accessRules.additionalProtections.title")}</h4>
+  const protectionsBody = (
+    <>
+      <div className="space-y-1 rounded-lg border border-border/70 bg-muted/20 p-3">
         <OptionSwitch
           label={t("accessRules.additionalProtections.watermark")}
           description={t("accessRules.additionalProtections.watermarkDescription")}
@@ -394,65 +499,6 @@ export function AccessTab({
           onCheckedChange={(checked) => updateDraft({ watermarkEnabled: checked })}
           highlighted={isHighlighted("watermarkEnabled")}
         />
-        <div className={cn("space-y-3", isHighlighted("requireNda") && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200 rounded-md p-1")}>
-          <OptionSwitch
-            label={t("accessRules.additionalProtections.requireNda")}
-            description={t("accessRules.additionalProtections.requireNdaDescription")}
-            checked={draft.requireNda}
-            onCheckedChange={handleRequireNdaChange}
-            highlighted={isHighlighted("requireNda")}
-          />
-          {draft.requireNda && (
-            <div className="space-y-2 pl-0 sm:pl-6">
-              <Label className="text-xs font-normal text-muted-foreground">
-                {t("accessRules.additionalProtections.ndaDocument")}
-              </Label>
-              <Select
-                value={selectedNdaValue || null}
-                onValueChange={(value) => {
-                  const selected = value ?? "";
-                  if (!selected || selected === "__empty__") return;
-                  const opt = ndaOptions.find(
-                    (o) => o.id === selected || o.templateId === selected || o.documentId === selected
-                  );
-                  const nextTemplateId =
-                    opt?.templateId && opt.templateId.length > 0
-                      ? opt.templateId
-                      : ndaTemplates.some((t) => t.id === selected)
-                        ? selected
-                        : "";
-                  const nextDocumentId =
-                    opt?.documentId && opt.documentId.length > 0 ? opt.documentId : selected;
-                  updateDraft({
-                    ndaTemplateId: nextTemplateId,
-                    ndaDocumentId: nextDocumentId,
-                  });
-                }}
-              >
-                <SelectTrigger aria-label={t("accessRules.additionalProtections.ndaDocument")} className="w-full">
-                  <SelectValue placeholder={t("accessRules.additionalProtections.ndaDocumentPlaceholder")} />
-                </SelectTrigger>
-                <SelectContent>
-                  {ndaOptions.length === 0 ? (
-                    <SelectItem value="__empty__" disabled>
-                      {t("accessRules.additionalProtections.ndaDocumentPlaceholder")}
-                    </SelectItem>
-                  ) : (
-                    ndaOptions.map((opt) => (
-                      <SelectItem key={opt.id} value={opt.id}>
-                        {opt.title}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-              {errors.ndaDocumentId && (
-                <p className="text-xs text-destructive">{errors.ndaDocumentId}</p>
-              )}
-            </div>
-          )}
-        </div>
-
         <OptionSwitch
           label={t("accessRules.additionalProtections.allowDownloading")}
           description={t("accessRules.additionalProtections.allowDownloadingDescription")}
@@ -469,6 +515,200 @@ export function AccessTab({
         />
       </div>
 
+      <div
+        className={cn(
+          "space-y-3 rounded-lg border border-border/70 p-3",
+          isHighlighted("requireNda") &&
+            "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
+        )}
+      >
+        <OptionSwitch
+          label={t("accessRules.additionalProtections.requireNda")}
+          description={t("accessRules.additionalProtections.requireNdaDescription")}
+          checked={draft.requireNda}
+          onCheckedChange={handleRequireNdaChange}
+          highlighted={isHighlighted("requireNda")}
+        />
+        {draft.requireNda && (
+          <div className="space-y-2">
+            <Label className="text-xs font-normal text-muted-foreground">
+              {t("accessRules.additionalProtections.ndaDocument")}
+            </Label>
+            <Select
+              value={selectedNdaValue || null}
+              onValueChange={(value) => {
+                const selected = value ?? "";
+                if (!selected || selected === "__empty__") return;
+                const opt = ndaOptions.find(
+                  (o) => o.id === selected || o.templateId === selected || o.documentId === selected
+                );
+                const nextTemplateId =
+                  opt?.templateId && opt.templateId.length > 0
+                    ? opt.templateId
+                    : ndaTemplates.some((tpl) => tpl.id === selected)
+                      ? selected
+                      : "";
+                const nextDocumentId =
+                  opt?.documentId && opt.documentId.length > 0 ? opt.documentId : selected;
+                updateDraft({
+                  ndaTemplateId: nextTemplateId,
+                  ndaDocumentId: nextDocumentId,
+                });
+              }}
+            >
+              <SelectTrigger
+                aria-label={t("accessRules.additionalProtections.ndaDocument")}
+                className="w-full"
+              >
+                <SelectValue
+                  placeholder={t("accessRules.additionalProtections.ndaDocumentPlaceholder")}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {ndaOptions.length === 0 ? (
+                  <SelectItem value="__empty__" disabled>
+                    {t("accessRules.additionalProtections.ndaDocumentPlaceholder")}
+                  </SelectItem>
+                ) : (
+                  ndaOptions.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.title}
+                    </SelectItem>
+                  ))
+                )}
+              </SelectContent>
+            </Select>
+            {errors.ndaDocumentId && (
+              <p className="text-xs text-destructive">{errors.ndaDocumentId}</p>
+            )}
+          </div>
+        )}
+      </div>
+    </>
+  );
+
+  const advancedBody = (
+    <>
+      <OptionSwitch
+        label={t("accessRules.advanced.visitorAsk")}
+        description={t("accessRules.advanced.visitorAskDescription")}
+        checked={visitorAskOn}
+        onCheckedChange={(checked) => updateDraft(visitorAskMasterPatch(checked))}
+        highlighted={isHighlighted("enableQaConversations")}
+      />
+      {STANDALONE_ADVANCED_KEYS.map((key) => (
+        <OptionSwitch
+          key={key}
+          label={t(STANDALONE_ADVANCED_LABELS[key])}
+          description={t(STANDALONE_ADVANCED_DESCRIPTIONS[key])}
+          checked={draft[key] as boolean}
+          onCheckedChange={(checked) => updateDraft({ [key]: checked } as Partial<DraftLink>)}
+          highlighted={isHighlighted(key)}
+        />
+      ))}
+    </>
+  );
+
+  if (sections) {
+    return (
+      <div className="space-y-4" data-testid="access-tab-sections">
+        <Section
+          id="authentication"
+          step="1"
+          title={t("accessRules.authentication.title")}
+        >
+          {authBody}
+        </Section>
+
+        <Section
+          id="viewers"
+          step="2"
+          title={t("accessRules.viewers.title")}
+        >
+          {viewersBody}
+        </Section>
+
+        <Section
+          id="protections"
+          step="3"
+          title={t("accessRules.additionalProtections.title")}
+        >
+          {protectionsBody}
+        </Section>
+
+        <Section
+          id="advanced"
+          step="4"
+          title={t("accessRules.advanced.title")}
+        >
+          {advancedCount > 0 ? (
+            <div className="mb-1 flex items-center gap-2">
+              <Badge variant="secondary" className="text-xs">
+                {t("accessRules.advanced.enabledCount", { count: advancedCount })}
+              </Badge>
+            </div>
+          ) : null}
+          <div className="space-y-3">{advancedBody}</div>
+        </Section>
+
+        {errors.submit && <p className="text-xs text-destructive">{errors.submit}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6 py-2" data-testid="access-tab-compact">
+      <Section
+        id="authentication"
+        title={t("accessRules.authentication.title")}
+        description={undefined}
+      >
+        {authBody}
+      </Section>
+
+      <Section id="allowed" title={t("accessRules.allowedViewers.title")}>
+        <ContactEmailTagInput
+          values={draft.allowedViewers}
+          onChange={handleAllowedViewersChange}
+          placeholder={t("accessRules.allowedViewers.placeholder")}
+          hint={t("accessRules.allowedViewers.hint")}
+          conflictValues={conflicts}
+          allowDomains={false}
+        />
+        {allowedViewersNeedEmail && (
+          <p className="text-xs text-muted-foreground">
+            {t("accessRules.errors.allowRequiresEmail")}
+          </p>
+        )}
+        {errors.allowedViewers && (
+          <p className="text-xs text-destructive">{errors.allowedViewers}</p>
+        )}
+      </Section>
+
+      <Section id="blocked" title={t("accessRules.blockedViewers.title")}>
+        <ContactEmailTagInput
+          values={draft.blockedViewers}
+          onChange={(values) => updateDraft({ blockedViewers: values })}
+          placeholder={t("accessRules.blockedViewers.placeholder")}
+          hint={t("accessRules.blockedViewers.hint")}
+          conflictValues={conflicts}
+          allowDomains={false}
+        />
+        {errors.blockedViewers && (
+          <p className="text-xs text-destructive">{errors.blockedViewers}</p>
+        )}
+      </Section>
+
+      {conflicts.length > 0 && (
+        <p className="text-xs text-destructive">
+          {t("accessRules.errors.conflict", { value: conflicts.join(", ") })}
+        </p>
+      )}
+
+      <Section id="protections" title={t("accessRules.additionalProtections.title")}>
+        {protectionsBody}
+      </Section>
+
       <CollapsibleSection
         title={t("accessRules.advanced.title")}
         badge={
@@ -481,35 +721,10 @@ export function AccessTab({
         open={advancedOpen}
         onToggle={() => setAdvancedOpen((v) => !v)}
       >
-        <div
-          className={cn(
-            "space-y-3 rounded-md border border-border/60 p-3",
-            isHighlighted("enableQaConversations") && "ring-2 ring-primary/40"
-          )}
-        >
-          <OptionSwitch
-            label={t("accessRules.advanced.visitorAsk")}
-            description={t("accessRules.advanced.visitorAskDescription")}
-            checked={visitorAskOn}
-            onCheckedChange={(checked) => updateDraft(visitorAskMasterPatch(checked))}
-            highlighted={isHighlighted("enableQaConversations")}
-          />
-        </div>
-        {STANDALONE_ADVANCED_KEYS.map((key) => (
-          <OptionSwitch
-            key={key}
-            label={t(STANDALONE_ADVANCED_LABELS[key])}
-            description={t(STANDALONE_ADVANCED_DESCRIPTIONS[key])}
-            checked={draft[key] as boolean}
-            onCheckedChange={(checked) => updateDraft({ [key]: checked } as Partial<DraftLink>)}
-            highlighted={isHighlighted(key)}
-          />
-        ))}
+        {advancedBody}
       </CollapsibleSection>
 
-      {errors.submit && (
-        <p className="text-xs text-destructive">{errors.submit}</p>
-      )}
+      {errors.submit && <p className="text-xs text-destructive">{errors.submit}</p>}
     </div>
   );
 }

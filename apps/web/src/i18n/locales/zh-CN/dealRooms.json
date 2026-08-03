@@ -70,16 +70,74 @@
     "noTemplate": "未匹配到模板结构。"
   },
   "tabs": {
-    "documents": "文档",
+    "documents": "数据室",
+    "links": "分享",
     "participants": "分享",
     "qa": "问发起方",
     "activity": "活动",
     "analytics": "分析",
     "settings": "设置"
   },
+  "pageTabs": {
+    "resources": "资源文件",
+    "access": "访问控制",
+    "links": "分享链接",
+    "analytics": "数据分析",
+    "knowledge": "知识库"
+  },
+  "accessControl": {
+    "editorTitle": "链接访问设置",
+    "selectLink": "选择分享链接",
+    "newLink": "新建分享链接",
+    "emptyTitle": "暂无分享链接",
+    "emptyDescription": "请先在「分享链接」中创建链接，再在此配置访问规则。",
+    "goCreateLink": "去创建链接",
+    "pageTitle": "访问控制",
+    "pageDescription": "配置本数据室的访客身份验证、准入名单与内容保护策略。",
+    "defaultsHint": "尚未创建分享链接时，此处设置会保存为数据室默认规则，并在创建链接时自动应用。"
+  },
+  "knowledge": {
+    "title": "知识库",
+    "disabledTitle": "知识库未启用",
+    "disabledDescription": "请在 API 配置 DOCLING_RAG_BASE_URL，以将数据室文档同步到外部知识库。",
+    "loadFailed": "加载知识库失败",
+    "sync": "同步",
+    "syncing": "同步中…",
+    "syncQueued": "已排队同步知识库",
+    "syncFailed": "排队同步失败",
+    "syncIssue": "部分文档同步失败，请排查后重试同步。",
+    "indexPreparing": "索引准备中，请稍后重试。",
+    "syncProgress": "同步中 {{synced}}/{{total}}（待处理 {{pending}}，失败 {{failed}}）",
+    "docSyncFailed": "该文档同步失败。",
+    "unavailable": "知识库不可用",
+    "lastSynced": "上次同步 {{time}}",
+    "emptyDocuments": "知识库尚无文档。请先添加资源文件，再点击同步。",
+    "chunkCount": "{{count}} 个切片",
+    "queryTitle": "向知识库提问",
+    "queryLabel": "问题",
+    "queryPlaceholder": "就本数据室文档提问…",
+    "ask": "提问",
+    "querying": "提问中…",
+    "queryFailed": "知识库检索失败",
+    "noHits": "未找到匹配段落。",
+    "status": {
+      "none": "未开通",
+      "provisioning": "开通中",
+      "syncing": "同步中",
+      "ready": "就绪",
+      "degraded": "部分失败",
+      "failed": "失败"
+    },
+    "docStatus": {
+      "pending": "待同步",
+      "syncing": "同步中",
+      "synced": "已同步",
+      "failed": "失败",
+      "deleted": "已删除"
+    }
+  },
   "sidebar": {
-    "label": "数据室导航",
-    "backToRooms": "全部数据室"
+    "label": "数据室导航"
   },
   "share": {
     "title": "分享",
@@ -297,14 +355,37 @@
     "links": {
       "title": "链接",
       "createLink": "创建链接",
+      "createNewLink": "创建新链接",
+      "bulkDelete": "批量删除",
+      "searchPlaceholder": "搜索链接…",
+      "searchAria": "搜索分享链接",
+      "noSearchResults": "没有匹配的链接",
+      "selectAll": "全选链接",
+      "selectRow": "选择 {{name}}",
+      "setupAccessFirstTitle": "先设置安全规则",
+      "setupAccessFirstDescription": "创建分享链接前，请先在「访问控制」中配置身份验证与内容保护规则。",
+      "goToAccessControlNow": "立即前往",
+      "redirectCountdown": "{{seconds}} 秒后自动前往访问控制",
       "emptyTitle": "未找到该数据室的链接",
       "table": {
         "name": "名称",
         "link": "链接",
         "views": "浏览量",
         "lastViewed": "最近查看",
+        "createdAt": "创建时间",
+        "sortCreatedDesc": "按创建时间降序",
+        "sortCreatedAsc": "按创建时间升序",
         "active": "活跃",
         "actions": "操作"
+      },
+      "pagination": {
+        "first": "首页",
+        "last": "末页",
+        "prev": "上一页",
+        "next": "下一页",
+        "pageInput": "页码",
+        "pageOf": "第 {{page}} / {{totalPages}} 页",
+        "go": "跳转"
       },
       "actions": {
         "view": "查看活动",
@@ -344,7 +425,11 @@
         "description": "确定要删除分享链接 \"{{name}}\" 吗？删除后该链接将失效，访客无法再访问。",
         "loading": "删除中...",
         "success": "链接已删除",
-        "error": "删除链接失败"
+        "error": "删除链接失败",
+        "bulkTitle": "删除所选链接",
+        "bulkDescription": "确定删除选中的 {{count}} 条分享链接吗？删除后这些链接将失效，访客无法再访问。",
+        "bulkSuccess": "已删除 {{count}} 条链接",
+        "bulkPartialError": "已删除 {{succeeded}} 条，失败 {{failed}} 条"
       }
     },
     "emptyLinksTitle": "未找到该数据室的链接",
@@ -362,10 +447,16 @@
   },
   "analytics": {
     "title": "分析",
+    "loadFailed": "加载数据分析失败",
+    "trendEmptyTitle": "暂无浏览趋势",
     "trendEmpty": "该数据室暂无浏览趋势数据。",
     "views": "浏览量",
     "activeLinks": "活跃链接",
+    "uniqueVisitors": "独立访客",
     "recentVisitors": "最近访客",
+    "visitorViews_one": "{{count}} 次浏览",
+    "visitorViews_other": "{{count}} 次浏览",
+    "visitorLastSeen": "最近访问 {{time}}",
     "trend": "浏览趋势",
     "topDocuments": "热门文档"
   },
@@ -475,7 +566,32 @@
     "deleteNotEmpty": "无法删除包含文档的文件夹，请先移除文档。",
     "createFailed": "创建文件夹失败",
     "renameFailed": "重命名文件夹失败",
-    "deleteFailed": "删除文件夹失败"
+    "deleteFailed": "删除文件夹失败",
+    "lockedBadge": "已锁定",
+    "lockedActionBlocked": "该项已锁定。请先解锁再修改结构。",
+    "toolbar": {
+      "searchPlaceholder": "搜索目录与文件…",
+      "searchAria": "搜索目录与文件",
+      "typeLabel": "类型",
+      "typeAll": "全部类型",
+      "typeFolders": "仅目录",
+      "typeFiles": "仅文件",
+      "lockLabel": "锁定状态",
+      "lockAll": "全部",
+      "lockLocked": "已锁定",
+      "lockUnlocked": "未锁定",
+      "selected_one": "已选 {{count}} 项",
+      "selected_other": "已选 {{count}} 项",
+      "bulkLock": "批量锁定",
+      "bulkUnlock": "批量解锁",
+      "clearSelection": "取消",
+      "lockConfirm": "锁定所选 {{count}} 项？锁定后将无法重命名、移动或删除。",
+      "unlockConfirm": "解锁所选 {{count}} 项？",
+      "lockSuccess": "已锁定",
+      "unlockSuccess": "已解锁",
+      "lockFailed": "更新锁定状态失败",
+      "noMatches": "没有符合筛选条件的目录或文件。"
+    }
   },
   "documents": {
     "dialogDescription": "整理文件夹并管理该数据室中的文档。",

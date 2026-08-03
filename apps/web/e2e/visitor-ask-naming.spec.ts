@@ -10,7 +10,7 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
 
-    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=participants`);
+    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=links`);
     await expect(page.getByRole("button", { name: /Create link/i }).first()).toBeVisible({
       timeout: 15000,
     });
@@ -59,7 +59,7 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
 
-    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=participants`);
+    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=links`);
     const row = page.getByTestId("deal-room-link-row-link_1");
     await expect(row).toBeVisible({ timeout: 15000 });
     await row.click();

@@ -227,16 +227,25 @@ describe("DealRoomDetailPage", () => {
     expect(screen.queryByTestId("upload-progress-popup")).not.toBeInTheDocument();
   });
 
-  it("switches to participants tab and shows links section", async () => {
+  it("switches to links tab and shows links section", async () => {
+    getDealRoomByIdMock.mockResolvedValue(mockRoom);
+    await renderPage("/acme/deal-rooms/room-1?tab=links");
+
+    await waitFor(() => {
+      expect(screen.getByText(/no links found/i)).toBeInTheDocument();
+    });
+    expect(screen.getByRole("heading", { name: "Series A Data Room" })).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-page-tabs")).toBeInTheDocument();
+    expect(screen.queryByText("Invitees")).not.toBeInTheDocument();
+  });
+
+  it("migrates legacy participants tab to links", async () => {
     getDealRoomByIdMock.mockResolvedValue(mockRoom);
     await renderPage("/acme/deal-rooms/room-1?tab=participants");
 
     await waitFor(() => {
       expect(screen.getByText(/no links found/i)).toBeInTheDocument();
     });
-    expect(screen.queryByRole("heading", { name: "Series A Data Room" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Due diligence materials")).not.toBeInTheDocument();
-    expect(screen.queryByText("Invitees")).not.toBeInTheDocument();
   });
 
   it("shows error and retries on failure", async () => {

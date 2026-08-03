@@ -10,6 +10,7 @@ interface TrendChartProps {
   data?: number[];
   labels?: string[];
   className?: string;
+  emptyTitle?: string;
   emptyDescription?: string;
   formatValue?: (value: number) => string;
 }
@@ -19,6 +20,7 @@ export function TrendChart({
   data,
   labels,
   className,
+  emptyTitle,
   emptyDescription,
   formatValue,
 }: TrendChartProps) {
@@ -34,7 +36,7 @@ export function TrendChart({
         <CardContent>
           <EmptyState
             icon={<ChartLineUp size={32} />}
-            title={t("trendEmptyTitle")}
+            title={emptyTitle ?? t("trendEmptyTitle")}
             description={emptyDescription ?? t("empty.description")}
             size="large"
           />

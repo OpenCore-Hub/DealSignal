@@ -231,12 +231,12 @@ describe("AccessTab", () => {
     expect(screen.queryByTitle(/reduce leak risk/i)).not.toBeInTheDocument();
   });
 
-  it("shows advanced count badge when Visitor Ask is enabled", () => {
+  it("shows advanced count badge when Enable AI assistant is enabled", () => {
     renderAccessTab({ ...baseDraft, enableQaConversations: true });
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("counts Visitor Ask and file requests separately in advanced badge", () => {
+  it("counts Enable AI assistant and file requests separately in advanced badge", () => {
     renderAccessTab({
       ...baseDraft,
       enableFileRequests: true,
@@ -245,36 +245,36 @@ describe("AccessTab", () => {
     expect(screen.getByText("2 enabled")).toBeInTheDocument();
   });
 
-  it("renders Visitor Ask master toggle without Ask Docs sub-channels", () => {
+  it("renders Enable AI assistant master toggle without Ask Docs sub-channels", () => {
     renderAccessTab({ ...baseDraft, enableQaConversations: true });
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByText(/Visitor Ask/i)).toBeInTheDocument();
+    expect(screen.getByText(/Enable AI assistant/i)).toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: /Ask Docs/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/AI Agents/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
   });
 
-  it("enabling Visitor Ask sets enableQaConversations", () => {
+  it("enabling Enable AI assistant sets enableQaConversations", () => {
     const { updateDraft } = renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
-    fireEvent.click(screen.getByRole("switch", { name: /Visitor Ask/i }));
+    fireEvent.click(screen.getByRole("switch", { name: /Enable AI assistant/i }));
     expect(updateDraft).toHaveBeenCalledWith({ enableQaConversations: true });
   });
 
-  it("turning off Visitor Ask clears enableQaConversations", () => {
+  it("turning off Enable AI assistant clears enableQaConversations", () => {
     const { updateDraft } = renderAccessTab({
       ...baseDraft,
       enableQaConversations: true,
     });
     fireEvent.click(screen.getByText(/advanced/i));
-    fireEvent.click(screen.getByRole("switch", { name: /Visitor Ask/i }));
+    fireEvent.click(screen.getByRole("switch", { name: /Enable AI assistant/i }));
     expect(updateDraft).toHaveBeenCalledWith({ enableQaConversations: false });
   });
 
   it("renders all advanced options when section is expanded", () => {
     renderAccessTab({ ...baseDraft, enableQaConversations: true });
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByText(/Visitor Ask/i)).toBeInTheDocument();
+    expect(screen.getByText(/Enable AI assistant/i)).toBeInTheDocument();
     expect(screen.getByText(/file requests/i)).toBeInTheDocument();
     expect(screen.getByText(/index file/i)).toBeInTheDocument();
   });
@@ -284,7 +284,7 @@ describe("AccessTab", () => {
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
     expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
-    expect(screen.getByRole("switch", { name: /Visitor Ask/i })).not.toBeDisabled();
+    expect(screen.getByRole("switch", { name: /Enable AI assistant/i })).not.toBeDisabled();
   });
 
   it("displays validation errors", () => {

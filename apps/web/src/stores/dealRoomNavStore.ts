@@ -40,7 +40,7 @@ export function badgeCountForTab(
   signals: Pick<DealRoomNavSignals, "failedDeliveries" | "unreadQuestions" | "activeLinkCount">
 ): number {
   switch (tab) {
-    case "participants":
+    case "links":
       if (signals.failedDeliveries > 0) return signals.failedDeliveries;
       // Nudge outbound setup when the room has no active share links yet.
       return signals.activeLinkCount === 0 ? 1 : 0;

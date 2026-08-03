@@ -4,6 +4,7 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { api } from "@/lib/api";
+import { copyToClipboard } from "@/lib/clipboard";
 import { FolderPermissionsSection } from "./FolderPermissionsSection";
 import type { Link } from "@/types";
 
@@ -17,14 +18,37 @@ i18nInstance.use(initReactI18next).init({
           links: {
             title: "Share links",
             createLink: "Create link",
+            createNewLink: "Create new link",
+            bulkDelete: "Batch delete",
+            searchPlaceholder: "Search links…",
+            searchAria: "Search share links",
+            noSearchResults: "No links match your search.",
+            selectAll: "Select all links",
+            selectRow: "Select {{name}}",
+            setupAccessFirstTitle: "Set security rules first",
+            setupAccessFirstDescription: "Configure access control first.",
+            goToAccessControlNow: "Go now",
+            redirectCountdown: "Redirecting in {{seconds}}s",
             emptyTitle: "No links yet",
             table: {
               name: "Name",
               link: "Link",
               views: "Views",
               lastViewed: "Last viewed",
+              createdAt: "Created",
+              sortCreatedDesc: "Sort by created time, descending",
+              sortCreatedAsc: "Sort by created time, ascending",
               active: "Active",
               actions: "Actions",
+            },
+            pagination: {
+              first: "First",
+              last: "Last",
+              prev: "Previous page",
+              next: "Next page",
+              pageInput: "Page number",
+              pageOf: "Page {{page}} of {{totalPages}}",
+              go: "Go",
             },
             actions: {
               view: "View",
@@ -38,14 +62,24 @@ i18nInstance.use(initReactI18next).init({
               success: "Deleted",
               error: "Failed",
               loading: "Deleting…",
+              bulkTitle: "Delete selected links",
+              bulkDescription: "Delete {{count}} selected share link(s)?",
+              bulkSuccess: "Deleted {{count}} link(s)",
+              bulkPartialError: "Deleted {{succeeded}}, failed {{failed}}",
             },
           },
+        },
+        share: {
+          copyLink: "Copy link",
+          copied: "Link copied",
         },
       },
       common: {
         loading: "Loading...",
         cancel: "Cancel",
         delete: "Delete",
+        retry: "Retry",
+        emDash: "—",
       },
       linkShare: {
         activity: { title: "Link activity" },
@@ -58,43 +92,67 @@ i18nInstance.use(initReactI18next).init({
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomLinks: vi.fn(),
+    getLinkAccessRequests: vi.fn(),
     updateLink: vi.fn(),
     deleteLink: vi.fn(),
   },
 }));
 
+vi.mock("@/lib/clipboard", () => ({
+  copyToClipboard: vi.fn(() => Promise.resolve(true)),
+}));
+
 vi.mock("./DealRoomShareDialog", () => ({
   DealRoomShareDialog: ({
     children,
-    onChanged,
-  }: {
-    children: React.ReactNode;
-    onChanged?: () => void | Promise<void>;
-  }) => (
-    <div>
-      {children}
-      <button type="button" onClick={() => void onChanged?.()}>
-        Simulate create done
-      </button>
-    </div>
-  ),
-}));
-
-vi.mock("@/components/links/share", () => ({
-  LinkActivityDialog: ({
-    link,
     open,
   }: {
-    link: { id: string; name?: string };
-    open: boolean;
-  }) => (open ? <div data-testid="link-activity-dialog">{link.name}</div> : null),
+    children?: React.ReactNode;
+    open?: boolean;
+  }) => (open || children ? <div data-testid="deal-room-share-dialog">{children}</div> : null),
 }));
+
+vi.mock("@/components/links/share", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/links/share")>();
+  return {
+    ...actual,
+    LinkActivityDialog: ({
+      link,
+      open,
+    }: {
+      link: { id: string; name?: string };
+      open: boolean;
+    }) => (open ? <div data-testid="link-activity-dialog">{link.name}</div> : null),
+  };
+});
 
 vi.mock("./SendVerificationCodeDialog", () => ({
   SendVerificationCodeDialog: () => null,
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() },
+}));
+
+vi.mock("./SetupAccessRedirectToast", () => ({
+  SetupAccessRedirectOverlay: ({
+    open,
+    title,
+    onRedirect,
+  }: {
+    open: boolean;
+    title: string;
+    onRedirect: () => void;
+  }) =>
+    open ? (
+      <div data-testid="setup-access-redirect-toast">
+        <p>{title}</p>
+        <button type="button" onClick={onRedirect}>
+          Go now
+        </button>
+      </div>
+    ) : null,
+}));
 
 function makeLink(overrides: Partial<Link> = {}): Link {
   return {
@@ -104,19 +162,33 @@ function makeLink(overrides: Partial<Link> = {}): Link {
     accessCount: 0,
     isActive: true,
     requireEmailVerification: false,
+    createdAt: "2026-06-20T10:00:00Z",
     ...overrides,
   } as Link;
+}
+
+function pageResponse(data: Link[], total = data.length, page = 1, pageSize = 10) {
+  return {
+    data,
+    pagination: {
+      page,
+      page_size: pageSize,
+      total,
+      has_more: page * pageSize < total,
+    },
+  };
 }
 
 describe("FolderPermissionsSection refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    localStorage.clear();
   });
 
   it("reloads links when refreshKey bumps after external create", async () => {
     vi.mocked(api.getDealRoomLinks)
-      .mockResolvedValueOnce({ data: [] })
-      .mockResolvedValueOnce({ data: [makeLink()] });
+      .mockResolvedValueOnce(pageResponse([]))
+      .mockResolvedValueOnce(pageResponse([makeLink()]));
 
     const { rerender } = render(
       <I18nextProvider i18n={i18nInstance}>
@@ -136,10 +208,31 @@ describe("FolderPermissionsSection refresh", () => {
     expect(api.getDealRoomLinks).toHaveBeenCalledTimes(2);
   });
 
-  it("refetches when in-section create reports onChanged", async () => {
-    vi.mocked(api.getDealRoomLinks)
-      .mockResolvedValueOnce({ data: [] })
-      .mockResolvedValueOnce({ data: [makeLink({ name: "New share" })] });
+  it("shows centered redirect overlay before creating the first link when access is unset", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([]));
+    const onSetupAccess = vi.fn();
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" onSetupAccess={onSetupAccess} />
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByText("No links yet")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+    expect(screen.queryByTestId("deal-room-share-dialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("setup-access-redirect-toast")).toBeInTheDocument();
+    expect(screen.getByText("Set security rules first")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Go now" }));
+    expect(onSetupAccess).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens create share dialog when access defaults already exist", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([]));
+    localStorage.setItem(
+      "dealsignal:deal-room-access-defaults:room-1",
+      JSON.stringify({ requireEmail: true })
+    );
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -148,15 +241,13 @@ describe("FolderPermissionsSection refresh", () => {
     );
 
     expect(await screen.findByText("No links yet")).toBeInTheDocument();
-    fireEvent.click(screen.getByText("Simulate create done"));
-
-    await waitFor(() => {
-      expect(screen.getByText("New share")).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+    expect(screen.getByTestId("deal-room-share-dialog")).toBeInTheDocument();
   });
 
   it("opens link activity when clicking a share link row", async () => {
-    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [makeLink()] });
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
+    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -168,5 +259,147 @@ describe("FolderPermissionsSection refresh", () => {
     fireEvent.click(row);
 
     expect(await screen.findByTestId("link-activity-dialog")).toHaveTextContent("Investor pack");
+  });
+
+  it("copies the full short URL from the link column copy button", async () => {
+    const link = makeLink({
+      shortUrl: "http://localhost/l/13bb3665bfd8254deae860c0cd20ffa6",
+    });
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([link]));
+    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    const copyBtn = await screen.findByTestId("deal-room-link-copy-link-1");
+    fireEvent.click(copyBtn);
+    expect(copyToClipboard).toHaveBeenCalledWith(
+      "http://localhost/l/13bb3665bfd8254deae860c0cd20ffa6",
+      "Link copied",
+    );
+    expect(screen.queryByTestId("link-activity-dialog")).not.toBeInTheDocument();
+  });
+
+  it("shows create-new-link above the table when links already exist", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
+    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    localStorage.setItem(
+      "dealsignal:deal-room-access-defaults:room-1",
+      JSON.stringify({ requireEmail: true })
+    );
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    const createBtn = await screen.findByTestId("deal-room-create-new-link");
+    expect(createBtn).toHaveTextContent("Create new link");
+    fireEvent.click(createBtn);
+    expect(screen.getByTestId("deal-room-share-dialog")).toBeInTheDocument();
+  });
+
+  it("requests paginated links with created_at_desc by default", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
+    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    await screen.findByTestId("deal-room-link-row-link-1");
+    expect(api.getDealRoomLinks).toHaveBeenCalledWith("room-1", {
+      page: 1,
+      page_size: 10,
+      sort: "created_at_desc",
+      q: undefined,
+    });
+    expect(screen.getByTestId("deal-room-links-pagination")).toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-links-sort-created")).toBeInTheDocument();
+  });
+
+  it("cycles created-at sort: first click keeps desc, second click asc", async () => {
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
+    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    await screen.findByTestId("deal-room-link-row-link-1");
+    const sortBtn = screen.getByTestId("deal-room-links-sort-created");
+    expect(sortBtn).toHaveAttribute("data-sort", "desc");
+
+    fireEvent.click(sortBtn);
+    expect(sortBtn).toHaveAttribute("data-sort", "desc");
+    expect(api.getDealRoomLinks).toHaveBeenCalledWith(
+      "room-1",
+      expect.objectContaining({ sort: "created_at_desc" }),
+    );
+
+    fireEvent.click(sortBtn);
+    await waitFor(() => {
+      expect(api.getDealRoomLinks).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({ sort: "created_at_asc", page: 1 }),
+      );
+    });
+    expect(sortBtn).toHaveAttribute("data-sort", "asc");
+  });
+
+  it("searches via backend q and batch-deletes selected rows", async () => {
+    vi.mocked(api.getDealRoomLinks).mockImplementation(async (_roomId, opts) => {
+      const all = [
+        makeLink({ id: "link-1", name: "Investor pack", shortUrl: "http://localhost/l/abc" }),
+        makeLink({ id: "link-2", name: "Bank pack", shortUrl: "http://localhost/l/xyz" }),
+      ];
+      const q = (opts?.q || "").toLowerCase();
+      const data = q ? all.filter((l) => (l.name || "").toLowerCase().includes(q)) : all;
+      return pageResponse(data);
+    });
+    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.deleteLink).mockResolvedValue(undefined as never);
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <FolderPermissionsSection roomId="room-1" />
+      </I18nextProvider>,
+    );
+
+    await screen.findByTestId("deal-room-link-row-link-1");
+    const toolbar = screen.getByTestId("deal-room-links-toolbar");
+    expect(toolbar).toHaveTextContent("Create new link");
+    expect(toolbar).toHaveTextContent("Batch delete");
+
+    fireEvent.change(screen.getByLabelText("Search share links"), {
+      target: { value: "Bank" },
+    });
+
+    await waitFor(() => {
+      expect(api.getDealRoomLinks).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({ q: "Bank" }),
+      );
+    });
+    expect(await screen.findByTestId("deal-room-link-row-link-2")).toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-link-row-link-1")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select Bank pack" }));
+    const bulkBtn = screen.getByTestId("deal-room-bulk-delete-links");
+    expect(bulkBtn).toBeEnabled();
+    fireEvent.click(bulkBtn);
+    fireEvent.click(screen.getByTestId("deal-room-bulk-delete-confirm"));
+
+    await waitFor(() => {
+      expect(api.deleteLink).toHaveBeenCalledWith("link-2");
+    });
   });
 });

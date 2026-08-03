@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
-import { useReducedMotion } from "motion/react";
-import { motion, AnimatePresence } from "motion/react";
 import { Link as LinkIcon, Check } from "@phosphor-icons/react";
 import {
   Dialog,
@@ -14,17 +12,13 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
-import type { AccessRule, DealRoomFolder, DealRoomFolderDocs, Link } from "@/types";
+import type { AccessRule, DealRoomFolderDocs, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
-  AccessTab,
-  DocumentsTab,
-  LinkAccessRequestsPanel,
   buildDraft,
   buildRules,
   buildAllowedLists,
@@ -33,25 +27,30 @@ import {
   validateDraft,
 } from "@/components/links/share";
 import type { DraftLink } from "@/components/links/share";
+import { clearRoomAccessDefaults, loadRoomAccessDefaults } from "./roomAccessDefaults";
 
-const tabTransition = {
-  initial: { opacity: 0, x: 8 },
-  animate: { opacity: 1, x: 0 },
-  exit: { opacity: 0, x: -8 },
-  transition: { duration: 0.2, ease: [0.16, 1, 0.3, 1] as const },
-};
+/** Create-link dialog no longer exposes scope UI; default to full room access. */
+function withCreateScopeDefaults(draft: DraftLink): DraftLink {
+  return {
+    ...draft,
+    folderScopeMode: "full",
+    folderPaths: [],
+  };
+}
 
 interface DealRoomShareDialogProps {
   roomId: string;
   linkId?: string;
   slug?: string;
+  /** @deprecated Access settings live on the Access Control page tab. */
   defaultTab?: "share" | "access" | "documents";
   children?: React.ReactElement;
   onChanged?: () => void | Promise<void>;
+  /** Jump to Access Control for the current link (e.g. from access summary). */
+  onEditAccess?: (linkId: string) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
 }
-
 
 function now(): number {
   return Date.now();
@@ -61,22 +60,19 @@ interface DialogData {
   links: Link[];
   selectedLink: Link | null;
   rules: AccessRule[];
-  folders: DealRoomFolder[];
   documents: DealRoomFolderDocs[];
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
-  const [linksRes, docsRes, foldersRes] = await Promise.all([
+  const [linksRes, docsRes] = await Promise.all([
     api.getDealRoomLinks(roomId),
     api.getDealRoomDocuments(roomId),
-    api.getDealRoomFolders(roomId),
   ]);
   const loadedLinks = linksRes.data;
-  const folders = foldersRes.data ?? [];
   const documents = docsRes.data ?? [];
 
   if (!linkId) {
-    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents };
+    return { links: loadedLinks, selectedLink: null, rules: [], documents };
   }
 
   let selectedLink = loadedLinks.find((l) => l.id === linkId) || null;
@@ -96,7 +92,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
   }
 
   if (!selectedLink) {
-    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents };
+    return { links: loadedLinks, selectedLink: null, rules: [], documents };
   }
 
   const rulesRes = await api.getLinkAccessRules(selectedLink.id);
@@ -105,7 +101,6 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     links: loadedLinks,
     selectedLink,
     rules: rulesRes.data,
-    folders,
     documents,
   };
 }
@@ -113,11 +108,11 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
 interface DealRoomShareDialogContentProps {
   roomId: string;
   slug?: string;
-  defaultTab?: "share" | "access" | "documents";
   data: DialogData | null;
   loadingData: boolean;
   refetch: () => Promise<void>;
   onChanged?: () => void | Promise<void>;
+  onEditAccess?: (linkId: string) => void;
   onClose: () => void;
   registerCloseGuard: (guard: () => boolean) => void;
 }
@@ -125,45 +120,26 @@ interface DealRoomShareDialogContentProps {
 function DealRoomShareDialogContent({
   roomId,
   slug,
-  defaultTab = "share",
   data,
   loadingData,
   refetch,
   onChanged,
+  onEditAccess,
   onClose,
   registerCloseGuard,
 }: DealRoomShareDialogContentProps) {
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
-  const reducedMotion = useReducedMotion();
-  const [tab, setTab] = useState<"share" | "access" | "documents">(defaultTab);
-  const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.selectedLink, data?.rules));
+  const [draft, setDraft] = useState<DraftLink>(() => {
+    const base = buildDraft(data?.selectedLink, data?.rules);
+    if (data?.selectedLink) return base;
+    const defaults = loadRoomAccessDefaults(roomId);
+    const merged = defaults ? { ...base, ...defaults, name: base.name } : base;
+    return withCreateScopeDefaults(merged);
+  });
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
-  const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.listNDATemplates();
-        if (cancelled) return;
-        setNdaTemplates(
-          (res.data ?? []).map((tpl) => ({
-            id: tpl.id,
-            name: tpl.name,
-            sourceDocumentId: tpl.source_document_id,
-          }))
-        );
-      } catch {
-        if (!cancelled) setNdaTemplates([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Unsaved-changes tracking. We use a mutable ref instead of a callback so
   // the data-sync effect does not depend on the comparison function, which
@@ -207,18 +183,28 @@ function DealRoomShareDialogContent({
     const currentKey = data ? (data.selectedLink?.id ?? "new") : undefined;
     const keyChanged = currentKey !== loadedKeyRef.current;
     if (keyChanged) {
-      const nextDraft = buildDraft(data?.selectedLink, data?.rules);
+      let nextDraft = buildDraft(data?.selectedLink, data?.rules);
+      if (!data?.selectedLink) {
+        const defaults = loadRoomAccessDefaults(roomId);
+        if (defaults) nextDraft = { ...nextDraft, ...defaults, name: nextDraft.name };
+        nextDraft = withCreateScopeDefaults(nextDraft);
+      }
       setDraft(nextDraft);
       setHighlightedFields([]);
       hasUnsavedChangesRef.current = false;
       loadedKeyRef.current = currentKey;
     } else if (currentKey && !hasUnsavedChangesRef.current) {
       // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
-      const nextDraft = buildDraft(data?.selectedLink, data?.rules);
+      let nextDraft = buildDraft(data?.selectedLink, data?.rules);
+      if (!data?.selectedLink) {
+        const defaults = loadRoomAccessDefaults(roomId);
+        if (defaults) nextDraft = { ...nextDraft, ...defaults, name: nextDraft.name };
+        nextDraft = withCreateScopeDefaults(nextDraft);
+      }
       setDraft(nextDraft);
       setHighlightedFields([]);
     }
-  }, [data]);
+  }, [data, roomId]);
 
   const [confirmDialog, setConfirmDialog] = useState<{
     open: boolean;
@@ -285,6 +271,7 @@ function DealRoomShareDialogContent({
           notify_on_access: draft.notifyOnAccess,
           folder_paths: draft.folderPaths,
         });
+        clearRoomAccessDefaults(roomId);
       } else {
         await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
         await api.setLinkAccessRules(link.id, buildRules(draft));
@@ -312,6 +299,7 @@ function DealRoomShareDialogContent({
   const handleSave = async () => {
     const currentErrors = validateDraft(draft, selectedLink, lt, now(), isDealRoomLink, existingNames);
     if (Object.keys(currentErrors).length > 0) {
+      setHighlightedFields(Object.keys(currentErrors));
       return;
     }
     const link = await saveLinkAndRules();
@@ -349,12 +337,22 @@ function DealRoomShareDialogContent({
     void doUpdate();
   };
 
-  const primaryAction =
-    tab === "share"
-      ? { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave }
-      : tab === "access"
-        ? { label: saveSuccess ? lt("accessRules.saved") : isNew ? t("share.createLink") : t("accessRules.saveAccessRules"), onClick: handleSave }
-        : { label: saveSuccess ? lt("share.savedButtonLabel") : isNew ? t("share.createLink") : t("share.saveLinkSettings"), onClick: handleSave };
+  const handleEditAccess = () => {
+    if (!selectedLink) {
+      toast.message(lt("share.editAccessAfterCreate"));
+      return;
+    }
+    if (onEditAccess) {
+      onClose();
+      onEditAccess(selectedLink.id);
+    }
+  };
+
+  const primaryLabel = saveSuccess
+    ? lt("share.savedButtonLabel")
+    : isNew
+      ? t("share.createLink")
+      : t("share.saveLinkSettings");
 
   return (
     <>
@@ -380,84 +378,24 @@ function DealRoomShareDialogContent({
         </div>
       </DialogHeader>
 
-      <Tabs value={tab} onValueChange={(v) => setTab(v as typeof tab)} className="flex flex-1 flex-col overflow-hidden">
-        <TabsList variant="line" className="w-full">
-          <TabsTrigger value="share">{lt("share.title")}</TabsTrigger>
-          <TabsTrigger value="access">{lt("accessRules.title")}</TabsTrigger>
-          <TabsTrigger value="documents">{lt("documents.title")}</TabsTrigger>
-        </TabsList>
-
-        <div className="flex-1 overflow-y-auto px-3 py-2" style={{ scrollbarGutter: "stable" }}>
-          {loadingData || !data ? (
-            <div className="py-10 text-center text-sm text-muted-foreground">
-              {t("common:loading")}
-            </div>
-          ) : (
-            <>
-              <AnimatePresence mode="wait" initial={false}>
-              <motion.div key={tab} {...(reducedMotion ? {} : tabTransition)}>
-                <TabsContent value="share">
-                  <ShareTab
-                    draft={draft}
-                    updateDraft={updateDraft}
-                    link={selectedLink}
-                    onEditAccess={() => setTab("access")}
-                    errors={validationErrors}
-                    slug={slug}
-                    highlightedFields={highlightedFields}
-                    documents={data?.documents ?? []}
-                  />
-                </TabsContent>
-                <TabsContent value="access" className="space-y-4">
-                  {selectedLink ? (
-                    <LinkAccessRequestsPanel
-                      linkId={selectedLink.id}
-                      onChanged={(detail) => {
-                        if (detail?.action === "approve" && detail.email) {
-                          const email = detail.email.trim().toLowerCase();
-                          setDraft((prev) => {
-                            if (prev.allowedViewers.some((v) => v.trim().toLowerCase() === email)) {
-                              return prev;
-                            }
-                            return { ...prev, allowedViewers: [...prev.allowedViewers, email] };
-                          });
-                          // Approving grants access without marking the rest of the form dirty.
-                        }
-                        void refetch();
-                      }}
-                    />
-                  ) : null}
-                  <AccessTab
-                    draft={draft}
-                    updateDraft={updateDraft}
-                    errors={validationErrors}
-                    highlightedFields={highlightedFields}
-                    isDealRoomLink={isDealRoomLink}
-                    passwordAlreadySet={Boolean(selectedLink?.requirePassword)}
-                    ndaTemplates={ndaTemplates}
-                    documents={(data?.documents ?? [])
-                      .flatMap((folder) => folder.documents ?? [])
-                      .map((d) => ({ id: d.document_id, title: d.title }))}
-                  />
-                </TabsContent>
-                <TabsContent value="documents">
-                  <DocumentsTab
-                    folders={data?.folders ?? []}
-                    documents={data?.documents ?? []}
-                    selectedPaths={draft.folderPaths}
-                    scopeMode={draft.folderScopeMode}
-                    onChange={({ scopeMode, selectedPaths }) =>
-                      updateDraft({ folderScopeMode: scopeMode, folderPaths: selectedPaths })
-                    }
-                  />
-                </TabsContent>
-
-              </motion.div>
-            </AnimatePresence>
-            </>
-          )}
-        </div>
-      </Tabs>
+      <div className="flex-1 space-y-6 overflow-y-auto px-1 py-2" style={{ scrollbarGutter: "stable" }}>
+        {loadingData || !data ? (
+          <div className="py-10 text-center text-sm text-muted-foreground">
+            {t("common:loading")}
+          </div>
+        ) : (
+          <ShareTab
+            draft={draft}
+            updateDraft={updateDraft}
+            link={selectedLink}
+            onEditAccess={handleEditAccess}
+            errors={validationErrors}
+            slug={slug}
+            highlightedFields={highlightedFields}
+            documents={data.documents}
+          />
+        )}
+      </div>
 
       <DialogFooter>
         <Button variant="outline" onClick={handleConditionalClose}>
@@ -465,21 +403,18 @@ function DealRoomShareDialogContent({
         </Button>
         <Button
           className="min-w-[140px]"
-          onClick={primaryAction.onClick}
-          disabled={
-            saving ||
-            Object.keys(validationErrors).length > 0
-          }
+          onClick={handleSave}
+          disabled={saving || Object.keys(validationErrors).length > 0}
         >
           {saving ? (
             t("common:saving")
           ) : saveSuccess ? (
             <span className="flex items-center gap-1.5">
               <Check size={16} />
-              {primaryAction.label}
+              {primaryLabel}
             </span>
           ) : (
-            primaryAction.label
+            primaryLabel
           )}
         </Button>
       </DialogFooter>
@@ -517,9 +452,9 @@ export function DealRoomShareDialog({
   roomId,
   linkId,
   slug,
-  defaultTab,
   children,
   onChanged,
+  onEditAccess,
   open: openProp,
   onOpenChange,
 }: DealRoomShareDialogProps) {
@@ -565,11 +500,11 @@ export function DealRoomShareDialog({
             key={dataKey}
             roomId={roomId}
             slug={slug}
-            defaultTab={defaultTab}
             data={data}
             loadingData={loading}
             refetch={refetch}
             onChanged={onChanged}
+            onEditAccess={onEditAccess}
             onClose={() => setOpen(false)}
             registerCloseGuard={registerCloseGuard}
           />

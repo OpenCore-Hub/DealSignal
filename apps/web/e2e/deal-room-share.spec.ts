@@ -46,7 +46,7 @@ test.beforeEach(async ({ page }) => {
 // ── Helpers ──────────────────────────────────────────────────────────
 
 async function openCreateDialog(page: Page) {
-  await page.goto(`/${seed.workspaceSlug}/deal-rooms/${roomId}?tab=participants`);
+  await page.goto(`/${seed.workspaceSlug}/deal-rooms/${roomId}?tab=links`);
   await page.waitForTimeout(1500);
 
   // Click the share button in the page header or the empty-state CTA.
@@ -58,7 +58,7 @@ async function openCreateDialog(page: Page) {
 }
 
 async function openEditDialog(page: Page, linkName: string) {
-  await page.goto(`/${seed.workspaceSlug}/deal-rooms/${roomId}?tab=participants`);
+  await page.goto(`/${seed.workspaceSlug}/deal-rooms/${roomId}?tab=links`);
   await page.waitForTimeout(1500);
 
   const row = page.locator("table tbody tr").filter({ hasText: linkName }).first();
@@ -548,7 +548,7 @@ test("applies expiration, custom domain and notify-on-access, and manages the li
   await visitorPage.close();
 
   // Edit the link to set an expired date and verify it blocks access.
-  await page.goto(`/${seed.workspaceSlug}/deal-rooms/${roomId}?tab=participants`);
+  await page.goto(`/${seed.workspaceSlug}/deal-rooms/${roomId}?tab=links`);
   await page.waitForTimeout(1500);
   const row = page.locator("table tbody tr").filter({ hasText: "Expiry Domain Test" }).first();
   await row.getByRole("button", { name: "moreActions" }).click();

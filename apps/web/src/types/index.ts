@@ -363,6 +363,8 @@ export interface DealRoomFolder {
   name: string;
   description?: string;
   sort_order: number;
+  /** Structure lock — blocks rename/delete/upload/create-child. */
+  locked?: boolean;
 }
 
 export interface DealRoomDocumentItem {
@@ -376,6 +378,8 @@ export interface DealRoomDocumentItem {
   page_count?: number;
   file_size?: number;
   created_at: string;
+  /** Structure lock — blocks remove/move. */
+  locked?: boolean;
 }
 
 export interface DealRoomFolderDocs {
@@ -437,6 +441,57 @@ export interface DealRoom {
   unreadQuestions?: number;
   /** Engagement score (0-100) computed from visitor activity. */
   heatScore?: number;
+}
+
+/** Aggregated analytics for a deal room's share links (GET /deal-rooms/:id/analytics). */
+export interface DealRoomAnalytics {
+  totalViews: number;
+  uniqueVisitors: number;
+  activeLinkCount: number;
+  documentCount: number;
+  viewsOverTime: { day: string; views: number }[];
+  recentVisitors: {
+    visitorId: string;
+    visitorEmail?: string;
+    firstAccessAt: string;
+    lastAccessAt: string;
+    totalViews: number;
+  }[];
+}
+
+/** External docling-rag knowledge corpus status for a deal room. */
+export interface DealRoomKnowledgeCorpus {
+  enabled: boolean;
+  status: string;
+  lastSyncedAt?: string;
+  errorMessage?: string;
+  progress?: {
+    total: number;
+    pending: number;
+    syncing: number;
+    synced: number;
+    failed: number;
+    jobStatus?: string;
+  };
+  documents: Array<{
+    documentId: string;
+    title?: string;
+    status: string;
+    chunkCount: number;
+    lastError?: string;
+  }>;
+}
+
+export interface DealRoomKnowledgeQueryResult {
+  query: string;
+  mode: string;
+  answer?: string;
+  results: Array<{
+    chunkId: string;
+    documentId?: string;
+    text: string;
+    score: number;
+  }>;
 }
 
 export interface WorkspaceMember {

@@ -12,18 +12,24 @@ import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
 import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
-import { useDealRoomTab } from "@/hooks/useDealRoomTab";
-import { DealRoomShareButton } from "@/components/deal-rooms/DealRoomShareButton";
+import { isDealRoomPageTab, useDealRoomTab } from "@/hooks/useDealRoomTab";
+import type { DealRoomTab } from "@/hooks/useDealRoomTab";
 import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissionsSection";
-import { DealRoomAccessRequestsPanel } from "@/components/deal-rooms/DealRoomAccessRequestsPanel";
+import { DealRoomAccessControlTab } from "@/components/deal-rooms/DealRoomAccessControlTab";
 import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsTab";
 import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
 import { DealRoomDocumentsHome } from "@/components/deal-rooms/DealRoomDocumentsHome";
 import { DealRoomActivityTab } from "@/components/deal-rooms/DealRoomActivityTab";
 import { DealRoomSettingsTab } from "@/components/deal-rooms/DealRoomSettingsTab";
-import { useDealRoomNavSignals, fetchDealRoomLinks } from "@/hooks/useDealRoomNavSignals";
+import { DealRoomKnowledgeTab } from "@/components/deal-rooms/DealRoomKnowledgeTab";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  useDealRoomNavSignals,
+  fetchDealRoomLinks,
+  isLinkActive,
+} from "@/hooks/useDealRoomNavSignals";
 import { useDealRoomNavStore } from "@/stores/dealRoomNavStore";
-import { useUIStore, type BreadcrumbItem } from "@/stores/uiStore";
+import { useUIStore } from "@/stores/uiStore";
 import { matchesRecommendedFile } from "@/lib/dealRoomReadiness";
 import type { DealRoomFolderDocs, Link } from "@/types";
 
@@ -68,17 +74,15 @@ export function DealRoomDetailPage() {
   const [linksRevision, setLinksRevision] = useState(0);
   const [roomLinks, setRoomLinks] = useState<Link[]>([]);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
+  const [accessLinkId, setAccessLinkId] = useState<string | undefined>();
+  const { tab, setTab } = useDealRoomTab();
+  const reducedMotion = useReducedMotion();
+  const setBreadcrumbTail = useUIStore((state) => state.setBreadcrumbTail);
+  const navSignals = useDealRoomNavStore();
+  useDealRoomNavSignals(roomId, linksRevision);
   const bumpLinksRevision = useCallback(() => {
     setLinksRevision((n) => n + 1);
   }, []);
-  const { tab, setTab } = useDealRoomTab();
-  const reducedMotion = useReducedMotion();
-  const currentWorkspace = useUIStore((state) => state.currentWorkspace);
-  const setBreadcrumbs = useUIStore((state) => state.setBreadcrumbs);
-  const navSignals = useDealRoomNavStore();
-  useDealRoomNavSignals(roomId, linksRevision);
-
-  const workspaceName = currentWorkspace?.name || workspaceSlug;
 
   // Cleanup all progress intervals and document-status polls on unmount to
   // prevent state updates on an unmounted component.
@@ -150,19 +154,15 @@ export function DealRoomDetailPage() {
     };
   }, [roomId, linksRevision]);
 
-  // Sync page breadcrumb to the global header.
+  // Append room name after the shared workspace nav breadcrumbs (Home >> Deal rooms).
   useEffect(() => {
-    if (!workspaceSlug) return;
-    const items: BreadcrumbItem[] = [
-      { label: workspaceName ?? workspaceSlug, to: `/${workspaceSlug}/dashboard` },
-      { label: t("page.title"), to: `/${workspaceSlug}/deal-rooms` },
-    ];
-    if (room?.name) {
-      items.push({ label: room.name });
+    if (!room?.name) {
+      setBreadcrumbTail(null);
+      return;
     }
-    setBreadcrumbs(items);
-    return () => setBreadcrumbs([]);
-  }, [workspaceSlug, workspaceName, room?.name, t, setBreadcrumbs]);
+    setBreadcrumbTail({ label: room.name });
+    return () => setBreadcrumbTail(null);
+  }, [room?.name, setBreadcrumbTail]);
 
   const allRoomDocuments = useMemo(
     () => (room?.documents ?? []).flatMap((fd: DealRoomFolderDocs) => fd.documents),
@@ -453,52 +453,71 @@ export function DealRoomDetailPage() {
     return null;
   }
 
-  const activeLinkCount = navSignals.activeLinkCount || room.activeLinkCount || roomLinks.length;
-  const viewCount = navSignals.viewCount || room.viewCount || 0;
+  // Prefer live filtered active links; navSignals can lag until linksRevision bumps.
+  const activeLinkCount = Math.max(
+    roomLinks.filter(isLinkActive).length,
+    navSignals.activeLinkCount,
+    room.activeLinkCount ?? 0,
+  );
   const description = room.description?.trim() ?? "";
   const descriptionLong = description.length > 120;
 
+  const showPageTabs = isDealRoomPageTab(tab);
+
   return (
     <motion.div className="space-y-6" {...(reducedMotion ? {} : pageTransition)}>
-      {tab === "participants" ? (
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <DealRoomShareButton
-            roomId={room.id}
-            slug={room.slug}
-            onChanged={bumpLinksRevision}
-          />
-        </div>
-      ) : (
-        <PageHeader
-          title={room.name}
-          description={
-            description
-              ? descriptionExpanded || !descriptionLong
-                ? description
-                : `${description.slice(0, 120).trimEnd()}…`
-              : undefined
-          }
+      <PageHeader
+        title={room.name}
+        description={
+          description
+            ? descriptionExpanded || !descriptionLong
+              ? description
+              : `${description.slice(0, 120).trimEnd()}…`
+            : undefined
+        }
+      >
+        {descriptionLong ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            onClick={() => setDescriptionExpanded((v) => !v)}
+          >
+            {descriptionExpanded
+              ? t("documentsHome.descriptionHide")
+              : t("documentsHome.descriptionShow")}
+          </Button>
+        ) : null}
+      </PageHeader>
+
+      {showPageTabs && (
+        <Tabs
+          value={tab}
+          onValueChange={(value) => setTab(value as DealRoomTab)}
+          className="gap-0"
         >
-          <div className="flex flex-wrap items-center gap-2">
-            {descriptionLong && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setDescriptionExpanded((v) => !v)}
-              >
-                {descriptionExpanded
-                  ? t("documentsHome.descriptionHide")
-                  : t("documentsHome.descriptionShow")}
-              </Button>
-            )}
-            <DealRoomShareButton
-              roomId={room.id}
-              slug={room.slug}
-              onChanged={bumpLinksRevision}
-            />
-          </div>
-        </PageHeader>
+          <TabsList
+            variant="line"
+            className="h-auto w-full justify-start gap-0 overflow-x-auto rounded-none border-b border-border bg-transparent p-0"
+            data-testid="deal-room-page-tabs"
+          >
+            <TabsTrigger value="documents" className="rounded-none px-3 pb-2.5">
+              {t("pageTabs.resources")}
+            </TabsTrigger>
+            <TabsTrigger value="access" className="rounded-none px-3 pb-2.5">
+              {t("pageTabs.access")}
+            </TabsTrigger>
+            <TabsTrigger value="links" className="rounded-none px-3 pb-2.5">
+              {t("pageTabs.links")}
+            </TabsTrigger>
+            <TabsTrigger value="analytics" className="rounded-none px-3 pb-2.5">
+              {t("pageTabs.analytics")}
+            </TabsTrigger>
+            <TabsTrigger value="knowledge" className="rounded-none px-3 pb-2.5">
+              {t("pageTabs.knowledge")}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
       )}
 
       <AnimatePresence mode="wait">
@@ -527,6 +546,7 @@ export function DealRoomDetailPage() {
                     onFolderDelete={handleFolderDelete}
                     onDocumentsAdd={handleDocumentsAdd}
                     onFolderUpload={uploadFileToFolder}
+                    onChanged={refetch}
                     onDocumentOpen={(docId) =>
                       navigate(`/${workspaceSlug}/documents/${docId}`, {
                         state: {
@@ -541,12 +561,34 @@ export function DealRoomDetailPage() {
             </DealRoomDocumentsHome>
           )}
 
-          {tab === "participants" && (
-            <div className="grid grid-cols-1 gap-4">
-              <DealRoomAccessRequestsPanel roomId={room.id} onChanged={refetch} />
-              <FolderPermissionsSection roomId={room.id} refreshKey={linksRevision} />
-            </div>
+          {tab === "access" && (
+            <DealRoomAccessControlTab
+              roomId={room.id}
+              initialLinkId={accessLinkId}
+              onChanged={async () => {
+                await refetch();
+              }}
+            />
           )}
+
+          {tab === "links" && (
+            <FolderPermissionsSection
+              roomId={room.id}
+              slug={room.slug}
+              refreshKey={linksRevision}
+              onLinksChanged={bumpLinksRevision}
+              onManageAccess={(linkId) => {
+                setAccessLinkId(linkId);
+                setTab("access");
+              }}
+              onSetupAccess={() => {
+                setAccessLinkId(undefined);
+                setTab("access");
+              }}
+            />
+          )}
+
+          {tab === "knowledge" && <DealRoomKnowledgeTab roomId={room.id} />}
 
           {tab === "qa" && <DealRoomQATab roomId={room.id} />}
 
@@ -554,20 +596,13 @@ export function DealRoomDetailPage() {
             <DealRoomActivityTab
               recentVisitors={room.recentVisitors}
               links={roomLinks}
-              onOpenShare={() => setTab("participants")}
+              onOpenShare={() => setTab("links")}
               onOpenAnalytics={() => setTab("analytics")}
             />
           )}
 
           {tab === "analytics" && (
-            <DealRoomAnalyticsTab
-              roomId={room.id}
-              documentCount={room.documentCount}
-              viewCount={viewCount}
-              activeLinkCount={activeLinkCount}
-              recentVisitors={room.recentVisitors}
-              links={roomLinks}
-            />
+            <DealRoomAnalyticsTab roomId={room.id} links={roomLinks} />
           )}
 
           {tab === "settings" && (

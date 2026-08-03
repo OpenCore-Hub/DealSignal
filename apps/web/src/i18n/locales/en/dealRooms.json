@@ -73,16 +73,74 @@
     "noTemplate": "No matching template structure."
   },
   "tabs": {
-    "documents": "Documents",
+    "documents": "Deal room",
+    "links": "Share",
     "participants": "Share",
     "qa": "Ask Host",
     "activity": "Activity",
     "analytics": "Analytics",
     "settings": "Settings"
   },
+  "pageTabs": {
+    "resources": "Resources",
+    "access": "Access control",
+    "links": "Share links",
+    "analytics": "Analytics",
+    "knowledge": "Knowledge base"
+  },
+  "accessControl": {
+    "editorTitle": "Link access settings",
+    "selectLink": "Select share link",
+    "newLink": "New share link",
+    "emptyTitle": "No share links yet",
+    "emptyDescription": "Create a share link first, then configure access rules here.",
+    "goCreateLink": "Create share link",
+    "pageTitle": "Access control",
+    "pageDescription": "Configure how visitors prove their identity, who is allowed in, and how content is protected for this deal room.",
+    "defaultsHint": "No share link yet — these settings are saved as room defaults and applied when you create a link."
+  },
+  "knowledge": {
+    "title": "Knowledge base",
+    "disabledTitle": "Knowledge base is not enabled",
+    "disabledDescription": "Configure DOCLING_RAG_BASE_URL on the API to sync room documents into the external knowledge base.",
+    "loadFailed": "Failed to load knowledge base",
+    "sync": "Sync",
+    "syncing": "Syncing…",
+    "syncQueued": "Knowledge sync queued",
+    "syncFailed": "Failed to queue knowledge sync",
+    "syncIssue": "Some documents failed to sync. Retry sync after fixing the issue.",
+    "indexPreparing": "Index is preparing. Try again shortly.",
+    "syncProgress": "Syncing {{synced}}/{{total}} (pending {{pending}}, failed {{failed}})",
+    "docSyncFailed": "This document failed to sync.",
+    "unavailable": "Knowledge base is unavailable",
+    "lastSynced": "Last synced {{time}}",
+    "emptyDocuments": "No documents in the knowledge corpus yet. Add resources, then sync.",
+    "chunkCount": "{{count}} chunks",
+    "queryTitle": "Ask the knowledge base",
+    "queryLabel": "Question",
+    "queryPlaceholder": "Ask about documents in this deal room…",
+    "ask": "Ask",
+    "querying": "Asking…",
+    "queryFailed": "Failed to query knowledge base",
+    "noHits": "No matching passages found.",
+    "status": {
+      "none": "Not provisioned",
+      "provisioning": "Provisioning",
+      "syncing": "Syncing",
+      "ready": "Ready",
+      "degraded": "Degraded",
+      "failed": "Failed"
+    },
+    "docStatus": {
+      "pending": "Pending",
+      "syncing": "Syncing",
+      "synced": "Synced",
+      "failed": "Failed",
+      "deleted": "Deleted"
+    }
+  },
   "sidebar": {
-    "label": "Deal room navigation",
-    "backToRooms": "All deal rooms"
+    "label": "Deal room navigation"
   },
   "share": {
     "title": "Share",
@@ -300,14 +358,37 @@
     "links": {
       "title": "Links",
       "createLink": "Create link",
+      "createNewLink": "Create new link",
+      "bulkDelete": "Batch delete",
+      "searchPlaceholder": "Search links…",
+      "searchAria": "Search share links",
+      "noSearchResults": "No links match your search.",
+      "selectAll": "Select all links",
+      "selectRow": "Select {{name}}",
+      "setupAccessFirstTitle": "Set security rules first",
+      "setupAccessFirstDescription": "Before creating a share link, configure authentication and content protections on the Access Control tab.",
+      "goToAccessControlNow": "Go now",
+      "redirectCountdown": "Redirecting in {{seconds}}s",
       "emptyTitle": "No links found for this dataroom",
       "table": {
         "name": "Name",
         "link": "Link",
         "views": "Views",
         "lastViewed": "Last viewed",
+        "createdAt": "Created",
+        "sortCreatedDesc": "Sort by created time, descending",
+        "sortCreatedAsc": "Sort by created time, ascending",
         "active": "Active",
         "actions": "Actions"
+      },
+      "pagination": {
+        "first": "First",
+        "last": "Last",
+        "prev": "Previous page",
+        "next": "Next page",
+        "pageInput": "Page number",
+        "pageOf": "Page {{page}} of {{totalPages}}",
+        "go": "Go"
       },
       "actions": {
         "view": "View activity",
@@ -347,7 +428,11 @@
         "description": "Are you sure you want to delete the share link \"{{name}}\"? This link will stop working and visitors will no longer be able to access.",
         "loading": "Deleting...",
         "success": "Link deleted",
-        "error": "Failed to delete link"
+        "error": "Failed to delete link",
+        "bulkTitle": "Delete selected links",
+        "bulkDescription": "Delete {{count}} selected share link(s)? These links will stop working and visitors will no longer be able to access them.",
+        "bulkSuccess": "Deleted {{count}} link(s)",
+        "bulkPartialError": "Deleted {{succeeded}}, failed {{failed}}"
       }
     },
     "emptyLinksTitle": "No links found for this dataroom",
@@ -365,10 +450,16 @@
   },
   "analytics": {
     "title": "Analytics",
+    "loadFailed": "Failed to load analytics",
+    "trendEmptyTitle": "No view trend yet",
     "trendEmpty": "No view trend data yet for this deal room.",
     "views": "Views",
     "activeLinks": "Active links",
+    "uniqueVisitors": "Unique visitors",
     "recentVisitors": "Recent visitors",
+    "visitorViews_one": "{{count}} view",
+    "visitorViews_other": "{{count}} views",
+    "visitorLastSeen": "Last seen {{time}}",
     "trend": "View trend",
     "topDocuments": "Top documents"
   },
@@ -479,7 +570,32 @@
     "deleteNotEmpty": "Cannot delete a folder that contains documents. Remove documents first.",
     "createFailed": "Failed to create folder",
     "renameFailed": "Failed to rename folder",
-    "deleteFailed": "Failed to delete folder"
+    "deleteFailed": "Failed to delete folder",
+    "lockedBadge": "Locked",
+    "lockedActionBlocked": "This item is locked. Unlock it before making structure changes.",
+    "toolbar": {
+      "searchPlaceholder": "Search folders and files…",
+      "searchAria": "Search folders and files",
+      "typeLabel": "Type",
+      "typeAll": "All types",
+      "typeFolders": "Folders",
+      "typeFiles": "Files",
+      "lockLabel": "Lock status",
+      "lockAll": "All",
+      "lockLocked": "Locked",
+      "lockUnlocked": "Unlocked",
+      "selected_one": "{{count}} selected",
+      "selected_other": "{{count}} selected",
+      "bulkLock": "Lock",
+      "bulkUnlock": "Unlock",
+      "clearSelection": "Clear",
+      "lockConfirm": "Lock {{count}} selected item(s)? Locked items cannot be renamed, moved, or deleted.",
+      "unlockConfirm": "Unlock {{count}} selected item(s)?",
+      "lockSuccess": "Resources locked",
+      "unlockSuccess": "Resources unlocked",
+      "lockFailed": "Failed to update locks",
+      "noMatches": "No folders or files match your filters."
+    }
   },
   "documents": {
     "dialogDescription": "Organize folders and manage documents in this deal room.",
