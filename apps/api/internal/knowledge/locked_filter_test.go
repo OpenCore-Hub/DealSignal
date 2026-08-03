@@ -6,6 +6,88 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
 )
 
+func TestApplyDisplaySourceNamesPrefersRoomTitle(t *testing.T) {
+	hits := []QueryHit{
+		{
+			DocumentID: "doc-1",
+			SourceName: "18b1062d-919b-437a-8d5c-76efc60dec86.docx",
+		},
+		{
+			DocumentID: "doc-2",
+			SourceName: "deck.pdf",
+		},
+		{
+			DocumentID: "",
+			SourceName: "orphan.bin",
+		},
+	}
+	applyDisplaySourceNames(hits, map[string]string{
+		"doc-1": "单向保密协议 (NDA).docx",
+		// doc-2 missing → keep stamped name
+	})
+	if hits[0].SourceName != "单向保密协议 (NDA).docx" {
+		t.Fatalf("title enrich=%q", hits[0].SourceName)
+	}
+	if hits[1].SourceName != "deck.pdf" {
+		t.Fatalf("missing title must keep sourceName, got %q", hits[1].SourceName)
+	}
+	if hits[2].SourceName != "orphan.bin" {
+		t.Fatalf("unmapped hit must keep sourceName, got %q", hits[2].SourceName)
+	}
+}
+
+func TestFillHitLocusFromMetadata(t *testing.T) {
+	hit := QueryHit{}
+	fillHitLocus(&hit, map[string]any{
+		"source_name": "deck.pdf",
+		"locus": map[string]any{
+			"pages": []any{float64(3), float64(4)},
+			"sheet": "损益表",
+		},
+	})
+	if hit.SourceName != "deck.pdf" {
+		t.Fatalf("sourceName=%q", hit.SourceName)
+	}
+	if len(hit.Pages) != 2 || hit.Pages[0] != 3 || hit.Pages[1] != 4 {
+		t.Fatalf("pages=%v", hit.Pages)
+	}
+	if hit.Sheet != "损益表" {
+		t.Fatalf("sheet=%q", hit.Sheet)
+	}
+}
+
+func TestApplyViewerPagesPDFMinAndSheetMap(t *testing.T) {
+	hits := []QueryHit{
+		{DocumentID: "d1", Pages: []int{4, 3}},
+		{DocumentID: "d2", Sheet: "损益表"},
+		{DocumentID: "d2", Sheet: "missing"},
+		{DocumentID: "d3", Sheet: "Cashflow"}, // no map entry
+	}
+	applyViewerPages(hits, map[string]map[string]int{
+		"d2": {"损益表": 7},
+	})
+	if hits[0].ViewerPage == nil || *hits[0].ViewerPage != 3 {
+		t.Fatalf("PDF min viewerPage=%v want 3", hits[0].ViewerPage)
+	}
+	if hits[1].ViewerPage == nil || *hits[1].ViewerPage != 7 {
+		t.Fatalf("sheet map viewerPage=%v want 7", hits[1].ViewerPage)
+	}
+	if hits[2].ViewerPage != nil {
+		t.Fatalf("missing sheet must not invent viewerPage, got %v", *hits[2].ViewerPage)
+	}
+	if hits[3].ViewerPage != nil {
+		t.Fatalf("unmapped doc must not invent viewerPage")
+	}
+}
+
+func TestApplyViewerPagesPrefersPagesOverSheet(t *testing.T) {
+	hits := []QueryHit{{DocumentID: "d", Pages: []int{2}, Sheet: "A"}}
+	applyViewerPages(hits, map[string]map[string]int{"d": {"A": 99}})
+	if hits[0].ViewerPage == nil || *hits[0].ViewerPage != 2 {
+		t.Fatalf("pages must win over sheet map, got %v", hits[0].ViewerPage)
+	}
+}
+
 func TestApplyLockedSearchFilterDropsLockedHitsAndAnswer(t *testing.T) {
 	res := docling.SearchResponse{
 		Query:  "cap",

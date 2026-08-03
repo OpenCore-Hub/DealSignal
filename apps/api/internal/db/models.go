@@ -181,6 +181,13 @@ type Document struct {
 	Category    string
 }
 
+type DocumentSheetPageRange struct {
+	DocumentID pgtype.UUID
+	SheetName  string
+	PageStart  int32
+	PageEnd    int32
+}
+
 type EmailEvent struct {
 	ID         pgtype.UUID
 	EmailLogID pgtype.UUID

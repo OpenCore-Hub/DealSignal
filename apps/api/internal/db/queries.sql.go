@@ -2898,6 +2898,15 @@ func (q *Queries) DeleteSecurityEventsBefore(ctx context.Context, createdAt pgty
 	return result.RowsAffected(), nil
 }
 
+const deleteSheetPageRangesByDocument = `-- name: DeleteSheetPageRangesByDocument :exec
+DELETE FROM document_sheet_page_ranges WHERE document_id = $1
+`
+
+func (q *Queries) DeleteSheetPageRangesByDocument(ctx context.Context, documentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteSheetPageRangesByDocument, documentID)
+	return err
+}
+
 const deleteTenantDomain = `-- name: DeleteTenantDomain :exec
 DELETE FROM tenant_domains
 WHERE id = $1 AND tenant_id = $2
@@ -10457,6 +10466,71 @@ func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurity
 	return items, nil
 }
 
+const listSheetPageRangesByDocument = `-- name: ListSheetPageRangesByDocument :many
+SELECT sheet_name, page_start, page_end
+FROM document_sheet_page_ranges
+WHERE document_id = $1
+ORDER BY page_start, sheet_name
+`
+
+type ListSheetPageRangesByDocumentRow struct {
+	SheetName string
+	PageStart int32
+	PageEnd   int32
+}
+
+func (q *Queries) ListSheetPageRangesByDocument(ctx context.Context, documentID pgtype.UUID) ([]ListSheetPageRangesByDocumentRow, error) {
+	rows, err := q.db.Query(ctx, listSheetPageRangesByDocument, documentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSheetPageRangesByDocumentRow
+	for rows.Next() {
+		var i ListSheetPageRangesByDocumentRow
+		if err := rows.Scan(&i.SheetName, &i.PageStart, &i.PageEnd); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSheetPageRangesByDocuments = `-- name: ListSheetPageRangesByDocuments :many
+SELECT document_id, sheet_name, page_start, page_end
+FROM document_sheet_page_ranges
+WHERE document_id = ANY($1::uuid[])
+ORDER BY document_id, page_start, sheet_name
+`
+
+func (q *Queries) ListSheetPageRangesByDocuments(ctx context.Context, dollar_1 []pgtype.UUID) ([]DocumentSheetPageRange, error) {
+	rows, err := q.db.Query(ctx, listSheetPageRangesByDocuments, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DocumentSheetPageRange
+	for rows.Next() {
+		var i DocumentSheetPageRange
+		if err := rows.Scan(
+			&i.DocumentID,
+			&i.SheetName,
+			&i.PageStart,
+			&i.PageEnd,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSignalsBySuggestionIDs = `-- name: ListSignalsBySuggestionIDs :many
 SELECT id, tenant_id, workspace_id, suggestion_id, type, title, description, explanation, suggestion, document_id, contact_id, link_id, priority, created_at, updated_at, subtype, metadata, context
 FROM signals
@@ -12944,6 +13018,31 @@ func (q *Queries) UpsertDealRoomRagDocument(ctx context.Context, arg UpsertDealR
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const upsertDocumentSheetPageRange = `-- name: UpsertDocumentSheetPageRange :exec
+INSERT INTO document_sheet_page_ranges (document_id, sheet_name, page_start, page_end)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (document_id, sheet_name) DO UPDATE SET
+    page_start = EXCLUDED.page_start,
+    page_end = EXCLUDED.page_end
+`
+
+type UpsertDocumentSheetPageRangeParams struct {
+	DocumentID pgtype.UUID
+	SheetName  string
+	PageStart  int32
+	PageEnd    int32
+}
+
+func (q *Queries) UpsertDocumentSheetPageRange(ctx context.Context, arg UpsertDocumentSheetPageRangeParams) error {
+	_, err := q.db.Exec(ctx, upsertDocumentSheetPageRange,
+		arg.DocumentID,
+		arg.SheetName,
+		arg.PageStart,
+		arg.PageEnd,
+	)
+	return err
 }
 
 const upsertIntegrationToken = `-- name: UpsertIntegrationToken :exec

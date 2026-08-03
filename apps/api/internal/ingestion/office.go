@@ -39,10 +39,17 @@ func NewConverter(baseURL, jwtSecret string, s *storage.Client) *Converter {
 }
 
 // ConvertToPDF asks OnlyOffice to convert an Office file to PDF.
-// It uses a public (non-signed) internal URL so the OnlyOffice downloader
-// (which normalizes/re-encodes URLs and breaks AWS presigned signatures) can
-// fetch the file. The S3 bucket must allow anonymous read access.
+// Spreadsheets use spreadsheetLayout so every sheet is included.
 func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey string) (string, error) {
+	return c.convertToPDF(ctx, sourceType, storageKey, true)
+}
+
+// ConvertToPDFActiveSheet converts only the workbook's active sheet (no spreadsheetLayout).
+func (c *Converter) ConvertToPDFActiveSheet(ctx context.Context, sourceType, storageKey string) (string, error) {
+	return c.convertToPDF(ctx, sourceType, storageKey, false)
+}
+
+func (c *Converter) convertToPDF(ctx context.Context, sourceType, storageKey string, allSheets bool) (string, error) {
 	// Use only the document ID as the OnlyOffice cache key (full path with slashes causes error -7).
 	// Append a timestamp so a previously failed conversion does not poison OnlyOffice's cache.
 	parts := strings.Split(storageKey, "/")
@@ -65,7 +72,7 @@ func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey str
 	// OnlyOffice only converts the active sheet unless spreadsheetLayout is
 	// provided. The layout below triggers all sheets while keeping each sheet
 	// readable: fit to 1 page wide, auto-paginate vertically, A4 landscape.
-	if isSpreadsheet(sourceType) {
+	if allSheets && isSpreadsheet(sourceType) {
 		payload["spreadsheetLayout"] = map[string]interface{}{
 			"ignorePrintArea": true,
 			"orientation":     "landscape",

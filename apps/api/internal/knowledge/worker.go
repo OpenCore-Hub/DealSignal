@@ -3,7 +3,6 @@ package knowledge
 import (
 	"context"
 	"errors"
-	"io"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -226,33 +225,57 @@ func (w *Worker) ingestOne(ctx context.Context, room db.DealRoom, cred ragCreden
 	if err != nil {
 		return w.failDoc(ctx, room.ID, documentID, err)
 	}
-	rc, err := w.service.store.GetObject(ctx, doc.StorageKey)
+
+	payload, err := w.service.buildIngestPayload(ctx, doc)
 	if err != nil {
 		return w.failDoc(ctx, room.ID, documentID, err)
 	}
-	defer rc.Close()
-	body, err := io.ReadAll(io.LimitReader(rc, 256<<20))
-	if err != nil {
-		return w.failDoc(ctx, room.ID, documentID, err)
+
+	// Persist the RAG object name before upload (docx/pptx → "{id}.pdf").
+	if binding.ExternalName != payload.Name {
+		if err := w.purgeRemoteNames(ctx, cred, binding, payload.Name); err != nil {
+			return w.failDoc(ctx, room.ID, documentID, err)
+		}
+		binding, err = w.service.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
+			RoomID:       room.ID,
+			DocumentID:   documentID,
+			WorkspaceID:  room.WorkspaceID,
+			ExternalName: payload.Name,
+			Status:       "syncing",
+			LastError:    pgtype.Text{},
+		})
+		if err != nil {
+			return w.failDoc(ctx, room.ID, documentID, err)
+		}
 	}
+
 	res, err := w.service.client.IngestBytes(
 		ctx,
 		cred.tenantSlug,
 		cred.kbSlug,
 		cred.apiKey,
-		binding.ExternalName,
-		contentTypeForName(binding.ExternalName),
-		body,
+		payload.Name,
+		payload.ContentType,
+		payload.Body,
 	)
 	if err != nil {
 		return w.failDoc(ctx, room.ID, documentID, err)
+	}
+
+	if payload.ViaPreviewPDF {
+		logger.InfoCtx(ctx, "knowledge ingest via preview PDF",
+			logger.Attr("document_id", uuid.UUID(documentID.Bytes).String()),
+			logger.Attr("external_name", payload.Name),
+			logger.Attr("bytes", len(payload.Body)),
+			logger.Attr("chunks", res.Chunks),
+		)
 	}
 
 	extID := pgtype.Text{}
 	docs, listErr := w.service.client.ListDocuments(ctx, cred.tenantSlug, cred.kbSlug, cred.apiKey)
 	if listErr == nil {
 		for _, d := range docs {
-			if d.Name == binding.ExternalName || d.Name == res.Name {
+			if d.Name == payload.Name || d.Name == res.Name {
 				extID = pgtype.Text{String: d.ID, Valid: d.ID != ""}
 				break
 			}
@@ -269,6 +292,48 @@ func (w *Worker) ingestOne(ctx context.Context, room db.DealRoom, cred ragCreden
 	return err
 }
 
+// purgeRemoteNames removes stale RAG objects when the external identity changes
+// (e.g. legacy "{id}.docx" → preview "{id}.pdf").
+func (w *Worker) purgeRemoteNames(
+	ctx context.Context,
+	cred ragCredentials,
+	binding db.DealRoomRagDocument,
+	keepName string,
+) error {
+	names := map[string]struct{}{}
+	if binding.ExternalName != "" && binding.ExternalName != keepName {
+		names[binding.ExternalName] = struct{}{}
+	}
+	docID := uuid.UUID(binding.DocumentID.Bytes).String()
+	for _, n := range []string{docID + ".docx", docID + ".doc", docID + ".pptx", docID + ".ppt"} {
+		if n != keepName {
+			names[n] = struct{}{}
+		}
+	}
+	if len(names) == 0 && !binding.ExternalDocumentID.Valid {
+		return nil
+	}
+	docs, err := w.service.client.ListDocuments(ctx, cred.tenantSlug, cred.kbSlug, cred.apiKey)
+	if err != nil {
+		return err
+	}
+	for _, d := range docs {
+		_, byName := names[d.Name]
+		byID := binding.ExternalDocumentID.Valid && d.ID == binding.ExternalDocumentID.String && d.Name != keepName
+		if !byName && !byID {
+			continue
+		}
+		if delErr := w.service.client.DeleteDocument(ctx, cred.tenantSlug, cred.kbSlug, cred.apiKey, d.ID); delErr != nil {
+			var apiErr *docling.APIError
+			if errors.As(delErr, &apiErr) && apiErr.Status == 404 {
+				continue
+			}
+			return delErr
+		}
+	}
+	return nil
+}
+
 func (w *Worker) deleteOne(ctx context.Context, room db.DealRoom, cred ragCredentials, documentID pgtype.UUID) error {
 	binding, err := w.service.queries.GetDealRoomRagDocument(ctx, db.GetDealRoomRagDocumentParams{
 		RoomID:     room.ID,
@@ -280,32 +345,10 @@ func (w *Worker) deleteOne(ctx context.Context, room db.DealRoom, cred ragCreden
 		}
 		return err
 	}
-	extID := ""
-	if binding.ExternalDocumentID.Valid {
-		extID = binding.ExternalDocumentID.String
+	// Purge current + legacy office identities (pre preview-PDF "{id}.docx"/".pptx").
+	if err := w.purgeRemoteNames(ctx, cred, binding, ""); err != nil {
+		return w.failDoc(ctx, room.ID, documentID, err)
 	}
-	if extID == "" {
-		docs, listErr := w.service.client.ListDocuments(ctx, cred.tenantSlug, cred.kbSlug, cred.apiKey)
-		if listErr != nil {
-			// Must not mark local deleted while remote purge is unverified.
-			return w.failDoc(ctx, room.ID, documentID, listErr)
-		}
-		for _, d := range docs {
-			if d.Name == binding.ExternalName {
-				extID = d.ID
-				break
-			}
-		}
-	}
-	if extID != "" {
-		if err := w.service.client.DeleteDocument(ctx, cred.tenantSlug, cred.kbSlug, cred.apiKey, extID); err != nil {
-			var apiErr *docling.APIError
-			if !(errors.As(err, &apiErr) && apiErr.Status == 404) {
-				return w.failDoc(ctx, room.ID, documentID, err)
-			}
-		}
-	}
-	// extID empty after a successful list ⇒ remote copy already absent.
 	_, err = w.service.queries.UpdateDealRoomRagDocumentSync(ctx, db.UpdateDealRoomRagDocumentSyncParams{
 		RoomID:     room.ID,
 		DocumentID: documentID,

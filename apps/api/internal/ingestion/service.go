@@ -102,12 +102,14 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 	}
 
 	pdfPath := tmpFile
+	var sheetRanges []SheetPageRange
 	if doc.SourceType != "pdf" {
-		converted, err := s.converter.ConvertToPDF(ctx, doc.SourceType, doc.StorageKey)
+		converted, ranges, err := s.convertOfficePreview(ctx, doc, tmpFile)
 		if err != nil {
 			return fmt.Errorf("convert to pdf: %w", err)
 		}
 		pdfPath = converted
+		sheetRanges = ranges
 		defer os.Remove(converted)
 	}
 
@@ -159,7 +161,57 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 		}
 	}
 
+	if err := s.persistSheetPageRanges(ctx, doc.ID, sheetRanges); err != nil {
+		return err
+	}
+
 	return s.updateDocumentStatus(ctx, doc.ID, "ready", &pageCount)
+}
+
+// convertOfficePreview prefers per-sheet XLSX convert (trusted sheet→page map);
+// on failure or non-xlsx, falls back to the legacy all-sheets OnlyOffice convert.
+func (s *Service) convertOfficePreview(
+	ctx context.Context,
+	doc db.GetDocumentByIDRow,
+	localPath string,
+) (pdfPath string, ranges []SheetPageRange, err error) {
+	if strings.EqualFold(doc.SourceType, "xlsx") && s.converter != nil {
+		merged, sheetRanges, perErr := s.converter.ConvertSpreadsheetWithSheetRanges(
+			ctx, doc.SourceType, doc.StorageKey, localPath,
+		)
+		if perErr == nil {
+			return merged, sheetRanges, nil
+		}
+		logger.InfoCtx(ctx, "per-sheet spreadsheet convert failed; falling back",
+			logger.Attr("document_id", uuidToString(doc.ID)),
+			logger.Attr("error", perErr.Error()),
+		)
+	}
+	converted, err := s.converter.ConvertToPDF(ctx, doc.SourceType, doc.StorageKey)
+	if err != nil {
+		return "", nil, err
+	}
+	return converted, nil, nil
+}
+
+func (s *Service) persistSheetPageRanges(ctx context.Context, documentID pgtype.UUID, ranges []SheetPageRange) error {
+	if err := s.queries.DeleteSheetPageRangesByDocument(ctx, documentID); err != nil {
+		return fmt.Errorf("clear sheet page ranges: %w", err)
+	}
+	for _, r := range ranges {
+		if r.SheetName == "" || r.PageStart <= 0 || r.PageEnd < r.PageStart {
+			continue
+		}
+		if err := s.queries.UpsertDocumentSheetPageRange(ctx, db.UpsertDocumentSheetPageRangeParams{
+			DocumentID: documentID,
+			SheetName:  r.SheetName,
+			PageStart:  int32(r.PageStart),
+			PageEnd:    int32(r.PageEnd),
+		}); err != nil {
+			return fmt.Errorf("persist sheet page range %q: %w", r.SheetName, err)
+		}
+	}
+	return nil
 }
 
 func (s *Service) runCSV(ctx context.Context, doc db.GetDocumentByIDRow, path string) error {
@@ -307,6 +359,9 @@ func (s *Service) cleanupDocumentData(ctx context.Context, documentID pgtype.UUI
 		return err
 	}
 	if err := s.queries.DeletePagesByDocument(ctx, documentID); err != nil {
+		return err
+	}
+	if err := s.queries.DeleteSheetPageRangesByDocument(ctx, documentID); err != nil {
 		return err
 	}
 	return nil

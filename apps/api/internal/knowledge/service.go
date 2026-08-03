@@ -82,6 +82,7 @@ type Service struct {
 	cfg       config.DoclingRAGConfig
 	client    *docling.Client
 	store     ObjectStore
+	preview   PreviewPDFConverter
 	access    RoomAccess
 	secretKey string // used to seal tenant API keys at rest
 }
@@ -97,6 +98,15 @@ func NewService(queries *db.Queries, cfg config.DoclingRAGConfig, client *doclin
 		access:    roomAccessAdapter{queries: queries},
 		secretKey: secretKey,
 	}
+}
+
+// WithPreviewPDFConverter sets the OnlyOffice converter used for Word/PowerPoint
+// knowledge ingest (preview-page locus). Required for DOCX/PPTX sync.
+func (s *Service) WithPreviewPDFConverter(c PreviewPDFConverter) *Service {
+	if s != nil {
+		s.preview = c
+	}
+	return s
 }
 
 // Enabled reports whether external RAG is configured.
@@ -154,6 +164,10 @@ type QueryHit struct {
 	DocumentID string  `json:"documentId,omitempty"`
 	Text       string  `json:"text"`
 	Score      float64 `json:"score"`
+	SourceName string  `json:"sourceName,omitempty"`
+	Pages      []int   `json:"pages,omitempty"`
+	Sheet      string  `json:"sheet,omitempty"`
+	ViewerPage *int    `json:"viewerPage,omitempty"`
 }
 
 // GetCorpus returns local sync state for a room.
@@ -312,7 +326,7 @@ func (s *Service) EnqueueIngestDocument(ctx context.Context, roomID, workspaceID
 	if err != nil {
 		return err
 	}
-	extName := externalDocName(documentID, doc.Title, doc.StorageKey)
+	extName := externalDocName(documentID, doc.SourceType, doc.Title, doc.StorageKey)
 	_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
 		RoomID:       room.ID,
 		DocumentID:   doc.ID,
@@ -359,7 +373,7 @@ func (s *Service) EnqueueDeleteDocument(ctx context.Context, roomID, workspaceID
 		}
 		return err
 	}
-	extName := externalDocName(documentID, doc.Title, doc.StorageKey)
+	extName := externalDocName(documentID, doc.SourceType, doc.Title, doc.StorageKey)
 	_, err = s.queries.UpsertDealRoomRagDocument(ctx, db.UpsertDealRoomRagDocumentParams{
 		RoomID:       room.ID,
 		DocumentID:   doc.ID,
@@ -445,7 +459,121 @@ func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string,
 			byExtID[b.ExternalDocumentID.String] = docID
 		}
 	}
-	return applyLockedSearchFilter(res, byExtID, byName, lockedIDs), nil
+	out := applyLockedSearchFilter(res, byExtID, byName, lockedIDs)
+	s.enrichViewerPages(ctx, &out)
+	s.enrichSourceDisplayNames(ctx, room.ID, &out)
+	return out, nil
+}
+
+// enrichViewerPages fills ViewerPage from locus.pages or sheet→page map.
+// Sheet-map load failures degrade (leave viewerPage unset) so search still returns.
+func (s *Service) enrichViewerPages(ctx context.Context, out *QueryResponse) {
+	sheetStart := s.loadSheetPageStarts(ctx, out.Results)
+	applyViewerPages(out.Results, sheetStart)
+}
+
+// enrichSourceDisplayNames replaces opaque ingest names (UUID.ext) with the
+// room document title. Failures degrade — hits still return with stamped names.
+func (s *Service) enrichSourceDisplayNames(ctx context.Context, roomID pgtype.UUID, out *QueryResponse) {
+	if len(out.Results) == 0 {
+		return
+	}
+	need := false
+	for _, hit := range out.Results {
+		if hit.DocumentID != "" {
+			need = true
+			break
+		}
+	}
+	if !need {
+		return
+	}
+	rows, err := s.queries.ListDealRoomDocumentsWithMeta(ctx, roomID)
+	if err != nil {
+		logger.InfoCtx(ctx, "document titles unavailable; citation source names degraded",
+			logger.Attr("error", err.Error()),
+		)
+		return
+	}
+	titleByDoc := make(map[string]string, len(rows))
+	for _, d := range rows {
+		docID := uuid.UUID(d.DocumentID.Bytes).String()
+		if title := strings.TrimSpace(d.DocumentTitle); title != "" {
+			titleByDoc[docID] = title
+		}
+	}
+	applyDisplaySourceNames(out.Results, titleByDoc)
+}
+
+// applyDisplaySourceNames prefers DealSignal document titles over RAG upload
+// identities (externalDocName = "{uuid}.{ext}"). Does not invent titles.
+func applyDisplaySourceNames(hits []QueryHit, titleByDoc map[string]string) {
+	for i := range hits {
+		title := strings.TrimSpace(titleByDoc[hits[i].DocumentID])
+		if title == "" {
+			continue
+		}
+		hits[i].SourceName = title
+	}
+}
+
+func (s *Service) loadSheetPageStarts(ctx context.Context, hits []QueryHit) map[string]map[string]int {
+	need := map[string]bool{}
+	for _, hit := range hits {
+		if hit.DocumentID != "" && len(hit.Pages) == 0 && hit.Sheet != "" {
+			need[hit.DocumentID] = true
+		}
+	}
+	docIDs := make([]pgtype.UUID, 0, len(need))
+	for id := range need {
+		docIDs = append(docIDs, pgUUID(id))
+	}
+	out := map[string]map[string]int{}
+	if len(docIDs) == 0 {
+		return out
+	}
+	rows, err := s.queries.ListSheetPageRangesByDocuments(ctx, docIDs)
+	if err != nil {
+		logger.InfoCtx(ctx, "sheet page ranges unavailable; citation jumps degraded",
+			logger.Attr("error", err.Error()),
+		)
+		return out
+	}
+	for _, row := range rows {
+		docID := uuid.UUID(row.DocumentID.Bytes).String()
+		if out[docID] == nil {
+			out[docID] = map[string]int{}
+		}
+		out[docID][row.SheetName] = int(row.PageStart)
+	}
+	return out
+}
+
+// applyViewerPages sets ViewerPage from pages (min) or sheet map page_start.
+// Missing map entries leave ViewerPage nil — never invent a page.
+func applyViewerPages(hits []QueryHit, sheetStart map[string]map[string]int) {
+	for i := range hits {
+		hit := &hits[i]
+		hit.ViewerPage = nil
+		if len(hit.Pages) > 0 {
+			min := hit.Pages[0]
+			for _, p := range hit.Pages[1:] {
+				if p > 0 && p < min {
+					min = p
+				}
+			}
+			if min > 0 {
+				hit.ViewerPage = &min
+			}
+			continue
+		}
+		if hit.Sheet == "" || hit.DocumentID == "" {
+			continue
+		}
+		if start, ok := sheetStart[hit.DocumentID][hit.Sheet]; ok && start > 0 {
+			hit.ViewerPage = &start
+		}
+	}
 }
 
 type ragCredentials struct {
@@ -655,7 +783,7 @@ func (s *Service) alignRoomDocuments(ctx context.Context, room db.DealRoom) erro
 			RoomID:       room.ID,
 			DocumentID:   d.DocumentID,
 			WorkspaceID:  room.WorkspaceID,
-			ExternalName: externalDocName(docID, doc.Title, doc.StorageKey),
+			ExternalName: externalDocName(docID, doc.SourceType, doc.Title, doc.StorageKey),
 			Status:       "pending",
 			LastError:    pgtype.Text{},
 		})
@@ -719,12 +847,14 @@ func applyLockedSearchFilter(
 			sawUnmappedWhileLocks = true
 			continue
 		}
-		out.Results = append(out.Results, QueryHit{
+		qh := QueryHit{
 			ChunkID:    hit.Chunk.ID,
 			DocumentID: localDoc,
 			Text:       hit.Chunk.Text,
 			Score:      hit.Score,
-		})
+		}
+		fillHitLocus(&qh, hit.Chunk.Metadata)
+		out.Results = append(out.Results, qh)
 	}
 	if res.Answer != "" && !sawLockedHit && !sawUnmappedWhileLocks {
 		out.Answer = res.Answer
@@ -774,15 +904,57 @@ func mapUpstream(err error) error {
 	return err
 }
 
-func externalDocName(documentID, title, storageKey string) string {
-	ext := strings.TrimPrefix(path.Ext(title), ".")
-	if ext == "" {
-		ext = strings.TrimPrefix(path.Ext(storageKey), ".")
+// externalDocName is the stable RAG upload identity. Word/PowerPoint use
+// "{id}.pdf" because knowledge ingest uploads the OnlyOffice preview PDF (page
+// locus = viewer pages). Other types keep "{id}.{sourceExt}".
+func externalDocName(documentID, sourceType, title, storageKey string) string {
+	return documentID + "." + knowledgeExternalExt(sourceType, title, storageKey)
+}
+
+func fillHitLocus(hit *QueryHit, metadata map[string]any) {
+	if metadata == nil {
+		return
 	}
-	if ext == "" {
-		ext = "bin"
+	// Prefer stamped provenance fields (prov-v1); do not invent from chunk text.
+	if name, ok := metadata["source_name"].(string); ok && name != "" {
+		hit.SourceName = name
+	} else if src, ok := metadata["source_uri"].(string); ok && src != "" {
+		hit.SourceName = strings.TrimPrefix(src, "upload:///")
 	}
-	return documentID + "." + strings.ToLower(ext)
+	locus, _ := metadata["locus"].(map[string]any)
+	if locus == nil {
+		return
+	}
+	if sheet, ok := locus["sheet"].(string); ok {
+		hit.Sheet = sheet
+	}
+	switch pages := locus["pages"].(type) {
+	case []any:
+		for _, p := range pages {
+			switch v := p.(type) {
+			case float64:
+				if v >= 1 {
+					hit.Pages = append(hit.Pages, int(v))
+				}
+			case int:
+				if v >= 1 {
+					hit.Pages = append(hit.Pages, v)
+				}
+			}
+		}
+	case []float64:
+		for _, v := range pages {
+			if v >= 1 {
+				hit.Pages = append(hit.Pages, int(v))
+			}
+		}
+	case []int:
+		for _, v := range pages {
+			if v >= 1 {
+				hit.Pages = append(hit.Pages, v)
+			}
+		}
+	}
 }
 
 func pgUUID(id string) pgtype.UUID {

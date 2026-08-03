@@ -1500,6 +1500,28 @@ WHERE token = $1;
 -- name: DeletePagesByDocument :exec
 DELETE FROM pages WHERE document_id = $1;
 
+-- name: DeleteSheetPageRangesByDocument :exec
+DELETE FROM document_sheet_page_ranges WHERE document_id = $1;
+
+-- name: UpsertDocumentSheetPageRange :exec
+INSERT INTO document_sheet_page_ranges (document_id, sheet_name, page_start, page_end)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (document_id, sheet_name) DO UPDATE SET
+    page_start = EXCLUDED.page_start,
+    page_end = EXCLUDED.page_end;
+
+-- name: ListSheetPageRangesByDocument :many
+SELECT sheet_name, page_start, page_end
+FROM document_sheet_page_ranges
+WHERE document_id = $1
+ORDER BY page_start, sheet_name;
+
+-- name: ListSheetPageRangesByDocuments :many
+SELECT document_id, sheet_name, page_start, page_end
+FROM document_sheet_page_ranges
+WHERE document_id = ANY($1::uuid[])
+ORDER BY document_id, page_start, sheet_name;
+
 -- name: DeleteChunksByDocument :exec
 DELETE FROM chunks WHERE chunks.document_id = $1 OR chunks.page_id IN (SELECT id FROM pages WHERE pages.document_id = $1);
 

@@ -91,6 +91,18 @@ func (c *Client) PutObject(ctx context.Context, key string, body io.Reader, size
 	return nil
 }
 
+// DeleteObject removes an object. Missing keys are treated as success.
+func (c *Client) DeleteObject(ctx context.Context, key string) error {
+	_, err := c.client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: c.bucketPtr(),
+		Key:    c.keyPtr(key),
+	})
+	if err != nil {
+		return fmt.Errorf("delete object %s: %w", key, err)
+	}
+	return nil
+}
+
 // GetObject returns a reader for an object.
 func (c *Client) GetObject(ctx context.Context, key string) (io.ReadCloser, error) {
 	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
