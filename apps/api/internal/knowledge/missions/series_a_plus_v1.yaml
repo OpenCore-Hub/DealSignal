@@ -1,0 +1,30 @@
+id: series_a_plus_v1
+title:
+  en: Series A+ growth diligence
+  zh-CN: A轮及以后增长尽调
+items:
+  - id: unit_economics
+    keywords: [unit economics, LTV, CAC, payback, 单位经济, 获客成本]
+    prompts:
+      en: What unit economics (LTV, CAC, payback) are stated in this room’s financials?
+      zh-CN: 本室财务材料写明的单位经济指标（LTV、CAC、回收期）是多少？
+  - id: growth_metrics
+    keywords: [ARR, MRR, growth, retention, churn, NRR, 收入增长, 留存]
+    prompts:
+      en: What growth and retention metrics (ARR/MRR, churn, NRR) appear in this room?
+      zh-CN: 本室文件中的增长与留存指标（ARR/MRR、流失、NRR）如何披露？
+  - id: use_of_proceeds
+    keywords: [use of funds, use of proceeds, 资金用途, 募集资金]
+    prompts:
+      en: How does this room’s memo allocate use of proceeds for this round?
+      zh-CN: 本室投资备忘录如何约定本轮资金用途？
+  - id: cap_table_round
+    keywords: [cap table, ownership, dilution, 股权结构, 稀释, 持股]
+    prompts:
+      en: What post-round ownership or dilution is shown in this room’s cap table?
+      zh-CN: 本室股权表显示的本轮后持股或稀释情况是什么？
+  - id: prior_preferred
+    keywords: [preferred, liquidation, protective, 优先股, 清算优先, 保护性条款]
+    prompts:
+      en: What preferred-share or protective provisions from prior rounds remain in this room’s docs?
+      zh-CN: 本室文件中既往轮次仍生效的优先股或保护性条款有哪些？

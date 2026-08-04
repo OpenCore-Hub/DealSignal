@@ -1,7 +1,6 @@
 package knowledge
 
 import (
-	"errors"
 	"unicode"
 	"unicode/utf8"
 )
@@ -16,6 +15,10 @@ const defaultAnswerTokenRunes = 36
 
 type streamPhasePayload struct {
 	Phase string `json:"phase"`
+	// Set on phase=generating so the desk can show rewrite disclosure
+	// while answer tokens are still streaming (turn already audited).
+	RetrieveQuery  string `json:"retrieveQuery,omitempty"`
+	RewriteApplied bool   `json:"rewriteApplied,omitempty"`
 }
 
 type streamSourcesPayload struct {
@@ -28,14 +31,15 @@ type streamTokenPayload struct {
 }
 
 type streamDonePayload struct {
-	SessionID    string     `json:"sessionId"`
-	Turn         QATurn     `json:"turn"`
-	Query        string     `json:"query"`
-	Mode         string     `json:"mode"`
-	Answer       string     `json:"answer,omitempty"`
-	Results      []QueryHit `json:"results"`
-	Refused      bool       `json:"refused"`
-	ResultStatus string     `json:"resultStatus"`
+	SessionID    string       `json:"sessionId"`
+	Turn         QATurn       `json:"turn"`
+	Query        string       `json:"query"`
+	Mode         string       `json:"mode"`
+	Answer       string       `json:"answer,omitempty"`
+	Results      []QueryHit   `json:"results"`
+	Refused      bool         `json:"refused"`
+	ResultStatus string       `json:"resultStatus"`
+	SessionState SessionState `json:"sessionState,omitempty"`
 }
 
 type streamErrorPayload struct {
@@ -78,24 +82,8 @@ func answerTokenChunks(answer string, maxRunes int) []string {
 }
 
 func streamErrorFrom(err error) streamErrorPayload {
-	switch {
-	case errors.Is(err, ErrUnavailable):
-		return streamErrorPayload{Code: "knowledge_unavailable", Message: "knowledge base is not available"}
-	case errors.Is(err, ErrForbidden):
-		return streamErrorPayload{Code: "forbidden", Message: "forbidden"}
-	case errors.Is(err, ErrNotFound):
-		return streamErrorPayload{Code: "not_found", Message: "not found"}
-	case errors.Is(err, ErrInvalidInput):
-		return streamErrorPayload{Code: "invalid_input", Message: "invalid input"}
-	case errors.Is(err, ErrQueryBusy):
-		return streamErrorPayload{Code: "knowledge_query_busy", Message: "a question is already in progress"}
-	case errors.Is(err, ErrQueryRateLimited):
-		return streamErrorPayload{Code: "knowledge_query_rate_limited", Message: "too many questions, please try again shortly"}
-	case errors.Is(err, ErrQueryQuotaExceeded):
-		return streamErrorPayload{Code: "knowledge_query_quota_exceeded", Message: "answer quota for this plan is exhausted"}
-	default:
-		return streamErrorPayload{Code: "internal_error", Message: "internal error"}
-	}
+	body := mapKnowledgeError(err)
+	return streamErrorPayload{Code: body.Code, Message: body.Message}
 }
 
 func shouldEmitGroundedSources(turn QATurn) bool {

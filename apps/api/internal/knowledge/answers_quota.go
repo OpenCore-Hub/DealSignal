@@ -14,10 +14,15 @@ import (
 // ErrQueryQuotaExceeded is returned when workspace answer entitlement is exhausted.
 var ErrQueryQuotaExceeded = errors.New("knowledge query quota exceeded")
 
+// ErrQueryQuotaCheckFailed is returned when Used cannot be read and a limit is configured.
+// Fail-closed: do not admit asks that we cannot meter.
+var ErrQueryQuotaCheckFailed = errors.New("knowledge query quota check failed")
+
 type answersQuotaSnapshot struct {
-	Used   int
-	Limit  int
-	Window time.Duration // metering window for Used
+	Used     int
+	Limit    int
+	Window   time.Duration // metering window for Used
+	CountErr error         // set when Used could not be loaded
 }
 
 // resolveAnswersQuotaLimit picks DailyAnswers when set, else MonthlySearches.
@@ -61,6 +66,7 @@ func (s *Service) answersQuotaSnapshot(ctx context.Context, workspaceID pgtype.U
 		Since:       pgtype.Timestamptz{Time: since, Valid: true},
 	})
 	if err != nil {
+		snap.CountErr = err
 		return snap
 	}
 	if n > math.MaxInt {
@@ -71,11 +77,16 @@ func (s *Service) answersQuotaSnapshot(ctx context.Context, workspaceID pgtype.U
 	return snap
 }
 
+// enforceAnswersQuota is a soft pre-check (COUNT then ask). Concurrent asks may
+// slightly exceed Limit; metering still lands on knowledge_qa_turns.
 func (s *Service) enforceAnswersQuota(ctx context.Context, workspaceID string) error {
 	if s == nil || workspaceID == "" {
 		return nil
 	}
 	snap := s.answersQuotaSnapshot(ctx, pgUUID(workspaceID))
+	if snap.Limit > 0 && snap.CountErr != nil {
+		return ErrQueryQuotaCheckFailed
+	}
 	if snap.Limit > 0 && snap.Used >= snap.Limit {
 		return ErrQueryQuotaExceeded
 	}

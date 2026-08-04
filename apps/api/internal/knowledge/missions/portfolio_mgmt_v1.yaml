@@ -1,0 +1,30 @@
+id: portfolio_mgmt_v1
+title:
+  en: Portfolio company monitoring
+  zh-CN: 投后组合管理
+items:
+  - id: portfolio_kpis
+    keywords: [KPI, dashboard, performance, 关键指标, 业绩看板, 经营表现]
+    prompts:
+      en: What portfolio KPI or performance figures are reported in this room’s materials?
+      zh-CN: 本室材料报告了哪些组合公司 KPI 或业绩数据？
+  - id: board_actions
+    keywords: [board, minutes, resolution, 董事会, 决议, 会议纪要]
+    prompts:
+      en: What board resolutions or material actions are recorded in this room’s governance docs?
+      zh-CN: 本室治理文件记录了哪些董事会决议或重大事项？
+  - id: runway_cash
+    keywords: [runway, cash, burn, 现金跑道, 账面现金, 烧钱]
+    prompts:
+      en: What cash runway or burn figures appear for portfolio companies in this room?
+      zh-CN: 本室对组合公司的现金跑道或烧钱速度如何披露？
+  - id: follow_on_rights
+    keywords: [follow-on, pro rata, participation, 跟投, 按比例, 优先认购]
+    prompts:
+      en: What follow-on or pro-rata participation rights are in this room’s deal docs?
+      zh-CN: 本室交易文件中的后续轮跟投或按比例参与权如何约定？
+  - id: exit_path
+    keywords: [exit, IPO, M&A, secondary, 退出, 上市, 并购, 二级转让]
+    prompts:
+      en: What exit paths or exit-related covenants are described in this room’s docs?
+      zh-CN: 本室文件描述了哪些退出路径或与退出相关的约定？

@@ -25,11 +25,15 @@ var (
 	ErrForbidden    = errors.New("knowledge base forbidden")
 	ErrNotFound     = errors.New("knowledge base not found")
 	ErrInvalidInput = errors.New("invalid input")
+	// ErrAnswerRequiresSession is returned when legacy /knowledge/query asks for Answer=true.
+	// Metered answers must go through the session query path so turns are audited.
+	ErrAnswerRequiresSession = errors.New("answer requires session query")
 )
 
-// ObjectStore reads document bytes from object storage.
+// ObjectStore reads/writes document and diligence-archive bytes in object storage.
 type ObjectStore interface {
 	GetObject(ctx context.Context, key string) (io.ReadCloser, error)
+	PutObject(ctx context.Context, key string, body io.Reader, size int64, contentType string) error
 }
 
 // RoomAccess checks deal-room membership for knowledge endpoints.
@@ -84,27 +88,71 @@ type Beginner interface {
 
 // Service orchestrates local mapping + docling-rag sync/query.
 type Service struct {
-	queries   *db.Queries
-	pool      Beginner
-	cfg       config.DoclingRAGConfig
-	client    *docling.Client
-	store     ObjectStore
-	preview   PreviewPDFConverter
-	access    RoomAccess
-	secretKey string // used to seal tenant API keys at rest
+	queries          *db.Queries
+	pool             Beginner
+	cfg              config.DoclingRAGConfig
+	client           *docling.Client
+	store            ObjectStore
+	preview          PreviewPDFConverter
+	access           RoomAccess
+	secretKey        string // used to seal tenant API keys at rest
+	followUpLLM      followUpChatCompleter
+	rewriteEnabled   bool // conversational retrieve rewrite (independent of follow-up chips)
+	rewriteCache     rewriteCache
+	retentionDays    int  // hot retention window surfaced on ops board
+	tableLaneEnabled bool // merge local table_row chunks into Query (Phase I2)
+	multiHopEnabled  bool // deterministic clause→definition→attachment hop (Phase I3)
 }
 
 // NewService constructs a knowledge service. client may be nil/disabled.
 // secretKey should be a long-lived server secret (e.g. URL_SIGNING_SECRET).
 func NewService(queries *db.Queries, cfg config.DoclingRAGConfig, client *docling.Client, store ObjectStore, secretKey string) *Service {
 	return &Service{
-		queries:   queries,
-		cfg:       cfg,
-		client:    client,
-		store:     store,
-		access:    roomAccessAdapter{queries: queries},
-		secretKey: secretKey,
+		queries:          queries,
+		cfg:              cfg,
+		client:           client,
+		store:            store,
+		access:           roomAccessAdapter{queries: queries},
+		secretKey:        secretKey,
+		rewriteEnabled:   true,
+		tableLaneEnabled: true,
+		multiHopEnabled:  true,
 	}
+}
+
+// WithQueryRewrite enables/disables elliptical retrieve-query rewrite.
+// Follow-up chip LLM is unaffected. Default is enabled.
+func (s *Service) WithQueryRewrite(enabled bool) *Service {
+	if s != nil {
+		s.rewriteEnabled = enabled
+	}
+	return s
+}
+
+// WithRewriteCache attaches a provenanced rewrite cache (memory or Redis).
+// Cache hits are always re-validated with rewriteIsGrounded (ceiling Phase P).
+func (s *Service) WithRewriteCache(cache rewriteCache) *Service {
+	if s != nil {
+		s.rewriteCache = cache
+	}
+	return s
+}
+
+// WithTableLane enables/disables the local table_row retrieve lane (Phase I2).
+func (s *Service) WithTableLane(enabled bool) *Service {
+	if s != nil {
+		s.tableLaneEnabled = enabled
+	}
+	return s
+}
+
+// WithMultiHop enables/disables deterministic second-hop retrieve (Phase I3).
+// Probe Query leaves MultiHop=false on the request; session path opts in.
+func (s *Service) WithMultiHop(enabled bool) *Service {
+	if s != nil {
+		s.multiHopEnabled = enabled
+	}
+	return s
 }
 
 // WithDBPool enables transactional session/turn writes.
@@ -178,14 +226,19 @@ type QueryRequest struct {
 	Query  string `json:"query"`
 	Answer bool   `json:"answer"`
 	TopK   int    `json:"top_k"`
+	// SessionState / MultiHop are set only by queryWithSession (not HTTP probe JSON).
+	SessionState SessionState `json:"-"`
+	MultiHop     bool         `json:"-"`
 }
 
 // QueryResponse is sanitized search output for the UI.
 type QueryResponse struct {
-	Query   string      `json:"query"`
-	Mode    string      `json:"mode"`
-	Answer  string      `json:"answer,omitempty"`
-	Results []QueryHit  `json:"results"`
+	Query   string     `json:"query"`
+	Mode    string     `json:"mode"`
+	Answer  string     `json:"answer,omitempty"`
+	Results []QueryHit `json:"results"`
+	// MultiHop is session-internal audit; persisted on bound_answer, not probe JSON.
+	MultiHop *MultiHopAudit `json:"-"`
 }
 
 // QueryHit is one citation-friendly hit.
@@ -503,10 +556,6 @@ func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string,
 	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
 		return QueryResponse{}, err
 	}
-	// Same plan meter as session asks — legacy /knowledge/query must not bypass.
-	if err := s.enforceAnswersQuota(ctx, workspaceID); err != nil {
-		return QueryResponse{}, err
-	}
 	q := strings.TrimSpace(req.Query)
 	if q == "" {
 		return QueryResponse{}, fmt.Errorf("query is required")
@@ -560,6 +609,23 @@ func (s *Service) Query(ctx context.Context, roomID, workspaceID, userID string,
 		}
 	}
 	out := applyLockedSearchFilter(res, byExtID, byName, lockedIDs)
+
+	// Phase I2: local table_row lane (numeric/table intent) merged before locus enrich.
+	if tableHits, terr := s.retrieveTableLaneHits(ctx, room, lockedIDs, q, topK); terr != nil {
+		logger.InfoCtx(ctx, "knowledge table lane unavailable; continuing with hybrid only",
+			logger.Attr("error", terr.Error()),
+		)
+	} else if n := applyTableLane(&out, tableHits, topK); n > 0 {
+		recordKnowledgeQATableLaneHits(n)
+	}
+
+	// Phase I3: deterministic multi-hop (session path only; Answer:false on hop Search).
+	if req.MultiHop {
+		if audit := s.runMultiHop(ctx, cred, byExtID, byName, lockedIDs, req.SessionState, &out, topK, mode); audit != nil {
+			out.MultiHop = audit
+		}
+	}
+
 	s.enrichViewerPages(ctx, &out)
 	s.enrichSourceDisplayNames(ctx, room.ID, &out)
 	return out, nil

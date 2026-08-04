@@ -1,0 +1,30 @@
+id: project_mgmt_v1
+title:
+  en: Project delivery diligence
+  zh-CN: 项目交付尽调
+items:
+  - id: scope_objectives
+    keywords: [scope, charter, objective, 范围, 章程, 目标]
+    prompts:
+      en: What project scope and objectives are defined in this room’s charter or overview?
+      zh-CN: 本室项目章程或概览如何定义范围与目标？
+  - id: schedule_milestones
+    keywords: [schedule, milestone, timeline, 进度, 里程碑, 时间表]
+    prompts:
+      en: What key milestones or delivery dates are in this room’s project plan?
+      zh-CN: 本室项目计划中的关键里程碑或交付日期是什么？
+  - id: budget_resources
+    keywords: [budget, cost, resource, 预算, 成本, 资源]
+    prompts:
+      en: What budget or resource allocations appear in this room’s planning docs?
+      zh-CN: 本室计划文件中的预算或资源分配如何约定？
+  - id: risk_register
+    keywords: [risk, issue, mitigation, 风险, 问题, 缓解措施]
+    prompts:
+      en: What open risks or issues are listed in this room’s risk register?
+      zh-CN: 本室风险登记册列出了哪些未关闭风险或问题？
+  - id: acceptance_criteria
+    keywords: [acceptance, quality, testing, UAT, 验收, 质量, 测试]
+    prompts:
+      en: What acceptance or quality criteria are stated in this room’s specs or test plans?
+      zh-CN: 本室规格或测试计划写明的验收/质量标准是什么？

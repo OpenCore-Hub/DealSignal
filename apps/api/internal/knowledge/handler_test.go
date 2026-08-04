@@ -34,6 +34,14 @@ func (s stubAnswersQuota) enforceAnswersQuota(context.Context, string) error {
 	return s.err
 }
 
+type stubCorpusReady struct {
+	err error
+}
+
+func (s stubCorpusReady) enforceCorpusReady(context.Context, string, string, string) error {
+	return s.err
+}
+
 func testKnowledgeRouter(h *Handler) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	r := gin.New()
@@ -63,19 +71,21 @@ func TestQuerySessionStreamSSEDone(t *testing.T) {
 				Answer:    "Grounded answer for: " + req.Query,
 				Results:   []QueryHit{{ChunkID: "c1", Text: "clause", Score: 0.9}},
 				Turn: QATurn{
-					ID:           "turn-1",
-					SessionID:    "sess-1",
-					Sequence:     1,
-					Question:     req.Query,
-					Answer:       "Grounded answer for: " + req.Query,
-					ResultStatus: "answered",
-					Hits:         []QueryHit{{ChunkID: "c1", Text: "clause", Score: 0.9}},
+					ID:             "turn-1",
+					SessionID:      "sess-1",
+					Sequence:       1,
+					Question:       req.Query,
+					Answer:         "Grounded answer for: " + req.Query,
+					ResultStatus:   "answered",
+					Hits:           []QueryHit{{ChunkID: "c1", Text: "clause", Score: 0.9}},
+					RetrieveQuery:  "Acme SAFE valuation cap",
+					RewriteApplied: true,
 				},
 			}, nil
 		}},
 	}
 	r := testKnowledgeRouter(h)
-	body := `{"query":"What is the valuation cap?","answer":true,"top_k":8}`
+	body := `{"query":"他们免费吗？","answer":true,"top_k":8}`
 	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query/stream", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -91,6 +101,8 @@ func TestQuerySessionStreamSSEDone(t *testing.T) {
 		"event: phase",
 		`"phase":"retrieving"`,
 		`"phase":"generating"`,
+		`"rewriteApplied":true`,
+		`"retrieveQuery":"Acme SAFE valuation cap"`,
 		"event: sources",
 		"event: token",
 		"event: done",
@@ -174,6 +186,56 @@ func TestQuerySessionStreamRejectsBusyBeforeSSE(t *testing.T) {
 		t.Fatal("busy reject must not open SSE")
 	}
 	close(release)
+}
+
+func TestQuerySessionStreamRejectsCorpusNotReady(t *testing.T) {
+	h := &Handler{
+		admission: newMemoryAskAdmission(0),
+		corpus:    stubCorpusReady{err: ErrCorpusNotReady},
+		runner: stubSessionRunner{fn: func(
+			context.Context, string, string, string, SessionQueryRequest, string,
+		) (SessionQueryResponse, error) {
+			t.Fatal("runner must not run when corpus is not ready")
+			return SessionQueryResponse{}, nil
+		}},
+	}
+	r := testKnowledgeRouter(h)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query/stream", strings.NewReader(`{"query":"q"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "knowledge_corpus_not_ready") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); strings.Contains(ct, "text/event-stream") {
+		t.Fatal("corpus reject must not open SSE")
+	}
+}
+
+func TestLegacyQueryRejectsAnswerTrue(t *testing.T) {
+	h := &Handler{
+		admission: newMemoryAskAdmission(0),
+		runner: stubSessionRunner{fn: func(
+			context.Context, string, string, string, SessionQueryRequest, string,
+		) (SessionQueryResponse, error) {
+			t.Fatal("session runner must not run for legacy query")
+			return SessionQueryResponse{}, nil
+		}},
+	}
+	r := testKnowledgeRouter(h)
+	req := httptest.NewRequest(http.MethodPost, "/api/workspaces/acme/deal-rooms/room-1/knowledge/query", strings.NewReader(`{"query":"q","answer":true}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "answer_requires_session") {
+		t.Fatalf("body=%s", w.Body.String())
+	}
 }
 
 func TestQuerySessionStreamRejectsQuotaExceeded(t *testing.T) {
@@ -289,5 +351,33 @@ func TestStreamErrorFromQueryBusy(t *testing.T) {
 	p := streamErrorFrom(ErrQueryBusy)
 	if p.Code != "knowledge_query_busy" {
 		t.Fatalf("%+v", p)
+	}
+}
+
+func TestSuggestFollowUpsSoftFailsWhenBusy(t *testing.T) {
+	t.Parallel()
+	a := newMemoryMemberAdmission(followUpAdmissionScope, 0)
+	if err := a.Admit(context.Background(), "room-1", "user-1"); err != nil {
+		t.Fatal(err)
+	}
+	// service intentionally nil — gate must soft-fail before SuggestFollowUps.
+	h := &Handler{followUpAdmission: a}
+	r := testKnowledgeRouter(h)
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/workspaces/acme/deal-rooms/room-1/knowledge/turns/turn-1/follow-ups",
+		nil,
+	)
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var res FollowUpsResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &res); err != nil {
+		t.Fatal(err)
+	}
+	if len(res.Items) != 0 {
+		t.Fatalf("expected empty items so FE keeps templates, got %#v", res)
 	}
 }

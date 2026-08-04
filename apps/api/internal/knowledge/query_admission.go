@@ -19,23 +19,40 @@ func memberQueryGateKey(roomID, userID string) string {
 }
 
 const (
-	defaultKnowledgeQAMemberRPM = 20
-	knowledgeQAInflightTTL      = 5 * time.Minute
-	knowledgeQARPMWindow        = time.Minute
+	defaultKnowledgeQAMemberRPM   = 20
+	defaultKnowledgeQAFollowUpRPM = 40
+	knowledgeQAInflightTTL        = 5 * time.Minute
+	knowledgeQARPMWindow          = time.Minute
+
+	askAdmissionScope      = "ask"
+	followUpAdmissionScope = "followups"
 )
 
 // DefaultMemberRPM is the default per-member session-ask quota (per minute).
 func DefaultMemberRPM() int { return defaultKnowledgeQAMemberRPM }
+
+// DefaultFollowUpRPM is the default per-member follow-up generation quota (per minute).
+func DefaultFollowUpRPM() int { return defaultKnowledgeQAFollowUpRPM }
 
 // NewMemoryAskAdmission builds a process-local admission controller (tests / no Redis).
 func NewMemoryAskAdmission(rpm int) AskAdmission {
 	return newMemoryAskAdmission(rpm)
 }
 
+// NewMemoryFollowUpAdmission builds process-local follow-up chip generation admission.
+func NewMemoryFollowUpAdmission(rpm int) AskAdmission {
+	return newMemoryMemberAdmission(followUpAdmissionScope, rpm)
+}
+
 // NewRedisAskAdmission builds a cross-replica admission controller.
 // rdb must support SetNX/Del; limit must support RateLimitAllow (may be the same client).
 func NewRedisAskAdmission(rdb setNXer, limit rateLimitStore, rpm int) AskAdmission {
 	return newRedisAskAdmission(rdb, limit, rpm)
+}
+
+// NewRedisFollowUpAdmission builds cross-replica follow-up chip generation admission.
+func NewRedisFollowUpAdmission(rdb setNXer, limit rateLimitStore, rpm int) AskAdmission {
+	return newRedisMemberAdmission(followUpAdmissionScope, rdb, limit, rpm)
 }
 
 // AskAdmission admits one ask at a time per member and enforces a per-minute quota.
@@ -57,6 +74,7 @@ type setNXer interface {
 
 // memoryAskAdmission is process-local (tests / single-replica fallback).
 type memoryAskAdmission struct {
+	scope    string
 	mu       sync.Mutex
 	inflight map[string]struct{}
 	hits     map[string][]time.Time
@@ -66,10 +84,18 @@ type memoryAskAdmission struct {
 }
 
 func newMemoryAskAdmission(rpm int) *memoryAskAdmission {
+	return newMemoryMemberAdmission(askAdmissionScope, rpm)
+}
+
+func newMemoryMemberAdmission(scope string, rpm int) *memoryAskAdmission {
 	if rpm < 0 {
 		rpm = 0
 	}
+	if scope == "" {
+		scope = askAdmissionScope
+	}
 	return &memoryAskAdmission{
+		scope:    scope,
 		inflight: make(map[string]struct{}),
 		hits:     make(map[string][]time.Time),
 		limit:    rpm,
@@ -117,33 +143,43 @@ func (a *memoryAskAdmission) Release(_ context.Context, roomID, userID string) {
 }
 
 // redisAskAdmission coordinates inflight + RPM across replicas.
-// Redis errors fail open (admit) so a Redis outage does not freeze the desk.
+// Redis errors intentionally fail open (admit): desk availability beats
+// cross-replica gate strictness during an infra outage. Plan answer quota
+// still fail-closes independently via Postgres COUNT.
 type redisAskAdmission struct {
+	scope string
 	rdb   setNXer
 	limit rateLimitStore
 	rpm   int
 }
 
 func newRedisAskAdmission(rdb setNXer, limit rateLimitStore, rpm int) *redisAskAdmission {
+	return newRedisMemberAdmission(askAdmissionScope, rdb, limit, rpm)
+}
+
+func newRedisMemberAdmission(scope string, rdb setNXer, limit rateLimitStore, rpm int) *redisAskAdmission {
 	if rpm < 0 {
 		rpm = 0
 	}
-	return &redisAskAdmission{rdb: rdb, limit: limit, rpm: rpm}
+	if scope == "" {
+		scope = askAdmissionScope
+	}
+	return &redisAskAdmission{scope: scope, rdb: rdb, limit: limit, rpm: rpm}
 }
 
-func knowledgeQAInflightKey(roomID, userID string) string {
-	return fmt.Sprintf("knowledge:qa:inflight:%s:%s", roomID, userID)
+func knowledgeQAInflightKey(scope, roomID, userID string) string {
+	return fmt.Sprintf("knowledge:qa:%s:inflight:%s:%s", scope, roomID, userID)
 }
 
-func knowledgeQARPMKey(roomID, userID string) string {
-	return fmt.Sprintf("knowledge:qa:rpm:%s:%s", roomID, userID)
+func knowledgeQARPMKey(scope, roomID, userID string) string {
+	return fmt.Sprintf("knowledge:qa:%s:rpm:%s:%s", scope, roomID, userID)
 }
 
 func (a *redisAskAdmission) Admit(ctx context.Context, roomID, userID string) error {
 	if a == nil || a.rdb == nil {
 		return nil
 	}
-	ok, err := a.rdb.SetNX(ctx, knowledgeQAInflightKey(roomID, userID), "1", knowledgeQAInflightTTL)
+	ok, err := a.rdb.SetNX(ctx, knowledgeQAInflightKey(a.scope, roomID, userID), "1", knowledgeQAInflightTTL)
 	if err != nil {
 		// Fail open on Redis errors.
 		return nil
@@ -152,13 +188,13 @@ func (a *redisAskAdmission) Admit(ctx context.Context, roomID, userID string) er
 		return ErrQueryBusy
 	}
 	if a.rpm > 0 && a.limit != nil {
-		allowed, _, err := a.limit.RateLimitAllow(ctx, knowledgeQARPMKey(roomID, userID), a.rpm, knowledgeQARPMWindow)
+		allowed, _, err := a.limit.RateLimitAllow(ctx, knowledgeQARPMKey(a.scope, roomID, userID), a.rpm, knowledgeQARPMWindow)
 		if err != nil {
 			// Fail open: keep inflight so Release still cleans up.
 			return nil
 		}
 		if !allowed {
-			_ = a.rdb.Del(ctx, knowledgeQAInflightKey(roomID, userID))
+			_ = a.rdb.Del(ctx, knowledgeQAInflightKey(a.scope, roomID, userID))
 			return ErrQueryRateLimited
 		}
 	}
@@ -169,7 +205,7 @@ func (a *redisAskAdmission) Release(ctx context.Context, roomID, userID string) 
 	if a == nil || a.rdb == nil {
 		return
 	}
-	_ = a.rdb.Del(ctx, knowledgeQAInflightKey(roomID, userID))
+	_ = a.rdb.Del(ctx, knowledgeQAInflightKey(a.scope, roomID, userID))
 }
 
 // compile-time checks

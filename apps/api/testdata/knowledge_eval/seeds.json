@@ -1,0 +1,93 @@
+{
+  "description": "Hand-written knowledge desk eval seeds (ceiling Phase G/K/O). wrong_citation rows with hits+claims+expectedSourceNames feed the CI gold gate; accepted room candidates export into this shape.",
+  "seeds": [
+    {
+      "id": "wrong_cite_price",
+      "kind": "wrong_citation",
+      "question": "What is the purchase price?",
+      "answer": "The purchase price is fifty million USD [1].",
+      "note": "Hit cited a different round; price was ten million.",
+      "expect": "reject_or_rebind",
+      "hits": [
+        {"chunkId": "h_spa", "sourceName": "SPA_Schedule.pdf", "excerpt": "Prior round valued at fifty million USD."},
+        {"chunkId": "h_cim", "sourceName": "CIM.pdf", "excerpt": "Purchase price is ten million USD."}
+      ],
+      "claims": [
+        {"text": "The purchase price is fifty million USD", "hitIds": ["h_spa"], "confidence": "grounded"}
+      ],
+      "expectedSourceNames": ["CIM.pdf"]
+    },
+    {
+      "id": "not_answering_cap",
+      "kind": "not_answering",
+      "question": "What is the valuation cap in the SAFE?",
+      "answer": "SAFE agreements often include valuation caps in venture deals.",
+      "note": "Industry trivia — not from room docs.",
+      "expect": "refuse_or_ground"
+    },
+    {
+      "id": "wrong_cite_party",
+      "kind": "wrong_citation",
+      "question": "Who is the buyer?",
+      "answer": "Acme Holdings is the buyer [2].",
+      "note": "Citation pointed at seller schedule.",
+      "expect": "reject_or_rebind",
+      "hits": [
+        {"chunkId": "h_buyer", "sourceName": "SPA.pdf", "excerpt": "Buyer means Acme Holdings LLC."},
+        {"chunkId": "h_seller", "sourceName": "Seller_Schedule.pdf", "excerpt": "Seller group includes Acme Holdings affiliates."}
+      ],
+      "claims": [
+        {"text": "Acme Holdings is the buyer", "hitIds": ["h_seller"], "confidence": "grounded"}
+      ],
+      "expectedSourceNames": ["SPA.pdf"]
+    },
+    {
+      "id": "not_answering_law",
+      "kind": "not_answering",
+      "question": "Is this change of control clause enforceable under Delaware law?",
+      "answer": "Under Delaware corporate law, change of control provisions are generally enforceable if clearly drafted.",
+      "note": "Out-of-room legal advice — desk must refuse or stay in-corpus.",
+      "expect": "refuse_or_ground"
+    },
+    {
+      "id": "wrong_cite_cross_file",
+      "kind": "wrong_citation",
+      "question": "What EBITDA does the CIM show for FY2023?",
+      "answer": "FY2023 EBITDA was $12.4 million [1].",
+      "note": "Cited SPA schedule instead of CIM financials.",
+      "expect": "reject_or_rebind",
+      "hits": [
+        {"chunkId": "h_spa_fin", "sourceName": "SPA_Schedule.pdf", "excerpt": "Working capital peg implies EBITDA near $12.4 million."},
+        {"chunkId": "h_cim_fin", "sourceName": "CIM.pdf", "excerpt": "FY2023 EBITDA was $9.1 million."}
+      ],
+      "claims": [
+        {"text": "FY2023 EBITDA was $12.4 million", "hitIds": ["h_spa_fin"], "confidence": "grounded"}
+      ],
+      "expectedSourceNames": ["CIM.pdf"]
+    },
+    {
+      "id": "not_answering_market",
+      "kind": "not_answering",
+      "question": "What is a typical SaaS NRR benchmark?",
+      "answer": "Best-in-class SaaS companies often target net revenue retention above 120%.",
+      "note": "Market common knowledge — not room evidence.",
+      "expect": "refuse_or_ground"
+    },
+    {
+      "id": "wrong_cite_definition",
+      "kind": "wrong_citation",
+      "question": "How is Material Adverse Effect defined?",
+      "answer": "Material Adverse Effect means any material adverse change in the industry [1].",
+      "note": "Cited industry overview; definition lives in Exhibit A.",
+      "expect": "reject_or_rebind",
+      "hits": [
+        {"chunkId": "h_overview", "sourceName": "Industry_Overview.pdf", "excerpt": "Material adverse change in the industry is common diligence language."},
+        {"chunkId": "h_exhibit", "sourceName": "SPA_Exhibit_A.pdf", "excerpt": "Material Adverse Effect means a material adverse effect on the Business."}
+      ],
+      "claims": [
+        {"text": "Material Adverse Effect means any material adverse change in the industry", "hitIds": ["h_overview"], "confidence": "grounded"}
+      ],
+      "expectedSourceNames": ["SPA_Exhibit_A.pdf"]
+    }
+  ]
+}

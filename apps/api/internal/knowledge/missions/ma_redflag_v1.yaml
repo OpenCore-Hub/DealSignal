@@ -1,0 +1,30 @@
+id: ma_redflag_v1
+title:
+  en: M&A red-flag review
+  zh-CN: 并购红旗审查
+items:
+  - id: change_of_control
+    keywords: [change of control, CoC, 控制权变更, 控制权]
+    prompts:
+      en: Which contracts have change-of-control termination rights in this room?
+      zh-CN: 本室哪些合同在控制权变更时可被终止？
+  - id: material_litigation
+    keywords: [litigation, dispute, 诉讼, 争议, 仲裁]
+    prompts:
+      en: What material litigation or disputes are disclosed in this room’s docs?
+      zh-CN: 本室文件披露了哪些重大诉讼或争议？
+  - id: related_party
+    keywords: [related party, affiliate, 关联交易, 关联方]
+    prompts:
+      en: What related-party transactions appear in this room’s disclosures?
+      zh-CN: 本室披露文件中有哪些关联交易？
+  - id: indebtedness
+    keywords: [indebtedness, debt, loan, 负债, 借款, 债务]
+    prompts:
+      en: What material indebtedness or liens are described in this room’s docs?
+      zh-CN: 本室文件描述了哪些重大债务或担保负担？
+  - id: ip_ownership
+    keywords: [intellectual property, IP, patent, 知识产权, 专利]
+    prompts:
+      en: How is key IP ownership or assignment documented in this room?
+      zh-CN: 本室关键知识产权归属或转让如何约定？

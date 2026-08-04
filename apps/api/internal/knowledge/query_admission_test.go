@@ -68,8 +68,30 @@ func TestRedisAskAdmissionBusyAndRateLimit(t *testing.T) {
 	if err := a.Admit(context.Background(), "r", "u"); !errors.Is(err, ErrQueryRateLimited) {
 		t.Fatalf("got %v", err)
 	}
-	if rdb.keys[knowledgeQAInflightKey("r", "u")] {
+	if rdb.keys[knowledgeQAInflightKey(askAdmissionScope, "r", "u")] {
 		t.Fatal("inflight should be cleared after rate limit")
+	}
+}
+
+func TestFollowUpAdmissionUsesSeparateKeys(t *testing.T) {
+	t.Parallel()
+	rdb := &stubSetNX{keys: map[string]bool{}}
+	lim := &stubRateLimit{allow: true}
+	ask := newRedisAskAdmission(rdb, lim, 10)
+	fu := newRedisMemberAdmission(followUpAdmissionScope, rdb, lim, 10)
+
+	if err := ask.Admit(context.Background(), "r", "u"); err != nil {
+		t.Fatal(err)
+	}
+	// Follow-ups share the member but not the ask inflight key.
+	if err := fu.Admit(context.Background(), "r", "u"); err != nil {
+		t.Fatal(err)
+	}
+	if !rdb.keys[knowledgeQAInflightKey(askAdmissionScope, "r", "u")] {
+		t.Fatal("ask inflight missing")
+	}
+	if !rdb.keys[knowledgeQAInflightKey(followUpAdmissionScope, "r", "u")] {
+		t.Fatal("follow-ups inflight missing")
 	}
 }
 

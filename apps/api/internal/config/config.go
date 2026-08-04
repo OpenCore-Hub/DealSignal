@@ -103,6 +103,18 @@ type Config struct {
 	KnowledgeQARetentionDays int
 	// KnowledgeQAMemberRPM caps session asks per room member per minute (0 disables RPM; single-flight remains).
 	KnowledgeQAMemberRPM int
+	// KnowledgeQAFollowUpRPM caps follow-up chip generations per room member per minute (0 disables RPM).
+	KnowledgeQAFollowUpRPM int
+	// KnowledgeQARewriteEnabled toggles elliptical retrieve-query rewrite (default on).
+	// Independent of follow-up chip LLM — set false to kill rewrite without killing chips.
+	KnowledgeQARewriteEnabled bool
+	// KnowledgeQARewriteCacheEnabled toggles provenanced rewrite cache after grounding (default on).
+	KnowledgeQARewriteCacheEnabled bool
+	// KnowledgeQATableLaneEnabled merges local table_row chunks into Knowledge Query (default on).
+	// Requires TABLE_INGEST_* to have produced rows for room spreadsheets.
+	KnowledgeQATableLaneEnabled bool
+	// KnowledgeQAMultiHopEnabled runs deterministic second-hop retrieve on the session path (default on).
+	KnowledgeQAMultiHopEnabled bool
 
 	SignalRulesPath string
 
@@ -230,6 +242,11 @@ func Load() (*Config, error) {
 		SecurityEventsRetentionDays: getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
 		KnowledgeQARetentionDays:    getEnvInt("KNOWLEDGE_QA_RETENTION_DAYS", 90),
 		KnowledgeQAMemberRPM:        getEnvInt("KNOWLEDGE_QA_MEMBER_RPM", 20),
+		KnowledgeQAFollowUpRPM:      getEnvInt("KNOWLEDGE_QA_FOLLOWUP_RPM", 40),
+		KnowledgeQARewriteEnabled:      strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_ENABLED", "true")) == "true",
+		KnowledgeQARewriteCacheEnabled: strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_CACHE_ENABLED", "true")) == "true",
+		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
+		KnowledgeQAMultiHopEnabled:     strings.ToLower(getEnv("KNOWLEDGE_QA_MULTI_HOP_ENABLED", "true")) == "true",
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",

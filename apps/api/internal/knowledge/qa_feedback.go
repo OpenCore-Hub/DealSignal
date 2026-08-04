@@ -48,10 +48,11 @@ func (s *Service) UpsertTurnFeedback(
 		return QAFeedback{}, err
 	}
 
-	if _, err := s.queries.GetKnowledgeQATurnForRoom(ctx, db.GetKnowledgeQATurnForRoomParams{
+	turnRow, err := s.queries.GetKnowledgeQATurnForRoom(ctx, db.GetKnowledgeQATurnForRoomParams{
 		ID:     pgUUID(turnID),
 		RoomID: pgUUID(roomID),
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return QAFeedback{}, ErrNotFound
 		}
@@ -68,6 +69,10 @@ func (s *Service) UpsertTurnFeedback(
 		return QAFeedback{}, err
 	}
 	recordKnowledgeQAFeedback(kind)
+	// Negative feedback → eval candidate for gold review (ceiling Phase G/O).
+	if kind == FeedbackKindWrongCitation || kind == FeedbackKindNotAnswering {
+		s.recordEvalCandidate(ctx, roomID, workspaceID, userID, turnRow, kind, note)
+	}
 	return mapQAFeedback(row), nil
 }
 

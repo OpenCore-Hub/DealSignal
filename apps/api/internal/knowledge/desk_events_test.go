@@ -49,3 +49,16 @@ func TestRecordDeskEventInvalid(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestRecordDeskEventFollowUpsUpgradeFailed(t *testing.T) {
+	svc := &Service{access: stubRoomAccess{}}
+	before := testutil.ToFloat64(knowledgeQAFollowUpsUpgradeFailedTotal)
+	if err := svc.RecordDeskEvent(context.Background(), "r", "w", "u", DeskEventRequest{
+		Type: "followups_upgrade_failed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if testutil.ToFloat64(knowledgeQAFollowUpsUpgradeFailedTotal) < before+1 {
+		t.Fatal("followups_upgrade_failed counter")
+	}
+}

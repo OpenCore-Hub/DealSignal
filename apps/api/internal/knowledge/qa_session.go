@@ -25,11 +25,13 @@ const (
 )
 
 // SessionQueryRequest is the lazy-create session query body.
+// ClientRequestID is required for idempotent asks (empty → 400 invalid_input).
 type SessionQueryRequest struct {
-	SessionID string `json:"sessionId"`
-	Query     string `json:"query"`
-	Answer    bool   `json:"answer"`
-	TopK      int    `json:"top_k"`
+	SessionID       string `json:"sessionId"`
+	Query           string `json:"query"`
+	Answer          bool   `json:"answer"`
+	TopK            int    `json:"top_k"`
+	ClientRequestID string `json:"clientRequestId"`
 }
 
 // CreateSessionRequest is the optional body for explicit session create.
@@ -39,14 +41,15 @@ type CreateSessionRequest struct {
 
 // QASession is the API shape for a knowledge Q&A session.
 type QASession struct {
-	ID         string     `json:"id"`
-	RoomID     string     `json:"roomId"`
-	Title      string     `json:"title,omitempty"`
-	Status     string     `json:"status"`
-	CreatedAt  time.Time  `json:"createdAt"`
-	UpdatedAt  time.Time  `json:"updatedAt"`
-	LastTurnAt *time.Time `json:"lastTurnAt,omitempty"`
-	TurnCount  int        `json:"turnCount,omitempty"`
+	ID         string        `json:"id"`
+	RoomID     string        `json:"roomId"`
+	Title      string        `json:"title,omitempty"`
+	Status     string        `json:"status"`
+	CreatedAt  time.Time     `json:"createdAt"`
+	UpdatedAt  time.Time     `json:"updatedAt"`
+	LastTurnAt *time.Time    `json:"lastTurnAt,omitempty"`
+	TurnCount  int           `json:"turnCount,omitempty"`
+	State      *SessionState `json:"state,omitempty"`
 }
 
 // QASessionSummary is a list row with preview fields for A.1 history.
@@ -63,19 +66,31 @@ type SessionListResponse struct {
 
 // QATurn is one audited research turn.
 type QATurn struct {
-	ID           string      `json:"id"`
-	SessionID    string      `json:"sessionId"`
-	Sequence     int         `json:"sequence"`
-	Question     string      `json:"question"`
-	Answer       string      `json:"answer,omitempty"`
-	Refused      bool        `json:"refused"`
-	ResultStatus string      `json:"resultStatus"`
-	Hits         []QueryHit  `json:"hits"`
-	Mode         string      `json:"mode,omitempty"`
-	TopK         int         `json:"topK,omitempty"`
-	ErrorSummary string      `json:"errorSummary,omitempty"`
-	CreatedAt    time.Time   `json:"createdAt"`
-	Feedback     *QAFeedback `json:"feedback,omitempty"`
+	ID                string         `json:"id"`
+	SessionID         string         `json:"sessionId"`
+	Sequence          int            `json:"sequence"`
+	Question          string         `json:"question"`
+	Answer            string         `json:"answer,omitempty"`
+	Refused           bool           `json:"refused"`
+	ResultStatus      string         `json:"resultStatus"`
+	Hits              []QueryHit     `json:"hits"`
+	Mode              string         `json:"mode,omitempty"`
+	TopK              int            `json:"topK,omitempty"`
+	ErrorSummary      string         `json:"errorSummary,omitempty"`
+	RetrieveQuery     string         `json:"retrieveQuery,omitempty"`
+	RewriteApplied    bool           `json:"rewriteApplied,omitempty"`
+	RewriteBasis      string         `json:"rewriteBasis,omitempty"` // state | prior_only
+	Claims            []AnswerClaim  `json:"claims,omitempty"`
+	Unresolved        []string       `json:"unresolved,omitempty"`
+	Conflicts         []HitConflict  `json:"conflicts,omitempty"`
+	MultiHop          *MultiHopAudit `json:"multiHop,omitempty"`
+	Refusal           *RefusalInfo   `json:"refusal,omitempty"`
+	Judgment          *JudgmentInfo  `json:"judgment,omitempty"`
+	CostUnits         int            `json:"costUnits,omitempty"`
+	CorpusFingerprint string         `json:"corpusFingerprint,omitempty"`
+	DurationMs        int            `json:"durationMs,omitempty"`
+	CreatedAt         time.Time      `json:"createdAt"`
+	Feedback          *QAFeedback    `json:"feedback,omitempty"`
 }
 
 // SessionDetail is a session plus ordered turns.
@@ -86,12 +101,13 @@ type SessionDetail struct {
 
 // SessionQueryResponse is the product query path result.
 type SessionQueryResponse struct {
-	SessionID string     `json:"sessionId"`
-	Turn      QATurn     `json:"turn"`
-	Query     string     `json:"query"`
-	Mode      string     `json:"mode"`
-	Answer    string     `json:"answer,omitempty"`
-	Results   []QueryHit `json:"results"`
+	SessionID    string       `json:"sessionId"`
+	Turn         QATurn       `json:"turn"`
+	Query        string       `json:"query"`
+	Mode         string       `json:"mode"`
+	Answer       string       `json:"answer,omitempty"`
+	Results      []QueryHit   `json:"results"`
+	SessionState SessionState `json:"sessionState,omitempty"`
 }
 
 // QueryWithSession runs knowledge Query and appends an audit turn (JSON transport).
@@ -133,6 +149,23 @@ func (s *Service) queryWithSession(
 	if q == "" {
 		return SessionQueryResponse{}, fmt.Errorf("query is required")
 	}
+	clientRequestID, err := parseClientRequestID(req.ClientRequestID)
+	if err != nil {
+		return SessionQueryResponse{}, err
+	}
+	// Replay before corpus/quota/upstream so retries neither burn entitlement nor re-query.
+	if clientRequestID != "" {
+		if replay, ok, lerr := s.lookupIdempotentTurn(ctx, roomID, userID, clientRequestID, q); lerr != nil {
+			return SessionQueryResponse{}, lerr
+		} else if ok {
+			// Do not re-record Prometheus turn counters — the original ask already did.
+			return replay, nil
+		}
+	}
+	// A5 server-side: do not create sessions or burn quota on an unreadied corpus.
+	if err := s.enforceCorpusReady(ctx, roomID, workspaceID, userID); err != nil {
+		return SessionQueryResponse{}, err
+	}
 	if err := s.enforceAnswersQuota(ctx, workspaceID); err != nil {
 		return SessionQueryResponse{}, err
 	}
@@ -142,15 +175,37 @@ func (s *Service) queryWithSession(
 		return SessionQueryResponse{}, err
 	}
 
-	queryReq := QueryRequest{Query: q, Answer: req.Answer, TopK: req.TopK}
+	// Retrieve may use a rewritten standalone query; audit stores the user's wording
+	// plus retrieve_query / rewrite_applied / rewrite_basis for replay/debug.
+	// Rewrite inputs are limited to session.state + prior turn (ceiling §3.2).
+	displayQ := q
+	retrieveQ, rewriteApplied, rewriteBasis := s.maybeRewriteFollowUpQuery(ctx, session, q)
+	queryReq := QueryRequest{
+		Query:        retrieveQ,
+		Answer:       req.Answer,
+		TopK:         req.TopK,
+		SessionState: parseSessionState(session.State),
+		MultiHop:     true,
+	}
 	res, qerr := s.Query(ctx, roomID, workspaceID, userID, queryReq)
 
 	// Client Stop / disconnect cancels the request ctx. Persist the audit turn
 	// anyway so the desk can hydrate (P5) — same pattern as assistant/link.
 	auditCtx, auditCancel := auditWriteContext(ctx)
 	defer auditCancel()
-	turn, err := s.appendTurn(auditCtx, session, roomID, workspaceID, userID, q, queryReq, res, qerr)
+	durationMs := int32(time.Since(started).Milliseconds())
+	if durationMs < 0 {
+		durationMs = 0
+	}
+	turn, err := s.appendTurn(auditCtx, session, roomID, workspaceID, userID, displayQ, retrieveQ, rewriteApplied, rewriteBasis, queryReq, res, qerr, clientRequestID, durationMs)
 	if err != nil {
+		if clientRequestID != "" && isUniqueViolation(err) {
+			if replay, ok, lerr := s.lookupIdempotentTurn(ctx, roomID, userID, clientRequestID, q); lerr != nil {
+				return SessionQueryResponse{}, lerr
+			} else if ok {
+				return replay, nil
+			}
+		}
 		return SessionQueryResponse{}, err
 	}
 
@@ -162,14 +217,61 @@ func (s *Service) queryWithSession(
 	// Upstream unavailability is reflected on the turn, not as a dropped response.
 	_ = qerr
 	recordKnowledgeQATurn(turn.ResultStatus, transport, started)
+	// Post-turn state matches what appendTurn persisted (evolve from prior + this turn).
+	nextState := evolveSessionState(parseSessionState(session.State), turn)
 	return SessionQueryResponse{
-		SessionID: turn.SessionID,
-		Turn:      turn,
-		Query:     q,
-		Mode:      turn.Mode,
-		Answer:    turn.Answer,
-		Results:   results,
+		SessionID:    turn.SessionID,
+		Turn:         turn,
+		Query:        displayQ,
+		Mode:         turn.Mode,
+		Answer:       turn.Answer,
+		Results:      results,
+		SessionState: nextState,
 	}, nil
+}
+
+func (s *Service) lookupIdempotentTurn(
+	ctx context.Context,
+	roomID, userID, clientRequestID, question string,
+) (SessionQueryResponse, bool, error) {
+	if s.queries == nil || clientRequestID == "" {
+		return SessionQueryResponse{}, false, nil
+	}
+	row, err := s.queries.GetKnowledgeQATurnByClientRequest(ctx, db.GetKnowledgeQATurnByClientRequestParams{
+		RoomID:          pgUUID(roomID),
+		CreatedBy:       pgUUID(userID),
+		ClientRequestID: pgtype.Text{String: clientRequestID, Valid: true},
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return SessionQueryResponse{}, false, nil
+	}
+	if err != nil {
+		return SessionQueryResponse{}, false, err
+	}
+	if row.Question != question {
+		return SessionQueryResponse{}, false, fmt.Errorf("%w: clientRequestId reused with different question", ErrInvalidInput)
+	}
+	turn := mapQATurn(row)
+	results := turn.Hits
+	if results == nil {
+		results = []QueryHit{}
+	}
+	var state SessionState
+	if sess, serr := s.queries.GetKnowledgeQASession(ctx, db.GetKnowledgeQASessionParams{
+		ID:     row.SessionID,
+		RoomID: row.RoomID,
+	}); serr == nil {
+		state = parseSessionState(sess.State)
+	}
+	return SessionQueryResponse{
+		SessionID:    turn.SessionID,
+		Turn:         turn,
+		Query:        question,
+		Mode:         turn.Mode,
+		Answer:       turn.Answer,
+		Results:      results,
+		SessionState: state,
+	}, true, nil
 }
 
 // ListSessions returns a keyset page of room session summaries (newest first).
@@ -385,10 +487,14 @@ func (s *Service) createSessionClosingActives(
 func (s *Service) appendTurn(
 	ctx context.Context,
 	session db.KnowledgeQaSession,
-	roomID, workspaceID, userID, question string,
+	roomID, workspaceID, userID, question, retrieveQuery string,
+	rewriteApplied bool,
+	rewriteBasis string,
 	req QueryRequest,
 	res QueryResponse,
 	qerr error,
+	clientRequestID string,
+	durationMs int32,
 ) (QATurn, error) {
 	refused := false
 	status := "answered"
@@ -401,13 +507,21 @@ func (s *Service) appendTurn(
 		topK = s.cfg.DefaultTopK
 	}
 
+	// Cost proxy uses pre-refuse hit set (retrieve work) + final answer text.
+	costHits := res.Results
+	if costHits == nil {
+		costHits = []QueryHit{}
+	}
+	var refusal *RefusalInfo
 	if qerr != nil {
 		status = "error"
 		hits = []QueryHit{}
 		answer = ""
 		errCode = classifyQueryErrorCode(qerr)
+		refusal = refusalForError()
+		costHits = []QueryHit{}
 	} else {
-		refused, status = classifyTurnResult(answer, len(hits))
+		refused, status, refusal = classifyTurnResult(answer, len(hits))
 		if refused {
 			hits = []QueryHit{}
 		}
@@ -419,7 +533,41 @@ func (s *Service) appendTurn(
 	if err != nil {
 		return QATurn{}, err
 	}
-	snapshot, _ := json.Marshal(s.corpusSnapshot(ctx, roomID))
+	// Phase I: conflict set over coverage sources — list both sides, never pick.
+	var bound BoundAnswer
+	if !refused && len(hits) > 0 {
+		answer, bound = applyConflictAnswerPolicy(answer, hits, refused)
+	} else {
+		bound = bindAnswerClaims(answer, hits, refused)
+	}
+	// Phase I3: persist multi-hop audit on the same JSONB envelope.
+	if res.MultiHop != nil && (res.MultiHop.Applied || len(res.MultiHop.Queries) > 0) {
+		bound.MultiHop = res.MultiHop
+	}
+	// Phase J: typed refusal / gap envelope for desk + replay.
+	if refusal != nil {
+		bound.Refusal = refusal
+		recordKnowledgeQARefusal(refusal.Kind)
+	}
+	// Phase K: stamp quality for answered turns (partial vs grounded).
+	if j := classifyJudgment(status, bound); j != nil {
+		bound.Judgment = j
+		recordKnowledgeQAJudgment(j.Kind, j.Reason)
+	}
+	// Phase M: deterministic cost units for workspace attribution.
+	if units := estimateCostUnits(answer, costHits); units > 0 {
+		bound.CostUnits = units
+	}
+	boundJSON := marshalBoundAnswer(bound)
+	snapshotMap := s.corpusSnapshot(ctx, roomID)
+	fingerprint, _ := s.roomCorpusFingerprint(ctx, roomID)
+	if fingerprint != "" {
+		snapshotMap["fingerprint"] = fingerprint
+	}
+	snapshot, _ := json.Marshal(snapshotMap)
+	if durationMs < 0 {
+		durationMs = 0
+	}
 
 	write := func(q *db.Queries) (db.KnowledgeQaTurn, error) {
 		if _, err := q.LockKnowledgeQASession(ctx, session.ID); err != nil {
@@ -428,6 +576,15 @@ func (s *Service) appendTurn(
 		seqRow, err := q.NextKnowledgeQATurnSequence(ctx, session.ID)
 		if err != nil {
 			return db.KnowledgeQaTurn{}, err
+		}
+		retrieveStored := ""
+		basisStored := ""
+		if rewriteApplied {
+			retrieveStored = strings.TrimSpace(retrieveQuery)
+			basisStored = strings.TrimSpace(rewriteBasis)
+			if basisStored != rewriteBasisState && basisStored != rewriteBasisPriorOnly {
+				basisStored = rewriteBasisPriorOnly
+			}
 		}
 		row, err := q.CreateKnowledgeQATurn(ctx, db.CreateKnowledgeQATurnParams{
 			SessionID:            session.ID,
@@ -444,15 +601,25 @@ func (s *Service) appendTurn(
 			TopK:                 pgtype.Int4{Int32: int32(topK), Valid: topK > 0},
 			ErrorSummary:         pgtype.Text{String: errCode, Valid: errCode != ""},
 			CreatedBy:            pgUUID(userID),
+			ClientRequestID:      pgtype.Text{String: clientRequestID, Valid: true},
+			RetrieveQuery:        pgtype.Text{String: retrieveStored, Valid: retrieveStored != ""},
+			RewriteApplied:       rewriteApplied,
+			RewriteBasis:         pgtype.Text{String: basisStored, Valid: basisStored != ""},
+			BoundAnswer:          boundJSON,
+			CorpusFingerprint:    pgtype.Text{String: fingerprint, Valid: fingerprint != ""},
+			DurationMs:           durationMs,
 		})
 		if err != nil {
 			return db.KnowledgeQaTurn{}, err
 		}
+		turnMapped := mapQATurn(row)
+		nextState := evolveSessionState(parseSessionState(session.State), turnMapped)
 		title := truncateRunes(question, knowledgeQATitleMaxRunes)
 		if err := q.TouchKnowledgeQASessionAfterTurn(ctx, db.TouchKnowledgeQASessionAfterTurnParams{
 			ID:            session.ID,
 			LastTurnAt:    pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
 			TitleFallback: pgtype.Text{String: title, Valid: title != ""},
+			State:         marshalSessionState(nextState),
 		}); err != nil {
 			return db.KnowledgeQaTurn{}, err
 		}
@@ -568,6 +735,10 @@ func mapQASession(row db.KnowledgeQaSession, turnCount int) QASession {
 		t := row.LastTurnAt.Time.UTC()
 		s.LastTurnAt = &t
 	}
+	st := parseSessionState(row.State)
+	if len(st.Entities) > 0 || len(st.OpenQuestions) > 0 || len(st.CoverageHints) > 0 {
+		s.State = &st
+	}
 	return s
 }
 
@@ -616,16 +787,21 @@ func decodeSessionListCursor(cursor string) (time.Time, uuid.UUID, error) {
 
 func mapQATurn(row db.KnowledgeQaTurn) QATurn {
 	t := QATurn{
-		ID:           uuid.UUID(row.ID.Bytes).String(),
-		SessionID:    uuid.UUID(row.SessionID.Bytes).String(),
-		Sequence:     int(row.Sequence),
-		Question:     row.Question,
-		Answer:       textOrEmpty(row.Answer),
-		Refused:      row.Refused,
-		ResultStatus: row.ResultStatus,
-		Mode:         textOrEmpty(row.Mode),
-		ErrorSummary: textOrEmpty(row.ErrorSummary),
-		Hits:         []QueryHit{},
+		ID:                uuid.UUID(row.ID.Bytes).String(),
+		SessionID:         uuid.UUID(row.SessionID.Bytes).String(),
+		Sequence:          int(row.Sequence),
+		Question:          row.Question,
+		Answer:            textOrEmpty(row.Answer),
+		Refused:           row.Refused,
+		ResultStatus:      row.ResultStatus,
+		Mode:              textOrEmpty(row.Mode),
+		ErrorSummary:      textOrEmpty(row.ErrorSummary),
+		RetrieveQuery:     textOrEmpty(row.RetrieveQuery),
+		RewriteApplied:    row.RewriteApplied,
+		RewriteBasis:      textOrEmpty(row.RewriteBasis),
+		CorpusFingerprint: textOrEmpty(row.CorpusFingerprint),
+		DurationMs:        int(row.DurationMs),
+		Hits:              []QueryHit{},
 	}
 	if row.TopK.Valid {
 		t.TopK = int(row.TopK.Int32)
@@ -638,6 +814,15 @@ func mapQATurn(row db.KnowledgeQaTurn) QATurn {
 		if err := json.Unmarshal(row.Hits, &hits); err == nil && hits != nil {
 			t.Hits = hits
 		}
+	}
+	if bound := parseBoundAnswer(row.BoundAnswer); !bound.empty() {
+		t.Claims = bound.Claims
+		t.Unresolved = bound.Unresolved
+		t.Conflicts = bound.Conflicts
+		t.MultiHop = bound.MultiHop
+		t.Refusal = bound.Refusal
+		t.Judgment = bound.Judgment
+		t.CostUnits = bound.CostUnits
 	}
 	return t
 }

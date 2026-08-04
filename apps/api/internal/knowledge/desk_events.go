@@ -28,6 +28,10 @@ func (s *Service) RecordDeskEvent(
 		}
 		recordKnowledgeQACiteOpen(outcome)
 		return nil
+	case "followups_upgrade_failed":
+		// FE soft-fail after POST …/follow-ups; templates stay visible (no toast).
+		recordKnowledgeQAFollowUpsUpgradeFailed()
+		return nil
 	default:
 		return fmt.Errorf("%w: unknown desk event type", ErrInvalidInput)
 	}

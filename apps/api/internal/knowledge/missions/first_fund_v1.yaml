@@ -1,0 +1,30 @@
+id: first_fund_v1
+title:
+  en: First-time fundraise
+  zh-CN: 首期基金募集
+items:
+  - id: fund_size_strategy
+    keywords: [fund size, strategy, thesis, 基金规模, 策略, 投资主题]
+    prompts:
+      en: What fund size and investment strategy are stated in this room’s fund docs?
+      zh-CN: 本室基金文件写明的基金规模与投资策略是什么？
+  - id: gp_commitment
+    keywords: [GP commitment, general partner, skin in the game, GP出资, 普通合伙人]
+    prompts:
+      en: What GP commitment or capital contribution appears in this room’s docs?
+      zh-CN: 本室文件对 GP 出资或跟投承诺如何约定？
+  - id: management_fee
+    keywords: [management fee, carry, carried interest, 管理费, 收益分成, 附带权益]
+    prompts:
+      en: What management fee and carried interest terms are in this room’s LPA or PPM?
+      zh-CN: 本室 LPA 或 PPM 中的管理费与收益分成（Carry）如何约定？
+  - id: track_record
+    keywords: [track record, DPI, TVPI, IRR, 过往业绩, 业绩记录]
+    prompts:
+      en: What track-record metrics (e.g. DPI, TVPI, IRR) are disclosed in this room?
+      zh-CN: 本室披露了哪些过往业绩指标（如 DPI、TVPI、IRR）？
+  - id: key_person
+    keywords: [key person, key-man, 关键人士, 关键人条款]
+    prompts:
+      en: How are key-person events defined in this room’s fund documents?
+      zh-CN: 本室基金文件如何定义关键人士（Key Person）事件？

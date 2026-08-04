@@ -89,6 +89,10 @@ func (s stubStore) GetObject(context.Context, string) (io.ReadCloser, error) {
 	return io.NopCloser(bytes.NewReader(s.body)), nil
 }
 
+func (s stubStore) PutObject(context.Context, string, io.Reader, int64, string) error {
+	return s.err
+}
+
 func TestBuildIngestPayloadDocxUsesPreviewPDF(t *testing.T) {
 	dir := t.TempDir()
 	pdfPath := filepath.Join(dir, "preview.pdf")

@@ -1,0 +1,30 @@
+id: sales_dataroom_v1
+title:
+  en: Enterprise sales diligence
+  zh-CN: 企业销售资料室
+items:
+  - id: pricing_quote
+    keywords: [pricing, quote, discount, 报价, 价格, 折扣]
+    prompts:
+      en: What pricing, quote amounts, or discount terms appear in this room’s proposals?
+      zh-CN: 本室提案或报价单中的价格、报价金额或折扣条款是什么？
+  - id: msa_liability
+    keywords: [MSA, liability, indemnity, limitation, 主服务协议, 责任上限, 赔偿]
+    prompts:
+      en: What liability caps or indemnity terms are in this room’s MSA or contracts?
+      zh-CN: 本室 MSA 或合同中的责任上限或赔偿责任如何约定？
+  - id: sla_uptime
+    keywords: [SLA, uptime, support, 服务水平, 可用性, 支持]
+    prompts:
+      en: What SLA, uptime, or support commitments are stated in this room’s docs?
+      zh-CN: 本室文件写明的 SLA、可用性或支持承诺是什么？
+  - id: security_certs
+    keywords: [SOC, ISO, security, compliance, 安全, 合规, 认证]
+    prompts:
+      en: What security certifications or compliance attestations are in this room?
+      zh-CN: 本室披露了哪些安全认证或合规证明？
+  - id: data_processing
+    keywords: [DPA, privacy, subprocessors, 数据处理, 隐私, 分包处理方]
+    prompts:
+      en: How do this room’s docs address data processing, privacy, or subprocessors?
+      zh-CN: 本室文件对数据处理、隐私或分包处理方如何约定？

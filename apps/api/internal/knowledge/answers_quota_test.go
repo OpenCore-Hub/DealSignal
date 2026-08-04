@@ -45,3 +45,15 @@ func TestEnforceAnswersQuotaNilService(t *testing.T) {
 		t.Fatalf("empty workspace: %v", err)
 	}
 }
+
+func TestMapKnowledgeErrorQuotaCheckFailed(t *testing.T) {
+	t.Parallel()
+	body := mapKnowledgeError(ErrQueryQuotaCheckFailed)
+	if body.Code != "knowledge_query_quota_unavailable" || body.Status != 503 {
+		t.Fatalf("%+v", body)
+	}
+	body = mapKnowledgeError(ErrAnswerRequiresSession)
+	if body.Code != "answer_requires_session" || body.Status != 400 {
+		t.Fatalf("%+v", body)
+	}
+}

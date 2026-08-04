@@ -9,8 +9,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/gin-gonic/gin"
@@ -31,12 +33,19 @@ type answersQuotaChecker interface {
 	enforceAnswersQuota(ctx context.Context, workspaceID string) error
 }
 
+// corpusReadyChecker rejects asks when the room corpus is not ask-ready (A5).
+type corpusReadyChecker interface {
+	enforceCorpusReady(ctx context.Context, roomID, workspaceID, userID string) error
+}
+
 // Handler exposes knowledge BFF routes.
 type Handler struct {
-	service   *Service
-	runner    sessionQueryRunner
-	admission AskAdmission
-	quota     answersQuotaChecker
+	service           *Service
+	runner            sessionQueryRunner
+	admission         AskAdmission
+	followUpAdmission AskAdmission
+	quota             answersQuotaChecker
+	corpus            corpusReadyChecker
 }
 
 // HandlerOption configures NewHandler.
@@ -51,18 +60,46 @@ func WithAskAdmission(a AskAdmission) HandlerOption {
 	}
 }
 
+// WithFollowUpAdmission overrides follow-up chip generation admission.
+func WithFollowUpAdmission(a AskAdmission) HandlerOption {
+	return func(h *Handler) {
+		if a != nil {
+			h.followUpAdmission = a
+		}
+	}
+}
+
 // NewHandler constructs a knowledge handler.
 func NewHandler(service *Service, opts ...HandlerOption) *Handler {
 	h := &Handler{
-		service:   service,
-		runner:    service,
-		quota:     service,
-		admission: newMemoryAskAdmission(defaultKnowledgeQAMemberRPM),
+		service:           service,
+		runner:            service,
+		quota:             service,
+		corpus:            service,
+		admission:         newMemoryAskAdmission(defaultKnowledgeQAMemberRPM),
+		followUpAdmission: newMemoryMemberAdmission(followUpAdmissionScope, defaultKnowledgeQAFollowUpRPM),
 	}
 	for _, opt := range opts {
 		opt(h)
 	}
 	return h
+}
+
+func (h *Handler) checkCorpusReady(ctx context.Context, roomID, workspaceID, userID, transport string) error {
+	var err error
+	switch {
+	case h.corpus != nil:
+		err = h.corpus.enforceCorpusReady(ctx, roomID, workspaceID, userID)
+	case h.service != nil:
+		err = h.service.enforceCorpusReady(ctx, roomID, workspaceID, userID)
+	}
+	if err != nil {
+		if errors.Is(err, ErrCorpusNotReady) {
+			recordKnowledgeQAGateReject(transport, "corpus_not_ready")
+		}
+		return err
+	}
+	return nil
 }
 
 func (h *Handler) checkAnswersQuota(ctx context.Context, workspaceID, transport string) error {
@@ -74,7 +111,11 @@ func (h *Handler) checkAnswersQuota(ctx context.Context, workspaceID, transport 
 		err = h.service.enforceAnswersQuota(ctx, workspaceID)
 	}
 	if err != nil {
-		recordKnowledgeQAGateReject(transport, "quota_exceeded")
+		reason := "quota_exceeded"
+		if errors.Is(err, ErrQueryQuotaCheckFailed) {
+			reason = "quota_unavailable"
+		}
+		recordKnowledgeQAGateReject(transport, reason)
 	}
 	return err
 }
@@ -97,6 +138,25 @@ func (h *Handler) releaseAsk(ctx context.Context, roomID, userID string) {
 	}
 }
 
+// admitFollowUps enforces single-flight + RPM for chip generation.
+// On reject, callers soft-fail (FE already shows local templates).
+func (h *Handler) admitFollowUps(ctx context.Context, roomID, userID string) error {
+	if h.followUpAdmission == nil {
+		return nil
+	}
+	err := h.followUpAdmission.Admit(ctx, roomID, userID)
+	if err != nil {
+		recordKnowledgeQAGateReject("followups", errAdmissionKind(err))
+	}
+	return err
+}
+
+func (h *Handler) releaseFollowUps(ctx context.Context, roomID, userID string) {
+	if h.followUpAdmission != nil {
+		h.followUpAdmission.Release(ctx, roomID, userID)
+	}
+}
+
 // RegisterWorkspaceRoutes mounts knowledge routes under deal-rooms.
 func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g := r.Group("/deal-rooms")
@@ -113,7 +173,19 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.GET("/:roomId/knowledge/sessions/:sessionId", h.GetSession)
 	g.POST("/:roomId/knowledge/sessions/:sessionId/close", h.CloseSession)
 	g.PUT("/:roomId/knowledge/turns/:turnId/feedback", h.UpsertTurnFeedback)
+	g.POST("/:roomId/knowledge/turns/:turnId/follow-ups", h.SuggestFollowUps)
 	g.POST("/:roomId/knowledge/events", h.RecordDeskEvent)
+	g.GET("/:roomId/knowledge/missions", h.ListMissionPacks)
+	g.GET("/:roomId/knowledge/mission/progress", h.GetMissionProgress)
+	g.GET("/:roomId/knowledge/mission", h.GetRoomMissionPack)
+	g.PUT("/:roomId/knowledge/mission", h.SetRoomMissionPack)
+	g.GET("/:roomId/knowledge/eval/candidates", h.ListEvalCandidates)
+	g.GET("/:roomId/knowledge/eval/candidates/export", h.ExportEvalCandidates)
+	g.PATCH("/:roomId/knowledge/eval/candidates/:candidateId", h.ReviewEvalCandidate)
+	g.GET("/:roomId/knowledge/sessions/:sessionId/export", h.ExportSession)
+	g.GET("/:roomId/knowledge/archives", h.ListSessionArchives)
+	g.GET("/:roomId/knowledge/archives/:archiveId", h.GetSessionArchive)
+	g.GET("/:roomId/knowledge/ops", h.GetOpsSummary)
 }
 
 // Get returns corpus sync status.
@@ -145,18 +217,20 @@ func (h *Handler) Sync(c *gin.Context) {
 	c.JSON(http.StatusAccepted, gin.H{"status": "queued"})
 }
 
-// Query proxies a search/answer request (no session persistence).
+// Query proxies a search-only request (no session persistence).
+// Answer=true is rejected — metered answers must use sessions/query[/stream].
+// Corpus / ask-admission gates apply only to session asks (§7.1 probe path).
 func (h *Handler) Query(c *gin.Context) {
 	var req QueryRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
-	// Fail closed on plan quota before upstream search (service also enforces).
-	if err := h.checkAnswersQuota(c.Request.Context(), middleware.WorkspaceIDFrom(c), "json"); err != nil {
-		writeKnowledgeError(c, err)
+	if req.Answer {
+		writeKnowledgeError(c, ErrAnswerRequiresSession)
 		return
 	}
+
 	res, err := h.service.Query(
 		c.Request.Context(),
 		c.Param("roomId"),
@@ -181,7 +255,11 @@ func (h *Handler) QuerySession(c *gin.Context) {
 	roomID := c.Param("roomId")
 	userID := middleware.UserIDFrom(c)
 	wsID := middleware.WorkspaceIDFrom(c)
-	// Plan quota before single-flight so exhausted plans do not occupy the slot.
+	// Corpus / plan quota before single-flight so unreadied rooms do not occupy the slot.
+	if err := h.checkCorpusReady(c.Request.Context(), roomID, wsID, userID, "json"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
 	if err := h.checkAnswersQuota(c.Request.Context(), wsID, "json"); err != nil {
 		writeKnowledgeError(c, err)
 		return
@@ -219,7 +297,11 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 	roomID := c.Param("roomId")
 	userID := middleware.UserIDFrom(c)
 	wsID := middleware.WorkspaceIDFrom(c)
-	// Reject before SSE headers so clients get a normal 429 JSON body.
+	// Reject before SSE headers so clients get a normal JSON body (409/429).
+	if err := h.checkCorpusReady(c.Request.Context(), roomID, wsID, userID, "stream"); err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
 	if err := h.checkAnswersQuota(c.Request.Context(), wsID, "stream"); err != nil {
 		writeKnowledgeError(c, err)
 		return
@@ -270,8 +352,14 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 	}
 
 	// Leave retrieving once the audited answer exists (philosophy §5).
+	// Attach rewrite audit here so FE can show “searched as” during token*.
 	if req.Answer || strings.TrimSpace(res.Answer) != "" {
-		writeEvent("phase", streamPhasePayload{Phase: "generating"})
+		gen := streamPhasePayload{Phase: "generating"}
+		if res.Turn.RewriteApplied {
+			gen.RewriteApplied = true
+			gen.RetrieveQuery = res.Turn.RetrieveQuery
+		}
+		writeEvent("phase", gen)
 	}
 
 	hits := res.Turn.Hits
@@ -303,6 +391,7 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 		Results:      res.Results,
 		Refused:      res.Turn.Refused,
 		ResultStatus: res.Turn.ResultStatus,
+		SessionState: res.SessionState,
 	})
 }
 
@@ -388,6 +477,239 @@ func (h *Handler) GetSession(c *gin.Context) {
 	c.JSON(http.StatusOK, detail)
 }
 
+// SuggestFollowUps returns evidence-grounded (or template) next questions for a turn.
+func (h *Handler) SuggestFollowUps(c *gin.Context) {
+	roomID := c.Param("roomId")
+	userID := middleware.UserIDFrom(c)
+	started := time.Now()
+	if err := h.admitFollowUps(c.Request.Context(), roomID, userID); err != nil {
+		// Soft-fail: FE already paints local templates; empty body keeps them.
+		c.JSON(http.StatusOK, FollowUpsResponse{Items: nil, Source: "template"})
+		return
+	}
+	defer h.releaseFollowUps(c.Request.Context(), roomID, userID)
+
+	res, err := h.service.SuggestFollowUps(
+		c.Request.Context(),
+		roomID,
+		middleware.WorkspaceIDFrom(c),
+		userID,
+		c.Param("turnId"),
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	recordKnowledgeQAFollowUpsDuration(res.Source, started)
+	c.JSON(http.StatusOK, res)
+}
+
+// ExportSession downloads a diligence audit JSON pack for the session.
+func (h *Handler) ExportSession(c *gin.Context) {
+	pack, err := h.service.ExportSession(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		c.Param("sessionId"),
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	body, err := marshalDiligencePack(pack)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	filename := fmt.Sprintf("diligence-%s.json", strings.TrimSpace(c.Param("sessionId")))
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Data(http.StatusOK, "application/json; charset=utf-8", body)
+}
+
+// ListSessionArchives returns cold-archive tombstones for the room.
+func (h *Handler) ListSessionArchives(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	res, err := h.service.ListSessionArchives(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		limit,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// GetSessionArchive restores a read-only diligence pack from cold storage.
+func (h *Handler) GetSessionArchive(c *gin.Context) {
+	detail, err := h.service.GetSessionArchive(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		c.Param("archiveId"),
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, detail)
+}
+
+// GetOpsSummary returns workspace SLO / cost board metrics for the knowledge desk.
+func (h *Handler) GetOpsSummary(c *gin.Context) {
+	windowHours, _ := strconv.Atoi(c.Query("windowHours"))
+	res, err := h.service.GetOpsSummary(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		windowHours,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// ListEvalCandidates lists feedback→gold review candidates for the room (ceiling Phase O).
+func (h *Handler) ListEvalCandidates(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	res, err := h.service.ListEvalCandidates(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		strings.TrimSpace(c.Query("kind")),
+		strings.TrimSpace(c.Query("status")),
+		limit,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// ExportEvalCandidates exports accepted candidates as seeds.json-shaped gold.
+func (h *Handler) ExportEvalCandidates(c *gin.Context) {
+	limit, _ := strconv.Atoi(c.Query("limit"))
+	res, err := h.service.ExportAcceptedEvalSeeds(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		limit,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// ReviewEvalCandidate accepts or rejects a gold candidate.
+func (h *Handler) ReviewEvalCandidate(c *gin.Context) {
+	var req ReviewEvalCandidateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	res, err := h.service.ReviewEvalCandidate(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		c.Param("candidateId"),
+		req,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// ListMissionPacks returns builtin diligence mission packs.
+func (h *Handler) ListMissionPacks(c *gin.Context) {
+	loc := locale.Normalize(locale.FromContext(c.Request.Context()))
+	res, err := h.service.ListMissionPacks(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		loc,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// GetMissionProgress returns checklist coverage vs optional session state (ceiling Phase N).
+func (h *Handler) GetMissionProgress(c *gin.Context) {
+	loc := locale.Normalize(locale.FromContext(c.Request.Context()))
+	res, err := h.service.GetMissionProgress(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		strings.TrimSpace(c.Query("sessionId")),
+		loc,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// GetRoomMissionPack returns the effective mission pack for the room.
+func (h *Handler) GetRoomMissionPack(c *gin.Context) {
+	loc := locale.Normalize(locale.FromContext(c.Request.Context()))
+	res, err := h.service.GetRoomMissionPack(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		loc,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
+// SetRoomMissionPack binds a builtin pack to the room.
+func (h *Handler) SetRoomMissionPack(c *gin.Context) {
+	var req SetMissionPackRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	loc := locale.Normalize(locale.FromContext(c.Request.Context()))
+	res, err := h.service.SetRoomMissionPack(
+		c.Request.Context(),
+		c.Param("roomId"),
+		middleware.WorkspaceIDFrom(c),
+		middleware.UserIDFrom(c),
+		loc,
+		req,
+	)
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, res)
+}
+
 // UpsertTurnFeedback upserts the caller's feedback on a turn.
 func (h *Handler) UpsertTurnFeedback(c *gin.Context) {
 	var req FeedbackRequest
@@ -453,41 +775,14 @@ func (h *Handler) CloseSession(c *gin.Context) {
 }
 
 func writeKnowledgeError(c *gin.Context, err error) {
-	switch {
-	case errors.Is(err, ErrUnavailable):
-		c.JSON(http.StatusServiceUnavailable, gin.H{
-			"code":    "knowledge_unavailable",
-			"message": "knowledge base is not available",
-		})
-	case errors.Is(err, ErrForbidden):
-		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "forbidden"})
-	case errors.Is(err, ErrNotFound):
-		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
-	case errors.Is(err, ErrInvalidInput):
-		c.JSON(http.StatusBadRequest, gin.H{
-			"code":    "invalid_input",
-			"message": httpx.SafeMessage("invalid_input", err),
-		})
-	case errors.Is(err, ErrQueryBusy):
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"code":    "knowledge_query_busy",
-			"message": "a question is already in progress",
-		})
-	case errors.Is(err, ErrQueryRateLimited):
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"code":    "knowledge_query_rate_limited",
-			"message": "too many questions, please try again shortly",
-		})
-	case errors.Is(err, ErrQueryQuotaExceeded):
-		c.JSON(http.StatusTooManyRequests, gin.H{
-			"code":    "knowledge_query_quota_exceeded",
-			"message": "answer quota for this plan is exhausted",
-		})
-	default:
-		logger.ErrorCtx(c.Request.Context(), "knowledge handler error", err)
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"code":    "internal_error",
-			"message": httpx.SafeMessage("internal_error", err),
-		})
+	body := mapKnowledgeError(err)
+	msg := body.Message
+	if errors.Is(err, ErrInvalidInput) {
+		msg = httpx.SafeMessage("invalid_input", err)
 	}
+	if body.Status >= http.StatusInternalServerError && body.Code == "internal_error" {
+		logger.ErrorCtx(c.Request.Context(), "knowledge handler error", err)
+		msg = httpx.SafeMessage("internal_error", err)
+	}
+	c.JSON(body.Status, gin.H{"code": body.Code, "message": msg})
 }

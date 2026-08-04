@@ -123,10 +123,20 @@ func (s *Server) registerRoutes() error {
 			webhookHandler.RegisterRoutes(api)
 		}
 
+		authMailTimeout := s.cfg.SMTPTimeout
+		if s.cfg.ResendAPIKey != "" && s.cfg.ResendTimeout > 0 {
+			authMailTimeout = s.cfg.ResendTimeout
+		}
+		if authMailTimeout <= 0 {
+			authMailTimeout = 10 * time.Second
+		}
+		// Background-only budget (Register does not wait). Headroom for provider retries.
+		authMailTimeout *= 3
 		authSvc := auth.NewService(queries, tokenStore,
 			auth.WithMailer(appMailer),
 			auth.WithAppBaseURL(s.cfg.FrontendURL),
 			auth.WithVerificationTokenTTL(time.Duration(s.cfg.VerificationTokenTTLHours)*time.Hour),
+			auth.WithSendTimeout(authMailTimeout),
 		)
 		authHandler := auth.NewHandler(authSvc, s.cfg)
 		authHandler.RegisterRoutes(api)
@@ -256,7 +266,7 @@ func (s *Server) registerRoutes() error {
 			s.registerWorker(analyticsRetention)
 			analyticsRetention.Start(s.shutdownCtx)
 
-			knowledgeRetention := knowledge.NewRetentionCleaner(queries, s.cfg.KnowledgeQARetentionDays)
+			knowledgeRetention := knowledge.NewRetentionCleaner(queries, storageClient, s.cfg.KnowledgeQARetentionDays)
 			s.registerWorker(knowledgeRetention)
 			knowledgeRetention.Start(s.shutdownCtx)
 
@@ -291,16 +301,40 @@ func (s *Server) registerRoutes() error {
 				doclingClient,
 				storageClient,
 				s.cfg.URLSigningSecret,
-			).WithDBPool(s.dbPool).WithPreviewPDFConverter(converter)
+			).WithDBPool(s.dbPool).WithPreviewPDFConverter(converter).
+				WithRetentionDays(s.cfg.KnowledgeQARetentionDays)
+			if llmClient != nil {
+				knowledgeSvc = knowledgeSvc.WithFollowUpLLM(llmClient)
+			}
+			knowledgeSvc = knowledgeSvc.WithQueryRewrite(s.cfg.KnowledgeQARewriteEnabled)
+			knowledgeSvc = knowledgeSvc.WithTableLane(s.cfg.KnowledgeQATableLaneEnabled)
+			knowledgeSvc = knowledgeSvc.WithMultiHop(s.cfg.KnowledgeQAMultiHopEnabled)
+			if s.cfg.KnowledgeQARewriteCacheEnabled {
+				if s.redisClient != nil {
+					knowledgeSvc = knowledgeSvc.WithRewriteCache(knowledge.NewKVRewriteCache(s.redisClient))
+				} else {
+					knowledgeSvc = knowledgeSvc.WithRewriteCache(knowledge.NewMemoryRewriteCache())
+				}
+			}
 			var knowledgeOpts []knowledge.HandlerOption
 			if s.redisClient != nil {
-				knowledgeOpts = append(knowledgeOpts, knowledge.WithAskAdmission(
-					knowledge.NewRedisAskAdmission(s.redisClient, s.redisClient, s.cfg.KnowledgeQAMemberRPM),
-				))
+				knowledgeOpts = append(knowledgeOpts,
+					knowledge.WithAskAdmission(
+						knowledge.NewRedisAskAdmission(s.redisClient, s.redisClient, s.cfg.KnowledgeQAMemberRPM),
+					),
+					knowledge.WithFollowUpAdmission(
+						knowledge.NewRedisFollowUpAdmission(s.redisClient, s.redisClient, s.cfg.KnowledgeQAFollowUpRPM),
+					),
+				)
 			} else {
-				knowledgeOpts = append(knowledgeOpts, knowledge.WithAskAdmission(
-					knowledge.NewMemoryAskAdmission(s.cfg.KnowledgeQAMemberRPM),
-				))
+				knowledgeOpts = append(knowledgeOpts,
+					knowledge.WithAskAdmission(
+						knowledge.NewMemoryAskAdmission(s.cfg.KnowledgeQAMemberRPM),
+					),
+					knowledge.WithFollowUpAdmission(
+						knowledge.NewMemoryFollowUpAdmission(s.cfg.KnowledgeQAFollowUpRPM),
+					),
+				)
 			}
 			knowledgeHandler := knowledge.NewHandler(knowledgeSvc, knowledgeOpts...)
 			if knowledgeSvc.Enabled() {

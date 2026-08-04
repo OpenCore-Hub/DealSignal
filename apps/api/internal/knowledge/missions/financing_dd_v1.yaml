@@ -1,0 +1,30 @@
+id: financing_dd_v1
+title:
+  en: Financing due diligence
+  zh-CN: 融资尽调
+items:
+  - id: valuation_cap
+    keywords: [valuation, cap, 估值, 上限, pre-money, post-money]
+    prompts:
+      en: What valuation cap or pre-money valuation appears in this room’s financing docs?
+      zh-CN: 本室融资文件里的估值上限或投前估值是多少？
+  - id: option_pool
+    keywords: [option, pool, ESOP, 期权池]
+    prompts:
+      en: How is the employee option pool sized in this room’s financing docs?
+      zh-CN: 本室融资文件里的员工期权池规模如何约定？
+  - id: liquidation_pref
+    keywords: [liquidation, preference, 清算优先, 优先清算]
+    prompts:
+      en: What liquidation preference do investors have in this room’s docs?
+      zh-CN: 本室文件里投资人的清算优先权怎么写？
+  - id: anti_dilution
+    keywords: [anti-dilution, antidilution, 反稀释]
+    prompts:
+      en: Which anti-dilution protection is stated in this room’s financing docs?
+      zh-CN: 本室融资文件约定了哪种反稀释保护？
+  - id: board_rights
+    keywords: [board, director, 董事会, 董事席位]
+    prompts:
+      en: What board composition or observer rights are in this room’s docs?
+      zh-CN: 本室文件对董事会构成或观察员权利如何约定？

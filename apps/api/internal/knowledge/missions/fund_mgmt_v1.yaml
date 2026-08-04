@@ -1,0 +1,30 @@
+id: fund_mgmt_v1
+title:
+  en: Fund operations & LP reporting
+  zh-CN: 基金运营与 LP 报告
+items:
+  - id: capital_calls
+    keywords: [capital call, contribution, unfunded, 缴款通知, 出资, 未缴资本]
+    prompts:
+      en: What capital-call or unfunded-commitment terms are in this room’s fund docs?
+      zh-CN: 本室基金文件对缴款通知或未缴出资如何约定？
+  - id: distribution_waterfall
+    keywords: [distribution, waterfall, preferred return, 分配, 瀑布, 优先回报]
+    prompts:
+      en: How is the distribution waterfall described in this room’s LPA?
+      zh-CN: 本室 LPA 如何描述收益分配瀑布（waterfall）？
+  - id: valuation_policy
+    keywords: [valuation, fair value, NAV, 估值政策, 公允价值, 净资产]
+    prompts:
+      en: What portfolio valuation or NAV policy is stated in this room’s docs?
+      zh-CN: 本室文件写明的投资组合估值或 NAV 政策是什么？
+  - id: lp_reporting
+    keywords: [quarterly report, capital account, LP report, 季报, 资本账户, LP报告]
+    prompts:
+      en: What LP reporting cadence or capital-account items appear in this room?
+      zh-CN: 本室披露的 LP 报告频率或资本账户项目有哪些？
+  - id: conflicts_policy
+    keywords: [conflict, related party, co-invest, 利益冲突, 关联方, 跟投]
+    prompts:
+      en: How does this room’s LPA address conflicts, related parties, or co-invest rights?
+      zh-CN: 本室 LPA 对利益冲突、关联交易或跟投权利如何约定？

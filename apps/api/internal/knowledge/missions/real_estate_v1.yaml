@@ -1,0 +1,30 @@
+id: real_estate_v1
+title:
+  en: Real estate transaction diligence
+  zh-CN: 房地产交易尽调
+items:
+  - id: title_encumbrances
+    keywords: [title, encumbrance, lien, easement, 产权, 他项权利, 抵押权, 地役权]
+    prompts:
+      en: What title exceptions, liens, or easements are disclosed in this room’s title docs?
+      zh-CN: 本室产权文件披露了哪些产权例外、抵押权或地役权？
+  - id: rent_roll
+    keywords: [rent roll, occupancy, NOI, 租约明细, 出租率, 净营运收入]
+    prompts:
+      en: What rent roll, occupancy, or NOI figures appear in this room’s financials?
+      zh-CN: 本室财务材料中的租约明细、出租率或 NOI 数据是多少？
+  - id: lease_terms
+    keywords: [lease, tenancy, renewal, break, 租约, 租户, 续租, 提前解约]
+    prompts:
+      en: What material lease terms (term, renewals, break rights) are in this room’s leases?
+      zh-CN: 本室租约中的关键条款（期限、续租、提前解约权）如何约定？
+  - id: environmental
+    keywords: [environmental, Phase I, contamination, 环境, 污染, 环评]
+    prompts:
+      en: What environmental findings or Phase I conclusions are in this room’s reports?
+      zh-CN: 本室环境报告中的主要发现或 Phase I 结论是什么？
+  - id: inspection_capex
+    keywords: [inspection, deferred maintenance, capex, 验房, 维保欠账, 资本性支出]
+    prompts:
+      en: What inspection defects or deferred capex are noted in this room’s reports?
+      zh-CN: 本室验房或检测报告指出了哪些缺陷或延期资本性支出？
