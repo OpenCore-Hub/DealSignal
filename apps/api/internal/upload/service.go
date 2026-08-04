@@ -11,6 +11,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -28,6 +29,16 @@ var (
 		".csv":  "csv",
 	}
 )
+
+// ExistingDocumentError indicates a non-deleted document with the same title already exists.
+type ExistingDocumentError struct {
+	ID    string
+	Title string
+}
+
+func (e *ExistingDocumentError) Error() string {
+	return "a document with this filename already exists"
+}
 
 // Document is the public view of a db.Document.
 type Document struct {
@@ -64,11 +75,33 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 }
 
 // CreateDocument validates, stores the file and creates the document record.
-// Ingestion writes preview pages/chunks (text + bbox) for document viewing.
-func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader) (Document, error) {
+// When replace is false and a document with the same title already exists in the
+// workspace, it returns ExistingDocumentError without writing storage.
+// When replace is true, the existing document is overwritten in place and
+// re-queued for ingestion (preserving id and deal-room memberships).
+func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader, replace bool) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {
 		return Document{}, err
+	}
+
+	tenantUUID := pgUUID(tenantID)
+	workspaceUUID := pgUUID(workspaceID)
+	userUUID := pgUUID(userID)
+
+	existing, err := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+		WorkspaceID: workspaceUUID,
+		Title:       fileHeader.Filename,
+	})
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return Document{}, fmt.Errorf("lookup existing document: %w", err)
+	}
+	exists := err == nil
+	if exists && !replace {
+		return Document{}, &ExistingDocumentError{
+			ID:    uuid.UUID(existing.ID.Bytes).String(),
+			Title: existing.Title,
+		}
 	}
 
 	file, err := fileHeader.Open()
@@ -81,16 +114,16 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		return Document{}, err
 	}
 
+	if exists && replace {
+		return s.replaceExistingDocument(ctx, existing, workspaceUUID, sourceType, category, fileHeader, file)
+	}
+
 	docID := uuid.New()
 	storageKey := storage.ObjectKey(tenantID, workspaceID, docID.String(), fileHeader.Filename)
 
 	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
 		return Document{}, fmt.Errorf("store file: %w", err)
 	}
-
-	tenantUUID := pgUUID(tenantID)
-	workspaceUUID := pgUUID(workspaceID)
-	userUUID := pgUUID(userID)
 
 	docCategory := "general"
 	if category == "agreement" {
@@ -126,6 +159,53 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	return documentFromDB(d), nil
 }
 
+func (s *Service) replaceExistingDocument(
+	ctx context.Context,
+	existing db.GetDocumentByTitleInWorkspaceRow,
+	workspaceUUID pgtype.UUID,
+	sourceType string,
+	category string,
+	fileHeader *multipart.FileHeader,
+	file multipart.File,
+) (Document, error) {
+	docID := uuid.UUID(existing.ID.Bytes).String()
+	tenantID := uuid.UUID(existing.TenantID.Bytes).String()
+	workspaceID := uuid.UUID(existing.WorkspaceID.Bytes).String()
+	storageKey := storage.ObjectKey(tenantID, workspaceID, docID, fileHeader.Filename)
+	oldKey := existing.StorageKey
+
+	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
+		return Document{}, fmt.Errorf("store file: %w", err)
+	}
+
+	docCategory := existing.Category
+	if category == "agreement" {
+		docCategory = "agreement"
+	} else if category != "" {
+		docCategory = category
+	}
+
+	d, err := RebindDocumentContent(ctx, s.queries, RebindDocumentContentParams{
+		DocumentID:  existing.ID,
+		TenantID:    existing.TenantID,
+		WorkspaceID: workspaceUUID,
+		StorageKey:  storageKey,
+		SourceType:  sourceType,
+		FileSize:    fileHeader.Size,
+		Category:    docCategory,
+	})
+	if err != nil {
+		return Document{}, err
+	}
+
+	// Best-effort cleanup of the previous object when the key changed.
+	if oldKey != "" && oldKey != storageKey {
+		_ = s.storage.DeleteObject(ctx, oldKey)
+	}
+
+	return documentFromReplace(d), nil
+}
+
 func documentFromDB(d db.CreateDocumentRow) Document {
 	doc := Document{
 		ID:         uuid.UUID(d.ID.Bytes).String(),
@@ -139,6 +219,17 @@ func documentFromDB(d db.CreateDocumentRow) Document {
 		doc.PageCount = &v
 	}
 	return doc
+}
+
+func documentFromReplace(d db.ReplaceDocumentFileRow) Document {
+	return documentFromDB(db.CreateDocumentRow{
+		ID:         d.ID,
+		Title:      d.Title,
+		SourceType: d.SourceType,
+		Status:     d.Status,
+		PageCount:  d.PageCount,
+		CreatedAt:  d.CreatedAt,
+	})
 }
 
 func validateFileContent(file multipart.File, sourceType string) error {

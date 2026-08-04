@@ -75,12 +75,23 @@ func (h *Handler) Create(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
 	category := c.PostForm("category")
-	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader)
+	replace := parseTruthyForm(c.PostForm("replace"))
+	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader, replace)
 	if err != nil {
-		switch err {
-		case ErrFileTooLarge:
+		var existsErr *ExistingDocumentError
+		switch {
+		case errors.As(err, &existsErr):
+			c.JSON(http.StatusConflict, gin.H{
+				"code":    "document_exists",
+				"message": httpx.SafeMessage("document_exists", err),
+				"document": gin.H{
+					"id":    existsErr.ID,
+					"title": existsErr.Title,
+				},
+			})
+		case errors.Is(err, ErrFileTooLarge):
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": httpx.SafeMessage("payload_too_large", err)})
-		case ErrInvalidFileType, ErrInvalidFileContent:
+		case errors.Is(err, ErrInvalidFileType), errors.Is(err, ErrInvalidFileContent):
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": httpx.SafeMessage("unsupported_media_type", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -149,6 +160,29 @@ func (h *Handler) List(c *gin.Context) {
 	wsPgUUID := pgtype.UUID{Bytes: wsUUID, Valid: true}
 	filter := strings.ToLower(c.Query("filter"))
 	category := strings.ToLower(c.Query("category"))
+	excludeDealRoom := parseTruthyForm(c.Query("exclude_deal_room"))
+
+	var dealRoomDocIDs map[string]struct{}
+	if excludeDealRoom {
+		ids, err := h.uploadService.queries.ListDocumentIDsInDealRoomsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+			return
+		}
+		dealRoomDocIDs = make(map[string]struct{}, len(ids))
+		for _, id := range ids {
+			dealRoomDocIDs[uuid.UUID(id.Bytes).String()] = struct{}{}
+		}
+	}
+
+	appendDoc := func(out []gin.H, info docInfo, job db.IngestionJob) []gin.H {
+		if dealRoomDocIDs != nil {
+			if _, inRoom := dealRoomDocIDs[uuid.UUID(info.ID.Bytes).String()]; inRoom {
+				return out
+			}
+		}
+		return append(out, documentResponse(info, job))
+	}
 
 	// When category filter is specified, use the category query
 	if category != "" {
@@ -163,7 +197,7 @@ func (h *Handler) List(c *gin.Context) {
 		out := make([]gin.H, 0, len(docs))
 		for _, d := range docs {
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
-			out = append(out, documentResponse(docInfo{
+			out = appendDoc(out, docInfo{
 				ID:         d.ID,
 				Title:      d.Title,
 				SourceType: d.SourceType,
@@ -174,7 +208,7 @@ func (h *Handler) List(c *gin.Context) {
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
-			}, job))
+			}, job)
 		}
 		c.JSON(http.StatusOK, gin.H{"data": out})
 		return
@@ -190,7 +224,7 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		for _, d := range docs {
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
-			out = append(out, documentResponse(docInfo{
+			out = appendDoc(out, docInfo{
 				ID:         d.ID,
 				Title:      d.Title,
 				SourceType: d.SourceType,
@@ -201,7 +235,7 @@ func (h *Handler) List(c *gin.Context) {
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
-			}, job))
+			}, job)
 		}
 	case "popular":
 		docs, err := h.uploadService.queries.ListPopularDocumentsByWorkspace(ctx, wsPgUUID)
@@ -211,7 +245,7 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		for _, d := range docs {
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
-			out = append(out, documentResponse(docInfo{
+			out = appendDoc(out, docInfo{
 				ID:         d.ID,
 				Title:      d.Title,
 				SourceType: d.SourceType,
@@ -222,7 +256,7 @@ func (h *Handler) List(c *gin.Context) {
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
-			}, job))
+			}, job)
 		}
 	case "unshared":
 		docs, err := h.uploadService.queries.ListUnsharedDocumentsByWorkspace(ctx, wsPgUUID)
@@ -232,7 +266,7 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		for _, d := range docs {
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
-			out = append(out, documentResponse(docInfo{
+			out = appendDoc(out, docInfo{
 				ID:         d.ID,
 				Title:      d.Title,
 				SourceType: d.SourceType,
@@ -243,7 +277,7 @@ func (h *Handler) List(c *gin.Context) {
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
-			}, job))
+			}, job)
 		}
 	case "archived":
 		docs, err := h.uploadService.queries.ListArchivedDocumentsByWorkspace(ctx, wsPgUUID)
@@ -253,7 +287,7 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		for _, d := range docs {
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
-			out = append(out, documentResponse(docInfo{
+			out = appendDoc(out, docInfo{
 				ID:         d.ID,
 				Title:      d.Title,
 				SourceType: d.SourceType,
@@ -264,7 +298,7 @@ func (h *Handler) List(c *gin.Context) {
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
-			}, job))
+			}, job)
 		}
 	default:
 		docs, err := h.uploadService.queries.ListDocumentsByWorkspace(ctx, wsPgUUID)
@@ -274,7 +308,7 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		for _, d := range docs {
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
-			out = append(out, documentResponse(docInfo{
+			out = appendDoc(out, docInfo{
 				ID:         d.ID,
 				Title:      d.Title,
 				SourceType: d.SourceType,
@@ -285,7 +319,7 @@ func (h *Handler) List(c *gin.Context) {
 				PageCount:  d.PageCount,
 				CreatedAt:  d.CreatedAt,
 				UpdatedAt:  d.UpdatedAt,
-			}, job))
+			}, job)
 		}
 	}
 	c.JSON(http.StatusOK, gin.H{"data": out})
@@ -782,4 +816,13 @@ func textOrNil(t pgtype.Text) interface{} {
 
 func uuidToString(u pgtype.UUID) string {
 	return uuid.UUID(u.Bytes).String()
+}
+
+func parseTruthyForm(v string) bool {
+	switch strings.ToLower(strings.TrimSpace(v)) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
 }

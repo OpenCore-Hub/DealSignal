@@ -86,6 +86,36 @@ FROM documents
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL
 LIMIT 1;
 
+-- name: GetDocumentByTitleInWorkspace :one
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND title = $2 AND deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: ReplaceDocumentFile :one
+UPDATE documents
+SET storage_key = $1,
+    file_size = $2,
+    source_type = $3,
+    status = 'uploaded',
+    page_count = NULL,
+    category = $6,
+    updated_at = now()
+WHERE id = $4 AND workspace_id = $5 AND deleted_at IS NULL
+RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at;
+
+-- name: ResetIngestionJobByDocument :exec
+UPDATE ingestion_jobs
+SET status = 'queued', attempts = 0, error_message = NULL, updated_at = now()
+WHERE document_id = $1;
+
+-- name: ListDocumentIDsInDealRoomsByWorkspace :many
+SELECT DISTINCT drd.document_id
+FROM deal_room_documents drd
+JOIN documents d ON d.id = drd.document_id AND d.deleted_at IS NULL
+WHERE drd.workspace_id = $1;
+
 -- name: ListDocumentsByWorkspace :many
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents

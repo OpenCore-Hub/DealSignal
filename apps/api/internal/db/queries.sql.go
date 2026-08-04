@@ -4522,6 +4522,58 @@ func (q *Queries) GetDocumentByIDForLink(ctx context.Context, arg GetDocumentByI
 	return i, err
 }
 
+const getDocumentByTitleInWorkspace = `-- name: GetDocumentByTitleInWorkspace :one
+SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+FROM documents
+WHERE workspace_id = $1 AND title = $2 AND deleted_at IS NULL
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+type GetDocumentByTitleInWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Title       string
+}
+
+type GetDocumentByTitleInWorkspaceRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) GetDocumentByTitleInWorkspace(ctx context.Context, arg GetDocumentByTitleInWorkspaceParams) (GetDocumentByTitleInWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getDocumentByTitleInWorkspace, arg.WorkspaceID, arg.Title)
+	var i GetDocumentByTitleInWorkspaceRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.Category,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
 const getDocumentViewMetrics = `-- name: GetDocumentViewMetrics :many
 SELECT
     d.id,
@@ -8731,6 +8783,33 @@ func (q *Queries) ListDealsByWorkspace(ctx context.Context, workspaceID pgtype.U
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentIDsInDealRoomsByWorkspace = `-- name: ListDocumentIDsInDealRoomsByWorkspace :many
+SELECT DISTINCT drd.document_id
+FROM deal_room_documents drd
+JOIN documents d ON d.id = drd.document_id AND d.deleted_at IS NULL
+WHERE drd.workspace_id = $1
+`
+
+func (q *Queries) ListDocumentIDsInDealRoomsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listDocumentIDsInDealRoomsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var document_id pgtype.UUID
+		if err := rows.Scan(&document_id); err != nil {
+			return nil, err
+		}
+		items = append(items, document_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -12965,6 +13044,85 @@ func (q *Queries) ReopenLinkAccessRequest(ctx context.Context, arg ReopenLinkAcc
 		&i.SignerName,
 	)
 	return i, err
+}
+
+const replaceDocumentFile = `-- name: ReplaceDocumentFile :one
+UPDATE documents
+SET storage_key = $1,
+    file_size = $2,
+    source_type = $3,
+    status = 'uploaded',
+    page_count = NULL,
+    category = $6,
+    updated_at = now()
+WHERE id = $4 AND workspace_id = $5 AND deleted_at IS NULL
+RETURNING id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
+`
+
+type ReplaceDocumentFileParams struct {
+	StorageKey  string
+	FileSize    pgtype.Int8
+	SourceType  string
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Category    string
+}
+
+type ReplaceDocumentFileRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ReplaceDocumentFile(ctx context.Context, arg ReplaceDocumentFileParams) (ReplaceDocumentFileRow, error) {
+	row := q.db.QueryRow(ctx, replaceDocumentFile,
+		arg.StorageKey,
+		arg.FileSize,
+		arg.SourceType,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.Category,
+	)
+	var i ReplaceDocumentFileRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.CreatedBy,
+		&i.Title,
+		&i.SourceType,
+		&i.Status,
+		&i.StorageKey,
+		&i.FileSize,
+		&i.Category,
+		&i.PageCount,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const resetIngestionJobByDocument = `-- name: ResetIngestionJobByDocument :exec
+UPDATE ingestion_jobs
+SET status = 'queued', attempts = 0, error_message = NULL, updated_at = now()
+WHERE document_id = $1
+`
+
+func (q *Queries) ResetIngestionJobByDocument(ctx context.Context, documentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, resetIngestionJobByDocument, documentID)
+	return err
 }
 
 const resetLinkInvitation = `-- name: ResetLinkInvitation :one

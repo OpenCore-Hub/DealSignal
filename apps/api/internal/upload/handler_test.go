@@ -4,6 +4,24 @@ import (
 	"testing"
 )
 
+func TestParseTruthyForm(t *testing.T) {
+	cases := map[string]bool{
+		"true":  true,
+		"TRUE":  true,
+		"1":     true,
+		"yes":   true,
+		"on":    true,
+		"":      false,
+		"false": false,
+		"0":     false,
+	}
+	for in, want := range cases {
+		if got := parseTruthyForm(in); got != want {
+			t.Fatalf("parseTruthyForm(%q)=%v want %v", in, got, want)
+		}
+	}
+}
+
 func TestContentTypeForSourceType(t *testing.T) {
 	cases := []struct {
 		input    string

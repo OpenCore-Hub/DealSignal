@@ -1038,6 +1038,48 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 		}
 		return db.DealRoomDocument{}, err
 	}
+
+	// Idempotent: replacing an upload keeps the same document id; re-adding it
+	// to the room should update folder placement instead of failing UNIQUE.
+	if existing, getErr := s.queries.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
+		RoomID:     room.ID,
+		DocumentID: doc.ID,
+	}); getErr == nil {
+		if existing.FolderPath != folderPath {
+			if err := s.queries.UpdateDealRoomDocumentFolder(ctx, db.UpdateDealRoomDocumentFolderParams{
+				FolderPath: folderPath,
+				ID:         existing.ID,
+				RoomID:     room.ID,
+			}); err != nil {
+				return db.DealRoomDocument{}, err
+			}
+			existing.FolderPath = folderPath
+		}
+		if existing.SortOrder != sortOrder {
+			if err := s.queries.UpdateDealRoomDocumentSortOrder(ctx, db.UpdateDealRoomDocumentSortOrderParams{
+				SortOrder: sortOrder,
+				ID:        existing.ID,
+				RoomID:    room.ID,
+			}); err != nil {
+				return db.DealRoomDocument{}, err
+			}
+			existing.SortOrder = sortOrder
+		}
+		if s.knowledgeEnqueuer != nil {
+			if kerr := s.knowledgeEnqueuer.EnqueueIngestDocument(
+				ctx,
+				uuid.UUID(room.ID.Bytes).String(),
+				uuid.UUID(room.WorkspaceID.Bytes).String(),
+				uuid.UUID(doc.ID.Bytes).String(),
+			); kerr != nil {
+				logger.ErrorCtx(ctx, "enqueue knowledge ingest after re-add document", kerr)
+			}
+		}
+		return existing, nil
+	} else if !errors.Is(getErr, pgx.ErrNoRows) {
+		return db.DealRoomDocument{}, getErr
+	}
+
 	row, err := s.queries.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
 		TenantID:    room.TenantID,
 		WorkspaceID: room.WorkspaceID,

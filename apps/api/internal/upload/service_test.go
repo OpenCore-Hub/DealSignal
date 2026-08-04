@@ -43,6 +43,16 @@ func TestValidateFileHeader(t *testing.T) {
 	}
 }
 
+func TestExistingDocumentError(t *testing.T) {
+	err := &ExistingDocumentError{ID: "abc", Title: "nda.docx"}
+	if err.Error() == "" {
+		t.Fatal("expected message")
+	}
+	if err.ID != "abc" || err.Title != "nda.docx" {
+		t.Fatalf("unexpected fields: %+v", err)
+	}
+}
+
 func TestDocumentFromDB(t *testing.T) {
 	now := time.Now()
 	docID := uuid.New()

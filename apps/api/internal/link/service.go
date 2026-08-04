@@ -27,6 +27,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/nda"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/redis"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -5109,47 +5110,87 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.queries.WithTx(tx)
 
-	docID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-	doc, err := qtx.CreateDocument(ctx, db.CreateDocumentParams{
-		ID:          docID,
-		TenantID:    link.TenantID,
-		WorkspaceID: link.WorkspaceID,
-		CreatedBy:   reviewerID,
-		Title:       file.OriginalFilename,
-		SourceType:  sourceType,
-		Status:      "uploaded",
-		StorageKey:  file.StorageKey,
-		FileSize:    pgtype.Int8{Int64: file.FileSize, Valid: true},
-		Category:    "uploaded",
-	})
-	if err != nil {
-		return fmt.Errorf("create document: %w", err)
-	}
-
 	folderPath := link.TargetFolderPath
 	if folderPath == "" {
 		folderPath = "/Uploads"
 	}
-	_, err = qtx.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
-		TenantID:    link.TenantID,
+
+	var docID pgtype.UUID
+	existing, lookupErr := qtx.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
 		WorkspaceID: link.WorkspaceID,
-		RoomID:      link.DealRoomID,
-		DocumentID:  doc.ID,
-		FolderPath:  folderPath,
-		SortOrder:   0,
+		Title:       file.OriginalFilename,
 	})
-	if err != nil {
-		return fmt.Errorf("add deal room document: %w", err)
+	switch {
+	case lookupErr == nil:
+		// Owner approved a file that collides with an existing library title —
+		// replace in place so deal-room memberships and share links stay valid.
+		rebinding, rebindErr := upload.RebindDocumentContent(ctx, qtx, upload.RebindDocumentContentParams{
+			DocumentID:  existing.ID,
+			TenantID:    existing.TenantID,
+			WorkspaceID: link.WorkspaceID,
+			StorageKey:  file.StorageKey,
+			SourceType:  sourceType,
+			FileSize:    file.FileSize,
+			Category:    "uploaded",
+		})
+		if rebindErr != nil {
+			return fmt.Errorf("replace existing document: %w", rebindErr)
+		}
+		docID = rebinding.ID
+	case errors.Is(lookupErr, pgx.ErrNoRows):
+		docID = pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		if _, createErr := qtx.CreateDocument(ctx, db.CreateDocumentParams{
+			ID:          docID,
+			TenantID:    link.TenantID,
+			WorkspaceID: link.WorkspaceID,
+			CreatedBy:   reviewerID,
+			Title:       file.OriginalFilename,
+			SourceType:  sourceType,
+			Status:      "uploaded",
+			StorageKey:  file.StorageKey,
+			FileSize:    pgtype.Int8{Int64: file.FileSize, Valid: true},
+			Category:    "uploaded",
+		}); createErr != nil {
+			return fmt.Errorf("create document: %w", createErr)
+		}
+		if _, jobErr := qtx.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+			TenantID:    link.TenantID,
+			WorkspaceID: link.WorkspaceID,
+			DocumentID:  docID,
+			Status:      "queued",
+		}); jobErr != nil {
+			return fmt.Errorf("create ingestion job: %w", jobErr)
+		}
+	default:
+		return fmt.Errorf("lookup existing document: %w", lookupErr)
 	}
 
-	_, err = qtx.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:    link.TenantID,
-		WorkspaceID: link.WorkspaceID,
-		DocumentID:  doc.ID,
-		Status:      "queued",
+	membership, memErr := qtx.GetDealRoomDocumentByDocumentID(ctx, db.GetDealRoomDocumentByDocumentIDParams{
+		RoomID:     link.DealRoomID,
+		DocumentID: docID,
 	})
-	if err != nil {
-		return fmt.Errorf("create ingestion job: %w", err)
+	if memErr != nil {
+		if !errors.Is(memErr, pgx.ErrNoRows) {
+			return fmt.Errorf("lookup deal room membership: %w", memErr)
+		}
+		if _, addErr := qtx.AddDealRoomDocument(ctx, db.AddDealRoomDocumentParams{
+			TenantID:    link.TenantID,
+			WorkspaceID: link.WorkspaceID,
+			RoomID:      link.DealRoomID,
+			DocumentID:  docID,
+			FolderPath:  folderPath,
+			SortOrder:   0,
+		}); addErr != nil {
+			return fmt.Errorf("add deal room document: %w", addErr)
+		}
+	} else if membership.FolderPath != folderPath {
+		if updErr := qtx.UpdateDealRoomDocumentFolder(ctx, db.UpdateDealRoomDocumentFolderParams{
+			FolderPath: folderPath,
+			ID:         membership.ID,
+			RoomID:     link.DealRoomID,
+		}); updErr != nil {
+			return fmt.Errorf("update deal room document folder: %w", updErr)
+		}
 	}
 
 	if err := qtx.UpdateUploadedFileStatus(ctx, db.UpdateUploadedFileStatusParams{
