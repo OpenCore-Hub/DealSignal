@@ -2,6 +2,7 @@ import { useCallback, useState } from "react";
 import { useNavigate, useParams } from "react-router";
 import { Buildings, Eye, Link as LinkIcon, Scales } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageHeader } from "@/components/common/PageHeader";
@@ -15,6 +16,7 @@ import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
 import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
 import type { Document, Link, PageAnalytics, VisitorSummary } from "@/types";
@@ -67,14 +69,25 @@ export function DocumentDetail() {
   const { doc, links, analytics, visitors } = data;
 
   const isAgreement = doc.category === "agreement";
+  const canMarkAgreement = doc.fileType === "pdf" || doc.sourceType === "pdf";
 
   const handleToggleCategory = async () => {
     if (!doc || !documentId) return;
+    const newCategory = isAgreement ? "general" : "agreement";
+    if (newCategory === "agreement" && !canMarkAgreement) {
+      toast.error(t("agreementDocuments:page.pdfOnly"));
+      return;
+    }
     setTogglingCategory(true);
     try {
-      const newCategory = isAgreement ? "general" : "agreement";
       await api.updateDocumentCategory(documentId, newCategory);
       refetch();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "agreement_pdf_required") {
+        toast.error(t("agreementDocuments:page.pdfOnly"));
+      } else {
+        toast.error(t("common:error.saveFailed"));
+      }
     } finally {
       setTogglingCategory(false);
     }
@@ -113,8 +126,13 @@ export function DocumentDetail() {
         <Button
           variant={isAgreement ? "default" : "outline"}
           className="gap-1.5"
-          onClick={handleToggleCategory}
-          disabled={togglingCategory}
+          onClick={() => void handleToggleCategory()}
+          disabled={togglingCategory || (!isAgreement && !canMarkAgreement)}
+          title={
+            !isAgreement && !canMarkAgreement
+              ? t("agreementDocuments:page.pdfOnly")
+              : undefined
+          }
         >
           <Scales size={16} />
           {isAgreement

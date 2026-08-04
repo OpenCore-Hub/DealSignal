@@ -7,16 +7,32 @@ import i18n from "i18next";
 import { DocumentsTable } from "./DocumentsTable";
 import type { Document } from "@/types";
 
-const { getDocumentsMock, getLinksMock } = vi.hoisted(() => ({
+const { getDocumentsMock, getLinksMock, getPageSignedUrlMock } = vi.hoisted(() => ({
   getDocumentsMock: vi.fn(),
   getLinksMock: vi.fn(),
+  getPageSignedUrlMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     getDocuments: getDocumentsMock,
     getLinks: getLinksMock,
+    getPageSignedUrl: getPageSignedUrlMock,
   },
+}));
+
+vi.mock("@/hooks/useDocumentUploadConflict", () => ({
+  UploadCancelledError: class UploadCancelledError extends Error {
+    constructor(message = "upload_cancelled") {
+      super(message);
+      this.name = "UploadCancelledError";
+    }
+  },
+  useDocumentUploadConflict: () => ({
+    uploadDocument: vi.fn(),
+    conflictDialog: null,
+    isAwaitingConflict: false,
+  }),
 }));
 
 vi.mock("@/components/links/LinksTable", () => ({
@@ -45,12 +61,17 @@ const resources = {
         emptyTitle: "Empty library",
         emptyDescription: "Upload a document to get started.",
         upload: "Upload Document",
+        downloadTemplate: "Download Template",
         searchPlaceholder: "Search documents...",
         documentCount: "{{count}} documents",
         documentCountFiltered: "{{count}} documents · {{filtered}} filtered",
         noMatches: "No matching documents found",
         emptyFilter: "No documents in this view",
         clearFilter: "Clear filter",
+        templates: {
+          ndaCN: "NDA (Chinese)",
+          ndaEN: "NDA (English)",
+        },
       },
       columns: {
         file: "File",
@@ -59,6 +80,8 @@ const resources = {
         status: "Status",
         shareLinks: "Links",
         pages: "{{count}} pages",
+        pages_one: "{{count}} page",
+        pages_other: "{{count}} pages",
         links: "{{count}} links",
         viewCount: "{{count}} views",
       },
@@ -76,7 +99,26 @@ const resources = {
         createLink: "Create Link",
       },
     },
-    common: { retry: "Retry", preview: "Preview", view: "View", addToDealRoom: "Add to Deal Room" },
+    agreementDocuments: {
+      page: {
+        documentsTitle: "Agreements",
+        documentsHint: "Upload PDF NDAs here.",
+        fileCount_one: "{{count}} file",
+        fileCount_other: "{{count}} files",
+        emptyTitle: "Add your first NDA",
+        emptyDescription: "Upload a PDF NDA.",
+        pdfOnly: "Agreement files must be PDF.",
+        uploadSuccess: "Agreement uploaded",
+        previewUnavailable: "Preview unavailable",
+      },
+    },
+    common: {
+      retry: "Retry",
+      preview: "Preview",
+      view: "View",
+      delete: "Delete",
+      addToDealRoom: "Add to Deal Room",
+    },
   },
 };
 
@@ -85,7 +127,7 @@ async function initI18n() {
   await instance.use(initReactI18next).init({
     lng: "en",
     fallbackLng: "en",
-    ns: ["documents", "common", "links"],
+    ns: ["documents", "common", "links", "agreementDocuments"],
     defaultNS: "documents",
     resources,
     interpolation: { escapeValue: false },
@@ -137,6 +179,13 @@ describe("DocumentsTable", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getLinksMock.mockResolvedValue({ data: [] });
+    getPageSignedUrlMock.mockResolvedValue({
+      page_number: 1,
+      image_url: "https://example.test/page-1.png",
+      expires_at: "2099-01-01T00:00:00Z",
+      width: 800,
+      height: 1100,
+    });
   });
 
   it("fetches all documents by default", async () => {
@@ -146,6 +195,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
@@ -158,6 +208,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
 
@@ -171,6 +222,7 @@ describe("DocumentsTable", () => {
     expect(screen.getByRole("button", { name: "Create Link" })).toBeInTheDocument();
     expect(getDocumentsMock).not.toHaveBeenCalledWith("shared", undefined, {
       excludeDealRoom: true,
+      excludeAgreement: true,
     });
 
     fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
@@ -178,6 +230,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
   });
@@ -189,6 +242,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
     expect(await screen.findByText("Empty library")).toBeInTheDocument();
@@ -216,6 +270,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
@@ -238,6 +293,7 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
 
@@ -245,10 +301,69 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined, {
         excludeDealRoom: true,
+        excludeAgreement: true,
       }),
     );
 
     expect(await screen.findByText("No documents in this view")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear filter" })).toBeInTheDocument();
+  });
+
+  it("agreement category uses inline PDF upload instead of navigating away", async () => {
+    getDocumentsMock.mockResolvedValue({ data: [] });
+    const instance = await initI18n();
+    render(
+      <I18nextProvider i18n={instance}>
+        <MemoryRouter initialEntries={["/acme/agreement-documents"]}>
+          <Routes>
+            <Route
+              path="/:workspaceSlug/agreement-documents"
+              element={<DocumentsTable category="agreement" />}
+            />
+            <Route path="/:workspaceSlug/documents/upload" element={<div>upload-page</div>} />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "agreement", {
+        excludeDealRoom: true,
+        excludeAgreement: false,
+      }),
+    );
+    expect(await screen.findByText("Add your first NDA")).toBeInTheDocument();
+
+    const input = screen.getByTestId("agreement-file-input") as HTMLInputElement;
+    expect(input.accept).toMatch(/pdf/i);
+
+    fireEvent.click(screen.getByTestId("agreement-upload-button"));
+    expect(screen.queryByText("upload-page")).not.toBeInTheDocument();
+    expect(input).toBeInTheDocument();
+  });
+
+  it("agreement category renders document cards instead of a table", async () => {
+    getDocumentsMock.mockResolvedValue({ data: [mockDocs[0]] });
+    const instance = await initI18n();
+    render(
+      <I18nextProvider i18n={instance}>
+        <MemoryRouter initialEntries={["/acme/agreement-documents"]}>
+          <Routes>
+            <Route
+              path="/:workspaceSlug/agreement-documents"
+              element={<DocumentsTable category="agreement" />}
+            />
+          </Routes>
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    expect(await screen.findByTestId("agreement-doc-cards")).toBeInTheDocument();
+    expect(await screen.findByTestId("agreement-doc-card-doc_1")).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    expect(await screen.findByRole("img", { name: "Pitch Deck" })).toHaveAttribute(
+      "src",
+      "https://example.test/page-1.png",
+    );
   });
 });

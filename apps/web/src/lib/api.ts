@@ -395,12 +395,13 @@ export const api = {
   getDocuments: (
     filter?: DocumentFilter,
     category?: string,
-    opts?: { excludeDealRoom?: boolean },
+    opts?: { excludeDealRoom?: boolean; excludeAgreement?: boolean },
   ) => {
     const params = new URLSearchParams();
     if (filter && filter !== "all") params.set("filter", filter);
     if (category) params.set("category", category);
     if (opts?.excludeDealRoom) params.set("exclude_deal_room", "true");
+    if (opts?.excludeAgreement) params.set("exclude_agreement", "true");
     const qs = params.toString();
     return request<{ data: Document[] }>(
       getWorkspaceSlug(),

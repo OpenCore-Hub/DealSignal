@@ -977,8 +977,12 @@ export const handlers = [
   http.get("*/api/workspaces/:workspaceSlug/documents", ({ request }) => {
     const url = new URL(request.url);
     const filter = url.searchParams.get("filter");
+    const category = (url.searchParams.get("category") ?? "").toLowerCase();
     const excludeDealRoom = ["1", "true", "yes", "on"].includes(
       (url.searchParams.get("exclude_deal_room") ?? "").toLowerCase(),
+    );
+    const excludeAgreement = ["1", "true", "yes", "on"].includes(
+      (url.searchParams.get("exclude_agreement") ?? "").toLowerCase(),
     );
     let docs: typeof mockDocuments;
     switch (filter) {
@@ -1019,6 +1023,11 @@ export const handlers = [
       default:
         docs = mockDocuments;
     }
+    if (category) {
+      docs = docs.filter((d) => (d.category ?? "general") === category);
+    } else if (excludeAgreement) {
+      docs = docs.filter((d) => (d.category ?? "general") !== "agreement");
+    }
     if (excludeDealRoom) {
       const inRoom = new Set(
         mockDealRooms.flatMap((room) =>
@@ -1033,6 +1042,25 @@ export const handlers = [
   http.get("*/api/workspaces/:workspaceSlug/documents/:id", ({ params }) => {
     const doc = mockDocuments.find((d) => d.id === params.id);
     if (!doc) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json(doc);
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/documents/:id/category", async ({ params, request }) => {
+    const doc = mockDocuments.find((d) => d.id === params.id);
+    if (!doc) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as { category?: string };
+    const category = (body.category ?? "").toLowerCase();
+    if (category !== "general" && category !== "agreement") {
+      return HttpResponse.json({ code: "invalid_input", message: "invalid category" }, { status: 400 });
+    }
+    if (category === "agreement" && doc.fileType !== "pdf" && doc.sourceType !== "pdf") {
+      return HttpResponse.json(
+        { code: "agreement_pdf_required", message: "agreement documents must be PDF" },
+        { status: 415 },
+      );
+    }
+    doc.category = category;
+    doc.updatedAt = new Date().toISOString();
     return HttpResponse.json(doc);
   }),
 
@@ -1079,10 +1107,21 @@ export const handlers = [
   http.post("*/api/workspaces/:workspaceSlug/documents", async ({ request }) => {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const category = String(formData.get("category") ?? "").toLowerCase();
     const replace = ["1", "true", "yes", "on"].includes(
       String(formData.get("replace") ?? "").toLowerCase(),
     );
     const title = file?.name ?? "uploaded.pdf";
+    const ext = title.split(".").pop()?.toLowerCase() ?? "pdf";
+    if (category === "agreement" && ext !== "pdf") {
+      return HttpResponse.json(
+        {
+          code: "agreement_pdf_required",
+          message: "agreement documents must be PDF",
+        },
+        { status: 415 },
+      );
+    }
     const existing = mockDocuments.find((d) => d.title === title);
     if (existing && !replace) {
       return HttpResponse.json(
@@ -1094,7 +1133,6 @@ export const handlers = [
         { status: 409 },
       );
     }
-    const ext = title.split(".").pop()?.toLowerCase() ?? "pdf";
     const fileType = (["pdf", "docx", "pptx", "xlsx"] as const).includes(ext as never) ? (ext as import("@/types").Document["fileType"]) : "pdf";
     if (existing && replace) {
       existing.fileSize = file?.size ?? existing.fileSize;
@@ -1102,6 +1140,7 @@ export const handlers = [
       existing.sourceType = fileType;
       existing.fileName = title;
       existing.status = "ready";
+      existing.category = category === "agreement" ? "agreement" : existing.category ?? "general";
       existing.updatedAt = new Date().toISOString();
       return HttpResponse.json(existing, { status: 201 });
     }
@@ -1114,6 +1153,7 @@ export const handlers = [
       fileSize: file?.size ?? 1_000_000,
       pageCount: 10,
       status: "ready" as const,
+      category: (category === "agreement" ? "agreement" : "general") as import("@/types").DocumentCategory,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };

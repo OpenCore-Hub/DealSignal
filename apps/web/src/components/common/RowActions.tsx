@@ -32,7 +32,12 @@ export function RowActions({ actions }: RowActionsProps) {
       <DropdownMenuTrigger
         className={cn(
           buttonVariants({ variant: "ghost", size: "icon-sm" }),
-          "rounded-full text-muted-foreground hover:bg-muted hover:text-foreground data-[popup-open]:bg-muted data-[popup-open]:text-foreground",
+          "rounded-full text-muted-foreground/80",
+          "opacity-70 transition-[opacity,background-color,color,transform] duration-200",
+          "hover:bg-foreground/[0.06] hover:text-foreground hover:opacity-100",
+          "active:scale-[0.94]",
+          "data-[popup-open]:bg-foreground/[0.08] data-[popup-open]:text-foreground data-[popup-open]:opacity-100",
+          "group-hover:opacity-100",
         )}
         aria-label={t("moreActions")}
         onClick={(e) => e.stopPropagation()}
@@ -41,36 +46,60 @@ export function RowActions({ actions }: RowActionsProps) {
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="end"
-        sideOffset={6}
-        className="min-w-48 p-1.5 shadow-dropdown"
+        sideOffset={8}
+        className={cn(
+          "min-w-[14rem] overflow-hidden rounded-xl border-border/50 p-1.5",
+          "bg-popover/95 text-popover-foreground backdrop-blur-xl",
+          "shadow-[0_18px_50px_-18px_rgba(15,23,42,0.35),0_0_0_1px_rgba(15,23,42,0.04)]",
+          "dark:shadow-[0_18px_50px_-18px_rgba(0,0,0,0.55),0_0_0_1px_rgba(255,255,255,0.06)]",
+          "duration-200 data-open:zoom-in-95 data-open:slide-in-from-top-1",
+        )}
         onClick={(e) => e.stopPropagation()}
       >
         {actions.map((action, index) => {
           const prev = actions[index - 1];
           const showSeparator = Boolean(action.destructive && prev && !prev.destructive);
           return (
-            <div key={`${action.label}-${index}`}>
-              {showSeparator && <DropdownMenuSeparator className="my-1.5" />}
+            <div
+              key={`${action.label}-${index}`}
+              className="animate-in fade-in-0 slide-in-from-top-1 fill-mode-both"
+              style={{
+                animationDuration: "220ms",
+                animationDelay: `${Math.min(index, 6) * 28}ms`,
+              }}
+            >
+              {showSeparator ? (
+                <DropdownMenuSeparator className="mx-1 my-1.5 bg-border/70" />
+              ) : null}
               <DropdownMenuItem
                 onClick={action.onClick}
                 disabled={action.disabled}
                 title={action.title}
                 variant={action.destructive ? "destructive" : "default"}
-                className="gap-2.5 px-2.5 py-2"
+                className={cn(
+                  "gap-2.5 rounded-lg px-2 py-2",
+                  "transition-[background-color,transform] duration-150",
+                  "focus:bg-foreground/[0.05]",
+                  "data-[variant=destructive]:focus:bg-destructive/10",
+                  "active:scale-[0.985]",
+                )}
               >
                 {action.icon ? (
                   <span
                     className={cn(
-                      "flex size-4 shrink-0 items-center justify-center [&_svg]:size-4",
+                      "flex size-7 shrink-0 items-center justify-center rounded-md",
+                      "transition-colors duration-150",
                       action.destructive
-                        ? "text-destructive"
-                        : "text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground",
+                        ? "bg-destructive/10 text-destructive"
+                        : "bg-muted/80 text-muted-foreground group-focus/dropdown-menu-item:bg-foreground/[0.06] group-focus/dropdown-menu-item:text-foreground",
                     )}
                   >
-                    {action.icon}
+                    <span className="flex size-4 items-center justify-center [&_svg]:size-3.5">
+                      {action.icon}
+                    </span>
                   </span>
                 ) : null}
-                <span className="flex-1 truncate text-left font-medium tracking-tight">
+                <span className="flex-1 truncate text-left text-[13px] font-medium tracking-[-0.01em]">
                   {action.label}
                 </span>
                 {action.pro ? (

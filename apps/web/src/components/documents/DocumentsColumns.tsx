@@ -1,7 +1,19 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useMemo } from "react";
 import type { NavigateFunction } from "react-router";
-import { Archive, ArrowCounterClockwise, Buildings, CaretDown, CaretUp, CaretUpDown, Copy, DownloadSimple, Eye, Link as LinkIcon, Trash } from "@phosphor-icons/react";
+import {
+  Archive,
+  ArrowCounterClockwise,
+  Buildings,
+  CaretDown,
+  CaretUp,
+  CaretUpDown,
+  Copy,
+  DownloadSimple,
+  Eye,
+  Link as LinkIcon,
+  Trash,
+} from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
@@ -13,6 +25,7 @@ import { RowActions } from "@/components/common/RowActions";
 import { formatDate, formatFileSize } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
 import { documentsSharePath } from "@/lib/documentsSharePath";
+import { cn } from "@/lib/utils";
 import type { Column, ColumnDef } from "@tanstack/react-table";
 import type { Document, HeatLevel, Link } from "@/types";
 
@@ -63,16 +76,20 @@ function SortableHeader({ column, label }: { column: Column<DocumentRow>; label:
     <Button
       variant="ghost"
       size="sm"
-      className="-ml-3 h-8 gap-1 px-2 font-medium"
+      className={cn(
+        "-ml-2 h-8 gap-1 px-2",
+        "text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70",
+        "hover:bg-transparent hover:text-foreground",
+      )}
       onClick={column.getToggleSortingHandler()}
     >
       {label}
       {sorted === "asc" ? (
-        <CaretUp size={14} />
+        <CaretUp size={12} />
       ) : sorted === "desc" ? (
-        <CaretDown size={14} />
+        <CaretDown size={12} />
       ) : (
-        <CaretUpDown size={14} className="text-muted-foreground" />
+        <CaretUpDown size={12} className="opacity-50" />
       )}
     </Button>
   );
@@ -93,17 +110,32 @@ export function useDocumentColumns({
     () => [
       {
         accessorKey: "title",
-        header: t("documents:columns.file"),
+        header: () => (
+          <span className="px-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+            {t("documents:columns.file")}
+          </span>
+        ),
         cell: ({ row }) => {
           const doc = row.original;
           return (
-            <div className="flex items-center gap-3">
-              <FileTypeIcon type={doc.fileType} showLabel />
+            <div className="flex min-w-0 items-center gap-3.5 py-0.5">
+              <FileTypeIcon
+                type={doc.fileType}
+                showLabel
+                className="transition-transform duration-200 group-hover/doc-row:scale-[1.04]"
+              />
               <div className="min-w-0">
-                <p className="truncate text-sm font-medium">{doc.title}</p>
-                <p className="text-caption text-muted-foreground">
-                  {t("documents:columns.pages", { count: doc.pageCount })} · {formatFileSize(doc.fileSize)} · {formatDate(doc.createdAt)} ·{" "}
-                  {t("documents:columns.links", { count: doc.links.length })}
+                <p className="truncate text-[13.5px] font-medium tracking-[-0.015em] text-foreground">
+                  {doc.title}
+                </p>
+                <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
+                  <span>{t("documents:columns.pages", { count: doc.pageCount })}</span>
+                  <span className="mx-1.5 text-border">·</span>
+                  <span>{formatFileSize(doc.fileSize)}</span>
+                  <span className="mx-1.5 text-border">·</span>
+                  <span>{formatDate(doc.createdAt)}</span>
+                  <span className="mx-1.5 text-border">·</span>
+                  <span>{t("documents:columns.links", { count: doc.links.length })}</span>
                 </p>
               </div>
             </div>
@@ -112,7 +144,11 @@ export function useDocumentColumns({
       },
       {
         accessorKey: "status",
-        header: t("documents:columns.status"),
+        header: () => (
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+            {t("documents:columns.status")}
+          </span>
+        ),
         cell: ({ row }) => (
           <DocumentStatusBadge
             status={row.original.status}
@@ -123,7 +159,9 @@ export function useDocumentColumns({
       },
       {
         accessorKey: "heatLevel",
-        header: ({ column }) => <SortableHeader column={column} label={t("documents:columns.heat")} />,
+        header: ({ column }) => (
+          <SortableHeader column={column} label={t("documents:columns.heat")} />
+        ),
         sortingFn: (rowA, rowB) => {
           const rank = { hot: 2, warm: 1, cold: 0 } as const;
           const a = rank[rowA.original.heatLevel];
@@ -131,28 +169,39 @@ export function useDocumentColumns({
           if (a !== b) return a - b;
           return rowA.original.totalViews - rowB.original.totalViews;
         },
-        cell: ({ row }) => <HeatBadge level={row.original.heatLevel} />,
+        cell: ({ row }) => (
+          <HeatBadge level={row.original.heatLevel} className="font-medium" />
+        ),
       },
       {
         accessorKey: "totalViews",
-        header: ({ column }) => <SortableHeader column={column} label={t("documents:columns.views")} />,
+        header: ({ column }) => (
+          <SortableHeader column={column} label={t("documents:columns.views")} />
+        ),
         sortingFn: "basic",
         cell: ({ row }) => (
-          <span className="text-caption tabular-nums">
+          <span className="font-mono text-[12px] tabular-nums tracking-tight text-muted-foreground">
             {row.original.totalViews}
           </span>
         ),
       },
       {
         id: "shareLinks",
-        header: t("documents:columns.shareLinks"),
+        header: () => (
+          <span className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground/70">
+            {t("documents:columns.shareLinks")}
+          </span>
+        ),
         cell: ({ row }) => {
           const doc = row.original;
           return (
             <Button
               variant="ghost"
               size="sm"
-              className="h-auto px-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
+              className={cn(
+                "h-7 rounded-full px-2.5 text-xs font-medium",
+                "text-muted-foreground hover:bg-foreground/[0.05] hover:text-foreground",
+              )}
               onClick={(e) => {
                 e.stopPropagation();
                 navigate(
@@ -170,7 +219,9 @@ export function useDocumentColumns({
       },
       {
         id: "actions",
-        header: t("documents:columns.actions"),
+        header: () => (
+          <span className="sr-only">{t("documents:columns.actions")}</span>
+        ),
         cell: ({ row }) => {
           const doc = row.original;
           const firstLink = doc.links[0];
@@ -210,11 +261,20 @@ export function useDocumentColumns({
           };
 
           return (
-            <div className="flex items-center justify-start gap-1">
+            <div
+              className="flex items-center justify-end gap-0.5"
+              onClick={(e) => e.stopPropagation()}
+            >
               <Button
                 size="icon-sm"
                 variant="ghost"
                 aria-label={t("common:preview")}
+                className={cn(
+                  "rounded-full text-muted-foreground/80 opacity-70",
+                  "transition-[opacity,background-color,color,transform] duration-200",
+                  "hover:bg-foreground/[0.06] hover:text-foreground hover:opacity-100",
+                  "active:scale-[0.94] group-hover/doc-row:opacity-100",
+                )}
                 onClick={(e) => {
                   e.stopPropagation();
                   navigate(`/${workspaceSlug}/documents/${doc.id}`, {
@@ -248,7 +308,12 @@ export function useDocumentColumns({
                   },
                   {
                     label: doc.status === "archived" ? t("common:unarchive") : t("common:archive"),
-                    icon: doc.status === "archived" ? <ArrowCounterClockwise size={16} /> : <Archive size={16} />,
+                    icon:
+                      doc.status === "archived" ? (
+                        <ArrowCounterClockwise size={16} />
+                      ) : (
+                        <Archive size={16} />
+                      ),
                     onClick: handleArchive,
                     disabled: busy || doc.status === "failed",
                     title:
@@ -280,6 +345,6 @@ export function useDocumentColumns({
         },
       },
     ],
-    [navigate, workspaceSlug, t, refetch, onAddToDealRoom, onDelete, returnTo, returnLabel]
+    [navigate, workspaceSlug, t, refetch, onAddToDealRoom, onDelete, returnTo, returnLabel],
   );
 }
