@@ -77,7 +77,8 @@ interface DealRoomFolderTreeProps {
   onDocumentRemove?: (docId: string) => Promise<void>;
   onDocumentsAdd?: (documentIds: string[], folderPath: string) => Promise<void>;
   onDocumentOpen?: (docId: string) => void;
-  onFolderUpload?: (file: File, folderPath: string) => Promise<void>;
+  /** Upload one or more local files into a folder (multi-select supported). */
+  onFolderUpload?: (file: File, folderPath: string, sortOrder?: number) => Promise<void>;
   onChanged?: () => void | Promise<void>;
 }
 
@@ -389,13 +390,16 @@ export function DealRoomFolderTree({
     e: React.ChangeEvent<HTMLInputElement>,
     folderPath: string
   ) => {
-    const file = e.target.files?.[0];
-    if (!file || !onFolderUpload) return;
-    try {
-      await onFolderUpload(file, folderPath);
-    } finally {
-      e.target.value = "";
-    }
+    const files = Array.from(e.target.files ?? []);
+    if (files.length === 0 || !onFolderUpload) return;
+    // Clear immediately so the same selection can be re-picked after upload.
+    e.target.value = "";
+    const baseSort =
+      folderDocs.find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+    // Kick off in parallel; stable sort_order via base+index (avoids duplicate ranks).
+    await Promise.all(
+      files.map((file, index) => onFolderUpload(file, folderPath, baseSort + index)),
+    );
   };
 
   const handleFolderClick = (path: string) => {
@@ -524,6 +528,7 @@ export function DealRoomFolderTree({
                       if (el) fileInputRefs.current.set(node.folder.path, el);
                     }}
                     type="file"
+                    multiple
                     accept={td("upload.supportedTypes")}
                     data-testid={`folder-upload-input-${node.folder.path}`}
                     tabIndex={-1}
@@ -588,7 +593,7 @@ export function DealRoomFolderTree({
                           <UploadSimple size={16} />
                         </span>
                         <span className="font-medium tracking-tight">
-                          {t("folders.addFile")}
+                          {t("folders.addFiles")}
                         </span>
                       </DropdownMenuItem>
                     )}

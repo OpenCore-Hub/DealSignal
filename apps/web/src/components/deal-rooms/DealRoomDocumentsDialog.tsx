@@ -9,8 +9,11 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { useTranslation } from "react-i18next";
+import { useParams } from "react-router";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { viewerPath } from "@/lib/knowledge/citations";
+import { useUIStore } from "@/stores/uiStore";
 import { DealRoomFolderTree } from "./DealRoomFolderTree";
 import { DocumentPicker } from "./DocumentPicker";
 import type { DealRoomFolder, DealRoomFolderDocs, Document } from "@/types";
@@ -42,6 +45,9 @@ export function DealRoomDocumentsDialog({
 }: DealRoomDocumentsDialogProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
+  const { workspaceSlug: paramSlug } = useParams<{ workspaceSlug?: string }>();
+  const storeSlug = useUIStore((s) => s.currentWorkspace?.slug);
+  const workspaceSlug = (paramSlug || storeSlug || "").trim();
   const [internalOpen, setInternalOpen] = useState(false);
   const open = openProp !== undefined ? openProp : internalOpen;
   const setOpen = (value: boolean) => {
@@ -135,7 +141,15 @@ export function DealRoomDocumentsDialog({
   };
 
   const handleDocumentOpen = (documentId: string) => {
-    window.open(`/viewer/${documentId}`, "_blank", "noopener,noreferrer");
+    // Carry roomId + ws so new-tab /viewer can API + mount knowledge rail (Phase X).
+    window.open(
+      viewerPath(documentId, undefined, {
+        roomId,
+        workspaceSlug: workspaceSlug || undefined,
+      }),
+      "_blank",
+      "noopener,noreferrer",
+    );
   };
 
   return (
