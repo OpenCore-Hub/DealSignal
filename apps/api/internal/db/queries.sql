@@ -1547,6 +1547,22 @@ JOIN pages p ON p.id = c.page_id
 WHERE p.document_id = ANY(sqlc.arg(document_ids)::uuid[])
 ORDER BY p.document_id, p.page_number, c.chunk_index;
 
+-- name: SearchTableRowsByDocuments :many
+-- Knowledge Q&A table lane (ceiling Phase I2). pattern is already ILIKE-escaped by Go.
+SELECT
+    c.id,
+    c.document_id,
+    c.chunk_index,
+    c.text,
+    c.bbox
+FROM chunks c
+WHERE c.workspace_id = sqlc.arg(workspace_id)
+  AND c.chunk_type = 'table_row'
+  AND c.document_id = ANY(sqlc.arg(document_ids)::uuid[])
+  AND c.text ILIKE '%' || sqlc.arg(pattern) || '%' ESCAPE '\'
+ORDER BY c.document_id, c.chunk_index
+LIMIT sqlc.arg(row_limit);
+
 -- name: GetDocumentByIDAndTenant :one
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -3041,6 +3057,7 @@ FOR UPDATE;
 UPDATE knowledge_qa_sessions
 SET last_turn_at = sqlc.arg(last_turn_at),
     title = COALESCE(NULLIF(title, ''), sqlc.arg(title_fallback)),
+    state = sqlc.arg(state)::jsonb,
     updated_at = now()
 WHERE id = sqlc.arg(id);
 
@@ -3064,7 +3081,14 @@ INSERT INTO knowledge_qa_turns (
     mode,
     top_k,
     error_summary,
-    created_by
+    created_by,
+    client_request_id,
+    retrieve_query,
+    rewrite_applied,
+    rewrite_basis,
+    bound_answer,
+    corpus_fingerprint,
+    duration_ms
 ) VALUES (
     sqlc.arg(session_id),
     sqlc.arg(room_id),
@@ -3079,9 +3103,23 @@ INSERT INTO knowledge_qa_turns (
     sqlc.narg(mode),
     sqlc.narg(top_k),
     sqlc.narg(error_summary),
-    sqlc.arg(created_by)
+    sqlc.arg(created_by),
+    sqlc.narg(client_request_id),
+    sqlc.narg(retrieve_query),
+    sqlc.arg(rewrite_applied),
+    sqlc.narg(rewrite_basis),
+    sqlc.narg(bound_answer)::jsonb,
+    sqlc.narg(corpus_fingerprint),
+    sqlc.arg(duration_ms)
 )
 RETURNING *;
+
+-- name: GetKnowledgeQATurnByClientRequest :one
+SELECT *
+FROM knowledge_qa_turns
+WHERE room_id = sqlc.arg(room_id)
+  AND created_by = sqlc.arg(created_by)
+  AND client_request_id = sqlc.arg(client_request_id);
 
 -- name: ListKnowledgeQATurnsForSession :many
 SELECT *
@@ -3123,12 +3161,235 @@ WHERE t.session_id = sqlc.arg(session_id)
 
 -- name: DeleteExpiredKnowledgeQASessions :execrows
 -- Turns + feedback cascade via FK. Cutoff is exclusive (activity strictly older).
+-- Prefer archive-then-delete (ListExpired… + DeleteKnowledgeQASession) when object store is configured.
 DELETE FROM knowledge_qa_sessions
 WHERE COALESCE(last_turn_at, updated_at) < sqlc.arg(cutoff);
+
+-- name: ListExpiredKnowledgeQASessionsForArchive :many
+SELECT *
+FROM knowledge_qa_sessions
+WHERE COALESCE(last_turn_at, updated_at) < sqlc.arg(cutoff)
+ORDER BY COALESCE(last_turn_at, updated_at) ASC
+LIMIT sqlc.arg(page_limit);
+
+-- name: DeleteKnowledgeQASession :execrows
+DELETE FROM knowledge_qa_sessions
+WHERE id = $1;
 
 -- name: CountKnowledgeQATurnsForWorkspaceSince :one
 SELECT COUNT(*)::bigint AS count
 FROM knowledge_qa_turns
 WHERE workspace_id = sqlc.arg(workspace_id)
   AND created_at >= sqlc.arg(since);
+
+-- name: CountKnowledgeQATurnsForWorkspaceByStatusSince :many
+SELECT result_status, COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since)
+GROUP BY result_status
+ORDER BY result_status ASC;
+
+-- name: AvgKnowledgeQATurnDurationMsForWorkspaceSince :one
+SELECT
+    COALESCE(AVG(duration_ms), 0)::float8 AS avg_ms,
+    COUNT(*)::bigint AS n
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since);
+
+-- name: P95KnowledgeQATurnDurationMsForWorkspaceSince :one
+SELECT
+    COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p95_ms,
+    COUNT(*)::bigint AS n
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since);
+
+-- name: SumKnowledgeQACostUnitsForWorkspaceSince :one
+SELECT COALESCE(SUM(
+    CASE
+        WHEN bound_answer ? 'costUnits'
+             AND jsonb_typeof(bound_answer->'costUnits') = 'number'
+            THEN (bound_answer->>'costUnits')::bigint
+        ELSE 0
+    END
+), 0)::bigint AS cost_units
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since);
+
+-- name: CountKnowledgeQARefusalsByKindForWorkspaceSince :many
+SELECT
+    COALESCE(bound_answer->'refusal'->>'kind', '')::text AS kind,
+    COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since)
+  AND bound_answer ? 'refusal'
+  AND COALESCE(bound_answer->'refusal'->>'kind', '') <> ''
+GROUP BY 1
+ORDER BY 1 ASC;
+
+-- name: CountKnowledgeQAJudgmentsByKindForWorkspaceSince :many
+SELECT
+    COALESCE(bound_answer->'judgment'->>'kind', '')::text AS kind,
+    COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND created_at >= sqlc.arg(since)
+  AND bound_answer ? 'judgment'
+  AND COALESCE(bound_answer->'judgment'->>'kind', '') <> ''
+GROUP BY 1
+ORDER BY 1 ASC;
+
+-- name: CreateKnowledgeQASessionArchive :one
+INSERT INTO knowledge_qa_session_archives (
+    workspace_id,
+    room_id,
+    session_id,
+    title,
+    storage_key,
+    turn_count,
+    corpus_fingerprint,
+    status,
+    created_by
+) VALUES (
+    sqlc.arg(workspace_id),
+    sqlc.arg(room_id),
+    sqlc.arg(session_id),
+    sqlc.narg(title),
+    sqlc.arg(storage_key),
+    sqlc.arg(turn_count),
+    sqlc.narg(corpus_fingerprint),
+    sqlc.arg(status),
+    sqlc.narg(created_by)
+)
+RETURNING *;
+
+-- name: ListKnowledgeQASessionArchivesForRoom :many
+SELECT *
+FROM knowledge_qa_session_archives
+WHERE room_id = $1
+ORDER BY archived_at DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: GetKnowledgeQASessionArchive :one
+SELECT *
+FROM knowledge_qa_session_archives
+WHERE id = $1 AND room_id = $2;
+
+-- name: MarkKnowledgeQASessionArchiveRestored :one
+UPDATE knowledge_qa_session_archives
+SET status = 'restored_readonly'
+WHERE id = $1 AND room_id = $2
+RETURNING *;
+
+-- name: CountKnowledgeQASessionArchivesForWorkspace :one
+SELECT COUNT(*)::bigint AS count
+FROM knowledge_qa_session_archives
+WHERE workspace_id = $1;
+
+-- name: CountKnowledgeQASessionArchivesForRoom :one
+SELECT COUNT(*)::bigint AS count
+FROM knowledge_qa_session_archives
+WHERE room_id = $1;
+
+-- name: GetKnowledgeQARoomMission :one
+SELECT room_id, workspace_id, pack_id, updated_at, updated_by
+FROM knowledge_qa_room_missions
+WHERE room_id = $1;
+
+-- name: UpsertKnowledgeQARoomMission :one
+INSERT INTO knowledge_qa_room_missions (
+    room_id, workspace_id, pack_id, updated_by, updated_at
+) VALUES (
+    sqlc.arg(room_id),
+    sqlc.arg(workspace_id),
+    sqlc.arg(pack_id),
+    sqlc.narg(updated_by),
+    now()
+)
+ON CONFLICT (room_id) DO UPDATE SET
+    pack_id = EXCLUDED.pack_id,
+    workspace_id = EXCLUDED.workspace_id,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = now()
+RETURNING *;
+
+-- name: UpsertKnowledgeQAEvalCandidate :one
+INSERT INTO knowledge_qa_eval_candidates (
+    room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, created_by, review_status, expect, reviewed_at, reviewed_by
+) VALUES (
+    sqlc.arg(room_id),
+    sqlc.arg(workspace_id),
+    sqlc.arg(turn_id),
+    sqlc.arg(feedback_kind),
+    sqlc.arg(question),
+    sqlc.narg(answer),
+    sqlc.narg(note),
+    sqlc.narg(snapshot),
+    sqlc.narg(corpus_fingerprint),
+    sqlc.arg(created_by),
+    'pending',
+    NULL,
+    NULL,
+    NULL
+)
+ON CONFLICT (turn_id, feedback_kind) DO UPDATE SET
+    question = EXCLUDED.question,
+    answer = EXCLUDED.answer,
+    note = EXCLUDED.note,
+    snapshot = EXCLUDED.snapshot,
+    corpus_fingerprint = EXCLUDED.corpus_fingerprint,
+    created_by = EXCLUDED.created_by,
+    review_status = 'pending',
+    expect = NULL,
+    reviewed_at = NULL,
+    reviewed_by = NULL,
+    created_at = now()
+RETURNING id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by;
+
+-- name: ListKnowledgeQAEvalCandidatesForRoom :many
+SELECT id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+FROM knowledge_qa_eval_candidates
+WHERE room_id = sqlc.arg(room_id)
+  AND (sqlc.narg(feedback_kind)::text IS NULL OR feedback_kind = sqlc.narg(feedback_kind))
+  AND (sqlc.narg(review_status)::text IS NULL OR review_status = sqlc.narg(review_status))
+ORDER BY created_at DESC
+LIMIT sqlc.arg(limit_n);
+
+-- name: GetKnowledgeQAEvalCandidateForRoom :one
+SELECT id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+FROM knowledge_qa_eval_candidates
+WHERE id = sqlc.arg(id) AND room_id = sqlc.arg(room_id);
+
+-- name: ReviewKnowledgeQAEvalCandidate :one
+UPDATE knowledge_qa_eval_candidates
+SET review_status = sqlc.arg(review_status),
+    expect = sqlc.narg(expect),
+    reviewed_at = now(),
+    reviewed_by = sqlc.arg(reviewed_by)
+WHERE id = sqlc.arg(id) AND room_id = sqlc.arg(room_id)
+RETURNING id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by;
+
+-- name: CountKnowledgeQAEvalCandidatesByStatusForWorkspace :many
+SELECT review_status, COUNT(*)::bigint AS count
+FROM knowledge_qa_eval_candidates
+WHERE workspace_id = sqlc.arg(workspace_id)
+GROUP BY review_status;
+
+-- name: ListAcceptedKnowledgeQAEvalCandidatesForRoom :many
+SELECT id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+FROM knowledge_qa_eval_candidates
+WHERE room_id = sqlc.arg(room_id)
+  AND review_status = 'accepted'
+ORDER BY reviewed_at DESC NULLS LAST, created_at DESC
+LIMIT sqlc.arg(limit_n);
 

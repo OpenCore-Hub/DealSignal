@@ -276,6 +276,25 @@ type IntegrationToken struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type KnowledgeQaEvalCandidate struct {
+	ID                pgtype.UUID
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	CreatedAt         pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	ReviewStatus      string
+	Expect            pgtype.Text
+	ReviewedAt        pgtype.Timestamptz
+	ReviewedBy        pgtype.UUID
+}
+
 type KnowledgeQaFeedback struct {
 	ID        pgtype.UUID
 	TurnID    pgtype.UUID
@@ -284,6 +303,14 @@ type KnowledgeQaFeedback struct {
 	Note      pgtype.Text
 	CreatedAt pgtype.Timestamptz
 	UpdatedAt pgtype.Timestamptz
+}
+
+type KnowledgeQaRoomMission struct {
+	RoomID      pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PackID      string
+	UpdatedAt   pgtype.Timestamptz
+	UpdatedBy   pgtype.UUID
 }
 
 type KnowledgeQaSession struct {
@@ -296,6 +323,23 @@ type KnowledgeQaSession struct {
 	CreatedAt   pgtype.Timestamptz
 	UpdatedAt   pgtype.Timestamptz
 	LastTurnAt  pgtype.Timestamptz
+	// entities / openQuestions / coverageHints — provenanced desk state for rewrite
+	State []byte
+}
+
+// Cold-archive tombstones: diligence JSON pack in object storage; hot session rows purged
+type KnowledgeQaSessionArchive struct {
+	ID                pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	RoomID            pgtype.UUID
+	SessionID         pgtype.UUID
+	Title             pgtype.Text
+	StorageKey        string
+	TurnCount         int32
+	CorpusFingerprint pgtype.Text
+	Status            string
+	ArchivedAt        pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
 }
 
 type KnowledgeQaTurn struct {
@@ -315,6 +359,17 @@ type KnowledgeQaTurn struct {
 	ErrorSummary         pgtype.Text
 	CreatedAt            pgtype.Timestamptz
 	CreatedBy            pgtype.UUID
+	ClientRequestID      pgtype.Text
+	RetrieveQuery        pgtype.Text
+	RewriteApplied       bool
+	// When rewrite_applied: state (used session.state) | prior_only (prior turn only)
+	RewriteBasis pgtype.Text
+	// {claims:[{text,hitIds,confidence}], unresolved:[]} — provenanced desk answer; null when unbound
+	BoundAnswer []byte
+	// Stable sha256 of room RAG doc sync generation at ask time (ceiling §3.6)
+	CorpusFingerprint pgtype.Text
+	// End-to-end ask latency in milliseconds (retrieve + audit write)
+	DurationMs int32
 }
 
 type KnowledgeSyncJob struct {

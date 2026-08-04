@@ -263,6 +263,32 @@ func (q *Queries) ArchiveNDATemplate(ctx context.Context, arg ArchiveNDATemplate
 	return i, err
 }
 
+const avgKnowledgeQATurnDurationMsForWorkspaceSince = `-- name: AvgKnowledgeQATurnDurationMsForWorkspaceSince :one
+SELECT
+    COALESCE(AVG(duration_ms), 0)::float8 AS avg_ms,
+    COUNT(*)::bigint AS n
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+`
+
+type AvgKnowledgeQATurnDurationMsForWorkspaceSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+type AvgKnowledgeQATurnDurationMsForWorkspaceSinceRow struct {
+	AvgMs float64
+	N     int64
+}
+
+func (q *Queries) AvgKnowledgeQATurnDurationMsForWorkspaceSince(ctx context.Context, arg AvgKnowledgeQATurnDurationMsForWorkspaceSinceParams) (AvgKnowledgeQATurnDurationMsForWorkspaceSinceRow, error) {
+	row := q.db.QueryRow(ctx, avgKnowledgeQATurnDurationMsForWorkspaceSince, arg.WorkspaceID, arg.Since)
+	var i AvgKnowledgeQATurnDurationMsForWorkspaceSinceRow
+	err := row.Scan(&i.AvgMs, &i.N)
+	return i, err
+}
+
 const cancelPendingKnowledgeIngestJobs = `-- name: CancelPendingKnowledgeIngestJobs :exec
 UPDATE knowledge_sync_jobs
 SET status = 'done',
@@ -328,7 +354,7 @@ UPDATE knowledge_qa_sessions
 SET status = 'closed',
     updated_at = now()
 WHERE id = $1 AND room_id = $2 AND status = 'active'
-RETURNING id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+RETURNING id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at, state
 `
 
 type CloseKnowledgeQASessionParams struct {
@@ -349,6 +375,7 @@ func (q *Queries) CloseKnowledgeQASession(ctx context.Context, arg CloseKnowledg
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastTurnAt,
+		&i.State,
 	)
 	return i, err
 }
@@ -478,6 +505,150 @@ func (q *Queries) CountEmailEventsByLogID(ctx context.Context, emailLogID pgtype
 	return items, nil
 }
 
+const countKnowledgeQAEvalCandidatesByStatusForWorkspace = `-- name: CountKnowledgeQAEvalCandidatesByStatusForWorkspace :many
+SELECT review_status, COUNT(*)::bigint AS count
+FROM knowledge_qa_eval_candidates
+WHERE workspace_id = $1
+GROUP BY review_status
+`
+
+type CountKnowledgeQAEvalCandidatesByStatusForWorkspaceRow struct {
+	ReviewStatus string
+	Count        int64
+}
+
+func (q *Queries) CountKnowledgeQAEvalCandidatesByStatusForWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]CountKnowledgeQAEvalCandidatesByStatusForWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, countKnowledgeQAEvalCandidatesByStatusForWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountKnowledgeQAEvalCandidatesByStatusForWorkspaceRow
+	for rows.Next() {
+		var i CountKnowledgeQAEvalCandidatesByStatusForWorkspaceRow
+		if err := rows.Scan(&i.ReviewStatus, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countKnowledgeQAJudgmentsByKindForWorkspaceSince = `-- name: CountKnowledgeQAJudgmentsByKindForWorkspaceSince :many
+SELECT
+    COALESCE(bound_answer->'judgment'->>'kind', '')::text AS kind,
+    COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+  AND bound_answer ? 'judgment'
+  AND COALESCE(bound_answer->'judgment'->>'kind', '') <> ''
+GROUP BY 1
+ORDER BY 1 ASC
+`
+
+type CountKnowledgeQAJudgmentsByKindForWorkspaceSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+type CountKnowledgeQAJudgmentsByKindForWorkspaceSinceRow struct {
+	Kind  string
+	Count int64
+}
+
+func (q *Queries) CountKnowledgeQAJudgmentsByKindForWorkspaceSince(ctx context.Context, arg CountKnowledgeQAJudgmentsByKindForWorkspaceSinceParams) ([]CountKnowledgeQAJudgmentsByKindForWorkspaceSinceRow, error) {
+	rows, err := q.db.Query(ctx, countKnowledgeQAJudgmentsByKindForWorkspaceSince, arg.WorkspaceID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountKnowledgeQAJudgmentsByKindForWorkspaceSinceRow
+	for rows.Next() {
+		var i CountKnowledgeQAJudgmentsByKindForWorkspaceSinceRow
+		if err := rows.Scan(&i.Kind, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countKnowledgeQARefusalsByKindForWorkspaceSince = `-- name: CountKnowledgeQARefusalsByKindForWorkspaceSince :many
+SELECT
+    COALESCE(bound_answer->'refusal'->>'kind', '')::text AS kind,
+    COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+  AND bound_answer ? 'refusal'
+  AND COALESCE(bound_answer->'refusal'->>'kind', '') <> ''
+GROUP BY 1
+ORDER BY 1 ASC
+`
+
+type CountKnowledgeQARefusalsByKindForWorkspaceSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+type CountKnowledgeQARefusalsByKindForWorkspaceSinceRow struct {
+	Kind  string
+	Count int64
+}
+
+func (q *Queries) CountKnowledgeQARefusalsByKindForWorkspaceSince(ctx context.Context, arg CountKnowledgeQARefusalsByKindForWorkspaceSinceParams) ([]CountKnowledgeQARefusalsByKindForWorkspaceSinceRow, error) {
+	rows, err := q.db.Query(ctx, countKnowledgeQARefusalsByKindForWorkspaceSince, arg.WorkspaceID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountKnowledgeQARefusalsByKindForWorkspaceSinceRow
+	for rows.Next() {
+		var i CountKnowledgeQARefusalsByKindForWorkspaceSinceRow
+		if err := rows.Scan(&i.Kind, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countKnowledgeQASessionArchivesForRoom = `-- name: CountKnowledgeQASessionArchivesForRoom :one
+SELECT COUNT(*)::bigint AS count
+FROM knowledge_qa_session_archives
+WHERE room_id = $1
+`
+
+func (q *Queries) CountKnowledgeQASessionArchivesForRoom(ctx context.Context, roomID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countKnowledgeQASessionArchivesForRoom, roomID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countKnowledgeQASessionArchivesForWorkspace = `-- name: CountKnowledgeQASessionArchivesForWorkspace :one
+SELECT COUNT(*)::bigint AS count
+FROM knowledge_qa_session_archives
+WHERE workspace_id = $1
+`
+
+func (q *Queries) CountKnowledgeQASessionArchivesForWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countKnowledgeQASessionArchivesForWorkspace, workspaceID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countKnowledgeQATurnsForSession = `-- name: CountKnowledgeQATurnsForSession :one
 SELECT COUNT(*)::int AS count
 FROM knowledge_qa_turns
@@ -489,6 +660,45 @@ func (q *Queries) CountKnowledgeQATurnsForSession(ctx context.Context, sessionID
 	var count int32
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countKnowledgeQATurnsForWorkspaceByStatusSince = `-- name: CountKnowledgeQATurnsForWorkspaceByStatusSince :many
+SELECT result_status, COUNT(*)::bigint AS count
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+GROUP BY result_status
+ORDER BY result_status ASC
+`
+
+type CountKnowledgeQATurnsForWorkspaceByStatusSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+type CountKnowledgeQATurnsForWorkspaceByStatusSinceRow struct {
+	ResultStatus string
+	Count        int64
+}
+
+func (q *Queries) CountKnowledgeQATurnsForWorkspaceByStatusSince(ctx context.Context, arg CountKnowledgeQATurnsForWorkspaceByStatusSinceParams) ([]CountKnowledgeQATurnsForWorkspaceByStatusSinceRow, error) {
+	rows, err := q.db.Query(ctx, countKnowledgeQATurnsForWorkspaceByStatusSince, arg.WorkspaceID, arg.Since)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountKnowledgeQATurnsForWorkspaceByStatusSinceRow
+	for rows.Next() {
+		var i CountKnowledgeQATurnsForWorkspaceByStatusSinceRow
+		if err := rows.Scan(&i.ResultStatus, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countKnowledgeQATurnsForWorkspaceSince = `-- name: CountKnowledgeQATurnsForWorkspaceSince :one
@@ -1486,7 +1696,7 @@ INSERT INTO knowledge_qa_sessions (
 ) VALUES (
     $1, $2, $3, $4, 'active'
 )
-RETURNING id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+RETURNING id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at, state
 `
 
 type CreateKnowledgeQASessionParams struct {
@@ -1514,6 +1724,73 @@ func (q *Queries) CreateKnowledgeQASession(ctx context.Context, arg CreateKnowle
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastTurnAt,
+		&i.State,
+	)
+	return i, err
+}
+
+const createKnowledgeQASessionArchive = `-- name: CreateKnowledgeQASessionArchive :one
+INSERT INTO knowledge_qa_session_archives (
+    workspace_id,
+    room_id,
+    session_id,
+    title,
+    storage_key,
+    turn_count,
+    corpus_fingerprint,
+    status,
+    created_by
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9
+)
+RETURNING id, workspace_id, room_id, session_id, title, storage_key, turn_count, corpus_fingerprint, status, archived_at, created_by
+`
+
+type CreateKnowledgeQASessionArchiveParams struct {
+	WorkspaceID       pgtype.UUID
+	RoomID            pgtype.UUID
+	SessionID         pgtype.UUID
+	Title             pgtype.Text
+	StorageKey        string
+	TurnCount         int32
+	CorpusFingerprint pgtype.Text
+	Status            string
+	CreatedBy         pgtype.UUID
+}
+
+func (q *Queries) CreateKnowledgeQASessionArchive(ctx context.Context, arg CreateKnowledgeQASessionArchiveParams) (KnowledgeQaSessionArchive, error) {
+	row := q.db.QueryRow(ctx, createKnowledgeQASessionArchive,
+		arg.WorkspaceID,
+		arg.RoomID,
+		arg.SessionID,
+		arg.Title,
+		arg.StorageKey,
+		arg.TurnCount,
+		arg.CorpusFingerprint,
+		arg.Status,
+		arg.CreatedBy,
+	)
+	var i KnowledgeQaSessionArchive
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.SessionID,
+		&i.Title,
+		&i.StorageKey,
+		&i.TurnCount,
+		&i.CorpusFingerprint,
+		&i.Status,
+		&i.ArchivedAt,
+		&i.CreatedBy,
 	)
 	return i, err
 }
@@ -1533,7 +1810,14 @@ INSERT INTO knowledge_qa_turns (
     mode,
     top_k,
     error_summary,
-    created_by
+    created_by,
+    client_request_id,
+    retrieve_query,
+    rewrite_applied,
+    rewrite_basis,
+    bound_answer,
+    corpus_fingerprint,
+    duration_ms
 ) VALUES (
     $1,
     $2,
@@ -1548,9 +1832,16 @@ INSERT INTO knowledge_qa_turns (
     $11,
     $12,
     $13,
-    $14
+    $14,
+    $15,
+    $16,
+    $17,
+    $18,
+    $19::jsonb,
+    $20,
+    $21
 )
-RETURNING id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by
+RETURNING id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by, client_request_id, retrieve_query, rewrite_applied, rewrite_basis, bound_answer, corpus_fingerprint, duration_ms
 `
 
 type CreateKnowledgeQATurnParams struct {
@@ -1568,6 +1859,13 @@ type CreateKnowledgeQATurnParams struct {
 	TopK                 pgtype.Int4
 	ErrorSummary         pgtype.Text
 	CreatedBy            pgtype.UUID
+	ClientRequestID      pgtype.Text
+	RetrieveQuery        pgtype.Text
+	RewriteApplied       bool
+	RewriteBasis         pgtype.Text
+	BoundAnswer          []byte
+	CorpusFingerprint    pgtype.Text
+	DurationMs           int32
 }
 
 func (q *Queries) CreateKnowledgeQATurn(ctx context.Context, arg CreateKnowledgeQATurnParams) (KnowledgeQaTurn, error) {
@@ -1586,6 +1884,13 @@ func (q *Queries) CreateKnowledgeQATurn(ctx context.Context, arg CreateKnowledge
 		arg.TopK,
 		arg.ErrorSummary,
 		arg.CreatedBy,
+		arg.ClientRequestID,
+		arg.RetrieveQuery,
+		arg.RewriteApplied,
+		arg.RewriteBasis,
+		arg.BoundAnswer,
+		arg.CorpusFingerprint,
+		arg.DurationMs,
 	)
 	var i KnowledgeQaTurn
 	err := row.Scan(
@@ -1605,6 +1910,13 @@ func (q *Queries) CreateKnowledgeQATurn(ctx context.Context, arg CreateKnowledge
 		&i.ErrorSummary,
 		&i.CreatedAt,
 		&i.CreatedBy,
+		&i.ClientRequestID,
+		&i.RetrieveQuery,
+		&i.RewriteApplied,
+		&i.RewriteBasis,
+		&i.BoundAnswer,
+		&i.CorpusFingerprint,
+		&i.DurationMs,
 	)
 	return i, err
 }
@@ -2902,6 +3214,7 @@ WHERE COALESCE(last_turn_at, updated_at) < $1
 `
 
 // Turns + feedback cascade via FK. Cutoff is exclusive (activity strictly older).
+// Prefer archive-then-delete (ListExpired… + DeleteKnowledgeQASession) when object store is configured.
 func (q *Queries) DeleteExpiredKnowledgeQASessions(ctx context.Context, cutoff pgtype.Timestamptz) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteExpiredKnowledgeQASessions, cutoff)
 	if err != nil {
@@ -2922,6 +3235,19 @@ type DeleteIntegrationTokenParams struct {
 func (q *Queries) DeleteIntegrationToken(ctx context.Context, arg DeleteIntegrationTokenParams) error {
 	_, err := q.db.Exec(ctx, deleteIntegrationToken, arg.WorkspaceID, arg.Provider)
 	return err
+}
+
+const deleteKnowledgeQASession = `-- name: DeleteKnowledgeQASession :execrows
+DELETE FROM knowledge_qa_sessions
+WHERE id = $1
+`
+
+func (q *Queries) DeleteKnowledgeQASession(ctx context.Context, id pgtype.UUID) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteKnowledgeQASession, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteLink = `-- name: DeleteLink :execrows
@@ -3460,7 +3786,7 @@ func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBy
 }
 
 const getActiveKnowledgeQASessionForRoom = `-- name: GetActiveKnowledgeQASessionForRoom :one
-SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at, state
 FROM knowledge_qa_sessions
 WHERE room_id = $1 AND status = 'active'
 ORDER BY COALESCE(last_turn_at, created_at) DESC
@@ -3480,6 +3806,7 @@ func (q *Queries) GetActiveKnowledgeQASessionForRoom(ctx context.Context, roomID
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastTurnAt,
+		&i.State,
 	)
 	return i, err
 }
@@ -4553,8 +4880,82 @@ func (q *Queries) GetInvitationByToken(ctx context.Context, token pgtype.UUID) (
 	return i, err
 }
 
+const getKnowledgeQAEvalCandidateForRoom = `-- name: GetKnowledgeQAEvalCandidateForRoom :one
+SELECT id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+FROM knowledge_qa_eval_candidates
+WHERE id = $1 AND room_id = $2
+`
+
+type GetKnowledgeQAEvalCandidateForRoomParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+type GetKnowledgeQAEvalCandidateForRoomRow struct {
+	ID                pgtype.UUID
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	ReviewStatus      string
+	Expect            pgtype.Text
+	ReviewedAt        pgtype.Timestamptz
+	ReviewedBy        pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
+}
+
+func (q *Queries) GetKnowledgeQAEvalCandidateForRoom(ctx context.Context, arg GetKnowledgeQAEvalCandidateForRoomParams) (GetKnowledgeQAEvalCandidateForRoomRow, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeQAEvalCandidateForRoom, arg.ID, arg.RoomID)
+	var i GetKnowledgeQAEvalCandidateForRoomRow
+	err := row.Scan(
+		&i.ID,
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.TurnID,
+		&i.FeedbackKind,
+		&i.Question,
+		&i.Answer,
+		&i.Note,
+		&i.Snapshot,
+		&i.CorpusFingerprint,
+		&i.ReviewStatus,
+		&i.Expect,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
+const getKnowledgeQARoomMission = `-- name: GetKnowledgeQARoomMission :one
+SELECT room_id, workspace_id, pack_id, updated_at, updated_by
+FROM knowledge_qa_room_missions
+WHERE room_id = $1
+`
+
+func (q *Queries) GetKnowledgeQARoomMission(ctx context.Context, roomID pgtype.UUID) (KnowledgeQaRoomMission, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeQARoomMission, roomID)
+	var i KnowledgeQaRoomMission
+	err := row.Scan(
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.PackID,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
+	)
+	return i, err
+}
+
 const getKnowledgeQASession = `-- name: GetKnowledgeQASession :one
-SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at, state
 FROM knowledge_qa_sessions
 WHERE id = $1 AND room_id = $2
 `
@@ -4577,12 +4978,88 @@ func (q *Queries) GetKnowledgeQASession(ctx context.Context, arg GetKnowledgeQAS
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastTurnAt,
+		&i.State,
+	)
+	return i, err
+}
+
+const getKnowledgeQASessionArchive = `-- name: GetKnowledgeQASessionArchive :one
+SELECT id, workspace_id, room_id, session_id, title, storage_key, turn_count, corpus_fingerprint, status, archived_at, created_by
+FROM knowledge_qa_session_archives
+WHERE id = $1 AND room_id = $2
+`
+
+type GetKnowledgeQASessionArchiveParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) GetKnowledgeQASessionArchive(ctx context.Context, arg GetKnowledgeQASessionArchiveParams) (KnowledgeQaSessionArchive, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeQASessionArchive, arg.ID, arg.RoomID)
+	var i KnowledgeQaSessionArchive
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.SessionID,
+		&i.Title,
+		&i.StorageKey,
+		&i.TurnCount,
+		&i.CorpusFingerprint,
+		&i.Status,
+		&i.ArchivedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
+const getKnowledgeQATurnByClientRequest = `-- name: GetKnowledgeQATurnByClientRequest :one
+SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by, client_request_id, retrieve_query, rewrite_applied, rewrite_basis, bound_answer, corpus_fingerprint, duration_ms
+FROM knowledge_qa_turns
+WHERE room_id = $1
+  AND created_by = $2
+  AND client_request_id = $3
+`
+
+type GetKnowledgeQATurnByClientRequestParams struct {
+	RoomID          pgtype.UUID
+	CreatedBy       pgtype.UUID
+	ClientRequestID pgtype.Text
+}
+
+func (q *Queries) GetKnowledgeQATurnByClientRequest(ctx context.Context, arg GetKnowledgeQATurnByClientRequestParams) (KnowledgeQaTurn, error) {
+	row := q.db.QueryRow(ctx, getKnowledgeQATurnByClientRequest, arg.RoomID, arg.CreatedBy, arg.ClientRequestID)
+	var i KnowledgeQaTurn
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.Sequence,
+		&i.Question,
+		&i.Answer,
+		&i.Refused,
+		&i.ResultStatus,
+		&i.CorpusStatusSnapshot,
+		&i.Hits,
+		&i.Mode,
+		&i.TopK,
+		&i.ErrorSummary,
+		&i.CreatedAt,
+		&i.CreatedBy,
+		&i.ClientRequestID,
+		&i.RetrieveQuery,
+		&i.RewriteApplied,
+		&i.RewriteBasis,
+		&i.BoundAnswer,
+		&i.CorpusFingerprint,
+		&i.DurationMs,
 	)
 	return i, err
 }
 
 const getKnowledgeQATurnForRoom = `-- name: GetKnowledgeQATurnForRoom :one
-SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by
+SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by, client_request_id, retrieve_query, rewrite_applied, rewrite_basis, bound_answer, corpus_fingerprint, duration_ms
 FROM knowledge_qa_turns
 WHERE id = $1 AND room_id = $2
 `
@@ -4612,6 +5089,13 @@ func (q *Queries) GetKnowledgeQATurnForRoom(ctx context.Context, arg GetKnowledg
 		&i.ErrorSummary,
 		&i.CreatedAt,
 		&i.CreatedBy,
+		&i.ClientRequestID,
+		&i.RetrieveQuery,
+		&i.RewriteApplied,
+		&i.RewriteBasis,
+		&i.BoundAnswer,
+		&i.CorpusFingerprint,
+		&i.DurationMs,
 	)
 	return i, err
 }
@@ -7118,6 +7602,77 @@ func (q *Queries) InsertSuggestionOutbox(ctx context.Context, arg InsertSuggesti
 	return result.RowsAffected(), nil
 }
 
+const listAcceptedKnowledgeQAEvalCandidatesForRoom = `-- name: ListAcceptedKnowledgeQAEvalCandidatesForRoom :many
+SELECT id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+FROM knowledge_qa_eval_candidates
+WHERE room_id = $1
+  AND review_status = 'accepted'
+ORDER BY reviewed_at DESC NULLS LAST, created_at DESC
+LIMIT $2
+`
+
+type ListAcceptedKnowledgeQAEvalCandidatesForRoomParams struct {
+	RoomID pgtype.UUID
+	LimitN int32
+}
+
+type ListAcceptedKnowledgeQAEvalCandidatesForRoomRow struct {
+	ID                pgtype.UUID
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	ReviewStatus      string
+	Expect            pgtype.Text
+	ReviewedAt        pgtype.Timestamptz
+	ReviewedBy        pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
+}
+
+func (q *Queries) ListAcceptedKnowledgeQAEvalCandidatesForRoom(ctx context.Context, arg ListAcceptedKnowledgeQAEvalCandidatesForRoomParams) ([]ListAcceptedKnowledgeQAEvalCandidatesForRoomRow, error) {
+	rows, err := q.db.Query(ctx, listAcceptedKnowledgeQAEvalCandidatesForRoom, arg.RoomID, arg.LimitN)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAcceptedKnowledgeQAEvalCandidatesForRoomRow
+	for rows.Next() {
+		var i ListAcceptedKnowledgeQAEvalCandidatesForRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RoomID,
+			&i.WorkspaceID,
+			&i.TurnID,
+			&i.FeedbackKind,
+			&i.Question,
+			&i.Answer,
+			&i.Note,
+			&i.Snapshot,
+			&i.CorpusFingerprint,
+			&i.ReviewStatus,
+			&i.Expect,
+			&i.ReviewedAt,
+			&i.ReviewedBy,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAccessLogsByLink = `-- name: ListAccessLogsByLink :many
 WITH visitor_emails AS (
     SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
@@ -8377,6 +8932,50 @@ func (q *Queries) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID)
 	return items, nil
 }
 
+const listExpiredKnowledgeQASessionsForArchive = `-- name: ListExpiredKnowledgeQASessionsForArchive :many
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at, state
+FROM knowledge_qa_sessions
+WHERE COALESCE(last_turn_at, updated_at) < $1
+ORDER BY COALESCE(last_turn_at, updated_at) ASC
+LIMIT $2
+`
+
+type ListExpiredKnowledgeQASessionsForArchiveParams struct {
+	Cutoff    pgtype.Timestamptz
+	PageLimit int32
+}
+
+func (q *Queries) ListExpiredKnowledgeQASessionsForArchive(ctx context.Context, arg ListExpiredKnowledgeQASessionsForArchiveParams) ([]KnowledgeQaSession, error) {
+	rows, err := q.db.Query(ctx, listExpiredKnowledgeQASessionsForArchive, arg.Cutoff, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnowledgeQaSession
+	for rows.Next() {
+		var i KnowledgeQaSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LastTurnAt,
+			&i.State,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listExpiringLinksByWorkspace = `-- name: ListExpiringLinksByWorkspace :many
 SELECT l.id, l.name
 FROM links l
@@ -8529,6 +9128,85 @@ func (q *Queries) ListFileRequestsByVisitor(ctx context.Context, arg ListFileReq
 	return items, nil
 }
 
+const listKnowledgeQAEvalCandidatesForRoom = `-- name: ListKnowledgeQAEvalCandidatesForRoom :many
+SELECT id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+FROM knowledge_qa_eval_candidates
+WHERE room_id = $1
+  AND ($2::text IS NULL OR feedback_kind = $2)
+  AND ($3::text IS NULL OR review_status = $3)
+ORDER BY created_at DESC
+LIMIT $4
+`
+
+type ListKnowledgeQAEvalCandidatesForRoomParams struct {
+	RoomID       pgtype.UUID
+	FeedbackKind pgtype.Text
+	ReviewStatus pgtype.Text
+	LimitN       int32
+}
+
+type ListKnowledgeQAEvalCandidatesForRoomRow struct {
+	ID                pgtype.UUID
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	ReviewStatus      string
+	Expect            pgtype.Text
+	ReviewedAt        pgtype.Timestamptz
+	ReviewedBy        pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
+}
+
+func (q *Queries) ListKnowledgeQAEvalCandidatesForRoom(ctx context.Context, arg ListKnowledgeQAEvalCandidatesForRoomParams) ([]ListKnowledgeQAEvalCandidatesForRoomRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeQAEvalCandidatesForRoom,
+		arg.RoomID,
+		arg.FeedbackKind,
+		arg.ReviewStatus,
+		arg.LimitN,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListKnowledgeQAEvalCandidatesForRoomRow
+	for rows.Next() {
+		var i ListKnowledgeQAEvalCandidatesForRoomRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.RoomID,
+			&i.WorkspaceID,
+			&i.TurnID,
+			&i.FeedbackKind,
+			&i.Question,
+			&i.Answer,
+			&i.Note,
+			&i.Snapshot,
+			&i.CorpusFingerprint,
+			&i.ReviewStatus,
+			&i.Expect,
+			&i.ReviewedAt,
+			&i.ReviewedBy,
+			&i.CreatedAt,
+			&i.CreatedBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnowledgeQAFeedbackForSessionUser = `-- name: ListKnowledgeQAFeedbackForSessionUser :many
 SELECT f.id, f.turn_id, f.user_id, f.kind, f.note, f.created_at, f.updated_at
 FROM knowledge_qa_feedback f
@@ -8559,6 +9237,51 @@ func (q *Queries) ListKnowledgeQAFeedbackForSessionUser(ctx context.Context, arg
 			&i.Note,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeQASessionArchivesForRoom = `-- name: ListKnowledgeQASessionArchivesForRoom :many
+SELECT id, workspace_id, room_id, session_id, title, storage_key, turn_count, corpus_fingerprint, status, archived_at, created_by
+FROM knowledge_qa_session_archives
+WHERE room_id = $1
+ORDER BY archived_at DESC
+LIMIT $2
+`
+
+type ListKnowledgeQASessionArchivesForRoomParams struct {
+	RoomID    pgtype.UUID
+	PageLimit int32
+}
+
+func (q *Queries) ListKnowledgeQASessionArchivesForRoom(ctx context.Context, arg ListKnowledgeQASessionArchivesForRoomParams) ([]KnowledgeQaSessionArchive, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeQASessionArchivesForRoom, arg.RoomID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnowledgeQaSessionArchive
+	for rows.Next() {
+		var i KnowledgeQaSessionArchive
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.RoomID,
+			&i.SessionID,
+			&i.Title,
+			&i.StorageKey,
+			&i.TurnCount,
+			&i.CorpusFingerprint,
+			&i.Status,
+			&i.ArchivedAt,
+			&i.CreatedBy,
 		); err != nil {
 			return nil, err
 		}
@@ -8672,7 +9395,7 @@ func (q *Queries) ListKnowledgeQASessionSummariesForRoom(ctx context.Context, ar
 }
 
 const listKnowledgeQATurnsForSession = `-- name: ListKnowledgeQATurnsForSession :many
-SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by
+SELECT id, session_id, room_id, workspace_id, sequence, question, answer, refused, result_status, corpus_status_snapshot, hits, mode, top_k, error_summary, created_at, created_by, client_request_id, retrieve_query, rewrite_applied, rewrite_basis, bound_answer, corpus_fingerprint, duration_ms
 FROM knowledge_qa_turns
 WHERE session_id = $1
 ORDER BY sequence ASC
@@ -8704,6 +9427,13 @@ func (q *Queries) ListKnowledgeQATurnsForSession(ctx context.Context, sessionID 
 			&i.ErrorSummary,
 			&i.CreatedAt,
 			&i.CreatedBy,
+			&i.ClientRequestID,
+			&i.RetrieveQuery,
+			&i.RewriteApplied,
+			&i.RewriteBasis,
+			&i.BoundAnswer,
+			&i.CorpusFingerprint,
+			&i.DurationMs,
 		); err != nil {
 			return nil, err
 		}
@@ -11885,7 +12615,7 @@ func (q *Queries) ListWorkspacesWithCrmEnabled(ctx context.Context) ([]ListWorks
 }
 
 const lockKnowledgeQASession = `-- name: LockKnowledgeQASession :one
-SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at
+SELECT id, workspace_id, room_id, created_by, title, status, created_at, updated_at, last_turn_at, state
 FROM knowledge_qa_sessions
 WHERE id = $1
 FOR UPDATE
@@ -11904,6 +12634,7 @@ func (q *Queries) LockKnowledgeQASession(ctx context.Context, id pgtype.UUID) (K
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LastTurnAt,
+		&i.State,
 	)
 	return i, err
 }
@@ -11958,6 +12689,37 @@ WHERE token = $1
 func (q *Queries) MarkInvitationUsed(ctx context.Context, token pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, markInvitationUsed, token)
 	return err
+}
+
+const markKnowledgeQASessionArchiveRestored = `-- name: MarkKnowledgeQASessionArchiveRestored :one
+UPDATE knowledge_qa_session_archives
+SET status = 'restored_readonly'
+WHERE id = $1 AND room_id = $2
+RETURNING id, workspace_id, room_id, session_id, title, storage_key, turn_count, corpus_fingerprint, status, archived_at, created_by
+`
+
+type MarkKnowledgeQASessionArchiveRestoredParams struct {
+	ID     pgtype.UUID
+	RoomID pgtype.UUID
+}
+
+func (q *Queries) MarkKnowledgeQASessionArchiveRestored(ctx context.Context, arg MarkKnowledgeQASessionArchiveRestoredParams) (KnowledgeQaSessionArchive, error) {
+	row := q.db.QueryRow(ctx, markKnowledgeQASessionArchiveRestored, arg.ID, arg.RoomID)
+	var i KnowledgeQaSessionArchive
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RoomID,
+		&i.SessionID,
+		&i.Title,
+		&i.StorageKey,
+		&i.TurnCount,
+		&i.CorpusFingerprint,
+		&i.Status,
+		&i.ArchivedAt,
+		&i.CreatedBy,
+	)
+	return i, err
 }
 
 const markMissingRagDocumentsDeleted = `-- name: MarkMissingRagDocumentsDeleted :exec
@@ -12059,6 +12821,32 @@ func (q *Queries) NextKnowledgeQATurnSequence(ctx context.Context, sessionID pgt
 	var max_sequence int32
 	err := row.Scan(&max_sequence)
 	return max_sequence, err
+}
+
+const p95KnowledgeQATurnDurationMsForWorkspaceSince = `-- name: P95KnowledgeQATurnDurationMsForWorkspaceSince :one
+SELECT
+    COALESCE(PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY duration_ms), 0)::float8 AS p95_ms,
+    COUNT(*)::bigint AS n
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+`
+
+type P95KnowledgeQATurnDurationMsForWorkspaceSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+type P95KnowledgeQATurnDurationMsForWorkspaceSinceRow struct {
+	P95Ms float64
+	N     int64
+}
+
+func (q *Queries) P95KnowledgeQATurnDurationMsForWorkspaceSince(ctx context.Context, arg P95KnowledgeQATurnDurationMsForWorkspaceSinceParams) (P95KnowledgeQATurnDurationMsForWorkspaceSinceRow, error) {
+	row := q.db.QueryRow(ctx, p95KnowledgeQATurnDurationMsForWorkspaceSince, arg.WorkspaceID, arg.Since)
+	var i P95KnowledgeQATurnDurationMsForWorkspaceSinceRow
+	err := row.Scan(&i.P95Ms, &i.N)
+	return i, err
 }
 
 const recordLinkOpened = `-- name: RecordLinkOpened :execrows
@@ -12240,6 +13028,137 @@ func (q *Queries) ResetLinkInvitation(ctx context.Context, arg ResetLinkInvitati
 	return i, err
 }
 
+const reviewKnowledgeQAEvalCandidate = `-- name: ReviewKnowledgeQAEvalCandidate :one
+UPDATE knowledge_qa_eval_candidates
+SET review_status = $1,
+    expect = $2,
+    reviewed_at = now(),
+    reviewed_by = $3
+WHERE id = $4 AND room_id = $5
+RETURNING id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+`
+
+type ReviewKnowledgeQAEvalCandidateParams struct {
+	ReviewStatus string
+	Expect       pgtype.Text
+	ReviewedBy   pgtype.UUID
+	ID           pgtype.UUID
+	RoomID       pgtype.UUID
+}
+
+type ReviewKnowledgeQAEvalCandidateRow struct {
+	ID                pgtype.UUID
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	ReviewStatus      string
+	Expect            pgtype.Text
+	ReviewedAt        pgtype.Timestamptz
+	ReviewedBy        pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
+}
+
+func (q *Queries) ReviewKnowledgeQAEvalCandidate(ctx context.Context, arg ReviewKnowledgeQAEvalCandidateParams) (ReviewKnowledgeQAEvalCandidateRow, error) {
+	row := q.db.QueryRow(ctx, reviewKnowledgeQAEvalCandidate,
+		arg.ReviewStatus,
+		arg.Expect,
+		arg.ReviewedBy,
+		arg.ID,
+		arg.RoomID,
+	)
+	var i ReviewKnowledgeQAEvalCandidateRow
+	err := row.Scan(
+		&i.ID,
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.TurnID,
+		&i.FeedbackKind,
+		&i.Question,
+		&i.Answer,
+		&i.Note,
+		&i.Snapshot,
+		&i.CorpusFingerprint,
+		&i.ReviewStatus,
+		&i.Expect,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
+const searchTableRowsByDocuments = `-- name: SearchTableRowsByDocuments :many
+SELECT
+    c.id,
+    c.document_id,
+    c.chunk_index,
+    c.text,
+    c.bbox
+FROM chunks c
+WHERE c.workspace_id = $1
+  AND c.chunk_type = 'table_row'
+  AND c.document_id = ANY($2::uuid[])
+  AND c.text ILIKE '%' || $3 || '%' ESCAPE '\'
+ORDER BY c.document_id, c.chunk_index
+LIMIT $4
+`
+
+type SearchTableRowsByDocumentsParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentIds []pgtype.UUID
+	Pattern     pgtype.Text
+	RowLimit    int32
+}
+
+type SearchTableRowsByDocumentsRow struct {
+	ID         pgtype.UUID
+	DocumentID pgtype.UUID
+	ChunkIndex pgtype.Int4
+	Text       string
+	Bbox       []byte
+}
+
+// Knowledge Q&A table lane (ceiling Phase I2). pattern is already ILIKE-escaped by Go.
+func (q *Queries) SearchTableRowsByDocuments(ctx context.Context, arg SearchTableRowsByDocumentsParams) ([]SearchTableRowsByDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, searchTableRowsByDocuments,
+		arg.WorkspaceID,
+		arg.DocumentIds,
+		arg.Pattern,
+		arg.RowLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []SearchTableRowsByDocumentsRow
+	for rows.Next() {
+		var i SearchTableRowsByDocumentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.DocumentID,
+			&i.ChunkIndex,
+			&i.Text,
+			&i.Bbox,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setDealRoomDocumentsLocked = `-- name: SetDealRoomDocumentsLocked :exec
 UPDATE deal_room_documents
 SET locked = $1
@@ -12339,22 +13258,55 @@ func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocument
 	return err
 }
 
+const sumKnowledgeQACostUnitsForWorkspaceSince = `-- name: SumKnowledgeQACostUnitsForWorkspaceSince :one
+SELECT COALESCE(SUM(
+    CASE
+        WHEN bound_answer ? 'costUnits'
+             AND jsonb_typeof(bound_answer->'costUnits') = 'number'
+            THEN (bound_answer->>'costUnits')::bigint
+        ELSE 0
+    END
+), 0)::bigint AS cost_units
+FROM knowledge_qa_turns
+WHERE workspace_id = $1
+  AND created_at >= $2
+`
+
+type SumKnowledgeQACostUnitsForWorkspaceSinceParams struct {
+	WorkspaceID pgtype.UUID
+	Since       pgtype.Timestamptz
+}
+
+func (q *Queries) SumKnowledgeQACostUnitsForWorkspaceSince(ctx context.Context, arg SumKnowledgeQACostUnitsForWorkspaceSinceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, sumKnowledgeQACostUnitsForWorkspaceSince, arg.WorkspaceID, arg.Since)
+	var cost_units int64
+	err := row.Scan(&cost_units)
+	return cost_units, err
+}
+
 const touchKnowledgeQASessionAfterTurn = `-- name: TouchKnowledgeQASessionAfterTurn :exec
 UPDATE knowledge_qa_sessions
 SET last_turn_at = $1,
     title = COALESCE(NULLIF(title, ''), $2),
+    state = $3::jsonb,
     updated_at = now()
-WHERE id = $3
+WHERE id = $4
 `
 
 type TouchKnowledgeQASessionAfterTurnParams struct {
 	LastTurnAt    pgtype.Timestamptz
 	TitleFallback pgtype.Text
+	State         []byte
 	ID            pgtype.UUID
 }
 
 func (q *Queries) TouchKnowledgeQASessionAfterTurn(ctx context.Context, arg TouchKnowledgeQASessionAfterTurnParams) error {
-	_, err := q.db.Exec(ctx, touchKnowledgeQASessionAfterTurn, arg.LastTurnAt, arg.TitleFallback, arg.ID)
+	_, err := q.db.Exec(ctx, touchKnowledgeQASessionAfterTurn,
+		arg.LastTurnAt,
+		arg.TitleFallback,
+		arg.State,
+		arg.ID,
+	)
 	return err
 }
 
@@ -13627,6 +14579,109 @@ func (q *Queries) UpsertIntegrationToken(ctx context.Context, arg UpsertIntegrat
 	return err
 }
 
+const upsertKnowledgeQAEvalCandidate = `-- name: UpsertKnowledgeQAEvalCandidate :one
+INSERT INTO knowledge_qa_eval_candidates (
+    room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, created_by, review_status, expect, reviewed_at, reviewed_by
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    $5,
+    $6,
+    $7,
+    $8,
+    $9,
+    $10,
+    'pending',
+    NULL,
+    NULL,
+    NULL
+)
+ON CONFLICT (turn_id, feedback_kind) DO UPDATE SET
+    question = EXCLUDED.question,
+    answer = EXCLUDED.answer,
+    note = EXCLUDED.note,
+    snapshot = EXCLUDED.snapshot,
+    corpus_fingerprint = EXCLUDED.corpus_fingerprint,
+    created_by = EXCLUDED.created_by,
+    review_status = 'pending',
+    expect = NULL,
+    reviewed_at = NULL,
+    reviewed_by = NULL,
+    created_at = now()
+RETURNING id, room_id, workspace_id, turn_id, feedback_kind, question, answer, note,
+    snapshot, corpus_fingerprint, review_status, expect, reviewed_at, reviewed_by, created_at, created_by
+`
+
+type UpsertKnowledgeQAEvalCandidateParams struct {
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	CreatedBy         pgtype.UUID
+}
+
+type UpsertKnowledgeQAEvalCandidateRow struct {
+	ID                pgtype.UUID
+	RoomID            pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	TurnID            pgtype.UUID
+	FeedbackKind      string
+	Question          string
+	Answer            pgtype.Text
+	Note              pgtype.Text
+	Snapshot          []byte
+	CorpusFingerprint pgtype.Text
+	ReviewStatus      string
+	Expect            pgtype.Text
+	ReviewedAt        pgtype.Timestamptz
+	ReviewedBy        pgtype.UUID
+	CreatedAt         pgtype.Timestamptz
+	CreatedBy         pgtype.UUID
+}
+
+func (q *Queries) UpsertKnowledgeQAEvalCandidate(ctx context.Context, arg UpsertKnowledgeQAEvalCandidateParams) (UpsertKnowledgeQAEvalCandidateRow, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeQAEvalCandidate,
+		arg.RoomID,
+		arg.WorkspaceID,
+		arg.TurnID,
+		arg.FeedbackKind,
+		arg.Question,
+		arg.Answer,
+		arg.Note,
+		arg.Snapshot,
+		arg.CorpusFingerprint,
+		arg.CreatedBy,
+	)
+	var i UpsertKnowledgeQAEvalCandidateRow
+	err := row.Scan(
+		&i.ID,
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.TurnID,
+		&i.FeedbackKind,
+		&i.Question,
+		&i.Answer,
+		&i.Note,
+		&i.Snapshot,
+		&i.CorpusFingerprint,
+		&i.ReviewStatus,
+		&i.Expect,
+		&i.ReviewedAt,
+		&i.ReviewedBy,
+		&i.CreatedAt,
+		&i.CreatedBy,
+	)
+	return i, err
+}
+
 const upsertKnowledgeQAFeedback = `-- name: UpsertKnowledgeQAFeedback :one
 INSERT INTO knowledge_qa_feedback (
     turn_id, user_id, kind, note
@@ -13666,6 +14721,49 @@ func (q *Queries) UpsertKnowledgeQAFeedback(ctx context.Context, arg UpsertKnowl
 		&i.Note,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertKnowledgeQARoomMission = `-- name: UpsertKnowledgeQARoomMission :one
+INSERT INTO knowledge_qa_room_missions (
+    room_id, workspace_id, pack_id, updated_by, updated_at
+) VALUES (
+    $1,
+    $2,
+    $3,
+    $4,
+    now()
+)
+ON CONFLICT (room_id) DO UPDATE SET
+    pack_id = EXCLUDED.pack_id,
+    workspace_id = EXCLUDED.workspace_id,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = now()
+RETURNING room_id, workspace_id, pack_id, updated_at, updated_by
+`
+
+type UpsertKnowledgeQARoomMissionParams struct {
+	RoomID      pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PackID      string
+	UpdatedBy   pgtype.UUID
+}
+
+func (q *Queries) UpsertKnowledgeQARoomMission(ctx context.Context, arg UpsertKnowledgeQARoomMissionParams) (KnowledgeQaRoomMission, error) {
+	row := q.db.QueryRow(ctx, upsertKnowledgeQARoomMission,
+		arg.RoomID,
+		arg.WorkspaceID,
+		arg.PackID,
+		arg.UpdatedBy,
+	)
+	var i KnowledgeQaRoomMission
+	err := row.Scan(
+		&i.RoomID,
+		&i.WorkspaceID,
+		&i.PackID,
+		&i.UpdatedAt,
+		&i.UpdatedBy,
 	)
 	return i, err
 }
