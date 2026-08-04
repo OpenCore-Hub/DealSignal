@@ -131,7 +131,11 @@ describe("DocumentsTable", () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     await renderTable();
 
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
     expect(screen.getByText("Old Report")).toBeInTheDocument();
   });
@@ -139,18 +143,30 @@ describe("DocumentsTable", () => {
   it("switches filters and refetches documents", async () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     await renderTable();
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
 
     fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
 
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
   });
 
   it("hides search and top upload button when the library is empty", async () => {
     getDocumentsMock.mockResolvedValue({ data: [] });
     await renderTable();
 
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
     expect(await screen.findByText("Empty library")).toBeInTheDocument();
 
     expect(screen.queryByPlaceholderText("Search documents...")).not.toBeInTheDocument();
@@ -162,7 +178,11 @@ describe("DocumentsTable", () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     await renderTable();
 
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
 
     expect(screen.getByPlaceholderText("Search documents...")).toBeInTheDocument();
@@ -174,10 +194,18 @@ describe("DocumentsTable", () => {
       Promise.resolve({ data: filter === "archived" ? [] : mockDocs })
     );
     await renderTable();
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
 
     fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
-    await waitFor(() => expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined));
+    await waitFor(() =>
+      expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined, {
+        excludeDealRoom: true,
+      }),
+    );
 
     expect(await screen.findByText("No documents in this view")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Clear filter" })).toBeInTheDocument();

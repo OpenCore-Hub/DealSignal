@@ -4,7 +4,10 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTranslation } from "react-i18next";
-import { api } from "@/lib/api";
+import {
+  UploadCancelledError,
+  useDocumentUploadConflict,
+} from "@/hooks/useDocumentUploadConflict";
 
 interface UploadFile {
   id: string;
@@ -21,15 +24,15 @@ interface UploaderProps {
 
 export function Uploader({ onUploadComplete, category }: UploaderProps) {
   const { t } = useTranslation("documents");
+  const { uploadDocument, conflictDialog, isAwaitingConflict } =
+    useDocumentUploadConflict();
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
-  // Track file keys for deduplication without depending on `files` state,
-  // which would cause a stale closure in the drag/drop handler.
   const existingKeysRef = useRef<Set<string>>(new Set());
+  const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
 
-  // Cleanup all progress intervals on unmount.
   useEffect(() => {
     const intervals = activeIntervalsRef.current;
     return () => {
@@ -39,22 +42,17 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
     };
   }, []);
 
-  // Track which files are actively being uploaded to prevent double-upload
-  const [uploadingIds, setUploadingIds] = useState<Set<string>>(new Set());
-
   const openFilePicker = useCallback(() => {
     inputRef.current?.click();
   }, []);
 
-  // Add files to queue with deduplication (by name + size). Uses a ref instead
-  // of `files` state to avoid stale closure when rapid sequential drops occur.
   const handleFiles = useCallback((selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
 
     const deduped: UploadFile[] = [];
     for (const file of Array.from(selectedFiles)) {
       const key = `${file.name}|${file.size}`;
-      if (existingKeysRef.current.has(key)) continue; // skip duplicate
+      if (existingKeysRef.current.has(key)) continue;
       existingKeysRef.current.add(key);
       deduped.push({
         id: Math.random().toString(36).slice(2),
@@ -69,7 +67,6 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
     }
   }, []);
 
-  // Remove a file from the queue
   const removeFile = useCallback((id: string) => {
     setFiles((prev) => {
       const removed = prev.find((f) => f.id === id);
@@ -80,19 +77,46 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
     });
   }, []);
 
-  // Upload a single file to the server
+  const markDone = useCallback(
+    (uploadId: string) => {
+      setUploadingIds((prev) => {
+        const next = new Set(prev);
+        next.delete(uploadId);
+        return next;
+      });
+      setFiles((prev) =>
+        prev.map((f) => (f.id === uploadId ? { ...f, progress: 100, status: "done" } : f)),
+      );
+      onUploadComplete?.();
+      window.dispatchEvent(new CustomEvent("documents:uploaded"));
+    },
+    [onUploadComplete],
+  );
+
+  const markError = useCallback((uploadId: string, message: string) => {
+    setUploadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(uploadId);
+      return next;
+    });
+    setFiles((prev) =>
+      prev.map((f) =>
+        f.id === uploadId ? { ...f, status: "error", error: message } : f,
+      ),
+    );
+  }, []);
+
   const uploadFileToServer = useCallback(
-    (uploadFile: UploadFile): Promise<void> | undefined => {
-      if (uploadingIds.has(uploadFile.id)) return; // already uploading
+    async (uploadFile: UploadFile): Promise<void> => {
+      if (uploadingIds.has(uploadFile.id)) return;
 
       setUploadingIds((prev) => new Set(prev).add(uploadFile.id));
       setFiles((prev) =>
         prev.map((f) =>
-          f.id === uploadFile.id ? { ...f, status: "uploading", error: undefined } : f
-        )
+          f.id === uploadFile.id ? { ...f, status: "uploading", error: undefined } : f,
+        ),
       );
 
-      // Simulate progress while waiting for server response
       const interval = setInterval(() => {
         setFiles((prev) =>
           prev.map((f) => {
@@ -106,66 +130,43 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
               ...f,
               progress: Math.min(f.progress + Math.random() * 15, 95),
             };
-          })
+          }),
         );
       }, 300);
       activeIntervalsRef.current.add(interval);
 
-      return api
-        .uploadDocument(uploadFile.file, category)
-        .then(() => {
-          clearInterval(interval);
-          activeIntervalsRef.current.delete(interval);
-          setUploadingIds((prev) => {
-            const next = new Set(prev);
-            next.delete(uploadFile.id);
-            return next;
-          });
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === uploadFile.id ? { ...f, progress: 100, status: "done" } : f
-            )
-          );
-          onUploadComplete?.();
-          // Notify interested components (e.g. document list) that a new upload finished.
-          window.dispatchEvent(new CustomEvent("documents:uploaded"));
-        })
-        .catch((err: Error) => {
-          clearInterval(interval);
-          activeIntervalsRef.current.delete(interval);
-          setUploadingIds((prev) => {
-            const next = new Set(prev);
-            next.delete(uploadFile.id);
-            return next;
-          });
-          setFiles((prev) =>
-            prev.map((f) =>
-              f.id === uploadFile.id
-                ? { ...f, status: "error", error: err.message }
-                : f
-            )
-          );
-        });
+      const stopProgress = () => {
+        clearInterval(interval);
+        activeIntervalsRef.current.delete(interval);
+      };
+
+      try {
+        await uploadDocument(uploadFile.file, category);
+        stopProgress();
+        markDone(uploadFile.id);
+      } catch (err) {
+        stopProgress();
+        if (err instanceof UploadCancelledError) {
+          markError(uploadFile.id, err.message);
+          return;
+        }
+        markError(uploadFile.id, err instanceof Error ? err.message : String(err));
+      }
     },
-    [uploadingIds, onUploadComplete, category]
+    [uploadingIds, category, uploadDocument, markDone, markError],
   );
 
-  // Upload all pending files
   const uploadAll = useCallback(async () => {
     const pending = files.filter((f) => f.status === "pending");
     if (pending.length === 0) return;
-
-    // Upload sequentially (could also parallelize with Promise.all)
     for (const uploadFile of pending) {
       await uploadFileToServer(uploadFile);
     }
   }, [files, uploadFileToServer]);
 
-  // Clear completed/error files
   const clearCompleted = useCallback(() => {
     setFiles((prev) => {
       const toKeep = prev.filter((f) => f.status === "pending" || f.status === "uploading");
-      // Rebuild the dedup ref from the remaining files.
       existingKeysRef.current = new Set(
         toKeep.map((f) => `${f.file.name}|${f.file.size}`),
       );
@@ -191,12 +192,10 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
   const hasPending = files.some((f) => f.status === "pending");
   const hasActive = files.some((f) => f.status === "uploading" || f.status === "processing");
   const hasCompleted = files.some((f) => f.status === "done" || f.status === "error");
-
   const supportedTypes = t("upload.supportedTypes");
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Drop zone / file picker */}
       <div
         onDragOver={onDragOver}
         onDragLeave={onDragLeave}
@@ -205,7 +204,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
           "flex flex-col items-center justify-center rounded-lg border-2 border-dashed p-10 text-center transition-colors",
           isDragging
             ? "border-primary bg-primary/5"
-            : "border-border bg-muted/30 hover:bg-muted/50"
+            : "border-border bg-muted/30 hover:bg-muted/50",
         )}
       >
         <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -233,10 +232,8 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
         </Button>
       </div>
 
-      {/* File list with scroll container */}
       {files.length > 0 && (
         <div className="rounded-lg border border-border overflow-hidden">
-          {/* Action bar: upload all + clear */}
           <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
             <span className="text-caption text-muted-foreground">
               {t("upload.fileCount", { count: files.length })}
@@ -250,8 +247,8 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
               {(hasPending || hasActive) && (
                 <Button
                   size="sm"
-                  disabled={!hasPending}
-                  onClick={() => uploadAll()}
+                  disabled={!hasPending || isAwaitingConflict}
+                  onClick={() => void uploadAll()}
                 >
                   {hasPending ? t("upload.uploadNow") : t("upload.uploading")}
                 </Button>
@@ -259,7 +256,6 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
             </div>
           </div>
 
-          {/* Scrollable file list */}
           <ul className="max-h-[240px] overflow-y-auto space-y-2 p-3">
             {files.map((uploadFile) => (
               <li
@@ -270,7 +266,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
                     ? "border-error/30 bg-error/[0.02]"
                     : uploadFile.status === "done"
                       ? "border-success/30 bg-success/[0.02]"
-                      : "border-border hover:bg-muted/50"
+                      : "border-border hover:bg-muted/50",
                 )}
               >
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
@@ -321,6 +317,8 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
           </ul>
         </div>
       )}
+
+      {conflictDialog}
     </div>
   );
 }

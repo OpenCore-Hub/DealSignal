@@ -392,10 +392,15 @@ export const api = {
   getDashboardStats: () =>
     request<DashboardStats>(getWorkspaceSlug(), "/dashboard/stats"),
 
-  getDocuments: (filter?: DocumentFilter, category?: string) => {
+  getDocuments: (
+    filter?: DocumentFilter,
+    category?: string,
+    opts?: { excludeDealRoom?: boolean },
+  ) => {
     const params = new URLSearchParams();
     if (filter && filter !== "all") params.set("filter", filter);
     if (category) params.set("category", category);
+    if (opts?.excludeDealRoom) params.set("exclude_deal_room", "true");
     const qs = params.toString();
     return request<{ data: Document[] }>(
       getWorkspaceSlug(),
@@ -691,10 +696,15 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
-  uploadDocument: (file: File, category?: string) => {
+  uploadDocument: (
+    file: File,
+    category?: string,
+    opts?: { replace?: boolean },
+  ) => {
     const formData = new FormData();
     formData.append("file", file);
     if (category) formData.append("category", category);
+    if (opts?.replace) formData.append("replace", "true");
     return request<Document>(getWorkspaceSlug(), "/documents", {
       method: "POST",
       body: formData,

@@ -67,7 +67,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     error,
     refetch,
   } = useAsyncData(async () => {
-    const [docsRes, linksRes] = await Promise.all([api.getDocuments(filter, category), api.getLinks()]);
+    const [docsRes, linksRes] = await Promise.all([
+      api.getDocuments(filter, category, { excludeDealRoom: true }),
+      api.getLinks(),
+    ]);
     return buildDocumentRows(docsRes.data, linksRes.data);
   }, [filter, category]);
 

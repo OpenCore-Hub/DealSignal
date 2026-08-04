@@ -15,7 +15,12 @@
     "clearCompleted": "清除已完成",
     "uploadNow": "立即上传",
     "uploading": "上传中...",
-    "pending": "等待上传"
+    "pending": "等待上传",
+    "replaceTitle": "文件已存在",
+    "replaceDescription": "「{{name}}」已在文档库中。是否替换为本次上传的文件？",
+    "replaceConfirm": "替换",
+    "replaceCancel": "取消",
+    "replaceCancelled": "已取消上传"
   },
   "filters": {
     "all": "全部文档",

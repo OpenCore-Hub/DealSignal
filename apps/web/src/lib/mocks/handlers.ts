@@ -975,7 +975,11 @@ export const handlers = [
 
   // Documents
   http.get("*/api/workspaces/:workspaceSlug/documents", ({ request }) => {
-    const filter = new URL(request.url).searchParams.get("filter");
+    const url = new URL(request.url);
+    const filter = url.searchParams.get("filter");
+    const excludeDealRoom = ["1", "true", "yes", "on"].includes(
+      (url.searchParams.get("exclude_deal_room") ?? "").toLowerCase(),
+    );
     let docs: typeof mockDocuments;
     switch (filter) {
       case "recent": {
@@ -1010,6 +1014,14 @@ export const handlers = [
       default:
         docs = mockDocuments;
     }
+    if (excludeDealRoom) {
+      const inRoom = new Set(
+        mockDealRooms.flatMap((room) =>
+          (room.documents ?? []).flatMap((fd) => fd.documents.map((d) => d.document_id || d.id)),
+        ),
+      );
+      docs = docs.filter((d) => !inRoom.has(d.id));
+    }
     return HttpResponse.json({ data: docs });
   }),
 
@@ -1043,9 +1055,32 @@ export const handlers = [
   http.post("*/api/workspaces/:workspaceSlug/documents", async ({ request }) => {
     const formData = await request.formData();
     const file = formData.get("file") as File | null;
+    const replace = ["1", "true", "yes", "on"].includes(
+      String(formData.get("replace") ?? "").toLowerCase(),
+    );
     const title = file?.name ?? "uploaded.pdf";
+    const existing = mockDocuments.find((d) => d.title === title);
+    if (existing && !replace) {
+      return HttpResponse.json(
+        {
+          code: "document_exists",
+          message: "a document with this filename already exists",
+          document: { id: existing.id, title: existing.title },
+        },
+        { status: 409 },
+      );
+    }
     const ext = title.split(".").pop()?.toLowerCase() ?? "pdf";
     const fileType = (["pdf", "docx", "pptx", "xlsx"] as const).includes(ext as never) ? (ext as import("@/types").Document["fileType"]) : "pdf";
+    if (existing && replace) {
+      existing.fileSize = file?.size ?? existing.fileSize;
+      existing.fileType = fileType;
+      existing.sourceType = fileType;
+      existing.fileName = title;
+      existing.status = "ready";
+      existing.updatedAt = new Date().toISOString();
+      return HttpResponse.json(existing, { status: 201 });
+    }
     const newDoc = {
       id: generateId("doc"),
       title,

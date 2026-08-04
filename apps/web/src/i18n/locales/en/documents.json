@@ -15,7 +15,12 @@
     "clearCompleted": "Clear completed",
     "uploadNow": "Upload now",
     "uploading": "Uploading...",
-    "pending": "Pending"
+    "pending": "Pending",
+    "replaceTitle": "File already exists",
+    "replaceDescription": "“{{name}}” is already in the document library. Replace it with this upload?",
+    "replaceConfirm": "Replace",
+    "replaceCancel": "Cancel",
+    "replaceCancelled": "Upload cancelled"
   },
   "filters": {
     "all": "All Documents",
