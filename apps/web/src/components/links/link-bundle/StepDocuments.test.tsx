@@ -134,5 +134,22 @@ describe("StepDocuments", () => {
     });
 
     expect(warningSpy).toHaveBeenCalledTimes(1);
+    expect(warningSpy).toHaveBeenCalledWith(
+      "1 of 2 documents from your saved draft are no longer available and have been removed.",
+    );
+  });
+
+  it("warns with missing=total when every draft document is gone", async () => {
+    const warningSpy = vi.spyOn(toast, "warning").mockImplementation(() => "");
+
+    await renderStepDocuments("/links/new", {
+      pendingDraftDocIds: ["missing-doc"],
+    });
+
+    await waitFor(() => {
+      expect(warningSpy).toHaveBeenCalledWith(
+        "1 of 1 documents from your saved draft are no longer available and have been removed.",
+      );
+    });
   });
 });

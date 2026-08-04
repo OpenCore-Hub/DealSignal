@@ -36,18 +36,24 @@ export function StepDocuments() {
         if (initialDocumentId) {
           clearPipelineDraft();
         } else {
-          const restored = res.data.filter((d: Document) =>
-            state.pendingDraftDocIds.includes(d.id),
-          );
+          const draftIds = state.pendingDraftDocIds;
+          const restored = res.data.filter((d: Document) => draftIds.includes(d.id));
           if (restored.length > 0) {
             dispatch({ type: "SET_SELECTED_DOCUMENTS", documents: restored });
           }
-          if (restored.length < state.pendingDraftDocIds.length) {
-            console.warn(
-              "Draft restore: some documents are no longer available",
-              { expected: state.pendingDraftDocIds.length, restored: restored.length },
+          const missing = draftIds.length - restored.length;
+          if (missing > 0) {
+            console.warn("Draft restore: some documents are no longer available", {
+              total: draftIds.length,
+              restored: restored.length,
+              missing,
+            });
+            toast.warning(
+              t("creator.draftDocsUnavailable", {
+                missing,
+                total: draftIds.length,
+              }),
             );
-            toast.warning(t("creator.draftDocsUnavailable", { expected: state.pendingDraftDocIds.length, restored: restored.length }));
             // When none of the draft documents are available, clear the stale draft
             // so the user doesn't keep seeing this warning on subsequent visits.
             if (restored.length === 0) {

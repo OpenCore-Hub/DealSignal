@@ -7,15 +7,20 @@ import { BundleSecurityOptions } from "./BundleSecurityOptions";
 import { buildConfigFromPreset } from "./pipelineUtils";
 import type { PermissionConfig } from "@/types";
 
+const { listNDATemplatesMock, getDocumentsMock } = vi.hoisted(() => ({
+  listNDATemplatesMock: vi.fn(async () => ({ data: [] })),
+  getDocumentsMock: vi.fn(async () => ({
+    data: [
+      { id: "nda-doc-1", title: "NDA Agreement", status: "ready" },
+      { id: "shared-doc", title: "Shared Deck", status: "ready" },
+    ],
+  })),
+}));
+
 vi.mock("@/lib/api", () => ({
   api: {
-    listNDATemplates: vi.fn(async () => ({ data: [] })),
-    getDocuments: vi.fn(async () => ({
-      data: [
-        { id: "nda-doc-1", title: "NDA Agreement" },
-        { id: "shared-doc", title: "Shared Deck" },
-      ],
-    })),
+    listNDATemplates: listNDATemplatesMock,
+    getDocuments: getDocumentsMock,
   },
 }));
 
@@ -154,5 +159,19 @@ describe("BundleSecurityOptions switch interaction", () => {
     await waitFor(() => {
       expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
     });
+  });
+
+  it("loads NDA candidates from agreement documents, not the general library", async () => {
+    const config = {
+      ...buildConfigFromPreset("customized"),
+      ndaEnabled: true,
+      requireEmailVerification: true,
+    };
+    await renderSecurityOptions(config);
+
+    await waitFor(() => {
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "agreement");
+    });
+    expect(listNDATemplatesMock).toHaveBeenCalled();
   });
 });

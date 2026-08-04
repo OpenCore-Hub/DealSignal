@@ -170,12 +170,7 @@ export function ContactSelector({
   const canSubmitCreate = isValidEmail(newContactEmail);
 
   return (
-    <div className="ml-6 space-y-2 rounded-md border border-border p-3">
-      <div className="space-y-0.5">
-        <Label className="text-sm font-normal">{t("creator.contactLabel")}</Label>
-        <p className="text-xs text-muted-foreground">{t("creator.contactHelper")}</p>
-      </div>
-
+    <div className="space-y-2">
       {/* Selected contact chips */}
       {selectedContacts.length > 0 && (
         <div className="flex flex-wrap gap-1.5">

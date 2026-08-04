@@ -102,7 +102,8 @@ async function renderStepSecurity(overrides?: Partial<BundlePipelineState>) {
 describe("StepSecurity integration", () => {
   it("renders custom security options for customized preset", async () => {
     await renderStepSecurity();
-    expect(screen.getByText("Security Options")).toBeInTheDocument();
+    expect(screen.getByText("Access Control")).toBeInTheDocument();
+    expect(screen.getByText("Content Protection")).toBeInTheDocument();
   });
 
   it("toggles allow download switch", async () => {
@@ -124,6 +125,10 @@ describe("StepSecurity integration", () => {
     fireEvent.click(switches[1]); // NDA
     // Toggling NDA from customized does not match any named preset, so the
     // custom options panel should remain visible so the user can continue editing.
-    expect(screen.getByText("Security Options")).toBeInTheDocument();
+    expect(screen.getByText("Access Control")).toBeInTheDocument();
+    expect(screen.getByTestId("security-switch-ndaEnabled")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
   });
 });

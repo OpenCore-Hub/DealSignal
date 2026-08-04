@@ -84,11 +84,12 @@
   },
   "creator": {
     "loadDocsFailed": "Failed to load documents",
-    "draftDocsUnavailable": "{{restored}} of {{expected}} document(s) from the saved draft are no longer available and have been removed.",
+    "draftDocsUnavailable": "{{missing}} of {{total}} documents from your saved draft are no longer available and have been removed.",
     "createFailed": "Failed to create link",
     "copySuccess": "Link copied",
     "noDocuments": "No available documents; please upload first.",
     "securityOptions": "Security Options",
+    "securityOptionsHint": "Tune access friction and content controls for this share link.",
     "requireEmailVerification": "Require email verification code",
     "contactLabel": "Recipient contact",
     "contactHelper": "Access code will be sent to this contact",

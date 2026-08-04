@@ -84,11 +84,12 @@
   },
   "creator": {
     "loadDocsFailed": "加载文档失败",
-    "draftDocsUnavailable": "已保存草稿中的 {{expected}} 个文档有 {{restored}} 个已失效，相关内容已移除。",
+    "draftDocsUnavailable": "草稿中的 {{total}} 个文档有 {{missing}} 个已失效，相关选择已移除。",
     "createFailed": "创建链接失败",
     "copySuccess": "链接已复制",
     "noDocuments": "暂无可用文档，请先上传。",
     "securityOptions": "安全选项",
+    "securityOptionsHint": "为该分享链接配置访问门槛与内容保护。",
     "requireEmailVerification": "需要邮箱验证码",
     "contactLabel": "收件人联系人",
     "contactHelper": "访问码将发送给该联系人",

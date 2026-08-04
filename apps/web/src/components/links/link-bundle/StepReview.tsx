@@ -137,11 +137,6 @@ export function StepReview() {
     navigate(documentsSharePath(workspaceSlug!));
   };
 
-  const handleCreateAnother = () => {
-    clearPipelineDraft();
-    dispatch({ type: "RESET" });
-  };
-
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -164,28 +159,6 @@ export function StepReview() {
               <Button size="sm" variant="ghost" onClick={handleCopy} className="gap-1">
                 {state.copied ? <CheckIcon size={14} className="text-success-500" /> : <CopyIcon size={14} />}
                 {state.copied ? tc("copied") : tc("copy")}
-              </Button>
-            </div>
-            <div className="flex flex-wrap gap-3">
-              <Button size="sm" className="gap-1.5" onClick={handleCopy}>
-                <CopyIcon size={14} />
-                {t("bundle.review.viewLink")}
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => {
-                  window.open(
-                    `mailto:?subject=${encodeURIComponent(selectedDocuments[0]?.title || "")}&body=${encodeURIComponent(state.generatedLink || "")}`
-                  );
-                }}
-              >
-                <EnvelopeIcon size={14} />
-                {t("bundle.review.sendViaEmail")}
-              </Button>
-              <Button size="sm" variant="outline" onClick={handleCreateAnother}>
-                {t("bundle.review.createAnother")}
               </Button>
             </div>
           </CardContent>
