@@ -42,6 +42,10 @@ export default defineConfig({
       ignored: ["**/coverage/**"],
     },
   },
+  // Newly added answer-markdown deps — keep prebundle fresh after installs.
+  optimizeDeps: {
+    include: ["react-markdown", "remark-breaks", "rehype-sanitize"],
+  },
   build: {
     chunkSizeWarningLimit: 800,
     rollupOptions: {

@@ -1,5 +1,8 @@
 import { create } from "zustand";
-import type { DealRoomKnowledgeQATurn } from "@/types";
+import type {
+  DealRoomKnowledgeQATurn,
+  DealRoomKnowledgeSessionState,
+} from "@/types";
 
 /** Room-scoped Q&A draft: composer + active session + turn timeline. */
 export interface KnowledgeQueryDraft {
@@ -7,6 +10,8 @@ export interface KnowledgeQueryDraft {
   activeSessionId: string | null;
   turns: DealRoomKnowledgeQATurn[];
   activeCite: number | null;
+  /** Auditable session.state for the research desk rail (Phase L). */
+  sessionState?: DealRoomKnowledgeSessionState | null;
 }
 
 const emptyDraft = (): KnowledgeQueryDraft => ({
@@ -14,6 +19,7 @@ const emptyDraft = (): KnowledgeQueryDraft => ({
   activeSessionId: null,
   turns: [],
   activeCite: null,
+  sessionState: null,
 });
 
 interface KnowledgeQueryState {

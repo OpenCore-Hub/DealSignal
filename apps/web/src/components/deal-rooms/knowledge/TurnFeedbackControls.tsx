@@ -68,7 +68,7 @@ export function TurnFeedbackControls({
 
   return (
     <div
-      className="space-y-2 px-4 py-3"
+      className="space-y-2 px-5 py-4"
       data-testid={`knowledge-turn-feedback-${turnId}`}
     >
       <p className="font-mono text-[10px] font-medium uppercase tracking-[0.12em] text-muted-foreground">

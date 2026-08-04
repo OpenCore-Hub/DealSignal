@@ -513,6 +513,18 @@ export interface DealRoomKnowledgeQueryResult {
   results: DealRoomKnowledgeQueryHit[];
 }
 
+/** Auditable desk state machine (ceiling Phase E) — rewrite may only read this + prior turn. */
+export interface DealRoomKnowledgeSessionState {
+  entities?: Array<{
+    name: string;
+    type: string;
+    firstTurnId: string;
+    hitIds?: string[];
+  }>;
+  openQuestions?: Array<{ text: string; sourceTurnId: string }>;
+  coverageHints?: Array<{ sourceNames: string[]; turnId: string }>;
+}
+
 /** Persisted research session for the knowledge tab audit timeline. */
 export interface DealRoomKnowledgeQASession {
   id: string;
@@ -524,6 +536,7 @@ export interface DealRoomKnowledgeQASession {
   lastTurnAt?: string;
   turnCount?: number;
   questionPreview?: string;
+  state?: DealRoomKnowledgeSessionState;
 }
 
 export interface DealRoomKnowledgeSessionList {
@@ -541,6 +554,59 @@ export interface DealRoomKnowledgeTurnFeedback {
   note?: string;
 }
 
+/** Sentence↔hit binding (ceiling Phase F). Empty hitIds → no fact styling. */
+export interface DealRoomKnowledgeAnswerClaim {
+  text: string;
+  hitIds?: string[];
+  confidence?: "grounded" | "weak" | string;
+}
+
+/** Cross-file disagreement in the coverage set (ceiling Phase I). */
+export interface DealRoomKnowledgeConflictSide {
+  sourceName: string;
+  hitId?: string;
+  value?: string;
+  excerpt: string;
+}
+
+export interface DealRoomKnowledgeHitConflict {
+  id: string;
+  kind: "numeric" | string;
+  topic?: string;
+  sides: DealRoomKnowledgeConflictSide[];
+}
+
+/** Audited second-hop retrieve (ceiling Phase I3). */
+export interface DealRoomKnowledgeMultiHopQuery {
+  kind: "definition" | "attachment" | string;
+  query: string;
+  fromHitIds?: string[];
+  anchor?: string;
+}
+
+export interface DealRoomKnowledgeMultiHop {
+  applied: boolean;
+  queries?: DealRoomKnowledgeMultiHopQuery[];
+  addedHitIds?: string[];
+}
+
+/** Typed L2 refusal / retrieval gap (ceiling Phase J). */
+export interface DealRoomKnowledgeRefusal {
+  kind: "ungrounded" | "no_hits" | "error" | string;
+  /** True when ungrounded cleared a non-empty hit set (audit). */
+  hadHits?: boolean;
+  hitCount?: number;
+}
+
+/** Stamp quality for answered turns (ceiling Phase K). */
+export interface DealRoomKnowledgeJudgment {
+  kind: "grounded" | "partial" | string;
+  reason?: "weak_only" | "has_unresolved" | "mixed" | string;
+  groundedClaims?: number;
+  weakClaims?: number;
+  unresolvedCount?: number;
+}
+
 export interface DealRoomKnowledgeQATurn {
   id: string;
   sessionId: string;
@@ -553,9 +619,131 @@ export interface DealRoomKnowledgeQATurn {
   mode?: string;
   topK?: number;
   errorSummary?: string;
+  /** Standalone retrieve query when rewrite ran; display question stays in `question`. */
+  retrieveQuery?: string;
+  rewriteApplied?: boolean;
+  /** When rewriteApplied: `state` (used session.state) | `prior_only`. */
+  rewriteBasis?: "state" | "prior_only" | string;
+  /** Provenanced sentences; prefer over raw answer styling when present. */
+  claims?: DealRoomKnowledgeAnswerClaim[];
+  /** Factual sentences that could not be bound to a hit. */
+  unresolved?: string[];
+  /** Cross-file conflicts — list both sides, do not pick (ceiling Phase I). */
+  conflicts?: DealRoomKnowledgeHitConflict[];
+  /** Deterministic clause→definition→attachment hop audit (ceiling Phase I3). */
+  multiHop?: DealRoomKnowledgeMultiHop;
+  /** Typed refusal / gap (ceiling Phase J). Present for refused / no_hits / error. */
+  refusal?: DealRoomKnowledgeRefusal;
+  /** Stamp quality for answered turns (ceiling Phase K). */
+  judgment?: DealRoomKnowledgeJudgment;
+  /** Room RAG sync-generation fingerprint at ask time (ceiling Phase H). */
+  corpusFingerprint?: string;
+  /** End-to-end ask latency in milliseconds. */
+  durationMs?: number;
   createdAt: string;
   /** Current user's feedback (Phase C); omitted when unset. */
   feedback?: DealRoomKnowledgeTurnFeedback;
+}
+
+/** Diligence audit export / cold-archive pack (ceiling Phase H). */
+export interface DealRoomKnowledgeDiligencePack {
+  schemaVersion: string;
+  exportedAt: string;
+  workspaceId: string;
+  roomId: string;
+  sessionId: string;
+  corpusFingerprint?: string;
+  session: DealRoomKnowledgeQASession;
+  turns: DealRoomKnowledgeQATurn[];
+}
+
+export interface DealRoomKnowledgeSessionArchive {
+  id: string;
+  workspaceId: string;
+  roomId: string;
+  sessionId: string;
+  title?: string;
+  turnCount: number;
+  corpusFingerprint?: string;
+  status: "cold" | "restored_readonly" | string;
+  archivedAt: string;
+}
+
+export interface DealRoomKnowledgeSessionArchiveList {
+  items: DealRoomKnowledgeSessionArchive[];
+}
+
+export interface DealRoomKnowledgeSessionArchiveDetail {
+  archive: DealRoomKnowledgeSessionArchive;
+  pack: DealRoomKnowledgeDiligencePack;
+}
+
+/** Workspace SLO / cost board for the knowledge desk. */
+export interface DealRoomKnowledgeOpsSummary {
+  scope: string;
+  windowHours: number;
+  turnsTotal: number;
+  turnsByStatus: Record<string, number>;
+  avgDurationMs: number;
+  /** p95 ask latency in the window (ceiling Phase M). */
+  p95DurationMs?: number;
+  /** Deterministic evidence+answer volume proxy (1 ≈ 1k runes). */
+  costUnitsTotal?: number;
+  refusalsByKind?: Record<string, number>;
+  judgmentsByKind?: Record<string, number>;
+  /** Gold-review queue by status (ceiling Phase O). */
+  evalCandidatesByStatus?: Record<string, number>;
+  pendingEvalCandidates?: number;
+  answersQuota: { used: number; limit: number; windowHours: number };
+  retentionDays: number;
+  coldArchiveCount: number;
+  roomCorpusFingerprint?: string;
+  prometheusHints?: string[];
+}
+
+/** Scrubbed hit snapshot for gold review (ceiling Phase O/Q). */
+export interface DealRoomKnowledgeEvalHitSnapshot {
+  chunkId?: string;
+  sourceName?: string;
+  pages?: number[];
+  sheet?: string;
+  excerpt?: string;
+}
+
+export interface DealRoomKnowledgeEvalCandidateSnapshot {
+  hits?: DealRoomKnowledgeEvalHitSnapshot[];
+  claims?: Array<{ text: string; hitIds?: string[]; confidence?: string }>;
+  unresolved?: string[];
+  expectedSourceNames?: string[];
+}
+
+/** Feedback→gold review candidate (ceiling Phase O). */
+export interface DealRoomKnowledgeEvalCandidate {
+  id: string;
+  roomId: string;
+  turnId: string;
+  feedbackKind: "wrong_citation" | "not_answering" | string;
+  question: string;
+  answer?: string;
+  note?: string;
+  corpusFingerprint?: string;
+  reviewStatus: "pending" | "accepted" | "rejected" | string;
+  expect?: string;
+  snapshot?: DealRoomKnowledgeEvalCandidateSnapshot | null;
+  createdAt: string;
+  reviewedAt?: string;
+}
+
+export interface DealRoomKnowledgeEvalSeedExport {
+  description: string;
+  seeds: Array<{
+    id: string;
+    kind: string;
+    question: string;
+    answer?: string;
+    note?: string;
+    expect: string;
+  }>;
 }
 
 export interface DealRoomKnowledgeSessionDetail {
@@ -570,6 +758,45 @@ export interface DealRoomKnowledgeSessionQueryResult {
   mode: string;
   answer?: string;
   results: DealRoomKnowledgeQueryHit[];
+  /** Post-turn auditable desk state (ceiling Phase L). */
+  sessionState?: DealRoomKnowledgeSessionState;
+}
+
+/** Evidence-grounded (or template) next-question chips for a turn. */
+export interface DealRoomKnowledgeFollowUpSuggestion {
+  id: string;
+  text: string;
+}
+
+export type DealRoomKnowledgeFollowUpSource = "llm" | "mission" | "template";
+
+export interface DealRoomKnowledgeFollowUpsResult {
+  items: DealRoomKnowledgeFollowUpSuggestion[];
+  source: DealRoomKnowledgeFollowUpSource | string;
+}
+
+/** Builtin diligence mission pack bound to a room (ceiling Phase G). */
+export interface DealRoomKnowledgeMissionPack {
+  packId: string;
+  title: string;
+  source: "room" | "template_default" | "catalog" | string;
+  items?: Array<{ id: string; prompt: string }>;
+}
+
+/** Mission checklist coverage vs session state (ceiling Phase N). */
+export interface DealRoomKnowledgeMissionProgressItem {
+  id: string;
+  prompt: string;
+  covered: boolean;
+}
+
+export interface DealRoomKnowledgeMissionProgress {
+  packId: string;
+  title: string;
+  source: "room" | "template_default" | string;
+  covered: number;
+  total: number;
+  items: DealRoomKnowledgeMissionProgressItem[];
 }
 
 export interface WorkspaceMember {

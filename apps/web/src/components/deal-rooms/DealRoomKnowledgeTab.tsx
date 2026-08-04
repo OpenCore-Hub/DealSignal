@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, LockKey, SealCheck } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router";
+import { useNavigate, useParams } from "react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import {
@@ -11,35 +11,30 @@ import {
 } from "@/components/deal-rooms/knowledge/CorpusIntegrityRail";
 import { GroundedChatShell } from "@/components/deal-rooms/knowledge/GroundedChatShell";
 import { KnowledgeAskEntryCard } from "@/components/deal-rooms/knowledge/KnowledgeAskEntryCard";
+import { KnowledgeOpsStrip } from "@/components/deal-rooms/knowledge/KnowledgeOpsStrip";
 import { KnowledgeSessionHistoryMenu } from "@/components/deal-rooms/knowledge/KnowledgeSessionHistoryMenu";
+import { ColdArchivePanel } from "@/components/deal-rooms/knowledge/ColdArchivePanel";
+import { EvalGoldReviewPanel } from "@/components/deal-rooms/knowledge/EvalGoldReviewPanel";
+import { MissionProgressRail } from "@/components/deal-rooms/knowledge/MissionProgressRail";
+import { SessionStateRail } from "@/components/deal-rooms/knowledge/SessionStateRail";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useKnowledgeDeskSession } from "@/hooks/useKnowledgeDeskSession";
 import {
   formatHitLocusLabel,
   formatPagesLabel,
   renderAnswerWithCitations,
   viewerPath,
 } from "@/lib/knowledge/citations";
+import { downloadDiligencePack } from "@/lib/knowledge/downloadDiligence";
 import { knowledgeErrorMessage } from "@/lib/knowledge/errors";
-import { asFeedbackKind } from "@/lib/knowledge/feedback";
-import {
-  createKnowledgeTurn,
-  reduceKnowledgeStream,
-  turnFromQATurn,
-  type KnowledgeTurn,
-} from "@/lib/knowledge/streamEvents";
+import { useKnowledgeFollowUpChips } from "@/lib/knowledge/useKnowledgeFollowUpChips";
 import { useKnowledgeQueryStore } from "@/stores/knowledgeQueryStore";
-import type {
-  DealRoomKnowledgeFeedbackKind,
-  DealRoomKnowledgeQATurn,
-} from "@/types";
 
 interface DealRoomKnowledgeTabProps {
   roomId: string;
 }
-
-const EMPTY_TURNS: DealRoomKnowledgeQATurn[] = [];
 
 export { knowledgeErrorMessage };
 
@@ -49,23 +44,8 @@ function isKnowledgeBusy(status?: string, jobStatus?: string) {
 }
 
 /** docling-rag grounded-answer refusals — retrieval may still return low-score hits. */
-export function isUngroundedKnowledgeAnswer(answer?: string | null): boolean {
-  const text = (answer ?? "").trim().toLowerCase();
-  if (!text) return false;
-  const needles = [
-    "does not contain an answer",
-    "do not contain an answer",
-    "no relevant information",
-    "cannot answer based on the",
-    "can't answer based on the",
-    "未找到相关",
-    "没有匹配",
-    "无法从提供的",
-    "上下文中没有",
-    "资料中没有",
-  ];
-  return needles.some((n) => text.includes(n));
-}
+/** @deprecated Prefer `@/lib/knowledge/trustGates` — kept for existing test imports. */
+export { isUngroundedKnowledgeAnswer } from "@/lib/knowledge/trustGates";
 
 // Re-export citation helpers for existing tests / callers.
 export {
@@ -79,6 +59,7 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
+  const { workspaceSlug } = useParams<{ workspaceSlug?: string }>();
   const { data, loading, error, refetch } = useAsyncData(
     () => api.getDealRoomKnowledge(roomId),
     [roomId],
@@ -107,46 +88,13 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   }, [roomId]);
 
   const [syncing, setSyncing] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [sessionHydrated, setSessionHydrated] = useState(false);
-  const [liveTurn, setLiveTurn] = useState<KnowledgeTurn | null>(null);
-  const askAbortRef = useRef<AbortController | null>(null);
-  /** Sync guard — React state `asking` alone cannot block rapid double Ask/Enter. */
-  const askingRef = useRef(false);
-
-  // Single store snapshot — avoid `?? []` selectors that allocate each read.
-  const draft = useKnowledgeQueryStore((s) => s.byRoom[roomId]);
-  const query = draft?.query ?? "";
-  const activeSessionId = draft?.activeSessionId ?? null;
-  const turns = draft?.turns ?? EMPTY_TURNS;
-  const activeCite = draft?.activeCite ?? null;
-
-  const openViewer = (documentId: string, page?: number) => {
-    // Prefer in-flight live turn; else last persisted audit turn.
-    let turnOutcome: "grounded" | "refused" | "unknown" = "unknown";
-    if (liveTurn) {
-      turnOutcome = liveTurn.refused
-        ? "refused"
-        : liveTurn.results.length > 0
-          ? "grounded"
-          : "unknown";
-    } else {
-      const last = turns[turns.length - 1];
-      if (last?.refused) turnOutcome = "refused";
-      else if ((last?.hits?.length ?? 0) > 0) turnOutcome = "grounded";
-    }
-    void api
-      .recordDealRoomKnowledgeDeskEvent(roomId, { type: "cite_open", turnOutcome })
-      .catch(() => {
-        /* metrics must not block navigation */
-      });
-    navigate(viewerPath(documentId, page));
-  };
-
-  const setQuery = (value: string) =>
-    useKnowledgeQueryStore.getState().setDraft(roomId, { query: value });
-  const setActiveCite = (value: number | null) =>
-    useKnowledgeQueryStore.getState().setDraft(roomId, { activeCite: value });
+  /** Bumps ops strip + gold review queue after accept/reject. */
+  const [opsRefreshKey, setOpsRefreshKey] = useState(0);
+  /** Desk chrome: SessionStateRail stays opt-in; MissionProgressRail auto-opens on empty desk. */
+  const [sessionStateOpen, setSessionStateOpen] = useState(false);
+  const [missionProgressOpen, setMissionProgressOpen] = useState(
+    () => (useKnowledgeQueryStore.getState().byRoom[roomId]?.turns.length ?? 0) === 0,
+  );
 
   // Landing shows corpus + ask-entry; restore desk when store already has turns
   // (viewer → Back) or after active-session hydrate.
@@ -154,13 +102,52 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     () => (useKnowledgeQueryStore.getState().byRoom[roomId]?.turns.length ?? 0) > 0,
   );
 
-  const viewTurns = useMemo(() => {
-    const lastIdx = turns.length - 1;
-    const mapped = turns.map((row, idx) =>
-      turnFromQATurn(row, idx === lastIdx && !liveTurn ? activeCite : null),
+  const corpusAllowAsk =
+    !!data?.enabled && resolveCorpusAttentionStage(data) === "ready";
+
+  const {
+    query,
+    setQuery,
+    activeSessionId,
+    turns,
+    setActiveCite,
+    sessionState,
+    asking,
+    liveTurn,
+    viewTurns,
+    sessionHydrated,
+    onAsk,
+    onStop,
+    onFeedback,
+    recordCiteOpen,
+  } = useKnowledgeDeskSession(roomId, {
+    allowAsk: corpusAllowAsk,
+    onActiveSessionHydrated: () => setChatOpen(true),
+  });
+
+  // First visit / new session → show follow-up templates; once Q&A is active → hide.
+  const deskHasQaActivity = turns.length > 0 || asking || !!liveTurn;
+  useEffect(() => {
+    setMissionProgressOpen(!deskHasQaActivity);
+  }, [deskHasQaActivity]);
+
+  const openViewer = (documentId: string, page?: number) => {
+    recordCiteOpen();
+    navigate(
+      viewerPath(documentId, page, {
+        roomId,
+        workspaceSlug: (workspaceSlug || "").trim() || undefined,
+      }),
     );
-    return liveTurn ? [...mapped, liveTurn] : mapped;
-  }, [turns, activeCite, liveTurn]);
+  };
+
+  const lastFollowUpTurn = turns.length > 0 ? turns[turns.length - 1]! : null;
+  const {
+    chips: followUpChips,
+    source: followUpSource,
+    upgrading: followUpUpgrading,
+    setEngaged: setFollowUpsEngaged,
+  } = useKnowledgeFollowUpChips(roomId, lastFollowUpTurn, t);
 
   useEffect(() => {
     if (!isKnowledgeBusy(data?.status, data?.progress?.jobStatus)) return;
@@ -169,35 +156,6 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     }, 2500);
     return () => window.clearInterval(timer);
   }, [data?.status, data?.progress?.jobStatus, refetch]);
-
-  // Hydrate newest active session from server (refresh recovery).
-  useEffect(() => {
-    let cancelled = false;
-    setSessionHydrated(false);
-    void (async () => {
-      try {
-        const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
-        if (cancelled) return;
-        const serverTurns = detail.turns ?? [];
-        const sessionId = detail.session?.id ?? null;
-        if (sessionId && serverTurns.length > 0) {
-          useKnowledgeQueryStore.getState().setDraft(roomId, {
-            activeSessionId: sessionId,
-            turns: serverTurns,
-            activeCite: null,
-          });
-          setChatOpen(true);
-        }
-      } catch {
-        // Non-fatal: desk still works for a fresh session on first ask.
-      } finally {
-        if (!cancelled) setSessionHydrated(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [roomId]);
 
   const onSync = async () => {
     setSyncing(true);
@@ -216,100 +174,6 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     }
   };
 
-  const onStopAsk = () => {
-    askAbortRef.current?.abort();
-  };
-
-  /** Poll active session until turn count grows past baseline (server may still be writing). */
-  const hydrateAfterAbort = async (baselineTurnCount: number) => {
-    const deadline = Date.now() + 4000;
-    let delayMs = 120;
-    while (Date.now() < deadline) {
-      try {
-        const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
-        const serverTurns = detail.turns ?? [];
-        const sessionId = detail.session?.id ?? null;
-        if (sessionId && serverTurns.length > baselineTurnCount) {
-          useKnowledgeQueryStore.getState().setDraft(roomId, {
-            activeSessionId: sessionId,
-            turns: serverTurns,
-            activeCite: null,
-          });
-          return;
-        }
-      } catch {
-        /* retry until deadline */
-      }
-      await new Promise((r) => setTimeout(r, delayMs));
-      delayMs = Math.min(Math.round(delayMs * 1.6), 700);
-    }
-  };
-
-  const onQuery = async () => {
-    const q = query.trim();
-    if (!q || askingRef.current) return;
-    askingRef.current = true;
-    askAbortRef.current?.abort();
-    const ac = new AbortController();
-    askAbortRef.current = ac;
-    setAsking(true);
-    setActiveCite(null);
-    setLiveTurn(createKnowledgeTurn(q));
-    const baselineTurnCount =
-      useKnowledgeQueryStore.getState().byRoom[roomId]?.turns?.length ?? 0;
-    try {
-      const res = await api.streamDealRoomKnowledgeSession(
-        roomId,
-        {
-          sessionId: activeSessionId ?? undefined,
-          query: q,
-          answer: true,
-          top_k: 8,
-        },
-        {
-          signal: ac.signal,
-          onEvent: (event) => {
-            setLiveTurn((prev) => (prev ? reduceKnowledgeStream(prev, event) : prev));
-          },
-        },
-      );
-      const current =
-        useKnowledgeQueryStore.getState().byRoom[roomId]?.turns ?? [];
-      const merged = [...current.filter((x) => x.id !== res.turn.id), res.turn].sort(
-        (a, b) => a.sequence - b.sequence,
-      );
-      useKnowledgeQueryStore.getState().setDraft(roomId, {
-        activeSessionId: res.sessionId,
-        turns: merged,
-        query: "",
-        activeCite: null,
-      });
-      // Clear optimistic stream turn only after audit row is in the store.
-      setLiveTurn(null);
-      if (res.turn.resultStatus === "error") {
-        toast.error(knowledgeErrorMessage(t, res.turn.errorSummary));
-      }
-    } catch (e) {
-      if (ac.signal.aborted) {
-        // Server may still finish QueryWithSession and persist the turn — hydrate so
-        // the audit timeline does not lose a completed answer after Stop (P5).
-        setLiveTurn(null);
-        await hydrateAfterAbort(baselineTurnCount);
-        return;
-      }
-      if (e instanceof ApiError) {
-        toast.error(knowledgeErrorMessage(t, e.code));
-      } else {
-        toast.error(t("knowledge.queryFailed"));
-      }
-      setLiveTurn(null);
-    } finally {
-      if (askAbortRef.current === ac) askAbortRef.current = null;
-      askingRef.current = false;
-      setAsking(false);
-    }
-  };
-
   const onNewSession = async () => {
     if (activeSessionId) {
       try {
@@ -324,7 +188,20 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
       turns: [],
       query: "",
       activeCite: null,
+      sessionState: null,
     });
+    setMissionProgressOpen(true);
+  };
+
+  const onExportSession = async () => {
+    if (!activeSessionId) return;
+    try {
+      const pack = await api.exportDealRoomKnowledgeSession(roomId, activeSessionId);
+      downloadDiligencePack(pack);
+      toast.success(t("knowledge.exportSuccess"));
+    } catch {
+      toast.error(t("knowledge.exportFailed"));
+    }
   };
 
   const onOpenSession = async (sessionId: string) => {
@@ -336,27 +213,9 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
       turns: serverTurns,
       query: "",
       activeCite: null,
+      sessionState: detail.session?.state ?? null,
     });
     setChatOpen(true);
-  };
-
-  const onFeedback = async (
-    turnId: string,
-    body: { kind: DealRoomKnowledgeFeedbackKind; note?: string },
-  ) => {
-    try {
-      const fb = await api.upsertDealRoomKnowledgeTurnFeedback(roomId, turnId, body);
-      const kind = asFeedbackKind(fb.kind) ?? body.kind;
-      const next = turns.map((row) =>
-        row.id === turnId
-          ? { ...row, feedback: { kind, note: fb.note } }
-          : row,
-      );
-      useKnowledgeQueryStore.getState().setDraft(roomId, { turns: next });
-    } catch {
-      toast.error(t("knowledge.feedback.saveFailed"));
-      throw new Error("feedback_failed");
-    }
   };
 
   if (loading && !data) {
@@ -431,6 +290,22 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
             onStartAsk={() => setChatOpen(true)}
           />
         </div>
+        <KnowledgeOpsStrip
+          roomId={roomId}
+          refreshKey={opsRefreshKey}
+          className="max-w-4xl"
+        />
+        <EvalGoldReviewPanel
+          roomId={roomId}
+          refreshKey={opsRefreshKey}
+          className="max-w-4xl"
+          onReviewed={() => setOpsRefreshKey((k) => k + 1)}
+        />
+        <ColdArchivePanel
+          roomId={roomId}
+          refreshKey={opsRefreshKey}
+          className="max-w-4xl"
+        />
         <div className="flex max-w-4xl justify-end">
           <KnowledgeSessionHistoryMenu
             roomId={roomId}
@@ -443,89 +318,140 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
   }
 
   return (
-    <div className="relative space-y-6" data-testid="deal-room-knowledge-tab">
+    // Fill remaining viewport under TopNav + page header/tabs; bleed into AppShell
+    // main bottom padding (p-6 / md:p-8) so the composer sits flush with the window.
+    <div
+      className="relative -mb-6 flex min-h-[calc(100dvh-12rem)] flex-col md:-mb-8"
+      data-testid="deal-room-knowledge-tab"
+    >
       <section
-        className="relative overflow-hidden rounded-2xl border border-border/70 bg-[linear-gradient(165deg,#f8fafc_0%,#ffffff_42%,#ffffff_100%)]"
+        className="relative isolate flex min-h-0 flex-1 flex-col rounded-2xl border border-border/70 bg-[linear-gradient(165deg,#f8fafc_0%,#ffffff_42%,#ffffff_100%)]"
         data-testid="deal-room-knowledge-desk"
       >
         <div
           aria-hidden
-          className="pointer-events-none absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle_at_center,rgba(15,23,42,0.06),transparent_68%)]"
-        />
-        <div
-          aria-hidden
-          className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/12 to-transparent"
-        />
+          className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl"
+        >
+          <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-[radial-gradient(circle_at_center,rgba(15,23,42,0.06),transparent_68%)]" />
+          <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-foreground/12 to-transparent" />
+        </div>
 
-        <div className="relative space-y-5 px-5 py-6 sm:px-7 sm:py-7">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div className="min-w-0 max-w-2xl space-y-2.5">
-              <p className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground">
-                {t("knowledge.heroEyebrow")}
-              </p>
-              <h2 className="text-[1.65rem] font-semibold tracking-tight text-foreground sm:text-[1.85rem]">
-                {t("knowledge.heroTitle")}
-              </h2>
-              <p className="max-w-xl text-sm leading-relaxed text-muted-foreground">
-                {t("knowledge.heroDescription")}
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setChatOpen(false)}
-                data-testid="deal-room-knowledge-back-to-corpus"
-                className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        <div className="relative flex min-h-0 flex-1 flex-col px-5 pt-6 sm:px-7 sm:pt-7">
+          <div className="flex shrink-0 flex-wrap items-center justify-end gap-2 pb-5">
+            <button
+              type="button"
+              onClick={() => setChatOpen(false)}
+              data-testid="deal-room-knowledge-back-to-corpus"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <ArrowLeft size={12} weight="bold" className="text-foreground/55" />
+              {t("knowledge.backToCorpus")}
+            </button>
+            {turns.length > 0 ? (
+              <span
+                className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm"
+                data-testid="deal-room-knowledge-session-meta"
               >
-                <ArrowLeft size={12} weight="bold" className="text-foreground/55" />
-                {t("knowledge.backToCorpus")}
-              </button>
-              {turns.length > 0 ? (
-                <span
-                  className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm"
-                  data-testid="deal-room-knowledge-session-meta"
-                >
-                  {t("knowledge.sessionTurns", { count: turns.length })}
-                </span>
-              ) : null}
-              <KnowledgeSessionHistoryMenu
-                roomId={roomId}
-                activeSessionId={activeSessionId}
-                onOpenSession={onOpenSession}
-              />
+                {t("knowledge.sessionTurns", { count: turns.length })}
+              </span>
+            ) : null}
+            <KnowledgeSessionHistoryMenu
+              roomId={roomId}
+              activeSessionId={activeSessionId}
+              onOpenSession={onOpenSession}
+            />
+            {activeSessionId && turns.length > 0 ? (
               <button
                 type="button"
                 onClick={() => {
-                  void onNewSession();
+                  void onExportSession();
                 }}
-                data-testid="deal-room-knowledge-new-session"
+                data-testid="deal-room-knowledge-export"
                 className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
-                {t("knowledge.newSession")}
+                {t("knowledge.exportDiligence")}
               </button>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
-                <LockKey size={12} weight="bold" className="text-foreground/55" />
-                {t("knowledge.trustScoped")}
-              </span>
-              <span className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm">
-                <SealCheck size={12} weight="bold" className="text-foreground/55" />
-                {t("knowledge.trustGrounded")}
-              </span>
-            </div>
+            ) : null}
+            <button
+              type="button"
+              onClick={() => {
+                void onNewSession();
+              }}
+              data-testid="deal-room-knowledge-new-session"
+              className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t("knowledge.newSession")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setSessionStateOpen((v) => !v)}
+              aria-pressed={sessionStateOpen}
+              data-testid="deal-room-knowledge-session-state-toggle"
+              className={
+                sessionStateOpen
+                  ? "inline-flex items-center gap-1.5 rounded-full border border-foreground/20 bg-foreground/[0.06] px-2.5 py-1 text-[11px] font-medium text-foreground backdrop-blur-sm transition-colors hover:bg-foreground/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              }
+            >
+              <LockKey size={12} weight="bold" className="text-foreground/55" />
+              {t("knowledge.trustScoped")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setMissionProgressOpen((v) => !v)}
+              aria-pressed={missionProgressOpen}
+              data-testid="deal-room-knowledge-mission-progress-toggle"
+              className={
+                missionProgressOpen
+                  ? "inline-flex items-center gap-1.5 rounded-full border border-foreground/20 bg-foreground/[0.06] px-2.5 py-1 text-[11px] font-medium text-foreground backdrop-blur-sm transition-colors hover:bg-foreground/[0.09] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  : "inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/80 px-2.5 py-1 text-[11px] font-medium text-foreground/80 backdrop-blur-sm transition-colors hover:bg-muted/50 hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              }
+            >
+              <SealCheck size={12} weight="bold" className="text-foreground/55" />
+              {t("knowledge.trustGrounded")}
+            </button>
           </div>
 
           <GroundedChatShell
+            layout="desk"
+            beforeTimeline={
+              <>
+                {sessionStateOpen ? (
+                  <SessionStateRail
+                    state={sessionState}
+                    onAskOpenQuestion={(text) => {
+                      void onAsk(text);
+                    }}
+                  />
+                ) : null}
+                {missionProgressOpen ? (
+                  <MissionProgressRail
+                    roomId={roomId}
+                    sessionId={activeSessionId}
+                    refreshKey={turns.length}
+                    onAskItem={(text) => {
+                      void onAsk(text);
+                    }}
+                  />
+                ) : null}
+              </>
+            }
             query={query}
             onQueryChange={setQuery}
             turns={viewTurns}
             asking={asking}
-            onAsk={() => {
-              void onQuery();
+            askEnabled={corpusReady}
+            onAsk={(overrideQuery) => {
+              void onAsk(overrideQuery);
             }}
-            onStop={asking ? onStopAsk : undefined}
+            onStop={asking ? onStop : undefined}
             onActiveCite={setActiveCite}
             onOpenViewer={openViewer}
             onFeedback={onFeedback}
+            followUpChips={followUpChips}
+            followUpSource={followUpSource}
+            followUpUpgrading={followUpUpgrading}
+            onFollowUpsEngagedChange={setFollowUpsEngaged}
           />
         </div>
       </section>

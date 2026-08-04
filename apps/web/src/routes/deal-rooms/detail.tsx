@@ -247,7 +247,7 @@ export function DealRoomDetailPage() {
   );
 
   const uploadFileToFolder = useCallback(
-    async (file: File, folderPath: string) => {
+    async (file: File, folderPath: string, sortOrder?: number) => {
       if (!roomId) return;
       const id = Math.random().toString(36).slice(2);
       const folderName = folderByPath.get(folderPath) ?? folderPath;
@@ -281,11 +281,14 @@ export function DealRoomDetailPage() {
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
 
-        const sortOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+        const order =
+          sortOrder ??
+          (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ??
+          0;
         await api.addDealRoomDocument(roomId, {
           document_id: doc.id,
           folder_path: folderPath,
-          sort_order: sortOrder,
+          sort_order: order,
         });
 
         // HTTP upload + room association succeeded, but the backend may still be
@@ -334,22 +337,41 @@ export function DealRoomDetailPage() {
     [room?.folders]
   );
 
-  const handleUpload = useCallback(
-    async (file: File) => {
+  const handleUploadFiles = useCallback(
+    async (files: File[]) => {
+      if (files.length === 0) return;
       const override = uploadTargetFolderRef.current;
       uploadTargetFolderRef.current = null;
-      const path = override ?? resolveTargetFolder(file.name).path;
-      await uploadFileToFolder(file, path);
+
+      // Group by target folder so multi-select gets distinct sort_order ranks.
+      const byFolder = new Map<string, File[]>();
+      for (const file of files) {
+        const path = override ?? resolveTargetFolder(file.name).path;
+        const list = byFolder.get(path) ?? [];
+        list.push(file);
+        byFolder.set(path, list);
+      }
+
+      const jobs: Promise<void>[] = [];
+      for (const [folderPath, folderFiles] of byFolder) {
+        const base =
+          (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
+        folderFiles.forEach((file, index) => {
+          jobs.push(uploadFileToFolder(file, folderPath, base + index));
+        });
+      }
+      await Promise.all(jobs);
     },
-    [resolveTargetFolder, uploadFileToFolder]
+    [resolveTargetFolder, uploadFileToFolder, room?.documents]
   );
 
   const onFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (file) void handleUpload(file);
+      const files = Array.from(e.target.files ?? []);
+      e.target.value = "";
+      if (files.length > 0) void handleUploadFiles(files);
     },
-    [handleUpload]
+    [handleUploadFiles]
   );
 
   const isUploading = uploadItems.some((item) => item.status === "uploading" || item.status === "processing");
@@ -670,9 +692,10 @@ export function DealRoomDetailPage() {
         )}
       </AnimatePresence>
 
-      {/* Hidden file input for toolbar upload. */}
+      {/* Hidden file input for toolbar upload (multi-select). */}
       <input
         type="file"
+        multiple
         ref={fileInputRef}
         onChange={onFileChange}
         className="hidden"

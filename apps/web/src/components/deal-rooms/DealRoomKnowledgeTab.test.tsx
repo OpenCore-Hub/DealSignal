@@ -29,16 +29,23 @@ void i18nInstance.use(initReactI18next).init({
       dealRooms: {
         knowledge: {
           title: "Knowledge base",
-          heroEyebrow: "Room knowledge",
-          heroTitle: "Ask what the documents actually say",
-          heroDescription: "Answers stay scoped to this deal room.",
           backToCorpus: "Back to vector library",
           turnQuestion: "Question",
+          retrieveQueryLabel: "Searched as",
           sessionTurns: "Session · {{count}} turns",
           newSession: "New session",
-          trustScoped: "Scoped to this room",
+          trustScoped: "Research desk",
           trustIsolated: "Data isolated",
-          trustGrounded: "Citation-backed",
+          trustGrounded: "Follow-up templates",
+          sessionStateTitle: "Desk state",
+          sessionStateHint: "Audited gaps and entities from this session.",
+          sessionStateOpenQuestions: "{{count}} open gaps",
+          sessionStateNoGaps: "No open gaps in this session",
+          sessionStateAskGap: "Ask this",
+          sessionStateEntities: "Entities",
+          sessionStateCoverage: "Recent coverage",
+          sessionStateExpand: "Expand",
+          sessionStateCollapse: "Collapse",
           askEntryTitle: "AI document Q&A",
           askEntryTagScope: "Scope",
           askEntryTagSecurity: "Security",
@@ -49,7 +56,6 @@ void i18nInstance.use(initReactI18next).init({
           sourcesTitle: "Evidence",
           sourcesCount: "{{count}} sources",
           sourcesHidden: "No grounded sources for this answer.",
-          sourcesEmpty: "Ask a question to see supporting passages.",
           corpusTitle: "Semantic vector library",
           corpusHint: "{{synced}} of {{total}} documents synced",
           corpusStageEmpty: "Add room files, then sync.",
@@ -113,6 +119,18 @@ void i18nInstance.use(initReactI18next).init({
           sessionTurnsShort: "{{count}} turns",
           sessionLoadMore: "Load more",
           followUpLabel: "Suggested follow-ups · this room’s docs",
+          followUpUpgrading: "Refining from evidence…",
+          followUpSourceEvidence: "Evidence-grounded",
+          missionProgressTitle: "Mission progress",
+          missionProgressHint: "Checklist coverage from audited session state.",
+          missionProgressCount: "{{covered}} / {{total}} covered",
+          missionProgressAsk: "Ask this",
+          missionProgressComplete: "All checklist items covered.",
+          missionProgressLoading: "Loading mission…",
+          missionProgressSwitchPack: "Switch mission pack",
+          missionProgressChange: "Change",
+          missionProgressExpand: "Expand",
+          missionProgressCollapse: "Collapse",
           feedback: {
             label: "Turn feedback",
             helpful: "Helpful",
@@ -135,6 +153,14 @@ void i18nInstance.use(initReactI18next).init({
             forbidden: "You do not have permission to ask",
             not_found: "Session not found",
             query_failed: "Failed to query knowledge base",
+            client_cancelled: "The question was stopped before it finished",
+            query_timeout: "The question timed out — try again",
+            answer_requires_session: "Answered questions must use the research desk session",
+            knowledge_query_busy: "A question is already in progress",
+            knowledge_query_rate_limited: "Too many questions",
+            knowledge_query_quota_exceeded: "Answer quota used up",
+            knowledge_query_quota_unavailable: "Could not verify answer quota",
+            knowledge_corpus_not_ready: "The knowledge corpus is not ready",
           },
           status: { ready: "Ready", none: "Not provisioned", syncing: "Syncing" },
           docStatus: { synced: "Synced", pending: "Pending" },
@@ -170,7 +196,17 @@ vi.mock("@/lib/api", () => ({
     streamDealRoomKnowledgeSession: vi.fn(),
     closeDealRoomKnowledgeSession: vi.fn(),
     upsertDealRoomKnowledgeTurnFeedback: vi.fn(),
+    suggestDealRoomKnowledgeFollowUps: vi.fn(),
     recordDealRoomKnowledgeDeskEvent: vi.fn(),
+    getDealRoomKnowledgeMissionProgress: vi.fn(),
+    listDealRoomKnowledgeMissions: vi.fn(),
+    setDealRoomKnowledgeMission: vi.fn(),
+    getDealRoomKnowledgeOps: vi.fn(),
+    listDealRoomKnowledgeEvalCandidates: vi.fn(),
+    reviewDealRoomKnowledgeEvalCandidate: vi.fn(),
+    exportDealRoomKnowledgeEvalCandidates: vi.fn(),
+    listDealRoomKnowledgeArchives: vi.fn(),
+    getDealRoomKnowledgeArchive: vi.fn(),
     getDealRoomAnalytics: vi.fn(),
     listRoomQuestions: vi.fn(),
     getDealRoomLinks: vi.fn(),
@@ -233,6 +269,73 @@ function mockRoomMetrics() {
     }),
   );
   vi.mocked(api.recordDealRoomKnowledgeDeskEvent).mockResolvedValue(undefined);
+  // Keep local templates stable in unit tests (API upgrade is covered by MSW e2e).
+  vi.mocked(api.suggestDealRoomKnowledgeFollowUps).mockResolvedValue({
+    source: "template",
+    items: [],
+  });
+  vi.mocked(api.getDealRoomKnowledgeMissionProgress).mockResolvedValue({
+    packId: "financing_dd_v1",
+    title: "Financing due diligence",
+    source: "template_default",
+    covered: 0,
+    total: 1,
+    items: [
+      {
+        id: "valuation_cap",
+        prompt: "What valuation cap appears in this room’s financing docs?",
+        covered: false,
+      },
+    ],
+  });
+  vi.mocked(api.listDealRoomKnowledgeMissions).mockResolvedValue({
+    items: [
+      {
+        packId: "financing_dd_v1",
+        title: "Financing due diligence",
+        source: "catalog",
+      },
+    ],
+  });
+  vi.mocked(api.setDealRoomKnowledgeMission).mockResolvedValue({
+    packId: "financing_dd_v1",
+    title: "Financing due diligence",
+    source: "room",
+  });
+  vi.mocked(api.getDealRoomKnowledgeOps).mockResolvedValue({
+    scope: "workspace",
+    windowHours: 24,
+    turnsTotal: 0,
+    turnsByStatus: {},
+    avgDurationMs: 0,
+    p95DurationMs: 0,
+    costUnitsTotal: 0,
+    refusalsByKind: {},
+    judgmentsByKind: {},
+    evalCandidatesByStatus: {},
+    pendingEvalCandidates: 0,
+    answersQuota: { used: 0, limit: 100, windowHours: 24 },
+    coldArchiveCount: 0,
+    retentionDays: 90,
+  });
+  vi.mocked(api.listDealRoomKnowledgeEvalCandidates).mockResolvedValue({
+    items: [],
+  });
+  vi.mocked(api.reviewDealRoomKnowledgeEvalCandidate).mockResolvedValue({
+    id: "cand-1",
+    roomId: "room-1",
+    turnId: "turn-1",
+    feedbackKind: "wrong_citation",
+    question: "q",
+    reviewStatus: "accepted",
+    createdAt: "2026-08-04T00:00:00Z",
+  });
+  vi.mocked(api.exportDealRoomKnowledgeEvalCandidates).mockResolvedValue({
+    description: "Accepted",
+    seeds: [],
+  });
+  vi.mocked(api.listDealRoomKnowledgeArchives).mockResolvedValue({ items: [] });
+  vi.mocked(api.getDealRoomKnowledgeArchive).mockRejectedValue(new Error("not found"));
 }
 
 describe("DealRoomKnowledgeTab", () => {
@@ -328,6 +431,7 @@ describe("DealRoomKnowledgeTab", () => {
     expect(await screen.findByTestId("deal-room-knowledge-desk")).toBeInTheDocument();
     expect(screen.queryByTestId("deal-room-knowledge-ask-entry")).not.toBeInTheDocument();
     expect(screen.queryByTestId("deal-room-knowledge-corpus")).not.toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-knowledge-back-to-corpus")).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId("deal-room-knowledge-back-to-corpus"));
     expect(await screen.findByTestId("deal-room-knowledge-corpus")).toBeInTheDocument();
@@ -344,12 +448,13 @@ describe("DealRoomKnowledgeTab", () => {
     await waitFor(() => {
       expect(api.streamDealRoomKnowledgeSession).toHaveBeenCalledWith(
         "room-1",
-        {
+        expect.objectContaining({
           sessionId: undefined,
           query: "valuation",
           answer: true,
           top_k: 8,
-        },
+          clientRequestId: expect.any(String),
+        }),
         expect.objectContaining({ onEvent: expect.any(Function) }),
       );
     });
@@ -359,9 +464,16 @@ describe("DealRoomKnowledgeTab", () => {
     expect(hit).toHaveTextContent("Memo.pdf · p.3–4");
     expect(await screen.findByTestId("grounded-chat-follow-ups")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("grounded-chat-follow-up-liability-in-source"));
-    expect(screen.getByLabelText("Question")).toHaveValue(
-      "Ask about liability terms in “Memo.pdf”?",
-    );
+    await waitFor(() => {
+      expect(api.streamDealRoomKnowledgeSession).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({
+          query: "Ask about liability terms in “Memo.pdf”?",
+          answer: true,
+        }),
+        expect.objectContaining({ onEvent: expect.any(Function) }),
+      );
+    });
     expect(screen.getByTestId("knowledge-turn-feedback-turn-1")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("knowledge-feedback-wrong_citation"));
     await waitFor(() => {
@@ -387,7 +499,7 @@ describe("DealRoomKnowledgeTab", () => {
     );
     fireEvent.click(screen.getByTestId("deal-room-knowledge-jump"));
     expect(screen.getByTestId("location-display")).toHaveTextContent(
-      "/viewer/doc-1?page=3",
+      "/viewer/doc-1?page=3&roomId=room-1",
     );
   });
 
@@ -548,7 +660,9 @@ describe("DealRoomKnowledgeTab", () => {
     fireEvent.click(screen.getByTestId("deal-room-knowledge-ask"));
     expect(await screen.findByTestId("grounded-chat-stop")).toBeInTheDocument();
     fireEvent.click(screen.getByTestId("grounded-chat-stop"));
-    expect(await screen.findByText(/Persisted after abort/)).toBeInTheDocument();
+    expect(await screen.findByTestId("knowledge-answer-markdown")).toHaveTextContent(
+      /Persisted after abort/,
+    );
     // mount + empty abort poll + successful poll
     expect(api.getActiveDealRoomKnowledgeSession.mock.calls.length).toBeGreaterThanOrEqual(3);
   });
@@ -607,7 +721,9 @@ describe("DealRoomKnowledgeTab", () => {
       answer: "ok",
       results: [],
     });
-    expect(await screen.findByText("ok")).toBeInTheDocument();
+    expect(await screen.findByTestId("knowledge-answer-markdown")).toHaveTextContent(
+      "ok",
+    );
   });
 
   it("disables start-ask until the vector library is truly ready", async () => {
@@ -693,6 +809,11 @@ describe("isUngroundedKnowledgeAnswer", () => {
     expect(
       isUngroundedKnowledgeAnswer(
         "The context provided does not contain an answer to the question.",
+      ),
+    ).toBe(true);
+    expect(
+      isUngroundedKnowledgeAnswer(
+        "根据您提供的上下文，文档属于单向保密协议。因此，无法根据现有上下文回答该问题。",
       ),
     ).toBe(true);
     expect(isUngroundedKnowledgeAnswer("The cap is $10M [1]")).toBe(false);
@@ -839,7 +960,7 @@ describe("docx citation open without page", () => {
     expect(screen.queryByTestId("deal-room-knowledge-jump")).not.toBeInTheDocument();
     fireEvent.click(screen.getByTestId("deal-room-knowledge-jump-doc"));
     expect(screen.getByTestId("location-display")).toHaveTextContent(
-      "/viewer/18b1062d-919b-437a-8d5c-76efc60dec86",
+      "/viewer/18b1062d-919b-437a-8d5c-76efc60dec86?roomId=room-1",
     );
   });
 
@@ -968,5 +1089,319 @@ describe("docx citation open without page", () => {
     expect(screen.getByTestId("knowledge-feedback-note")).toHaveValue(
       "page 3 locus wrong",
     );
+  });
+
+  it("toggles the session state rail from the Research desk chip", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        { documentId: "doc-1", title: "Memo.pdf", status: "synced", chunkCount: 2 },
+      ],
+    });
+    vi.mocked(api.getActiveDealRoomKnowledgeSession).mockResolvedValue({
+      session: {
+        id: "sess-rail",
+        roomId: "room-1",
+        status: "active",
+        title: "nda",
+        createdAt: "2026-08-03T00:00:00Z",
+        updatedAt: "2026-08-03T00:00:00Z",
+        turnCount: 1,
+        state: {
+          openQuestions: [{ text: "Gap about term", sourceTurnId: "turn-r1" }],
+        },
+      },
+      turns: [
+        {
+          id: "turn-r1",
+          sessionId: "sess-rail",
+          sequence: 1,
+          question: "nda",
+          answer: "Term is two years [1]",
+          refused: false,
+          resultStatus: "answered",
+          hits: [
+            {
+              chunkId: "c1",
+              documentId: "doc-1",
+              text: "two years",
+              score: 0.9,
+              sourceName: "NDA.pdf",
+              viewerPage: 1,
+            },
+          ],
+          createdAt: "2026-08-03T00:00:00Z",
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("deal-room-knowledge-desk")).toBeInTheDocument();
+    const toggle = screen.getByTestId("deal-room-knowledge-session-state-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("knowledge-session-state-rail")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByTestId("knowledge-session-state-rail")).toBeInTheDocument();
+    expect(screen.getByText("Gap about term")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("knowledge-session-state-rail")).not.toBeInTheDocument();
+  });
+
+  it("shows follow-up templates on an empty desk and hides them once Q&A has turns", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        { documentId: "doc-1", title: "Memo.pdf", status: "synced", chunkCount: 2 },
+      ],
+    });
+    vi.mocked(api.getActiveDealRoomKnowledgeSession).mockResolvedValue({
+      session: null,
+      turns: [],
+    });
+    vi.mocked(api.getDealRoomKnowledgeMissionProgress).mockResolvedValue({
+      packId: "financing_dd_v1",
+      title: "Financing DD",
+      source: "template_default",
+      covered: 0,
+      total: 2,
+      items: [
+        { id: "cap", prompt: "What is the valuation cap?", covered: false },
+        { id: "pool", prompt: "How is the option pool sized?", covered: false },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    fireEvent.click(
+      await screen.findByTestId("deal-room-knowledge-ask-entry-start"),
+    );
+    expect(await screen.findByTestId("deal-room-knowledge-desk")).toBeInTheDocument();
+    const toggle = screen.getByTestId("deal-room-knowledge-mission-progress-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(
+      await screen.findByTestId("knowledge-mission-progress-rail"),
+    ).toBeInTheDocument();
+
+    // Hydrate a turn into the store → templates auto-hide during Q&A.
+    useKnowledgeQueryStore.getState().setDraft("room-1", {
+      activeSessionId: "sess-mission",
+      turns: [
+        {
+          id: "turn-m1",
+          sessionId: "sess-mission",
+          sequence: 1,
+          question: "nda",
+          answer: "Term is two years [1]",
+          refused: false,
+          resultStatus: "answered",
+          hits: [
+            {
+              chunkId: "c1",
+              documentId: "doc-1",
+              text: "two years",
+              score: 0.9,
+              sourceName: "NDA.pdf",
+              viewerPage: 1,
+            },
+          ],
+          createdAt: "2026-08-03T00:00:00Z",
+        },
+      ],
+      query: "",
+      activeCite: null,
+      sessionState: null,
+    });
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("deal-room-knowledge-mission-progress-toggle"),
+      ).toHaveAttribute("aria-pressed", "false");
+    });
+    expect(screen.queryByTestId("knowledge-mission-progress-rail")).not.toBeInTheDocument();
+
+    // New session restores the empty-desk default (templates shown).
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-new-session"));
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("deal-room-knowledge-mission-progress-toggle"),
+      ).toHaveAttribute("aria-pressed", "true");
+    });
+    expect(
+      await screen.findByTestId("knowledge-mission-progress-rail"),
+    ).toBeInTheDocument();
+  });
+
+  it("toggles the mission progress rail from the Follow-up templates chip during Q&A", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        { documentId: "doc-1", title: "Memo.pdf", status: "synced", chunkCount: 2 },
+      ],
+    });
+    vi.mocked(api.getActiveDealRoomKnowledgeSession).mockResolvedValue({
+      session: {
+        id: "sess-mission",
+        roomId: "room-1",
+        status: "active",
+        title: "nda",
+        createdAt: "2026-08-03T00:00:00Z",
+        updatedAt: "2026-08-03T00:00:00Z",
+        turnCount: 1,
+      },
+      turns: [
+        {
+          id: "turn-m1",
+          sessionId: "sess-mission",
+          sequence: 1,
+          question: "nda",
+          answer: "Term is two years [1]",
+          refused: false,
+          resultStatus: "answered",
+          hits: [
+            {
+              chunkId: "c1",
+              documentId: "doc-1",
+              text: "two years",
+              score: 0.9,
+              sourceName: "NDA.pdf",
+              viewerPage: 1,
+            },
+          ],
+          createdAt: "2026-08-03T00:00:00Z",
+        },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("deal-room-knowledge-desk")).toBeInTheDocument();
+    const toggle = screen.getByTestId("deal-room-knowledge-mission-progress-toggle");
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("knowledge-mission-progress-rail")).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "true");
+    expect(await screen.findByTestId("knowledge-mission-progress-rail")).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute("aria-pressed", "false");
+    expect(screen.queryByTestId("knowledge-mission-progress-rail")).not.toBeInTheDocument();
+  });
+
+  it("hides previous turn feedback once the next ask starts", async () => {
+    vi.mocked(api.getDealRoomKnowledge).mockResolvedValue({
+      enabled: true,
+      status: "ready",
+      documents: [
+        { documentId: "doc-1", title: "Memo.pdf", status: "synced", chunkCount: 3 },
+      ],
+    });
+    vi.mocked(api.getActiveDealRoomKnowledgeSession).mockResolvedValue({
+      session: {
+        id: "sess-9",
+        roomId: "room-1",
+        status: "active",
+        title: "valuation",
+        createdAt: "2026-08-03T00:00:00Z",
+        updatedAt: "2026-08-03T00:00:00Z",
+        turnCount: 1,
+      },
+      turns: [
+        {
+          id: "turn-9",
+          sessionId: "sess-9",
+          sequence: 1,
+          question: "valuation",
+          answer: "The cap is $10M [1]",
+          refused: false,
+          resultStatus: "answered",
+          hits: [
+            {
+              chunkId: "c1",
+              documentId: "doc-1",
+              text: "cap $10M",
+              score: 0.9,
+              sourceName: "Memo.pdf",
+              viewerPage: 3,
+            },
+          ],
+          createdAt: "2026-08-03T00:00:00Z",
+          feedback: { kind: "helpful" },
+        },
+      ],
+    });
+
+    let resolveStream:
+      | ((value: Awaited<ReturnType<typeof api.streamDealRoomKnowledgeSession>>) => void)
+      | undefined;
+    vi.mocked(api.streamDealRoomKnowledgeSession).mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveStream = resolve;
+        }),
+    );
+
+    render(
+      <MemoryRouter>
+        <I18nextProvider i18n={i18nInstance}>
+          <DealRoomKnowledgeTab roomId="room-1" />
+        </I18nextProvider>
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByTestId("knowledge-turn-feedback-turn-9")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Question"), {
+      target: { value: "next question" },
+    });
+    fireEvent.click(screen.getByTestId("deal-room-knowledge-ask"));
+    await waitFor(() => {
+      expect(screen.queryByTestId("knowledge-turn-feedback-turn-9")).not.toBeInTheDocument();
+    });
+    resolveStream?.({
+      sessionId: "sess-9",
+      turn: {
+        id: "turn-10",
+        sessionId: "sess-9",
+        sequence: 2,
+        question: "next question",
+        answer: "second answer",
+        refused: false,
+        resultStatus: "answered",
+        hits: [],
+        createdAt: "2026-08-03T00:01:00Z",
+      },
+      query: "next question",
+      mode: "hybrid",
+      answer: "second answer",
+      results: [],
+    });
+    expect(await screen.findByTestId("knowledge-turn-feedback-turn-10")).toBeInTheDocument();
+    expect(screen.queryByTestId("knowledge-turn-feedback-turn-9")).not.toBeInTheDocument();
   });
 });

@@ -40,10 +40,27 @@ export function formatHitLocusLabel(
   return parts.length ? parts.join(" · ") : null;
 }
 
-/** Same-tab viewer path (keeps in-memory workspace slug for authenticated APIs). */
-export function viewerPath(documentId: string, page?: number): string {
-  const qs = page && page > 0 ? `?page=${page}` : "";
-  return `/viewer/${documentId}${qs}`;
+export interface ViewerPathOptions {
+  /** Deal-room id — enables owner Viewer knowledge rail (ceiling Phase T). */
+  roomId?: string;
+  /** Workspace slug — required for full-reload / new-tab /viewer (Phase X). */
+  workspaceSlug?: string;
+}
+
+/** Authenticated viewer path; carry ws + roomId for knowledge continuity. */
+export function viewerPath(
+  documentId: string,
+  page?: number,
+  opts?: ViewerPathOptions,
+): string {
+  const params = new URLSearchParams();
+  if (page && page > 0) params.set("page", String(page));
+  const roomId = (opts?.roomId || "").trim();
+  if (roomId) params.set("roomId", roomId);
+  const workspaceSlug = (opts?.workspaceSlug || "").trim();
+  if (workspaceSlug) params.set("ws", workspaceSlug);
+  const qs = params.toString();
+  return qs ? `/viewer/${documentId}?${qs}` : `/viewer/${documentId}`;
 }
 
 /** Split answer text so `[n]` citations become clickable markers. */

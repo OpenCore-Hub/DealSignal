@@ -16,6 +16,15 @@ import type {
   DealRoomKnowledgeQASession,
   DealRoomKnowledgeTurnFeedback,
   DealRoomKnowledgeFeedbackKind,
+  DealRoomKnowledgeFollowUpsResult,
+  DealRoomKnowledgeMissionPack,
+  DealRoomKnowledgeMissionProgress,
+  DealRoomKnowledgeEvalCandidate,
+  DealRoomKnowledgeEvalSeedExport,
+  DealRoomKnowledgeDiligencePack,
+  DealRoomKnowledgeSessionArchiveList,
+  DealRoomKnowledgeSessionArchiveDetail,
+  DealRoomKnowledgeOpsSummary,
   DealRoomDocumentItem,
   DealRoomFolder,
   DealRoomFolderDocs,
@@ -187,9 +196,18 @@ type StreamDonePayload = DealRoomKnowledgeSessionQueryResult & {
   resultStatus?: string;
 };
 
+type KnowledgeSessionAskBody = {
+  sessionId?: string;
+  query: string;
+  answer?: boolean;
+  top_k?: number;
+  /** Required idempotency key; server replays the same audited turn on retry. */
+  clientRequestId: string;
+};
+
 async function streamDealRoomKnowledgeSession(
   roomId: string,
-  body: { sessionId?: string; query: string; answer?: boolean; top_k?: number },
+  body: KnowledgeSessionAskBody,
   opts: {
     signal?: AbortSignal;
     onEvent: (event: KnowledgeStreamEvent) => void;
@@ -229,9 +247,19 @@ async function streamDealRoomKnowledgeSession(
         continue;
       }
       if (frame.event === "phase") {
-        const phase = (payload as { phase?: string }).phase;
+        const phasePayload = payload as {
+          phase?: string;
+          retrieveQuery?: string;
+          rewriteApplied?: boolean;
+        };
+        const phase = phasePayload.phase;
         if (phase === "retrieving" || phase === "generating") {
-          opts.onEvent({ type: "phase", phase });
+          opts.onEvent({
+            type: "phase",
+            phase,
+            retrieveQuery: phasePayload.retrieveQuery,
+            rewriteApplied: phasePayload.rewriteApplied,
+          });
         }
         continue;
       }
@@ -271,6 +299,14 @@ async function streamDealRoomKnowledgeSession(
           results: data.results ?? data.turn?.hits ?? [],
           refused: data.refused ?? data.turn?.refused,
           resultStatus: data.resultStatus ?? data.turn?.resultStatus,
+          retrieveQuery: data.turn?.retrieveQuery,
+          rewriteApplied: data.turn?.rewriteApplied,
+          claims: data.turn?.claims,
+          unresolved: data.turn?.unresolved,
+          conflicts: data.turn?.conflicts,
+          multiHop: data.turn?.multiHop,
+          refusal: data.turn?.refusal,
+          judgment: data.turn?.judgment,
         });
         doneResult = {
           sessionId: data.sessionId,
@@ -279,6 +315,7 @@ async function streamDealRoomKnowledgeSession(
           mode: data.mode,
           answer: data.answer,
           results: data.results ?? [],
+          sessionState: data.sessionState,
         };
       }
     }
@@ -956,10 +993,7 @@ export const api = {
       `/deal-rooms/${roomId}/knowledge/sessions`,
       { method: "POST", body: JSON.stringify(body ?? {}) },
     ),
-  queryDealRoomKnowledgeSession: (
-    roomId: string,
-    body: { sessionId?: string; query: string; answer?: boolean; top_k?: number },
-  ) =>
+  queryDealRoomKnowledgeSession: (roomId: string, body: KnowledgeSessionAskBody) =>
     request<DealRoomKnowledgeSessionQueryResult>(
       getWorkspaceSlug(),
       `/deal-rooms/${roomId}/knowledge/sessions/query`,
@@ -971,7 +1005,7 @@ export const api = {
    */
   streamDealRoomKnowledgeSession: (
     roomId: string,
-    body: { sessionId?: string; query: string; answer?: boolean; top_k?: number },
+    body: KnowledgeSessionAskBody,
     opts: {
       signal?: AbortSignal;
       onEvent: (event: KnowledgeStreamEvent) => void;
@@ -993,10 +1027,114 @@ export const api = {
       `/deal-rooms/${roomId}/knowledge/turns/${turnId}/feedback`,
       { method: "PUT", body: JSON.stringify(body) },
     ),
+  /** Evidence-grounded follow-ups for a turn (async; falls back to templates server-side). */
+  suggestDealRoomKnowledgeFollowUps: (
+    roomId: string,
+    turnId: string,
+    opts?: { signal?: AbortSignal },
+  ) =>
+    request<DealRoomKnowledgeFollowUpsResult>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/turns/${turnId}/follow-ups`,
+      { method: "POST", signal: opts?.signal },
+    ),
+  listDealRoomKnowledgeMissions: (roomId: string) =>
+    request<{ items: DealRoomKnowledgeMissionPack[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/missions`,
+    ),
+  getDealRoomKnowledgeMission: (roomId: string) =>
+    request<DealRoomKnowledgeMissionPack>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/mission`,
+    ),
+  setDealRoomKnowledgeMission: (roomId: string, body: { packId: string }) =>
+    request<DealRoomKnowledgeMissionPack>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/mission`,
+      { method: "PUT", body: JSON.stringify(body) },
+    ),
+  /** Checklist coverage of the room mission pack vs optional session (ceiling Phase N). */
+  getDealRoomKnowledgeMissionProgress: (
+    roomId: string,
+    params?: { sessionId?: string },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.sessionId) qs.set("sessionId", params.sessionId);
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return request<DealRoomKnowledgeMissionProgress>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/mission/progress${suffix}`,
+    );
+  },
+  /** Diligence audit JSON pack for a live session (ceiling Phase H). */
+  exportDealRoomKnowledgeSession: (roomId: string, sessionId: string) =>
+    request<DealRoomKnowledgeDiligencePack>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/sessions/${sessionId}/export`,
+    ),
+  listDealRoomKnowledgeArchives: (roomId: string, params?: { limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return request<DealRoomKnowledgeSessionArchiveList>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/archives${suffix}`,
+    );
+  },
+  getDealRoomKnowledgeArchive: (roomId: string, archiveId: string) =>
+    request<DealRoomKnowledgeSessionArchiveDetail>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/archives/${archiveId}`,
+    ),
+  listDealRoomKnowledgeEvalCandidates: (
+    roomId: string,
+    params?: { kind?: string; status?: string; limit?: number },
+  ) => {
+    const qs = new URLSearchParams();
+    if (params?.kind) qs.set("kind", params.kind);
+    if (params?.status) qs.set("status", params.status);
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return request<{ items: DealRoomKnowledgeEvalCandidate[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/eval/candidates${suffix}`,
+    );
+  },
+  reviewDealRoomKnowledgeEvalCandidate: (
+    roomId: string,
+    candidateId: string,
+    body: { reviewStatus: "accepted" | "rejected"; expect?: string },
+  ) =>
+    request<DealRoomKnowledgeEvalCandidate>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/eval/candidates/${candidateId}`,
+      { method: "PATCH", body: JSON.stringify(body) },
+    ),
+  exportDealRoomKnowledgeEvalCandidates: (roomId: string, params?: { limit?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.limit != null) qs.set("limit", String(params.limit));
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return request<DealRoomKnowledgeEvalSeedExport>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/eval/candidates/export${suffix}`,
+    );
+  },
+  getDealRoomKnowledgeOps: (roomId: string, params?: { windowHours?: number }) => {
+    const qs = new URLSearchParams();
+    if (params?.windowHours != null) qs.set("windowHours", String(params.windowHours));
+    const suffix = qs.size > 0 ? `?${qs.toString()}` : "";
+    return request<DealRoomKnowledgeOpsSummary>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/knowledge/ops${suffix}`,
+    );
+  },
   /** Fire-and-forget product funnel signal (204). Errors are ignored by callers. */
   recordDealRoomKnowledgeDeskEvent: (
     roomId: string,
-    body: { type: "cite_open"; turnOutcome?: "grounded" | "refused" | "unknown" },
+    body:
+      | { type: "cite_open"; turnOutcome?: "grounded" | "refused" | "unknown" }
+      | { type: "followups_upgrade_failed" },
   ) =>
     request<void>(
       getWorkspaceSlug(),

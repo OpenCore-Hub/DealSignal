@@ -90,8 +90,60 @@ type MockKnowledgeTurn = {
     pages?: number[];
     viewerPage?: number;
   }>;
+  retrieveQuery?: string;
+  rewriteApplied?: boolean;
+  claims?: Array<{ text: string; hitIds?: string[]; confidence?: string }>;
+  unresolved?: string[];
   createdAt: string;
   feedback?: MockKnowledgeFeedback;
+};
+
+function mockBindClaims(
+  answer: string | undefined,
+  hits: MockKnowledgeTurn["hits"],
+  refused: boolean,
+): Pick<MockKnowledgeTurn, "claims" | "unresolved"> {
+  if (refused || !answer?.trim() || hits.length === 0) return {};
+  const citeRe = /\[(\d+)\]/g;
+  const sentences = answer
+    .split(/(?<=[。！？.!?])\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const claims: NonNullable<MockKnowledgeTurn["claims"]> = [];
+  for (const sent of sentences.length ? sentences : [answer.trim()]) {
+    const nums: number[] = [];
+    let m: RegExpExecArray | null;
+    const re = new RegExp(citeRe.source, "g");
+    while ((m = re.exec(sent)) !== null) {
+      const n = Number(m[1]);
+      if (n > 0) nums.push(n);
+    }
+    const text = sent.replace(citeRe, "").replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const hitIds = [
+      ...new Set(
+        nums
+          .map((n) => hits[n - 1]?.chunkId)
+          .filter((id): id is string => !!id),
+      ),
+    ];
+    claims.push({
+      text,
+      hitIds: hitIds.length ? hitIds : undefined,
+      confidence: hitIds.length ? "grounded" : undefined,
+    });
+  }
+  return claims.length ? { claims } : {};
+}
+type MockKnowledgeSessionState = {
+  entities: Array<{
+    name: string;
+    type: string;
+    firstTurnId: string;
+    hitIds?: string[];
+  }>;
+  openQuestions: Array<{ text: string; sourceTurnId: string }>;
+  coverageHints: Array<{ sourceNames: string[]; turnId: string }>;
 };
 type MockKnowledgeSession = {
   id: string;
@@ -102,7 +154,74 @@ type MockKnowledgeSession = {
   updatedAt: string;
   lastTurnAt?: string;
   turnCount: number;
+  state?: MockKnowledgeSessionState;
 };
+
+function emptyMockKnowledgeState(): MockKnowledgeSessionState {
+  return { entities: [], openQuestions: [], coverageHints: [] };
+}
+
+function evolveMockKnowledgeState(
+  prev: MockKnowledgeSessionState | undefined,
+  turn: MockKnowledgeTurn,
+): MockKnowledgeSessionState | undefined {
+  const next: MockKnowledgeSessionState = {
+    entities: [...(prev?.entities ?? [])],
+    openQuestions: [...(prev?.openQuestions ?? [])],
+    coverageHints: [...(prev?.coverageHints ?? [])],
+  };
+  const coverage: string[] = [];
+  const seen = new Set<string>();
+  for (const h of turn.hits) {
+    const name = (h.sourceName || "").trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      coverage.push(name);
+    }
+    const existing = next.entities.find((e) => e.name.toLowerCase() === key);
+    if (existing) {
+      const ids = new Set(existing.hitIds ?? []);
+      if (h.chunkId) ids.add(h.chunkId);
+      existing.hitIds = [...ids].slice(0, 8);
+    } else {
+      next.entities.push({
+        name,
+        type: "document",
+        firstTurnId: turn.id,
+        hitIds: h.chunkId ? [h.chunkId] : [],
+      });
+    }
+  }
+  if (coverage.length > 0) {
+    next.coverageHints.push({ sourceNames: coverage.slice(0, 3), turnId: turn.id });
+    if (next.coverageHints.length > 5) {
+      next.coverageHints = next.coverageHints.slice(-5);
+    }
+  }
+  if (
+    turn.resultStatus === "refused" ||
+    turn.resultStatus === "no_hits" ||
+    turn.resultStatus === "error"
+  ) {
+    const q = turn.question.trim();
+    if (q && !next.openQuestions.some((o) => o.text.toLowerCase() === q.toLowerCase())) {
+      next.openQuestions.push({ text: q, sourceTurnId: turn.id });
+      if (next.openQuestions.length > 12) {
+        next.openQuestions = next.openQuestions.slice(-12);
+      }
+    }
+  }
+  if (
+    next.entities.length === 0 &&
+    next.openQuestions.length === 0 &&
+    next.coverageHints.length === 0
+  ) {
+    return undefined;
+  }
+  return next;
+}
 const mockKnowledgeSessionsByRoom = new Map<string, MockKnowledgeSession[]>();
 const mockKnowledgeTurnsBySession = new Map<string, MockKnowledgeTurn[]>();
 /** E2E override for GET …/knowledge corpus status (A5). Survives reload via Cache. */
@@ -112,9 +231,210 @@ type MockKnowledgeCorpusOverride = {
   jobStatus: string;
 };
 const mockKnowledgeCorpusOverrideByRoom = new Map<string, MockKnowledgeCorpusOverride>();
+/** roomId\\0clientRequestId → turn payload for ask idempotency replays. */
+const mockKnowledgeTurnByClientRequest = new Map<string, Record<string, unknown>>();
+/** roomId → bound mission pack id. */
+const mockKnowledgeMissionByRoom = new Map<string, string>();
+
+/** Builtin knowledge mission packs (mirrors apps/api/internal/knowledge/missions). */
+const mockKnowledgeMissionCatalog: Array<{
+  packId: string;
+  title: string;
+  items: Array<{ id: string; prompt: string }>;
+}> = [
+  {
+    packId: "financing_dd_v1",
+    title: "Financing due diligence",
+    items: [
+      {
+        id: "valuation_cap",
+        prompt: "What valuation cap or pre-money valuation appears in this room’s financing docs?",
+      },
+    ],
+  },
+  {
+    packId: "first_fund_v1",
+    title: "First-time fundraise",
+    items: [
+      {
+        id: "fund_size_strategy",
+        prompt: "What fund size and investment strategy are stated in this room’s fund docs?",
+      },
+    ],
+  },
+  {
+    packId: "ma_redflag_v1",
+    title: "M&A red-flag review",
+    items: [
+      {
+        id: "change_of_control",
+        prompt: "Which contracts have change-of-control termination rights in this room?",
+      },
+    ],
+  },
+  {
+    packId: "series_a_plus_v1",
+    title: "Series A+ growth diligence",
+    items: [
+      {
+        id: "unit_economics",
+        prompt: "What unit economics (LTV, CAC, payback) are stated in this room’s financials?",
+      },
+    ],
+  },
+  {
+    packId: "real_estate_v1",
+    title: "Real estate transaction diligence",
+    items: [
+      {
+        id: "title_encumbrances",
+        prompt: "What title exceptions, liens, or easements are disclosed in this room’s title docs?",
+      },
+    ],
+  },
+  {
+    packId: "fund_mgmt_v1",
+    title: "Fund operations & LP reporting",
+    items: [
+      {
+        id: "capital_calls",
+        prompt: "What capital-call or unfunded-commitment terms are in this room’s fund docs?",
+      },
+    ],
+  },
+  {
+    packId: "portfolio_mgmt_v1",
+    title: "Portfolio company monitoring",
+    items: [
+      {
+        id: "portfolio_kpis",
+        prompt: "What portfolio KPI or performance figures are reported in this room’s materials?",
+      },
+    ],
+  },
+  {
+    packId: "project_mgmt_v1",
+    title: "Project delivery diligence",
+    items: [
+      {
+        id: "scope_objectives",
+        prompt: "What project scope and objectives are defined in this room’s charter or overview?",
+      },
+    ],
+  },
+  {
+    packId: "sales_dataroom_v1",
+    title: "Enterprise sales diligence",
+    items: [
+      {
+        id: "pricing_quote",
+        prompt: "What pricing, quote amounts, or discount terms appear in this room’s proposals?",
+      },
+    ],
+  },
+];
+
+function mockMissionPack(packId: string) {
+  return (
+    mockKnowledgeMissionCatalog.find((p) => p.packId === packId) ??
+    mockKnowledgeMissionCatalog[0]!
+  );
+}
+/** roomId → feedback→gold candidates (ceiling Phase O). */
+type MockEvalCandidate = {
+  id: string;
+  roomId: string;
+  turnId: string;
+  feedbackKind: string;
+  question: string;
+  answer?: string;
+  note?: string;
+  reviewStatus: string;
+  expect?: string;
+  createdAt: string;
+  reviewedAt?: string;
+  snapshot?: {
+    hits?: Array<{ chunkId?: string; sourceName?: string; excerpt?: string }>;
+  };
+};
+const mockKnowledgeEvalCandidatesByRoom = new Map<string, MockEvalCandidate[]>();
+
+/** roomId → cold archive tombstones + packs (ceiling Phase U). */
+type MockKnowledgeArchive = {
+  id: string;
+  workspaceId: string;
+  roomId: string;
+  sessionId: string;
+  title?: string;
+  turnCount: number;
+  corpusFingerprint?: string;
+  status: string;
+  archivedAt: string;
+  pack: {
+    schemaVersion: string;
+    exportedAt: string;
+    workspaceId: string;
+    roomId: string;
+    sessionId: string;
+    corpusFingerprint?: string;
+    session: { id: string; status: string; title?: string };
+    turns: Array<{
+      id: string;
+      sequence: number;
+      question: string;
+      answer?: string;
+      resultStatus: string;
+    }>;
+  };
+};
+const mockKnowledgeArchivesByRoom = new Map<string, MockKnowledgeArchive[]>();
+
+function seedDefaultKnowledgeArchives() {
+  // room_1 demo tombstone for corpus landing / Phase U e2e.
+  mockKnowledgeArchivesByRoom.set("room_1", [
+    {
+      id: "kqa_arch_1",
+      workspaceId: "ws_1",
+      roomId: "room_1",
+      sessionId: "kqa_sess_archived_1",
+      title: "Archived diligence session",
+      turnCount: 1,
+      corpusFingerprint: "mockfp0123456789abcdef",
+      status: "cold",
+      archivedAt: "2026-07-01T12:00:00Z",
+      pack: {
+        schemaVersion: "1",
+        exportedAt: "2026-07-01T12:00:00Z",
+        workspaceId: "ws_1",
+        roomId: "room_1",
+        sessionId: "kqa_sess_archived_1",
+        corpusFingerprint: "mockfp0123456789abcdef",
+        session: {
+          id: "kqa_sess_archived_1",
+          status: "closed",
+          title: "Archived diligence session",
+        },
+        turns: [
+          {
+            id: "kqa_turn_archived_1",
+            sequence: 1,
+            question: "What was the valuation cap?",
+            answer: "Grounded answer for: What was the valuation cap? [1].",
+            resultStatus: "answered",
+          },
+        ],
+      },
+    },
+  ]);
+}
+seedDefaultKnowledgeArchives();
 
 /** Test-only: force session ask to return JSON 429 before SSE (busy / rate / quota). */
 let mockKnowledgeAskGate: { code: string; status: number } | null = null;
+
+function clientRequestKey(roomId: string, clientRequestId: string) {
+  return `${roomId}\0${clientRequestId}`;
+}
 
 function resetMockState() {
   mockUsers.clear();
@@ -153,10 +473,12 @@ async function hydrateKnowledgeQAState() {
             turns?: [string, MockKnowledgeTurn[]][];
             corpusOverrides?: [string, MockKnowledgeCorpusOverride][];
             askGate?: { code: string; status: number } | null;
+            clientRequests?: [string, Record<string, unknown>][];
           };
           mockKnowledgeSessionsByRoom.clear();
           mockKnowledgeTurnsBySession.clear();
           mockKnowledgeCorpusOverrideByRoom.clear();
+          mockKnowledgeTurnByClientRequest.clear();
           mockKnowledgeAskGate = data.askGate ?? null;
           for (const [roomId, sessions] of data.sessions ?? []) {
             mockKnowledgeSessionsByRoom.set(roomId, sessions);
@@ -166,6 +488,9 @@ async function hydrateKnowledgeQAState() {
           }
           for (const [roomId, override] of data.corpusOverrides ?? []) {
             mockKnowledgeCorpusOverrideByRoom.set(roomId, override);
+          }
+          for (const [key, payload] of data.clientRequests ?? []) {
+            mockKnowledgeTurnByClientRequest.set(key, payload);
           }
         }
       } catch {
@@ -190,6 +515,7 @@ async function persistKnowledgeQAState() {
           turns: [...mockKnowledgeTurnsBySession.entries()],
           corpusOverrides: [...mockKnowledgeCorpusOverrideByRoom.entries()],
           askGate: mockKnowledgeAskGate,
+          clientRequests: [...mockKnowledgeTurnByClientRequest.entries()],
         }),
         { headers: { "Content-Type": "application/json" } },
       ),
@@ -203,6 +529,11 @@ async function resetKnowledgeQAState() {
   mockKnowledgeSessionsByRoom.clear();
   mockKnowledgeTurnsBySession.clear();
   mockKnowledgeCorpusOverrideByRoom.clear();
+  mockKnowledgeTurnByClientRequest.clear();
+  mockKnowledgeMissionByRoom.clear();
+  mockKnowledgeEvalCandidatesByRoom.clear();
+  mockKnowledgeArchivesByRoom.clear();
+  seedDefaultKnowledgeArchives();
   mockKnowledgeAskGate = null;
   knowledgeQAHydrated = true;
   knowledgeQAHydratePromise = null;
@@ -245,9 +576,35 @@ async function roomSessions(roomId: string): Promise<MockKnowledgeSession[]> {
   return list;
 }
 
+/** Mirror production elliptical rewrite for MSW desk trust disclosure. */
+function mockKnowledgeRewrite(
+  displayQuery: string,
+  prior?: MockKnowledgeTurn,
+): Pick<MockKnowledgeTurn, "retrieveQuery" | "rewriteApplied"> {
+  if (!prior) return {};
+  const q = displayQuery.trim();
+  if (!q) return {};
+  const lower = q.toLowerCase();
+  const short = [...q].length <= 28;
+  const pronoun =
+    /它|他们|她们|这个|那个|上述|该|呢[？?]?$/.test(q) ||
+    /\b(they|them|their|this|that|those|these|it|it's)\b/.test(lower) ||
+    /\b(what about|how about|and the|same for)\b/.test(lower);
+  if (!short && !pronoun) return {};
+  const retrieveQuery = `${prior.question} — ${q}`.slice(0, 240).trim();
+  if (!retrieveQuery || retrieveQuery === q) return {};
+  return { retrieveQuery, rewriteApplied: true };
+}
+
 async function executeMockKnowledgeSessionQuery(
   roomId: string,
-  body: { sessionId?: string; query?: string; answer?: boolean; top_k?: number },
+  body: {
+    sessionId?: string;
+    query?: string;
+    answer?: boolean;
+    top_k?: number;
+    clientRequestId?: string;
+  },
 ): Promise<
   | { ok: true; payload: Record<string, unknown> }
   | { ok: false; status: number; body: Record<string, unknown> }
@@ -272,6 +629,28 @@ async function executeMockKnowledgeSessionQuery(
       status: 400,
       body: { code: "invalid_input", message: "query is required" },
     };
+  }
+  const clientRequestId = (body.clientRequestId || "").trim();
+  if (!clientRequestId) {
+    return {
+      ok: false,
+      status: 400,
+      body: { code: "invalid_input", message: "clientRequestId is required" },
+    };
+  }
+  const priorAsk = mockKnowledgeTurnByClientRequest.get(
+    clientRequestKey(roomId, clientRequestId),
+  );
+  if (priorAsk) {
+    const priorQ = String((priorAsk.turn as { question?: string } | undefined)?.question ?? "");
+    if (priorQ && priorQ !== rawQuery.replace(/^@refuse\s+/i, "").trim() && priorQ !== rawQuery) {
+      return {
+        ok: false,
+        status: 400,
+        body: { code: "invalid_input", message: "clientRequestId reused with different question" },
+      };
+    }
+    return { ok: true, payload: priorAsk };
   }
   // MSW refuse probe (A2): prefix `@refuse ` → refused turn with empty hits.
   const refuseProbe = /^@refuse\s+/i.test(rawQuery);
@@ -299,6 +678,7 @@ async function executeMockKnowledgeSessionQuery(
       updatedAt: now,
       lastTurnAt: now,
       turnCount: 0,
+      state: emptyMockKnowledgeState(),
     };
     sessions.unshift(session);
     mockKnowledgeTurnsBySession.set(session.id, []);
@@ -323,9 +703,14 @@ async function executeMockKnowledgeSessionQuery(
     ? `The provided context does not contain an answer to the question '${displayQuery}'.`
     : body.answer === false
       ? undefined
-      : `Grounded answer for: ${displayQuery}`;
+      : hits.length > 0
+        ? `Grounded answer for: ${displayQuery} [1].`
+        : `Grounded answer for: ${displayQuery}`;
   const resultStatus = refused ? "refused" : hits.length ? "answered" : "no_hits";
   const turns = mockKnowledgeTurnsBySession.get(session.id) ?? [];
+  const prior = turns.length > 0 ? turns[turns.length - 1] : undefined;
+  const rewrite = mockKnowledgeRewrite(displayQuery, prior);
+  const bound = mockBindClaims(answer, hits, refused);
   const turn: MockKnowledgeTurn = {
     id: generateId("kqa_turn"),
     sessionId: session.id,
@@ -335,6 +720,8 @@ async function executeMockKnowledgeSessionQuery(
     refused,
     resultStatus,
     hits,
+    ...rewrite,
+    ...bound,
     createdAt: now,
   };
   turns.push(turn);
@@ -342,20 +729,24 @@ async function executeMockKnowledgeSessionQuery(
   session.lastTurnAt = now;
   session.updatedAt = now;
   session.turnCount = turns.length;
+  session.state = evolveMockKnowledgeState(session.state, turn);
   if (!session.title) session.title = displayQuery.slice(0, 80);
+  const payload = {
+    sessionId: session.id,
+    turn,
+    query: displayQuery,
+    mode: "hybrid",
+    answer: turn.answer,
+    results: hits,
+    refused: turn.refused,
+    resultStatus: turn.resultStatus,
+    sessionState: session.state,
+  };
+  mockKnowledgeTurnByClientRequest.set(clientRequestKey(roomId, clientRequestId), payload);
   await persistKnowledgeQAState();
   return {
     ok: true,
-    payload: {
-      sessionId: session.id,
-      turn,
-      query: displayQuery,
-      mode: "hybrid",
-      answer: turn.answer,
-      results: hits,
-      refused: turn.refused,
-      resultStatus: turn.resultStatus,
-    },
+    payload,
   };
 }
 
@@ -1300,11 +1691,14 @@ export const handlers = [
       const tokenFrames = chunkMockAnswerTokens(answer, 36)
         .map((text) => `event: token\ndata: ${JSON.stringify({ text })}\n\n`)
         .join("");
+      const generatingPhase: Record<string, unknown> = { phase: "generating" };
+      if (turn.rewriteApplied) {
+        generatingPhase.rewriteApplied = true;
+        if (turn.retrieveQuery) generatingPhase.retrieveQuery = turn.retrieveQuery;
+      }
       const frames = [
         `event: phase\ndata: ${JSON.stringify({ phase: "retrieving" })}\n\n`,
-        answer
-          ? `event: phase\ndata: ${JSON.stringify({ phase: "generating" })}\n\n`
-          : "",
+        answer ? `event: phase\ndata: ${JSON.stringify(generatingPhase)}\n\n` : "",
         grounded
           ? `event: sources\ndata: ${JSON.stringify({ results: hits, grounded: true })}\n\n`
           : "",
@@ -1368,13 +1762,341 @@ export const handlers = [
       } catch {
         /* empty */
       }
-      if ((body.type || "").trim() !== "cite_open") {
+      const typ = (body.type || "").trim();
+      if (typ !== "cite_open" && typ !== "followups_upgrade_failed") {
         return HttpResponse.json(
           { code: "invalid_input", message: "unknown desk event type" },
           { status: 400 },
         );
       }
       return new HttpResponse(null, { status: 204 });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/missions",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({
+        items: mockKnowledgeMissionCatalog.map((p) => ({
+          packId: p.packId,
+          title: p.title,
+          source: "catalog",
+          items: p.items,
+        })),
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/mission/progress",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const bound = mockKnowledgeMissionByRoom.get(roomId);
+      const pack = mockMissionPack(bound || "financing_dd_v1");
+      return HttpResponse.json({
+        packId: pack.packId,
+        title: pack.title,
+        source: bound ? "room" : "template_default",
+        covered: 0,
+        total: pack.items.length,
+        items: pack.items.map((item) => ({ ...item, covered: false })),
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/mission",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const bound = mockKnowledgeMissionByRoom.get(roomId);
+      const pack = mockMissionPack(bound || "financing_dd_v1");
+      return HttpResponse.json({
+        packId: pack.packId,
+        title: pack.title,
+        source: bound ? "room" : "template_default",
+        items: pack.items,
+      });
+    },
+  ),
+
+  http.put(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/mission",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      let body: { packId?: string } = {};
+      try {
+        body = (await request.json()) as typeof body;
+      } catch {
+        /* empty */
+      }
+      const packId = (body.packId || "").trim();
+      const pack = mockKnowledgeMissionCatalog.find((p) => p.packId === packId);
+      if (!pack) {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "unknown mission pack" },
+          { status: 400 },
+        );
+      }
+      mockKnowledgeMissionByRoom.set(roomId, packId);
+      return HttpResponse.json({
+        packId: pack.packId,
+        title: pack.title,
+        source: "room",
+        items: pack.items,
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/:sessionId/export",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      const sessionId = params.sessionId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const sess = (mockKnowledgeSessionsByRoom.get(roomId) ?? []).find((s) => s.id === sessionId);
+      if (!sess) {
+        return HttpResponse.json({ code: "not_found", message: "session not found" }, { status: 404 });
+      }
+      const turns = mockKnowledgeTurnsBySession.get(sessionId) ?? [];
+      return HttpResponse.json({
+        schemaVersion: "knowledge_qa_diligence_v1",
+        exportedAt: new Date().toISOString(),
+        workspaceId: "ws-mock",
+        roomId,
+        sessionId,
+        corpusFingerprint: "mockfp0123456789abcdef",
+        session: sess,
+        turns,
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/archives",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      await hydrateKnowledgeQAState();
+      if (mockKnowledgeArchivesByRoom.size === 0) seedDefaultKnowledgeArchives();
+      const url = new URL(request.url);
+      const limit = Math.min(Number(url.searchParams.get("limit") || 20), 50);
+      const items = (mockKnowledgeArchivesByRoom.get(roomId) ?? [])
+        .slice(0, limit)
+        .map(({ pack: _pack, ...tombstone }) => tombstone);
+      return HttpResponse.json({ items });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/archives/:archiveId",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      const archiveId = params.archiveId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      await hydrateKnowledgeQAState();
+      if (mockKnowledgeArchivesByRoom.size === 0) seedDefaultKnowledgeArchives();
+      const list = mockKnowledgeArchivesByRoom.get(roomId) ?? [];
+      const row = list.find((a) => a.id === archiveId);
+      if (!row) {
+        return HttpResponse.json(
+          { code: "not_found", message: "archive not found" },
+          { status: 404 },
+        );
+      }
+      row.status = "restored_readonly";
+      const { pack, ...archive } = row;
+      return HttpResponse.json({ archive, pack });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/ops",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json({
+        scope: "workspace",
+        windowHours: 24,
+        turnsTotal: 0,
+        turnsByStatus: {},
+        avgDurationMs: 0,
+        p95DurationMs: 0,
+        costUnitsTotal: 0,
+        refusalsByKind: {},
+        judgmentsByKind: {},
+        evalCandidatesByStatus: {
+          pending: (mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? []).filter(
+            (c) => c.reviewStatus === "pending",
+          ).length,
+          accepted: (mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? []).filter(
+            (c) => c.reviewStatus === "accepted",
+          ).length,
+        },
+        pendingEvalCandidates: (mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? []).filter(
+          (c) => c.reviewStatus === "pending",
+        ).length,
+        answersQuota: { used: 0, limit: 10000, windowHours: 24 },
+        retentionDays: 90,
+        coldArchiveCount: (mockKnowledgeArchivesByRoom.get(roomId) ?? []).length,
+        roomCorpusFingerprint: "mockfp0123456789abcdef",
+        prometheusHints: [
+          "dealsignal_knowledge_qa_turn_duration_seconds",
+          "dealsignal_knowledge_qa_turns_total",
+          "dealsignal_knowledge_qa_eval_candidates_total",
+        ],
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/eval/candidates/export",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const url = new URL(request.url);
+      const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
+      const accepted = (mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? [])
+        .filter((c) => c.reviewStatus === "accepted")
+        .slice(0, limit);
+      return HttpResponse.json({
+        description: "Accepted knowledge desk eval seeds (mock).",
+        seeds: accepted.map((c) => ({
+          id: `cand_${c.id}`,
+          kind: c.feedbackKind,
+          question: c.question,
+          answer: c.answer,
+          note: c.note,
+          expect: c.expect || "reject_or_rebind",
+        })),
+      });
+    },
+  ),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/eval/candidates",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const url = new URL(request.url);
+      const kind = (url.searchParams.get("kind") || "").trim();
+      const status = (url.searchParams.get("status") || "").trim();
+      let items = [...(mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? [])];
+      if (kind) items = items.filter((c) => c.feedbackKind === kind);
+      if (status) items = items.filter((c) => c.reviewStatus === status);
+      return HttpResponse.json({ items });
+    },
+  ),
+
+  http.patch(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/eval/candidates/:candidateId",
+    async ({ params, request }) => {
+      const roomId = params.roomId as string;
+      const candidateId = params.candidateId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json()) as { reviewStatus?: string; expect?: string };
+      const status = (body.reviewStatus || "").trim();
+      if (status !== "accepted" && status !== "rejected") {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "invalid reviewStatus" },
+          { status: 400 },
+        );
+      }
+      const list = mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? [];
+      const row = list.find((c) => c.id === candidateId);
+      if (!row) return new HttpResponse(null, { status: 404 });
+      row.reviewStatus = status;
+      row.expect =
+        status === "accepted"
+          ? (body.expect || "").trim() ||
+            (row.feedbackKind === "not_answering" ? "refuse_or_ground" : "reject_or_rebind")
+          : undefined;
+      row.reviewedAt = new Date().toISOString();
+      return HttpResponse.json(row);
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/turns/:turnId/follow-ups",
+    async ({ params }) => {
+      const roomId = params.roomId as string;
+      const turnId = params.turnId as string;
+      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+      await hydrateKnowledgeQAState();
+      for (const session of await roomSessions(roomId)) {
+        const turns = mockKnowledgeTurnsBySession.get(session.id) ?? [];
+        const turn = turns.find((t) => t.id === turnId);
+        if (!turn) continue;
+        const coverage: string[] = [];
+        const seen = new Set<string>();
+        for (const h of turn.hits) {
+          const n = (h.sourceName || "").trim();
+          if (!n) continue;
+          const key = n.toLowerCase();
+          if (seen.has(key)) continue;
+          seen.add(key);
+          coverage.push(n);
+          if (coverage.length >= 3) break;
+        }
+        const source = coverage[0] || "room document";
+        if (turn.refused || turn.resultStatus === "no_hits" || turn.resultStatus === "error") {
+          return HttpResponse.json({
+            source: "template",
+            items: [
+              {
+                id: "narrow-scope",
+                text: "Try a more specific file name or clause title?",
+              },
+              {
+                id: "name-clause",
+                text: "Ask about a named clause in a room document?",
+              },
+            ],
+          });
+        }
+        if (coverage.length >= 2) {
+          const top2 = coverage[1]!;
+          return HttpResponse.json({
+            source: "llm",
+            items: [
+              {
+                id: "llm-1",
+                text: `What liability terms appear in “${source}”?`,
+              },
+              {
+                id: "llm-2",
+                text: `What exceptions does “${top2}” list?`,
+              },
+              {
+                id: "llm-3",
+                text: `Do “${source}” and “${top2}” agree on the same point?`,
+              },
+            ],
+          });
+        }
+        return HttpResponse.json({
+          source: "llm",
+          items: [
+            {
+              id: "llm-1",
+              text: `What liability terms appear in “${source}”?`,
+            },
+            {
+              id: "llm-2",
+              text: `How does “${source}” define the key obligations?`,
+            },
+            {
+              id: "llm-3",
+              text: `What exceptions does “${source}” list?`,
+            },
+          ],
+        });
+      }
+      return new HttpResponse(null, { status: 404 });
     },
   ),
 
@@ -1399,6 +2121,42 @@ export const handlers = [
         const turn = turns.find((t) => t.id === turnId);
         if (turn) {
           turn.feedback = { kind, note };
+          if (kind === "wrong_citation" || kind === "not_answering") {
+            const list = mockKnowledgeEvalCandidatesByRoom.get(roomId) ?? [];
+            const existing = list.find(
+              (c) => c.turnId === turnId && c.feedbackKind === kind,
+            );
+            const snap = {
+              hits: (turn.hits || []).slice(0, 3).map((h) => ({
+                chunkId: h.chunkId,
+                sourceName: h.sourceName,
+                excerpt: (h.text || "").slice(0, 280),
+              })),
+            };
+            if (existing) {
+              existing.question = turn.question;
+              existing.answer = turn.answer;
+              existing.note = note;
+              existing.reviewStatus = "pending";
+              existing.expect = undefined;
+              existing.reviewedAt = undefined;
+              existing.snapshot = snap;
+            } else {
+              list.unshift({
+                id: crypto.randomUUID(),
+                roomId,
+                turnId,
+                feedbackKind: kind,
+                question: turn.question,
+                answer: turn.answer,
+                note,
+                reviewStatus: "pending",
+                createdAt: new Date().toISOString(),
+                snapshot: snap,
+              });
+              mockKnowledgeEvalCandidatesByRoom.set(roomId, list);
+            }
+          }
           await persistKnowledgeQAState();
           return HttpResponse.json(turn.feedback);
         }
