@@ -4,40 +4,18 @@ import {
   Folder,
   FolderOpen,
   FileText,
+  FileX,
   Plus,
   UploadSimple,
-  PencilSimple,
   Trash,
   X,
-  DotsThreeVertical,
   Lock,
+  LockOpen,
   MagnifyingGlass,
 } from "@phosphor-icons/react";
-import { Button, buttonVariants } from "@/components/ui/button";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
@@ -49,15 +27,18 @@ import {
   findNodeByPath,
   parseSelection,
   subtreeSelectionState,
+  topmostSelectedFolderPaths,
   withFolderSubtreeSelection,
   withDocumentSelection,
   type FolderTreeNode,
   type SelectionKey,
-  type ResourceLockFilter,
 } from "@/lib/dealRoomFolderTree";
-import { DocumentPicker } from "./DocumentPicker";
 import { ResourcesToolbarHostContext } from "./DealRoomDocumentsHome";
+import { UploadCancelledError } from "@/hooks/useDocumentUploadConflict";
 import type { DealRoomDocumentItem, DealRoomFolder, DealRoomFolderDocs, Document } from "@/types";
+
+/** Backend treats parent_path "/" as a top-level (root) folder create. */
+const ROOT_PARENT = "/";
 
 interface DealRoomFolderTreeProps {
   roomId: string;
@@ -116,72 +97,24 @@ function SelectionCheckbox({
   );
 }
 
-function ContextMenu({
-  x,
-  y,
-  children,
-  onClose,
-}: {
-  x: number;
-  y: number;
-  children: React.ReactNode;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (!ref.current?.contains(e.target as Node)) {
-        onClose();
-      }
-    };
-    const handleEsc = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("click", handleClick, true);
-    window.addEventListener("scroll", onClose, true);
-    window.addEventListener("resize", onClose, true);
-    window.addEventListener("keydown", handleEsc);
-    return () => {
-      window.removeEventListener("click", handleClick, true);
-      window.removeEventListener("scroll", onClose, true);
-      window.removeEventListener("resize", onClose, true);
-      window.removeEventListener("keydown", handleEsc);
-    };
-  }, [onClose]);
-
-  return (
-    <div
-      ref={ref}
-      className="fixed z-50 min-w-[10rem] rounded-md border border-border bg-popover p-1 shadow-md"
-      style={{ left: x, top: y }}
-      onContextMenu={(e) => e.preventDefault()}
-    >
-      {children}
-    </div>
-  );
-}
-
 export function DealRoomFolderTree({
   roomId,
   folders,
   folderDocs,
-  workspaceDocuments,
-  roomDocuments,
   isAdmin = true,
   selectedFolderPath,
   onSelectFolder,
   onFolderCreate,
-  onFolderRename,
+  onFolderRename: _onFolderRename,
   onFolderDelete,
-  onDocumentsAdd,
+  onDocumentRemove,
   onFolderUpload,
   onDocumentOpen,
   onChanged,
 }: DealRoomFolderTreeProps) {
   const { t } = useTranslation("dealRooms");
-  const { t: tc } = useTranslation("common");
   const { t: td } = useTranslation("documents");
+  void _onFolderRename; // retained for caller compatibility; rename moved off row menus
 
   const isNavigator = typeof onSelectFolder === "function";
 
@@ -203,11 +136,10 @@ export function DealRoomFolderTree({
   );
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [lockFilter, setLockFilter] = useState<ResourceLockFilter>("all");
   const [selection, setSelection] = useState<Set<SelectionKey>>(() => new Set());
   const [bulkLoading, setBulkLoading] = useState(false);
 
-  const filtersActive = searchQuery.trim() !== "" || lockFilter !== "all";
+  const filtersActive = searchQuery.trim() !== "";
 
   const { roots, expandPaths } = useMemo(() => {
     if (!filtersActive) {
@@ -216,21 +148,26 @@ export function DealRoomFolderTree({
     return filterFolderTree(allRoots, {
       query: searchQuery,
       type: "all",
-      lock: lockFilter,
+      lock: "all",
     });
-  }, [allRoots, searchQuery, lockFilter, filtersActive]);
+  }, [allRoots, searchQuery, filtersActive]);
 
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(folders.map((f) => f.path)));
   const [creatingParent, setCreatingParent] = useState<string | null>(null);
   const [newFolderName, setNewFolderName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [renamingFolder, setRenamingFolder] = useState<DealRoomFolder | null>(null);
-  const [renameValue, setRenameValue] = useState("");
-  const [renaming, setRenaming] = useState(false);
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; folder: DealRoomFolder } | null>(null);
-  const [addToFolder, setAddToFolder] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
-  const fileInputRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+  const bulkUploadTargetRef = useRef<string | null>(null);
+  const bulkUploadInputRef = useRef<HTMLInputElement | null>(null);
+
+  const selectionParsed = useMemo(() => parseSelection(selection), [selection]);
+  const topmostFolders = useMemo(
+    () => topmostSelectedFolderPaths(selectionParsed.folderPaths),
+    [selectionParsed.folderPaths],
+  );
+  const singleFolderTarget = topmostFolders.length === 1 ? topmostFolders[0]! : null;
+  const singleFolderLocked = Boolean(
+    singleFolderTarget && folders.find((f) => f.path === singleFolderTarget)?.locked,
+  );
 
   useEffect(() => {
     if (expandPaths.size === 0) return;
@@ -270,6 +207,10 @@ export function DealRoomFolderTree({
   };
 
   const handleBulkLock = async () => {
+    if (selection.size === 0) {
+      toast.error(t("folders.toolbar.needItemSelection"));
+      return;
+    }
     const { folderPaths, documentIds } = parseSelection(selection);
     if (!confirm(t("folders.toolbar.lockConfirm", { count: selection.size }))) return;
     setBulkLoading(true);
@@ -289,6 +230,10 @@ export function DealRoomFolderTree({
   };
 
   const handleBulkUnlock = async () => {
+    if (selection.size === 0) {
+      toast.error(t("folders.toolbar.needItemSelection"));
+      return;
+    }
     const { folderPaths, documentIds } = parseSelection(selection);
     if (!confirm(t("folders.toolbar.unlockConfirm", { count: selection.size }))) return;
     setBulkLoading(true);
@@ -307,6 +252,122 @@ export function DealRoomFolderTree({
     }
   };
 
+  const handleBulkCreateSubfolder = () => {
+    if (!singleFolderTarget) {
+      toast.error(t("folders.toolbar.needOneFolder"));
+      return;
+    }
+    const folder = folders.find((f) => f.path === singleFolderTarget);
+    if (!folder) return;
+    guardLockedFolderAction(folder, () => {
+      clearSelection();
+      startCreate(singleFolderTarget);
+    });
+  };
+
+  const handleBulkDeleteFolders = async () => {
+    if (topmostFolders.length === 0) {
+      toast.error(t("folders.toolbar.needFolderSelection"));
+      return;
+    }
+    if (
+      !confirm(
+        t("folders.toolbar.deleteDirectoriesConfirm", { count: topmostFolders.length }),
+      )
+    ) {
+      return;
+    }
+    setBulkLoading(true);
+    try {
+      for (const path of topmostFolders) {
+        const folder = folders.find((f) => f.path === path);
+        if (folder?.locked) {
+          toast.error(t("folders.lockedActionBlocked"));
+          continue;
+        }
+        const docs = docsByFolder.get(path) ?? [];
+        if (docs.length > 0) {
+          toast.error(t("folders.deleteNotEmpty"));
+          continue;
+        }
+        await onFolderDelete(path);
+      }
+      clearSelection();
+      await onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkUpload = () => {
+    if (!onFolderUpload) return;
+    if (!singleFolderTarget) {
+      toast.error(t("folders.toolbar.needOneFolder"));
+      return;
+    }
+    const folder = folders.find((f) => f.path === singleFolderTarget);
+    if (!folder) return;
+    guardLockedFolderAction(folder, () => {
+      // Ref (not state) so the change handler cannot race a pending re-render.
+      bulkUploadTargetRef.current = singleFolderTarget;
+      window.setTimeout(() => bulkUploadInputRef.current?.click(), 0);
+    });
+  };
+
+  const handleBulkUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const target = bulkUploadTargetRef.current;
+    const files = Array.from(e.target.files ?? []);
+    e.target.value = "";
+    bulkUploadTargetRef.current = null;
+    if (!target || files.length === 0 || !onFolderUpload) return;
+    setBulkLoading(true);
+    try {
+      const baseSort = folderDocs.find((fd) => fd.folder === target)?.documents.length ?? 0;
+      // Sequential so shared replace/cancel dialogs never race.
+      for (let index = 0; index < files.length; index++) {
+        await onFolderUpload(files[index]!, target, baseSort + index);
+      }
+      toast.success(t("folders.toolbar.batchUploadSuccess", { count: files.length }));
+      clearSelection();
+      await onChanged?.();
+    } catch (err) {
+      if (!(err instanceof UploadCancelledError)) {
+        toast.error(err instanceof Error ? err.message : t("folders.toolbar.batchUploadFailed"));
+      }
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
+  const handleBulkRemoveDocuments = async () => {
+    if (!onDocumentRemove) return;
+    const { documentIds } = parseSelection(selection);
+    if (documentIds.length === 0) {
+      toast.error(t("folders.toolbar.needFileSelection"));
+      return;
+    }
+    if (
+      !confirm(t("folders.toolbar.removeFilesConfirm", { count: documentIds.length }))
+    ) {
+      return;
+    }
+    setBulkLoading(true);
+    try {
+      for (const id of documentIds) {
+        await onDocumentRemove(id);
+      }
+      toast.success(t("folders.toolbar.removeFilesSuccess", { count: documentIds.length }));
+      clearSelection();
+      await onChanged?.();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
   const toggleFolder = (path: string) => {
     setExpanded((prev) => {
       const next = new Set(prev);
@@ -318,6 +379,8 @@ export function DealRoomFolderTree({
 
   const startCreate = (parentPath: string) => {
     setCreatingParent(parentPath);
+    setNewFolderName("");
+    if (parentPath === ROOT_PARENT) return;
     setExpanded((prev) => {
       if (prev.has(parentPath)) return prev;
       const next = new Set(prev);
@@ -327,79 +390,15 @@ export function DealRoomFolderTree({
   };
 
   const handleCreate = async () => {
-    if (!newFolderName.trim()) return;
+    if (!newFolderName.trim() || creatingParent === null) return;
     setCreating(true);
     try {
-      await onFolderCreate(newFolderName.trim(), creatingParent ?? undefined);
+      await onFolderCreate(newFolderName.trim(), creatingParent);
       setNewFolderName("");
       setCreatingParent(null);
     } finally {
       setCreating(false);
     }
-  };
-
-  const startRename = (folder: DealRoomFolder) => {
-    setRenamingFolder(folder);
-    setRenameValue(folder.name);
-    setContextMenu(null);
-  };
-
-  const handleRename = async () => {
-    if (!renamingFolder || !renameValue.trim() || renameValue.trim() === renamingFolder.name) {
-      setRenamingFolder(null);
-      return;
-    }
-    setRenaming(true);
-    try {
-      await onFolderRename(renamingFolder.path, renameValue.trim());
-      setRenamingFolder(null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
-    } finally {
-      setRenaming(false);
-    }
-  };
-
-  const handleDelete = async (folder: DealRoomFolder) => {
-    const docs = docsByFolder.get(folder.path) ?? [];
-    if (docs.length > 0) {
-      alert(t("folders.deleteNotEmpty"));
-      return;
-    }
-    if (!confirm(t("folders.deleteConfirm", { name: folder.name }))) return;
-    try {
-      await onFolderDelete(folder.path);
-      setContextMenu(null);
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
-    }
-  };
-
-  const handleAddDocuments = async (documentIds: string[], folderPath: string) => {
-    if (!onDocumentsAdd) return;
-    setAdding(true);
-    try {
-      await onDocumentsAdd(documentIds, folderPath);
-      setAddToFolder(null);
-    } finally {
-      setAdding(false);
-    }
-  };
-
-  const handleFolderUploadChange = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-    folderPath: string
-  ) => {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length === 0 || !onFolderUpload) return;
-    // Clear immediately so the same selection can be re-picked after upload.
-    e.target.value = "";
-    const baseSort =
-      folderDocs.find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
-    // Kick off in parallel; stable sort_order via base+index (avoids duplicate ranks).
-    await Promise.all(
-      files.map((file, index) => onFolderUpload(file, folderPath, baseSort + index)),
-    );
   };
 
   const handleFolderClick = (path: string) => {
@@ -465,7 +464,6 @@ export function DealRoomFolderTree({
           tabIndex={0}
           aria-expanded={isExpanded}
           onClick={() => handleFolderClick(node.folder.path)}
-          onContextMenu={(e) => handleContextMenu(e, node.folder)}
           onKeyDown={(e) => {
             if (e.key === "Enter" || e.key === " ") {
               e.preventDefault();
@@ -473,7 +471,7 @@ export function DealRoomFolderTree({
             }
           }}
           className={cn(
-            "group flex w-full items-center justify-between gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors duration-150 ease-out hover:bg-muted/50 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+            "group flex w-full items-center gap-3 rounded-lg border border-transparent p-2.5 text-left transition-colors duration-150 ease-out hover:bg-muted/50 hover:border-border/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
             isSelected && "bg-primary/[0.04] border-primary/20 hover:border-primary/30 hover:bg-primary/[0.06]"
           )}
         >
@@ -518,126 +516,6 @@ export function DealRoomFolderTree({
                 </div>
               )}
             </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-0.5">
-            {isAdmin && (
-              <>
-                {onFolderUpload && (
-                  <input
-                    ref={(el) => {
-                      if (el) fileInputRefs.current.set(node.folder.path, el);
-                    }}
-                    type="file"
-                    multiple
-                    accept={td("upload.supportedTypes")}
-                    data-testid={`folder-upload-input-${node.folder.path}`}
-                    tabIndex={-1}
-                    aria-hidden
-                    className="sr-only"
-                    onChange={(e) => void handleFolderUploadChange(e, node.folder.path)}
-                  />
-                )}
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    className={cn(
-                      buttonVariants({ variant: "ghost", size: "icon-sm" }),
-                      "rounded-full text-muted-foreground opacity-70 transition-all duration-200",
-                      "hover:bg-muted hover:text-foreground hover:opacity-100",
-                      "data-[popup-open]:bg-muted data-[popup-open]:text-foreground data-[popup-open]:opacity-100",
-                      "focus-visible:opacity-100",
-                    )}
-                    onClick={(e) => e.stopPropagation()}
-                    aria-label={t("folders.actions", { name: node.folder.name })}
-                  >
-                    <DotsThreeVertical size={18} weight="bold" />
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent
-                    align="end"
-                    side="bottom"
-                    sideOffset={8}
-                    className="min-w-52 origin-top-right p-1.5 shadow-dropdown"
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    <DropdownMenuItem
-                      className={cn(
-                        "gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both",
-                        folderLocked && "opacity-50",
-                      )}
-                      style={{ animationDelay: "20ms", animationDuration: "180ms" }}
-                      onClick={() =>
-                        guardLockedFolderAction(node.folder, () => startCreate(node.folder.path))
-                      }
-                    >
-                      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground">
-                        <Plus size={16} weight="bold" />
-                      </span>
-                      <span className="font-medium tracking-tight">
-                        {t("folders.newSubfolder")}
-                      </span>
-                    </DropdownMenuItem>
-
-                    {onFolderUpload && (
-                      <DropdownMenuItem
-                        className={cn(
-                          "gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both",
-                          folderLocked && "opacity-50",
-                        )}
-                        style={{ animationDelay: "50ms", animationDuration: "180ms" }}
-                        onClick={() =>
-                          guardLockedFolderAction(node.folder, () => {
-                            fileInputRefs.current.get(node.folder.path)?.click();
-                          })
-                        }
-                      >
-                        <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground">
-                          <UploadSimple size={16} />
-                        </span>
-                        <span className="font-medium tracking-tight">
-                          {t("folders.addFiles")}
-                        </span>
-                      </DropdownMenuItem>
-                    )}
-
-                    <DropdownMenuItem
-                      className={cn(
-                        "gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both",
-                        folderLocked && "opacity-50",
-                      )}
-                      style={{ animationDelay: "80ms", animationDuration: "180ms" }}
-                      onClick={() =>
-                        guardLockedFolderAction(node.folder, () => startRename(node.folder))
-                      }
-                    >
-                      <span className="flex size-4 shrink-0 items-center justify-center text-muted-foreground group-focus/dropdown-menu-item:text-accent-foreground">
-                        <PencilSimple size={16} />
-                      </span>
-                      <span className="font-medium tracking-tight">
-                        {t("folders.rename")}
-                      </span>
-                    </DropdownMenuItem>
-
-                    <DropdownMenuSeparator className="my-1.5" />
-
-                    <DropdownMenuItem
-                      variant="destructive"
-                      className={cn(
-                        "gap-2.5 px-2.5 py-2 animate-in fade-in-0 slide-in-from-top-1 fill-mode-both",
-                        folderLocked && "opacity-50",
-                      )}
-                      style={{ animationDelay: "110ms", animationDuration: "180ms" }}
-                      onClick={() =>
-                        guardLockedFolderAction(node.folder, () => void handleDelete(node.folder))
-                      }
-                    >
-                      <span className="flex size-4 shrink-0 items-center justify-center text-destructive">
-                        <Trash size={16} />
-                      </span>
-                      <span className="font-medium tracking-tight">{tc("delete")}</span>
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              </>
-            )}
           </div>
         </div>
 
@@ -701,79 +579,164 @@ export function DealRoomFolderTree({
     );
   };
 
-  const handleContextMenu = (e: React.MouseEvent, folder: DealRoomFolder) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setContextMenu({ x: e.clientX, y: e.clientY, folder });
-  };
-
   const showNoMatches = folders.length > 0 && roots.length === 0 && filtersActive;
   const toolbarHost = useContext(ResourcesToolbarHostContext);
+  const showToolbar = isAdmin || folders.length > 0;
 
-  const toolbar =
-    folders.length > 0 ? (
-      <div className="flex flex-wrap items-center justify-end gap-2" data-testid="folder-tree-toolbar">
+  const toolbar = showToolbar ? (
+      <div className="flex flex-wrap items-center gap-2" data-testid="folder-tree-toolbar">
         {selection.size === 0 ? (
           <>
-            <div className="relative w-full max-w-xs sm:w-64">
-              <MagnifyingGlass
-                size={16}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
-                aria-hidden
-              />
-              <Input
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder={t("folders.toolbar.searchPlaceholder")}
-                aria-label={t("folders.toolbar.searchAria")}
-                className="h-9 pl-8"
-              />
-            </div>
-            <Select
-              value={lockFilter}
-              onValueChange={(value) => {
-                if (value) setLockFilter(value as ResourceLockFilter);
-              }}
-            >
-              <SelectTrigger className="w-[130px]" aria-label={t("folders.toolbar.lockLabel")}>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">{t("folders.toolbar.lockAll")}</SelectItem>
-                <SelectItem value="locked">{t("folders.toolbar.lockLocked")}</SelectItem>
-                <SelectItem value="unlocked">{t("folders.toolbar.lockUnlocked")}</SelectItem>
-              </SelectContent>
-            </Select>
+            {folders.length > 0 ? (
+              <div className="relative w-full max-w-xs sm:w-64">
+                <MagnifyingGlass
+                  size={16}
+                  className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground"
+                  aria-hidden
+                />
+                <Input
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder={t("folders.toolbar.searchPlaceholder")}
+                  aria-label={t("folders.toolbar.searchAria")}
+                  className="h-9 pl-8"
+                />
+              </div>
+            ) : null}
+            {isAdmin ? (
+              <>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  data-testid="folder-tree-create-directory"
+                  onClick={() => startCreate(ROOT_PARENT)}
+                >
+                  <Plus size={14} weight="bold" className="mr-1.5" />
+                  {t("folders.toolbar.createDirectory")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  data-testid="folder-tree-bulk-lock"
+                  onClick={() => void handleBulkLock()}
+                  disabled={bulkLoading}
+                >
+                  <Lock size={14} className="mr-1.5" />
+                  {t("folders.toolbar.bulkLock")}
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  data-testid="folder-tree-bulk-unlock"
+                  onClick={() => void handleBulkUnlock()}
+                  disabled={bulkLoading}
+                >
+                  <LockOpen size={14} className="mr-1.5" />
+                  {t("folders.toolbar.bulkUnlock")}
+                </Button>
+              </>
+            ) : null}
           </>
         ) : (
           <>
             <span className="text-sm font-medium text-foreground">
               {t("folders.toolbar.selected", { count: selection.size })}
             </span>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void handleBulkLock()}
-              disabled={bulkLoading}
-            >
-              <Lock size={14} className="mr-1.5" />
-              {t("folders.toolbar.bulkLock")}
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => void handleBulkUnlock()}
-              disabled={bulkLoading}
-            >
-              {t("folders.toolbar.bulkUnlock")}
-            </Button>
-            <Button size="sm" variant="ghost" onClick={clearSelection} disabled={bulkLoading}>
-              {t("folders.toolbar.clearSelection")}
-            </Button>
+            {isAdmin ? (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleBulkCreateSubfolder}
+                  disabled={bulkLoading || !singleFolderTarget || singleFolderLocked}
+                  data-testid="folder-tree-bulk-create-subfolder"
+                >
+                  <Plus size={14} weight="bold" className="mr-1.5" />
+                  {t("folders.toolbar.createSubdirectory")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => void handleBulkDeleteFolders()}
+                  disabled={bulkLoading || topmostFolders.length === 0}
+                  data-testid="folder-tree-bulk-delete-directory"
+                >
+                  <Trash size={14} className="mr-1.5" />
+                  {t("folders.toolbar.deleteDirectory")}
+                </Button>
+                {onFolderUpload ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handleBulkUpload}
+                    disabled={bulkLoading || !singleFolderTarget || singleFolderLocked}
+                    data-testid="folder-tree-bulk-upload"
+                  >
+                    <UploadSimple size={14} className="mr-1.5" />
+                    {t("folders.toolbar.batchUpload")}
+                  </Button>
+                ) : null}
+                {onDocumentRemove ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void handleBulkRemoveDocuments()}
+                    disabled={
+                      bulkLoading || selectionParsed.documentIds.length === 0
+                    }
+                    data-testid="folder-tree-bulk-remove-files"
+                  >
+                    <FileX size={14} className="mr-1.5" />
+                    {t("folders.toolbar.removeFiles")}
+                  </Button>
+                ) : null}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  data-testid="folder-tree-bulk-lock"
+                  onClick={() => void handleBulkLock()}
+                  disabled={bulkLoading}
+                >
+                  <Lock size={14} className="mr-1.5" />
+                  {t("folders.toolbar.bulkLock")}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-9"
+                  data-testid="folder-tree-bulk-unlock"
+                  onClick={() => void handleBulkUnlock()}
+                  disabled={bulkLoading}
+                >
+                  <LockOpen size={14} className="mr-1.5" />
+                  {t("folders.toolbar.bulkUnlock")}
+                </Button>
+              </>
+            ) : null}
+            {onFolderUpload ? (
+              <input
+                ref={bulkUploadInputRef}
+                type="file"
+                multiple
+                accept={td("upload.supportedTypes")}
+                data-testid="folder-tree-bulk-upload-input"
+                tabIndex={-1}
+                aria-hidden
+                className="sr-only"
+                onChange={(e) => void handleBulkUploadChange(e)}
+              />
+            ) : null}
           </>
         )}
       </div>
-    ) : null;
+  ) : null;
 
   return (
     <div className="space-y-1" data-testid="folder-tree">
@@ -803,119 +766,12 @@ export function DealRoomFolderTree({
           {t("folders.toolbar.noMatches")}
         </p>
       ) : (
-        <div className="space-y-1">{roots.map((root) => renderFolder(root, 0))}</div>
+        <div className="space-y-1">
+          {creatingParent === ROOT_PARENT ? renderCreateRow(ROOT_PARENT) : null}
+          {roots.map((root) => renderFolder(root, 0))}
+        </div>
       )}
 
-      {contextMenu && (
-        <ContextMenu x={contextMenu.x} y={contextMenu.y} onClose={() => setContextMenu(null)}>
-          {isAdmin && (
-            <div className="min-w-48 p-1 animate-in fade-in-0 zoom-in-95 duration-150">
-              <button
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground active:scale-[0.98]",
-                  contextMenu.folder.locked && "opacity-50",
-                )}
-                onClick={() =>
-                  guardLockedFolderAction(contextMenu.folder, () => {
-                    startCreate(contextMenu.folder.path);
-                    setContextMenu(null);
-                  })
-                }
-              >
-                <Plus size={16} weight="bold" className="text-muted-foreground" />
-                {t("folders.newSubfolder")}
-              </button>
-              {onDocumentsAdd && workspaceDocuments && workspaceDocuments.length > 0 && !isNavigator && (
-                <button
-                  className={cn(
-                    "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground active:scale-[0.98]",
-                    contextMenu.folder.locked && "opacity-50",
-                  )}
-                  onClick={() =>
-                    guardLockedFolderAction(contextMenu.folder, () => {
-                      setAddToFolder(contextMenu.folder.path);
-                      setContextMenu(null);
-                    })
-                  }
-                >
-                  <FileText size={16} className="text-muted-foreground" />
-                  {t("folders.addFile")}
-                </button>
-              )}
-              <button
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight transition-colors hover:bg-accent hover:text-accent-foreground active:scale-[0.98]",
-                  contextMenu.folder.locked && "opacity-50",
-                )}
-                onClick={() =>
-                  guardLockedFolderAction(contextMenu.folder, () => startRename(contextMenu.folder))
-                }
-              >
-                <PencilSimple size={16} className="text-muted-foreground" />
-                {t("folders.rename")}
-              </button>
-              <div className="my-1.5 h-px bg-border" />
-              <button
-                className={cn(
-                  "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm font-medium tracking-tight text-destructive transition-colors hover:bg-destructive/10 active:scale-[0.98]",
-                  contextMenu.folder.locked && "opacity-50",
-                )}
-                onClick={() =>
-                  guardLockedFolderAction(contextMenu.folder, () => void handleDelete(contextMenu.folder))
-                }
-              >
-                <Trash size={16} />
-                {tc("delete")}
-              </button>
-            </div>
-          )}
-          {!isAdmin && <p className="px-2 py-1 text-sm text-muted-foreground">{t("folders.readOnly")}</p>}
-        </ContextMenu>
-      )}
-
-      <Dialog open={!!renamingFolder} onOpenChange={(open) => !open && setRenamingFolder(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{t("folders.renameTitle")}</DialogTitle>
-          </DialogHeader>
-          <Input
-            value={renameValue}
-            onChange={(e) => setRenameValue(e.target.value)}
-            placeholder={t("folders.namePlaceholder")}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void handleRename();
-            }}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setRenamingFolder(null)}>
-              {tc("cancel")}
-            </Button>
-            <Button onClick={() => void handleRename()} disabled={!renameValue.trim() || renaming}>
-              {tc("save")}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={addToFolder !== null} onOpenChange={(open) => !open && setAddToFolder(null)}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{t("folders.addFile")}</DialogTitle>
-            <DialogDescription>{t("documents.addFromWorkspace")}</DialogDescription>
-          </DialogHeader>
-          {addToFolder && workspaceDocuments && roomDocuments && (
-            <DocumentPicker
-              workspaceDocuments={workspaceDocuments}
-              roomDocuments={roomDocuments}
-              folders={folders}
-              onAdd={handleAddDocuments}
-              initialFolderPath={addToFolder}
-              allowFolderChange={false}
-              disabled={adding}
-            />
-          )}
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

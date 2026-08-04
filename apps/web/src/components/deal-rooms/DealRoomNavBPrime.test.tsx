@@ -122,22 +122,20 @@ describe("deal room nav B′ pieces", () => {
     expect(onJumpTab).toHaveBeenCalledWith("links");
   });
 
-  it("shows no-link attention when outbound is missing", async () => {
-    const onJumpTab = vi.fn();
+  it("does not show no-link attention on the resources tab", async () => {
     await withI18n(
       <DealRoomDocumentsHome
         activeLinkCount={0}
         failedDeliveries={0}
         unreadQuestions={0}
-        onJumpTab={onJumpTab}
+        onJumpTab={vi.fn()}
       >
         <div>tree</div>
       </DealRoomDocumentsHome>
     );
 
-    expect(screen.getByText(/no active share links/i)).toBeInTheDocument();
-    fireEvent.click(screen.getByText(/no active share links/i));
-    expect(onJumpTab).toHaveBeenCalledWith("links");
+    expect(screen.queryByText(/no active share links/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-attention-banner")).not.toBeInTheDocument();
   });
 
   it("hides attention when room signals are healthy", async () => {

@@ -3,6 +3,7 @@ import {
   buildFolderTree,
   filterFolderTree,
   parseSelection,
+  topmostSelectedFolderPaths,
   collectSubtreeKeys,
   subtreeSelectionState,
   withFolderSubtreeSelection,
@@ -91,6 +92,14 @@ describe("parseSelection", () => {
       folderPaths: ["/legal", "/finance"],
       documentIds: ["abc"],
     });
+  });
+});
+
+describe("topmostSelectedFolderPaths", () => {
+  it("keeps only roots when parents and children are both selected", () => {
+    expect(
+      topmostSelectedFolderPaths(["/legal", "/legal/nda", "/finance"]).sort(),
+    ).toEqual(["/finance", "/legal"].sort());
   });
 });
 

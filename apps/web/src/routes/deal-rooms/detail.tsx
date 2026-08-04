@@ -36,6 +36,10 @@ import {
 import { useDealRoomNavStore } from "@/stores/dealRoomNavStore";
 import { useUIStore } from "@/stores/uiStore";
 import { matchesRecommendedFile } from "@/lib/dealRoomReadiness";
+import {
+  UploadCancelledError,
+  useDocumentUploadConflict,
+} from "@/hooks/useDocumentUploadConflict";
 import type { DealRoomFolderDocs, Link } from "@/types";
 
 interface UploadProgressItem {
@@ -65,6 +69,8 @@ const pageTransition = {
 export function DealRoomDetailPage() {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
+  const { t: td } = useTranslation("documents");
+  const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
@@ -277,7 +283,7 @@ export function DealRoomDetailPage() {
       activeIntervalsRef.current.add(interval);
 
       try {
-        const doc = await api.uploadDocument(file);
+        const doc = await uploadDocument(file);
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
 
@@ -285,6 +291,8 @@ export function DealRoomDetailPage() {
           sortOrder ??
           (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ??
           0;
+        // Backend AddDocument is idempotent: re-add after replace updates folder
+        // placement instead of failing on UNIQUE(room_id, document_id).
         await api.addDealRoomDocument(roomId, {
           document_id: doc.id,
           folder_path: folderPath,
@@ -305,19 +313,27 @@ export function DealRoomDetailPage() {
       } catch (e) {
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
+        const cancelled = e instanceof UploadCancelledError;
+        const message = cancelled
+          ? td("upload.replaceCancelled")
+          : e instanceof Error
+            ? e.message
+            : tc("error.saveFailed");
         setUploadItems((prev) =>
           prev.map((item) =>
             item.id === id
-              ? { ...item, status: "error", progress: 0, error: e instanceof Error ? e.message : tc("error.saveFailed") }
+              ? { ...item, status: "error", progress: 0, error: message }
               : item
           )
         );
-        toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+        if (!cancelled) {
+          toast.error(message);
+        }
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [roomId, folderByPath, room?.documents, tc, pollDocumentStatus]
+    [roomId, folderByPath, room?.documents, tc, td, pollDocumentStatus, uploadDocument]
   );
 
   const resolveTargetFolder = useCallback(
@@ -352,15 +368,14 @@ export function DealRoomDetailPage() {
         byFolder.set(path, list);
       }
 
-      const jobs: Promise<void>[] = [];
+      // Sequential uploads so replace/cancel dialogs never race.
       for (const [folderPath, folderFiles] of byFolder) {
         const base =
           (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
-        folderFiles.forEach((file, index) => {
-          jobs.push(uploadFileToFolder(file, folderPath, base + index));
-        });
+        for (let index = 0; index < folderFiles.length; index++) {
+          await uploadFileToFolder(folderFiles[index]!, folderPath, base + index);
+        }
       }
-      await Promise.all(jobs);
     },
     [resolveTargetFolder, uploadFileToFolder, room?.documents]
   );
@@ -435,6 +450,15 @@ export function DealRoomDetailPage() {
       }
     },
     [roomId, t, refetch]
+  );
+
+  /** Unlinks the document from this room only — workspace library copy remains. */
+  const handleDocumentRemove = useCallback(
+    async (docId: string) => {
+      if (!roomId) return;
+      await api.removeDealRoomDocument(roomId, docId);
+    },
+    [roomId],
   );
 
   const handleDocumentsAdd = useCallback(
@@ -568,6 +592,7 @@ export function DealRoomDetailPage() {
                     onFolderCreate={handleFolderCreate}
                     onFolderRename={handleFolderRename}
                     onFolderDelete={handleFolderDelete}
+                    onDocumentRemove={handleDocumentRemove}
                     onDocumentsAdd={handleDocumentsAdd}
                     onFolderUpload={uploadFileToFolder}
                     onChanged={refetch}
@@ -701,7 +726,10 @@ export function DealRoomDetailPage() {
         className="hidden"
         accept=".pdf,.docx,.pptx,.xlsx"
         disabled={isUploading}
+        data-testid="deal-room-page-upload-input"
       />
+
+      {conflictDialog}
     </motion.div>
   );
 }

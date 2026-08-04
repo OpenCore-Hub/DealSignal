@@ -19,7 +19,7 @@ interface DealRoomDocumentsHomeProps {
  * above the resources card.
  */
 export function DealRoomDocumentsHome({
-  activeLinkCount,
+  activeLinkCount: _activeLinkCount,
   failedDeliveries,
   unreadQuestions,
   onJumpTab,
@@ -29,13 +29,7 @@ export function DealRoomDocumentsHome({
   const [toolbarHost, setToolbarHost] = useState<HTMLDivElement | null>(null);
   const attentionItems: { key: string; tab: DealRoomTab; label: string }[] = [];
 
-  if (activeLinkCount === 0) {
-    attentionItems.push({
-      key: "no-links",
-      tab: "links",
-      label: t("documentsHome.attention.noActiveLinks"),
-    });
-  }
+  // "No active share links" is intentionally not shown on the resources tab.
   if (failedDeliveries > 0) {
     attentionItems.push({
       key: "failed",

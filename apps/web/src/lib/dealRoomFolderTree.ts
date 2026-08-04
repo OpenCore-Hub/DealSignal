@@ -142,6 +142,20 @@ export function parseSelection(keys: Iterable<SelectionKey>): {
   return { folderPaths, documentIds };
 }
 
+/**
+ * Selected folders whose parent path is not also selected.
+ * Selecting a parent cascades to children — bulk actions should target these roots.
+ */
+export function topmostSelectedFolderPaths(folderPaths: string[]): string[] {
+  const set = new Set(folderPaths);
+  return folderPaths.filter((path) => {
+    for (const other of set) {
+      if (other !== path && path.startsWith(`${other}/`)) return false;
+    }
+    return true;
+  });
+}
+
 /** Folder key + all descendant folder/document keys. */
 export function collectSubtreeKeys(node: FolderTreeNode): SelectionKey[] {
   const keys: SelectionKey[] = [folderSelectionKey(node.folder.path)];

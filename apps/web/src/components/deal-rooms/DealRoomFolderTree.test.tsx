@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { DealRoomFolderTree } from "./DealRoomFolderTree";
@@ -75,26 +75,51 @@ describe("DealRoomFolderTree toolbar", () => {
           onFolderCreate={async () => {}}
           onFolderRename={async () => {}}
           onFolderDelete={async () => {}}
+          onDocumentRemove={async () => {}}
+          onFolderUpload={async () => {}}
         />
       </Wrapper>,
     );
 
-    expect(screen.getByTestId("folder-tree-toolbar")).toBeInTheDocument();
-    expect(screen.getByLabelText(/search folders and files/i)).toBeInTheDocument();
+    const toolbar = screen.getByTestId("folder-tree-toolbar");
+    expect(toolbar).toBeInTheDocument();
+    const search = screen.getByLabelText(/search folders and files/i);
+    expect(search).toBeInTheDocument();
+    // Order: search → create directory → batch lock → batch unlock.
+    expect(toolbar).toHaveTextContent("Create directory");
+    expect(toolbar).toHaveTextContent("Batch lock");
+    expect(toolbar).toHaveTextContent("Batch unlock");
+    expect(toolbar.firstElementChild).toContainElement(search);
+    expect(screen.queryByLabelText(/lock status/i)).not.toBeInTheDocument();
 
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes.length).toBeGreaterThan(0);
     fireEvent.click(checkboxes[0]!);
 
+    // Idle chrome (search / create directory) hides; selection actions take over.
+    expect(screen.queryByLabelText(/search folders and files/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("folder-tree-create-directory")).not.toBeInTheDocument();
     // Legal folder + its document are selected together.
     expect(screen.getByText(/2 selected/i)).toBeInTheDocument();
-    const toolbar = screen.getByTestId("folder-tree-toolbar");
-    expect(toolbar).toHaveTextContent("Lock");
-    expect(toolbar).toHaveTextContent("Unlock");
-    expect(toolbar).toHaveTextContent("Clear");
+    expect(toolbar).toHaveTextContent("Create subdirectory");
+    expect(toolbar).toHaveTextContent("Delete directory");
+    expect(toolbar).toHaveTextContent("Batch upload");
+    expect(toolbar).toHaveTextContent("Remove files");
+    expect(toolbar).toHaveTextContent("Batch lock");
+    expect(toolbar).toHaveTextContent("Batch unlock");
+    const removeBtn = screen.getByTestId("folder-tree-bulk-remove-files");
+    const lockBtn = screen.getByTestId("folder-tree-bulk-lock");
+    const unlockBtn = screen.getByTestId("folder-tree-bulk-unlock");
+    expect(
+      removeBtn.compareDocumentPosition(lockBtn) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      lockBtn.compareDocumentPosition(unlockBtn) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(toolbar).not.toHaveTextContent(/^Clear$/);
   });
 
-  it("portals the toolbar next to the attention banner host", () => {
+  it("portals the toolbar into the documents chrome host", () => {
     render(
       <Wrapper>
         <DealRoomDocumentsHome
@@ -119,9 +144,63 @@ describe("DealRoomFolderTree toolbar", () => {
     const host = screen.getByTestId("deal-room-resources-toolbar-host");
     const toolbar = screen.getByTestId("folder-tree-toolbar");
     expect(host).toContainElement(toolbar);
-    expect(screen.getByTestId("deal-room-attention-banner").parentElement).toBe(
-      screen.getByTestId("deal-room-documents-chrome").firstElementChild,
+    expect(screen.queryByTestId("deal-room-attention-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("folder-tree-create-directory")).toBeInTheDocument();
+  });
+
+  it("starts a root directory create row from the toolbar", async () => {
+    const onFolderCreate = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Wrapper>
+        <DealRoomFolderTree
+          roomId="room-1"
+          folders={folders}
+          folderDocs={folderDocs}
+          isAdmin
+          onFolderCreate={onFolderCreate}
+          onFolderRename={async () => {}}
+          onFolderDelete={async () => {}}
+        />
+      </Wrapper>,
     );
+
+    fireEvent.click(screen.getByTestId("folder-tree-create-directory"));
+    const input = screen.getByPlaceholderText(/folder name/i);
+    fireEvent.change(input, { target: { value: "New Diligence" } });
+    fireEvent.click(screen.getByRole("button", { name: /^create$/i }));
+
+    await waitFor(() => {
+      expect(onFolderCreate).toHaveBeenCalledWith("New Diligence", "/");
+    });
+  });
+
+  it("removes selected files from the room via the selection toolbar", async () => {
+    const onDocumentRemove = vi.fn().mockResolvedValue(undefined);
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(
+      <Wrapper>
+        <DealRoomFolderTree
+          roomId="room-1"
+          folders={folders}
+          folderDocs={folderDocs}
+          isAdmin
+          onFolderCreate={async () => {}}
+          onFolderRename={async () => {}}
+          onFolderDelete={async () => {}}
+          onDocumentRemove={onDocumentRemove}
+          onFolderUpload={async () => {}}
+        />
+      </Wrapper>,
+    );
+
+    const checkboxes = screen.getAllByRole("checkbox");
+    fireEvent.click(checkboxes[0]!); // Legal + Board Minutes
+    fireEvent.click(screen.getByTestId("folder-tree-bulk-remove-files"));
+
+    await waitFor(() => {
+      expect(onDocumentRemove).toHaveBeenCalledWith("doc-1");
+    });
+    confirmSpy.mockRestore();
   });
 
   it("filters folders by search query", () => {
