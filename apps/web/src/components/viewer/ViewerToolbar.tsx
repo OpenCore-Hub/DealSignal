@@ -23,6 +23,9 @@ interface ViewerToolbarProps {
   onDownload: () => void;
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
+  /** Override sidebar toggle aria (e.g. owner knowledge rail). */
+  sidebarOpenLabel?: string;
+  sidebarCloseLabel?: string;
 }
 
 export function ViewerToolbar({
@@ -37,8 +40,12 @@ export function ViewerToolbar({
   onDownload,
   sidebarOpen = false,
   onToggleSidebar,
+  sidebarOpenLabel,
+  sidebarCloseLabel,
 }: ViewerToolbarProps) {
   const { t } = useTranslation(["documents", "common"]);
+  const openLabel = sidebarOpenLabel || t("documents:viewer.sidebarOpen");
+  const closeLabel = sidebarCloseLabel || t("documents:viewer.sidebarClose");
 
   return (
     <header className="flex h-14 items-center justify-between gap-2 border-b border-border bg-background px-4">
@@ -113,8 +120,8 @@ export function ViewerToolbar({
             size="icon-sm"
             variant={sidebarOpen ? "default" : "ghost"}
             onClick={onToggleSidebar}
-            aria-label={sidebarOpen ? t("documents:viewer.sidebarClose") : t("documents:viewer.sidebarOpen")}
-            title={sidebarOpen ? t("documents:viewer.sidebarClose") : t("documents:viewer.sidebarOpen")}
+            aria-label={sidebarOpen ? closeLabel : openLabel}
+            title={sidebarOpen ? closeLabel : openLabel}
           >
             <SidebarSimple size={16} />
           </Button>

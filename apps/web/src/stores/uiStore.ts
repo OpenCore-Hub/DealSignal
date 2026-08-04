@@ -63,7 +63,13 @@ export const useUIStore = create<UIState>()(
     }),
     {
       name: "dealsignal-ui",
-      partialize: (state) => ({ theme: state.theme, sidebarOpen: state.sidebarOpen }),
+      // Persist workspace so /viewer (outside /:slug layout) and window.open
+      // from Manage Docs keep authenticated API routing (ceiling Phase X).
+      partialize: (state) => ({
+        theme: state.theme,
+        sidebarOpen: state.sidebarOpen,
+        currentWorkspace: state.currentWorkspace,
+      }),
     }
   )
 );

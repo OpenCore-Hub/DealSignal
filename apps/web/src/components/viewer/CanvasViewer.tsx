@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { api, type PublicLinkCredentials } from "@/lib/api";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { ViewerCanvas } from "./ViewerCanvas";
+import { ViewerKnowledgeRail } from "./ViewerKnowledgeRail";
 import { useViewerDocument } from "./useViewerDocument";
 import type { WatermarkInfo } from "./WatermarkOverlay";
 import type { Document, Evidence } from "@/types";
@@ -27,6 +28,11 @@ interface CanvasViewerProps {
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   sidebar?: React.ReactNode;
+  /**
+   * Authenticated owner Viewer only: deal-room id for grounded knowledge rail.
+   * Ignored when `publicToken` is set (Visitor channel stays separate).
+   */
+  knowledgeRoomId?: string;
 }
 
 export function CanvasViewer({
@@ -40,11 +46,21 @@ export function CanvasViewer({
   sidebarOpen = false,
   onToggleSidebar,
   sidebar,
+  knowledgeRoomId,
 }: CanvasViewerProps = {}) {
   const { t } = useTranslation(["documents", "common"]);
   const { documentId: routeDocumentId } = useParams<{ documentId: string }>();
   const documentId = publicDocument?.id ?? routeDocumentId;
   const [actionError, setActionError] = useState<string | null>(null);
+  const ownerKnowledgeRoomId =
+    !publicToken && knowledgeRoomId?.trim() ? knowledgeRoomId.trim() : "";
+  const [knowledgeSidebarOpen, setKnowledgeSidebarOpen] = useState(
+    () => Boolean(ownerKnowledgeRoomId),
+  );
+
+  useEffect(() => {
+    if (ownerKnowledgeRoomId) setKnowledgeSidebarOpen(true);
+  }, [ownerKnowledgeRoomId]);
 
   const {
     doc,
@@ -218,6 +234,24 @@ export function CanvasViewer({
     );
   }
 
+  const effectiveSidebarOpen = ownerKnowledgeRoomId
+    ? knowledgeSidebarOpen
+    : sidebarOpen;
+  const effectiveToggleSidebar = ownerKnowledgeRoomId
+    ? () => setKnowledgeSidebarOpen((v) => !v)
+    : onToggleSidebar;
+  const effectiveSidebar =
+    ownerKnowledgeRoomId && knowledgeSidebarOpen && documentId ? (
+      <ViewerKnowledgeRail
+        roomId={ownerKnowledgeRoomId}
+        documentId={documentId}
+        onJumpToPage={setPage}
+        onClose={() => setKnowledgeSidebarOpen(false)}
+      />
+    ) : (
+      sidebar
+    );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background">
       <ViewerToolbar
@@ -230,8 +264,18 @@ export function CanvasViewer({
         onPreviousPage={goToPreviousPage}
         onNextPage={goToNextPage}
         onDownload={handleDownload}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={onToggleSidebar}
+        sidebarOpen={effectiveSidebarOpen}
+        onToggleSidebar={effectiveToggleSidebar}
+        sidebarOpenLabel={
+          ownerKnowledgeRoomId
+            ? t("documents:viewer.knowledgeRailOpen")
+            : undefined
+        }
+        sidebarCloseLabel={
+          ownerKnowledgeRoomId
+            ? t("documents:viewer.knowledgeRailClose")
+            : undefined
+        }
       />
       <ViewerCanvas
         doc={doc}
@@ -244,7 +288,7 @@ export function CanvasViewer({
         watermark={watermark}
         screenshotProtectionEnabled={publicLink?.screenshotProtectionEnabled}
         onSelectPage={setPage}
-        sidebar={sidebar}
+        sidebar={effectiveSidebar}
       />
     </div>
   );
