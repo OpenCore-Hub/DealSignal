@@ -27,6 +27,8 @@ Readiness probe: `curl http://localhost:8080/readyz`
 - `OPENAI_API_KEY` — optional. Leave empty to disable LLM-backed suggestion enrichment. Ask Docs / Diligence have been removed.
 - `OPENAI_BASE_URL` — e.g. `https://openrouter.ai/api/v1`
 - `OPENAI_REFERER` / `OPENAI_APP_TITLE` — optional headers for OpenRouter-compatible providers.
+- `KNOWLEDGE_QA_REWRITE_ENABLED` — optional (default `true`). Set `false` to disable elliptical retrieve-query rewrite without disabling follow-up chips.
+- `KNOWLEDGE_QA_MEMBER_RPM` / `KNOWLEDGE_QA_FOLLOWUP_RPM` — optional per-member ask / follow-up chip RPM gates.
 
 ## Testing
 
@@ -37,6 +39,8 @@ cd apps/api
 go test ./...
 go test ./internal/link -tags=integration  # requires PostgreSQL (default: localhost:5435)
 ./e2e-test.sh      # P0 backend E2E
+BASE_URL=http://localhost:8090 ./e2e-knowledge.sh  # deal-room knowledge Q&A (needs docling-rag; KNOWLEDGE_QA_FOLLOWUP_RPM gates chip LLM)
+# Ceiling freeze gates: docs/designs/plan/deal-room-knowledge-qa-ceiling.md §9
 ```
 
 Frontend:
@@ -48,6 +52,7 @@ pnpm typecheck
 pnpm test
 pnpm test:e2e          # MSW mocks
 ./e2e-real-backend.sh  # real backend
+REAL_API_BASE_URL=http://localhost:8090 ./e2e-knowledge-real.sh  # knowledge desk UI smoke
 ```
 
 ## Docker notes

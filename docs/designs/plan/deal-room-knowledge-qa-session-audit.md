@@ -18,7 +18,7 @@
 | 语料同步 / 向量查询 | 已落地（`knowledge` + docling-rag） |
 | 研究台 UI（答案 ∥ 证据轨） | 已落地；拒答隐藏证据 |
 | Q&A 会话 / 审计 turns | **已落地**（`knowledge_qa_*`；刷新恢复最近 `active`；A.1 列表；Zustand 仅作舞台缓存） |
-| 建议追问 V1 / 反馈 | **已落地**（前端模板追问；`knowledge_qa_feedback` upsert） |
+| 建议追问 / 反馈 | **已落地**（模板占位 → 证据锚定 LLM；`knowledge_qa_feedback` upsert） |
 | 旧 Ask Docs 审计栈 | 已删除（migration `106`）；模式可借鉴，表名/代码不复用 |
 
 ### 1.2 产品判断
@@ -35,7 +35,7 @@
 |------|------|
 | 会话开启 | **首次提问才创建 session**（避免空会话刷库） |
 | 房间级历史 | **P0**：当前会话持久化 + 刷新恢复最近 `active`；**A.1**：session 列表 |
-| 建议追问 | **V1 纯前端模板**；V2 再考虑模型生成（须锁「仅限本室」） |
+| 建议追问 | **证据锚定 LLM**（§8.3）+ 本地模板占位/fallback；须锁「仅限本室」 |
 
 ---
 
@@ -131,6 +131,18 @@
 
 索引：`(room_id, last_turn_at DESC)`；`(room_id, status)`。
 
+### 6.1b `knowledge_qa_sessions.state`（Phase E）
+
+JSONB，默认 `{}`。可审计会话状态机（**禁止**用不可审计对话摘要做 rewrite）：
+
+| 字段 | 含义 |
+|------|------|
+| `entities[]` | `{ name, type, firstTurnId, hitIds? }` — 跨 turn 复用的文件/实体 |
+| `openQuestions[]` | `{ text, sourceTurnId }` — 未覆盖缺口（refuse/no_hits/error） |
+| `coverageHints[]` | `{ sourceNames[], turnId }` — 最近 coverage set 摘要 |
+
+Rewrite **只许**消费：`state` + 上一 turn 的 question/answer/hits。
+
 ### 6.2 `knowledge_qa_turns`
 
 | 字段 | 类型 | 说明 |
@@ -150,8 +162,13 @@
 | `error_summary` | text | `result_status=error` 时短摘要 |
 | `created_at` | timestamptz | |
 | `created_by` | uuid | |
+| `client_request_id` | text | 幂等键（session ask **必填**）；`UNIQUE (room_id, created_by, client_request_id)` 在非空时生效 |
+| `retrieve_query` | text | 实际送入检索的 query；仅当 rewrite 生效时非空 |
+| `rewrite_applied` | bool | 本 turn 是否对检索 query 做了指代改写 |
+| `rewrite_basis` | text | `state` \| `prior_only`（仅 rewrite_applied 时）；证明是否消费了 session.state |
+| `bound_answer` | jsonb | Phase F：`{ claims:[{text,hitIds,confidence}], unresolved:[] }`；`answer` 文本仍保留兼容 |
 
-索引：`(session_id, sequence)`；`(room_id, created_at DESC)`。
+索引：`(session_id, sequence)`；`(room_id, created_at DESC)`；幂等查找 `(room_id, created_by, client_request_id)`。
 
 **`hits` 元素（对齐现网 `QueryHit`）**
 
@@ -200,15 +217,27 @@
 | `POST` | `/deal-rooms/:roomId/knowledge/sessions` | 显式建会话（「新会话」）；通常可省略，由 query 懒创建 |
 | `GET` | `/deal-rooms/:roomId/knowledge/sessions` | 列表：`limit` + cursor；摘要含 title、last_turn_at、turn_count、question_preview |
 | `GET` | `/deal-rooms/:roomId/knowledge/sessions/:sessionId` | session + turns（含 hits） |
-| `POST` | `/deal-rooms/:roomId/knowledge/sessions/query` | JSON：执行检索/生成，**原子追加 turn**，返回 `{ sessionId, turn, … }` |
-| `POST` | `/deal-rooms/:roomId/knowledge/sessions/query/stream` | SSE（Phase-2）：`phase(retrieving)` → `phase(generating)?` → `sources?` → `token*` → `done`；token 由已审计答案切分（上游仍阻塞）；拒答不发 grounded sources；落库规则同 JSON |
-| `POST` | `/deal-rooms/:roomId/knowledge/query` | **保留**无会话探测；产品主路径走 session query/stream |
+| `POST` | `/deal-rooms/:roomId/knowledge/sessions/query` | JSON：执行检索/生成，**原子追加 turn**，返回 `{ sessionId, turn, … }`；**`clientRequestId` 必填**（缺省/空白 → `400 invalid_input`） |
+| `POST` | `/deal-rooms/:roomId/knowledge/sessions/query/stream` | SSE（Phase-2）：`phase(retrieving)` → `phase(generating)?` → `sources?` → `token*` → `done`；token 由已审计答案切分（上游仍阻塞）；拒答不发 grounded sources；落库规则同 JSON；同样要求 `clientRequestId` |
+| `POST` | `/deal-rooms/:roomId/knowledge/query` | **保留**无会话探测（`answer=false`）；`answer=true` → `400 answer_requires_session`；产品主路径走 session query/stream |
+| `POST` | `/deal-rooms/:roomId/knowledge/turns/:turnId/follow-ups` | 建议追问：收窄→模板；否则 mission（pack+openQuestions）→ LLM → 模板；`source` ∈ `mission\|llm\|template` |
+| `GET` | `/deal-rooms/:roomId/knowledge/missions` | 内置 mission pack 目录 |
+| `GET` | `/deal-rooms/:roomId/knowledge/sessions/:sessionId/export` | diligence 审计包 JSON（session+turns+hits+fingerprint） |
+| `GET` | `/deal-rooms/:roomId/knowledge/archives` | 冷归档墓碑列表 |
+| `GET` | `/deal-rooms/:roomId/knowledge/archives/:archiveId` | 从对象存储恢复只读时间线 |
+| `GET` | `/deal-rooms/:roomId/knowledge/ops` | workspace SLO/配额/冷归档看板 |
+| `GET`/`PUT` | `/deal-rooms/:roomId/knowledge/mission` | 房间生效 pack（默认按 room template；PUT 绑定 builtin id） |
+| `GET` | `/deal-rooms/:roomId/knowledge/mission/progress?sessionId=` | checklist 相对会话状态覆盖进度（ceiling Phase N） |
+| `GET` | `/deal-rooms/:roomId/knowledge/eval/candidates` | 反馈→金标候选列表（kind/status 过滤；Phase O） |
+| `PATCH` | `/deal-rooms/:roomId/knowledge/eval/candidates/:id` | 人审 accept/reject + expect |
+| `GET` | `/deal-rooms/:roomId/knowledge/eval/candidates/export` | 已接受候选 → seeds.json 形导出 |
+| `POST` | `/deal-rooms/:roomId/knowledge/events` | 研究台 funnel：`cite_open` / `followups_upgrade_failed`（204，无持久化） |
 
 **懒创建约定（推荐实现）**
 
 ```
 POST /deal-rooms/:roomId/knowledge/sessions/query
-body: { sessionId?: string, query, answer?, top_k? }
+body: { sessionId?: string, query, answer?, top_k?, clientRequestId }
 
 POST /deal-rooms/:roomId/knowledge/sessions/query/stream
 body: 同上；Accept: text/event-stream
@@ -217,7 +246,8 @@ body: 同上；Accept: text/event-stream
 - 无 `sessionId` 或 session 已 `closed` → 创建新 `active` session 再提问  
 - 有有效 `sessionId` → 追加 turn  
 - 响应带 `sessionId`，前端写入 store  
-- 客户端 Abort：上游可能仍落库；UI 应在 Stop 后 hydrate `sessions/active`（审计连续）
+- 客户端 Abort：上游可能仍落库；UI 应在 Stop 后 hydrate `sessions/active`（审计连续）  
+- 同 `(room, user, clientRequestId)` + 同 question → replay 旧 turn（零上游、零配额）；question 不同 → `400 invalid_input`
 
 （若希望 REST 更碎，可拆成「先 POST sessions 再 POST …/sessions/:id/query」；懒创建减少空会话。）
 
@@ -280,15 +310,17 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 - 证据轨规则不变（哲学 P3/P4）。  
 - 「返回向量库」与信任 chip 同款 pill（已落地）。
 
-### 8.3 建议追问 V1（Phase B）
+### 8.3 建议追问（Phase B → 证据锚定）
 
 - 展示条件：存在至少一轮 turn。  
-- 生成：前端模板，输入最近 turn 的 `sourceName` / `refused` / `result_status`。  
-- 示例：
-  - 有来源：`继续问《{sourceName}》里的责任条款？`
-  - 拒答：`换个更具体的文件名或条款标题再问？`
-- 标签文案：`基于本室文档`。  
-- 禁止：行业常识、竞品对比、出室知识。
+- 点击：直接发送（同 session 新 turn）。  
+- 生成（P0）：
+  1. FE 先用本地模板占位（拒答/收窄或锚定 `sourceName`）。  
+  2. 异步 `POST …/turns/:turnId/follow-ups`：服务端用 **hits 证据 + 短答案 + 硬约束** 调小模型；门禁要求每条问句包含证据文件名。  
+  3. 拒答 / `no_hits` / `error`：**不走 LLM**，只返回收窄模板。  
+  4. LLM 失败或未配置 → 服务端模板 fallback（`source: template|llm`）。  
+- 禁止：行业常识、竞品对比、出室知识；禁止只拼「上一问+上一答」而无证据。  
+- 标签文案：`基于本室文档`。
 
 ### 8.4 反馈（Phase C）
 
@@ -324,7 +356,7 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 | ID | 步骤 | 期望 |
 |----|------|------|
 | B1 | 同 session 连问 2 轮 | 两条 turn，顺序正确；底栏始终可用 |
-| B2 | 点建议追问 | 填入 composer 或直接发送；文案含本室线索 |
+| B2 | 点建议追问 | 直接发送（同 session 新 turn）；文案含本室线索 |
 
 ### Phase C
 
@@ -332,6 +364,20 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 |----|------|------|
 | C1 | 提交「出处有误」→ 刷新 | 仍显示；可改为「有帮助」 |
 | C2 | 无 turn 时 | 不展示反馈控件 |
+
+### 真实后端（生产级 smoke）
+
+前置：API + Postgres/Redis/MinIO + docling-rag（`DOCLING_RAG_*`），本机常见 `BASE_URL=http://localhost:8090`。UI smoke 请用 host `localhost`（勿用 `127.0.0.1`），以便与 Vite 同源策略下 cookie 同站。
+
+```bash
+# API 契约（推荐先跑；exit 2 = knowledge 未启用）
+cd apps/api && BASE_URL=http://localhost:8090 ./e2e-knowledge.sh
+
+# UI 研究桌（不重建 docker；依赖上一步 API 健康）
+cd apps/web && REAL_API_BASE_URL=http://localhost:8090 ./e2e-knowledge-real.sh
+```
+
+覆盖：corpus ready 门禁、session JSON ask、`clientRequestId` 幂等、legacy `answer=true`→`answer_requires_session`、SSE phase/done、`POST …/follow-ups`、mission pack、feedback、active session ≥2 turns、diligence export、ops、archives list；UI 侧 ask→refresh hydrate→feedback。
 
 ---
 
@@ -366,12 +412,16 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 
 ## 13. 开放项（非阻塞）
 
+行业绝对天花板 **D→X 已落地、Y 冻结**，见 **[deal-room-knowledge-qa-ceiling.md](./deal-room-knowledge-qa-ceiling.md)**（§9 验收矩阵）。下表均为已归宿项（不再作为本里程碑开放债）：
+
 | 项 | 说明 |
 |----|------|
-| 懒创建单路由 vs 两步 REST | 实现期二选一，契约以「首次提问建 session」为准 |
-| 90 天清理 job | 已落地热数据 purge；冷归档分层仍后置 |
-| 建议追问 V2（LLM） | 后置；须评测出室风险 |
-| Visitor / Viewer 复用 | 组件白名单对齐哲学；本里程碑不做通道 |
+| 懒创建单路由 vs 两步 REST | 契约以「首次提问建 session」为准（已实现） |
+| 90 天清理 / 冷归档 | **H** + **U** + **W** |
+| 建议追问出室评测集 | **G** leak/gold CI |
+| 会话 rewrite 缓存/旁路 | **P** |
+| Visitor / Viewer 复用 | Owner：**T** + **X**；Visitor Ask 仍分离（不做混面） |
+| 多文件 coverage / 强制幂等 | **D** |
 
 ---
 
@@ -390,4 +440,31 @@ Get session 时附带当前用户的 `feedback?: { kind, note? }`。
 | 2026-08-03 | 成员单飞 gate（`knowledge_query_busy` 429）+ handler SSE httptest 契约测试 |
 | 2026-08-03 | 成员 RPM：`KNOWLEDGE_QA_MEMBER_RPM`（Redis 跨副本 / 内存回退）；`knowledge_query_rate_limited` |
 | 2026-08-03 | A.1 / B / C：session 列表、建议追问、feedback `112`；§1.1 现状表同步 |
-| 2026-08-03 | Answers 配额：`knowledge_qa_turns` 时间窗计数（migration `114`）+ session/legacy query 前强制；`knowledge_query_quota_exceeded`；语料卡不再用 visitor 指标冒充 answers；MSW/e2e 覆盖开 SSE 前 429 |
+| 2026-08-03 | Answers 配额：`knowledge_qa_turns` 时间窗计数（migration `114`）+ session 前强制；`knowledge_query_quota_exceeded`；语料卡不再用 visitor 指标冒充 answers；MSW/e2e 覆盖开 SSE 前 429 |
+| 2026-08-03 | 审查修复：legacy `answer=true` 拒绝；legacy 纳入 admit；配额 COUNT fail-closed；P5 hydrate≥审计写窗口；audit/cancel 错误码 i18n |
+| 2026-08-03 | A5 服务端：`knowledge_corpus_not_ready`（409，开 SSE 前）；与 FE `resolveCorpusAttentionStage===ready` 对齐 |
+| 2026-08-03 | Ask 幂等：`clientRequestId` + migration `115` UNIQUE(room,user,id)；重放跳过上游/配额；FE 每问一 UUID |
+| 2026-08-03 | 真实后端 smoke：`apps/api/e2e-knowledge.sh`（语料就绪→session ask→幂等→legacy 拒绝→SSE→feedback）；UI：`apps/web/e2e-knowledge-real.sh` |
+| 2026-08-03 | 修复：`ExpiryReminder` / analytics+knowledge `RetentionCleaner` / CRM `WindowAggregator` 的 `Start` 不得阻塞 `registerRoutes`（否则 HTTP 永不 listen） |
+| 2026-08-03 | 建议追问 P0：`POST …/turns/:turnId/follow-ups` 证据锚定 LLM + 门禁 + 模板 fallback；FE 模板先显后升级；点击直接 ask |
+| 2026-08-03 | 多轮 P1：指代追问 `maybeRewriteFollowUpQuery`（检索用 rewrite、审计存原文）；follow-ups 证据词门禁 + Prometheus；smoke 覆盖 follow-ups |
+| 2026-08-03 | Follow-ups 成员 RPM/单飞（`KNOWLEDGE_QA_FOLLOWUP_RPM`，与 ask 分 key；拒入软失败保模板）；rewrite 审计字段 migration `116`；出室 golden；duration histogram |
+| 2026-08-03 | FE：turn 卡片展示 `retrieveQuery`（「实际检索 / Searched as」）；`turnFromQATurn` 透传；MSW 指代追问模拟 rewrite |
+| 2026-08-03 | FE follow-ups 升级 hardening：`useKnowledgeFollowUpChips`（loading/source/stale abort+turnId/hover defer）；证据锚定徽标 |
+| 2026-08-03 | Stream：`phase=generating` 携带 `retrieveQuery`/`rewriteApplied`；FE `reduceKnowledgeStream` 在 token* 期间即可展示「实际检索」 |
+| 2026-08-03 | Rewrite 证据门禁：`rewriteIsGrounded`（共享证据词 + 拒未锚定拉丁实体）；指标 `rewrite_total{rejected}`；golden |
+| 2026-08-03 | Ops：`KNOWLEDGE_QA_REWRITE_ENABLED`（默认 on）可单独关掉检索 rewrite，不影响 follow-up chips；指标 `disabled` |
+| 2026-08-03 | 审查修复：legacy `/knowledge/query` 恢复探测（去 corpus/admit）；FE 忽略 template 覆盖保 i18n；smoke A5 409；§1.3 与 §8.3 对齐 |
+| 2026-08-03 | 天花板设计：[deal-room-knowledge-qa-ceiling.md](./deal-room-knowledge-qa-ceiling.md)；§13 指向 Phase D→H |
+| 2026-08-03 | Phase D：多文件 coverage 模板/LLM；`clientRequestId` 必填；§6.2/`follow-ups`/`events` 合同对齐；`followups_upgrade_failed` 观测；Redis admission key 含 `scope`（见下） |
+| 2026-08-04 | Phase E：`knowledge_qa_sessions.state` + turn `rewrite_basis`；rewrite 只读 state+prior；API 暴露 `session.state` |
+| 2026-08-04 | Phase F：`bound_answer` claims 绑定；FE 句子级溯源；无 hitIds 不强样式 |
+| 2026-08-04 | Phase G：mission packs/API；follow-ups `mission`；leak gate；eval candidates + seeds |
+| 2026-08-04 | Phase H：`corpus_fingerprint`/`duration_ms`、diligence export、冷归档墓碑、ops 看板 |
+| 2026-08-04 | Phase I 首刀：`bound_answer.conflicts` 跨文件数值冲突；答案并列表不选边；FE ConflictPanel |
+| 2026-08-04 | Phase I2：Knowledge Query 合并本地 `table_row`（`SearchTableRowsByDocuments`）；mode 可标 `hybrid+table` |
+| 2026-08-04 | 天花板 Phase Y 冻结：§13 开放项标为已归宿；验收见 ceiling §9 |
+
+**运维注记 · Redis admission `scope`（滚动发布）**
+
+Ask 与 follow-ups 分轨：`knowledge:qa:{scope}:inflight|rpm:{room}:{user}`，其中 `scope` ∈ `ask` | `followups`。混部窗口内旧副本若仍写无 scope 的旧 key，单飞/RPM 会短暂双轨（偏松不偏紧）；全量切换后旧 key 随 TTL（inflight ≤5m，RPM 窗 1m）自然失效。

@@ -157,14 +157,13 @@ Agent/后端只许发：`phase | sources | token | done | error` 与上述 paylo
 已具备：
 
 - Ask-first 布局、信任芯片、拒答隐藏证据、同页 viewer、store 恢复、角标解析。
-
-待演进：
-
-- 上游 docling **原生** token 流（仍为阻塞 JSON 时，服务端按已审计答案切分 `token*`）。  
-
-已具备（相对初稿）：
-
 - `KnowledgeStreamEvent` + reducer、`GroundedChatShell`、多轮 turns、`…/sessions/query/stream`（phase→sources?→token*→done）。
+- 天花板 **D→X** 研究台能力（见 [ceiling](./deal-room-knowledge-qa-ceiling.md)；**Y 已冻结**）。
+
+明确非目标（上游 / 通道）：
+
+- docling **原生** token 流：上游仍为阻塞 JSON 时，服务端按**已审计**答案切分 `token*` 即可；不阻塞本产品冻结。  
+- Visitor Ask 与 Host 研究台混面：不做。
 
 ---
 
