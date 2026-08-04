@@ -188,7 +188,7 @@ export function NewDealRoomPage() {
           </Button>
           <div
             ref={scrollRef}
-            className="flex gap-4 overflow-x-auto pb-4 scroll-smooth [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+            className="flex gap-4 overflow-x-auto pb-4 scroll-smooth"
           >
             {templates?.map((template) => {
               const selected = selectedTemplateId === template.id;

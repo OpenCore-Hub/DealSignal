@@ -110,17 +110,6 @@ export function DealRoomDetailPage() {
     };
   }, []);
 
-  // Hide the main scrollbar on the deal room detail page.
-  useEffect(() => {
-    const main = document.querySelector("main");
-    if (main) {
-      main.classList.add("scrollbar-hide");
-      return () => {
-        main.classList.remove("scrollbar-hide");
-      };
-    }
-  }, []);
-
   // Auto-open documents dialog from query param and reset selected folder when tab changes.
   useEffect(() => {
     if (shouldOpenDocuments) {

@@ -282,7 +282,7 @@ export function SendVerificationCodeDialog({
                 </label>
               </div>
 
-              <div className="max-h-60 overflow-y-scroll rounded-lg border [scrollbar-gutter:stable]">
+              <div className="max-h-60 overflow-y-auto rounded-lg border">
                 <table className="w-full text-sm">
                   <thead className="sticky top-0 z-10 bg-muted/80 text-left text-muted-foreground backdrop-blur-sm">
                     <tr>
