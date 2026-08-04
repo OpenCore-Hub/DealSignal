@@ -20,8 +20,9 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // ── Config ────────────────────────────────────────────────────────
-const API_BASE = process.env.REAL_API_BASE_URL || "http://localhost:8080";
+const API_BASE = process.env.REAL_API_BASE_URL || process.env.VITE_API_BASE_URL || "http://localhost:8080";
 const API_URL = new URL(API_BASE);
+const APP_ORIGIN = process.env.PLAYWRIGHT_BASE_URL || "http://localhost:5173";
 const FIXTURES_DIR = path.join(__dirname, "fixtures");
 const PDF_PATH = path.join(FIXTURES_DIR, "sample.pdf");
 
@@ -234,6 +235,17 @@ export async function authenticatePage(page: Page) {
   }));
 
   await page.context().addCookies(playwrightCookies);
+
+  // Router gate reads non-HttpOnly auth_session on the Vite origin; API host/port
+  // often differs (e.g. 127.0.0.1:8090 vs localhost:5173).
+  await page.context().addCookies([
+    {
+      name: "auth_session",
+      value: "1",
+      url: APP_ORIGIN,
+      sameSite: "Lax",
+    },
+  ]);
 }
 
 // ── Comprehensive seed ────────────────────────────────────────────
@@ -334,7 +346,6 @@ export async function seedLink(
     watermarkEnabled?: boolean;
     expiresAt?: string;
     maxAccessCount?: number;
-    watermarkEnabled?: boolean;
     contactEmail?: string;
     contactName?: string;
   } = {}
@@ -470,6 +481,43 @@ export async function visitPublicLink(
     // Might not have images, check for page text
     console.log("[visitPublicLink] no page image visible, continuing");
   });
+}
+
+/** Sync deal-room knowledge corpus until ask-ready (or throw). */
+export async function waitForKnowledgeCorpusReady(
+  workspaceSlug: string,
+  roomId: string,
+  timeoutS = 180,
+): Promise<void> {
+  const syncRes = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/knowledge/sync`,
+    { method: "POST" },
+  );
+  if (syncRes.status !== 202 && syncRes.status !== 200) {
+    throw new Error(`knowledge sync failed: ${syncRes.status} ${await syncRes.text()}`);
+  }
+
+  for (let i = 0; i < timeoutS; i++) {
+    await sleep(1000);
+    const corpus = await apiGetJson<{
+      enabled: boolean;
+      status: string;
+      documents?: { status: string }[];
+      progress?: { failed?: number };
+    }>(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/knowledge`);
+    if (!corpus.enabled) {
+      throw new Error("knowledge disabled (set DOCLING_RAG_BASE_URL + PLATFORM_ADMIN_KEY)");
+    }
+    const synced = (corpus.documents ?? []).filter((d) => d.status === "synced").length;
+    const bad = (corpus.documents ?? []).filter((d) =>
+      d.status === "failed" || d.status === "pending" || d.status === "syncing",
+    ).length;
+    if (corpus.status === "ready" && synced >= 1 && bad === 0) return;
+    if (corpus.status === "failed" || (corpus.progress?.failed ?? 0) > 0) {
+      throw new Error(`knowledge corpus failed: ${JSON.stringify(corpus)}`);
+    }
+  }
+  throw new Error(`knowledge corpus not ready within ${timeoutS}s`);
 }
 
 function sleep(ms: number): Promise<void> {

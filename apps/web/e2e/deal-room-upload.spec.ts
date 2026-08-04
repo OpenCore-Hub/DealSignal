@@ -45,15 +45,17 @@ test.describe("Deal room folder upload (real backend)", () => {
     await expect(folderTree).toBeVisible({ timeout: 5000 });
 
     // Click on the first folder to open it, then look for add-file button
-    const folderButtons = folderTree.locator('button[aria-label="Add file"]');
-    const addFileExists = await folderButtons.first().isVisible({ timeout: 3000 }).catch(() => false);
+    // Folder overflow menu → "Add files" (multi-select input).
+    const folderMenu = folderTree.getByRole("button", { name: /Actions for/i }).first();
+    const menuVisible = await folderMenu.isVisible({ timeout: 3000 }).catch(() => false);
 
-    if (addFileExists) {
-      const uploadButton = folderButtons.first();
-      await uploadButton.click();
+    if (menuVisible) {
+      await folderMenu.click();
+      await page.getByRole("menuitem", { name: /Add files/i }).click();
 
-      // Find the file input and upload
+      // Find the file input and upload (multi attribute allows several files).
       const fileInput = folderTree.locator('input[type="file"]').first();
+      await expect(fileInput).toHaveAttribute("multiple", "");
       await fileInput.setInputFiles(path.join(__dirname, "fixtures", "sample.pdf"));
 
       // Verify the upload progress indicator appears

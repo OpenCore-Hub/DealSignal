@@ -3,6 +3,7 @@
  * Covers: ask → session turn → feedback → hard refresh still hydrated;
  * citation open → browser Back; multi-turn; refuse without evidence.
  */
+import { readFile } from "node:fs/promises";
 import { test, expect, type Page } from "@playwright/test";
 import {
   setupAuthenticatedPage,
@@ -131,8 +132,14 @@ test.describe("Deal room knowledge Q&A (MSW)", () => {
     await expect(page.getByTestId("deal-room-knowledge-jump")).toBeVisible();
 
     await page.getByTestId("deal-room-knowledge-jump").click();
-    await expect(page).toHaveURL(/\/viewer\/[^/?]+(?:\?page=3)?/, { timeout: 15000 });
+    await expect(page).toHaveURL(/\/viewer\/[^/?]+\?/, { timeout: 15000 });
     await expect(page).toHaveURL(/page=3/);
+    await expect(page).toHaveURL(/roomId=room_1/);
+    await expect(page).toHaveURL(new RegExp(`ws=${WORKSPACE_SLUG}`));
+    await expect(page.getByTestId("viewer-knowledge-rail")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("viewer-knowledge-trust-chip")).toBeVisible();
 
     await page.goBack();
     await expect(page).toHaveURL(/deal-rooms\/room_1.*tab=knowledge/, {
@@ -166,7 +173,7 @@ test.describe("Deal room knowledge Q&A (MSW)", () => {
     await expect(turns.nth(1)).toContainText("What about the option pool?");
   });
 
-  test("fills composer from a room-scoped follow-up chip (B2)", async ({ page }) => {
+  test("sends a room-scoped follow-up chip immediately (B2)", async ({ page }) => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
 
@@ -177,13 +184,9 @@ test.describe("Deal room knowledge Q&A (MSW)", () => {
     await expect(chip).toContainText(/Acme Seed Round Pitch Deck/i);
 
     await chip.click();
-    const composer = page.getByLabel("Question");
-    await expect(composer).toHaveValue(/Acme Seed Round Pitch Deck/);
-    await expect(composer).toHaveValue(/liability/i);
-
-    // Sending the follow-up continues the same session (second turn).
-    await page.getByTestId("deal-room-knowledge-ask").click();
-    await expect(page.getByTestId("grounded-chat-turn")).toHaveCount(2, { timeout: 10000 });
+    // Chip auto-asks — same session gains a second turn without clicking Ask.
+    await expect(page.getByTestId("grounded-chat-turn")).toHaveCount(2, { timeout: 15000 });
+    await expect(page.getByTestId("grounded-chat-turn").nth(1)).toContainText(/liability/i);
   });
 
   test("surfaces answer-quota 429 before SSE opens", async ({ page }) => {
@@ -276,5 +279,114 @@ test.describe("Deal room knowledge Q&A (MSW)", () => {
     await expect(page.getByTestId("grounded-chat-turn")).toContainText(
       /Grounded answer for: What is the valuation cap/i,
     );
+  });
+
+  test("owner viewer with roomId mounts knowledge rail without cite (Phase X)", async ({
+    page,
+  }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+
+    await page.goto(`/viewer/doc_1?roomId=room_1&ws=${WORKSPACE_SLUG}`);
+    await expect(page.getByTestId("viewer-knowledge-rail")).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page.getByTestId("viewer-knowledge-trust-chip")).toBeVisible();
+
+    await page.getByLabel("Question").fill("What is the valuation cap?");
+    await page.getByTestId("deal-room-knowledge-ask").click();
+    await expect(page.getByTestId("grounded-chat-turn").last()).toContainText(
+      "What is the valuation cap?",
+      { timeout: 15000 },
+    );
+  });
+
+  test("owner viewer without roomId does not mount knowledge rail", async ({ page }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+
+    await page.goto(`/viewer/doc_1?ws=${WORKSPACE_SLUG}`);
+    await expect(page.getByTestId("viewer-knowledge-rail")).toHaveCount(0, {
+      timeout: 10000,
+    });
+    await expect(page.getByText(/Failed to load|No workspace selected/i)).toHaveCount(0);
+  });
+
+  test("cold archive: list → view preview → download pack (Phase U)", async ({ page }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+
+    await page.goto(`/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=knowledge`);
+    await expect(page.getByTestId("deal-room-knowledge-corpus")).toBeVisible({
+      timeout: 15000,
+    });
+    const archives = page.getByTestId("knowledge-cold-archives");
+    await expect(archives).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("knowledge-cold-archives-list")).toBeVisible();
+
+    await page.getByTestId("knowledge-cold-archive-open-kqa_arch_1").click();
+    await expect(page.getByTestId("knowledge-cold-archive-preview")).toBeVisible({
+      timeout: 10000,
+    });
+    await expect(page.getByTestId("knowledge-cold-archive-preview")).toContainText(
+      /valuation cap/i,
+    );
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      page.getByTestId("knowledge-cold-archive-download-kqa_arch_1").click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/diligence-archive-.*\.json$/);
+  });
+
+  test("gold review: wrong_citation → accept → export seeds JSON (Phase O/Q/R)", async ({
+    page,
+  }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+
+    await openKnowledgeDesk(page);
+    await askOnDesk(page, "What is the purchase price?");
+    await expect(page.getByTestId("deal-room-knowledge-hit")).toBeVisible({
+      timeout: 10000,
+    });
+
+    await page.getByTestId("knowledge-feedback-wrong_citation").click();
+    await expect(page.getByTestId("knowledge-feedback-wrong_citation")).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    await page.getByTestId("deal-room-knowledge-back-to-corpus").click();
+    await expect(page.getByTestId("deal-room-knowledge-corpus")).toBeVisible({
+      timeout: 10000,
+    });
+
+    const gold = page.getByTestId("knowledge-eval-gold-review");
+    await expect(gold).toBeVisible({ timeout: 10000 });
+    await expect(page.getByTestId("knowledge-eval-gold-list")).toBeVisible();
+
+    const accept = page.locator('[data-testid^="knowledge-eval-gold-accept-"]').first();
+    await expect(accept).toBeVisible();
+    await accept.click();
+
+    const exportBtn = page.getByTestId("knowledge-eval-gold-export");
+    await expect(exportBtn).toBeVisible({ timeout: 10000 });
+    await expect(exportBtn).toBeEnabled();
+
+    const [download] = await Promise.all([
+      page.waitForEvent("download"),
+      exportBtn.click(),
+    ]);
+    expect(download.suggestedFilename()).toMatch(/knowledge-eval-seeds-.*\.json$/);
+
+    const filePath = await download.path();
+    expect(filePath).toBeTruthy();
+    const pack = JSON.parse(await readFile(filePath!, "utf8")) as {
+      seeds?: Array<{ kind?: string; expect?: string; question?: string }>;
+    };
+    expect(pack.seeds?.length).toBeGreaterThanOrEqual(1);
+    expect(pack.seeds?.[0]?.kind).toBe("wrong_citation");
+    expect(pack.seeds?.[0]?.expect).toBe("reject_or_rebind");
   });
 });
