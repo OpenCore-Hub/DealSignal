@@ -56,4 +56,11 @@ describe("sanitizeDocumentsLibrarySearchParams", () => {
     );
     expect(stripped?.toString()).toBe("tab=archived");
   });
+
+  it("preserves unrelated params when dropping invalid tab", () => {
+    const next = sanitizeDocumentsLibrarySearchParams(
+      new URLSearchParams("tab=bogus&q=deck"),
+    );
+    expect(next?.toString()).toBe("q=deck");
+  });
 });
