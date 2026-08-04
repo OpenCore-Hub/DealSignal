@@ -19,10 +19,11 @@ import (
 const maxFileSize = 100 * 1024 * 1024 // 100MB
 
 var (
-	ErrFileTooLarge       = errors.New("file exceeds 100MB limit")
-	ErrInvalidFileType    = errors.New("unsupported file type")
-	ErrInvalidFileContent = errors.New("file content does not match extension")
-	allowedExtensions     = map[string]string{
+	ErrFileTooLarge         = errors.New("file exceeds 100MB limit")
+	ErrInvalidFileType      = errors.New("unsupported file type")
+	ErrInvalidFileContent   = errors.New("file content does not match extension")
+	ErrAgreementRequiresPDF = errors.New("agreement documents must be PDF")
+	allowedExtensions       = map[string]string{
 		".pdf":  "pdf",
 		".docx": "docx",
 		".pptx": "pptx",
@@ -30,6 +31,14 @@ var (
 		".csv":  "csv",
 	}
 )
+
+// errIfAgreementNotPDF enforces that agreement-category documents are PDF-only.
+func errIfAgreementNotPDF(category, sourceType string) error {
+	if strings.EqualFold(category, "agreement") && !strings.EqualFold(sourceType, "pdf") {
+		return ErrAgreementRequiresPDF
+	}
+	return nil
+}
 
 // ExistingDocumentError indicates a non-deleted document with the same title already exists.
 type ExistingDocumentError struct {
@@ -118,6 +127,9 @@ func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
 func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspaceID, category string, fileHeader *multipart.FileHeader, replace bool) (Document, error) {
 	sourceType, err := ValidateFileHeader(fileHeader)
 	if err != nil {
+		return Document{}, err
+	}
+	if err := errIfAgreementNotPDF(category, sourceType); err != nil {
 		return Document{}, err
 	}
 

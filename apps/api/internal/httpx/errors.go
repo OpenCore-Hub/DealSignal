@@ -165,6 +165,7 @@ var clientFallbacks = map[string]string{
 	"template_locked":         "template is locked",
 	"payload_too_large":       "payload too large",
 	"unsupported_media_type":  "unsupported media type",
+	"agreement_pdf_required":  "agreement documents must be PDF",
 	"page_not_found":          "page not found",
 	"invalid_id":              "invalid id",
 	"invalid_payload":         "invalid payload",

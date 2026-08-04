@@ -17,8 +17,8 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/watermark"
@@ -92,6 +92,8 @@ func (h *Handler) Create(c *gin.Context) {
 			})
 		case errors.Is(err, ErrFileTooLarge):
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": httpx.SafeMessage("payload_too_large", err)})
+		case errors.Is(err, ErrAgreementRequiresPDF):
+			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "agreement_pdf_required", "message": httpx.SafeMessage("agreement_pdf_required", err)})
 		case errors.Is(err, ErrInvalidFileType), errors.Is(err, ErrInvalidFileContent):
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": httpx.SafeMessage("unsupported_media_type", err)})
 		default:
@@ -162,6 +164,9 @@ func (h *Handler) List(c *gin.Context) {
 	filter := strings.ToLower(c.Query("filter"))
 	category := strings.ToLower(c.Query("category"))
 	excludeDealRoom := parseTruthyForm(c.Query("exclude_deal_room"))
+	// Opt-in: Document Library hides agreement docs. Other callers (NDA picker,
+	// bundle pipeline, deal rooms) must not pass this flag.
+	excludeAgreement := parseTruthyForm(c.Query("exclude_agreement"))
 
 	var dealRoomDocIDs map[string]struct{}
 	if excludeDealRoom {
@@ -177,6 +182,9 @@ func (h *Handler) List(c *gin.Context) {
 	}
 
 	appendDoc := func(out []gin.H, info docInfo, job db.IngestionJob) []gin.H {
+		if excludeAgreement && strings.EqualFold(info.Category, "agreement") {
+			return out
+		}
 		if dealRoomDocIDs != nil {
 			if _, inRoom := dealRoomDocIDs[uuid.UUID(info.ID.Bytes).String()]; inRoom {
 				return out
@@ -708,6 +716,19 @@ func (h *Handler) UpdateCategory(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	doc, job, err := h.getDocumentAndJob(c)
+	if err != nil {
+		h.handleDocError(c, err)
+		return
+	}
+	if err := errIfAgreementNotPDF(req.Category, doc.SourceType); err != nil {
+		c.JSON(http.StatusUnsupportedMediaType, gin.H{
+			"code":    "agreement_pdf_required",
+			"message": httpx.SafeMessage("agreement_pdf_required", err),
+		})
+		return
+	}
+
 	err = h.uploadService.queries.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
 		Category:    req.Category,
 		ID:          pgtype.UUID{Bytes: docID, Valid: true},
@@ -718,11 +739,7 @@ func (h *Handler) UpdateCategory(c *gin.Context) {
 		return
 	}
 
-	doc, job, err := h.getDocumentAndJob(c)
-	if err != nil {
-		h.handleDocError(c, err)
-		return
-	}
+	doc.Category = req.Category
 	c.JSON(http.StatusOK, documentResponse(doc, job))
 }
 

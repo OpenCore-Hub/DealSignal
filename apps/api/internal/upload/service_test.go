@@ -12,6 +12,37 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+func TestCreateDocument_AgreementRequiresPDF(t *testing.T) {
+	s := NewService(nil, nil, nil)
+	h := &multipart.FileHeader{Filename: "nda.docx", Size: 1024}
+	_, err := s.CreateDocument(t.Context(), uuid.NewString(), uuid.NewString(), uuid.NewString(), "agreement", h, false)
+	if !errors.Is(err, ErrAgreementRequiresPDF) {
+		t.Fatalf("expected ErrAgreementRequiresPDF, got %v", err)
+	}
+}
+
+func TestErrIfAgreementNotPDF(t *testing.T) {
+	cases := []struct {
+		category, sourceType string
+		wantErr              bool
+	}{
+		{"agreement", "pdf", false},
+		{"agreement", "PDF", false},
+		{"agreement", "docx", true},
+		{"general", "docx", false},
+		{"", "docx", false},
+	}
+	for _, tc := range cases {
+		err := errIfAgreementNotPDF(tc.category, tc.sourceType)
+		if tc.wantErr && !errors.Is(err, ErrAgreementRequiresPDF) {
+			t.Fatalf("category=%q source=%q: want ErrAgreementRequiresPDF, got %v", tc.category, tc.sourceType, err)
+		}
+		if !tc.wantErr && err != nil {
+			t.Fatalf("category=%q source=%q: unexpected err %v", tc.category, tc.sourceType, err)
+		}
+	}
+}
+
 func TestValidateFileHeader(t *testing.T) {
 	cases := []struct {
 		name      string
