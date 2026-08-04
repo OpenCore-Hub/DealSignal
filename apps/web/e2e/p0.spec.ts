@@ -65,9 +65,10 @@ test.describe("P0 user flow (real backend)", () => {
     const generatedLink = await page.locator('[data-testid="generated-link"]').textContent();
     expect(generatedLink).toContain("http");
 
-    // Navigate to links list and verify link appears
+    // Navigate to Document Library → Share tab (legacy /links redirects here)
     await page.goto(`/${workspaceSlug}/links`);
-    await expect(page.getByRole("heading", { name: /links/i }).first()).toBeVisible({ timeout: 10000 });
+    await expect(page).toHaveURL(/\/documents\?tab=shared/, { timeout: 10000 });
+    await expect(page.getByRole("tab", { name: /分享|Shared/i })).toBeVisible({ timeout: 10000 });
 
     // Click first link row
     const firstRow = page.locator('[data-testid="links-table-row"]').first();

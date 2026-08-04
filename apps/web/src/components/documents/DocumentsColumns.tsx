@@ -12,6 +12,7 @@ import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { formatDate, formatFileSize } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
+import { documentsSharePath } from "@/lib/documentsSharePath";
 import type { Column, ColumnDef } from "@tanstack/react-table";
 import type { Document, HeatLevel, Link } from "@/types";
 
@@ -51,6 +52,7 @@ interface UseDocumentColumnsOptions {
   navigate: NavigateFunction;
   refetch?: () => void;
   onAddToDealRoom?: (doc: DocumentRow) => void;
+  onDelete?: (doc: DocumentRow) => void;
   returnTo?: string;
   returnLabel?: string;
 }
@@ -81,6 +83,7 @@ export function useDocumentColumns({
   navigate,
   refetch,
   onAddToDealRoom,
+  onDelete,
   returnTo,
   returnLabel,
 }: UseDocumentColumnsOptions) {
@@ -152,7 +155,12 @@ export function useDocumentColumns({
               className="h-auto px-0 text-sm font-medium text-blue-600 hover:text-blue-700 hover:underline"
               onClick={(e) => {
                 e.stopPropagation();
-                navigate(`/${workspaceSlug}/links?documentId=${doc.id}&documentTitle=${encodeURIComponent(doc.title)}`);
+                navigate(
+                  documentsSharePath(workspaceSlug!, {
+                    documentId: doc.id,
+                    documentTitle: doc.title,
+                  }),
+                );
               }}
             >
               {t("common:view")}
@@ -167,6 +175,9 @@ export function useDocumentColumns({
           const doc = row.original;
           const firstLink = doc.links[0];
 
+          const busy = doc.status === "uploading" || doc.status === "processing";
+          const downloadReady = doc.status === "ready" || doc.status === "archived";
+
           const handleArchive = async () => {
             try {
               if (doc.status === "archived") {
@@ -179,6 +190,22 @@ export function useDocumentColumns({
               refetch?.();
             } catch (e) {
               toast.error(e instanceof Error ? e.message : t("documents:columns.archiveFailed"));
+            }
+          };
+
+          const handleDownload = async () => {
+            try {
+              const res = await api.getDocumentDownloadUrl(doc.id);
+              const a = document.createElement("a");
+              a.href = res.download_url;
+              a.download = res.filename || doc.title;
+              a.target = "_blank";
+              a.rel = "noopener noreferrer";
+              document.body.appendChild(a);
+              a.click();
+              a.remove();
+            } catch (e) {
+              toast.error(e instanceof Error ? e.message : t("documents:columns.downloadFailed"));
             }
           };
 
@@ -217,34 +244,34 @@ export function useDocumentColumns({
                     label: t("common:addToDealRoom"),
                     icon: <Buildings size={16} />,
                     onClick: () => onAddToDealRoom?.(doc),
-                    disabled: doc.status === "uploading" || doc.status === "processing" || doc.status === "failed",
+                    disabled: busy || doc.status === "failed",
                   },
                   {
                     label: doc.status === "archived" ? t("common:unarchive") : t("common:archive"),
                     icon: doc.status === "archived" ? <ArrowCounterClockwise size={16} /> : <Archive size={16} />,
                     onClick: handleArchive,
-                    disabled: doc.status === "uploading" || doc.status === "processing" || doc.status === "failed",
+                    disabled: busy || doc.status === "failed",
                     title:
-                      doc.status === "uploading" || doc.status === "processing" || doc.status === "failed"
+                      busy || doc.status === "failed"
                         ? t("documents:columns.archiveDisabled")
                         : undefined,
                   },
                   {
                     label: t("common:download"),
                     icon: <DownloadSimple size={16} />,
-                    onClick: () => {},
-                    disabled: true,
-                    title: t("documents:columns.downloadDisabled"),
-                    pro: true,
+                    onClick: () => {
+                      void handleDownload();
+                    },
+                    disabled: !downloadReady,
+                    title: downloadReady ? undefined : t("documents:columns.downloadNotReady"),
                   },
                   {
                     label: t("common:delete"),
                     icon: <Trash size={16} />,
-                    onClick: () => {},
-                    disabled: true,
-                    title: t("documents:columns.deleteDisabled"),
+                    onClick: () => onDelete?.(doc),
+                    disabled: busy || !onDelete,
+                    title: busy ? t("documents:columns.deleteBusy") : undefined,
                     destructive: true,
-                    pro: true,
                   },
                 ]}
               />
@@ -253,6 +280,6 @@ export function useDocumentColumns({
         },
       },
     ],
-    [navigate, workspaceSlug, t, refetch, onAddToDealRoom, returnTo, returnLabel]
+    [navigate, workspaceSlug, t, refetch, onAddToDealRoom, onDelete, returnTo, returnLabel]
   );
 }

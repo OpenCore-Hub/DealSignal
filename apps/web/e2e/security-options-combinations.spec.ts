@@ -86,13 +86,14 @@ async function selectContact(page: Page, id: string) {
 
 async function openAdvancedSettings(page: Page) {
   const toggle = page.locator('[data-testid="security-advanced-toggle"]');
-  if (await toggle.isVisible({ timeout: 2000 }).catch(() => false)) {
-    const expanded = await toggle.getAttribute("aria-expanded");
-    if (expanded !== "true") {
-      await toggle.click();
-      await page.waitForTimeout(500);
-    }
-    // May or may not have the expiry select visible
+  if (!(await toggle.isVisible({ timeout: 2000 }).catch(() => false))) return;
+  const expiry = page.locator('[data-testid="security-expiry-select"]');
+  const expanded =
+    (await toggle.getAttribute("aria-expanded")) === "true" ||
+    (await expiry.isVisible().catch(() => false));
+  if (!expanded) {
+    await toggle.click();
+    await page.waitForTimeout(500);
   }
 }
 

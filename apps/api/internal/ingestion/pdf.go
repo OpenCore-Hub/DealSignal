@@ -13,6 +13,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/ledongthuc/pdf"
 )
@@ -49,16 +50,40 @@ type Chunk struct {
 
 const maxPageTitleLen = 200
 
+// sanitizeUTF8Text strips invalid UTF-8 sequences so Postgres TEXT inserts never
+// fail with SQLSTATE 22021 on PDF-extracted (or mid-rune-truncated) strings.
+func sanitizeUTF8Text(s string) string {
+	if s == "" {
+		return ""
+	}
+	if utf8.ValidString(s) {
+		return s
+	}
+	return strings.ToValidUTF8(s, "")
+}
+
+// truncateUTF8Bytes returns a valid UTF-8 prefix of at most maxBytes without
+// splitting multi-byte runes (the old t[:n] cut left orphan lead bytes like 0xe2).
+func truncateUTF8Bytes(s string, maxBytes int) string {
+	if maxBytes <= 0 || s == "" {
+		return ""
+	}
+	if len(s) <= maxBytes {
+		return s
+	}
+	for maxBytes > 0 && !utf8.RuneStart(s[maxBytes]) {
+		maxBytes--
+	}
+	return s[:maxBytes]
+}
+
 // truncatePageTitle extracts the first non-empty text block and truncates it for
 // use as a page title. Fallback returns an empty string if no text is found.
 func truncatePageTitle(blocks []TextBlock) string {
 	for _, b := range blocks {
-		if t := strings.TrimSpace(b.Text); t != "" {
+		if t := strings.TrimSpace(sanitizeUTF8Text(b.Text)); t != "" {
 			t = strings.Join(strings.Fields(t), " ")
-			if len(t) > maxPageTitleLen {
-				return t[:maxPageTitleLen]
-			}
-			return t
+			return truncateUTF8Bytes(t, maxPageTitleLen)
 		}
 	}
 	return ""
@@ -144,7 +169,7 @@ func parseBBoxHTML(data []byte) ([]PageInfo, error) {
 			yMin, _ := strconv.ParseFloat(string(wm[2]), 64)
 			xMax, _ := strconv.ParseFloat(string(wm[3]), 64)
 			yMax, _ := strconv.ParseFloat(string(wm[4]), 64)
-			text := strings.TrimSpace(string(wm[5]))
+			text := strings.TrimSpace(sanitizeUTF8Text(string(wm[5])))
 			// Decode HTML entities
 			text = decodeHTMLEntities(text)
 			words = append(words, bboxWord{
@@ -460,20 +485,21 @@ func splitTextChunks(page PageInfo) []Chunk {
 	if len(page.Blocks) > 0 {
 		chunks := make([]Chunk, 0, len(page.Blocks))
 		for _, b := range page.Blocks {
-			if strings.TrimSpace(b.Text) == "" {
+			text := strings.TrimSpace(sanitizeUTF8Text(b.Text))
+			if text == "" {
 				continue
 			}
 			bboxJSON := []byte(fmt.Sprintf(`{"x":%.6f,"y":%.6f,"w":%.6f,"h":%.6f}`, b.Bbox.X, b.Bbox.Y, b.Bbox.W, b.Bbox.H))
-			chunks = append(chunks, Chunk{Text: b.Text, Bbox: bboxJSON})
+			chunks = append(chunks, Chunk{Text: text, Bbox: bboxJSON})
 		}
 		return chunks
 	}
 	// Fallback: split by newlines with whole-page bbox
-	paragraphs := strings.Split(strings.TrimSpace(page.Text), "\n")
+	paragraphs := strings.Split(strings.TrimSpace(sanitizeUTF8Text(page.Text)), "\n")
 	var chunks []Chunk
 	bbox := pageBbox(page.Width, page.Height)
 	for i, para := range paragraphs {
-		para = strings.TrimSpace(para)
+		para = strings.TrimSpace(sanitizeUTF8Text(para))
 		if para == "" {
 			continue
 		}

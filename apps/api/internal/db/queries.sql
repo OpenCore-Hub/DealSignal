@@ -152,6 +152,13 @@ WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
   AND NOT EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
 ORDER BY d.created_at DESC;
 
+-- name: ListSharedDocumentsByWorkspace :many
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+  AND EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
+ORDER BY d.created_at DESC;
+
 -- name: ListArchivedDocumentsByWorkspace :many
 SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
 FROM documents d
@@ -184,6 +191,55 @@ WHERE id = $1 AND workspace_id = $2 AND tenant_id = $3 AND deleted_at IS NULL AN
 UPDATE documents
 SET deleted_at = now(), updated_at = now()
 WHERE id = $1 AND workspace_id = $2 AND deleted_at IS NULL;
+
+-- name: SoftDeleteLinksByDocument :execrows
+UPDATE links
+SET status = 'deleted', updated_at = now()
+WHERE workspace_id = $1 AND document_id = $2 AND status <> 'deleted';
+
+-- name: SoftDeleteOrphanScopedLinksForDocument :execrows
+-- Soft-delete multi-doc links whose only remaining scoped member is this document.
+UPDATE links l
+SET status = 'deleted', updated_at = now()
+WHERE l.workspace_id = $1
+  AND l.status <> 'deleted'
+  AND EXISTS (
+      SELECT 1 FROM link_documents ld WHERE ld.link_id = l.id AND ld.document_id = $2
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM link_documents ld2
+      WHERE ld2.link_id = l.id AND ld2.document_id <> $2
+  );
+
+-- name: DeleteDealRoomDocumentsByDocument :exec
+DELETE FROM deal_room_documents
+WHERE workspace_id = $1 AND document_id = $2;
+
+-- name: DeleteLinkDocumentsByDocument :exec
+DELETE FROM link_documents
+WHERE document_id = $1;
+
+-- name: GetDocumentDeleteImpact :one
+SELECT
+    (
+        (SELECT COUNT(*)::bigint
+         FROM links l1
+         WHERE l1.workspace_id = sqlc.arg(workspace_id)
+           AND l1.document_id = sqlc.arg(document_id)
+           AND l1.status NOT IN ('deleted', 'disabled'))
+        +
+        (SELECT COUNT(*)::bigint
+         FROM link_documents ld
+         JOIN links l2 ON l2.id = ld.link_id
+         WHERE ld.document_id = sqlc.arg(document_id)
+           AND l2.workspace_id = sqlc.arg(workspace_id)
+           AND l2.status NOT IN ('deleted', 'disabled')
+           AND (l2.document_id IS NULL OR l2.document_id <> sqlc.arg(document_id)))
+    )::bigint AS active_link_count,
+    (SELECT COUNT(*)::bigint
+     FROM deal_room_documents drd
+     WHERE drd.workspace_id = sqlc.arg(workspace_id)
+       AND drd.document_id = sqlc.arg(document_id))::bigint AS deal_room_count;
 
 -- name: CreateIngestionJob :one
 INSERT INTO ingestion_jobs (tenant_id, workspace_id, document_id, status)

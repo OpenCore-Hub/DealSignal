@@ -1,12 +1,14 @@
 package upload
 
 import (
+	"errors"
 	"mime/multipart"
 	"testing"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -50,6 +52,22 @@ func TestExistingDocumentError(t *testing.T) {
 	}
 	if err.ID != "abc" || err.Title != "nda.docx" {
 		t.Fatalf("unexpected fields: %+v", err)
+	}
+}
+
+func TestDeleteDocument_InvalidIDs(t *testing.T) {
+	s := NewService(nil, nil, nil)
+	if err := s.DeleteDocument(t.Context(), "not-a-uuid", "also-bad"); err == nil {
+		t.Fatal("expected invalid id error")
+	}
+}
+
+func TestIsUniqueViolation(t *testing.T) {
+	if isUniqueViolation(errors.New("nope")) {
+		t.Fatal("expected false")
+	}
+	if !isUniqueViolation(&pgconn.PgError{Code: "23505"}) {
+		t.Fatal("expected unique violation")
 	}
 }
 

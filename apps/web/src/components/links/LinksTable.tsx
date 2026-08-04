@@ -33,6 +33,7 @@ import { RowActions } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
+import { documentsCreateLinkPath, documentsSharePath } from "@/lib/documentsSharePath";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -42,9 +43,11 @@ import type { Link } from "@/types";
 interface LinksTableProps {
   documentId?: string;
   documentTitle?: string;
+  /** Compact layout when embedded in Document Library → Share tab. */
+  embedded?: boolean;
 }
 
-export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
+export function LinksTable({ documentId, documentTitle, embedded = false }: LinksTableProps) {
   "use no memo";
   const navigate = useNavigate();
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
@@ -228,45 +231,60 @@ export function LinksTable({ documentId, documentTitle }: LinksTableProps) {
   if (data.length === 0) {
     const emptyTitle = isFiltered && documentTitle ? t("empty.filteredTitle", { title: documentTitle }) : t("empty.title");
     const emptyDescription = isFiltered && documentTitle ? t("empty.filteredDescription") : t("empty.description");
-    const createLinkPath = isFiltered && documentId
-      ? `/${workspaceSlug}/links/new?documentId=${documentId}`
-      : `/${workspaceSlug}/links/new`;
+    // Parent Document Library Share tab already exposes Create Link.
+    const emptyAction = embedded
+      ? undefined
+      : {
+          label: t("empty.createLink"),
+          onClick: () =>
+            navigate(
+              documentsCreateLinkPath(workspaceSlug!, {
+                documentId: isFiltered ? documentId : undefined,
+              }),
+            ),
+        };
 
     return (
       <EmptyState
         icon={<LinkIcon size={64} />}
         title={emptyTitle}
         description={emptyDescription}
-        action={{
-          label: t("empty.createLink"),
-          onClick: () => navigate(createLinkPath),
-        }}
+        action={emptyAction}
       />
     );
   }
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <h2 className="text-h2">
-            {isFiltered && documentTitle
-              ? t("title.filteredLinks", { title: documentTitle })
-              : t("title.allLinks")}
-          </h2>
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-2">
+          {!embedded && (
+            <h2 className="text-h2">
+              {isFiltered && documentTitle
+                ? t("title.filteredLinks", { title: documentTitle })
+                : t("title.allLinks")}
+            </h2>
+          )}
+          {embedded && isFiltered && documentTitle ? (
+            <p className="truncate text-sm text-muted-foreground">
+              {t("title.filteredLinks", { title: documentTitle })}
+            </p>
+          ) : null}
           {isFiltered && (
             <Button
               variant="ghost"
               size="sm"
-              className="gap-1 text-muted-foreground"
-              onClick={() => navigate(`/${workspaceSlug}/links`)}
+              className="gap-1 text-muted-foreground shrink-0"
+              onClick={() => navigate(documentsSharePath(workspaceSlug!))}
             >
               <X size={14} />
               {t("table.clearFilter")}
             </Button>
           )}
         </div>
-        <span className="text-caption text-muted-foreground">{t("table.totalLinks", { count: data.length })}</span>
+        <span className="text-caption whitespace-nowrap text-muted-foreground">
+          {t("table.totalLinks", { count: data.length })}
+        </span>
       </div>
 
       <div className="rounded-lg border border-border bg-card">

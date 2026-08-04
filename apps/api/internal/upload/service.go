@@ -12,6 +12,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -50,15 +51,50 @@ type Document struct {
 	CreatedAt  string `json:"created_at"`
 }
 
+// Beginner starts a database transaction.
+type Beginner interface {
+	Begin(context.Context) (pgx.Tx, error)
+}
+
+// DocumentDeleteImpact summarizes dependents revoked/detached on library delete.
+type DocumentDeleteImpact struct {
+	ActiveLinkCount int64 `json:"active_link_count"`
+	DealRoomCount   int64 `json:"deal_room_count"`
+}
+
 // Service handles document uploads.
 type Service struct {
 	queries *db.Queries
 	storage *storage.Client
+	pool    Beginner
 }
 
-// NewService creates an upload service.
-func NewService(q *db.Queries, s *storage.Client) *Service {
-	return &Service{queries: q, storage: s}
+// NewService creates an upload service. pool may be nil in unit tests (no TX).
+func NewService(q *db.Queries, s *storage.Client, pool Beginner) *Service {
+	return &Service{queries: q, storage: s, pool: pool}
+}
+
+func (s *Service) withTx(ctx context.Context, fn func(q *db.Queries) error) error {
+	if s.pool == nil {
+		return fn(s.queries)
+	}
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	if err := fn(s.queries.WithTx(tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
+	}
+	return nil
+}
+
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // ValidateFileHeader checks file size and extension.
@@ -130,33 +166,61 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		docCategory = "agreement"
 	}
 
-	d, err := s.queries.CreateDocument(ctx, db.CreateDocumentParams{
-		ID:          pgUUID(docID.String()),
-		TenantID:    tenantUUID,
-		WorkspaceID: workspaceUUID,
-		CreatedBy:   userUUID,
-		Title:       fileHeader.Filename,
-		SourceType:  sourceType,
-		Status:      "uploaded",
-		StorageKey:  storageKey,
-		FileSize:    pgtype.Int8{Int64: fileHeader.Size, Valid: true},
-		Category:    docCategory,
+	var created db.CreateDocumentRow
+	err = s.withTx(ctx, func(q *db.Queries) error {
+		d, createErr := q.CreateDocument(ctx, db.CreateDocumentParams{
+			ID:          pgUUID(docID.String()),
+			TenantID:    tenantUUID,
+			WorkspaceID: workspaceUUID,
+			CreatedBy:   userUUID,
+			Title:       fileHeader.Filename,
+			SourceType:  sourceType,
+			Status:      "uploaded",
+			StorageKey:  storageKey,
+			FileSize:    pgtype.Int8{Int64: fileHeader.Size, Valid: true},
+			Category:    docCategory,
+		})
+		if createErr != nil {
+			if isUniqueViolation(createErr) {
+				return &ExistingDocumentError{
+					ID:    docID.String(),
+					Title: fileHeader.Filename,
+				}
+			}
+			return fmt.Errorf("create document record: %w", createErr)
+		}
+		if _, jobErr := q.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
+			TenantID:    tenantUUID,
+			WorkspaceID: workspaceUUID,
+			DocumentID:  d.ID,
+			Status:      "queued",
+		}); jobErr != nil {
+			return fmt.Errorf("create ingestion job: %w", jobErr)
+		}
+		created = d
+		return nil
 	})
 	if err != nil {
-		return Document{}, fmt.Errorf("create document record: %w", err)
+		_ = s.storage.DeleteObject(ctx, storageKey)
+		var existsErr *ExistingDocumentError
+		if errors.As(err, &existsErr) {
+			// Race: another upload won the unique title. Surface as conflict so
+			// the client can offer replace with the surviving row's id.
+			if surviving, lookupErr := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
+				WorkspaceID: workspaceUUID,
+				Title:       fileHeader.Filename,
+			}); lookupErr == nil {
+				return Document{}, &ExistingDocumentError{
+					ID:    uuid.UUID(surviving.ID.Bytes).String(),
+					Title: surviving.Title,
+				}
+			}
+			return Document{}, existsErr
+		}
+		return Document{}, err
 	}
 
-	_, err = s.queries.CreateIngestionJob(ctx, db.CreateIngestionJobParams{
-		TenantID:    tenantUUID,
-		WorkspaceID: workspaceUUID,
-		DocumentID:  d.ID,
-		Status:      "queued",
-	})
-	if err != nil {
-		return Document{}, fmt.Errorf("create ingestion job: %w", err)
-	}
-
-	return documentFromDB(d), nil
+	return documentFromDB(created), nil
 }
 
 func (s *Service) replaceExistingDocument(
@@ -178,23 +242,36 @@ func (s *Service) replaceExistingDocument(
 		return Document{}, fmt.Errorf("store file: %w", err)
 	}
 
+	// Preserve the library category unless the caller explicitly overrides it.
 	docCategory := existing.Category
 	if category == "agreement" {
 		docCategory = "agreement"
-	} else if category != "" {
+	} else if category != "" && category != "uploaded" {
 		docCategory = category
 	}
+	if docCategory == "" {
+		docCategory = "general"
+	}
 
-	d, err := RebindDocumentContent(ctx, s.queries, RebindDocumentContentParams{
-		DocumentID:  existing.ID,
-		TenantID:    existing.TenantID,
-		WorkspaceID: workspaceUUID,
-		StorageKey:  storageKey,
-		SourceType:  sourceType,
-		FileSize:    fileHeader.Size,
-		Category:    docCategory,
+	var rebound db.ReplaceDocumentFileRow
+	err := s.withTx(ctx, func(q *db.Queries) error {
+		d, rebindErr := RebindDocumentContent(ctx, q, RebindDocumentContentParams{
+			DocumentID:  existing.ID,
+			TenantID:    existing.TenantID,
+			WorkspaceID: workspaceUUID,
+			StorageKey:  storageKey,
+			SourceType:  sourceType,
+			FileSize:    fileHeader.Size,
+			Category:    docCategory,
+		})
+		if rebindErr != nil {
+			return rebindErr
+		}
+		rebound = d
+		return nil
 	})
 	if err != nil {
+		_ = s.storage.DeleteObject(ctx, storageKey)
 		return Document{}, err
 	}
 
@@ -203,7 +280,7 @@ func (s *Service) replaceExistingDocument(
 		_ = s.storage.DeleteObject(ctx, oldKey)
 	}
 
-	return documentFromReplace(d), nil
+	return documentFromReplace(rebound), nil
 }
 
 func documentFromDB(d db.CreateDocumentRow) Document {
@@ -229,6 +306,82 @@ func documentFromReplace(d db.ReplaceDocumentFileRow) Document {
 		Status:     d.Status,
 		PageCount:  d.PageCount,
 		CreatedAt:  d.CreatedAt,
+	})
+}
+
+// GetDocumentDeleteImpact returns active share-link and deal-room dependents.
+func (s *Service) GetDocumentDeleteImpact(ctx context.Context, workspaceID, documentID string) (DocumentDeleteImpact, error) {
+	ws := pgUUID(workspaceID)
+	docID := pgUUID(documentID)
+	if !ws.Valid || !docID.Valid {
+		return DocumentDeleteImpact{}, fmt.Errorf("invalid id")
+	}
+	if _, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docID,
+		WorkspaceID: ws,
+	}); err != nil {
+		return DocumentDeleteImpact{}, err
+	}
+	row, err := s.queries.GetDocumentDeleteImpact(ctx, db.GetDocumentDeleteImpactParams{
+		WorkspaceID: ws,
+		DocumentID:  docID,
+	})
+	if err != nil {
+		return DocumentDeleteImpact{}, err
+	}
+	return DocumentDeleteImpact{
+		ActiveLinkCount: row.ActiveLinkCount,
+		DealRoomCount:   row.DealRoomCount,
+	}, nil
+}
+
+// DeleteDocument soft-deletes a workspace document and cleans dependent
+// memberships/share links so library deletion cannot leave live access paths.
+func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID string) error {
+	ws := pgUUID(workspaceID)
+	docID := pgUUID(documentID)
+	if !ws.Valid || !docID.Valid {
+		return fmt.Errorf("invalid id")
+	}
+
+	return s.withTx(ctx, func(q *db.Queries) error {
+		if _, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+			ID:          docID,
+			WorkspaceID: ws,
+		}); err != nil {
+			return err
+		}
+
+		// Revoke document-primary links first.
+		if _, err := q.SoftDeleteLinksByDocument(ctx, db.SoftDeleteLinksByDocumentParams{
+			WorkspaceID: ws,
+			DocumentID:  docID,
+		}); err != nil {
+			return fmt.Errorf("revoke share links: %w", err)
+		}
+		// Revoke multi-doc links that only pointed at this document.
+		if _, err := q.SoftDeleteOrphanScopedLinksForDocument(ctx, db.SoftDeleteOrphanScopedLinksForDocumentParams{
+			WorkspaceID: ws,
+			DocumentID:  docID,
+		}); err != nil {
+			return fmt.Errorf("revoke orphan scoped links: %w", err)
+		}
+		if err := q.DeleteLinkDocumentsByDocument(ctx, docID); err != nil {
+			return fmt.Errorf("detach scoped link documents: %w", err)
+		}
+		if err := q.DeleteDealRoomDocumentsByDocument(ctx, db.DeleteDealRoomDocumentsByDocumentParams{
+			WorkspaceID: ws,
+			DocumentID:  docID,
+		}); err != nil {
+			return fmt.Errorf("detach deal room memberships: %w", err)
+		}
+		if err := q.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
+			ID:          docID,
+			WorkspaceID: ws,
+		}); err != nil {
+			return fmt.Errorf("soft delete document: %w", err)
+		}
+		return nil
 	})
 }
 

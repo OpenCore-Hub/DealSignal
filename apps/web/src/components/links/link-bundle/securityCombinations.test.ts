@@ -10,6 +10,7 @@
 
 import { describe, it, expect } from "vitest";
 import { toCreateLinkPayload } from "@/lib/apiAdapters";
+import { validateBundleSecurityConfig } from "./pipelineUtils";
 import { buildConfigFromPreset } from "./pipelineUtils";
 import {
   enforceCrossOptionConstraints,
@@ -23,12 +24,13 @@ import type { PermissionConfig, PermissionPreset } from "@/types";
 
 interface GuardResult {
   blocked: boolean;
-  reason?: "contactRequired";
+  reason?: "contactRequired" | "ndaDocumentRequired";
 }
 
 function clientGuard(config: PermissionConfig): GuardResult {
-  if (config.requireEmailVerification && config.contactIds.length === 0) {
-    return { blocked: true, reason: "contactRequired" };
+  const result = validateBundleSecurityConfig(config);
+  if (!result.ok) {
+    return { blocked: true, reason: result.reason };
   }
   return { blocked: false };
 }
@@ -109,11 +111,22 @@ describe("Preset → CreateLinkPayload mapping", () => {
       expect(result.reason).toBe("contactRequired");
     });
 
-    it("passes with contact", () => {
+    it("BLOCKS without NDA document/template", () => {
       const config = withContact("confidential", "contact-789");
+      const result = clientGuard(config);
+      expect(result.blocked).toBe(true);
+      expect(result.reason).toBe("ndaDocumentRequired");
+    });
+
+    it("passes with contact and NDA document", () => {
+      const config = {
+        ...withContact("confidential", "contact-789"),
+        ndaDocumentId: "nda-doc-1",
+      };
       expect(clientGuard(config).blocked).toBe(false);
       const payload = toCreateLinkPayload(["doc-1"], config);
       expect(payload.contact_ids).toEqual(["contact-789"]);
+      expect(payload.nda_document_id).toBe("nda-doc-1");
     });
   });
 
@@ -171,6 +184,7 @@ describe("Preset → CreateLinkPayload mapping", () => {
         ...buildConfigFromPreset("customized"),
         requireEmailVerification: false,
         ndaEnabled: true,
+        ndaDocumentId: "nda-doc-1",
         contactIds: ["contact-nda"],
       };
       expect(clientGuard(config).blocked).toBe(false);

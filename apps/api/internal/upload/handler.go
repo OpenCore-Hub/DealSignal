@@ -53,6 +53,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/:id", h.Get)
 	g.GET("/:id/status", h.GetStatus)
 	g.DELETE("/:id", h.Delete)
+	g.GET("/:id/delete-impact", h.DeleteImpact)
 	g.POST("/:id/archive", h.Archive)
 	g.POST("/:id/unarchive", h.Unarchive)
 	g.GET("/:id/download-url", h.DownloadURL)
@@ -279,6 +280,27 @@ func (h *Handler) List(c *gin.Context) {
 				UpdatedAt:  d.UpdatedAt,
 			}, job)
 		}
+	case "shared":
+		docs, err := h.uploadService.queries.ListSharedDocumentsByWorkspace(ctx, wsPgUUID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to list documents"})
+			return
+		}
+		for _, d := range docs {
+			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
+			out = appendDoc(out, docInfo{
+				ID:         d.ID,
+				Title:      d.Title,
+				SourceType: d.SourceType,
+				StorageKey: d.StorageKey,
+				Status:     d.Status,
+				FileSize:   d.FileSize.Int64,
+				Category:   d.Category,
+				PageCount:  d.PageCount,
+				CreatedAt:  d.CreatedAt,
+				UpdatedAt:  d.UpdatedAt,
+			}, job)
+		}
 	case "archived":
 		docs, err := h.uploadService.queries.ListArchivedDocumentsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
@@ -393,39 +415,49 @@ func (h *Handler) Unarchive(c *gin.Context) {
 	c.JSON(http.StatusOK, documentResponse(doc, job))
 }
 
-// Delete soft-deletes a document.
+// DeleteImpact reports dependents that library delete will revoke or detach.
+func (h *Handler) DeleteImpact(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	if _, err := uuid.Parse(workspaceID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": httpx.SafeMessage("invalid_workspace", err)})
+		return
+	}
+	docID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": httpx.SafeMessage("invalid_id", err)})
+		return
+	}
+	impact, err := h.uploadService.GetDocumentDeleteImpact(c.Request.Context(), workspaceID, docID.String())
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": httpx.SafeMessage("document_not_found", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, impact)
+}
+
+// Delete soft-deletes a document and revokes dependent share / room access.
 func (h *Handler) Delete(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	wsUUID, err := uuid.Parse(workspaceID)
-	if err != nil {
+	if _, err := uuid.Parse(workspaceID); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_workspace", "message": httpx.SafeMessage("invalid_workspace", err)})
 		return
 	}
 
 	docID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": httpx.SafeMessage("invalid_id", err)})
 		return
 	}
 
-	ctx := c.Request.Context()
-	_, err = h.uploadService.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
-		ID:          pgtype.UUID{Bytes: docID, Valid: true},
-		WorkspaceID: pgtype.UUID{Bytes: wsUUID, Valid: true},
-	})
-	if err != nil {
+	if err := h.uploadService.DeleteDocument(c.Request.Context(), workspaceID, docID.String()); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": "document not found"})
+			c.JSON(http.StatusNotFound, gin.H{"code": "document_not_found", "message": httpx.SafeMessage("document_not_found", err)})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-		return
-	}
-
-	if err := h.uploadService.queries.SoftDeleteDocument(ctx, db.SoftDeleteDocumentParams{
-		ID:          pgtype.UUID{Bytes: docID, Valid: true},
-		WorkspaceID: pgtype.UUID{Bytes: wsUUID, Valid: true},
-	}); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}

@@ -310,6 +310,7 @@ export function DealRoomDetailPage() {
           )
         );
         pollDocumentStatus(id, doc.id);
+        void refetch();
       } catch (e) {
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
@@ -329,11 +330,13 @@ export function DealRoomDetailPage() {
         if (!cancelled) {
           toast.error(message);
         }
+        // Re-throw so batch callers can stop counting later files / refresh partials.
+        throw e;
       } finally {
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     },
-    [roomId, folderByPath, room?.documents, tc, td, pollDocumentStatus, uploadDocument]
+    [roomId, folderByPath, room?.documents, tc, td, pollDocumentStatus, uploadDocument, refetch]
   );
 
   const resolveTargetFolder = useCallback(
@@ -373,7 +376,12 @@ export function DealRoomDetailPage() {
         const base =
           (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
         for (let index = 0; index < folderFiles.length; index++) {
-          await uploadFileToFolder(folderFiles[index]!, folderPath, base + index);
+          try {
+            await uploadFileToFolder(folderFiles[index]!, folderPath, base + index);
+          } catch {
+            // Stop the batch after cancel/error; earlier successes already refreshed.
+            return;
+          }
         }
       }
     },

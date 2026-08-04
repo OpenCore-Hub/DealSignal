@@ -65,9 +65,16 @@ export function toCreateLinkPayload(
     require_email_verification: requireEmailVerification,
     require_password: false,
     require_nda: config.ndaEnabled,
-    nda_document_id: config.ndaEnabled
-      ? (config.ndaDocumentId || documentIds[0])
-      : undefined,
+    // Match deal-room share: require an explicit NDA template/document — never
+    // fall back to the shared content documentIds[0].
+    nda_template_id:
+      config.ndaEnabled && config.ndaTemplateId
+        ? config.ndaTemplateId
+        : undefined,
+    nda_document_id:
+      config.ndaEnabled && config.ndaDocumentId
+        ? config.ndaDocumentId
+        : undefined,
     allowed_emails: undefined,
     password: undefined,
     contact_ids:

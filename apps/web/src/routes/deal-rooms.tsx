@@ -157,13 +157,14 @@ export function DealRoomsPage() {
           <Skeleton className="h-64" />
         </div>
       ) : rooms?.length === 0 ? (
-        <div className="flex flex-1 flex-col items-center justify-center">
+        <div className="flex min-h-0 flex-1 flex-col">
           <EmptyState
             icon={<Folder size={48} />}
             title={t("empty.title")}
             description={t("empty.description")}
             action={{ label: t("empty.action"), onClick: () => navigate(`/${workspaceSlug}/deal-rooms/new`) }}
             size="large"
+            className="h-full min-h-[20rem] w-full justify-center"
           />
         </div>
       ) : (

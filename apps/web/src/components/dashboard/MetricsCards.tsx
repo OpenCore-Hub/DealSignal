@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router";
 import { Card, CardContent } from "@/components/ui/card";
 import { formatCompactNumber } from "@/lib/formatters";
+import { documentsSharePath } from "@/lib/documentsSharePath";
 
 interface MetricsCardsProps {
   workspaceSlug: string;
@@ -47,7 +48,7 @@ export function MetricsCards({
       count: pendingQuestions,
       icon: ChatTeardropText,
       color: "text-warning-500 border border-warning-500/30 bg-transparent",
-      to: `/${workspaceSlug}/links`,
+      to: documentsSharePath(workspaceSlug),
       ariaLabel: t("metrics.aria.pendingQuestions", { count: pendingQuestions }),
 
     },

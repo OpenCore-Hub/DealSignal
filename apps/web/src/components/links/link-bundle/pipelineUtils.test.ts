@@ -1,5 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { buildConfigFromPreset } from "./pipelineUtils";
+import {
+  buildConfigFromPreset,
+  validateBundleSecurityConfig,
+} from "./pipelineUtils";
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { PermissionPreset } from "@/types";
 
@@ -88,5 +91,46 @@ describe("buildConfigFromPreset", () => {
     expect(config.requireEmailVerification).toBe(false);
     expect(config.allowDownload).toBe(false);
     expect(config.watermarkEnabled).toBe(true);
+  });
+
+  it("initializes empty NDA selection fields", () => {
+    const config = buildConfigFromPreset("confidential");
+    expect(config.ndaDocumentId).toBe("");
+    expect(config.ndaTemplateId).toBe("");
+  });
+});
+
+describe("validateBundleSecurityConfig", () => {
+  it("blocks email/NDA without contact", () => {
+    expect(validateBundleSecurityConfig(buildConfigFromPreset("standard"))).toEqual({
+      ok: false,
+      reason: "contactRequired",
+    });
+  });
+
+  it("blocks NDA without template/document even with contact", () => {
+    const config = buildConfigFromPreset("confidential", {
+      contactIds: ["c-1"],
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({
+      ok: false,
+      reason: "ndaDocumentRequired",
+    });
+  });
+
+  it("passes with contact and ndaDocumentId", () => {
+    const config = buildConfigFromPreset("confidential", {
+      contactIds: ["c-1"],
+      ndaDocumentId: "nda-doc-1",
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
+  });
+
+  it("passes with contact and ndaTemplateId", () => {
+    const config = buildConfigFromPreset("confidential", {
+      contactIds: ["c-1"],
+      ndaTemplateId: "tpl-1",
+    });
+    expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
   });
 });

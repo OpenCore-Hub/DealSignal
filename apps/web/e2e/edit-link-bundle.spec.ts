@@ -116,7 +116,9 @@ test("edit mode backfills selected documents, security settings and review summa
   await page.getByRole("dialog").getByRole("button", { name: /Save changes/i }).click();
   await page.waitForTimeout(2000);
 
-  await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links`), { timeout: 10000 });
+  await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/documents\\?tab=shared`), {
+    timeout: 10000,
+  });
 
   // Verify the update persisted via API.
   const detailRes = await apiFetch(`/api/workspaces/${seed.workspaceSlug}/links/${link.id}`);
@@ -163,5 +165,7 @@ test("edit mode preserves document order and allows reordering", async ({ page }
   await page.getByRole("dialog").getByRole("button", { name: /Save changes/i }).click();
   await page.waitForTimeout(2000);
 
-  await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/links`), { timeout: 10000 });
+  await expect(page).toHaveURL(new RegExp(`/${seed.workspaceSlug}/documents\\?tab=shared`), {
+    timeout: 10000,
+  });
 });

@@ -131,6 +131,7 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			return fmt.Errorf("render page %d: %w", p.Number, err)
 		}
 
+		pageTitle := sanitizeUTF8Text(p.Title)
 		page, err := s.queries.CreatePage(ctx, db.CreatePageParams{
 			TenantID:       doc.TenantID,
 			WorkspaceID:    doc.WorkspaceID,
@@ -140,7 +141,7 @@ func (s *Service) run(ctx context.Context, doc db.GetDocumentByIDRow) error {
 			Width:          pgtype.Int4{Int32: int32(bounds.Dx()), Valid: true},
 			Height:         pgtype.Int4{Int32: int32(bounds.Dy()), Valid: true},
 			FileSize:       pgtype.Int8{Int64: int64(len(img)), Valid: true},
-			Title:          pgtype.Text{String: p.Title, Valid: p.Title != ""},
+			Title:          pgtype.Text{String: pageTitle, Valid: pageTitle != ""},
 		})
 		if err != nil {
 			return fmt.Errorf("create page record: %w", err)
@@ -311,6 +312,7 @@ func (s *Service) persistTypedChunks(
 	}
 	for i := range chunks {
 		ct := chunkTypes[i]
+		text := sanitizeUTF8Text(chunks[i].Text)
 		row, err := s.queries.CreateChunkWithBBox(ctx, db.CreateChunkWithBBoxParams{
 			TenantID:    doc.TenantID,
 			WorkspaceID: doc.WorkspaceID,
@@ -318,7 +320,7 @@ func (s *Service) persistTypedChunks(
 			DocumentID:  doc.ID,
 			ChunkIndex:  pgtype.Int4{Int32: indexBase + int32(i), Valid: true},
 			ChunkType:   pgtype.Text{String: ct, Valid: true},
-			Text:        chunks[i].Text,
+			Text:        text,
 			Bbox:        chunks[i].Bbox,
 		})
 		if err != nil {

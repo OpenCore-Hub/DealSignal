@@ -1008,6 +1008,11 @@ export const handlers = [
       case "unshared":
         docs = mockDocuments.filter((d) => !mockLinks.some((l) => l.documentId === d.id && l.isActive));
         break;
+      case "shared":
+        docs = mockDocuments.filter(
+          (d) => d.status !== "archived" && mockLinks.some((l) => l.documentId === d.id && l.isActive),
+        );
+        break;
       case "archived":
         docs = mockDocuments.filter((d) => d.status === "archived");
         break;
@@ -1031,10 +1036,29 @@ export const handlers = [
     return HttpResponse.json(doc);
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/documents/:id/delete-impact", ({ params }) => {
+    const docId = String(params.id);
+    if (!mockDocuments.some((d) => d.id === docId)) {
+      return new HttpResponse(null, { status: 404 });
+    }
+    const activeLinkCount = mockLinks.filter((l) => l.documentId === docId && l.isActive).length;
+    return HttpResponse.json({
+      active_link_count: activeLinkCount,
+      deal_room_count: 0,
+    });
+  }),
+
   http.delete("*/api/workspaces/:workspaceSlug/documents/:id", ({ params }) => {
     const index = mockDocuments.findIndex((d) => d.id === params.id);
     if (index === -1) return new HttpResponse(null, { status: 404 });
+    const docId = String(params.id);
     mockDocuments.splice(index, 1);
+    // Mirror API: revoking document share links on library delete.
+    for (let i = mockLinks.length - 1; i >= 0; i--) {
+      if (mockLinks[i]?.documentId === docId) {
+        mockLinks.splice(i, 1);
+      }
+    }
     return new HttpResponse(null, { status: 204 });
   }),
 

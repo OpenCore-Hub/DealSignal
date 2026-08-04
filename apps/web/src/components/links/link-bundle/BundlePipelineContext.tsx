@@ -14,6 +14,7 @@ const DEFAULT_SECURITY_CONFIG: PermissionConfig = {
   passwordEnabled: false,
   ndaEnabled: false,
   ndaDocumentId: "",
+  ndaTemplateId: "",
   allowDownload: true,
   watermarkEnabled: true,
   qaEnabled: false,

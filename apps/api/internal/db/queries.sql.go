@@ -3208,6 +3208,21 @@ func (q *Queries) DeleteDealRoomDocument(ctx context.Context, arg DeleteDealRoom
 	return err
 }
 
+const deleteDealRoomDocumentsByDocument = `-- name: DeleteDealRoomDocumentsByDocument :exec
+DELETE FROM deal_room_documents
+WHERE workspace_id = $1 AND document_id = $2
+`
+
+type DeleteDealRoomDocumentsByDocumentParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+func (q *Queries) DeleteDealRoomDocumentsByDocument(ctx context.Context, arg DeleteDealRoomDocumentsByDocumentParams) error {
+	_, err := q.db.Exec(ctx, deleteDealRoomDocumentsByDocument, arg.WorkspaceID, arg.DocumentID)
+	return err
+}
+
 const deleteExpiredKnowledgeQASessions = `-- name: DeleteExpiredKnowledgeQASessions :execrows
 DELETE FROM knowledge_qa_sessions
 WHERE COALESCE(last_turn_at, updated_at) < $1
@@ -3324,6 +3339,16 @@ type DeleteLinkDocumentsByDealRoomDocumentParams struct {
 
 func (q *Queries) DeleteLinkDocumentsByDealRoomDocument(ctx context.Context, arg DeleteLinkDocumentsByDealRoomDocumentParams) error {
 	_, err := q.db.Exec(ctx, deleteLinkDocumentsByDealRoomDocument, arg.DocumentID, arg.DealRoomID)
+	return err
+}
+
+const deleteLinkDocumentsByDocument = `-- name: DeleteLinkDocumentsByDocument :exec
+DELETE FROM link_documents
+WHERE document_id = $1
+`
+
+func (q *Queries) DeleteLinkDocumentsByDocument(ctx context.Context, documentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteLinkDocumentsByDocument, documentID)
 	return err
 }
 
@@ -4571,6 +4596,46 @@ func (q *Queries) GetDocumentByTitleInWorkspace(ctx context.Context, arg GetDocu
 		&i.UpdatedAt,
 		&i.DeletedAt,
 	)
+	return i, err
+}
+
+const getDocumentDeleteImpact = `-- name: GetDocumentDeleteImpact :one
+SELECT
+    (
+        (SELECT COUNT(*)::bigint
+         FROM links l1
+         WHERE l1.workspace_id = $1
+           AND l1.document_id = $2
+           AND l1.status NOT IN ('deleted', 'disabled'))
+        +
+        (SELECT COUNT(*)::bigint
+         FROM link_documents ld
+         JOIN links l2 ON l2.id = ld.link_id
+         WHERE ld.document_id = $2
+           AND l2.workspace_id = $1
+           AND l2.status NOT IN ('deleted', 'disabled')
+           AND (l2.document_id IS NULL OR l2.document_id <> $2))
+    )::bigint AS active_link_count,
+    (SELECT COUNT(*)::bigint
+     FROM deal_room_documents drd
+     WHERE drd.workspace_id = $1
+       AND drd.document_id = $2)::bigint AS deal_room_count
+`
+
+type GetDocumentDeleteImpactParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+type GetDocumentDeleteImpactRow struct {
+	ActiveLinkCount int64
+	DealRoomCount   int64
+}
+
+func (q *Queries) GetDocumentDeleteImpact(ctx context.Context, arg GetDocumentDeleteImpactParams) (GetDocumentDeleteImpactRow, error) {
+	row := q.db.QueryRow(ctx, getDocumentDeleteImpact, arg.WorkspaceID, arg.DocumentID)
+	var i GetDocumentDeleteImpactRow
+	err := row.Scan(&i.ActiveLinkCount, &i.DealRoomCount)
 	return i, err
 }
 
@@ -11766,6 +11831,66 @@ func (q *Queries) ListSecurityEventsByLink(ctx context.Context, arg ListSecurity
 	return items, nil
 }
 
+const listSharedDocumentsByWorkspace = `-- name: ListSharedDocumentsByWorkspace :many
+SELECT d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at
+FROM documents d
+WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
+  AND EXISTS (SELECT 1 FROM links l WHERE l.document_id = d.id AND l.status = 'active')
+ORDER BY d.created_at DESC
+`
+
+type ListSharedDocumentsByWorkspaceRow struct {
+	ID          pgtype.UUID
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	Title       string
+	SourceType  string
+	Status      string
+	StorageKey  string
+	FileSize    pgtype.Int8
+	Category    string
+	PageCount   pgtype.Int4
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
+	DeletedAt   pgtype.Timestamptz
+}
+
+func (q *Queries) ListSharedDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListSharedDocumentsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listSharedDocumentsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListSharedDocumentsByWorkspaceRow
+	for rows.Next() {
+		var i ListSharedDocumentsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.CreatedBy,
+			&i.Title,
+			&i.SourceType,
+			&i.Status,
+			&i.StorageKey,
+			&i.FileSize,
+			&i.Category,
+			&i.PageCount,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listSheetPageRangesByDocument = `-- name: ListSheetPageRangesByDocument :many
 SELECT sheet_name, page_start, page_end
 FROM document_sheet_page_ranges
@@ -13414,6 +13539,53 @@ type SoftDeleteDocumentParams struct {
 func (q *Queries) SoftDeleteDocument(ctx context.Context, arg SoftDeleteDocumentParams) error {
 	_, err := q.db.Exec(ctx, softDeleteDocument, arg.ID, arg.WorkspaceID)
 	return err
+}
+
+const softDeleteLinksByDocument = `-- name: SoftDeleteLinksByDocument :execrows
+UPDATE links
+SET status = 'deleted', updated_at = now()
+WHERE workspace_id = $1 AND document_id = $2 AND status <> 'deleted'
+`
+
+type SoftDeleteLinksByDocumentParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+func (q *Queries) SoftDeleteLinksByDocument(ctx context.Context, arg SoftDeleteLinksByDocumentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteLinksByDocument, arg.WorkspaceID, arg.DocumentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
+const softDeleteOrphanScopedLinksForDocument = `-- name: SoftDeleteOrphanScopedLinksForDocument :execrows
+UPDATE links l
+SET status = 'deleted', updated_at = now()
+WHERE l.workspace_id = $1
+  AND l.status <> 'deleted'
+  AND EXISTS (
+      SELECT 1 FROM link_documents ld WHERE ld.link_id = l.id AND ld.document_id = $2
+  )
+  AND NOT EXISTS (
+      SELECT 1 FROM link_documents ld2
+      WHERE ld2.link_id = l.id AND ld2.document_id <> $2
+  )
+`
+
+type SoftDeleteOrphanScopedLinksForDocumentParams struct {
+	WorkspaceID pgtype.UUID
+	DocumentID  pgtype.UUID
+}
+
+// Soft-delete multi-doc links whose only remaining scoped member is this document.
+func (q *Queries) SoftDeleteOrphanScopedLinksForDocument(ctx context.Context, arg SoftDeleteOrphanScopedLinksForDocumentParams) (int64, error) {
+	result, err := q.db.Exec(ctx, softDeleteOrphanScopedLinksForDocument, arg.WorkspaceID, arg.DocumentID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const sumKnowledgeQACostUnitsForWorkspaceSince = `-- name: SumKnowledgeQACostUnitsForWorkspaceSince :one

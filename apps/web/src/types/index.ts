@@ -25,7 +25,7 @@ export type DocumentCategory = "general" | "agreement";
 
 export type DocumentStatus = "uploading" | "processing" | "ready" | "failed" | "archived";
 
-export type DocumentFilter = "all" | "recent" | "popular" | "unshared" | "archived";
+export type DocumentFilter = "all" | "shared" | "recent" | "popular" | "unshared" | "archived";
 
 export interface Document {
   id: string;
@@ -200,6 +200,8 @@ export interface PermissionFields {
   ndaEnabled: boolean;
   /** NDA agreement document ID for bundle/pipeline links. */
   ndaDocumentId?: string;
+  /** Workspace NDA template ID when require NDA is enabled (preferred over document). */
+  ndaTemplateId?: string;
   allowDownload: boolean;
   watermarkEnabled: boolean;
   qaEnabled: boolean;

@@ -411,6 +411,11 @@ export const api = {
     request<Document>(getWorkspaceSlug(), `/documents/${id}`),
   deleteDocument: (id: string) =>
     request<void>(getWorkspaceSlug(), `/documents/${id}`, { method: "DELETE" }),
+  getDocumentDeleteImpact: (id: string) =>
+    request<{ active_link_count: number; deal_room_count: number }>(
+      getWorkspaceSlug(),
+      `/documents/${id}/delete-impact`,
+    ),
   archiveDocument: (id: string) =>
     request<Document>(getWorkspaceSlug(), `/documents/${id}/archive`, { method: "POST" }),
   unarchiveDocument: (id: string) =>

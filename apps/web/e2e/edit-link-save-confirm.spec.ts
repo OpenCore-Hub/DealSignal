@@ -80,9 +80,9 @@ test.describe("edit link save confirm (real backend)", () => {
       }
     }
 
-    // Should end up on links page after save
+    // Should end up on Document Library → Share tab after save
     await page.waitForTimeout(3000);
     const finalUrl = page.url();
-    expect(finalUrl).toMatch(/\/links/);
+    expect(finalUrl).toMatch(/\/documents\?tab=shared/);
   });
 });

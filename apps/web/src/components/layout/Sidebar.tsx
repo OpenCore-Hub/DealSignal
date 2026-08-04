@@ -3,7 +3,6 @@ import {
   ChartPie,
   FileText,
   Scales,
-  Link as LinkIcon,
   FolderOpen,
   Users,
   ChartLineUp,
@@ -54,7 +53,6 @@ export function Sidebar() {
         { to: "dashboard", labelKey: "sidebar.nav.dashboard", icon: ChartPie },
         { to: "deal-rooms", labelKey: "sidebar.nav.dealRooms", icon: FolderOpen },
         { to: "documents", labelKey: "sidebar.nav.documents", icon: FileText },
-        { to: "links", labelKey: "sidebar.nav.links", icon: LinkIcon },
       ],
     },
     {
@@ -170,6 +168,11 @@ export function Sidebar() {
                   <ul className="space-y-1">
                     {group.items.map((item) => {
                       const Icon = item.icon;
+                      // Create/edit/detail under /links stay highlighted on Document Library.
+                      const linksUnderDocuments =
+                        item.to === "documents" &&
+                        !!workspaceSlug &&
+                        location.pathname.startsWith(`/${workspaceSlug}/links`);
                       return (
                         <li key={item.to}>
                           <NavLink
@@ -181,49 +184,52 @@ export function Sidebar() {
                                 "transition-[color,transform] duration-200 ease-[cubic-bezier(0.16,1,0.3,1)]",
                                 "active:scale-[0.985]",
                                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                isActive
+                                isActive || linksUnderDocuments
                                   ? "text-foreground"
                                   : "text-muted-foreground hover:text-foreground"
                               )
                             }
                           >
-                            {({ isActive }) => (
-                              <>
-                                {isActive && (
-                                  <motion.span
-                                    layoutId={reducedMotion ? undefined : "workspace-nav-pill"}
-                                    className={cn(
-                                      "absolute inset-0 rounded-lg bg-background",
-                                      "shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-border/70"
-                                    )}
-                                    transition={reducedMotion ? { duration: 0 } : spring}
-                                  />
-                                )}
-                                {!isActive && (
-                                  <span className="absolute inset-0 rounded-lg transition-colors duration-200 group-hover:bg-background/55" />
-                                )}
-                                <span className="relative z-10 flex min-w-0 flex-1 items-center gap-3">
-                                  <span
-                                    className={cn(
-                                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-200",
-                                      isActive
-                                        ? "bg-primary/10 text-primary"
-                                        : "text-muted-foreground group-hover:bg-muted/70 group-hover:text-foreground"
-                                    )}
-                                  >
-                                    <Icon size={18} weight={isActive ? "fill" : "regular"} />
+                            {({ isActive }) => {
+                              const active = isActive || linksUnderDocuments;
+                              return (
+                                <>
+                                  {active && (
+                                    <motion.span
+                                      layoutId={reducedMotion ? undefined : "workspace-nav-pill"}
+                                      className={cn(
+                                        "absolute inset-0 rounded-lg bg-background",
+                                        "shadow-[0_1px_2px_rgba(15,23,42,0.05)] ring-1 ring-border/70"
+                                      )}
+                                      transition={reducedMotion ? { duration: 0 } : spring}
+                                    />
+                                  )}
+                                  {!active && (
+                                    <span className="absolute inset-0 rounded-lg transition-colors duration-200 group-hover:bg-background/55" />
+                                  )}
+                                  <span className="relative z-10 flex min-w-0 flex-1 items-center gap-3">
+                                    <span
+                                      className={cn(
+                                        "flex h-8 w-8 shrink-0 items-center justify-center rounded-md transition-colors duration-200",
+                                        active
+                                          ? "bg-primary/10 text-primary"
+                                          : "text-muted-foreground group-hover:bg-muted/70 group-hover:text-foreground"
+                                      )}
+                                    >
+                                      <Icon size={18} weight={active ? "fill" : "regular"} />
+                                    </span>
+                                    <span
+                                      className={cn(
+                                        "truncate tracking-normal leading-none transition-opacity duration-200",
+                                        sidebarOpen ? "opacity-100" : "opacity-0 md:hidden"
+                                      )}
+                                    >
+                                      {t(item.labelKey)}
+                                    </span>
                                   </span>
-                                  <span
-                                    className={cn(
-                                      "truncate tracking-normal leading-none transition-opacity duration-200",
-                                      sidebarOpen ? "opacity-100" : "opacity-0 md:hidden"
-                                    )}
-                                  >
-                                    {t(item.labelKey)}
-                                  </span>
-                                </span>
-                              </>
-                            )}
+                                </>
+                              );
+                            }}
                           </NavLink>
                         </li>
                       );

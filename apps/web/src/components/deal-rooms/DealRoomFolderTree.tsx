@@ -323,20 +323,25 @@ export function DealRoomFolderTree({
     bulkUploadTargetRef.current = null;
     if (!target || files.length === 0 || !onFolderUpload) return;
     setBulkLoading(true);
+    let uploaded = 0;
     try {
       const baseSort = folderDocs.find((fd) => fd.folder === target)?.documents.length ?? 0;
       // Sequential so shared replace/cancel dialogs never race.
       for (let index = 0; index < files.length; index++) {
         await onFolderUpload(files[index]!, target, baseSort + index);
+        uploaded += 1;
       }
       toast.success(t("folders.toolbar.batchUploadSuccess", { count: files.length }));
       clearSelection();
-      await onChanged?.();
     } catch (err) {
       if (!(err instanceof UploadCancelledError)) {
         toast.error(err instanceof Error ? err.message : t("folders.toolbar.batchUploadFailed"));
       }
     } finally {
+      // Refresh even when a later file is cancelled/fails so earlier successes appear.
+      if (uploaded > 0) {
+        await onChanged?.();
+      }
       setBulkLoading(false);
     }
   };

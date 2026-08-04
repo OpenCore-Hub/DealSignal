@@ -30,18 +30,30 @@ describe("toCreateLinkPayload", () => {
   });
 
   it("maps confidential config (NDA) correctly", () => {
+    const config = buildConfigFromPreset("confidential", {
+      ndaDocumentId: "nda-doc-1",
+    });
+    const payload = toCreateLinkPayload(["doc-1"], config);
+    expect(payload.require_nda).toBe(true);
+    expect(payload.nda_document_id).toBe("nda-doc-1");
+    expect(payload.nda_template_id).toBeUndefined();
+    expect(payload.require_email_verification).toBe(true);
+    expect(payload.permission_type).toBe("nda");
+  });
+
+  it("does not fall back to shared documentIds for NDA binding", () => {
     const config = buildConfigFromPreset("confidential");
     const payload = toCreateLinkPayload(["doc-1"], config);
     expect(payload.require_nda).toBe(true);
-    expect(payload.nda_document_id).toBe("doc-1");
-    expect(payload.require_email_verification).toBe(true);
-    expect(payload.permission_type).toBe("nda");
+    expect(payload.nda_document_id).toBeUndefined();
+    expect(payload.nda_template_id).toBeUndefined();
   });
 
   it("NDA forces require_email_verification even when explicitly false", () => {
     const config: PermissionConfig = {
       ...buildConfigFromPreset("public"),
       ndaEnabled: true,
+      ndaDocumentId: "nda-doc-id",
       requireEmailVerification: false,
       contactIds: ["contact-nda"],
     };
@@ -71,6 +83,19 @@ describe("toCreateLinkPayload", () => {
     };
     const payload = toCreateLinkPayload(["doc-1", "doc-2"], config);
     expect(payload.require_nda).toBe(true);
+    expect(payload.nda_document_id).toBe("nda-doc-id");
+  });
+
+  it("prefers nda_template_id when both template and document are set", () => {
+    const config: PermissionConfig = {
+      ...buildConfigFromPreset("public"),
+      ndaEnabled: true,
+      ndaTemplateId: "tpl-1",
+      ndaDocumentId: "nda-doc-id",
+      contactIds: ["contact-nda"],
+    };
+    const payload = toCreateLinkPayload(["doc-1"], config);
+    expect(payload.nda_template_id).toBe("tpl-1");
     expect(payload.nda_document_id).toBe("nda-doc-id");
   });
 

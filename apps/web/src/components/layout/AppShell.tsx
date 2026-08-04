@@ -23,7 +23,7 @@ export function AppShell({ children }: AppShellProps) {
       >
         <TopNav />
         <main className="flex-1 overflow-auto p-6 md:p-8">
-          <div className="mx-auto h-full max-w-[1400px]">
+          <div className="h-full w-full">
             <PageTransition>{children}</PageTransition>
           </div>
         </main>

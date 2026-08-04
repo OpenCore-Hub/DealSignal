@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatCountWithPlural } from "@/lib/formatters";
+import { documentsSharePath } from "@/lib/documentsSharePath";
 
 interface HeatMapProps {
   links: LinkType[];
@@ -89,7 +90,7 @@ export function HeatMap({ links }: HeatMapProps) {
 
                 {items.length > 3 && (
                   <Link
-                    to={`/${workspaceSlug}/links`}
+                    to={documentsSharePath(workspaceSlug!)}
                     state={returnState}
                     className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "w-full")}
                   >

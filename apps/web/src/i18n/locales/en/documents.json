@@ -23,7 +23,8 @@
     "replaceCancelled": "Upload cancelled"
   },
   "filters": {
-    "all": "All Documents",
+    "all": "Documents",
+    "shared": "Shared",
     "recent": "Recently Accessed",
     "popular": "High Popularity",
     "unshared": "Unshared",
@@ -60,12 +61,24 @@
     "links_other": "{{count}} links",
     "viewCount_one": "{{count}} view",
     "viewCount_other": "{{count}} views",
-    "downloadDisabled": "Download requires backend signed URL support",
-    "deleteDisabled": "Delete document requires backend support",
+    "downloadNotReady": "Document is not ready for download",
+    "downloadFailed": "Failed to download document",
+    "deleteBusy": "Wait until upload or processing finishes before deleting",
     "archived": "Document archived",
     "unarchived": "Document unarchived",
     "archiveFailed": "Failed to update document status",
     "archiveDisabled": "Only ready documents can be archived"
+  },
+  "delete": {
+    "title": "Delete document?",
+    "description": "“{{name}}” will be removed from the document library.",
+    "withLinks_one": "This will also revoke {{count}} active share link.",
+    "withLinks_other": "This will also revoke {{count}} active share links.",
+    "withDealRooms_one": "This will also remove it from {{count}} data room.",
+    "withDealRooms_other": "This will also remove it from {{count}} data rooms.",
+    "confirmLoading": "Deleting…",
+    "success": "Document deleted",
+    "failed": "Failed to delete document"
   },
   "status": {
     "uploading": "Uploading",

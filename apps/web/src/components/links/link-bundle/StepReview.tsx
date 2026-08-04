@@ -29,6 +29,8 @@ import { PipelineProgress } from "./PipelineProgress";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
 import { toCreateLinkPayload } from "@/lib/apiAdapters";
+import { documentsSharePath } from "@/lib/documentsSharePath";
+import { validateBundleSecurityConfig } from "./pipelineUtils";
 import {
   calculateFrictionScore,
   calculateSecurityScore,
@@ -87,7 +89,7 @@ export function StepReview() {
         await api.updateLinkFull(state.editingLinkId, payload);
         toast.success(t("bundle.review.successUpdate"));
         dispatch({ type: "SET_DIRTY", isDirty: false });
-        navigate(`/${workspaceSlug}/links`);
+        navigate(documentsSharePath(workspaceSlug!));
       } else {
         const link = await api.createLink(documentIds, config);
         dispatch({ type: "SET_GENERATED_LINK", link: link.shortUrl });
@@ -102,9 +104,13 @@ export function StepReview() {
   }, [selectedDocuments, config, isEdit, state.editingLinkId, dispatch, t, navigate, workspaceSlug]);
 
   const handleSubmit = useCallback(() => {
-    // Client-side guard: email verification requires at least one contact.
-    if (config.requireEmailVerification && config.contactIds.length === 0) {
-      toast.error(t("creator.contactRequired"));
+    const guard = validateBundleSecurityConfig(config);
+    if (!guard.ok) {
+      toast.error(
+        guard.reason === "ndaDocumentRequired"
+          ? t("creator.ndaDocumentRequired")
+          : t("creator.contactRequired"),
+      );
       return;
     }
     // In edit mode, show a confirmation dialog on the review step so the user
@@ -128,7 +134,7 @@ export function StepReview() {
     if (isEdit && state.isDirty) {
       if (!window.confirm(t("bundle.unsavedConfirmDesc"))) return;
     }
-    navigate(`/${workspaceSlug}/links`);
+    navigate(documentsSharePath(workspaceSlug!));
   };
 
   const handleCreateAnother = () => {

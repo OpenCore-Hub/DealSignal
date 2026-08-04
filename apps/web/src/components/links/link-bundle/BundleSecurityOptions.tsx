@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   EnvelopeIcon,
@@ -10,6 +10,7 @@ import {
   CaretDownIcon,
 } from "@phosphor-icons/react";
 import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -17,13 +18,23 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { api } from "@/lib/api";
 import type { PermissionConfig } from "@/types";
 import { useSecurityOptions } from "../smart-link/useSecurityOptions";
+
+interface NdaOption {
+  id: string;
+  title: string;
+  templateId: string;
+  documentId: string;
+}
 
 interface BundleSecurityOptionsProps {
   config: PermissionConfig;
   onChange: (config: PermissionConfig) => void;
   contactSelector?: React.ReactNode;
+  /** Shared content docs — excluded from NDA agreement picker. */
+  excludeNdaDocumentIds?: string[];
 }
 
 interface OptionRowProps {
@@ -71,11 +82,79 @@ export function BundleSecurityOptions({
   config,
   onChange,
   contactSelector,
+  excludeNdaDocumentIds = [],
 }: BundleSecurityOptionsProps) {
   const { t } = useTranslation("links");
-  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const { t: tShare } = useTranslation("linkShare");
+  const [advancedOpen, setAdvancedOpen] = useState(true);
+  const [ndaTemplates, setNdaTemplates] = useState<
+    { id: string; name: string; sourceDocumentId: string }[]
+  >([]);
+  const [ndaDocuments, setNdaDocuments] = useState<{ id: string; title: string }[]>([]);
 
   const { update } = useSecurityOptions(config, onChange);
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const [tplRes, docRes] = await Promise.all([
+          api.listNDATemplates(),
+          api.getDocuments(),
+        ]);
+        if (cancelled) return;
+        setNdaTemplates(
+          (tplRes.data ?? []).map((tpl) => ({
+            id: tpl.id,
+            name: tpl.name,
+            sourceDocumentId: tpl.source_document_id,
+          })),
+        );
+        setNdaDocuments(
+          (docRes.data ?? []).map((doc) => ({
+            id: doc.id,
+            title: doc.title,
+          })),
+        );
+      } catch {
+        if (!cancelled) {
+          setNdaTemplates([]);
+          setNdaDocuments([]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const excludeSet = useMemo(
+    () => new Set(excludeNdaDocumentIds),
+    [excludeNdaDocumentIds],
+  );
+
+  const ndaOptions = useMemo((): NdaOption[] => {
+    if (ndaTemplates.length > 0) {
+      return ndaTemplates.map((tpl) => ({
+        id: tpl.id,
+        title: tpl.name,
+        templateId: tpl.id,
+        documentId: tpl.sourceDocumentId,
+      }));
+    }
+    return ndaDocuments
+      .filter((doc) => !excludeSet.has(doc.id))
+      .map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        templateId: "",
+        documentId: doc.id,
+      }));
+  }, [ndaTemplates, ndaDocuments, excludeSet]);
+
+  const selectedNdaValue = config.ndaTemplateId || config.ndaDocumentId || "";
+  const ndaSelectionMissing =
+    config.ndaEnabled && !config.ndaTemplateId && !config.ndaDocumentId;
 
   return (
     <div className="space-y-6">
@@ -109,16 +188,88 @@ export function BundleSecurityOptions({
           {t("creator.sectionContentProtection")}
         </h3>
         <div className="divide-y divide-border/50 rounded-lg border border-border/50 bg-card/50">
-          <OptionRow
-            icon={ScrollIcon}
-            label={t("creator.nda")}
-            description={t("creator.ndaDesc")}
-            checked={config.ndaEnabled}
-            onCheckedChange={(checked) =>
-              update({ ndaEnabled: checked })
-            }
-            data-testid="security-switch-ndaEnabled"
-          />
+          <div>
+            <OptionRow
+              icon={ScrollIcon}
+              label={tShare("accessRules.additionalProtections.requireNda")}
+              description={tShare("accessRules.additionalProtections.requireNdaDescription")}
+              checked={config.ndaEnabled}
+              onCheckedChange={(checked) =>
+                update({
+                  ndaEnabled: checked,
+                  ndaDocumentId: checked ? config.ndaDocumentId : "",
+                  ndaTemplateId: checked ? config.ndaTemplateId : "",
+                })
+              }
+              data-testid="security-switch-ndaEnabled"
+            />
+            {config.ndaEnabled && (
+              <div className="space-y-2 px-3 pb-3 pl-[3.75rem]">
+                <Label className="text-xs font-normal text-muted-foreground">
+                  {tShare("accessRules.additionalProtections.ndaDocument")}
+                </Label>
+                <Select
+                  value={selectedNdaValue || null}
+                  onValueChange={(value) => {
+                    const selected = value ?? "";
+                    if (!selected || selected === "__empty__") return;
+                    const opt = ndaOptions.find(
+                      (o) =>
+                        o.id === selected ||
+                        o.templateId === selected ||
+                        o.documentId === selected,
+                    );
+                    const nextTemplateId =
+                      opt?.templateId && opt.templateId.length > 0
+                        ? opt.templateId
+                        : ndaTemplates.some((tpl) => tpl.id === selected)
+                          ? selected
+                          : "";
+                    const nextDocumentId =
+                      opt?.documentId && opt.documentId.length > 0
+                        ? opt.documentId
+                        : selected;
+                    update({
+                      ndaTemplateId: nextTemplateId,
+                      ndaDocumentId: nextDocumentId,
+                    });
+                  }}
+                >
+                  <SelectTrigger
+                    aria-label={tShare("accessRules.additionalProtections.ndaDocument")}
+                    className="w-full"
+                    data-testid="security-nda-document-select"
+                  >
+                    <SelectValue
+                      placeholder={tShare(
+                        "accessRules.additionalProtections.ndaDocumentPlaceholder",
+                      )}
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ndaOptions.length === 0 ? (
+                      <SelectItem value="__empty__" disabled>
+                        {tShare(
+                          "accessRules.additionalProtections.ndaDocumentPlaceholder",
+                        )}
+                      </SelectItem>
+                    ) : (
+                      ndaOptions.map((opt) => (
+                        <SelectItem key={opt.id} value={opt.id}>
+                          {opt.title}
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
+                {ndaSelectionMissing ? (
+                  <p className="text-xs text-destructive" data-testid="security-nda-document-error">
+                    {tShare("accessRules.errors.ndaDocumentRequired")}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
           <OptionRow
             icon={DownloadIcon}
             label={t("creator.allowDownload")}
@@ -148,6 +299,7 @@ export function BundleSecurityOptions({
         <button
           type="button"
           data-testid="security-advanced-toggle"
+          aria-expanded={advancedOpen}
           onClick={() => setAdvancedOpen((v) => !v)}
           className="flex w-full items-center gap-1.5 px-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
         >

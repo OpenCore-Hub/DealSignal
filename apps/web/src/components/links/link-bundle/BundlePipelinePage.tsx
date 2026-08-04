@@ -150,6 +150,7 @@ function BundlePipelineInner() {
           // Use explicit boolean flags when available (v2.6+), fall back to permissionType.
           ndaEnabled: link.requireNda === true || link.permissionType === "nda",
           ndaDocumentId: link.ndaDocumentId ?? "",
+          ndaTemplateId: link.ndaTemplateId ?? "",
           allowDownload: link.downloadEnabled ?? true,
           watermarkEnabled: link.watermarkEnabled ?? true,
           qaEnabled: link.qaEnabled ?? false,

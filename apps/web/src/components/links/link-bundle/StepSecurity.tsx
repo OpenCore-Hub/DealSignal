@@ -73,6 +73,7 @@ export function StepSecurity({ contacts = [] }: StepSecurityProps) {
           <BundleSecurityOptions
             config={state.config}
             onChange={handleConfigChange}
+            excludeNdaDocumentIds={state.selectedDocuments.map((d) => d.id)}
             contactSelector={
               state.config.requireEmailVerification && workspaceSlug ? (
                 <div className="px-3 pb-3 pl-[4.5rem]">

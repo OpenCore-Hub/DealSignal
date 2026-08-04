@@ -5124,6 +5124,10 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 	case lookupErr == nil:
 		// Owner approved a file that collides with an existing library title —
 		// replace in place so deal-room memberships and share links stay valid.
+		category := existing.Category
+		if category == "" {
+			category = "uploaded"
+		}
 		rebinding, rebindErr := upload.RebindDocumentContent(ctx, qtx, upload.RebindDocumentContentParams{
 			DocumentID:  existing.ID,
 			TenantID:    existing.TenantID,
@@ -5131,7 +5135,7 @@ func (s *Service) ApproveUploadedFile(ctx context.Context, fileID pgtype.UUID, r
 			StorageKey:  file.StorageKey,
 			SourceType:  sourceType,
 			FileSize:    file.FileSize,
-			Category:    "uploaded",
+			Category:    category,
 		})
 		if rebindErr != nil {
 			return fmt.Errorf("replace existing document: %w", rebindErr)

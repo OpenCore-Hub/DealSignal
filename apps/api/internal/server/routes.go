@@ -189,7 +189,7 @@ func (s *Server) registerRoutes() error {
 					MaxRowsPerSheet: s.cfg.TableIngest.MaxRowsPerSheet,
 					MaxRowsPerFile:  s.cfg.TableIngest.MaxRowsPerFile,
 				})
-			uploadSvc := upload.NewService(queries, storageClient)
+			uploadSvc := upload.NewService(queries, storageClient, s.dbPool)
 			uploadHandler := upload.NewHandler(uploadSvc, storageClient, workspaceSvc, s.cfg.AppBaseURL)
 
 			ingestionWorker := ingestion.NewWorker(ingestionSvc, 1*time.Second)

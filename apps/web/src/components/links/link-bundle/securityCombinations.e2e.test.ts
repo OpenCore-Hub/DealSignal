@@ -18,7 +18,10 @@
 
 import { describe, it, expect } from "vitest";
 import { toCreateLinkPayload } from "@/lib/apiAdapters";
-import { buildConfigFromPreset } from "./pipelineUtils";
+import {
+  buildConfigFromPreset,
+  validateBundleSecurityConfig,
+} from "./pipelineUtils";
 import {
   enforceCrossOptionConstraints,
   classifyPresetFromConfig,
@@ -140,13 +143,13 @@ function accessGate(store: StoreResult, req: AccessRequest): GateResult {
 
 interface GuardResult {
   blocked: boolean;
-  reason?: "contactRequired";
+  reason?: "contactRequired" | "ndaDocumentRequired";
 }
 
 function clientGuard(config: PermissionConfig): GuardResult {
-  const requireEmail = config.requireEmailVerification || config.ndaEnabled;
-  if (requireEmail && config.contactIds.length === 0) {
-    return { blocked: true, reason: "contactRequired" };
+  const result = validateBundleSecurityConfig(config);
+  if (!result.ok) {
+    return { blocked: true, reason: result.reason };
   }
   return { blocked: false };
 }
@@ -355,9 +358,10 @@ describe("Boolean switch cartesian product → backend storage correctness", () 
         whitelist: [],
         passwordEnabled: false,
         ndaEnabled: combo.ndaEnabled,
+        ndaDocumentId: combo.ndaEnabled ? "nda-doc-1" : "",
+        ndaTemplateId: "",
         allowDownload: combo.allowDownload,
         watermarkEnabled: combo.watermarkEnabled,
-        qaEnabled: false,
         qaEnabled: false,
         fileRequestsEnabled: false,
         indexFileEnabled: false,
@@ -446,7 +450,11 @@ describe("permission_type derivation (nda > public)", () => {
 
   it("NDA enabled → nda", () => {
     expect(
-      getPermType({ ...withContact(buildConfigFromPreset("customized")), ndaEnabled: true }),
+      getPermType({
+        ...withContact(buildConfigFromPreset("customized")),
+        ndaEnabled: true,
+        ndaDocumentId: "nda-doc-1",
+      }),
     ).toBe("nda");
   });
 
@@ -477,8 +485,18 @@ describe("Client guard block conditions", () => {
       clientGuard({
         ...buildConfigFromPreset("customized"),
         ndaEnabled: true,
+        ndaDocumentId: "nda-doc-1",
       }).reason,
     ).toBe("contactRequired");
+  });
+
+  it("NDA enabled with contact but no document → ndaDocumentRequired", () => {
+    expect(
+      clientGuard({
+        ...withContact(buildConfigFromPreset("customized")),
+        ndaEnabled: true,
+      }).reason,
+    ).toBe("ndaDocumentRequired");
   });
 });
 
@@ -555,6 +573,7 @@ describe("Regression — key scenarios", () => {
   it("scenario C: NDA only — forces email verification + NDA gate", () => {
     const config = withContact(buildConfigFromPreset("customized"));
     config.ndaEnabled = true;
+    config.ndaDocumentId = "nda-doc-1";
 
     const payload = toCreateLinkPayload(["doc-1"], config);
     const store = normalizeAndStoreConfig(payload, config.contactIds);

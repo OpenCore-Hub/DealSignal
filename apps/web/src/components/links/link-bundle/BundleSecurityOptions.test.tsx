@@ -1,11 +1,23 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import i18next from "i18next";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import { BundleSecurityOptions } from "./BundleSecurityOptions";
 import { buildConfigFromPreset } from "./pipelineUtils";
 import type { PermissionConfig } from "@/types";
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    listNDATemplates: vi.fn(async () => ({ data: [] })),
+    getDocuments: vi.fn(async () => ({
+      data: [
+        { id: "nda-doc-1", title: "NDA Agreement" },
+        { id: "shared-doc", title: "Shared Deck" },
+      ],
+    })),
+  },
+}));
 
 async function setupI18n() {
   const i18n = i18next.createInstance();
@@ -38,7 +50,15 @@ async function setupI18n() {
           "creator.maxViewsOptions.10": "10",
           "creator.maxViewsOptions.50": "50",
           "creator.maxViewsOptions.100": "100",
-
+        },
+        linkShare: {
+          "accessRules.additionalProtections.requireNda": "Require NDA to view",
+          "accessRules.additionalProtections.requireNdaDescription":
+            "Viewer must agree to NDA before access",
+          "accessRules.additionalProtections.ndaDocument": "NDA agreement document",
+          "accessRules.additionalProtections.ndaDocumentPlaceholder": "Select a document",
+          "accessRules.errors.ndaDocumentRequired":
+            "Please select an NDA agreement document",
         },
       },
     },
@@ -50,16 +70,35 @@ async function setupI18n() {
 async function renderSecurityOptions(
   config: PermissionConfig,
   onChange = vi.fn(),
+  excludeNdaDocumentIds: string[] = [],
 ) {
   const i18n = await setupI18n();
   return render(
     <I18nextProvider i18n={i18n}>
-      <BundleSecurityOptions config={config} onChange={onChange} />
+      <BundleSecurityOptions
+        config={config}
+        onChange={onChange}
+        excludeNdaDocumentIds={excludeNdaDocumentIds}
+      />
     </I18nextProvider>,
   );
 }
 
 describe("BundleSecurityOptions switch interaction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("expands advanced settings by default", async () => {
+    const config = buildConfigFromPreset("customized");
+    await renderSecurityOptions(config);
+    expect(screen.getByTestId("security-advanced-toggle")).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    expect(screen.getByTestId("security-expiry-select")).toBeInTheDocument();
+  });
+
   it("toggles email verification switch", async () => {
     const onChange = vi.fn();
     const config = buildConfigFromPreset("customized");
@@ -98,5 +137,22 @@ describe("BundleSecurityOptions switch interaction", () => {
     expect(onChange).toHaveBeenCalledOnce();
     const next = onChange.mock.calls[0][0] as PermissionConfig;
     expect(next.watermarkEnabled).toBe(false);
+  });
+
+  it("shows NDA picker and missing-selection error when enabled without doc", async () => {
+    const config = {
+      ...buildConfigFromPreset("customized"),
+      ndaEnabled: true,
+      requireEmailVerification: true,
+    };
+    await renderSecurityOptions(config, vi.fn(), ["shared-doc"]);
+
+    expect(screen.getByTestId("security-nda-document-select")).toBeInTheDocument();
+    expect(screen.getByTestId("security-nda-document-error")).toHaveTextContent(
+      "Please select an NDA agreement document",
+    );
+    await waitFor(() => {
+      expect(screen.getByText("Require NDA to view")).toBeInTheDocument();
+    });
   });
 });

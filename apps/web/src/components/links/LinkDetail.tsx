@@ -16,6 +16,7 @@ import { LinkAccessLog } from "./LinkAccessLog";
 import { LinkShareDialog } from "./share";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
+import { documentsSharePath } from "@/lib/documentsSharePath";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
 import type { AccessLog, Document, Link } from "@/types";
@@ -116,7 +117,7 @@ export function LinkDetail() {
   if (error) {
     return (
       <div className="space-y-6">
-        <SmartBackButton fallbackTo={`/${workspaceSlug}/links`} fallbackLabel={t("backToLinks")} />
+        <SmartBackButton fallbackTo={documentsSharePath(workspaceSlug!)} fallbackLabel={t("backToLinks")} />
         <Card>
           <CardContent className="py-12 text-center">
             <p className="text-body text-destructive mb-4">{tc("error.loadFailed")}{error ? `: ${error}` : ""}</p>
@@ -131,7 +132,7 @@ export function LinkDetail() {
 
   return (
     <div className="space-y-6">
-      <SmartBackButton fallbackTo={`/${workspaceSlug}/links`} fallbackLabel={t("backToLinks")} />
+      <SmartBackButton fallbackTo={documentsSharePath(workspaceSlug!)} fallbackLabel={t("backToLinks")} />
 
       <PageHeader
         title={(link.shortUrl || link.id).split("/").pop() || link.id}

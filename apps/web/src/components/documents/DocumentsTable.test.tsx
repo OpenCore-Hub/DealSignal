@@ -19,6 +19,12 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
+vi.mock("@/components/links/LinksTable", () => ({
+  LinksTable: ({ documentId }: { documentId?: string }) => (
+    <div data-testid="links-table">{documentId ? `filtered:${documentId}` : "all-links"}</div>
+  ),
+}));
+
 vi.mock("@/lib/formatters", () => ({
   formatFileSize: vi.fn(() => "1 MB"),
   formatDate: vi.fn(() => "Jun 20, 2026"),
@@ -28,7 +34,8 @@ const resources = {
   en: {
     documents: {
       filters: {
-        all: "All Documents",
+        all: "Documents",
+        shared: "Shared",
         recent: "Recently Accessed",
         popular: "High Popularity",
         unshared: "Unshared",
@@ -64,6 +71,11 @@ const resources = {
         pending: "Pending",
       },
     },
+    links: {
+      page: {
+        createLink: "Create Link",
+      },
+    },
     common: { retry: "Retry", preview: "Preview", view: "View", addToDealRoom: "Add to Deal Room" },
   },
 };
@@ -73,7 +85,7 @@ async function initI18n() {
   await instance.use(initReactI18next).init({
     lng: "en",
     fallbackLng: "en",
-    ns: ["documents", "common"],
+    ns: ["documents", "common", "links"],
     defaultNS: "documents",
     resources,
     interpolation: { escapeValue: false },
@@ -149,6 +161,18 @@ describe("DocumentsTable", () => {
       }),
     );
 
+    expect(screen.getByRole("tab", { name: "Documents" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Shared" })).toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Recently Accessed" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("tab", { name: "Unshared" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Shared" }));
+    expect(await screen.findByTestId("links-table")).toHaveTextContent("all-links");
+    expect(screen.getByRole("button", { name: "Create Link" })).toBeInTheDocument();
+    expect(getDocumentsMock).not.toHaveBeenCalledWith("shared", undefined, {
+      excludeDealRoom: true,
+    });
+
     fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
 
     await waitFor(() =>
@@ -174,7 +198,18 @@ describe("DocumentsTable", () => {
     expect(screen.getByRole("button", { name: "Upload Document" })).toBeInTheDocument();
   });
 
-  it("shows search and upload button when documents exist", async () => {
+  it("keeps Share tab reachable when document fetch fails", async () => {
+    getDocumentsMock.mockRejectedValue(new Error("boom"));
+    await renderTable();
+
+    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Shared" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Shared" }));
+    expect(await screen.findByTestId("links-table")).toHaveTextContent("all-links");
+  });
+
+  it("shows search and upload on Documents tab and hides them on other tabs", async () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     await renderTable();
 
@@ -187,6 +222,12 @@ describe("DocumentsTable", () => {
 
     expect(screen.getByPlaceholderText("Search documents...")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Upload Document" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("tab", { name: "Shared" }));
+    expect(await screen.findByTestId("links-table")).toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search documents...")).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Upload Document" })).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Create Link" })).toBeInTheDocument();
   });
 
   it("shows a filter-specific empty state when the filtered list is empty", async () => {

@@ -1,6 +1,21 @@
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { PermissionConfig, PermissionPreset } from "@/types";
 
+/** Client-side guards before create/update — mirrors StepReview checks. */
+export function validateBundleSecurityConfig(
+  config: PermissionConfig,
+): { ok: true } | { ok: false; reason: "contactRequired" | "ndaDocumentRequired" } {
+  const emailRequired =
+    config.requireEmailVerification || config.ndaEnabled;
+  if (emailRequired && config.contactIds.length === 0) {
+    return { ok: false, reason: "contactRequired" };
+  }
+  if (config.ndaEnabled && !config.ndaTemplateId && !config.ndaDocumentId) {
+    return { ok: false, reason: "ndaDocumentRequired" };
+  }
+  return { ok: true };
+}
+
 export function buildConfigFromPreset(
   preset: PermissionPreset,
   overrides?: Partial<PermissionConfig>,
@@ -20,6 +35,7 @@ export function buildConfigFromPreset(
     passwordEnabled: template.passwordEnabled,
     ndaEnabled: template.ndaEnabled,
     ndaDocumentId: "",
+    ndaTemplateId: "",
     allowDownload: template.allowDownload,
     watermarkEnabled: template.watermarkEnabled,
     qaEnabled: template.qaEnabled ?? false,

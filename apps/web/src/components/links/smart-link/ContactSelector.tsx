@@ -1,8 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router";
 import { CaretDownIcon, CheckIcon, PlusIcon, UserIcon, XIcon } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Combobox } from "@base-ui/react/combobox";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
@@ -23,13 +30,24 @@ function isValidEmail(value: string) {
   return EMAIL_RE.test(value.trim());
 }
 
-export function ContactSelector({ workspaceSlug, value, onChange, contacts: contactsProp }: ContactSelectorProps) {
+export function ContactSelector({
+  workspaceSlug: _workspaceSlug,
+  value,
+  onChange,
+  contacts: contactsProp,
+}: ContactSelectorProps) {
   const { t } = useTranslation("links");
-  const navigate = useNavigate();
+  const { t: tShare } = useTranslation("linkShare");
+  const { t: tc } = useTranslation("common");
   const [fetchedContacts, setFetchedContacts] = useState<Contact[]>([]);
+  const [createdContacts, setCreatedContacts] = useState<Contact[]>([]);
   const [loading, setLoading] = useState(!contactsProp);
   const [comboboxValue, setComboboxValue] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [addContactOpen, setAddContactOpen] = useState(false);
+  const [newContactEmail, setNewContactEmail] = useState("");
+  const [newContactName, setNewContactName] = useState("");
+  const [creatingContact, setCreatingContact] = useState(false);
   // Track which contact we're adding so we can clear combobox after add.
   const addTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -40,7 +58,12 @@ export function ContactSelector({ workspaceSlug, value, onChange, contacts: cont
     };
   }, []);
 
-  const contacts = contactsProp ?? fetchedContacts;
+  const contacts = useMemo(() => {
+    const base = contactsProp ?? fetchedContacts;
+    if (createdContacts.length === 0) return base;
+    const ids = new Set(base.map((c) => c.id));
+    return [...base, ...createdContacts.filter((c) => !ids.has(c.id))];
+  }, [contactsProp, fetchedContacts, createdContacts]);
 
   useEffect(() => {
     if (contactsProp) return;
@@ -99,10 +122,10 @@ export function ContactSelector({ workspaceSlug, value, onChange, contacts: cont
 
   const canCreateFromQuery = query.trim() && filtered.length === 0 && isValidEmail(query);
 
-  const goToNewContact = (prefillEmail?: string) => {
-    navigate(`/${workspaceSlug}/contacts/new`, {
-      state: { from: "link-creator", fromPipeline: true, ...(prefillEmail && { email: prefillEmail }) },
-    });
+  const openAddContact = (prefillEmail?: string) => {
+    setNewContactEmail(prefillEmail?.trim() ?? "");
+    setNewContactName("");
+    setAddContactOpen(true);
   };
 
   const addContact = (contactId: string) => {
@@ -119,6 +142,32 @@ export function ContactSelector({ workspaceSlug, value, onChange, contacts: cont
   const removeContact = (contactId: string) => {
     onChange(value.filter((id) => id !== contactId));
   };
+
+  const handleCreateContact = async () => {
+    const email = newContactEmail.trim();
+    if (!email || !isValidEmail(email)) return;
+    setCreatingContact(true);
+    try {
+      const contact = await api.createContact({
+        email,
+        name: newContactName.trim() || undefined,
+      });
+      setCreatedContacts((prev) => [...prev, contact]);
+      if (!contactsProp) {
+        setFetchedContacts((prev) => [...prev, contact]);
+      }
+      addContact(contact.id);
+      setAddContactOpen(false);
+      setNewContactEmail("");
+      setNewContactName("");
+    } catch {
+      // Error toast is handled by the api client.
+    } finally {
+      setCreatingContact(false);
+    }
+  };
+
+  const canSubmitCreate = isValidEmail(newContactEmail);
 
   return (
     <div className="ml-6 space-y-2 rounded-md border border-border p-3">
@@ -247,7 +296,8 @@ export function ContactSelector({ workspaceSlug, value, onChange, contacts: cont
                     variant="ghost"
                     size="sm"
                     className="w-full justify-start gap-1 text-xs"
-                    onClick={() => goToNewContact(query.trim())}
+                    data-testid="contact-create-from-search"
+                    onClick={() => openAddContact(query.trim())}
                   >
                     <PlusIcon size={14} />
                     {t("creator.createContactFromSearch", { email: query.trim() })}
@@ -261,16 +311,70 @@ export function ContactSelector({ workspaceSlug, value, onChange, contacts: cont
                   variant="ghost"
                   size="sm"
                   className="w-full justify-start gap-1 text-xs"
-                  onClick={() => goToNewContact()}
+                  data-testid="contact-add-new"
+                  onClick={() => openAddContact()}
                 >
                   <PlusIcon size={14} />
-                  {t("creator.newContact")}
+                  {tShare("contactPicker.addContact")}
                 </Button>
               </div>
             </Combobox.Popup>
           </Combobox.Positioner>
         </Combobox.Portal>
       </Combobox.Root>
+
+      <Dialog open={addContactOpen} onOpenChange={setAddContactOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>{tShare("contactPicker.addContactTitle")}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="bundle-new-contact-email">
+                {tShare("contactPicker.email")}
+              </Label>
+              <Input
+                id="bundle-new-contact-email"
+                type="email"
+                value={newContactEmail}
+                onChange={(e) => setNewContactEmail(e.target.value)}
+                placeholder={tShare("contactPicker.emailPlaceholder")}
+                data-testid="contact-add-email"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="bundle-new-contact-name">
+                {tShare("contactPicker.name")}
+              </Label>
+              <Input
+                id="bundle-new-contact-name"
+                value={newContactName}
+                onChange={(e) => setNewContactName(e.target.value)}
+                placeholder={tShare("contactPicker.namePlaceholder")}
+                data-testid="contact-add-name"
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAddContactOpen(false)}
+              disabled={creatingContact}
+            >
+              {tc("cancel")}
+            </Button>
+            <Button
+              onClick={() => void handleCreateContact()}
+              disabled={creatingContact || !canSubmitCreate}
+              data-testid="contact-add-submit"
+            >
+              {creatingContact
+                ? tShare("contactPicker.creating")
+                : tShare("contactPicker.create")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
