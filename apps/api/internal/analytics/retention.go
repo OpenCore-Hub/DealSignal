@@ -34,9 +34,17 @@ func NewRetentionCleaner(pool dbPool, q *db.Queries, accessLogsDays, pageViewsDa
 	}
 }
 
-// Start runs the cleaner immediately and then on a 24h ticker until ctx is done.
+// Start begins the retention loop in a background goroutine.
+// Must not block — registerRoutes runs on the HTTP listen path.
 func (r *RetentionCleaner) Start(ctx context.Context) {
+	go r.loop(ctx)
+}
+
+func (r *RetentionCleaner) loop(ctx context.Context) {
 	r.runOnce(ctx)
+	if r.interval <= 0 {
+		return
+	}
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {

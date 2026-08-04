@@ -24,8 +24,17 @@ func NewWindowAggregator(q *db.Queries, window time.Duration) *WindowAggregator 
 	return &WindowAggregator{queries: q, window: window}
 }
 
+// Start begins the aggregation loop in a background goroutine.
+// Must not block — registerRoutes runs on the HTTP listen path.
 func (a *WindowAggregator) Start(ctx context.Context) {
+	go a.loop(ctx)
+}
+
+func (a *WindowAggregator) loop(ctx context.Context) {
 	a.runOnce(ctx)
+	if a.window <= 0 {
+		return
+	}
 	ticker := time.NewTicker(a.window)
 	defer ticker.Stop()
 	for {

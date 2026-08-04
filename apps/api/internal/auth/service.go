@@ -4,12 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"strings"
 	"time"
 	"unicode"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,6 +23,8 @@ const (
 	accessTokenDuration         = 15 * time.Minute
 	refreshTokenDuration        = 7 * 24 * time.Hour
 	defaultVerificationTokenTTL = 24 * time.Hour
+	// Background send budget (covers provider retries). Does not block Register.
+	defaultVerificationSendTimeout = 30 * time.Second
 )
 
 var (
@@ -88,9 +92,8 @@ func WithVerificationTokenTTL(ttl time.Duration) ServiceOption {
 	return func(s *Service) { s.verificationTokenTTL = ttl }
 }
 
-// WithSendTimeout caps how long the registration path waits for the
-// verification email to be accepted by the mailer. This prevents a slow or
-// misconfigured provider from blocking user registration.
+// WithSendTimeout caps how long the *background* verification email send may
+// run (including provider retries). Registration never waits on this budget.
 func WithSendTimeout(timeout time.Duration) ServiceOption {
 	return func(s *Service) { s.sendTimeout = timeout }
 }
@@ -103,7 +106,7 @@ func NewService(q *db.Queries, store TokenStore, opts ...ServiceOption) *Service
 		mailer:               &noopMailer{},
 		appBaseURL:           "http://localhost:8080",
 		verificationTokenTTL: defaultVerificationTokenTTL,
-		sendTimeout:          30 * time.Second,
+		sendTimeout:          defaultVerificationSendTimeout,
 	}
 	if vs, ok := store.(verificationTokenStore); ok {
 		s.verifyStore = vs
@@ -204,10 +207,9 @@ func (s *Service) Register(ctx context.Context, email, password string) (User, T
 		return User{}, TokenPair{}, fmt.Errorf("store refresh token: %w", err)
 	}
 
-	// Send verification email. The configured mailer may be synchronous or
-	// queued; either way a failure here is non-fatal because the user has
-	// already been created and can request a new verification email later.
-	_ = s.sendVerificationEmail(ctx, uuidToString(u.ID), u.Email)
+	// Never block signup on SMTP/Resend latency — user + tokens are already durable.
+	// Failures are logged; the user can request a new verification email later.
+	s.enqueueVerificationEmail(ctx, uuidToString(u.ID), u.Email)
 
 	return userFromDB(u), pair, nil
 }
@@ -316,19 +318,42 @@ func (s *Service) VerifyEmailByToken(ctx context.Context, token string) error {
 	return s.VerifyEmail(ctx, userID)
 }
 
+// enqueueVerificationEmail starts a detached send so HTTP Register can return
+// immediately. Uses WithoutCancel so client disconnect cannot abort token minting.
+func (s *Service) enqueueVerificationEmail(parent context.Context, userID, email string) {
+	if s == nil || s.verifyStore == nil || s.mailer == nil {
+		return
+	}
+	timeout := s.sendTimeout
+	if timeout <= 0 {
+		timeout = defaultVerificationSendTimeout
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(parent), timeout)
+		defer cancel()
+		if err := s.sendVerificationEmail(ctx, userID, email); err != nil {
+			logger.ErrorCtx(ctx, "auth: verification email send failed", err,
+				slog.String("user_id", userID),
+				slog.String("email", email),
+			)
+		}
+	}()
+}
+
 func (s *Service) sendVerificationEmail(ctx context.Context, userID, email string) error {
 	if s.verifyStore == nil || s.mailer == nil {
 		return nil
 	}
 	token, err := s.verifyStore.CreateVerificationToken(ctx, userID, s.verificationTokenTTL)
 	if err != nil {
-		return err
+		return fmt.Errorf("create verification token: %w", err)
 	}
 	link := fmt.Sprintf("%s/verify-email/%s", strings.TrimRight(s.appBaseURL, "/"), token)
-	sendCtx, cancel := context.WithTimeout(ctx, s.sendTimeout)
-	defer cancel()
-	_, err = s.mailer.SendVerificationEmail(sendCtx, email, link)
-	return err
+	_, err = s.mailer.SendVerificationEmail(ctx, email, link)
+	if err != nil {
+		return fmt.Errorf("send verification email: %w", err)
+	}
+	return nil
 }
 
 // isUniqueViolation is a simple pgx unique-violation check.

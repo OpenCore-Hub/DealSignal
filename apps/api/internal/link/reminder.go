@@ -26,8 +26,17 @@ func NewExpiryReminder(q *db.Queries, n Notifier, checkInterval time.Duration) *
 	return &ExpiryReminder{queries: q, notifier: n, interval: checkInterval}
 }
 
+// Start begins the reminder loop in a background goroutine.
+// Must not block — registerRoutes runs on the HTTP listen path.
 func (r *ExpiryReminder) Start(ctx context.Context) {
+	go r.loop(ctx)
+}
+
+func (r *ExpiryReminder) loop(ctx context.Context) {
 	r.runOnce(ctx)
+	if r.interval <= 0 {
+		return
+	}
 	ticker := time.NewTicker(r.interval)
 	defer ticker.Stop()
 	for {

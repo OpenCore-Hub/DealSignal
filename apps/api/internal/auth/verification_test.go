@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -59,6 +60,89 @@ func TestSendVerificationEmailUsesFrontendURL(t *testing.T) {
 	}
 	if !strings.HasPrefix(mail.lastLink, "https://app.example.com/verify-email/") {
 		t.Errorf("unexpected verification link: %s", mail.lastLink)
+	}
+}
+
+type blockingMailer struct {
+	started chan struct{}
+	release chan struct{}
+	done    chan struct{}
+	mu      sync.Mutex
+	to      string
+	link    string
+}
+
+func (m *blockingMailer) SendVerificationEmail(ctx context.Context, to, verificationLink string) (string, error) {
+	select {
+	case <-m.started:
+	default:
+		close(m.started)
+	}
+	select {
+	case <-m.release:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	m.mu.Lock()
+	m.to = to
+	m.link = verificationLink
+	m.mu.Unlock()
+	close(m.done)
+	return "", nil
+}
+
+func (m *blockingMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, linkName, linkURL string) (string, error) {
+	return "", nil
+}
+
+func (m *blockingMailer) SendEmail(ctx context.Context, job mailer.EmailJob) (string, error) {
+	return m.SendVerificationEmail(ctx, job.Recipient, job.VerificationLink)
+}
+
+func TestEnqueueVerificationEmailDoesNotBlock(t *testing.T) {
+	store := NewMemoryTokenStore()
+	mail := &blockingMailer{
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+		done:    make(chan struct{}),
+	}
+	svc := NewService(nil, store,
+		WithMailer(mail),
+		WithAppBaseURL("https://app.example.com"),
+		WithSendTimeout(2*time.Second),
+	)
+
+	returned := make(chan struct{})
+	go func() {
+		svc.enqueueVerificationEmail(context.Background(), "user-id", "user@example.com")
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("enqueueVerificationEmail blocked on slow mailer")
+	}
+
+	select {
+	case <-mail.started:
+	case <-time.After(time.Second):
+		t.Fatal("background send never started")
+	}
+	close(mail.release)
+
+	select {
+	case <-mail.done:
+	case <-time.After(time.Second):
+		t.Fatal("background send did not finish")
+	}
+	mail.mu.Lock()
+	defer mail.mu.Unlock()
+	if mail.to != "user@example.com" {
+		t.Fatalf("expected email to user@example.com, got %s", mail.to)
+	}
+	if !strings.HasPrefix(mail.link, "https://app.example.com/verify-email/") {
+		t.Fatalf("unexpected verification link: %s", mail.link)
 	}
 }
 

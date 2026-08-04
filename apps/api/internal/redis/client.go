@@ -68,6 +68,22 @@ func (c *Client) RDB() *redis.Client {
 	return c.rdb
 }
 
+// Get returns a string value for key. Missing keys return ("", redis.Nil).
+func (c *Client) Get(ctx context.Context, key string) (string, error) {
+	if c == nil || c.rdb == nil {
+		return "", errors.New("redis client not available")
+	}
+	return c.rdb.Get(ctx, key).Result()
+}
+
+// Set stores a string value with TTL.
+func (c *Client) Set(ctx context.Context, key, value string, ttl time.Duration) error {
+	if c == nil || c.rdb == nil {
+		return errors.New("redis client not available")
+	}
+	return c.rdb.Set(ctx, key, value, ttl).Err()
+}
+
 // SetNX sets a key only if it does not exist, with a TTL.
 func (c *Client) SetNX(ctx context.Context, key string, value interface{}, ttl time.Duration) (bool, error) {
 	if c == nil || c.rdb == nil {
