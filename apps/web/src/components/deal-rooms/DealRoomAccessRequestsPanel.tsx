@@ -12,6 +12,8 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { api } from "@/lib/api";
+import { accessRequestReviewErrorMessage } from "@/lib/accessRequestErrors";
+import { useAccessRequestReview } from "@/hooks/useAccessRequestReview";
 import { useAsyncData } from "@/hooks/useAsyncData";
 
 type PendingAccessRequest = {
@@ -31,7 +33,7 @@ interface DealRoomAccessRequestsPanelProps {
 }
 
 export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAccessRequestsPanelProps) {
-  const { t } = useTranslation("dealRooms");
+  const { t } = useTranslation(["dealRooms", "linkShare", "common"]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const {
     data: requests,
@@ -39,9 +41,12 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
     error,
     refetch,
   } = useAsyncData(async () => {
-    const [roomRes, linksRes] = await Promise.all([
+    // Creator-scoped pending inbox + room membership requests. Avoids N+1
+    // per-link list calls that previously leaked emails to non-creators.
+    const [roomRes, linksRes, pendingLinkRes] = await Promise.all([
       api.getDealRoomAccessRequests(roomId),
       api.getDealRoomLinks(roomId),
+      api.getPendingLinkAccessRequests(),
     ]);
     const roomPending: PendingAccessRequest[] = (roomRes.data ?? [])
       .filter((r) => r.status === "pending")
@@ -53,71 +58,92 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
       }));
 
     const links = linksRes.data ?? [];
-    const linkEntries = await Promise.all(
-      links.map(async (link) => {
-        const res = await api.getLinkAccessRequests(link.id);
-        return (res.data ?? [])
-          .filter((r) => r.status === "pending")
-          .map(
-            (r): PendingAccessRequest => ({
-              id: r.id,
-              email: r.email,
-              reason: r.reason,
-              signerName: r.signer_name,
-              linkId: link.id,
-              linkName: link.name || undefined,
-              source: "link",
-            })
-          );
-      })
+    const linkMeta = new Map(
+      links.map((link) => [link.id, link.name || undefined] as const),
     );
+    const roomLinkIds = new Set(links.map((link) => link.id));
+    const linkPending: PendingAccessRequest[] = (pendingLinkRes.data ?? [])
+      .filter((r) => roomLinkIds.has(r.link_id))
+      .map((r) => ({
+        id: r.id,
+        email: r.email,
+        reason: r.reason,
+        signerName: r.signer_name,
+        linkId: r.link_id,
+        linkName: linkMeta.get(r.link_id) || r.link_name || undefined,
+        source: "link" as const,
+      }));
 
-    return [...roomPending, ...linkEntries.flat()];
+    return [...roomPending, ...linkPending];
   }, [roomId]);
 
   const pending = requests ?? [];
 
+  const afterLinkReview = useCallback(async () => {
+    await refetch();
+    onChanged?.();
+  }, [onChanged, refetch]);
+  const {
+    busyId: linkBusyId,
+    approve: approveLink,
+    reject: rejectLink,
+  } = useAccessRequestReview(afterLinkReview);
+
   const handleApprove = useCallback(
     async (request: PendingAccessRequest) => {
+      if (request.source === "link" && request.linkId) {
+        await approveLink(request.linkId, request);
+        return;
+      }
       setBusyId(request.id);
       try {
-        if (request.source === "link" && request.linkId) {
-          await api.approveLinkAccessRequest(request.linkId, request.id);
-        } else {
-          await api.approveDealRoomAccessRequest(roomId, request.id);
-        }
-        toast.success(t("accessRequests.approveSuccess"));
+        await api.approveDealRoomAccessRequest(roomId, request.id);
+        toast.success(t("dealRooms:accessRequests.approveSuccess"));
         await refetch();
         onChanged?.();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("accessRequests.approveError"));
+        toast.error(
+          accessRequestReviewErrorMessage(
+            err,
+            (key) => t(`linkShare:${key}`),
+            "accessRequests.approveError",
+          ),
+        );
       } finally {
         setBusyId(null);
       }
     },
-    [roomId, onChanged, refetch, t]
+    [approveLink, onChanged, refetch, roomId, t],
   );
 
   const handleReject = useCallback(
     async (request: PendingAccessRequest) => {
+      if (request.source === "link" && request.linkId) {
+        await rejectLink(request.linkId, request);
+        return;
+      }
       setBusyId(request.id);
       try {
-        if (request.source === "link" && request.linkId) {
-          await api.rejectLinkAccessRequest(request.linkId, request.id);
-        } else {
-          await api.rejectDealRoomAccessRequest(roomId, request.id);
-        }
-        toast.success(t("accessRequests.rejectSuccess"));
+        await api.rejectDealRoomAccessRequest(roomId, request.id);
+        toast.success(t("dealRooms:accessRequests.rejectSuccess"));
         await refetch();
         onChanged?.();
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : t("accessRequests.rejectError"));
+        toast.error(
+          accessRequestReviewErrorMessage(
+            err,
+            (key) => t(`linkShare:${key}`),
+            "accessRequests.rejectError",
+          ),
+        );
       } finally {
         setBusyId(null);
       }
     },
-    [roomId, onChanged, refetch, t]
+    [onChanged, refetch, rejectLink, roomId, t],
   );
+
+  const activeBusyId = busyId ?? linkBusyId;
 
   if (loading && !requests && !error) {
     return (
@@ -132,7 +158,7 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
         role="alert"
         data-testid="deal-room-access-requests-error"
       >
-        <p className="text-destructive">{t("accessRequests.loadFailed")}</p>
+        <p className="text-destructive">{t("dealRooms:accessRequests.loadFailed")}</p>
         <Button
           size="sm"
           variant="outline"
@@ -157,10 +183,10 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-h3">
           <UserPlus size={20} />
-          {t("accessRequests.title")}
+          {t("dealRooms:accessRequests.title")}
           <Badge variant="warm">{pending.length}</Badge>
         </CardTitle>
-        <CardDescription>{t("accessRequests.description")}</CardDescription>
+        <CardDescription>{t("dealRooms:accessRequests.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {pending.map((request) => (
@@ -173,12 +199,12 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
               <p className="truncate text-sm font-medium">{request.email}</p>
               {request.signerName ? (
                 <p className="text-sm text-muted-foreground">
-                  {t("accessRequests.signerName", { name: request.signerName })}
+                  {t("dealRooms:accessRequests.signerName", { name: request.signerName })}
                 </p>
               ) : null}
               {request.linkName ? (
                 <p className="text-sm text-muted-foreground">
-                  {t("accessRequests.linkLabel", { name: request.linkName })}
+                  {t("dealRooms:accessRequests.linkLabel", { name: request.linkName })}
                 </p>
               ) : null}
               {request.reason ? (
@@ -189,21 +215,21 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
               <Button
                 size="sm"
                 className="gap-1"
-                disabled={busyId === request.id}
+                disabled={activeBusyId === request.id}
                 onClick={() => { void handleApprove(request); }}
               >
                 <Check size={14} />
-                {t("accessRequests.approve")}
+                {t("dealRooms:accessRequests.approve")}
               </Button>
               <Button
                 size="sm"
                 variant="outline"
                 className="gap-1"
-                disabled={busyId === request.id}
+                disabled={activeBusyId === request.id}
                 onClick={() => { void handleReject(request); }}
               >
                 <X size={14} />
-                {t("accessRequests.reject")}
+                {t("dealRooms:accessRequests.reject")}
               </Button>
             </div>
           </div>

@@ -232,7 +232,14 @@
     "approveError": "批准访问申请失败",
     "rejectSuccess": "已拒绝访问申请",
     "rejectError": "拒绝访问申请失败",
-    "loadFailed": "加载访问申请失败"
+    "loadFailed": "加载访问申请失败",
+    "applicantWithName": "{{name}} · {{email}}",
+    "forbidden": "仅链接创建者可以审批访问申请",
+    "notFound": "未找到该访问申请",
+    "notPending": "该访问申请已不在待审批状态",
+    "blocked": "该邮箱已被禁止申请访问",
+    "codeSendFailed": "已批准访问，但验证码发送失败。请在分享设置中重新发送。",
+    "linkNotFound": "当前工作区未找到该分享链接"
   },
   "activity": {
     "title": "链接活动",

@@ -1338,8 +1338,26 @@ export const handlers = [
     return new HttpResponse(null, { status: 204 });
   }),
 
+  http.get("*/api/workspaces/:workspaceSlug/links/pending-access-requests", () => {
+    const data = mockLinkAccessRequests
+      .filter((r) => r.status === "pending")
+      .map((r) => {
+        const link = mockLinks.find((l) => l.id === r.link_id);
+        return {
+          ...r,
+          link_name: link?.name ?? "",
+          document_title: link?.documentTitle ?? "",
+          short_url: link?.shortUrl ?? "",
+        };
+      });
+    return HttpResponse.json({ data });
+  }),
+
   http.get("*/api/workspaces/:workspaceSlug/links/:id/access-requests", ({ params }) => {
     const linkId = params.id as string;
+    if (linkId === "pending-access-requests") {
+      return new HttpResponse(null, { status: 404 });
+    }
     const data = mockLinkAccessRequests.filter((r) => r.link_id === linkId);
     return HttpResponse.json({ data });
   }),

@@ -12,6 +12,7 @@ import { api, type DashboardStats, type InsightsOverview } from "@/lib/api";
 import { useSignalStore } from "@/stores/signalStore";
 import { sortSignals } from "@/lib/sortSignals";
 import type { ActionItem, DealRoom } from "@/types";
+import { documentsSharePath } from "@/lib/documentsSharePath";
 import { MetricsCards } from "./MetricsCards";
 import { AttentionZone } from "./AttentionZone";
 import { ActiveRoomsSection } from "./ActiveRoomsSection";
@@ -72,6 +73,9 @@ export function DashboardPage() {
     if (!workspaceSlug || !action.sourceType || !action.sourceId) return;
     switch (action.sourceType) {
       case "link_access_request":
+        // Approve inbox lives on Document Library → Share; sourceId is the link id.
+        navigate(documentsSharePath(workspaceSlug, { linkId: action.sourceId }));
+        break;
       case "link_question":
       case "uploaded_file":
       case "expiring_link":

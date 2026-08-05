@@ -32,12 +32,12 @@ import type {
   DealRoomTemplate,
   Document,
   DocumentFilter,
-  Evidence,
   HeatAlert,
   HeatLevel,
   IntegrationStatus,
   Link,
   LinkAccessRequest,
+  PendingLinkAccessRequest,
   LinkAnalytics,
   LinkAccessCodeContact,
   LinkRecentVisitor,
@@ -443,11 +443,15 @@ export const api = {
       total: res.total,
     };
   },
-  getPageSignedUrl: (id: string, pageNumber: number) =>
+  getPageSignedUrl: (id: string, pageNumber: number, opts?: { signal?: AbortSignal }) =>
     request<{ page_number: number; image_url: string; expires_at: string; width: number; height: number }>(
       getWorkspaceSlug(),
       `/documents/${id}/pages/signed-url`,
-      { method: "POST", body: JSON.stringify({ page_number: pageNumber }) }
+      {
+        method: "POST",
+        body: JSON.stringify({ page_number: pageNumber }),
+        signal: opts?.signal,
+      }
     ),
   getDocumentDownloadUrl: (id: string) =>
     request<{ download_url: string; expires_at: string; filename: string; content_type: string }>(
@@ -854,6 +858,11 @@ export const api = {
     }),
 
   // Link access requests (visitor authorization applications).
+  getPendingLinkAccessRequests: () =>
+    request<{ data: PendingLinkAccessRequest[] }>(
+      getWorkspaceSlug(),
+      "/links/pending-access-requests",
+    ),
   getLinkAccessRequests: (linkId: string) =>
     request<{ data: LinkAccessRequest[] }>(getWorkspaceSlug(), `/links/${linkId}/access-requests`),
   approveLinkAccessRequest: (linkId: string, requestId: string) =>

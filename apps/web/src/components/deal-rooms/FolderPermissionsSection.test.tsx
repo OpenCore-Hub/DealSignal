@@ -92,7 +92,7 @@ i18nInstance.use(initReactI18next).init({
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomLinks: vi.fn(),
-    getLinkAccessRequests: vi.fn(),
+    getPendingLinkAccessRequests: vi.fn(),
     updateLink: vi.fn(),
     deleteLink: vi.fn(),
   },
@@ -247,7 +247,7 @@ describe("FolderPermissionsSection refresh", () => {
 
   it("opens link activity when clicking a share link row", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
-    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -266,7 +266,7 @@ describe("FolderPermissionsSection refresh", () => {
       shortUrl: "http://localhost/l/13bb3665bfd8254deae860c0cd20ffa6",
     });
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([link]));
-    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -285,7 +285,7 @@ describe("FolderPermissionsSection refresh", () => {
 
   it("shows create-new-link above the table when links already exist", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
-    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
     localStorage.setItem(
       "dealsignal:deal-room-access-defaults:room-1",
       JSON.stringify({ requireEmail: true })
@@ -305,7 +305,7 @@ describe("FolderPermissionsSection refresh", () => {
 
   it("requests paginated links with created_at_desc by default", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
-    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -326,7 +326,7 @@ describe("FolderPermissionsSection refresh", () => {
 
   it("cycles created-at sort: first click keeps desc, second click asc", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
-    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -365,7 +365,7 @@ describe("FolderPermissionsSection refresh", () => {
       const data = q ? all.filter((l) => (l.name || "").toLowerCase().includes(q)) : all;
       return pageResponse(data);
     });
-    vi.mocked(api.getLinkAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
     vi.mocked(api.deleteLink).mockResolvedValue(undefined as never);
 
     render(

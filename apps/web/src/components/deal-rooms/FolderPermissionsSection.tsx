@@ -144,14 +144,15 @@ export function FolderPermissionsSection({
 
   const { data: pendingByLinkId, error: pendingError, refetch: refetchPending } = useAsyncData(async () => {
     if (linkList.length === 0) return {} as Record<string, number>;
-    const entries = await Promise.all(
-      linkList.map(async (link) => {
-        const res = await api.getLinkAccessRequests(link.id);
-        const pending = (res.data ?? []).filter((r) => r.status === "pending").length;
-        return [link.id, pending] as const;
-      })
-    );
-    return Object.fromEntries(entries) as Record<string, number>;
+    // Creator-scoped workspace inbox — empty for non-creators; one request vs N+1.
+    const res = await api.getPendingLinkAccessRequests();
+    const onPage = new Set(linkList.map((link) => link.id));
+    const counts: Record<string, number> = {};
+    for (const request of res.data ?? []) {
+      if (!onPage.has(request.link_id)) continue;
+      counts[request.link_id] = (counts[request.link_id] ?? 0) + 1;
+    }
+    return counts;
   }, [roomId, refreshKey, linkIdsKey]);
 
   const [viewLink, setViewLink] = useState<Link | null>(null);

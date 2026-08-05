@@ -8,12 +8,12 @@ import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
 const {
   getDealRoomAccessRequestsMock,
   getDealRoomLinksMock,
-  getLinkAccessRequestsMock,
+  getPendingLinkAccessRequestsMock,
   approveLinkAccessRequestMock,
 } = vi.hoisted(() => ({
   getDealRoomAccessRequestsMock: vi.fn(),
   getDealRoomLinksMock: vi.fn(),
-  getLinkAccessRequestsMock: vi.fn(),
+  getPendingLinkAccessRequestsMock: vi.fn(),
   approveLinkAccessRequestMock: vi.fn(),
 }));
 
@@ -21,7 +21,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomAccessRequests: getDealRoomAccessRequestsMock,
     getDealRoomLinks: getDealRoomLinksMock,
-    getLinkAccessRequests: getLinkAccessRequestsMock,
+    getPendingLinkAccessRequests: getPendingLinkAccessRequestsMock,
     approveLinkAccessRequest: approveLinkAccessRequestMock,
     rejectLinkAccessRequest: vi.fn(),
     approveDealRoomAccessRequest: vi.fn(),
@@ -48,6 +48,16 @@ async function renderPanel() {
       "accessRequests.rejectError": "fail",
       "accessRequests.loadFailed": "load failed",
     },
+    linkShare: {
+      "accessRequests.approveSuccess": "ok",
+      "accessRequests.approveError": "fail",
+      "accessRequests.rejectSuccess": "ok",
+      "accessRequests.rejectError": "fail",
+    },
+    common: {
+      loading: "Loading…",
+      retry: "Retry",
+    },
   });
   const view = render(
     <I18nextProvider i18n={i18nInstance}>
@@ -64,14 +74,14 @@ describe("DealRoomAccessRequestsPanel", () => {
   beforeEach(() => {
     getDealRoomAccessRequestsMock.mockReset();
     getDealRoomLinksMock.mockReset();
-    getLinkAccessRequestsMock.mockReset();
+    getPendingLinkAccessRequestsMock.mockReset();
     approveLinkAccessRequestMock.mockReset();
 
     getDealRoomAccessRequestsMock.mockResolvedValue({ data: [] });
     getDealRoomLinksMock.mockResolvedValue({
       data: [{ id: "link-1", name: "测啊" }],
     });
-    getLinkAccessRequestsMock.mockResolvedValue({
+    getPendingLinkAccessRequestsMock.mockResolvedValue({
       data: [
         {
           id: "req-1",
@@ -96,7 +106,7 @@ describe("DealRoomAccessRequestsPanel", () => {
     });
     expect(screen.getByText("visitor@example.com")).toBeInTheDocument();
     expect(screen.getByText(/测啊/)).toBeInTheDocument();
-    expect(getLinkAccessRequestsMock).toHaveBeenCalledWith("link-1");
+    expect(getPendingLinkAccessRequestsMock).toHaveBeenCalled();
   });
 
   it("approves via the link access-request API", async () => {
