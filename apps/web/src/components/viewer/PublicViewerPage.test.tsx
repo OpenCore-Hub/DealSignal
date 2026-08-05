@@ -342,6 +342,32 @@ describe("PublicViewerPage", () => {
     expect(document.getElementById("nda-delivery-email")).toBeInTheDocument();
   });
 
+  it("shows verification-matched delivery email hint when email verification is required", async () => {
+    accessPublicLinkMock.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "nda_required",
+        message: "nda required",
+        requestId: "req-hint",
+        requiresEmail: false,
+        requiresEmailVerification: true,
+        requiresPassword: false,
+        requiresNda: true,
+        isDealRoom: false,
+      })
+    );
+
+    await renderPage("nda-hint-token");
+
+    await waitFor(() => {
+      expect(document.getElementById("nda-delivery-email")).toBeInTheDocument();
+    });
+    expect(
+      screen.getByText("viewer.ndaDeliveryEmailVerificationHint"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("viewer.ndaDeliveryEmailHint")).not.toBeInTheDocument();
+  });
+
   it("disables Continue until NDA email, name and agreement are complete", async () => {
     accessPublicLinkMock.mockRejectedValue(
       new ApiError({

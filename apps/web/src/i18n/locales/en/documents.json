@@ -216,6 +216,7 @@
     "ndaDeliveryEmailLabel": "Email for signed agreement",
     "ndaDeliveryEmailPlaceholder": "Enter the email to receive the signed NDA",
     "ndaDeliveryEmailHint": "We will email the sealed PDF to this address after you sign.",
+    "ndaDeliveryEmailVerificationHint": "Use the same email that will receive the access verification code for this link.",
     "ndaDeliveryEmailRequired": "Please enter a valid email to receive the signed agreement.",
     "ndaSignedAt": "Signed at {{time}}",
     "ndaPreviewPage": "NDA page {{page}}",

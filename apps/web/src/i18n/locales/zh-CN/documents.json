@@ -209,6 +209,7 @@
     "ndaDeliveryEmailLabel": "接收已签协议的邮箱",
     "ndaDeliveryEmailPlaceholder": "请输入用于接收已签 NDA 的邮箱",
     "ndaDeliveryEmailHint": "签署完成后，密封 PDF 将发送至该邮箱。",
+    "ndaDeliveryEmailVerificationHint": "请填写将收到本链接访问验证码的同一邮箱。",
     "ndaDeliveryEmailRequired": "请输入有效邮箱以接收已签协议。",
     "ndaSignedAt": "签署时间 {{time}}",
     "ndaPreviewPage": "保密协议第 {{page}} 页",

@@ -1442,7 +1442,11 @@ export function PublicViewerPage() {
                     autoComplete="email"
                     readOnly={Boolean(inviteToken && prefilledEmail)}
                   />
-                  <p className="text-xs text-muted-foreground">{t("viewer.ndaDeliveryEmailHint")}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {security.emailVerification
+                      ? t("viewer.ndaDeliveryEmailVerificationHint")
+                      : t("viewer.ndaDeliveryEmailHint")}
+                  </p>
                 </div>
                 <div className="shrink-0 space-y-2">
                   <Label htmlFor="signer-name">{t("viewer.signerNameLabel")}</Label>
