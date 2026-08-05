@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -207,6 +208,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 	for _, kp := range keyPages {
 		keyPageTitles = append(keyPageTitles, kp.Title)
 	}
+	focus := s.resolveFocusPages(ctx, linkUUID, keyPages)
 
 	totalDurationSeconds24h := 0
 	if metrics.totalPageViews24h > 0 {
@@ -273,6 +275,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			}
 		}
 
+		metadata := attachFocusMetadata(c.Type, c.Subtype, c.Metadata, focus)
 		row, err := s.queries.CreateSuggestion(ctx, db.CreateSuggestionParams{
 			TenantID:    link.TenantID,
 			WorkspaceID: link.WorkspaceID,
@@ -283,7 +286,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 			Subtype:     pgText(c.Subtype),
 			Reason:      reason,
 			Action:      action,
-			Metadata:    metadataToBytes(c.Metadata),
+			Metadata:    metadataToBytes(metadata),
 			Context:     c.Context.ToJSONB(),
 			RuleID:      pgText(c.RuleID),
 		})
@@ -810,6 +813,107 @@ func metadataToBytes(m map[string]string) []byte {
 	}
 	b, _ := json.Marshal(m)
 	return b
+}
+
+// suggestionFocusPages holds real page anchors for deep links.
+type suggestionFocusPages struct {
+	hot            int
+	bounce         int
+	bounceExitRate float64 // 0..1; only set when bounce page comes from exit ranking
+}
+
+func (s *Service) resolveFocusPages(
+	ctx context.Context,
+	linkID pgtype.UUID,
+	keyPages []db.GetLinkKeyPageViewDetailsRow,
+) suggestionFocusPages {
+	var out suggestionFocusPages
+	out.hot = focusPageFromKeyPages(keyPages)
+	if out.hot <= 0 {
+		if topPages, err := s.queries.ListTopPagesByLink(ctx, linkID); err == nil {
+			out.hot = focusPageFromTopPages(topPages)
+		}
+	}
+
+	if highExit, err := s.queries.ListHighExitPagesByLink(ctx, linkID); err == nil {
+		if page, rate := focusPageFromHighExit(highExit); page > 0 {
+			out.bounce = page
+			out.bounceExitRate = rate
+		}
+	}
+	// Bounce visitors may leave before any page_view; fall back to engagement focus.
+	if out.bounce <= 0 {
+		out.bounce = out.hot
+	}
+	return out
+}
+
+// focusPageFromKeyPages returns the highest-ranked key page number, or 0.
+func focusPageFromKeyPages(keyPages []db.GetLinkKeyPageViewDetailsRow) int {
+	for _, kp := range keyPages {
+		if kp.PageNumber > 0 {
+			return int(kp.PageNumber)
+		}
+	}
+	return 0
+}
+
+// focusPageFromTopPages returns the most-viewed page number, or 0.
+func focusPageFromTopPages(pages []db.ListTopPagesByLinkRow) int {
+	for _, p := range pages {
+		if p.PageNumber > 0 {
+			return int(p.PageNumber)
+		}
+	}
+	return 0
+}
+
+// focusPageFromHighExit returns the highest exit-rate page and its rate.
+func focusPageFromHighExit(pages []db.ListHighExitPagesByLinkRow) (page int, exitRate float64) {
+	for _, p := range pages {
+		if p.PageNumber > 0 && p.ExitRate > 0 {
+			return int(p.PageNumber), p.ExitRate
+		}
+	}
+	return 0, 0
+}
+
+// attachFocusMetadata writes typed deep-link metadata.
+// hot_signal → engagement focus page; bounce risk → high-exit page (+ exit_rate).
+func attachFocusMetadata(typ, subtype string, md map[string]string, focus suggestionFocusPages) map[string]string {
+	page := 0
+	exitRate := 0.0
+	switch {
+	case typ == "hot_signal":
+		page = focus.hot
+	case typ == "risk_alert" && subtype == SubtypeBounce:
+		page = focus.bounce
+		exitRate = focus.bounceExitRate
+	default:
+		return md
+	}
+	if page <= 0 {
+		return md
+	}
+	out := make(map[string]string, len(md)+2)
+	for k, v := range md {
+		out[k] = v
+	}
+	out["page_number"] = strconv.Itoa(page)
+	if exitRate > 0 {
+		out["exit_rate"] = formatExitRatePercent(exitRate)
+	}
+	return out
+}
+
+func formatExitRatePercent(rate float64) string {
+	if rate < 0 {
+		rate = 0
+	}
+	if rate > 1 {
+		rate = 1
+	}
+	return strconv.FormatInt(int64(rate*100+0.5), 10) + "%"
 }
 
 func uuidToString(u pgtype.UUID) string {

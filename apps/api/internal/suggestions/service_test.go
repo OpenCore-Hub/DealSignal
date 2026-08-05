@@ -3,6 +3,7 @@ package suggestions
 import (
 	"testing"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 )
 
@@ -132,6 +133,68 @@ func TestHeatInputUsesUniqueVisitorsAsForwardSignals(t *testing.T) {
 	input := m.heatInput(0)
 	if input.ForwardSignals != 5 {
 		t.Fatalf("expected ForwardSignals=5, got %d", input.ForwardSignals)
+	}
+}
+
+func TestAttachFocusMetadata(t *testing.T) {
+	t.Parallel()
+
+	focus := suggestionFocusPages{hot: 7, bounce: 3, bounceExitRate: 0.42}
+
+	md := attachFocusMetadata("hot_signal", "hot", map[string]string{"score": "80"}, focus)
+	if md["page_number"] != "7" || md["score"] != "80" {
+		t.Fatalf("expected hot page_number=7 with score preserved, got %v", md)
+	}
+	if _, ok := md["exit_rate"]; ok {
+		t.Fatalf("hot_signal must not get exit_rate, got %v", md)
+	}
+
+	bounce := attachFocusMetadata("risk_alert", SubtypeBounce, nil, focus)
+	if bounce["page_number"] != "3" || bounce["exit_rate"] != "42%" {
+		t.Fatalf("expected bounce page=3 exit_rate=42%%, got %v", bounce)
+	}
+
+	forward := attachFocusMetadata("risk_alert", SubtypeForward, map[string]string{"distinct_ips": "4"}, focus)
+	if _, ok := forward["page_number"]; ok {
+		t.Fatalf("forward risk must not get page_number, got %v", forward)
+	}
+
+	zero := attachFocusMetadata("hot_signal", "hot", map[string]string{"score": "1"}, suggestionFocusPages{})
+	if _, ok := zero["page_number"]; ok {
+		t.Fatalf("page<=0 must not write page_number, got %v", zero)
+	}
+}
+
+func TestFocusPageHelpers(t *testing.T) {
+	t.Parallel()
+
+	if got := focusPageFromKeyPages(nil); got != 0 {
+		t.Fatalf("empty key pages => 0, got %d", got)
+	}
+	if got := focusPageFromKeyPages([]db.GetLinkKeyPageViewDetailsRow{
+		{PageNumber: 0},
+		{PageNumber: 12},
+	}); got != 12 {
+		t.Fatalf("expected first positive key page 12, got %d", got)
+	}
+	if got := focusPageFromTopPages([]db.ListTopPagesByLinkRow{
+		{PageNumber: 5, Views: 10},
+	}); got != 5 {
+		t.Fatalf("expected top page 5, got %d", got)
+	}
+
+	page, rate := focusPageFromHighExit([]db.ListHighExitPagesByLinkRow{
+		{PageNumber: 0, ExitRate: 0.9},
+		{PageNumber: 8, ExitRate: 0.55, ViewCount: 4, ExitCount: 2},
+	})
+	if page != 8 || rate != 0.55 {
+		t.Fatalf("expected high-exit page 8 @ 0.55, got %d @ %v", page, rate)
+	}
+	if got := formatExitRatePercent(0.424); got != "42%" {
+		t.Fatalf("expected 42%%, got %s", got)
+	}
+	if got := formatExitRatePercent(1.5); got != "100%" {
+		t.Fatalf("expected clamp to 100%%, got %s", got)
 	}
 }
 
