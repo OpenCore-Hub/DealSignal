@@ -21,13 +21,34 @@
     "clearFilter": "清除筛选",
     "copyLink": "复制链接"
   },
+  "accessRequests": {
+    "inboxTitle": "待审批访问申请",
+    "inboxDescription": "仅显示你创建的分享链接上的授权申请。批准后加入白名单；若开启邮箱验证，将发送访问验证码。",
+    "forDocument": "文档：{{title}}"
+  },
   "actions": {
     "viewLog": "查看日志",
     "editLink": "编辑链接",
     "exportData": "导出访问数据",
-    "downloadOnly": "仅允许下载",
-    "exportProTooltip": "导出需后端支持",
-    "downloadProTooltip": "仅允许下载需后端支持"
+    "exportSuccess": "已导出 {{count}} 条访问记录",
+    "exportEmpty": "暂无访问记录可导出",
+    "exportError": "导出访问数据失败",
+    "allowDownload": "允许下载",
+    "disallowDownload": "禁止下载",
+    "downloadEnabledSuccess": "已允许访客下载文件",
+    "downloadDisabledSuccess": "已禁止访客下载",
+    "downloadToggleError": "更新下载权限失败"
+  },
+  "export": {
+    "csv": {
+      "timestamp": "时间",
+      "visitorEmail": "访客邮箱",
+      "visitorName": "访客姓名",
+      "pageNumber": "页码",
+      "durationSeconds": "停留秒数",
+      "device": "设备",
+      "location": "地点"
+    }
   },
   "empty": {
     "title": "暂无链接",

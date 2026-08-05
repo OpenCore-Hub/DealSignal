@@ -21,13 +21,34 @@
     "clearFilter": "Clear filter",
     "copyLink": "Copy Link"
   },
+  "accessRequests": {
+    "inboxTitle": "Pending access requests",
+    "inboxDescription": "Authorization requests for share links you created. Approve to add the visitor to the allowlist; when email verification is on, an access code is sent.",
+    "forDocument": "Document: {{title}}"
+  },
   "actions": {
     "viewLog": "View Log",
     "editLink": "Edit Link",
     "exportData": "Export Access Data",
-    "downloadOnly": "Download Only",
-    "exportProTooltip": "Export requires backend support",
-    "downloadProTooltip": "Download-only requires backend support"
+    "exportSuccess": "Exported {{count}} access log rows",
+    "exportEmpty": "No access logs to export yet",
+    "exportError": "Failed to export access data",
+    "allowDownload": "Allow downloading",
+    "disallowDownload": "Disable downloading",
+    "downloadEnabledSuccess": "Visitors can download files",
+    "downloadDisabledSuccess": "Visitor downloads disabled",
+    "downloadToggleError": "Failed to update download permission"
+  },
+  "export": {
+    "csv": {
+      "timestamp": "timestamp",
+      "visitorEmail": "visitor_email",
+      "visitorName": "visitor_name",
+      "pageNumber": "page_number",
+      "durationSeconds": "duration_seconds",
+      "device": "device",
+      "location": "location"
+    }
   },
   "empty": {
     "title": "No links yet",

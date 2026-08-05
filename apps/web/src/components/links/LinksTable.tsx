@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
@@ -32,11 +32,14 @@ import { HeatBadge } from "@/components/common/HeatBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { EmptyState } from "@/components/common/EmptyState";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
+import { ShareAccessRequestsPanel } from "@/components/links/ShareAccessRequestsPanel";
 import { api } from "@/lib/api";
 import { documentsCreateLinkPath, documentsSharePath } from "@/lib/documentsSharePath";
+import { exportLinkAccessLogsCsv } from "@/lib/exportLinkAccessLogs";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import type { Link } from "@/types";
 
@@ -45,6 +48,27 @@ interface LinksTableProps {
   documentTitle?: string;
   /** Compact layout when embedded in Document Library → Share tab. */
   embedded?: boolean;
+}
+
+/** Column layout: long URL/title truncate; table scrolls horizontally when narrow. */
+function linksColumnClass(columnId: string): string {
+  switch (columnId) {
+    case "shortUrl":
+      // Fixed width so truncate works under table-fixed layout.
+      return "w-[20rem] max-w-[20rem] overflow-hidden";
+    case "documentTitle":
+      return "w-[16rem] max-w-[16rem] overflow-hidden";
+    case "accessCount":
+    case "avgDurationSeconds":
+    case "lastViewedAt":
+    case "heatLevel":
+    case "isActive":
+      return "whitespace-nowrap";
+    case "actions":
+      return "w-[3.75rem]";
+    default:
+      return "whitespace-nowrap";
+  }
 }
 
 export function LinksTable({ documentId, documentTitle, embedded = false }: LinksTableProps) {
@@ -74,6 +98,57 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
   const [sorting, setSorting] = useState<SortingState>([]);
   const [linkToDelete, setLinkToDelete] = useState<Link | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [busyLinkId, setBusyLinkId] = useState<string | null>(null);
+
+  const handleExportAccessData = useCallback(
+    async (link: Link) => {
+      setBusyLinkId(link.id);
+      try {
+        const count = await exportLinkAccessLogsCsv(
+          link.id,
+          link.documentTitle || link.name || link.id,
+          [
+            t("export.csv.timestamp"),
+            t("export.csv.visitorEmail"),
+            t("export.csv.visitorName"),
+            t("export.csv.pageNumber"),
+            t("export.csv.durationSeconds"),
+            t("export.csv.device"),
+            t("export.csv.location"),
+          ],
+        );
+        if (count === 0) {
+          toast.message(t("actions.exportEmpty"));
+        } else {
+          toast.success(t("actions.exportSuccess", { count }));
+        }
+      } catch {
+        toast.error(t("actions.exportError"));
+      } finally {
+        setBusyLinkId(null);
+      }
+    },
+    [t],
+  );
+
+  const handleToggleDownload = useCallback(
+    async (link: Link) => {
+      const next = !(link.downloadEnabled ?? false);
+      setBusyLinkId(link.id);
+      try {
+        await api.updateLink(link.id, { downloadEnabled: next });
+        toast.success(
+          next ? t("actions.downloadEnabledSuccess") : t("actions.downloadDisabledSuccess"),
+        );
+        await refetch();
+      } catch {
+        toast.error(t("actions.downloadToggleError"));
+      } finally {
+        setBusyLinkId(null);
+      }
+    },
+    [refetch, t],
+  );
 
   const columns = useMemo<ColumnDef<Link>[]>(
     () => [
@@ -83,9 +158,9 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         cell: ({ row }) => {
           const link = row.original;
           return (
-            <div className="flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 max-w-full items-center gap-2">
               <code
-                className="min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 text-caption"
+                className="block min-w-0 flex-1 truncate rounded bg-muted px-1.5 py-0.5 text-caption"
                 title={link.shortUrl}
               >
                 {link.shortUrl}
@@ -93,6 +168,7 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
               <Button
                 size="icon-sm"
                 variant="ghost"
+                className="shrink-0"
                 aria-label={t("table.copyLink")}
                 onClick={(e) => {
                   e.stopPropagation();
@@ -109,7 +185,7 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         accessorKey: "documentTitle",
         header: t("table.document"),
         cell: ({ row }) => (
-          <span className="block max-w-full truncate text-sm" title={row.original.documentTitle}>
+          <span className="block truncate text-sm" title={row.original.documentTitle}>
             {row.original.documentTitle}
           </span>
         ),
@@ -161,6 +237,8 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         header: "",
         cell: ({ row }) => {
           const link = row.original;
+          const busy = busyLinkId === link.id;
+          const downloadOn = link.downloadEnabled ?? false;
           return (
             <RowActions
               actions={[
@@ -177,24 +255,23 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
                 {
                   label: t("actions.exportData"),
                   icon: <Export size={16} />,
-                  onClick: () => {},
-                  disabled: true,
-                  title: t("actions.exportProTooltip"),
-                  pro: true,
+                  onClick: () => { void handleExportAccessData(link); },
+                  disabled: busy,
                 },
                 {
-                  label: t("actions.downloadOnly"),
+                  label: downloadOn
+                    ? t("actions.disallowDownload")
+                    : t("actions.allowDownload"),
                   icon: <DownloadSimple size={16} />,
-                  onClick: () => {},
-                  disabled: true,
-                  title: t("actions.downloadProTooltip"),
-                  pro: true,
+                  onClick: () => { void handleToggleDownload(link); },
+                  disabled: busy,
                 },
                 {
                   label: tc("delete"),
                   icon: <Trash size={16} />,
                   onClick: () => setLinkToDelete(link),
                   destructive: true,
+                  disabled: busy,
                 },
               ]}
             />
@@ -202,7 +279,15 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         },
       },
     ],
-    [navigate, workspaceSlug, t, tc]
+    [
+      busyLinkId,
+      handleExportAccessData,
+      handleToggleDownload,
+      navigate,
+      workspaceSlug,
+      t,
+      tc,
+    ],
   );
 
   // eslint-disable-next-line react-hooks/incompatible-library
@@ -214,6 +299,8 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
     getCoreRowModel: getCoreRowModel(),
     getSortedRowModel: getSortedRowModel(),
   });
+
+  const linkIds = useMemo(() => data.map((link) => link.id), [data]);
 
   if (error) {
     return (
@@ -227,6 +314,10 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
   if (loading) {
     return <SkeletonList rows={6} />;
   }
+
+  const accessInbox = (
+    <ShareAccessRequestsPanel linkIds={isFiltered ? linkIds : undefined} />
+  );
 
   if (data.length === 0) {
     const emptyTitle = isFiltered && documentTitle ? t("empty.filteredTitle", { title: documentTitle }) : t("empty.title");
@@ -245,17 +336,22 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
         };
 
     return (
-      <EmptyState
-        icon={<LinkIcon size={64} />}
-        title={emptyTitle}
-        description={emptyDescription}
-        action={emptyAction}
-      />
+      <div className="space-y-4">
+        {accessInbox}
+        <EmptyState
+          icon={<LinkIcon size={64} />}
+          title={emptyTitle}
+          description={emptyDescription}
+          action={emptyAction}
+        />
+      </div>
     );
   }
 
   return (
     <div className="space-y-4">
+      {accessInbox}
+
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           {!embedded && (
@@ -288,12 +384,12 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
       </div>
 
       <div className="rounded-lg border border-border bg-card">
-        <Table>
+        <Table className="min-w-[56rem] table-fixed">
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
               <TableRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => (
-                  <TableHead key={header.id} className={header.id === "actions" ? "w-[60px]" : ""}>
+                  <TableHead key={header.id} className={linksColumnClass(header.column.id)}>
                     {header.isPlaceholder
                       ? null
                       : flexRender(header.column.columnDef.header, header.getContext())}
@@ -320,7 +416,10 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
                 }}
               >
                 {row.getVisibleCells().map((cell) => (
-                  <TableCell key={cell.id}>
+                  <TableCell
+                    key={cell.id}
+                    className={cn(linksColumnClass(cell.column.id))}
+                  >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
                 ))}
