@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
-import { MemoryRouter, Routes, Route } from "react-router";
+import { MemoryRouter, Routes, Route, useLocation } from "react-router";
 import { SignalCard } from "./SignalCard";
 import { createTestI18n } from "@/i18n/test-utils";
 import type { Signal, ActionItem } from "@/types";
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div data-testid="location">{`${location.pathname}${location.search}`}</div>;
+}
 
 function makeSignal(overrides: Partial<Signal> = {}): Signal {
   return {
@@ -73,16 +78,20 @@ async function renderCard(signal: Signal, act?: ActionItem) {
   });
   return render(
     <MemoryRouter initialEntries={["/acme/dashboard"]}>
-      <Routes>
-        <Route
-          path="/acme/dashboard"
-          element={
-            <I18nextProvider i18n={i18n}>
-              <SignalCard signal={signal} action={act} />
-            </I18nextProvider>
-          }
-        />
-      </Routes>
+      <I18nextProvider i18n={i18n}>
+        <Routes>
+          <Route
+            path="/:workspaceSlug/dashboard"
+            element={
+              <>
+                <SignalCard signal={signal} action={act} />
+                <LocationProbe />
+              </>
+            }
+          />
+          <Route path="/:workspaceSlug/documents/:documentId" element={<LocationProbe />} />
+        </Routes>
+      </I18nextProvider>
     </MemoryRouter>
   );
 }
@@ -123,5 +132,21 @@ describe("SignalCard", () => {
       action
     );
     expect(screen.getByText(/visitor@example.com asked about pricing/)).toBeInTheDocument();
+  });
+
+  it("navigates to analytics when metadata has no page", async () => {
+    await renderCard(makeSignal());
+    fireEvent.click(screen.getByRole("button", { name: /View details/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/acme/documents/doc-1?tab=analytics",
+    );
+  });
+
+  it("deep-links to content page when metadata includes page_number", async () => {
+    await renderCard(makeSignal({ metadata: { page_number: "9" } }));
+    fireEvent.click(screen.getByRole("button", { name: /View details/i }));
+    expect(screen.getByTestId("location")).toHaveTextContent(
+      "/acme/documents/doc-1?tab=content&page=9",
+    );
   });
 });

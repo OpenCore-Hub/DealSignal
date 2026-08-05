@@ -47,10 +47,24 @@ describe("RiskAlertList", () => {
     expect(view.container.firstChild).toBeNull();
   });
 
-  it("links to document detail when documentId is present", async () => {
+  it("links to document analytics when documentId is present", async () => {
     await renderList([makeAlert({ documentId: "doc-1" })]);
     const link = screen.getByRole("link", { name: /Unidentified download/i });
-    expect(link).toHaveAttribute("href", "/acme/documents/doc-1");
+    expect(link).toHaveAttribute("href", "/acme/documents/doc-1?tab=analytics");
+  });
+
+  it("deep-links to content page when metadata includes page_number", async () => {
+    await renderList([
+      makeAlert({
+        documentId: "doc-1",
+        metadata: { page_number: "12" },
+      }),
+    ]);
+    const link = screen.getByRole("link", { name: /Unidentified download/i });
+    expect(link).toHaveAttribute(
+      "href",
+      "/acme/documents/doc-1?tab=content&page=12",
+    );
   });
 
   it("links to link detail when linkId is present", async () => {
@@ -62,7 +76,7 @@ describe("RiskAlertList", () => {
   it("prefers document navigation over link navigation", async () => {
     await renderList([makeAlert({ documentId: "doc-1", linkId: "link-1" })]);
     const link = screen.getByRole("link", { name: /Unidentified download/i });
-    expect(link).toHaveAttribute("href", "/acme/documents/doc-1");
+    expect(link).toHaveAttribute("href", "/acme/documents/doc-1?tab=analytics");
   });
 
   it("renders non-clickable item when no document or link id", async () => {

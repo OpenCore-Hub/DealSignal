@@ -167,6 +167,13 @@ export interface LinkAccessRequest {
   updated_at: string;
 }
 
+/** Workspace share-inbox row with link/document context. */
+export interface PendingLinkAccessRequest extends LinkAccessRequest {
+  link_name?: string;
+  document_title?: string;
+  short_url?: string;
+}
+
 export interface AccessRule {
   ruleType: "email";
   value: string;
@@ -903,6 +910,7 @@ export interface Signal {
   explanation: string;
   suggestion: string;
   context?: SignalContext;
+  metadata?: Record<string, string>;
   documentId?: string;
   contactId?: string;
   linkId?: string;

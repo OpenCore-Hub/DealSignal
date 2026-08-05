@@ -2,6 +2,10 @@ import { Link, useLocation } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, Warning } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
+import {
+  documentDetailPath,
+  parsePageFromMetadata,
+} from "@/lib/documentDetailNav";
 import type { RiskAlert } from "@/types";
 
 interface RiskAlertListProps {
@@ -76,11 +80,19 @@ export function RiskAlertList({ alerts, workspaceSlug }: RiskAlertListProps) {
       <ul className="space-y-3">
         {sorted.map((alert) => {
         const severity = severityConfig[alert.priority] ?? severityConfig.medium;
-        const to = alert.documentId
-          ? `/${workspaceSlug}/documents/${alert.documentId}`
-          : alert.linkId
-            ? `/${workspaceSlug}/links/${alert.linkId}`
-            : undefined;
+        const focusPage = parsePageFromMetadata(alert.metadata);
+        const to =
+          alert.documentId && workspaceSlug
+            ? documentDetailPath(
+                workspaceSlug,
+                alert.documentId,
+                focusPage
+                  ? { tab: "content", page: focusPage }
+                  : { tab: "analytics" },
+              )
+            : alert.linkId && workspaceSlug
+              ? `/${workspaceSlug}/links/${alert.linkId}`
+              : undefined;
 
         const content = (
           <>

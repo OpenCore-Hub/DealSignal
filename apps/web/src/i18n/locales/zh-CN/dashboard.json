@@ -33,7 +33,11 @@
       "total_downloads": "下载次数",
       "distinct_emails": "不同邮箱数",
       "bounces": "跳出次数",
-      "avg_duration_minutes": "平均停留（分钟）"
+      "avg_duration_minutes": "平均停留（分钟）",
+      "page_number": "页码",
+      "exit_rate": "退出率",
+      "score": "分数",
+      "level": "热度等级"
     }
   },
   "sections": {

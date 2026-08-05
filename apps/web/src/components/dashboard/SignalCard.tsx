@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import type { Signal, ActionItem, SignalContext } from "@/types";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useTranslation } from "react-i18next";
+import { documentDetailPath, parsePageFromMetadata } from "@/lib/documentDetailNav";
 import { formatDuration } from "@/lib/formatters";
 
 const typeConfig = {
@@ -54,10 +55,23 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
   const Icon = config.icon;
 
   const handleNavigate = () => {
+    if (!workspaceSlug) return;
     const state = { returnTo: location.pathname + location.search, returnLabel: tCommon("back") };
-    if (signal.documentId) navigate(`/${workspaceSlug}/documents/${signal.documentId}`, { state });
-    else if (signal.linkId) navigate(`/${workspaceSlug}/links/${signal.linkId}`, { state });
-    else if (signal.contactId) navigate(`/${workspaceSlug}/contacts/${signal.contactId}`, { state });
+    if (signal.documentId) {
+      const focusPage = parsePageFromMetadata(signal.metadata);
+      navigate(
+        documentDetailPath(
+          workspaceSlug,
+          signal.documentId,
+          focusPage ? { tab: "content", page: focusPage } : { tab: "analytics" },
+        ),
+        { state },
+      );
+    } else if (signal.linkId) {
+      navigate(`/${workspaceSlug}/links/${signal.linkId}`, { state });
+    } else if (signal.contactId) {
+      navigate(`/${workspaceSlug}/contacts/${signal.contactId}`, { state });
+    }
   };
 
   const actionIcon = {
