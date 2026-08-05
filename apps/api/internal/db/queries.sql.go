@@ -5481,6 +5481,38 @@ func (q *Queries) GetLinkAccessRequestByID(ctx context.Context, id pgtype.UUID) 
 	return i, err
 }
 
+const getLinkAccessRequestByIDAndWorkspace = `-- name: GetLinkAccessRequestByIDAndWorkspace :one
+SELECT id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at, signer_name
+FROM link_access_requests
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetLinkAccessRequestByIDAndWorkspaceParams struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetLinkAccessRequestByIDAndWorkspace(ctx context.Context, arg GetLinkAccessRequestByIDAndWorkspaceParams) (LinkAccessRequest, error) {
+	row := q.db.QueryRow(ctx, getLinkAccessRequestByIDAndWorkspace, arg.ID, arg.WorkspaceID)
+	var i LinkAccessRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.Email,
+		&i.Reason,
+		&i.Status,
+		&i.ReviewedBy,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.SignerName,
+	)
+	return i, err
+}
+
 const getLinkAccessRequestByLinkAndEmail = `-- name: GetLinkAccessRequestByLinkAndEmail :one
 SELECT id, tenant_id, workspace_id, link_id, email, reason, status, reviewed_by, reviewed_at, created_at, updated_at, signer_name
 FROM link_access_requests
@@ -8085,6 +8117,69 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const listActionItemsByWorkspaceForUser = `-- name: ListActionItemsByWorkspaceForUser :many
+SELECT a.id, a.tenant_id, a.workspace_id, a.signal_id, a.title, a.impact, a.due_at, a.status, a.action_type, a.created_at, a.updated_at, a.source_type, a.source_id
+FROM action_items a
+WHERE a.workspace_id = $1
+  AND (
+      a.status = 'pending'
+      OR (a.status = 'done' AND a.updated_at > now() - interval '1 day')
+      OR (a.status IN ('snoozed', 'ignored') AND a.updated_at > now() - interval '30 days')
+  )
+  AND (
+      a.source_type IS DISTINCT FROM 'link_access_request'
+      OR EXISTS (
+          SELECT 1
+          FROM links l
+          WHERE l.workspace_id = a.workspace_id
+            AND l.id = NULLIF(a.source_id, '')::uuid
+            AND l.created_by = $2
+      )
+  )
+ORDER BY a.created_at DESC
+`
+
+type ListActionItemsByWorkspaceForUserParams struct {
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+}
+
+// Same retention window as ListActionItemsByWorkspace, but link_access_request
+// todos are only visible to the link creator (source_id = link id).
+func (q *Queries) ListActionItemsByWorkspaceForUser(ctx context.Context, arg ListActionItemsByWorkspaceForUserParams) ([]ActionItem, error) {
+	rows, err := q.db.Query(ctx, listActionItemsByWorkspaceForUser, arg.WorkspaceID, arg.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ActionItem
+	for rows.Next() {
+		var i ActionItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.SignalID,
+			&i.Title,
+			&i.Impact,
+			&i.DueAt,
+			&i.Status,
+			&i.ActionType,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.SourceType,
+			&i.SourceID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAllNDATemplatesByWorkspace = `-- name: ListAllNDATemplatesByWorkspace :many
 SELECT id, tenant_id, workspace_id, name, source_document_id, content_sha256, require_signer_name, status, created_by, created_at, updated_at
 FROM nda_templates
@@ -9261,6 +9356,72 @@ func (q *Queries) ListFileRequestsByVisitor(ctx context.Context, arg ListFileReq
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listHighExitPagesByLink = `-- name: ListHighExitPagesByLink :many
+WITH views AS (
+    SELECT pv.page_number, COUNT(*)::bigint AS view_count
+    FROM page_views pv
+    WHERE pv.link_id = $1
+    GROUP BY pv.page_number
+),
+exits AS (
+    SELECT last_views.page_number, COUNT(*)::bigint AS exit_count
+    FROM (
+        SELECT DISTINCT ON (pv.visitor_id) pv.visitor_id, pv.page_number
+        FROM page_views pv
+        WHERE pv.link_id = $1
+        ORDER BY pv.visitor_id, pv.created_at DESC
+    ) last_views
+    GROUP BY last_views.page_number
+)
+SELECT
+    v.page_number,
+    v.view_count,
+    COALESCE(e.exit_count, 0)::bigint AS exit_count,
+    CASE
+        WHEN v.view_count > 0
+            THEN LEAST(1.0, COALESCE(e.exit_count, 0)::float8 / v.view_count::float8)
+        ELSE 0::float8
+    END AS exit_rate
+FROM views v
+LEFT JOIN exits e ON e.page_number = v.page_number
+WHERE v.view_count >= 2
+ORDER BY exit_rate DESC, exit_count DESC, view_count DESC
+LIMIT 5
+`
+
+type ListHighExitPagesByLinkRow struct {
+	PageNumber int32
+	ViewCount  int64
+	ExitCount  int64
+	ExitRate   float64
+}
+
+// Per-visitor last page = exit. Rank by exit_rate for bounce deep links.
+func (q *Queries) ListHighExitPagesByLink(ctx context.Context, linkID pgtype.UUID) ([]ListHighExitPagesByLinkRow, error) {
+	rows, err := q.db.Query(ctx, listHighExitPagesByLink, linkID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListHighExitPagesByLinkRow
+	for rows.Next() {
+		var i ListHighExitPagesByLinkRow
+		if err := rows.Scan(
+			&i.PageNumber,
+			&i.ViewCount,
+			&i.ExitCount,
+			&i.ExitRate,
 		); err != nil {
 			return nil, err
 		}
@@ -10879,6 +11040,100 @@ func (q *Queries) ListPendingLinkAccessRequestsByWorkspace(ctx context.Context, 
 			&i.Email,
 			&i.LinkID,
 			&i.LinkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingLinkAccessRequestsDetailedByWorkspace = `-- name: ListPendingLinkAccessRequestsDetailedByWorkspace :many
+SELECT
+    r.id,
+    r.link_id,
+    r.email,
+    r.reason,
+    r.signer_name,
+    r.status,
+    r.created_at,
+    r.updated_at,
+    l.name AS link_name,
+    l.public_token,
+    l.custom_domain,
+    COALESCE(
+        (
+            SELECT d.title
+            FROM documents d
+            WHERE d.id = l.document_id
+              AND d.deleted_at IS NULL
+        ),
+        (
+            SELECT d.title
+            FROM link_documents ld
+            JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+            WHERE ld.link_id = l.id
+            ORDER BY ld.sort_order ASC, ld.created_at ASC
+            LIMIT 1
+        ),
+        COALESCE(l.name, '')
+    )::text AS document_title
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1
+  AND l.workspace_id = $1
+  AND l.created_by = $2
+  AND r.status = 'pending'
+  AND l.status NOT IN ('deleted', 'disabled')
+ORDER BY r.created_at DESC
+`
+
+type ListPendingLinkAccessRequestsDetailedByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+}
+
+type ListPendingLinkAccessRequestsDetailedByWorkspaceRow struct {
+	ID            pgtype.UUID
+	LinkID        pgtype.UUID
+	Email         string
+	Reason        pgtype.Text
+	SignerName    pgtype.Text
+	Status        string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	LinkName      pgtype.Text
+	PublicToken   string
+	CustomDomain  pgtype.Text
+	DocumentTitle string
+}
+
+// Creator share-page inbox: pending requests the reviewer can approve (link.created_by).
+func (q *Queries) ListPendingLinkAccessRequestsDetailedByWorkspace(ctx context.Context, arg ListPendingLinkAccessRequestsDetailedByWorkspaceParams) ([]ListPendingLinkAccessRequestsDetailedByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingLinkAccessRequestsDetailedByWorkspace, arg.WorkspaceID, arg.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingLinkAccessRequestsDetailedByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingLinkAccessRequestsDetailedByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.Email,
+			&i.Reason,
+			&i.SignerName,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LinkName,
+			&i.PublicToken,
+			&i.CustomDomain,
+			&i.DocumentTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -14059,6 +14314,66 @@ func (q *Queries) UpdateLinkContactSendStatusByEmail(ctx context.Context, arg Up
 		arg.Email,
 	)
 	return err
+}
+
+const updateLinkDownloadEnabled = `-- name: UpdateLinkDownloadEnabled :one
+UPDATE links
+SET download_enabled = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+  AND status NOT IN ('deleted', 'disabled')
+RETURNING id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+`
+
+type UpdateLinkDownloadEnabledParams struct {
+	DownloadEnabled bool
+	ID              pgtype.UUID
+	WorkspaceID     pgtype.UUID
+}
+
+func (q *Queries) UpdateLinkDownloadEnabled(ctx context.Context, arg UpdateLinkDownloadEnabledParams) (Link, error) {
+	row := q.db.QueryRow(ctx, updateLinkDownloadEnabled, arg.DownloadEnabled, arg.ID, arg.WorkspaceID)
+	var i Link
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.DocumentID,
+		&i.PublicToken,
+		&i.Name,
+		&i.PermissionType,
+		&i.ExpiresAt,
+		&i.MaxAccessCount,
+		&i.AccessCount,
+		&i.DownloadEnabled,
+		&i.WatermarkEnabled,
+		&i.Status,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.RequireEmail,
+		&i.RequireNda,
+		&i.RequireEmailVerification,
+		&i.DealRoomID,
+		&i.RequirePassword,
+		&i.PasswordHash,
+		&i.CustomDomain,
+		&i.Tags,
+		&i.NotifyOnAccess,
+		&i.SecurityVersion,
+		&i.QaEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.LinkType,
+		&i.TargetFolderPath,
+		&i.ScreenshotProtectionEnabled,
+		&i.LastReminderSentAt,
+		&i.HasDocumentScope,
+		&i.FolderScopePaths,
+		&i.NdaDocumentID,
+		&i.FolderScopeMode,
+		&i.NdaTemplateID,
+	)
+	return i, err
 }
 
 const updateLinkFolderScopeMode = `-- name: UpdateLinkFolderScopeMode :exec

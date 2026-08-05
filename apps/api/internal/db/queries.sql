@@ -346,6 +346,13 @@ SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
 RETURNING *;
 
+-- name: UpdateLinkDownloadEnabled :one
+UPDATE links
+SET download_enabled = $1, updated_at = now()
+WHERE id = $2 AND workspace_id = $3
+  AND status NOT IN ('deleted', 'disabled')
+RETURNING *;
+
 -- name: UpdateLinkFull :one
 UPDATE links SET
     name = $1,
@@ -829,6 +836,39 @@ WHERE link_id = $1
 GROUP BY page_number
 ORDER BY views DESC, avg_duration_seconds DESC
 LIMIT 10;
+
+-- name: ListHighExitPagesByLink :many
+-- Per-visitor last page = exit. Rank by exit_rate for bounce deep links.
+WITH views AS (
+    SELECT pv.page_number, COUNT(*)::bigint AS view_count
+    FROM page_views pv
+    WHERE pv.link_id = sqlc.arg(link_id)
+    GROUP BY pv.page_number
+),
+exits AS (
+    SELECT last_views.page_number, COUNT(*)::bigint AS exit_count
+    FROM (
+        SELECT DISTINCT ON (pv.visitor_id) pv.visitor_id, pv.page_number
+        FROM page_views pv
+        WHERE pv.link_id = sqlc.arg(link_id)
+        ORDER BY pv.visitor_id, pv.created_at DESC
+    ) last_views
+    GROUP BY last_views.page_number
+)
+SELECT
+    v.page_number,
+    v.view_count,
+    COALESCE(e.exit_count, 0)::bigint AS exit_count,
+    CASE
+        WHEN v.view_count > 0
+            THEN LEAST(1.0, COALESCE(e.exit_count, 0)::float8 / v.view_count::float8)
+        ELSE 0::float8
+    END AS exit_rate
+FROM views v
+LEFT JOIN exits e ON e.page_number = v.page_number
+WHERE v.view_count >= 2
+ORDER BY exit_rate DESC, exit_count DESC, view_count DESC
+LIMIT 5;
 
 -- name: GetVisitorSummariesByDocument :many
 WITH visitor_emails AS (
@@ -1721,6 +1761,29 @@ WHERE workspace_id = $1
   )
 ORDER BY created_at DESC;
 
+-- name: ListActionItemsByWorkspaceForUser :many
+-- Same retention window as ListActionItemsByWorkspace, but link_access_request
+-- todos are only visible to the link creator (source_id = link id).
+SELECT a.*
+FROM action_items a
+WHERE a.workspace_id = $1
+  AND (
+      a.status = 'pending'
+      OR (a.status = 'done' AND a.updated_at > now() - interval '1 day')
+      OR (a.status IN ('snoozed', 'ignored') AND a.updated_at > now() - interval '30 days')
+  )
+  AND (
+      a.source_type IS DISTINCT FROM 'link_access_request'
+      OR EXISTS (
+          SELECT 1
+          FROM links l
+          WHERE l.workspace_id = a.workspace_id
+            AND l.id = NULLIF(a.source_id, '')::uuid
+            AND l.created_by = $2
+      )
+  )
+ORDER BY a.created_at DESC;
+
 -- name: GetActionItemByID :one
 SELECT *
 FROM action_items
@@ -1749,6 +1812,52 @@ FROM link_access_requests r
 JOIN links l ON l.id = r.link_id
 WHERE r.workspace_id = $1 AND r.status = 'pending'
 ORDER BY r.created_at DESC;
+
+-- name: ListPendingLinkAccessRequestsDetailedByWorkspace :many
+-- Creator share-page inbox: pending requests the reviewer can approve (link.created_by).
+SELECT
+    r.id,
+    r.link_id,
+    r.email,
+    r.reason,
+    r.signer_name,
+    r.status,
+    r.created_at,
+    r.updated_at,
+    l.name AS link_name,
+    l.public_token,
+    l.custom_domain,
+    COALESCE(
+        (
+            SELECT d.title
+            FROM documents d
+            WHERE d.id = l.document_id
+              AND d.deleted_at IS NULL
+        ),
+        (
+            SELECT d.title
+            FROM link_documents ld
+            JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+            WHERE ld.link_id = l.id
+            ORDER BY ld.sort_order ASC, ld.created_at ASC
+            LIMIT 1
+        ),
+        COALESCE(l.name, '')
+    )::text AS document_title
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1
+  AND l.workspace_id = $1
+  AND l.created_by = $2
+  AND r.status = 'pending'
+  AND l.status NOT IN ('deleted', 'disabled')
+ORDER BY r.created_at DESC;
+
+-- name: GetLinkAccessRequestByIDAndWorkspace :one
+SELECT *
+FROM link_access_requests
+WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
 
 -- name: ListPendingRoomAccessRequestsByWorkspace :many
 SELECT r.id, r.email, r.room_id, dr.name AS room_name
