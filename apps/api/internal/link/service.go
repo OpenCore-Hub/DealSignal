@@ -2327,10 +2327,15 @@ func (s *Service) notifyLinkAccessRequest(ctx context.Context, link db.Link, lin
 	}
 }
 
-// ListAccessRequests returns all access requests for a link.
-func (s *Service) ListAccessRequests(ctx context.Context, workspaceID, linkID string) ([]LinkAccessRequest, error) {
-	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
+// ListAccessRequests returns access requests for a link. Non-creators receive an
+// empty list (no email leakage); approve/reject remain creator-gated separately.
+func (s *Service) ListAccessRequests(ctx context.Context, workspaceID, linkID, reviewerID string) ([]LinkAccessRequest, error) {
+	link, err := s.GetByID(ctx, linkID, workspaceID)
+	if err != nil {
 		return nil, err
+	}
+	if !link.CreatedBy.Valid || uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
+		return []LinkAccessRequest{}, nil
 	}
 	id, err := uuid.Parse(linkID)
 	if err != nil {
@@ -2347,38 +2352,103 @@ func (s *Service) ListAccessRequests(ctx context.Context, workspaceID, linkID st
 	return out, nil
 }
 
-// ApproveAccessRequest approves a pending request, adds an allow-rule and sends an invitation email.
-func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (LinkAccessRequest, error) {
+// ListPendingAccessRequests returns pending visitor access requests the reviewer
+// can act on (links they created) within the workspace share inbox.
+func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, reviewerID string) ([]PendingLinkAccessRequest, error) {
+	wsUUID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		return nil, errors.New("invalid workspace id")
+	}
+	reviewerUUID, err := uuid.Parse(reviewerID)
+	if err != nil {
+		return nil, errors.New("invalid reviewer id")
+	}
+	rows, err := s.queries.ListPendingLinkAccessRequestsDetailedByWorkspace(ctx, db.ListPendingLinkAccessRequestsDetailedByWorkspaceParams{
+		WorkspaceID: pgtype.UUID{Bytes: wsUUID, Valid: true},
+		CreatedBy:   pgtype.UUID{Bytes: reviewerUUID, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("list pending access requests: %w", err)
+	}
+	out := make([]PendingLinkAccessRequest, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, PendingLinkAccessRequest{
+			LinkAccessRequest: LinkAccessRequest{
+				ID:         uuid.UUID(r.ID.Bytes).String(),
+				LinkID:     uuid.UUID(r.LinkID.Bytes).String(),
+				Email:      r.Email,
+				Reason:     r.Reason.String,
+				SignerName: r.SignerName.String,
+				Status:     r.Status,
+				CreatedAt:  r.CreatedAt.Time,
+				UpdatedAt:  r.UpdatedAt.Time,
+			},
+			LinkName:      r.LinkName.String,
+			DocumentTitle: r.DocumentTitle,
+			PublicToken:   r.PublicToken,
+			CustomDomain:  r.CustomDomain.String,
+		})
+	}
+	return out, nil
+}
+
+// pendingAccessRequestForReview loads a pending request only when the link is in
+// workspaceID, the request belongs to that workspace+link, and reviewerID is the
+// link creator. Non-creator, cross-workspace, wrong-link, and missing IDs all
+// return ErrAccessRequestNotFound (opaque) so callers cannot probe existence or
+// ownership via status-code differences.
+func (s *Service) pendingAccessRequestForReview(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (db.Link, db.LinkAccessRequest, error) {
 	link, err := s.GetByID(ctx, linkID, workspaceID)
 	if err != nil {
-		return LinkAccessRequest{}, err
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotFound
+		}
+		return db.Link{}, db.LinkAccessRequest{}, err
 	}
-	if uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
-		return LinkAccessRequest{}, errors.New("only the link creator can approve access requests")
+	if !link.CreatedBy.Valid || uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
+		return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotFound
 	}
 
 	reqUUID, err := uuid.Parse(requestID)
 	if err != nil {
-		return LinkAccessRequest{}, errors.New("invalid request id")
+		return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotFound
 	}
-	reqRow, err := s.queries.GetLinkAccessRequestByID(ctx, pgtype.UUID{Bytes: reqUUID, Valid: true})
+	wsUUID, err := uuid.Parse(workspaceID)
+	if err != nil {
+		return db.Link{}, db.LinkAccessRequest{}, errors.New("invalid workspace id")
+	}
+
+	reqRow, err := s.queries.GetLinkAccessRequestByIDAndWorkspace(ctx, db.GetLinkAccessRequestByIDAndWorkspaceParams{
+		ID:          pgtype.UUID{Bytes: reqUUID, Valid: true},
+		WorkspaceID: pgtype.UUID{Bytes: wsUUID, Valid: true},
+	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return LinkAccessRequest{}, errors.New("access request not found")
+			return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotFound
 		}
-		return LinkAccessRequest{}, fmt.Errorf("get access request: %w", err)
-	}
-	if reqRow.Status != "pending" {
-		return LinkAccessRequest{}, errors.New("access request is not pending")
+		return db.Link{}, db.LinkAccessRequest{}, fmt.Errorf("get access request: %w", err)
 	}
 	if uuid.UUID(reqRow.LinkID.Bytes).String() != linkID {
-		return LinkAccessRequest{}, errors.New("access request does not belong to this link")
+		return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotFound
+	}
+	if reqRow.Status != "pending" {
+		return db.Link{}, db.LinkAccessRequest{}, ErrAccessRequestNotPending
+	}
+	return link, reqRow, nil
+}
+
+// ApproveAccessRequest approves a pending request, adds an allow-rule and sends an invitation email.
+func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (LinkAccessRequest, error) {
+	link, reqRow, err := s.pendingAccessRequestForReview(ctx, workspaceID, linkID, requestID, reviewerID)
+	if err != nil {
+		return LinkAccessRequest{}, err
 	}
 
 	reviewerUUID, err := uuid.Parse(reviewerID)
 	if err != nil {
 		return LinkAccessRequest{}, errors.New("invalid reviewer id")
 	}
+	reqUUID := reqRow.ID
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
@@ -2390,11 +2460,11 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 	updated, err := qtx.UpdateLinkAccessRequestStatus(ctx, db.UpdateLinkAccessRequestStatusParams{
 		Status:     "approved",
 		ReviewedBy: pgtype.UUID{Bytes: reviewerUUID, Valid: true},
-		ID:         pgtype.UUID{Bytes: reqUUID, Valid: true},
+		ID:         reqUUID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return LinkAccessRequest{}, errors.New("access request is not pending")
+			return LinkAccessRequest{}, ErrAccessRequestNotPending
 		}
 		return LinkAccessRequest{}, fmt.Errorf("approve access request: %w", err)
 	}
@@ -2449,30 +2519,9 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 
 // RejectAccessRequest rejects a pending access request.
 func (s *Service) RejectAccessRequest(ctx context.Context, workspaceID, linkID, requestID, reviewerID string) (LinkAccessRequest, error) {
-	link, err := s.GetByID(ctx, linkID, workspaceID)
+	_, reqRow, err := s.pendingAccessRequestForReview(ctx, workspaceID, linkID, requestID, reviewerID)
 	if err != nil {
 		return LinkAccessRequest{}, err
-	}
-	if uuid.UUID(link.CreatedBy.Bytes).String() != reviewerID {
-		return LinkAccessRequest{}, errors.New("only the link creator can reject access requests")
-	}
-
-	reqUUID, err := uuid.Parse(requestID)
-	if err != nil {
-		return LinkAccessRequest{}, errors.New("invalid request id")
-	}
-	reqRow, err := s.queries.GetLinkAccessRequestByID(ctx, pgtype.UUID{Bytes: reqUUID, Valid: true})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return LinkAccessRequest{}, errors.New("access request not found")
-		}
-		return LinkAccessRequest{}, fmt.Errorf("get access request: %w", err)
-	}
-	if reqRow.Status != "pending" {
-		return LinkAccessRequest{}, errors.New("access request is not pending")
-	}
-	if uuid.UUID(reqRow.LinkID.Bytes).String() != linkID {
-		return LinkAccessRequest{}, errors.New("access request does not belong to this link")
 	}
 
 	reviewerUUID, err := uuid.Parse(reviewerID)
@@ -2483,11 +2532,11 @@ func (s *Service) RejectAccessRequest(ctx context.Context, workspaceID, linkID, 
 	updated, err := s.queries.UpdateLinkAccessRequestStatus(ctx, db.UpdateLinkAccessRequestStatusParams{
 		Status:     "rejected",
 		ReviewedBy: pgtype.UUID{Bytes: reviewerUUID, Valid: true},
-		ID:         pgtype.UUID{Bytes: reqUUID, Valid: true},
+		ID:         reqRow.ID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return LinkAccessRequest{}, errors.New("access request is not pending")
+			return LinkAccessRequest{}, ErrAccessRequestNotPending
 		}
 		return LinkAccessRequest{}, fmt.Errorf("reject access request: %w", err)
 	}
@@ -2707,9 +2756,21 @@ type LinkAccessRequest struct {
 	UpdatedAt  time.Time  `json:"updated_at"`
 }
 
+// PendingLinkAccessRequest is a workspace-scoped pending request with share context.
+type PendingLinkAccessRequest struct {
+	LinkAccessRequest
+	LinkName       string `json:"link_name,omitempty"`
+	DocumentTitle  string `json:"document_title,omitempty"`
+	PublicToken    string `json:"-"`
+	CustomDomain   string `json:"-"`
+}
+
 var (
-	ErrAccessRequestBlocked = errors.New("this email is blocked from requesting access")
-	ErrAccessRequestExists  = errors.New("an access request from this email is already pending")
+	ErrAccessRequestBlocked    = errors.New("this email is blocked from requesting access")
+	ErrAccessRequestExists     = errors.New("an access request from this email is already pending")
+	ErrAccessRequestNotFound   = errors.New("access request not found")
+	ErrAccessRequestForbidden  = errors.New("only the link creator can review access requests")
+	ErrAccessRequestNotPending = errors.New("access request is not pending")
 )
 
 // DeliveryEmailMismatchError is returned when a submitted email differs from the
@@ -3585,6 +3646,26 @@ func (s *Service) UpdateStatus(ctx context.Context, linkID, workspaceID, status 
 			return db.Link{}, ErrNotFoundInWorkspace
 		}
 		return db.Link{}, fmt.Errorf("update link status: %w", err)
+	}
+	return link, nil
+}
+
+// UpdateDownloadEnabled toggles whether visitors may download files on the link.
+func (s *Service) UpdateDownloadEnabled(ctx context.Context, linkID, workspaceID string, enabled bool) (db.Link, error) {
+	id, err := uuid.Parse(linkID)
+	if err != nil {
+		return db.Link{}, errors.New("invalid link id")
+	}
+	link, err := s.queries.UpdateLinkDownloadEnabled(ctx, db.UpdateLinkDownloadEnabledParams{
+		DownloadEnabled: enabled,
+		ID:              pgtype.UUID{Bytes: id, Valid: true},
+		WorkspaceID:     pgUUID(workspaceID),
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.Link{}, ErrNotFoundInWorkspace
+		}
+		return db.Link{}, fmt.Errorf("update link download: %w", err)
 	}
 	return link, nil
 }

@@ -137,6 +137,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g := r.Group("/links")
 	g.POST("", h.Create)
 	g.GET("", h.List)
+	// Static path must be registered before /:id or Gin treats "pending-access-requests" as an id.
+	g.GET("/pending-access-requests", h.ListPendingAccessRequests)
 	g.GET("/:id", h.Get)
 	g.PATCH("/:id", h.Update)
 	g.PUT("/:id", h.UpdateFull)
@@ -414,16 +416,36 @@ func (h *Handler) Get(c *gin.Context) {
 // Update changes a link's status.
 func (h *Handler) Update(c *gin.Context) {
 	var req struct {
-		Status   string `json:"status" binding:"omitempty,oneof=active revoked"`
-		IsActive *bool  `json:"isActive" binding:"omitempty"`
+		Status          string `json:"status" binding:"omitempty,oneof=active revoked"`
+		IsActive        *bool  `json:"isActive" binding:"omitempty"`
+		DownloadEnabled *bool  `json:"downloadEnabled" binding:"omitempty"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
-	if req.Status == "" && req.IsActive == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "status or isActive is required"})
+	if req.Status == "" && req.IsActive == nil && req.DownloadEnabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "status, isActive, or downloadEnabled is required"})
 		return
+	}
+
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
+	ctx := c.Request.Context()
+
+	var link db.Link
+	var err error
+
+	if req.DownloadEnabled != nil {
+		link, err = h.service.UpdateDownloadEnabled(ctx, linkID, workspaceID, *req.DownloadEnabled)
+		if err != nil {
+			if errors.Is(err, ErrNotFoundInWorkspace) {
+				c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update link"})
+			return
+		}
 	}
 
 	status := req.Status
@@ -434,17 +456,18 @@ func (h *Handler) Update(c *gin.Context) {
 			status = "revoked"
 		}
 	}
-
-	workspaceID := middleware.WorkspaceIDFrom(c)
-	link, err := h.service.UpdateStatus(c.Request.Context(), c.Param("id"), workspaceID, status)
-	if err != nil {
-		if errors.Is(err, ErrNotFoundInWorkspace) {
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+	if status != "" {
+		link, err = h.service.UpdateStatus(ctx, linkID, workspaceID, status)
+		if err != nil {
+			if errors.Is(err, ErrNotFoundInWorkspace) {
+				c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+				return
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update link"})
 			return
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to update link"})
-		return
 	}
+
 	item, err := h.linkResponse(c, link)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to build link response"})
@@ -833,10 +856,11 @@ func (h *Handler) CheckPublicEmail(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
-// ListAccessRequests returns all access requests for a link.
+// ListAccessRequests returns access requests for a link (creator-only; others get []).
 func (h *Handler) ListAccessRequests(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	requests, err := h.service.ListAccessRequests(c.Request.Context(), workspaceID, c.Param("id"))
+	userID := middleware.UserIDFrom(c)
+	requests, err := h.service.ListAccessRequests(c.Request.Context(), workspaceID, c.Param("id"), userID)
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
@@ -848,23 +872,46 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": requests})
 }
 
+// ListPendingAccessRequests returns pending visitor access requests for the workspace share inbox.
+func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	userID := middleware.UserIDFrom(c)
+	requests, err := h.service.ListPendingAccessRequests(c.Request.Context(), workspaceID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	out := make([]gin.H, 0, len(requests))
+	for _, ar := range requests {
+		item := gin.H{
+			"id":             ar.ID,
+			"link_id":        ar.LinkID,
+			"email":          ar.Email,
+			"status":         ar.Status,
+			"created_at":     ar.CreatedAt.Format(time.RFC3339),
+			"updated_at":     ar.UpdatedAt.Format(time.RFC3339),
+			"link_name":      ar.LinkName,
+			"document_title": ar.DocumentTitle,
+			"short_url":      publicURL(c, h.cfg, ar.PublicToken, ar.CustomDomain),
+		}
+		if ar.Reason != "" {
+			item["reason"] = ar.Reason
+		}
+		if ar.SignerName != "" {
+			item["signer_name"] = ar.SignerName
+		}
+		out = append(out, item)
+	}
+	c.JSON(http.StatusOK, gin.H{"data": out})
+}
+
 // ApproveAccessRequest approves a pending access request.
 func (h *Handler) ApproveAccessRequest(c *gin.Context) {
 	userID := middleware.UserIDFrom(c)
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	ar, err := h.service.ApproveAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-		case errors.Is(err, ErrAccessRequestBlocked):
-			c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
-		case errors.Is(err, ErrAccessCodeSendFailed):
-			// Approval already committed; owner should resend the access code.
-			c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": httpx.SafeMessage("access_code_send_failed", err)})
-		default:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
-		}
+		writeAccessRequestReviewError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": ar})
@@ -876,15 +923,29 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	ar, err := h.service.RejectAccessRequest(c.Request.Context(), workspaceID, c.Param("id"), c.Param("requestId"), userID)
 	if err != nil {
-		switch {
-		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-		default:
-			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
-		}
+		writeAccessRequestReviewError(c, err)
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": ar})
+}
+
+func writeAccessRequestReviewError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrNotFoundInWorkspace),
+		errors.Is(err, ErrAccessRequestNotFound),
+		errors.Is(err, ErrAccessRequestForbidden):
+		// Opaque 404: do not distinguish missing link/request vs non-creator.
+		c.JSON(http.StatusNotFound, gin.H{"code": "access_request_not_found", "message": httpx.SafeMessage("access_request_not_found", err)})
+	case errors.Is(err, ErrAccessRequestNotPending):
+		c.JSON(http.StatusConflict, gin.H{"code": "access_request_not_pending", "message": httpx.SafeMessage("access_request_not_pending", err)})
+	case errors.Is(err, ErrAccessRequestBlocked):
+		c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		// Approval already committed; owner should resend the access code.
+		c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": httpx.SafeMessage("access_code_send_failed", err)})
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
+	}
 }
 
 // CreateDealRoomLinkRequest is the JSON body for creating a deal-room share link.

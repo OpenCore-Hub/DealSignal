@@ -164,8 +164,9 @@ func (h *Handler) List(c *gin.Context) {
 	filter := strings.ToLower(c.Query("filter"))
 	category := strings.ToLower(c.Query("category"))
 	excludeDealRoom := parseTruthyForm(c.Query("exclude_deal_room"))
-	// Opt-in: Document Library hides agreement docs. Other callers (NDA picker,
-	// bundle pipeline, deal rooms) must not pass this flag.
+	// Opt-in exclusions for Document Library and share-content pickers.
+	// NDA agreement pickers must NOT pass exclude_agreement; they query
+	// category=agreement instead. Deal-room UIs omit both flags.
 	excludeAgreement := parseTruthyForm(c.Query("exclude_agreement"))
 
 	var dealRoomDocIDs map[string]struct{}

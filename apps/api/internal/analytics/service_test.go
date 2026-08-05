@@ -92,7 +92,7 @@ func (m *mockAnalyticsQuerier) ListSignalsByWorkspace(_ context.Context, _ pgtyp
 	return nil, nil
 }
 
-func (m *mockAnalyticsQuerier) ListActionItemsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ActionItem, error) {
+func (m *mockAnalyticsQuerier) ListActionItemsByWorkspaceForUser(_ context.Context, _ db.ListActionItemsByWorkspaceForUserParams) ([]db.ActionItem, error) {
 	return nil, nil
 }
 

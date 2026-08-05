@@ -30,7 +30,8 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 // List returns the signal feed for the workspace.
 func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	feed, err := h.service.GetFeed(c.Request.Context(), workspaceID)
+	userID := middleware.UserIDFrom(c)
+	feed, err := h.service.GetFeed(c.Request.Context(), workspaceID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return

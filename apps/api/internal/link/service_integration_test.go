@@ -951,6 +951,7 @@ func TestRequestAccess(t *testing.T) {
 		listed, listErr := f.svc.ListAccessRequests(f.ctx,
 			uuid.UUID(f.workspace.ID.Bytes).String(),
 			uuid.UUID(f.link.ID.Bytes).String(),
+			uuid.UUID(f.user.ID.Bytes).String(),
 		)
 		if listErr != nil {
 			t.Fatalf("list access requests: %v", listErr)
@@ -1247,8 +1248,164 @@ func TestApproveAccessRequest(t *testing.T) {
 			req.ID,
 			uuid.UUID(other.ID.Bytes).String(),
 		)
-		if err == nil {
-			t.Fatal("expected error when non-creator approves")
+		if !errors.Is(err, ErrAccessRequestNotFound) {
+			t.Fatalf("expected ErrAccessRequestNotFound for non-creator, got %v", err)
+		}
+	})
+
+	t.Run("cross-workspace approve is denied", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+		userID := uuid.UUID(f.user.ID.Bytes).String()
+		linkID := uuid.UUID(f.link.ID.Bytes).String()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "allowed@example.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "cross-ws@other.com", "need access", "")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		otherWS, err := f.q.CreateWorkspace(f.ctx, db.CreateWorkspaceParams{
+			TenantID:   f.link.TenantID,
+			Name:       "Other Workspace",
+			Slug:       uuid.NewString(),
+			BrandColor: pgtype.Text{},
+		})
+		if err != nil {
+			t.Fatalf("create other workspace: %v", err)
+		}
+
+		_, err = f.svc.ApproveAccessRequest(f.ctx,
+			uuid.UUID(otherWS.ID.Bytes).String(),
+			linkID,
+			req.ID,
+			userID,
+		)
+		if !errors.Is(err, ErrAccessRequestNotFound) {
+			t.Fatalf("expected ErrAccessRequestNotFound for cross-workspace, got %v", err)
+		}
+
+		// Still pending in the original workspace.
+		row, err := f.q.GetLinkAccessRequestByID(f.ctx, pgtype.UUID{Bytes: uuid.MustParse(req.ID), Valid: true})
+		if err != nil {
+			t.Fatalf("get access request: %v", err)
+		}
+		if row.Status != "pending" {
+			t.Fatalf("expected request to stay pending, got %s", row.Status)
+		}
+
+		// Creator can still list/approve in the owning workspace.
+		pending, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, userID)
+		if err != nil {
+			t.Fatalf("list pending: %v", err)
+		}
+		if len(pending) != 1 {
+			t.Fatalf("expected 1 pending in owning workspace, got %d", len(pending))
+		}
+	})
+
+	t.Run("wrong link id cannot approve foreign request", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+		userID := uuid.UUID(f.user.ID.Bytes).String()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "allowed@example.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		req, err := f.svc.RequestAccess(f.ctx, f.link, "wrong-link@other.com", "", "")
+		if err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		otherLink, err := f.svc.CreateLink(f.ctx, userID, wsID, CreateLinkRequest{
+			DocumentID:     uuid.UUID(f.link.DocumentID.Bytes).String(),
+			Name:           "Other Link",
+			PermissionType: "public",
+			RequireEmail:   true,
+		})
+		if err != nil {
+			t.Fatalf("create other link: %v", err)
+		}
+
+		_, err = f.svc.ApproveAccessRequest(f.ctx,
+			wsID,
+			uuid.UUID(otherLink.ID.Bytes).String(),
+			req.ID,
+			userID,
+		)
+		if !errors.Is(err, ErrAccessRequestNotFound) {
+			t.Fatalf("expected ErrAccessRequestNotFound, got %v", err)
+		}
+	})
+
+	t.Run("pending inbox is scoped to link creator", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+		userID := uuid.UUID(f.user.ID.Bytes).String()
+
+		if err := f.q.CreateLinkAccessRule(f.ctx, db.CreateLinkAccessRuleParams{
+			TenantID:    f.link.TenantID,
+			WorkspaceID: f.link.WorkspaceID,
+			LinkID:      f.link.ID,
+			RuleType:    "email",
+			Value:       "allowed@example.com",
+			Action:      "allow",
+			SortOrder:   1,
+		}); err != nil {
+			t.Fatalf("create allow rule: %v", err)
+		}
+
+		if _, err := f.svc.RequestAccess(f.ctx, f.link, "inbox@other.com", "please", ""); err != nil {
+			t.Fatalf("request access: %v", err)
+		}
+
+		mine, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, userID)
+		if err != nil {
+			t.Fatalf("list pending for creator: %v", err)
+		}
+		if len(mine) != 1 || mine[0].Email != "inbox@other.com" {
+			t.Fatalf("expected creator inbox to include request, got %#v", mine)
+		}
+
+		other, err := f.q.CreateUser(f.ctx, db.CreateUserParams{
+			Email:        fmt.Sprintf("member-%s@example.com", uuid.NewString()),
+			PasswordHash: "hash",
+		})
+		if err != nil {
+			t.Fatalf("create other user: %v", err)
+		}
+		otherList, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, uuid.UUID(other.ID.Bytes).String())
+		if err != nil {
+			t.Fatalf("list pending for non-creator: %v", err)
+		}
+		if len(otherList) != 0 {
+			t.Fatalf("expected empty inbox for non-creator, got %#v", otherList)
 		}
 	})
 }

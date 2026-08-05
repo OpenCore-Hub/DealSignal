@@ -68,7 +68,8 @@ func (h *Handler) GetScore(c *gin.Context) {
 // GetDashboardStats returns workspace-level dashboard data.
 func (h *Handler) GetDashboardStats(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	stats, err := h.service.DashboardStats(c.Request.Context(), workspaceID)
+	userID := middleware.UserIDFrom(c)
+	stats, err := h.service.DashboardStats(c.Request.Context(), workspaceID, userID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return

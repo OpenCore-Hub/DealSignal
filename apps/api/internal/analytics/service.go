@@ -36,7 +36,7 @@ type Querier interface {
 	ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.Link, error)
 	GetDocumentViewMetrics(ctx context.Context, arg db.GetDocumentViewMetricsParams) ([]db.GetDocumentViewMetricsRow, error)
 	ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.Signal, error)
-	ListActionItemsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ActionItem, error)
+	ListActionItemsByWorkspaceForUser(ctx context.Context, arg db.ListActionItemsByWorkspaceForUserParams) ([]db.ActionItem, error)
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
 	GetPageAnalyticsByDocument(ctx context.Context, arg db.GetPageAnalyticsByDocumentParams) ([]db.GetPageAnalyticsByDocumentRow, error)
 	GetPageTitlesByDocument(ctx context.Context, arg db.GetPageTitlesByDocumentParams) ([]db.GetPageTitlesByDocumentRow, error)
@@ -66,8 +66,9 @@ type SignalFeed struct {
 }
 
 // SignalSyncer syncs suggestions into signals and returns the current feed.
+// userID scopes link_access_request action items to the link creator.
 type SignalSyncer interface {
-	GetFeed(ctx context.Context, workspaceID string) (SignalFeed, error)
+	GetFeed(ctx context.Context, workspaceID, userID string) (SignalFeed, error)
 }
 
 // Cache is a minimal key/value cache used to avoid recomputing dashboard stats.
@@ -442,8 +443,9 @@ type WorkspaceStats struct {
 }
 
 // DashboardStats aggregates high-level workspace metrics.
-func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (WorkspaceStats, error) {
-	cacheKey := fmt.Sprintf("dashboard:stats:%s", workspaceID)
+// userID scopes link_access_request todos to links the viewer created.
+func (s *Service) DashboardStats(ctx context.Context, workspaceID, userID string) (WorkspaceStats, error) {
+	cacheKey := fmt.Sprintf("dashboard:stats:%s:%s", workspaceID, userID)
 	if s.cache != nil {
 		var cached WorkspaceStats
 		if err := s.cache.Get(ctx, cacheKey, &cached); err == nil {
@@ -452,6 +454,10 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 	}
 
 	wsUUID, err := parseUUID(workspaceID)
+	if err != nil {
+		return WorkspaceStats{}, err
+	}
+	userUUID, err := parseUUID(userID)
 	if err != nil {
 		return WorkspaceStats{}, err
 	}
@@ -584,7 +590,7 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 	}
 
 	if s.signalSyncer != nil {
-		feed, err := s.signalSyncer.GetFeed(ctx, workspaceID)
+		feed, err := s.signalSyncer.GetFeed(ctx, workspaceID, userID)
 		if err != nil {
 			return stats, fmt.Errorf("sync signals: %w", err)
 		}
@@ -597,7 +603,10 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID string) (Works
 		}
 		stats.Signals = signals
 
-		actions, err := s.queries.ListActionItemsByWorkspace(ctx, wsUUID)
+		actions, err := s.queries.ListActionItemsByWorkspaceForUser(ctx, db.ListActionItemsByWorkspaceForUserParams{
+			WorkspaceID: wsUUID,
+			CreatedBy:   userUUID,
+		})
 		if err != nil {
 			return stats, fmt.Errorf("actions: %w", err)
 		}

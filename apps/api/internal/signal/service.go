@@ -51,8 +51,13 @@ type Feed struct {
 }
 
 // GetFeed returns the signal feed for a workspace, syncing from suggestions first.
-func (s *Service) GetFeed(ctx context.Context, workspaceID string) (Feed, error) {
+// userID scopes link_access_request todos to links the viewer created.
+func (s *Service) GetFeed(ctx context.Context, workspaceID, userID string) (Feed, error) {
 	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return Feed{}, err
+	}
+	userUUID, err := pgUUID(userID)
 	if err != nil {
 		return Feed{}, err
 	}
@@ -71,7 +76,10 @@ func (s *Service) GetFeed(ctx context.Context, workspaceID string) (Feed, error)
 		return Feed{}, fmt.Errorf("list signals: %w", err)
 	}
 
-	actions, err := s.queries.ListActionItemsByWorkspace(ctx, wsUUID)
+	actions, err := s.queries.ListActionItemsByWorkspaceForUser(ctx, db.ListActionItemsByWorkspaceForUserParams{
+		WorkspaceID: wsUUID,
+		CreatedBy:   userUUID,
+	})
 	if err != nil {
 		return Feed{}, fmt.Errorf("list actions: %w", err)
 	}

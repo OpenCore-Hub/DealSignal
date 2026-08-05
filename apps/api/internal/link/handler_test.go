@@ -711,3 +711,33 @@ func TestRejectIfAskHostLimitedWritesSecurityEvent(t *testing.T) {
 		t.Fatalf("security event identity mismatch: %+v", sink.events[0])
 	}
 }
+
+func TestWriteAccessRequestReviewError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		err  error
+		code int
+		body string
+	}{
+		{ErrNotFoundInWorkspace, http.StatusNotFound, "access_request_not_found"},
+		{ErrAccessRequestNotFound, http.StatusNotFound, "access_request_not_found"},
+		{ErrAccessRequestForbidden, http.StatusNotFound, "access_request_not_found"},
+		{ErrAccessRequestNotPending, http.StatusConflict, "access_request_not_pending"},
+		{ErrAccessRequestBlocked, http.StatusForbidden, "access_request_blocked"},
+		{ErrAccessCodeSendFailed, http.StatusBadGateway, "access_code_send_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			writeAccessRequestReviewError(c, tc.err)
+			if w.Code != tc.code {
+				t.Fatalf("status=%d want %d", w.Code, tc.code)
+			}
+			if !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("body %q missing %q", w.Body.String(), tc.body)
+			}
+		})
+	}
+}

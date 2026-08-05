@@ -51,8 +51,8 @@ type analyticsSignalSyncer struct {
 	svc *signal.Service
 }
 
-func (a *analyticsSignalSyncer) GetFeed(ctx context.Context, workspaceID string) (analytics.SignalFeed, error) {
-	feed, err := a.svc.GetFeed(ctx, workspaceID)
+func (a *analyticsSignalSyncer) GetFeed(ctx context.Context, workspaceID, userID string) (analytics.SignalFeed, error) {
+	feed, err := a.svc.GetFeed(ctx, workspaceID, userID)
 	if err != nil {
 		return analytics.SignalFeed{}, err
 	}
