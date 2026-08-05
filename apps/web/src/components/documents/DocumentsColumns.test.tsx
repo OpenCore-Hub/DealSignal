@@ -94,6 +94,7 @@ async function initI18n() {
           createLink: "Create Link",
           addToDealRoom: "Add to Deal Room",
           archive: "Archive",
+          unarchive: "Unarchive",
           download: "Download",
           delete: "Delete",
         },
@@ -158,6 +159,23 @@ describe("useDocumentColumns download/delete", () => {
     const menu2 = await screen.findByRole("menu");
     fireEvent.click(within(menu2).getByRole("menuitem", { name: /Delete/i }));
     expect(deleteOnDelete).toHaveBeenCalledWith(expect.objectContaining({ id: "doc_1" }));
+  });
+
+  it("shows Unarchive for archived documents", async () => {
+    const i18nInstance = await initI18n();
+    const archived: DocumentRow = { ...readyDoc, status: "archived" };
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <ActionsHarness doc={archived} />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: /^Unarchive$/i })).toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /^Archive$/i })).not.toBeInTheDocument();
   });
 
   it("disables download while processing and keeps delete available after ready", async () => {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate, useParams } from "react-router";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { FileText } from "@phosphor-icons/react";
@@ -13,11 +14,14 @@ import { DocumentAnalytics } from "@/components/documents/DocumentAnalytics";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
+import { documentDetailPath } from "@/lib/documentDetailNav";
 import { useTranslation } from "react-i18next";
 
 export function InsightsPagesPage() {
   const { t } = useTranslation("insights");
   const { t: tc } = useTranslation("common");
+  const navigate = useNavigate();
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [selectedDocId, setSelectedDocId] = useState("");
   const {
     data: documents,
@@ -99,7 +103,21 @@ export function InsightsPagesPage() {
           description={t("pages.noAnalyticsDescription")}
         />
       ) : (
-        <DocumentAnalytics analytics={analytics ?? []} />
+        <DocumentAnalytics
+          analytics={analytics ?? []}
+          variant="detail"
+          onOpenPage={
+            workspaceSlug && selectedDocId
+              ? (pageNumber) =>
+                  navigate(
+                    documentDetailPath(workspaceSlug, selectedDocId, {
+                      tab: "content",
+                      page: pageNumber,
+                    }),
+                  )
+              : undefined
+          }
+        />
       )}
     </div>
   );

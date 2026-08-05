@@ -1,16 +1,15 @@
-import { useCallback, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Buildings, Eye, Link as LinkIcon, Scales } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { PageHeader } from "@/components/common/PageHeader";
 import { SmartBackButton } from "@/components/common/SmartBackButton";
-import { DetailLayout } from "@/components/common/DetailLayout";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { DocumentAnalytics } from "./DocumentAnalytics";
 import { DocumentContent } from "./DocumentContent";
+import { DocumentInsights } from "./DocumentInsights";
 import { DocumentStats } from "./DocumentStats";
 import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
@@ -18,7 +17,15 @@ import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import {
+  isLegacyDocumentDetailTab,
+  parseDocumentDetailTab,
+  parseDocumentFocusPage,
+  patchDocumentDetailSearchParams,
+  type DocumentDetailTab,
+} from "@/lib/documentDetailNav";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
+import { cn } from "@/lib/utils";
 import type { Document, Link, PageAnalytics, VisitorSummary } from "@/types";
 
 interface DocumentDetailData {
@@ -31,6 +38,7 @@ interface DocumentDetailData {
 export function DocumentDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, documentId } = useParams<{ workspaceSlug: string; documentId: string }>();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { t } = useTranslation(["documents", "common", "agreementDocuments"]);
   const [addToRoomOpen, setAddToRoomOpen] = useState(false);
   const [togglingCategory, setTogglingCategory] = useState(false);
@@ -50,12 +58,42 @@ export function DocumentDetail() {
 
   const { data, loading, error, refetch } = useAsyncData(loadDetail, [loadDetail]);
 
+  const rawTab = searchParams.get("tab");
+  const tab = parseDocumentDetailTab(rawTab);
+  const focusPage =
+    tab === "content"
+      ? parseDocumentFocusPage(searchParams.get("page"), data?.doc.pageCount)
+      : null;
+
+  const setDetailNav = useCallback(
+    (patch: { tab?: DocumentDetailTab; page?: number | null }) => {
+      setSearchParams(
+        (prev) => patchDocumentDetailSearchParams(prev, patch),
+        { replace: true },
+      );
+    },
+    [setSearchParams],
+  );
+
+  // Rewrite legacy ?tab=ai → insights so bookmarks stay valid.
+  useEffect(() => {
+    if (!isLegacyDocumentDetailTab(rawTab)) return;
+    setDetailNav({ tab });
+  }, [rawTab, tab, setDetailNav]);
+
+  const openContentPage = useCallback(
+    (pageNumber: number) => {
+      setDetailNav({ tab: "content", page: pageNumber });
+    },
+    [setDetailNav],
+  );
+
   if (error) {
     return (
-      <div className="space-y-6">
+      <div className="mx-auto max-w-6xl space-y-6">
         <SmartBackButton fallbackTo={`/${workspaceSlug}/documents`} fallbackLabel={t("documents:detail.back")} />
-        <div className="rounded-xl border border-border bg-card py-12 text-center">
-          <p className="text-body text-destructive mb-4">
+        <div className="rounded-2xl border border-border/70 bg-background py-12 text-center">
+          <p className="mb-4 text-body text-destructive">
             {t("documents:detail.loadFailed", { error })}
           </p>
           <Button onClick={refetch}>{t("common:retry")}</Button>
@@ -70,6 +108,7 @@ export function DocumentDetail() {
 
   const isAgreement = doc.category === "agreement";
   const canMarkAgreement = doc.fileType === "pdf" || doc.sourceType === "pdf";
+  const busyDoc = doc.status === "uploading" || doc.status === "processing" || doc.status === "failed";
 
   const handleToggleCategory = async () => {
     if (!doc || !documentId) return;
@@ -94,73 +133,162 @@ export function DocumentDetail() {
   };
 
   return (
-    <div className="space-y-6">
+    <div className="mx-auto max-w-6xl space-y-8">
       <SmartBackButton fallbackTo={`/${workspaceSlug}/documents`} fallbackLabel={t("documents:detail.back")} />
 
-      <PageHeader
-        title={doc.title}
-        description={t("documents:detail.meta", {
-          fileType: doc.fileType.toUpperCase(),
-          pageCount: doc.pageCount,
-          fileSize: formatFileSize(doc.fileSize),
-          createdAt: formatRelativeTime(doc.createdAt),
-        })}
-      >
-        <Button variant="outline" className="gap-1.5" onClick={() => navigate(`/viewer/${doc.id}`)}>
-          <Eye size={16} />
-          {t("common:preview")}
-        </Button>
-        <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}>
-          <LinkIcon size={16} />
-          {t("common:createLink")}
-        </Button>
-        <Button
-          variant="outline"
-          className="gap-1.5"
-          onClick={() => setAddToRoomOpen(true)}
-          disabled={doc.status === "uploading" || doc.status === "processing" || doc.status === "failed"}
-        >
-          <Buildings size={16} />
-          {t("common:addToDealRoom")}
-        </Button>
-        <Button
-          variant={isAgreement ? "default" : "outline"}
-          className="gap-1.5"
-          onClick={() => void handleToggleCategory()}
-          disabled={togglingCategory || (!isAgreement && !canMarkAgreement)}
-          title={
-            !isAgreement && !canMarkAgreement
-              ? t("agreementDocuments:page.pdfOnly")
-              : undefined
-          }
-        >
-          <Scales size={16} />
-          {isAgreement
-            ? t("agreementDocuments:page.unsetAsAgreement")
-            : t("agreementDocuments:page.setAsAgreement")}
-        </Button>
-      </PageHeader>
+      <header className="grid gap-6 border-b border-border/60 pb-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
+        <div className="min-w-0 space-y-3">
+          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground/75">
+            {doc.fileType.toUpperCase()}
+          </p>
+          <h1 className="text-balance text-[1.85rem] font-semibold leading-[1.15] tracking-[-0.03em] text-foreground sm:text-[2.15rem]">
+            {doc.title}
+          </h1>
+          <p className="text-[13px] leading-relaxed text-muted-foreground">
+            {t("documents:detail.meta", {
+              fileType: doc.fileType.toUpperCase(),
+              pageCount: doc.pageCount,
+              fileSize: formatFileSize(doc.fileSize),
+              createdAt: formatRelativeTime(doc.createdAt),
+            })}
+          </p>
+        </div>
 
-      <DetailLayout sidebar={<DocumentStats links={links} visitors={visitors} />}>
-        <Tabs defaultValue="overview" className="w-full">
-          <TabsList className="mb-4">
-            <TabsTrigger value="overview">{t("documents:detail.tabs.overview")}</TabsTrigger>
-            <TabsTrigger value="content">{t("documents:detail.tabs.content")}</TabsTrigger>
-            <TabsTrigger value="analytics">{t("documents:detail.tabs.analytics")}</TabsTrigger>
-          </TabsList>
-          <TabsContent value="overview" className="space-y-6">
-            <DocumentAnalytics analytics={analytics} />
-            <DocumentVisitorsCard visitors={visitors} />
-            <DocumentLinksCard doc={doc} links={links} workspaceSlug={workspaceSlug!} />
-          </TabsContent>
-          <TabsContent value="content">
-            <DocumentContent title={doc.title} pageCount={doc.pageCount} documentId={doc.id} analytics={analytics} evidences={[]} />
-          </TabsContent>
-          <TabsContent value="analytics">
-            <DocumentAnalytics analytics={analytics} />
-          </TabsContent>
-        </Tabs>
-      </DetailLayout>
+        <div className="flex flex-col gap-2 sm:items-end">
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-1.5"
+              onClick={() => navigate(`/viewer/${doc.id}`)}
+            >
+              <Eye size={15} />
+              {t("common:preview")}
+            </Button>
+            <Button
+              size="sm"
+              className="gap-1.5"
+              onClick={() => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`)}
+            >
+              <LinkIcon size={15} />
+              {t("common:createLink")}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="gap-1.5 text-muted-foreground hover:text-foreground"
+              onClick={() => setAddToRoomOpen(true)}
+              disabled={busyDoc}
+            >
+              <Buildings size={15} />
+              {t("common:addToDealRoom")}
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "gap-1.5 text-muted-foreground hover:text-foreground",
+                isAgreement && "bg-foreground/[0.04] text-foreground",
+              )}
+              onClick={() => { void handleToggleCategory(); }}
+              disabled={togglingCategory || (!isAgreement && !canMarkAgreement)}
+              title={
+                !isAgreement && !canMarkAgreement
+                  ? t("agreementDocuments:page.pdfOnly")
+                  : undefined
+              }
+            >
+              <Scales size={15} />
+              {isAgreement
+                ? t("agreementDocuments:page.unsetAsAgreement")
+                : t("agreementDocuments:page.setAsAgreement")}
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <DocumentStats links={links} visitors={visitors} />
+
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          const next = parseDocumentDetailTab(value);
+          // page is only meaningful on the content tab; drop it elsewhere.
+          setDetailNav(
+            next === "content" ? { tab: next } : { tab: next, page: null },
+          );
+        }}
+        className="w-full gap-5"
+      >
+        <TabsList variant="line" className="mb-1 h-auto w-full justify-start gap-5 border-b border-border/60 pb-0">
+          <TabsTrigger
+            value="overview"
+            className="rounded-none px-0 pb-2.5 text-[13px] data-active:shadow-none"
+          >
+            {t("documents:detail.tabs.overview")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="content"
+            className="rounded-none px-0 pb-2.5 text-[13px] data-active:shadow-none"
+          >
+            {t("documents:detail.tabs.content")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="analytics"
+            className="rounded-none px-0 pb-2.5 text-[13px] data-active:shadow-none"
+          >
+            {t("documents:detail.tabs.analytics")}
+          </TabsTrigger>
+          <TabsTrigger
+            value="insights"
+            className="rounded-none px-0 pb-2.5 text-[13px] data-active:shadow-none"
+          >
+            {t("documents:detail.tabs.insights")}
+          </TabsTrigger>
+        </TabsList>
+        <TabsContent value="overview" className="space-y-5">
+          <DocumentAnalytics
+            key={`${doc.id}-overview`}
+            analytics={analytics}
+            variant="overview"
+            onOpenPage={openContentPage}
+          />
+          <DocumentInsights
+            key={`${doc.id}-insights-overview`}
+            analytics={analytics}
+            onOpenPage={openContentPage}
+          />
+          <DocumentVisitorsCard visitors={visitors} />
+          <DocumentLinksCard doc={doc} links={links} workspaceSlug={workspaceSlug!} />
+        </TabsContent>
+        <TabsContent value="content">
+          <DocumentContent
+            title={doc.title}
+            pageCount={doc.pageCount}
+            documentId={doc.id}
+            analytics={analytics}
+            focusPage={focusPage}
+            onFocusPageChange={(page) => setDetailNav({ tab: "content", page })}
+          />
+        </TabsContent>
+        <TabsContent value="analytics">
+          <DocumentAnalytics
+            key={`${doc.id}-detail`}
+            analytics={analytics}
+            variant="detail"
+            onOpenPage={openContentPage}
+          />
+        </TabsContent>
+        <TabsContent value="insights">
+          <DocumentInsights
+            key={`${doc.id}-insights`}
+            analytics={analytics}
+            onOpenPage={openContentPage}
+          />
+        </TabsContent>
+      </Tabs>
 
       <AddToDealRoomDialog
         documentId={doc.id}

@@ -1,100 +1,101 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router";
-import { FileText, MagnifyingGlassPlus } from "@phosphor-icons/react";
+import { Eye, FileText, MagnifyingGlassPlus } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
-import { PageCard } from "./PageCard";
+import { DocumentPageGrid } from "./DocumentPageGrid";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
-import type { PageAnalytics, Evidence } from "@/types";
+import { formatDuration } from "@/lib/formatters";
+import { buildPageGridItems } from "@/lib/projectPageGrid";
+import type { PageAnalytics } from "@/types";
 
 interface DocumentContentProps {
   title: string;
   pageCount: number;
   documentId: string;
   analytics: PageAnalytics[];
-  evidences?: Evidence[];
+  /** Page to highlight from analytics / URL deep link. */
+  focusPage?: number | null;
+  onFocusPageChange?: (pageNumber: number) => void;
 }
 
-export function DocumentContent({ title, pageCount, documentId, analytics, evidences: initialEvidences }: DocumentContentProps) {
-  const { t } = useTranslation("documents");
+export function DocumentContent({
+  title,
+  pageCount,
+  documentId,
+  analytics,
+  focusPage = null,
+  onFocusPageChange,
+}: DocumentContentProps) {
+  const { t, i18n } = useTranslation(["documents", "common"]);
   const navigate = useNavigate();
-  const [selectedPage, setSelectedPage] = useState<number | null>(null);
+  const [selectedPage, setSelectedPage] = useState<number | null>(focusPage);
   const [pageImageUrl, setPageImageUrl] = useState<string | null>(null);
   const [loadingImageUrl, setLoadingImageUrl] = useState(false);
-  const [highlightBoxes, setHighlightBoxes] = useState<Array<{ x: number; y: number; w: number; h: number }>>([]);
-  const evidences = initialEvidences ?? [];
-  const [imageSizeForPage, setImageSizeForPage] = useState<{
-    page: number;
-    size: { width: number; height: number };
-  } | null>(null);
 
-  const pages = Array.from({ length: pageCount }, (_, i) => {
-    const pageNumber = i + 1;
-    const analytic = analytics.find((a) => a.pageNumber === pageNumber);
-    return {
-      pageNumber,
-      viewCount: analytic?.viewCount ?? 0,
-      avgDurationSeconds: analytic?.avgDurationSeconds ?? 0,
-      hasEvidence: evidences?.some((e) => e.page_number === pageNumber) ?? false,
-    };
-  });
+  useEffect(() => {
+    if (focusPage == null) return;
+    setSelectedPage(focusPage);
+  }, [focusPage]);
 
-  // Load signed URL for selected page (only depends on page + document, NOT evidences)
+  const pages = useMemo(
+    () => buildPageGridItems(pageCount, analytics),
+    [analytics, pageCount],
+  );
+
+  const selectedAnalytic = useMemo(() => {
+    if (!selectedPage) return null;
+    return pages.find((p) => p.pageNumber === selectedPage) ?? null;
+  }, [pages, selectedPage]);
+
   useEffect(() => {
     if (!selectedPage || !documentId) return;
-    let cancelled = false;
+    const controller = new AbortController();
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loading state for async fetch
     setLoadingImageUrl(true);
     api
-      .getPageSignedUrl(documentId, selectedPage)
+      .getPageSignedUrl(documentId, selectedPage, { signal: controller.signal })
       .then((res) => {
-        if (!cancelled) setPageImageUrl(res.image_url);
+        if (!controller.signal.aborted) setPageImageUrl(res.image_url);
       })
       .catch(() => {
-        if (!cancelled) setPageImageUrl(null);
+        if (!controller.signal.aborted) setPageImageUrl(null);
       })
       .finally(() => {
-        if (!cancelled) setLoadingImageUrl(false);
+        if (!controller.signal.aborted) setLoadingImageUrl(false);
       });
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [selectedPage, documentId]);
 
-  // Update highlight boxes when page or evidences change (separate from image loading)
-  useEffect(() => {
-    if (!selectedPage) return;
-    const pageEvidence = evidences?.filter((e) => e.page_number === selectedPage) ?? [];
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- derived UI state from props
-    setHighlightBoxes(pageEvidence.flatMap((e) => e.boxes || []));
-  }, [selectedPage, evidences]);
+  const handleSelectPage = (pageNumber: number) => {
+    setSelectedPage(pageNumber);
+    onFocusPageChange?.(pageNumber);
+  };
+
+  const durationLabel = formatDuration(
+    selectedAnalytic?.avgDurationSeconds ?? 0,
+    i18n.language,
+  );
+  const exitPercent = Math.round((selectedAnalytic?.exitRate ?? 0) * 100);
 
   return (
-    <div className="space-y-4">
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-        {pages.map((page) => (
-          <PageCard
-            key={page.pageNumber}
-            documentId={documentId}
-            pageNumber={page.pageNumber}
-            viewCount={page.viewCount}
-            avgDurationSeconds={page.avgDurationSeconds}
-            exitRate={analytics.find((a) => a.pageNumber === page.pageNumber)?.exitRate}
-            hasEvidence={page.hasEvidence}
-            isSelected={selectedPage === page.pageNumber}
-            onClick={() => {
-              setSelectedPage(page.pageNumber);
-              navigate(`/viewer/${documentId}?page=${page.pageNumber}`);
-            }}
-          />
-        ))}
-      </div>
+    <div className="space-y-4" data-testid="document-content">
+      <DocumentPageGrid
+        items={pages}
+        documentId={documentId}
+        selectedPage={selectedPage}
+        focusPage={focusPage ?? selectedPage}
+        onSelectPage={handleSelectPage}
+      />
 
       {selectedPage && (
-        <Card>
+        <Card data-testid="document-content-page-detail">
           <CardContent>
-            <div className="flex items-start justify-between">
+            <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
                 <p className="text-h3 flex items-center gap-2">
                   <MagnifyingGlassPlus size={18} />
@@ -102,83 +103,59 @@ export function DocumentContent({ title, pageCount, documentId, analytics, evide
                 </p>
                 <p className="text-body mt-1 text-muted-foreground">{title}</p>
               </div>
+              <Button
+                type="button"
+                size="sm"
+                className="gap-1.5"
+                onClick={() => navigate(`/viewer/${documentId}?page=${selectedPage}`)}
+              >
+                <Eye size={15} />
+                {t("documents:content.openPreview")}
+              </Button>
             </div>
             <div className="mt-4 grid grid-cols-3 gap-4 text-sm">
-              {(() => {
-                const analytic = analytics.find((a) => a.pageNumber === selectedPage);
-                return (
-                  <>
-                    <div>
-                      <p className="text-caption text-muted-foreground">{t("documents:content.viewCount")}</p>
-                      <p className="text-h2">{analytic?.viewCount ?? 0}</p>
-                    </div>
-                    <div>
-                      <p className="text-caption text-muted-foreground">{t("documents:content.avgDuration")}</p>
-                      <p className="text-h2">{analytic?.avgDurationSeconds ?? 0}s</p>
-                    </div>
-                    <div>
-                      <p className="text-caption text-muted-foreground">{t("documents:content.exitRate")}</p>
-                      <p className="text-h2">{Math.round((analytic?.exitRate ?? 0) * 100)}%</p>
-                    </div>
-                  </>
-                );
-              })()}
+              <div>
+                <p className="text-caption text-muted-foreground">
+                  {t("documents:content.viewCount")}
+                </p>
+                <p className="text-h2">{selectedAnalytic?.viewCount ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-caption text-muted-foreground">
+                  {t("documents:content.avgDuration")}
+                </p>
+                <p className="text-h2">
+                  {t("documents:content.avgDurationValue", { duration: durationLabel })}
+                </p>
+              </div>
+              <div>
+                <p className="text-caption text-muted-foreground">
+                  {t("documents:content.exitRate")}
+                </p>
+                <p className="text-h2">
+                  {t("documents:content.exitRateValue", { percent: exitPercent })}
+                </p>
+              </div>
             </div>
 
             <div className="mt-4 flex justify-center rounded-md border border-border bg-muted/30 p-4">
               {loadingImageUrl ? (
                 <Skeleton className="h-[400px] w-[300px]" />
               ) : pageImageUrl ? (
-                <div className="relative inline-block">
-                  <img
-                    src={pageImageUrl}
-                    alt={t("documents:content.pageLabel", { pageNumber: selectedPage })}
-                    className="max-h-[600px] w-auto rounded-md shadow-sm"
-                    onLoad={(e) => {
-                      const img = e.currentTarget;
-                      setImageSizeForPage({
-                        page: selectedPage,
-                        size: { width: img.clientWidth, height: img.clientHeight },
-                      });
-                    }}
-                  />
-                  {imageSizeForPage?.page === selectedPage &&
-                    highlightBoxes.map((box, idx) => {
-                      const { width: w, height: h } = imageSizeForPage.size;
-                      return (
-                        <div
-                          key={idx}
-                          className="pointer-events-none absolute border-2 border-primary bg-primary/20 animate-pulse rounded-sm"
-                          style={{
-                            left: `${box.x * w}px`,
-                            top: `${box.y * h}px`,
-                            width: `${box.w * w}px`,
-                            height: `${box.h * h}px`,
-                          }}
-                        />
-                      );
-                    })}
-                </div>
+                <img
+                  src={pageImageUrl}
+                  alt={t("documents:content.pageLabel", { pageNumber: selectedPage })}
+                  className="max-h-[600px] w-auto rounded-md shadow-sm"
+                />
               ) : (
                 <div className="flex h-[400px] w-[300px] flex-col items-center justify-center text-muted-foreground">
                   <FileText size={48} className="text-muted-foreground/50" />
-                  <p className="mt-2 text-sm">{t("documents:content.pageLabel", { pageNumber: selectedPage })}</p>
+                  <p className="mt-2 text-sm">
+                    {t("documents:content.pageLabel", { pageNumber: selectedPage })}
+                  </p>
                 </div>
               )}
             </div>
-
-            {evidences && evidences.filter((e) => e.page_number === selectedPage).length > 0 && (
-              <div className="mt-4 rounded-md border border-border bg-muted/50 p-3">
-                <p className="text-caption mb-2 text-muted-foreground">{t("documents:content.evidenceHighlight")}</p>
-                {evidences
-                  .filter((e) => e.page_number === selectedPage)
-                  .map((ev) => (
-                    <p key={ev.chunk_id} className="text-sm">
-                      {ev.quote}
-                    </p>
-                  ))}
-              </div>
-            )}
           </CardContent>
         </Card>
       )}

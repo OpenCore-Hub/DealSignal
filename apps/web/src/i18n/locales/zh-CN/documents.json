@@ -67,8 +67,10 @@
   "delete": {
     "title": "删除文档？",
     "description": "“{{name}}” 将从文档库中移除。",
-    "withLinks": "同时会撤销 {{count}} 条有效分享链接。",
-    "withDealRooms": "同时会从 {{count}} 个数据室中移除。",
+    "withLinks_one": "同时会撤销 {{count}} 条有效分享链接。",
+    "withLinks_other": "同时会撤销 {{count}} 条有效分享链接。",
+    "withDealRooms_one": "同时会从 {{count}} 个数据室中移除。",
+    "withDealRooms_other": "同时会从 {{count}} 个数据室中移除。",
     "confirmLoading": "删除中…",
     "success": "文档已删除",
     "failed": "删除文档失败"
@@ -98,7 +100,7 @@
       "overview": "总览",
       "content": "内容",
       "analytics": "数据",
-      "ai": "AI 洞察"
+      "insights": "洞察"
     },
     "recentVisitors": "最近访客",
     "documentLinks": "此文档的链接",
@@ -115,45 +117,51 @@
     "title": "页面停留时间",
     "emptyTitle": "暂无页面数据",
     "emptyDescription": "该文档尚未被访问，页面停留时间将在首次访问后显示。",
-    "pageTooltip": "第 {{pageNumber}} 页 · {{seconds}}s",
+    "pageTooltip": "第 {{pageNumber}} 页 · {{seconds}} 秒",
+    "bucketTooltip": "第 {{start}}–{{end}} 页 · 峰值 {{seconds}} 秒",
     "firstPage": "第 1 页",
-    "lastPage": "第 {{count}} 页"
+    "lastPage": "第 {{count}} 页",
+    "bucketedHint": "{{count}} 个区间",
+    "hiddenZeros": "已隐藏 {{count}} 页暂无停留",
+    "filterAll": "全部页",
+    "filterEngaged": "有停留",
+    "filterEmptyTitle": "暂无有停留的页面",
+    "filterEmptyDescription": "可切换到「全部页」查看完整文档，或等待更多访问。",
+    "expandPerPage": "展开 {{count}} 页",
+    "collapsePerPage": "显示区间",
+    "focusRange": "第 {{start}}–{{end}} 页",
+    "clearFocus": "全部页",
+    "drillHint": "点击区间可查看其中各页",
+    "drillBucket": "查看第 {{start}}–{{end}} 页",
+    "openPageHint": "点击页面柱或「停留最长」可在内容 Tab 打开该页",
+    "openPage": "在内容中打开第 {{pageNumber}} 页",
+    "topPages": "停留最长",
+    "topPageLabel": "第 {{pageNumber}} 页",
+    "topPageSeconds": "{{seconds}} 秒"
   },
   "content": {
     "pageLabel": "第 {{pageNumber}} 页",
-    "evidenceBadge": "证据",
-    "evidenceSrOnly": "此页包含 AI 证据高亮",
     "pageDetailTitle": "第 {{pageNumber}} 页详情",
     "viewCount": "次访问",
     "avgDuration": "平均停留",
+    "avgDurationValue": "{{duration}}",
     "exitRate": "退出率",
-    "evidenceHighlight": "AI 证据高亮",
-    "sourceLocation": "原文定位",
-    "matchType": "{{type}} 匹配 · 分数 {{score}}",
-    "allEvidence": "全部证据（点击跳转）",
-    "searchPlaceholder": "搜索文档内容..."
+    "exitRateValue": "{{percent}}%",
+    "searchPlaceholder": "搜索文档内容...",
+    "virtualizedHint": "共 {{count}} 页 · 滚动加载更多缩略图",
+    "openPreview": "打开预览"
   },
-  "aiInsights": {
-    "emptyTitle": "暂无分析数据",
-    "emptyDescription": "文档被访问后，AI 将基于真实阅读行为生成关键洞察。",
-    "title": "AI 关键洞察",
-    "topPage": "投资人最关注第 {{pageNumber}} 页",
-    "topPageDescription": "平均停留 {{seconds}} 秒，说明这一页是决策关键页。",
-    "exitRisk": "第 {{pageNumber}} 页退出率较高",
-    "exitRiskDescription": "退出率 {{percent}}%，建议优化内容或补充说明。",
-    "evidenceDriven": "证据驱动的回答",
-    "evidenceDrivenDescription": "所有 AI 结论均附带页码与原文定位，可在左侧“内容”页查看高亮。",
-    "followUpTitle": "追问 AI",
-    "questions": {
-      "risks": "这份文档最关键的风险点是什么？",
-      "focus": "投资人最关注哪些页面？",
-      "optimize": "我应该如何优化这份文档？"
-    },
-    "questionLabels": {
-      "risks": "关键风险点",
-      "focus": "投资人关注点",
-      "optimize": "优化建议"
-    }
+  "insights": {
+    "title": "阅读洞察",
+    "subtitle": "基于真实停留与退出率推导。",
+    "emptyTitle": "暂无洞察",
+    "emptyDescription": "访客阅读后，这里会显示关注页与高退出风险页。",
+    "topPage": "停留最长：第 {{pageNumber}} 页",
+    "topPageDescription": "平均 {{seconds}} 秒，通常是决策关键页。",
+    "exitRisk": "退出率偏高：第 {{pageNumber}} 页",
+    "exitRiskDescription": "退出率 {{percent}}%。可考虑澄清或收紧该页内容。",
+    "sparse": "{{total}} 页中仅 {{engaged}} 页有停留",
+    "sparseDescription": "还有 {{count}} 页暂无停留记录——可检查内容覆盖或链接投放。"
   },
   "viewer": {
     "loadFailed": "加载失败：{{error}}",

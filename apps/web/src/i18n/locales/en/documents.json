@@ -105,7 +105,7 @@
       "overview": "Overview",
       "content": "Content",
       "analytics": "Analytics",
-      "ai": "AI Insights"
+      "insights": "Insights"
     },
     "recentVisitors": "Recent visitors",
     "documentLinks": "Links for this document",
@@ -123,44 +123,50 @@
     "emptyTitle": "No page data yet",
     "emptyDescription": "This document hasn't been viewed yet. Time on page will appear after the first visit.",
     "pageTooltip": "Page {{pageNumber}} · {{seconds}}s",
+    "bucketTooltip": "Pages {{start}}–{{end}} · peak {{seconds}}s",
     "firstPage": "Page 1",
-    "lastPage": "Page {{count}}"
+    "lastPage": "Page {{count}}",
+    "bucketedHint": "{{count}} ranges",
+    "hiddenZeros": "{{count}} pages with no dwell are hidden",
+    "filterAll": "All pages",
+    "filterEngaged": "With dwell",
+    "filterEmptyTitle": "No pages with dwell time",
+    "filterEmptyDescription": "Switch to All pages to see the full document, or wait for more visits.",
+    "expandPerPage": "Expand {{count}} pages",
+    "collapsePerPage": "Show ranges",
+    "focusRange": "Pages {{start}}–{{end}}",
+    "clearFocus": "All pages",
+    "drillHint": "Click a range to inspect pages inside it",
+    "drillBucket": "Inspect pages {{start}}–{{end}}",
+    "openPageHint": "Click a page or longest-dwell row to open it in Content",
+    "openPage": "Open page {{pageNumber}} in Content",
+    "topPages": "Longest dwell",
+    "topPageLabel": "Page {{pageNumber}}",
+    "topPageSeconds": "{{seconds}}s"
   },
   "content": {
     "pageLabel": "Page {{pageNumber}}",
-    "evidenceBadge": "Evidence",
-    "evidenceSrOnly": "This page contains AI evidence highlights",
     "pageDetailTitle": "Page {{pageNumber}} details",
     "viewCount": "Views",
     "avgDuration": "Avg. duration",
+    "avgDurationValue": "{{duration}}",
     "exitRate": "Exit rate",
-    "evidenceHighlight": "AI evidence highlights",
-    "sourceLocation": "Source location",
-    "matchType": "{{type}} match · score {{score}}",
-    "allEvidence": "All evidence (click to jump)",
-    "searchPlaceholder": "Search document content..."
+    "exitRateValue": "{{percent}}%",
+    "searchPlaceholder": "Search document content...",
+    "virtualizedHint": "{{count}} pages · scroll to load more thumbnails",
+    "openPreview": "Open preview"
   },
-  "aiInsights": {
-    "emptyTitle": "No analysis data yet",
-    "emptyDescription": "After the document is viewed, AI will generate key insights based on real reading behavior.",
-    "title": "AI insights",
-    "topPage": "Investors focused most on page {{pageNumber}}",
-    "topPageDescription": "Average time on page {{seconds}}s, indicating this is a decision-critical page.",
-    "exitRisk": "Page {{pageNumber}} has a high exit rate",
-    "exitRiskDescription": "Exit rate {{percent}}%, consider optimizing content or adding explanations.",
-    "evidenceDriven": "Evidence-driven answers",
-    "evidenceDrivenDescription": "All AI conclusions include page numbers and source locations; view highlights in the Content tab.",
-    "followUpTitle": "Ask a follow-up",
-    "questions": {
-      "risks": "What are the most critical risks in this document?",
-      "focus": "Which pages do investors care about most?",
-      "optimize": "How should I optimize this document?"
-    },
-    "questionLabels": {
-      "risks": "Key risks",
-      "focus": "Investor focus",
-      "optimize": "Optimization tips"
-    }
+  "insights": {
+    "title": "Reading insights",
+    "subtitle": "Derived from real page dwell and exit rates.",
+    "emptyTitle": "No insights yet",
+    "emptyDescription": "After visitors read this document, focus pages and exit risks will appear here.",
+    "topPage": "Longest dwell on page {{pageNumber}}",
+    "topPageDescription": "Average {{seconds}}s — often a decision-critical page.",
+    "exitRisk": "High exit rate on page {{pageNumber}}",
+    "exitRiskDescription": "Exit rate {{percent}}%. Consider clarifying or tightening this page.",
+    "sparse": "{{engaged}} of {{total}} pages have dwell",
+    "sparseDescription": "{{count}} pages have no recorded dwell yet — check content coverage or link targeting."
   },
   "viewer": {
     "loadFailed": "Failed to load: {{error}}",

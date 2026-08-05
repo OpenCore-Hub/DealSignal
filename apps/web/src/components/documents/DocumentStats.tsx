@@ -1,16 +1,16 @@
 import { useMemo } from "react";
 import { useTranslation } from "react-i18next";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatCard } from "@/components/common/StatCard";
+import { cn } from "@/lib/utils";
 import { formatDuration } from "@/lib/formatters";
 import type { HeatLevel, Link, VisitorSummary } from "@/types";
 
 interface DocumentStatsProps {
   links: Link[];
   visitors: VisitorSummary[];
+  className?: string;
 }
 
-export function DocumentStats({ links, visitors }: DocumentStatsProps) {
+export function DocumentStats({ links, visitors, className }: DocumentStatsProps) {
   const { t } = useTranslation(["documents", "common"]);
 
   const totalViews = links.reduce((sum, l) => sum + l.accessCount, 0);
@@ -28,41 +28,60 @@ export function DocumentStats({ links, visitors }: DocumentStatsProps) {
     return counts;
   }, [links]);
 
+  const metrics = [
+    { label: t("documents:detail.totalViews"), value: String(totalViews) },
+    { label: t("documents:detail.uniqueVisitors"), value: String(uniqueVisitors) },
+    { label: t("documents:detail.avgDuration"), value: formatDuration(avgDuration) },
+  ];
+
   return (
-    <div className="space-y-4">
-      <StatCard label={t("documents:detail.totalViews")} value={totalViews} />
-      <StatCard label={t("documents:detail.uniqueVisitors")} value={uniqueVisitors} />
-      <StatCard label={t("documents:detail.avgDuration")} value={formatDuration(avgDuration)} />
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-h3">{t("documents:detail.heatDistribution")}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="flex flex-wrap gap-2">
+    <section
+      className={cn(
+        "overflow-hidden rounded-2xl border border-border/70 bg-background",
+        "shadow-[0_1px_0_rgba(15,23,42,0.04)]",
+        className,
+      )}
+    >
+      <div className="grid grid-cols-2 divide-x divide-y divide-border/70 md:grid-cols-4 md:divide-y-0">
+        {metrics.map((metric) => (
+          <div key={metric.label} className="px-5 py-4 md:py-5">
+            <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/80">
+              {metric.label}
+            </p>
+            <p className="mt-2 font-mono text-[1.75rem] leading-none tracking-tight tabular-nums text-foreground">
+              {metric.value}
+            </p>
+          </div>
+        ))}
+        <div className="col-span-2 px-5 py-4 md:col-span-1 md:py-5">
+          <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/80">
+            {t("documents:detail.heatDistribution")}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-1.5">
             {heatDistribution.hot > 0 && (
-              <div className="flex items-center gap-1.5 rounded-full bg-hot-500/10 px-2 py-1 text-xs font-medium text-hot-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-hot-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-hot-500/10 px-2 py-1 text-xs font-medium text-hot-500">
+                <span className="size-1.5 rounded-full bg-hot-500" />
                 {t("documents:detail.heatHot", { count: heatDistribution.hot })}
-              </div>
+              </span>
             )}
             {heatDistribution.warm > 0 && (
-              <div className="flex items-center gap-1.5 rounded-full bg-warm-500/10 px-2 py-1 text-xs font-medium text-warm-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-warm-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-warm-500/10 px-2 py-1 text-xs font-medium text-warm-500">
+                <span className="size-1.5 rounded-full bg-warm-500" />
                 {t("documents:detail.heatWarm", { count: heatDistribution.warm })}
-              </div>
+              </span>
             )}
             {heatDistribution.cold > 0 && (
-              <div className="flex items-center gap-1.5 rounded-full bg-cold-500/10 px-2 py-1 text-xs font-medium text-cold-500">
-                <span className="h-1.5 w-1.5 rounded-full bg-cold-500" />
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-cold-500/10 px-2 py-1 text-xs font-medium text-cold-500">
+                <span className="size-1.5 rounded-full bg-cold-500" />
                 {t("documents:detail.heatCold", { count: heatDistribution.cold })}
-              </div>
+              </span>
             )}
             {links.length === 0 && (
               <p className="text-sm text-muted-foreground">{t("documents:detail.noLinks")}</p>
             )}
           </div>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+      </div>
+    </section>
   );
 }

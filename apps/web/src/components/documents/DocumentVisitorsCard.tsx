@@ -1,7 +1,6 @@
-import { Plus } from "@phosphor-icons/react";
+import { Users } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { VisitorList } from "@/components/common/VisitorList";
 import type { HeatLevel, VisitorSummary } from "@/types";
 
@@ -41,20 +40,25 @@ export function DocumentVisitorsCard({ visitors }: DocumentVisitorsCardProps) {
   const visitorList = toVisitorListItems(visitors);
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="text-h2 flex items-center gap-2">
-          <Plus size={20} />
-          {t("documents:detail.recentVisitors")}
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <VisitorList
-          visitors={visitorList}
-          returnTo={location.pathname + location.search}
-          returnLabel={t("documents:detail.back")}
-        />
-      </CardContent>
-    </Card>
+    <section className="rounded-2xl border border-border/70 bg-background px-5 py-5">
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Users size={16} className="text-muted-foreground" weight="duotone" />
+          <h2 className="text-[11px] font-medium uppercase tracking-[0.14em] text-muted-foreground/80">
+            {t("documents:detail.recentVisitors")}
+          </h2>
+        </div>
+        {visitorList.length > 0 ? (
+          <span className="font-mono text-[11px] tabular-nums text-muted-foreground">
+            {visitorList.length}
+          </span>
+        ) : null}
+      </div>
+      <VisitorList
+        visitors={visitorList}
+        returnTo={location.pathname + location.search}
+        returnLabel={t("documents:detail.back")}
+      />
+    </section>
   );
 }
