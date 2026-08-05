@@ -626,9 +626,16 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	}
 
 	// Create allow-list and block-list rules from *_emails.
-	rules := make([]AccessRule, 0, len(req.AllowedEmails)+len(req.BlockedEmails))
+	// Document links: contact_ids are the allowlist source of truth (same gate
+	// semantics as deal-room allowed_emails). Derive allows from provisioned
+	// contact emails so CheckPublicEmail / NDA Continue match Access.
+	allowEmails := req.AllowedEmails
+	if !hasDealRoom && requireEmailVerification {
+		allowEmails = documentAllowEmailsFromCodes(emailCodes)
+	}
+	rules := make([]AccessRule, 0, len(allowEmails)+len(req.BlockedEmails))
 	seenRules := make(map[string]struct{})
-	for _, email := range req.AllowedEmails {
+	for _, email := range allowEmails {
 		v := strings.TrimSpace(strings.ToLower(email))
 		if v == "" {
 			continue
@@ -950,6 +957,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 	// CreateLink / UpdateAccessRules / SendEmailVerificationCode. Wiping them on
 	// every UpdateLink would destroy create-time auto-sent codes on the next save.
 	var emailCodes []emailCode
+	var documentAllowEmails []string
 	if isDealRoomLink {
 		if !requireEmailVerification {
 			if err := qtx.DeleteLinkContactsByLink(ctx, existing.ID); err != nil {
@@ -1012,6 +1020,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 				if !contactUUID.Valid {
 					return db.Link{}, fmt.Errorf("invalid contact id: %s", cid)
 				}
+				documentAllowEmails = append(documentAllowEmails, contact.Email.String)
 
 				if snap, existed := existingByContactID[cid]; existed {
 					if err := qtx.CreateLinkContactWithDelivery(ctx, db.CreateLinkContactWithDeliveryParams{
@@ -1045,6 +1054,11 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 					return db.Link{}, fmt.Errorf("create link contact: %w", err)
 				}
 			}
+		}
+
+		// Keep access_rules allowlist aligned with contact_ids (deal-room parity).
+		if err := replaceAllowEmailRules(ctx, qtx, existing, workspaceUUID, documentAllowEmails); err != nil {
+			return db.Link{}, err
 		}
 	}
 
@@ -1692,6 +1706,14 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 		}
 	}
 
+	// Document verification links: contact_ids remain the allowlist floor.
+	// UpdateAccessRules may add allows, but must not drop contact emails.
+	if fresh.RequireEmailVerification && !fresh.DealRoomID.Valid {
+		if err := s.ensureDocumentLinkAllowlistFromContacts(ctx, fresh); err != nil {
+			return fmt.Errorf("ensure document contact allowlist: %w", err)
+		}
+	}
+
 	// Audit log.
 	s.recordSecurityEvent(ctx, link, uuid.UUID(userUUID.Bytes).String(), "", "access_rules_updated", "")
 	return nil
@@ -2120,6 +2142,11 @@ func (s *Service) CheckPublicEmail(ctx context.Context, publicToken, email, clie
 	email = strings.TrimSpace(strings.ToLower(email))
 	if !isValidEmail(email) {
 		return link, ErrRequiresEmail
+	}
+	// Legacy document links may have link_contacts without allow rules; backfill
+	// once so NDA Continue matches deal-room allowlist semantics.
+	if err := s.ensureDocumentLinkAllowlistFromContacts(ctx, link); err != nil {
+		return link, err
 	}
 	eval, err := s.EvaluateAccessRules(ctx, uuid.UUID(link.ID.Bytes).String(), email)
 	if err != nil {
@@ -2796,6 +2823,12 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	// on an empty input.
 	if requiresEmail && effectiveEmail == "" {
 		return AccessResult{}, ErrRequiresEmail
+	}
+
+	// Legacy document links may have link_contacts without allow rules; backfill
+	// before evaluation so Access deny/allow matches CheckPublicEmail.
+	if err := s.ensureDocumentLinkAllowlistFromContacts(ctx, link); err != nil {
+		return AccessResult{}, err
 	}
 
 	// Evaluate access rules before any gate checks.

@@ -387,6 +387,23 @@ func TestUpdateAccessRules_Integration(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected UpdateAccessRules to succeed with email verification, got %v", err)
 		}
+		rules, err := f.q.ListLinkAccessRulesByLink(f.ctx, verifiedLink.ID)
+		if err != nil {
+			t.Fatalf("list rules: %v", err)
+		}
+		got := map[string]bool{}
+		for _, r := range rules {
+			if r.Action == "allow" {
+				got[r.Value] = true
+			}
+		}
+		// Document contact email is the allowlist floor; extra allows may coexist.
+		if !got["contact@example.com"] {
+			t.Fatalf("expected contact email allow rule to remain, got %#v", rules)
+		}
+		if !got["alice@vc.com"] {
+			t.Fatalf("expected explicitly added allow rule, got %#v", rules)
+		}
 	})
 
 	t.Run("replaces existing rules", func(t *testing.T) {
@@ -1365,6 +1382,102 @@ func TestCreateLinkAccessRules_Integration(t *testing.T) {
 		}
 		if link.PermissionType != "public" {
 			t.Errorf("expected permission_type=public, got %q", link.PermissionType)
+		}
+	})
+}
+
+func TestDocumentLinkContactAllowlist_Integration(t *testing.T) {
+	t.Run("create derives allow rules from contact_ids", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		contact, err := f.q.CreateContact(f.ctx, db.CreateContactParams{
+			WorkspaceID: f.workspace.ID,
+			Email:       pgtype.Text{String: "yang@example.com", Valid: true},
+			Name:        pgtype.Text{String: "Yang", Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("create contact: %v", err)
+		}
+
+		link, err := f.svc.CreateLink(f.ctx, uuid.UUID(f.user.ID.Bytes).String(), uuid.UUID(f.workspace.ID.Bytes).String(), CreateLinkRequest{
+			DocumentID:               uuid.UUID(f.link.DocumentID.Bytes).String(),
+			Name:                     "Doc Contact Allowlist",
+			RequireEmailVerification: true,
+			ContactIDs:               []string{uuid.UUID(contact.ID.Bytes).String()},
+			// Client-supplied allow list must not override contact_ids for document links.
+			AllowedEmails: []string{"other@example.com"},
+		})
+		if err != nil {
+			t.Fatalf("create link: %v", err)
+		}
+
+		rules, err := f.q.ListLinkAccessRulesByLink(f.ctx, link.ID)
+		if err != nil {
+			t.Fatalf("list rules: %v", err)
+		}
+		if len(rules) != 1 || rules[0].Action != "allow" || rules[0].Value != "yang@example.com" {
+			t.Fatalf("expected allow rule for contact email, got %#v", rules)
+		}
+
+		if _, err := f.svc.CheckPublicEmail(f.ctx, link.PublicToken, "yang@example.com", "127.0.0.1"); err != nil {
+			t.Fatalf("contact email should be allowed: %v", err)
+		}
+		if _, err := f.svc.CheckPublicEmail(f.ctx, link.PublicToken, "other@example.com", "127.0.0.1"); !errors.Is(err, ErrNotAllowedEmail) {
+			t.Fatalf("expected ErrNotAllowedEmail for non-contact, got %v", err)
+		}
+	})
+
+	t.Run("update syncs allow rules when contacts change", func(t *testing.T) {
+		f := newFixture(t)
+		defer f.cleanup()
+
+		alice, err := f.q.CreateContact(f.ctx, db.CreateContactParams{
+			WorkspaceID: f.workspace.ID,
+			Email:       pgtype.Text{String: "alice@example.com", Valid: true},
+			Name:        pgtype.Text{String: "Alice", Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("create alice: %v", err)
+		}
+		bob, err := f.q.CreateContact(f.ctx, db.CreateContactParams{
+			WorkspaceID: f.workspace.ID,
+			Email:       pgtype.Text{String: "bob@example.com", Valid: true},
+			Name:        pgtype.Text{String: "Bob", Valid: true},
+		})
+		if err != nil {
+			t.Fatalf("create bob: %v", err)
+		}
+
+		link, err := f.svc.CreateLink(f.ctx, uuid.UUID(f.user.ID.Bytes).String(), uuid.UUID(f.workspace.ID.Bytes).String(), CreateLinkRequest{
+			DocumentID:               uuid.UUID(f.link.DocumentID.Bytes).String(),
+			Name:                     "Doc Contact Update Allowlist",
+			RequireEmailVerification: true,
+			ContactIDs:               []string{uuid.UUID(alice.ID.Bytes).String()},
+		})
+		if err != nil {
+			t.Fatalf("create link: %v", err)
+		}
+
+		updated, err := f.svc.UpdateLink(f.ctx, uuid.UUID(link.ID.Bytes).String(), uuid.UUID(f.workspace.ID.Bytes).String(), UpdateLinkRequest{
+			DocumentIDs:              []string{uuid.UUID(f.link.DocumentID.Bytes).String()},
+			Name:                     link.Name.String,
+			RequireEmailVerification: true,
+			ContactIDs:               []string{uuid.UUID(bob.ID.Bytes).String()},
+		})
+		if err != nil {
+			t.Fatalf("update link: %v", err)
+		}
+
+		rules, err := f.q.ListLinkAccessRulesByLink(f.ctx, updated.ID)
+		if err != nil {
+			t.Fatalf("list rules: %v", err)
+		}
+		if len(rules) != 1 || rules[0].Value != "bob@example.com" {
+			t.Fatalf("expected allowlist to follow bob after update, got %#v", rules)
+		}
+		if _, err := f.svc.CheckPublicEmail(f.ctx, updated.PublicToken, "alice@example.com", "127.0.0.1"); !errors.Is(err, ErrNotAllowedEmail) {
+			t.Fatalf("alice should be denied after removal, got %v", err)
 		}
 	})
 }
