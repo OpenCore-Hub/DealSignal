@@ -18,6 +18,12 @@ describe("documentsSharePath", () => {
       }),
     ).toBe("/acme/documents?tab=shared&documentId=doc-1&documentTitle=Pitch+Deck");
   });
+
+  it("includes linkId for access-request deep links", () => {
+    expect(documentsSharePath("acme", { linkId: "link-9" })).toBe(
+      "/acme/documents?tab=shared&linkId=link-9",
+    );
+  });
 });
 
 describe("documentsCreateLinkPath", () => {
@@ -47,12 +53,12 @@ describe("sanitizeDocumentsLibrarySearchParams", () => {
   it("keeps shared document filters and strips them off other tabs", () => {
     expect(
       sanitizeDocumentsLibrarySearchParams(
-        new URLSearchParams("tab=shared&documentId=doc-1&documentTitle=Deck"),
+        new URLSearchParams("tab=shared&documentId=doc-1&documentTitle=Deck&linkId=link-1"),
       ),
     ).toBeNull();
 
     const stripped = sanitizeDocumentsLibrarySearchParams(
-      new URLSearchParams("tab=archived&documentId=doc-1&documentTitle=Deck"),
+      new URLSearchParams("tab=archived&documentId=doc-1&documentTitle=Deck&linkId=link-1"),
     );
     expect(stripped?.toString()).toBe("tab=archived");
   });

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { clearPipelineDraft, useBundlePipeline } from "./BundlePipelineContext";
 import { BundleDocumentPicker } from "./BundleDocumentPicker";
 import { PipelineProgress } from "./PipelineProgress";
+import { SHARE_CONTENT_DOCUMENT_OPTS } from "./pipelineUtils";
 import { api } from "@/lib/api";
 import type { Document } from "@/types";
 import { toast } from "sonner";
@@ -25,7 +26,9 @@ export function StepDocuments() {
     loadedRef.current = true;
     setLoading(true);
     try {
-      const res = await api.getDocuments();
+      // Share content picker: same scope as Document Library (not agreements / data-room docs).
+      // NDA templates are chosen separately in the security step via category=agreement.
+      const res = await api.getDocuments("all", undefined, SHARE_CONTENT_DOCUMENT_OPTS);
       dispatch({ type: "SET_DOCUMENTS", documents: res.data });
 
       // Restore selected documents from pending draft IDs (set in createInitialState).

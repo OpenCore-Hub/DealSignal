@@ -13,7 +13,11 @@ import { StepReview } from "./StepReview";
 import {
   classifyPresetFromConfig,
 } from "../smart-link/levelConfig";
-import type { Contact, Document, PermissionConfig } from "@/types";
+import {
+  SHARE_CONTENT_DOCUMENT_OPTS,
+  buildEditModeDocumentLists,
+} from "./pipelineUtils";
+import type { Contact, PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
@@ -71,41 +75,13 @@ function BundlePipelineInner() {
         const link = await api.getLinkById(id!);
         if (cancelled) return;
 
-        // Fetch all documents for the picker
-        const docRes = await api.getDocuments();
-
-        // Build selected documents from link.documents (cross-reference with full Document list).
-        // DocumentSummary from the backend now includes fileSize; if a link document is not
-        // in the full document list (e.g., deleted), construct a fallback with available fields.
-        const selectedDocs: Document[] = link.documents
-          .map((ds) => {
-            const full = docRes.data.find((d) => d.id === ds.id);
-            if (full) return full;
-            // Fallback: construct a minimal Document from DocumentSummary fields.
-            // Use new Date(0).toISOString() as a sentinel instead of empty strings
-            // to avoid Invalid Date errors if any UI component calls toLocaleDateString().
-            return {
-              id: ds.id,
-              title: ds.title,
-              sourceType: ds.sourceType,
-              fileName: ds.title,
-              fileType: ds.sourceType,
-              fileSize: ds.fileSize ?? 0,
-              pageCount: ds.pageCount,
-              status: ds.status,
-              createdAt: new Date(0).toISOString(),
-              updatedAt: new Date(0).toISOString(),
-            } as Document;
-          });
-
-        // Merge selected docs into the full list if any are missing from the picker.
-        const allDocs = [...docRes.data];
-        const existingIds = new Set(allDocs.map((d) => d.id));
-        for (const sd of selectedDocs) {
-          if (!existingIds.has(sd.id)) {
-            allDocs.push(sd);
-          }
-        }
+        // Same scope as create mode / Document Library: no agreements or data-room docs
+        // in the available picker. Selected tray may still show orphans via fallbacks.
+        const docRes = await api.getDocuments("all", undefined, SHARE_CONTENT_DOCUMENT_OPTS);
+        const { pickerDocuments, selectedDocuments: selectedDocs } = buildEditModeDocumentLists(
+          docRes.data,
+          link.documents,
+        );
 
         // Map maxAccessCount to maxViews.
         const maxViews: number | "unlimited" =
@@ -179,7 +155,7 @@ function BundlePipelineInner() {
             payload: {
               linkId: link.id,
               token,
-              documents: allDocs,
+              documents: pickerDocuments,
               selectedDocuments: selectedDocs,
               config,
             },

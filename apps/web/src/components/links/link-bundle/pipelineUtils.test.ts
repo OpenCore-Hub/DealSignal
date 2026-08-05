@@ -1,10 +1,25 @@
 import { describe, it, expect } from "vitest";
 import {
   buildConfigFromPreset,
+  buildEditModeDocumentLists,
   validateBundleSecurityConfig,
 } from "./pipelineUtils";
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
-import type { PermissionPreset } from "@/types";
+import type { Document, DocumentSummary, PermissionPreset } from "@/types";
+
+const libraryDoc: Document = {
+  id: "doc-lib",
+  title: "Library Deck",
+  sourceType: "pdf",
+  fileName: "Library Deck.pdf",
+  fileType: "pdf",
+  fileSize: 100,
+  pageCount: 1,
+  status: "ready",
+  category: "general",
+  createdAt: "2026-08-01T00:00:00Z",
+  updatedAt: "2026-08-01T00:00:00Z",
+};
 
 describe("buildConfigFromPreset", () => {
   it("builds a public preset config correctly", () => {
@@ -132,5 +147,26 @@ describe("validateBundleSecurityConfig", () => {
       ndaTemplateId: "tpl-1",
     });
     expect(validateBundleSecurityConfig(config)).toEqual({ ok: true });
+  });
+});
+
+describe("buildEditModeDocumentLists", () => {
+  it("keeps the available picker free of selected orphans (agreement / room docs)", () => {
+    const agreementOnLink: DocumentSummary = {
+      id: "doc-nda",
+      title: "Standard NDA",
+      sourceType: "pdf",
+      pageCount: 2,
+      status: "ready",
+      fileSize: 50,
+    };
+    const { pickerDocuments, selectedDocuments } = buildEditModeDocumentLists(
+      [libraryDoc],
+      [libraryDoc, agreementOnLink],
+    );
+
+    expect(pickerDocuments.map((d) => d.id)).toEqual(["doc-lib"]);
+    expect(selectedDocuments.map((d) => d.id)).toEqual(["doc-lib", "doc-nda"]);
+    expect(selectedDocuments[1]?.title).toBe("Standard NDA");
   });
 });

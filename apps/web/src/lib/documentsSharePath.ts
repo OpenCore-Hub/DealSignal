@@ -3,7 +3,7 @@ const LIBRARY_TABS = new Set(["shared", "archived"]);
 /** Canonical path for the Document Library → Share (links) tab. */
 export function documentsSharePath(
   workspaceSlug: string,
-  opts?: { documentId?: string; documentTitle?: string },
+  opts?: { documentId?: string; documentTitle?: string; linkId?: string },
 ): string {
   const params = new URLSearchParams();
   params.set("tab", "shared");
@@ -12,6 +12,9 @@ export function documentsSharePath(
   }
   if (opts?.documentTitle) {
     params.set("documentTitle", opts.documentTitle);
+  }
+  if (opts?.linkId) {
+    params.set("linkId", opts.linkId);
   }
   return `/${workspaceSlug}/documents?${params.toString()}`;
 }
@@ -50,6 +53,10 @@ export function sanitizeDocumentsLibrarySearchParams(
     }
     if (next.has("documentTitle")) {
       next.delete("documentTitle");
+      changed = true;
+    }
+    if (next.has("linkId")) {
+      next.delete("linkId");
       changed = true;
     }
   }

@@ -104,6 +104,21 @@ describe("StepDocuments", () => {
     vi.clearAllMocks();
   });
 
+  it("loads selectable documents without agreements or data-room docs", async () => {
+    await renderStepDocuments("/links/new");
+
+    await waitFor(() => {
+      expect(getDocumentsMock).toHaveBeenCalledWith(
+        "all",
+        undefined,
+        expect.objectContaining({
+          excludeDealRoom: true,
+          excludeAgreement: true,
+        }),
+      );
+    });
+  });
+
   it("auto-selects the URL document and ignores a stale draft without warning", async () => {
     const warningSpy = vi.spyOn(toast, "warning").mockImplementation(() => "");
 
@@ -120,6 +135,14 @@ describe("StepDocuments", () => {
 
     // The stale draft should not trigger the "draft unavailable" warning.
     expect(warningSpy).not.toHaveBeenCalled();
+    expect(getDocumentsMock).toHaveBeenCalledWith(
+      "all",
+      undefined,
+      expect.objectContaining({
+        excludeDealRoom: true,
+        excludeAgreement: true,
+      }),
+    );
   });
 
   it("still restores a draft and warns when some draft documents are missing", async () => {

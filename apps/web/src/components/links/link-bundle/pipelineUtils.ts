@@ -1,5 +1,40 @@
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
-import type { PermissionConfig, PermissionPreset } from "@/types";
+import type { Document, DocumentSummary, PermissionConfig, PermissionPreset } from "@/types";
+
+/** Document Library / share-content picker scope (excludes agreements + data-room docs). */
+export const SHARE_CONTENT_DOCUMENT_OPTS = {
+  excludeDealRoom: true,
+  excludeAgreement: true,
+} as const;
+
+/**
+ * Edit-mode lists: keep the available picker clean (no agreement / data-room merge-back),
+ * while still reconstructing already-selected link documents for the selected tray.
+ */
+export function buildEditModeDocumentLists(
+  pickerDocs: Document[],
+  linkDocuments: DocumentSummary[],
+): { pickerDocuments: Document[]; selectedDocuments: Document[] } {
+  const byId = new Map(pickerDocs.map((d) => [d.id, d]));
+  const selectedDocuments: Document[] = linkDocuments.map((ds) => {
+    const full = byId.get(ds.id);
+    if (full) return full;
+    return {
+      id: ds.id,
+      title: ds.title,
+      sourceType: ds.sourceType,
+      fileName: ds.title,
+      fileType: ds.sourceType,
+      fileSize: ds.fileSize ?? 0,
+      pageCount: ds.pageCount,
+      status: ds.status,
+      createdAt: new Date(0).toISOString(),
+      updatedAt: new Date(0).toISOString(),
+    };
+  });
+  // Never enlarge the available pool with selected orphans (e.g. agreement / room docs).
+  return { pickerDocuments: pickerDocs, selectedDocuments };
+}
 
 /** Client-side guards before create/update — mirrors StepReview checks. */
 export function validateBundleSecurityConfig(
