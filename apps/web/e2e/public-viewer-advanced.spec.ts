@@ -30,6 +30,41 @@ test.describe("Public viewer advanced (real backend)", () => {
     publicToken = publicLink.publicToken;
   });
 
+  // ── Document-link contact allowlist (CheckPublicEmail parity) ─
+  test("check-email allows contact and rejects others for document verification links", async () => {
+    const doc = await seedDocument(workspaceSlug);
+    const contactEmail = `allowlist-${Date.now()}@example.com`;
+    const link = await seedLink(workspaceSlug, doc.id, {
+      permissionType: "public",
+      requireEmailVerification: true,
+      contactEmail,
+    });
+
+    const okRes = await apiFetch(`/api/v1/public/links/${link.publicToken}/check-email`, {
+      method: "POST",
+      body: JSON.stringify({ email: contactEmail }),
+    });
+    expect(okRes.status).toBe(200);
+
+    const denyRes = await apiFetch(`/api/v1/public/links/${link.publicToken}/check-email`, {
+      method: "POST",
+      body: JSON.stringify({ email: `other-${Date.now()}@example.com` }),
+    });
+    expect(denyRes.status).toBe(403);
+    const denyBody = (await denyRes.json()) as { code?: string };
+    expect(denyBody.code).toBe("not_allowed");
+
+    const rulesRes = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${link.id}/access-rules`);
+    expect(rulesRes.ok).toBe(true);
+    const rulesBody = (await rulesRes.json()) as {
+      data?: { value: string; action: string }[];
+    };
+    const allows = (rulesBody.data ?? [])
+      .filter((r) => r.action === "allow")
+      .map((r) => r.value.toLowerCase());
+    expect(allows).toContain(contactEmail.toLowerCase());
+  });
+
   // ── Email verification code ─────────────────────────────────
   test("sends email verification code", async () => {
     const res = await apiFetch(`/api/v1/public/links/${verificationToken}/send-email-code`, {

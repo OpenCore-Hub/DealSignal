@@ -46,6 +46,45 @@ let securitySettings = {
   twoFactorEnabled: false,
 };
 
+type MockLinkExt = Link & {
+  _requireEmailVerification?: boolean;
+  _requirePassword?: boolean;
+  _requireNDA?: boolean;
+  _password?: string;
+  _allowedEmails?: string[];
+  contactIds?: string[];
+};
+
+function normalizeMockEmail(email: string): string {
+  return email.trim().toLowerCase();
+}
+
+/** Mirror backend document-link SoT: contact_ids drive the allowlist when present. */
+function resolveDocumentAllowEmails(opts: {
+  contactIds?: string[];
+  allowedEmails?: string[];
+}): string[] {
+  if (opts.contactIds && opts.contactIds.length > 0) {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (const id of opts.contactIds) {
+      const contact = mockContacts.find((c) => c.id === id);
+      const email = contact?.email ? normalizeMockEmail(contact.email) : "";
+      if (!email || seen.has(email)) continue;
+      seen.add(email);
+      out.push(email);
+    }
+    return out;
+  }
+  return (opts.allowedEmails ?? [])
+    .map(normalizeMockEmail)
+    .filter((email, index, arr) => email.length > 0 && arr.indexOf(email) === index);
+}
+
+function findMockLinkByPublicToken(token: string): MockLinkExt | undefined {
+  return mockLinks.find((l) => l.shortUrl.endsWith(token)) as MockLinkExt | undefined;
+}
+
 // Snapshot of initial state so E2E tests can reset between cases.
 const initialState = {
   workspaces: structuredClone(mockWorkspaces),
@@ -1268,13 +1307,18 @@ export const handlers = [
     if (typeof payload.require_email_verification === "boolean") link.requireEmailVerification = payload.require_email_verification;
     if (typeof payload.require_password === "boolean") link.requirePassword = payload.require_password;
     if (typeof payload.require_nda === "boolean") link.requireNda = payload.require_nda;
-    if (payload.allowed_emails) link.allowedEmails = payload.allowed_emails;
     if (payload.expires_at) link.expiresAt = payload.expires_at;
     if (typeof payload.max_access_count === "number") link.maxAccessCount = payload.max_access_count;
     if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
     if (typeof payload.watermark_enabled === "boolean") link.watermarkEnabled = payload.watermark_enabled;
     if (typeof payload.qa_enabled === "boolean") link.qaEnabled = payload.qa_enabled;
     if (payload.contact_ids) link.contactIds = payload.contact_ids;
+    const nextAllows = resolveDocumentAllowEmails({
+      contactIds: payload.contact_ids ?? link.contactIds,
+      allowedEmails: payload.allowed_emails ?? link.allowedEmails,
+    });
+    link.allowedEmails = nextAllows;
+    (link as MockLinkExt)._allowedEmails = nextAllows;
 
     return HttpResponse.json(link);
   }),
@@ -1301,9 +1345,19 @@ export const handlers = [
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/links/:id/access-rules", ({ params }) => {
-    const link = mockLinks.find((l) => l.id === params.id);
+    const link = mockLinks.find((l) => l.id === params.id) as MockLinkExt | undefined;
     if (!link) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json({ data: [] as { ruleType: "email"; value: string; action: "allow" | "block" }[] });
+    const allows = resolveDocumentAllowEmails({
+      contactIds: link.contactIds,
+      allowedEmails: link._allowedEmails ?? link.allowedEmails,
+    });
+    return HttpResponse.json({
+      data: allows.map((value) => ({
+        ruleType: "email" as const,
+        value,
+        action: "allow" as const,
+      })),
+    });
   }),
 
   http.put("*/api/workspaces/:workspaceSlug/links/:id/access-rules", async ({ params }) => {
@@ -1447,7 +1501,8 @@ export const handlers = [
 
   http.post("*/api/workspaces/:workspaceSlug/links", async ({ request }) => {
     const body = (await request.json()) as {
-      document_id: string;
+      document_id?: string;
+      document_ids?: string[];
       name?: string;
       permission_type?: string;
       require_email?: boolean;
@@ -1455,23 +1510,30 @@ export const handlers = [
       require_password?: boolean;
       require_nda?: boolean;
       allowed_emails?: string[];
+      contact_ids?: string[];
       password?: string;
       expires_at?: string;
       max_access_count?: number;
       download_enabled?: boolean;
       watermark_enabled?: boolean;
     };
-    const doc = mockDocuments.find((d) => d.id === body.document_id);
+    const primaryDocId = body.document_ids?.[0] ?? body.document_id ?? "";
+    const doc = mockDocuments.find((d) => d.id === primaryDocId);
+    const allowEmails = resolveDocumentAllowEmails({
+      contactIds: body.contact_ids,
+      allowedEmails: body.allowed_emails,
+    });
 
     const requirePassword = body.require_password || body.permission_type === "password" || !!body.password;
     const requireNDA = body.require_nda || body.permission_type === "nda";
-    const hasWhitelist = body.allowed_emails && body.allowed_emails.length > 0;
+    const hasWhitelist = allowEmails.length > 0;
     const requireEmailVerification =
       body.require_email_verification ||
       body.permission_type === "email_required" ||
       body.permission_type === "whitelist" ||
       hasWhitelist ||
       requireNDA ||
+      Boolean(body.contact_ids?.length) ||
       false;
 
     let permissionType: "public" | "email" | "password" | "nda" = "public";
@@ -1483,7 +1545,8 @@ export const handlers = [
 
     const newLink = {
       id: generateId("link"),
-      documentId: body.document_id,
+      documentId: primaryDocId,
+      documentIds: body.document_ids?.length ? body.document_ids : primaryDocId ? [primaryDocId] : [],
       documentTitle: doc?.title ?? "Untitled",
       shortUrl: `https://invest.acme.capital/d/${generateId("sh")}`,
       accessCount: 0,
@@ -1493,18 +1556,16 @@ export const handlers = [
       isActive: true,
       avgDurationSeconds: 0,
       permissionType,
+      contactIds: body.contact_ids ?? [],
+      allowedEmails: allowEmails,
+      requireEmailVerification,
+      requireNda: requireNDA,
       _requireEmailVerification: requireEmailVerification,
       _requirePassword: requirePassword,
       _requireNDA: requireNDA,
       _password: body.password,
-      _allowedEmails: body.allowed_emails ?? [],
-    } as Link & {
-      _requireEmailVerification?: boolean;
-      _requirePassword?: boolean;
-      _requireNDA?: boolean;
-      _password?: string;
-      _allowedEmails?: string[];
-    };
+      _allowedEmails: allowEmails,
+    } as MockLinkExt;
     mockLinks.unshift(newLink);
     return HttpResponse.json(newLink, { status: 201 });
   }),
@@ -3087,6 +3148,46 @@ export const handlers = [
     return HttpResponse.json(action);
   }),
 
+  // Public viewer — pre-NDA allowlist check (parity with backend CheckPublicEmail).
+  http.post("*/api/v1/public/links/:token/check-email", async ({ params, request }) => {
+    const token = params.token as string;
+    const body = (await request.json().catch(() => ({}))) as { email?: string };
+    const email = normalizeMockEmail(body.email ?? "");
+    if (!email || !email.includes("@")) {
+      return HttpResponse.json({ code: "invalid_input", message: "email required" }, { status: 400 });
+    }
+    const link = findMockLinkByPublicToken(token) ?? (mockLinks[0] as MockLinkExt | undefined);
+    if (!link) {
+      return HttpResponse.json({ code: "link_not_found", message: "link not found" }, { status: 404 });
+    }
+    const requiresEmailVerification =
+      Boolean(link._requireEmailVerification) ||
+      Boolean(link.requireEmailVerification) ||
+      link.permissionType === "email" ||
+      link.permissionType === "nda";
+    const requiresNda = Boolean(link._requireNDA) || Boolean(link.requireNda) || link.permissionType === "nda";
+    const requiresPassword = Boolean(link._requirePassword) || Boolean(link.requirePassword) || link.permissionType === "password";
+    const allowEmails = resolveDocumentAllowEmails({
+      contactIds: link.contactIds,
+      allowedEmails: link._allowedEmails ?? link.allowedEmails,
+    });
+    if (allowEmails.length > 0 && !allowEmails.includes(email)) {
+      return HttpResponse.json(
+        {
+          code: "not_allowed",
+          message: "email is not allowed",
+          requiresEmail: false,
+          requiresEmailVerification,
+          requiresPassword,
+          requiresNda,
+          isDealRoom: Boolean(link.dealRoomId),
+        },
+        { status: 403 },
+      );
+    }
+    return HttpResponse.json({ ok: true });
+  }),
+
   // Public viewer
   http.post("*/api/v1/public/links/:token", async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as {
@@ -3096,24 +3197,28 @@ export const handlers = [
       nda_agreed?: boolean;
     };
     const token = params.token as string;
-    const link = mockLinks.find((l) => l.shortUrl.endsWith(token)) ?? mockLinks[0];
-    const extended = link as Link & {
-      _requireEmailVerification?: boolean;
-      _requirePassword?: boolean;
-      _requireNDA?: boolean;
-      _password?: string;
-      _allowedEmails?: string[];
-    };
+    const extended =
+      findMockLinkByPublicToken(token) ??
+      (mockLinks[0] as MockLinkExt);
 
     // The mock permissionType "email" corresponds to the legacy "email_required" type,
     // where the visitor must supply both email and code. Modern email verification uses
     // permissionType "public" + _requireEmailVerification and is code-only.
     const isLegacyEmailRequired = extended.permissionType === "email";
     const requiresEmailVerification =
-      extended._requireEmailVerification || isLegacyEmailRequired || extended.permissionType === "nda";
-    const requiresPassword = extended._requirePassword || extended.permissionType === "password";
-    const requiresNda = extended._requireNDA || extended.permissionType === "nda";
-    const hasWhitelist = extended._allowedEmails && extended._allowedEmails.length > 0;
+      extended._requireEmailVerification ||
+      extended.requireEmailVerification ||
+      isLegacyEmailRequired ||
+      extended.permissionType === "nda";
+    const requiresPassword =
+      extended._requirePassword || extended.requirePassword || extended.permissionType === "password";
+    const requiresNda =
+      extended._requireNDA || extended.requireNda || extended.permissionType === "nda";
+    const allowEmails = resolveDocumentAllowEmails({
+      contactIds: extended.contactIds,
+      allowedEmails: extended._allowedEmails ?? extended.allowedEmails,
+    });
+    const hasWhitelist = allowEmails.length > 0;
     // Email is required for legacy email_required, whitelist matching, or NDA records.
     // Modern email verification (code-only) should not ask for email.
     const requiresEmail = isLegacyEmailRequired || hasWhitelist || requiresNda;
@@ -3137,13 +3242,20 @@ export const handlers = [
       );
     }
     if (hasWhitelist) {
-      const allowed = (extended._allowedEmails ?? []).some(
-        (entry) => entry.trim().toLowerCase() === body.email!.toLowerCase()
-      );
+      const allowed = allowEmails.includes(normalizeMockEmail(body.email ?? ""));
       if (!allowed) {
+        // Match backend Access/CheckPublicEmail: not_allowed (not legacy whitelist_denied).
         return HttpResponse.json(
-          { code: "whitelist_denied", message: "email not in whitelist", requiresEmail, requiresEmailVerification, requiresPassword, requiresNda },
-          { status: 403 }
+          {
+            code: "not_allowed",
+            message: "email not in whitelist",
+            requiresEmail,
+            requiresEmailVerification,
+            requiresPassword,
+            requiresNda,
+            isDealRoom: Boolean(extended.dealRoomId),
+          },
+          { status: 403 },
         );
       }
     }
