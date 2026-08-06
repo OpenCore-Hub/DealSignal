@@ -22,6 +22,10 @@
     "replaceCancel": "Cancel",
     "replaceCancelled": "Upload cancelled"
   },
+  "category": {
+    "agreement": "Agreement",
+    "dealRoom": "Data room"
+  },
   "filters": {
     "all": "Documents",
     "shared": "Shared",
@@ -90,7 +94,7 @@
   },
   "detail": {
     "back": "Back to documents",
-    "loadFailed": "Failed to load: {{error}}",
+    "loadFailed": "Unable to load this document. Please try again.",
     "meta": "{{fileType}} · {{pageCount}} pages · {{fileSize}} · uploaded {{createdAt}}",
     "downloadDisabled": "Download requires backend signed URL support",
     "totalViews": "Total views",
@@ -116,7 +120,13 @@
       "title": "Delete document",
       "description": "Are you sure you want to delete \"{{title}}\"? Associated links will become invalid and this action cannot be undone."
     },
-    "deleted": "Document deleted"
+    "deleted": "Document deleted",
+    "categoryErrors": {
+      "agreement_not_allowed_in_deal_room": "Agreement documents cannot be added to a data room",
+      "category_immutable": "This document’s category cannot be changed",
+      "category_while_in_room": "Remove the document from data rooms before changing its category",
+      "category_deal_room_via_api": "Data-room category is managed when you add or remove the document from a room"
+    }
   },
   "analytics": {
     "title": "Time on page",
@@ -169,8 +179,12 @@
     "sparseDescription": "{{count}} pages have no recorded dwell yet — check content coverage or link targeting."
   },
   "viewer": {
-    "loadFailed": "Failed to load: {{error}}",
+    "loadFailed": "Unable to load this document. Please try again.",
     "notFound": "Document does not exist or cannot be loaded",
+    "documentLockedTitle": "This document is not available",
+    "documentLockedDescription": "This file is locked in the deal room and cannot be viewed through this link. Contact the deal team if you need access.",
+    "documentOutOfScopeTitle": "This document is not included",
+    "documentOutOfScopeDescription": "This link only shares selected folders. Choose another document from the list, or ask the sender for an updated link.",
     "meta": "{{fileType}} · {{fileSize}} · {{pageCount}} pages",
     "zoomOut": "Zoom out",
     "zoomIn": "Zoom in",
@@ -207,6 +221,9 @@
     "passwordLabel": "Password",
     "passwordPlaceholder": "Enter the link password",
     "passwordRequired": "Please enter the link password to continue.",
+    "invalidPassword": "Incorrect password. Please try again.",
+    "invalidEmailCode": "Incorrect verification code. Please check your email and try again.",
+    "whitelistDenied": "Your email is not on the allowed list for this link.",
     "ndaLabel": "I agree to the non-disclosure agreement",
     "ndaRequired": "Please agree to the non-disclosure agreement to continue.",
     "ndaPreviewTitle": "NDA preview",

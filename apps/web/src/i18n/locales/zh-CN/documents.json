@@ -22,6 +22,10 @@
     "replaceCancel": "取消",
     "replaceCancelled": "已取消上传"
   },
+  "category": {
+    "agreement": "协议",
+    "dealRoom": "数据室"
+  },
   "filters": {
     "all": "文档",
     "shared": "分享",
@@ -85,7 +89,7 @@
   },
   "detail": {
     "back": "返回文档库",
-    "loadFailed": "加载失败：{{error}}",
+    "loadFailed": "无法加载此文档，请重试。",
     "meta": "{{fileType}} · {{pageCount}} 页 · {{fileSize}} · 上传于 {{createdAt}}",
     "downloadDisabled": "下载需后端签名 URL 支持",
     "totalViews": "总访问",
@@ -111,7 +115,13 @@
       "title": "删除文档",
       "description": "确定要删除「{{title}}」吗？关联链接将一并失效，此操作不可撤销。"
     },
-    "deleted": "文档已删除"
+    "deleted": "文档已删除",
+    "categoryErrors": {
+      "agreement_not_allowed_in_deal_room": "协议文档不能加入数据室",
+      "category_immutable": "此文档类型不可更改",
+      "category_while_in_room": "请先从数据室移除该文档，再更改类型",
+      "category_deal_room_via_api": "数据室类型由加入/移出数据室自动管理"
+    }
   },
   "analytics": {
     "title": "页面停留时间",
@@ -164,8 +174,12 @@
     "sparseDescription": "还有 {{count}} 页暂无停留记录——可检查内容覆盖或链接投放。"
   },
   "viewer": {
-    "loadFailed": "加载失败：{{error}}",
+    "loadFailed": "无法加载此文档，请重试。",
     "notFound": "文档不存在或无法加载",
+    "documentLockedTitle": "无法查看此文档",
+    "documentLockedDescription": "该文件已在数据室中锁定，无法通过此分享链接访问。如需查看，请联系数据室管理员。",
+    "documentOutOfScopeTitle": "此文档不在分享范围内",
+    "documentOutOfScopeDescription": "当前链接仅分享部分文件夹。请从列表中选择其他文档，或联系分享方获取更新后的链接。",
     "meta": "{{fileType}} · {{fileSize}} · {{pageCount}} 页",
     "zoomOut": "缩小",
     "zoomIn": "放大",
@@ -202,6 +216,9 @@
     "passwordLabel": "密码",
     "passwordPlaceholder": "输入链接密码",
     "passwordRequired": "请输入链接密码以继续查看文档。",
+    "invalidPassword": "密码不正确，请重试。",
+    "invalidEmailCode": "验证码不正确，请检查邮箱后重试。",
+    "whitelistDenied": "您的邮箱不在该链接的允许列表中。",
     "ndaLabel": "我同意保密协议",
     "ndaRequired": "请勾选同意保密协议以继续查看文档。",
     "ndaPreviewTitle": "保密协议预览",

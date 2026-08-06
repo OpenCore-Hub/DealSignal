@@ -1,5 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { useMemo } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import type { NavigateFunction } from "react-router";
 import {
   Archive,
@@ -21,10 +22,12 @@ import { Button } from "@/components/ui/button";
 import { FileTypeIcon } from "@/components/common/FileTypeIcon";
 import { HeatBadge } from "@/components/common/HeatBadge";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
+import { DocumentCategoryBadge } from "./DocumentCategoryBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { formatDate, formatFileSize } from "@/lib/formatters";
 import { copyToClipboard } from "@/lib/clipboard";
 import { documentsSharePath } from "@/lib/documentsSharePath";
+import { canAddDocumentToDealRoom } from "@/lib/documentCategory";
 import { cn } from "@/lib/utils";
 import type { Column, ColumnDef } from "@tanstack/react-table";
 import type { Document, HeatLevel, Link } from "@/types";
@@ -43,6 +46,7 @@ export function calculateHeatLevel(totalViews: number): HeatLevel {
 
 export function buildDocumentRows(documents: Document[], links: Link[]): DocumentRow[] {
   const linksByDoc = links.reduce<Record<string, Link[]>>((acc, link) => {
+    if (!link.documentId || link.dealRoomId) return acc;
     if (!acc[link.documentId]) acc[link.documentId] = [];
     acc[link.documentId].push(link);
     return acc;
@@ -125,9 +129,12 @@ export function useDocumentColumns({
                 className="transition-transform duration-200 group-hover/doc-row:scale-[1.04]"
               />
               <div className="min-w-0">
-                <p className="truncate text-[13.5px] font-medium tracking-[-0.015em] text-foreground">
-                  {doc.title}
-                </p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <p className="truncate text-[13.5px] font-medium tracking-[-0.015em] text-foreground">
+                    {doc.title}
+                  </p>
+                  <DocumentCategoryBadge category={doc.category} />
+                </div>
                 <p className="mt-0.5 truncate text-[11.5px] text-muted-foreground">
                   <span>{t("documents:columns.pages", { count: doc.pageCount })}</span>
                   <span className="mx-1.5 text-border">·</span>
@@ -228,6 +235,7 @@ export function useDocumentColumns({
 
           const busy = doc.status === "uploading" || doc.status === "processing";
           const downloadReady = doc.status === "ready" || doc.status === "archived";
+          const showAddToDealRoom = Boolean(onAddToDealRoom) && canAddDocumentToDealRoom(doc.category);
 
           const handleArchive = async () => {
             try {
@@ -240,7 +248,7 @@ export function useDocumentColumns({
               }
               refetch?.();
             } catch (e) {
-              toast.error(e instanceof Error ? e.message : t("documents:columns.archiveFailed"));
+              toast.error(apiErrorMessage(e, { messageKey: "documents:columns.archiveFailed" }));
             }
           };
 
@@ -256,7 +264,7 @@ export function useDocumentColumns({
               a.click();
               a.remove();
             } catch (e) {
-              toast.error(e instanceof Error ? e.message : t("documents:columns.downloadFailed"));
+              toast.error(apiErrorMessage(e, { messageKey: "documents:columns.downloadFailed" }));
             }
           };
 
@@ -300,12 +308,16 @@ export function useDocumentColumns({
                         },
                       ]
                     : []),
-                  {
-                    label: t("common:addToDealRoom"),
-                    icon: <Buildings size={16} />,
-                    onClick: () => onAddToDealRoom?.(doc),
-                    disabled: busy || doc.status === "failed",
-                  },
+                  ...(showAddToDealRoom
+                    ? [
+                        {
+                          label: t("common:addToDealRoom"),
+                          icon: <Buildings size={16} />,
+                          onClick: () => onAddToDealRoom?.(doc),
+                          disabled: busy || doc.status === "failed",
+                        },
+                      ]
+                    : []),
                   {
                     label: doc.status === "archived" ? t("common:unarchive") : t("common:archive"),
                     icon:

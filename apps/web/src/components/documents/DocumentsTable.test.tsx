@@ -193,10 +193,7 @@ describe("DocumentsTable", () => {
     await renderTable();
 
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general"),
     );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
     expect(screen.getByText("Old Report")).toBeInTheDocument();
@@ -206,10 +203,7 @@ describe("DocumentsTable", () => {
     getDocumentsMock.mockResolvedValue({ data: mockDocs });
     await renderTable();
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general"),
     );
 
     expect(screen.getByRole("tab", { name: "Documents" })).toBeInTheDocument();
@@ -220,18 +214,12 @@ describe("DocumentsTable", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Shared" }));
     expect(await screen.findByTestId("links-table")).toHaveTextContent("all-links");
     expect(screen.getByRole("button", { name: "Create Link" })).toBeInTheDocument();
-    expect(getDocumentsMock).not.toHaveBeenCalledWith("shared", undefined, {
-      excludeDealRoom: true,
-      excludeAgreement: true,
-    });
+    expect(getDocumentsMock).not.toHaveBeenCalledWith("shared", "general");
 
     fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
 
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", "general"),
     );
   });
 
@@ -240,10 +228,7 @@ describe("DocumentsTable", () => {
     await renderTable();
 
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general"),
     );
     expect(await screen.findByText("Empty library")).toBeInTheDocument();
 
@@ -268,10 +253,7 @@ describe("DocumentsTable", () => {
     await renderTable();
 
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general"),
     );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
 
@@ -291,18 +273,12 @@ describe("DocumentsTable", () => {
     );
     await renderTable();
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general"),
     );
 
     fireEvent.click(screen.getByRole("tab", { name: "Archived" }));
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", undefined, {
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
+      expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", "general"),
     );
 
     expect(await screen.findByText("No documents in this view")).toBeInTheDocument();
@@ -327,10 +303,7 @@ describe("DocumentsTable", () => {
     );
 
     await waitFor(() =>
-      expect(getDocumentsMock).toHaveBeenCalledWith("all", "agreement", {
-        excludeDealRoom: true,
-        excludeAgreement: false,
-      }),
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "agreement"),
     );
     expect(await screen.findByText("Add your first NDA")).toBeInTheDocument();
 

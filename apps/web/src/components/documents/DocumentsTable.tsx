@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   useReactTable,
@@ -46,6 +47,7 @@ import {
   useDocumentUploadConflict,
 } from "@/hooks/useDocumentUploadConflict";
 import { api } from "@/lib/api";
+import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { ApiError } from "@/lib/apiClient";
 import { LinksTable } from "@/components/links/LinksTable";
 import {
@@ -216,12 +218,10 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     refetch,
   } = useAsyncData(async () => {
     if (showShareTab) return [] as DocumentRow[];
+    // Partition by category truth: library → general; agreements page → agreement.
+    const listCategory = category ?? LIBRARY_DOCUMENT_CATEGORY;
     const [docsRes, linksRes] = await Promise.all([
-      api.getDocuments(filter, category, {
-        excludeDealRoom: true,
-        // Document Library only — keep agreement PDFs available to NDA pickers.
-        excludeAgreement: !category,
-      }),
+      api.getDocuments(filter, listCategory),
       api.getLinks(),
     ]);
     return buildDocumentRows(docsRes.data, linksRes.data);
@@ -708,9 +708,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
                   setDocToDelete(null);
                   void refetch();
                 } catch (e) {
-                  toast.error(
-                    e instanceof Error ? e.message : t("documents:delete.failed"),
-                  );
+                  toast.error(apiErrorMessage(e, { messageKey: "documents:delete.failed" }));
                 } finally {
                   setIsDeleting(false);
                 }

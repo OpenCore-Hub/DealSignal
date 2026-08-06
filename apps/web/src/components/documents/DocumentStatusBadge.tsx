@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { SpinnerGap, CheckCircle, XCircle, Clock, Archive } from "@phosphor-icons/react";
 import { Badge } from "@/components/ui/badge";
 import type { Document } from "@/types";
+import { ingestionErrorLabel } from "@/lib/apiErrors";
 
 interface DocumentStatusBadgeProps {
   status: Document["status"];
@@ -37,7 +38,7 @@ export function DocumentStatusBadge({ status, progress, errorMessage }: Document
       );
     case "failed":
       return (
-        <Badge variant="destructive" className="gap-1" title={errorMessage ?? undefined}>
+        <Badge variant="destructive" className="gap-1" title={ingestionErrorLabel(errorMessage) ?? undefined}>
           <XCircle className="size-3" />
           {t("documents:status.failed")}
         </Badge>

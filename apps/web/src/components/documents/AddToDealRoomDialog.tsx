@@ -1,4 +1,5 @@
 import { useMemo, useState, type ReactNode } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { Buildings, Folder } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
+import { agreementCategoryErrorCode } from "@/lib/documentCategory";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { toast } from "sonner";
 import type { DealRoomFolder, DealRoomFolderDocs } from "@/types";
@@ -41,6 +44,7 @@ export function AddToDealRoomDialog({
 }: AddToDealRoomDialogProps) {
   const { t } = useTranslation("dealRooms");
   const { t: tc } = useTranslation("common");
+  const { t: td } = useTranslation("documents");
 
   const [selectedRoomId, setSelectedRoomId] = useState<string>("");
   const [selectedFolder, setSelectedFolder] = useState<string>("");
@@ -110,7 +114,11 @@ export function AddToDealRoomDialog({
       onAdded?.();
       handleOpenChange(false);
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      if (e instanceof ApiError && agreementCategoryErrorCode(e.code)) {
+        toast.error(td(`detail.categoryErrors.${e.code}`));
+      } else {
+        toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
+      }
     } finally {
       setAdding(false);
     }

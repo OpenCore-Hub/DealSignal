@@ -198,4 +198,50 @@ describe("useDocumentColumns download/delete", () => {
       "data-disabled",
     );
   });
+
+  it("hides add-to-deal-room for agreement and deal_room categories", async () => {
+    const i18nInstance = await initI18n();
+    const onAddToDealRoom = vi.fn();
+    function CategoryHarness({ doc }: { doc: DocumentRow }) {
+      const navigate = vi.fn();
+      const columns = useDocumentColumns({
+        workspaceSlug: "acme",
+        navigate,
+        onAddToDealRoom,
+      });
+      const table = useReactTable({
+        data: [doc],
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+      });
+      const actionsCell = table.getRowModel().rows[0]!.getVisibleCells().find((c) => c.column.id === "actions");
+      return <div>{actionsCell ? flexRender(actionsCell.column.columnDef.cell, actionsCell.getContext()) : null}</div>;
+    }
+
+    for (const category of ["agreement", "deal_room"] as const) {
+      onAddToDealRoom.mockClear();
+      const { unmount } = render(
+        <I18nextProvider i18n={i18nInstance}>
+          <MemoryRouter>
+            <CategoryHarness doc={{ ...readyDoc, category }} />
+          </MemoryRouter>
+        </I18nextProvider>,
+      );
+      fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+      const menu = await screen.findByRole("menu");
+      expect(within(menu).queryByRole("menuitem", { name: /Add to Deal Room/i })).not.toBeInTheDocument();
+      unmount();
+    }
+
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <CategoryHarness doc={{ ...readyDoc, category: "general" }} />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const generalMenu = await screen.findByRole("menu");
+    expect(within(generalMenu).getByRole("menuitem", { name: /Add to Deal Room/i })).toBeInTheDocument();
+  });
 });

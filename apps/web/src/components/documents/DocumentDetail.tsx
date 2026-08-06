@@ -14,6 +14,7 @@ import { DocumentStats } from "./DocumentStats";
 import { DocumentVisitorsCard } from "./DocumentVisitorsCard";
 import { DocumentLinksCard } from "./DocumentLinksCard";
 import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
+import { DocumentCategoryBadge } from "./DocumentCategoryBadge";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
 import { useAsyncData } from "@/hooks/useAsyncData";
@@ -24,6 +25,13 @@ import {
   patchDocumentDetailSearchParams,
   type DocumentDetailTab,
 } from "@/lib/documentDetailNav";
+import {
+  canAddDocumentToDealRoom,
+  canToggleAgreementCategory,
+  isAgreementCategory,
+  isDealRoomCategory,
+  agreementCategoryErrorCode,
+} from "@/lib/documentCategory";
 import { formatFileSize, formatRelativeTime } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
 import type { Document, Link, PageAnalytics, VisitorSummary } from "@/types";
@@ -94,7 +102,7 @@ export function DocumentDetail() {
         <SmartBackButton fallbackTo={`/${workspaceSlug}/documents`} fallbackLabel={t("documents:detail.back")} />
         <div className="rounded-2xl border border-border/70 bg-background py-12 text-center">
           <p className="mb-4 text-body text-destructive">
-            {t("documents:detail.loadFailed", { error })}
+            {error || t("documents:detail.loadFailed")}
           </p>
           <Button onClick={refetch}>{t("common:retry")}</Button>
         </div>
@@ -106,12 +114,17 @@ export function DocumentDetail() {
 
   const { doc, links, analytics, visitors } = data;
 
-  const isAgreement = doc.category === "agreement";
-  const canMarkAgreement = doc.fileType === "pdf" || doc.sourceType === "pdf";
+  const isAgreement = isAgreementCategory(doc.category);
+  const isDealRoomDoc = isDealRoomCategory(doc.category);
+  const canMarkAgreement = canToggleAgreementCategory(doc.category, {
+    fileType: doc.fileType,
+    sourceType: doc.sourceType,
+  });
+  const canAddToDealRoom = canAddDocumentToDealRoom(doc.category);
   const busyDoc = doc.status === "uploading" || doc.status === "processing" || doc.status === "failed";
 
   const handleToggleCategory = async () => {
-    if (!doc || !documentId) return;
+    if (!doc || !documentId || isDealRoomDoc) return;
     const newCategory = isAgreement ? "general" : "agreement";
     if (newCategory === "agreement" && !canMarkAgreement) {
       toast.error(t("agreementDocuments:page.pdfOnly"));
@@ -124,6 +137,11 @@ export function DocumentDetail() {
     } catch (err) {
       if (err instanceof ApiError && err.code === "agreement_pdf_required") {
         toast.error(t("agreementDocuments:page.pdfOnly"));
+      } else if (
+        err instanceof ApiError &&
+        agreementCategoryErrorCode(err.code)
+      ) {
+        toast.error(t(`documents:detail.categoryErrors.${err.code}`));
       } else {
         toast.error(t("common:error.saveFailed"));
       }
@@ -138,9 +156,12 @@ export function DocumentDetail() {
 
       <header className="grid gap-6 border-b border-border/60 pb-7 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end">
         <div className="min-w-0 space-y-3">
-          <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground/75">
-            {doc.fileType.toUpperCase()}
-          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground/75">
+              {doc.fileType.toUpperCase()}
+            </p>
+            <DocumentCategoryBadge category={doc.category} />
+          </div>
           <h1 className="text-balance text-[1.85rem] font-semibold leading-[1.15] tracking-[-0.03em] text-foreground sm:text-[2.15rem]">
             {doc.title}
           </h1>
@@ -175,16 +196,18 @@ export function DocumentDetail() {
             </Button>
           </div>
           <div className="flex flex-wrap items-center gap-1.5 sm:justify-end">
-            <Button
-              variant="ghost"
-              size="sm"
-              className="gap-1.5 text-muted-foreground hover:text-foreground"
-              onClick={() => setAddToRoomOpen(true)}
-              disabled={busyDoc}
-            >
-              <Buildings size={15} />
-              {t("common:addToDealRoom")}
-            </Button>
+            {canAddToDealRoom ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="gap-1.5 text-muted-foreground hover:text-foreground"
+                onClick={() => setAddToRoomOpen(true)}
+                disabled={busyDoc}
+              >
+                <Buildings size={15} />
+                {t("common:addToDealRoom")}
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
@@ -193,11 +216,13 @@ export function DocumentDetail() {
                 isAgreement && "bg-foreground/[0.04] text-foreground",
               )}
               onClick={() => { void handleToggleCategory(); }}
-              disabled={togglingCategory || (!isAgreement && !canMarkAgreement)}
+              disabled={togglingCategory || isDealRoomDoc || (!isAgreement && !canMarkAgreement)}
               title={
-                !isAgreement && !canMarkAgreement
-                  ? t("agreementDocuments:page.pdfOnly")
-                  : undefined
+                isDealRoomDoc
+                  ? t("documents:detail.categoryErrors.category_immutable")
+                  : !isAgreement && !canMarkAgreement
+                    ? t("agreementDocuments:page.pdfOnly")
+                    : undefined
               }
             >
               <Scales size={15} />
