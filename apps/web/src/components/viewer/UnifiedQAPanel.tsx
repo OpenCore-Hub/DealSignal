@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import type { VisitorQuestion } from "@/types";
+import type { PublicAskTurn } from "@/types";
 
 interface UnifiedQAPanelProps {
   token: string;
@@ -31,7 +31,7 @@ export function UnifiedQAPanel({
   qaEnabled,
 }: UnifiedQAPanelProps) {
   const { t } = useTranslation("documents");
-  const [questions, setQuestions] = useState<VisitorQuestion[]>([]);
+  const [turns, setTurns] = useState<PublicAskTurn[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(() => Boolean(qaEnabled));
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -48,8 +48,8 @@ export function UnifiedQAPanel({
       setQuestionError(null);
       setLoadingQuestions(true);
       try {
-        const res = await api.listPublicQuestions(token, creds(sessionTokenRef.current));
-        if (!cancelled) setQuestions(res.data ?? []);
+        const res = await api.listPublicAskTurns(token, creds(sessionTokenRef.current));
+        if (!cancelled) setTurns(res.data ?? []);
       } catch {
         if (!cancelled) setQuestionError(t("viewer.qaLoadError"));
       } finally {
@@ -63,32 +63,32 @@ export function UnifiedQAPanel({
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [questions, ownerSubmitting]);
+  }, [turns, ownerSubmitting]);
 
   const allMessages = useMemo<UIMessage[]>(() => {
     const list: UIMessage[] = [];
     if (qaEnabled) {
-      questions.forEach((q) => {
+      turns.forEach((turn) => {
         list.push({
-          id: `q_${q.id}`,
+          id: `q_${turn.id}`,
           source: "you",
-          content: q.question,
-          createdAt: q.created_at,
-          pendingReply: q.status === "pending",
+          content: turn.question,
+          createdAt: turn.created_at,
+          pendingReply: turn.status === "host_pending",
         });
-        if (q.answer && q.status === "answered") {
+        if (turn.host_answer && turn.status === "host_answered") {
           list.push({
-            id: `a_${q.id}`,
+            id: `a_${turn.id}`,
             source: "owner",
-            content: q.answer,
-            createdAt: q.updated_at,
+            content: turn.host_answer,
+            createdAt: turn.updated_at,
           });
         }
       });
     }
     list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     return list;
-  }, [qaEnabled, questions]);
+  }, [qaEnabled, turns]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -104,7 +104,7 @@ export function UnifiedQAPanel({
       setQuestionError(null);
       setInput("");
       try {
-        await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
+        await api.createPublicAsk(token, text, creds(sessionTokenRef.current));
         setRefreshKey((k) => k + 1);
       } catch (e: unknown) {
         if (e instanceof ApiError) {

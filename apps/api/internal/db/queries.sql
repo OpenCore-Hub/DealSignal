@@ -3143,6 +3143,57 @@ FROM link_visitor_questions
 WHERE id = $1 AND workspace_id = $2
 LIMIT 1;
 
+-- name: GetLinkAskSessionByLinkVisitor :one
+SELECT *
+FROM link_ask_sessions
+WHERE link_id = $1 AND visitor_id = $2
+LIMIT 1;
+
+-- name: CreateLinkAskSession :one
+INSERT INTO link_ask_sessions (
+    tenant_id, workspace_id, link_id, visitor_id, visitor_email
+) VALUES ($1, $2, $3, $4, $5)
+RETURNING *;
+
+-- name: TouchLinkAskSession :one
+UPDATE link_ask_sessions
+SET updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: CreateLinkAskTurn :one
+INSERT INTO link_ask_turns (
+    session_id,
+    tenant_id,
+    workspace_id,
+    link_id,
+    visitor_id,
+    question,
+    lane,
+    status,
+    host_question_id,
+    route_reason
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING *;
+
+-- name: ListLinkAskTurnsByVisitor :many
+SELECT *
+FROM link_ask_turns
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY created_at ASC;
+
+-- name: MarkLinkAskTurnHostAnswered :execrows
+UPDATE link_ask_turns
+SET status = 'host_answered',
+    host_answer = $1,
+    answered_by = $2,
+    updated_at = now()
+WHERE host_question_id = $3
+  AND workspace_id = $4
+  AND link_id = $5
+  AND status = 'host_pending';
+
+
 -- name: UpdateVisitorQuestionAnswer :exec
 UPDATE link_visitor_questions
 SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()

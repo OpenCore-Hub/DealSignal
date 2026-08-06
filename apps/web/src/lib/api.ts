@@ -55,6 +55,7 @@ import type {
   WorkspaceMember,
   WorkspaceSettings,
   VisitorQuestion,
+  PublicAskTurn,
   FileRequest,
   AskSecurityEvent,
 } from "@/types";
@@ -671,6 +672,21 @@ export const api = {
     }),
   listPublicQuestions: (token: string, creds?: PublicLinkCredentials) =>
     request<{ data: VisitorQuestion[] }>(undefined, `/v1/public/links/${token}/questions/me`, {
+      method: "GET",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+    }),
+
+  // Unified public Visitor Ask (Phase A)
+  createPublicAsk: (token: string, question: string, creds?: PublicLinkCredentials) =>
+    request<{ data: PublicAskTurn }>(undefined, `/v1/public/links/${token}/ask`, {
+      method: "POST",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+      body: JSON.stringify({ question }),
+    }),
+  listPublicAskTurns: (token: string, creds?: PublicLinkCredentials) =>
+    request<{ data: PublicAskTurn[] }>(undefined, `/v1/public/links/${token}/ask/me`, {
       method: "GET",
       skipAuth: true,
       headers: publicAccessHeaders(creds),

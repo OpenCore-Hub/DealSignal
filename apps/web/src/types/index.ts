@@ -136,6 +136,27 @@ export interface VisitorQuestion {
   updated_at: string;
 }
 
+/** Unified visitor Ask turn (Phase A host lane). */
+export interface PublicAskTurn {
+  id: string;
+  session_id: string;
+  question: string;
+  lane: "ai" | "host" | "hybrid";
+  status:
+    | "routing"
+    | "ai_streaming"
+    | "ai_answered"
+    | "ai_refused"
+    | "host_pending"
+    | "host_answered"
+    | "failed";
+  host_question_id?: string;
+  host_answer?: string;
+  route_reason?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface FileRequest {
   id: string;
   link_id: string;

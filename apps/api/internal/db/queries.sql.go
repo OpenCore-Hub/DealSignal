@@ -2276,6 +2276,107 @@ func (q *Queries) CreateLinkAccessRule(ctx context.Context, arg CreateLinkAccess
 	return err
 }
 
+const createLinkAskSession = `-- name: CreateLinkAskSession :one
+INSERT INTO link_ask_sessions (
+    tenant_id, workspace_id, link_id, visitor_id, visitor_email
+) VALUES ($1, $2, $3, $4, $5)
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, created_at, updated_at
+`
+
+type CreateLinkAskSessionParams struct {
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    string
+	VisitorEmail pgtype.Text
+}
+
+func (q *Queries) CreateLinkAskSession(ctx context.Context, arg CreateLinkAskSessionParams) (LinkAskSession, error) {
+	row := q.db.QueryRow(ctx, createLinkAskSession,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.VisitorEmail,
+	)
+	var i LinkAskSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createLinkAskTurn = `-- name: CreateLinkAskTurn :one
+INSERT INTO link_ask_turns (
+    session_id,
+    tenant_id,
+    workspace_id,
+    link_id,
+    visitor_id,
+    question,
+    lane,
+    status,
+    host_question_id,
+    route_reason
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_question_id, host_answer, answered_by, route_reason, created_at, updated_at
+`
+
+type CreateLinkAskTurnParams struct {
+	SessionID      pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	LinkID         pgtype.UUID
+	VisitorID      string
+	Question       string
+	Lane           string
+	Status         string
+	HostQuestionID pgtype.UUID
+	RouteReason    pgtype.Text
+}
+
+func (q *Queries) CreateLinkAskTurn(ctx context.Context, arg CreateLinkAskTurnParams) (LinkAskTurn, error) {
+	row := q.db.QueryRow(ctx, createLinkAskTurn,
+		arg.SessionID,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.Question,
+		arg.Lane,
+		arg.Status,
+		arg.HostQuestionID,
+		arg.RouteReason,
+	)
+	var i LinkAskTurn
+	err := row.Scan(
+		&i.ID,
+		&i.SessionID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.Question,
+		&i.Lane,
+		&i.Status,
+		&i.AiPayload,
+		&i.HostQuestionID,
+		&i.HostAnswer,
+		&i.AnsweredBy,
+		&i.RouteReason,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const createLinkContact = `-- name: CreateLinkContact :exec
 INSERT INTO link_contacts (link_id, contact_id, access_code, code_send_status)
 VALUES ($1, $2, $3, 'pending')
@@ -6046,6 +6147,34 @@ func (q *Queries) GetLinkAnalytics(ctx context.Context, linkID pgtype.UUID) (Get
 		&i.FirstAccessAt,
 		&i.LastAccessAt,
 		&i.ViewsOverTime,
+	)
+	return i, err
+}
+
+const getLinkAskSessionByLinkVisitor = `-- name: GetLinkAskSessionByLinkVisitor :one
+SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, created_at, updated_at
+FROM link_ask_sessions
+WHERE link_id = $1 AND visitor_id = $2
+LIMIT 1
+`
+
+type GetLinkAskSessionByLinkVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID string
+}
+
+func (q *Queries) GetLinkAskSessionByLinkVisitor(ctx context.Context, arg GetLinkAskSessionByLinkVisitorParams) (LinkAskSession, error) {
+	row := q.db.QueryRow(ctx, getLinkAskSessionByLinkVisitor, arg.LinkID, arg.VisitorID)
+	var i LinkAskSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -10583,6 +10712,55 @@ func (q *Queries) ListLinkAccessRulesByLink(ctx context.Context, linkID pgtype.U
 	return items, nil
 }
 
+const listLinkAskTurnsByVisitor = `-- name: ListLinkAskTurnsByVisitor :many
+SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_question_id, host_answer, answered_by, route_reason, created_at, updated_at
+FROM link_ask_turns
+WHERE link_id = $1 AND visitor_id = $2
+ORDER BY created_at ASC
+`
+
+type ListLinkAskTurnsByVisitorParams struct {
+	LinkID    pgtype.UUID
+	VisitorID string
+}
+
+func (q *Queries) ListLinkAskTurnsByVisitor(ctx context.Context, arg ListLinkAskTurnsByVisitorParams) ([]LinkAskTurn, error) {
+	rows, err := q.db.Query(ctx, listLinkAskTurnsByVisitor, arg.LinkID, arg.VisitorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LinkAskTurn
+	for rows.Next() {
+		var i LinkAskTurn
+		if err := rows.Scan(
+			&i.ID,
+			&i.SessionID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.Question,
+			&i.Lane,
+			&i.Status,
+			&i.AiPayload,
+			&i.HostQuestionID,
+			&i.HostAnswer,
+			&i.AnsweredBy,
+			&i.RouteReason,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLinkContactsByLinkID = `-- name: ListLinkContactsByLinkID :many
 SELECT lc.contact_id
 FROM link_contacts lc
@@ -14059,6 +14237,40 @@ func (q *Queries) MarkKnowledgeQASessionArchiveRestored(ctx context.Context, arg
 	return i, err
 }
 
+const markLinkAskTurnHostAnswered = `-- name: MarkLinkAskTurnHostAnswered :execrows
+UPDATE link_ask_turns
+SET status = 'host_answered',
+    host_answer = $1,
+    answered_by = $2,
+    updated_at = now()
+WHERE host_question_id = $3
+  AND workspace_id = $4
+  AND link_id = $5
+  AND status = 'host_pending'
+`
+
+type MarkLinkAskTurnHostAnsweredParams struct {
+	HostAnswer     pgtype.Text
+	AnsweredBy     pgtype.UUID
+	HostQuestionID pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	LinkID         pgtype.UUID
+}
+
+func (q *Queries) MarkLinkAskTurnHostAnswered(ctx context.Context, arg MarkLinkAskTurnHostAnsweredParams) (int64, error) {
+	result, err := q.db.Exec(ctx, markLinkAskTurnHostAnswered,
+		arg.HostAnswer,
+		arg.AnsweredBy,
+		arg.HostQuestionID,
+		arg.WorkspaceID,
+		arg.LinkID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const markMissingRagDocumentsDeleted = `-- name: MarkMissingRagDocumentsDeleted :exec
 UPDATE deal_room_rag_documents
 SET status = 'deleted',
@@ -14771,6 +14983,29 @@ func (q *Queries) TouchKnowledgeQASessionAfterTurn(ctx context.Context, arg Touc
 		arg.ID,
 	)
 	return err
+}
+
+const touchLinkAskSession = `-- name: TouchLinkAskSession :one
+UPDATE link_ask_sessions
+SET updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, created_at, updated_at
+`
+
+func (q *Queries) TouchLinkAskSession(ctx context.Context, id pgtype.UUID) (LinkAskSession, error) {
+	row := q.db.QueryRow(ctx, touchLinkAskSession, id)
+	var i LinkAskSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const touchLinkUpdatedAt = `-- name: TouchLinkUpdatedAt :exec

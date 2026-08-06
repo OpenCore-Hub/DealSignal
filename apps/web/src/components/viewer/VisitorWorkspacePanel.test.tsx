@@ -6,13 +6,13 @@ import i18n from "i18next";
 import { VisitorWorkspacePanel } from "./VisitorWorkspacePanel";
 import enDocuments from "@/i18n/locales/en/documents.json";
 
-const { listPublicQuestionsMock } = vi.hoisted(() => ({
-  listPublicQuestionsMock: vi.fn(),
+const { listPublicAskTurnsMock } = vi.hoisted(() => ({
+  listPublicAskTurnsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
-    listPublicQuestions: listPublicQuestionsMock,
+    listPublicAskTurns: listPublicAskTurnsMock,
   },
 }));
 
@@ -40,15 +40,15 @@ function renderPanel(props: Partial<React.ComponentProps<typeof VisitorWorkspace
 
 describe("VisitorWorkspacePanel", () => {
   beforeEach(() => {
-    listPublicQuestionsMock.mockReset();
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    listPublicAskTurnsMock.mockReset();
+    listPublicAskTurnsMock.mockResolvedValue({ data: [] });
   });
 
   it("renders Ask Host for single-doc deal-room links with qa enabled", async () => {
     renderPanel({ qaEnabled: true, fileRequestsEnabled: false });
 
     await waitFor(() => {
-      expect(listPublicQuestionsMock).toHaveBeenCalledWith(
+      expect(listPublicAskTurnsMock).toHaveBeenCalledWith(
         "tok-room",
         expect.objectContaining({ sessionToken: "sess-room" }),
       );
@@ -59,7 +59,7 @@ describe("VisitorWorkspacePanel", () => {
 
   it("does not render Ask Host when qa is disabled (document-only links)", () => {
     renderPanel({ qaEnabled: false, fileRequestsEnabled: false });
-    expect(listPublicQuestionsMock).not.toHaveBeenCalled();
+    expect(listPublicAskTurnsMock).not.toHaveBeenCalled();
     expect(screen.queryByPlaceholderText(/Ask the host a question/i)).not.toBeInTheDocument();
   });
 
@@ -77,7 +77,7 @@ describe("VisitorWorkspacePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Ask" }));
     await waitFor(() => {
-      expect(listPublicQuestionsMock).toHaveBeenCalled();
+      expect(listPublicAskTurnsMock).toHaveBeenCalled();
     });
   });
 });

@@ -10,6 +10,7 @@ import type {
   DealRoomMember,
   Link,
   VisitorQuestion,
+  PublicAskTurn,
   WorkspaceMember,
 } from "@/types";
 import { qaEnabledForLinkId } from "@/lib/qaScope";
@@ -112,6 +113,7 @@ interface MockUser {
 const mockUsers = new Map<string, MockUser>();
 /** Per-link visitor Ask Host questions for public MSW e2e. */
 const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
+const mockPublicAskTurns = new Map<string, PublicAskTurn[]>();
 /** Per-link Ask Host questions for owner inbox (room + link). */
 const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
 /** Thin room security: blocklist + outbound floors. */
@@ -498,6 +500,7 @@ function clientRequestKey(roomId: string, clientRequestId: string) {
 function resetMockState() {
   mockUsers.clear();
   mockPublicQuestions.clear();
+  mockPublicAskTurns.clear();
   mockOwnerQuestions.clear();
   void resetKnowledgeQAState();
   seedOwnerAskHostQuestions();
@@ -3640,6 +3643,65 @@ export const handlers = [
     list.push(row);
     mockPublicQuestions.set(token, list);
     return HttpResponse.json({ data: row }, { status: 201 });
+  }),
+
+  http.get("*/api/v1/public/links/:token/ask/me", ({ params }) => {
+    const token = params.token as string;
+    return HttpResponse.json({ data: mockPublicAskTurns.get(token) ?? [] });
+  }),
+
+  http.post("*/api/v1/public/links/:token/ask", async ({ params, request }) => {
+    const token = params.token as string;
+    const body = (await request.json().catch(() => ({}))) as { question?: string };
+    const question = (body.question ?? "").trim();
+    if (!question) {
+      return HttpResponse.json({ code: "invalid_request", message: "question required" }, { status: 400 });
+    }
+    const lower = question.toLowerCase();
+    if (lower.includes("__rate_limit__")) {
+      return HttpResponse.json(
+        { code: "rate_limit_exceeded", message: "too many Ask Host requests, please try again later" },
+        { status: 429 },
+      );
+    }
+    if (lower.includes("__limiter_down__")) {
+      return HttpResponse.json(
+        {
+          code: "limiter_unavailable",
+          message: "Ask Host is temporarily unavailable, please try again later",
+        },
+        { status: 503 },
+      );
+    }
+    const sessionId = `sess_${token}`;
+    const hostQuestionId = generateId("q");
+    const turn: PublicAskTurn = {
+      id: generateId("turn"),
+      session_id: sessionId,
+      question,
+      lane: "host",
+      status: "host_pending",
+      host_question_id: hostQuestionId,
+      route_reason: "unified_ask",
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    };
+    const list = mockPublicAskTurns.get(token) ?? [];
+    list.push(turn);
+    mockPublicAskTurns.set(token, list);
+    const legacy: VisitorQuestion = {
+      id: hostQuestionId,
+      link_id: token,
+      visitor_id: "visitor_mock",
+      question,
+      status: "pending",
+      created_at: turn.created_at,
+      updated_at: turn.updated_at,
+    };
+    const legacyList = mockPublicQuestions.get(token) ?? [];
+    legacyList.push(legacy);
+    mockPublicQuestions.set(token, legacyList);
+    return HttpResponse.json({ data: turn }, { status: 201 });
   }),
 
   http.get("*/api/v1/public/documents/:documentId/pages", ({ params }) => {

@@ -209,6 +209,8 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/deal-rooms/:slug/redirect", h.PublicDealRoomRedirect)
 	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion)
 	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions)
+	r.POST("/links/:publicToken/ask", h.PublicCreateAsk)
+	r.GET("/links/:publicToken/ask/me", h.PublicListMyAskTurns)
 	r.POST("/links/:publicToken/file-requests", h.PublicCreateFileRequest)
 	r.GET("/links/:publicToken/file-requests/me", h.PublicListMyFileRequests)
 	r.GET("/links/:publicToken/index-file", h.PublicGetLinkIndexFile)
@@ -3171,6 +3173,66 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 	}
 	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, body.Question)
 	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
+}
+
+// PublicCreateAsk is the unified visitor Ask entry (Phase A host lane).
+func (h *Handler) PublicCreateAsk(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	linkID := uuid.UUID(result.Link.ID.Bytes).String()
+	if h.rejectIfAskHostLimited(c, result, linkID) {
+		return
+	}
+	var body struct {
+		Question string `json:"question" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	turn, err := h.service.CreateHostAskTurn(c.Request.Context(), result.Link, result.VisitorID, result.Email, body.Question)
+	if err != nil {
+		if msg := err.Error(); msg == "question is required" || msg == "question must not exceed 500 characters" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": msg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	if turn.HostQuestionID != "" {
+		if qID, parseErr := uuid.Parse(turn.HostQuestionID); parseErr == nil {
+			go h.service.ClassifyQuestionIntent(context.Background(), pgtype.UUID{Bytes: qID, Valid: true}, body.Question)
+		}
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": turn})
+}
+
+// PublicListMyAskTurns returns the visitor's unified Ask timeline on this link.
+func (h *Handler) PublicListMyAskTurns(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	turns, err := h.service.ListMyAskTurns(c.Request.Context(), result.Link.ID, result.VisitorID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turns})
 }
 
 // PublicListMyVisitorQuestions returns the visitor's own questions.

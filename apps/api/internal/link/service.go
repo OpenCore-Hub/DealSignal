@@ -5040,27 +5040,10 @@ func constantTimeEmailCompare(a, b string) bool {
 
 // CreateVisitorQuestion creates a new visitor question on a public link.
 // The qa_enabled flag must be checked by the caller before invoking this method.
+// Also dual-writes link_ask_turns for unified Ask (Phase A).
 func (s *Service) CreateVisitorQuestion(ctx context.Context, link db.Link, visitorID, visitorEmail, question string) (db.LinkVisitorQuestion, error) {
-	if strings.TrimSpace(question) == "" {
-		return db.LinkVisitorQuestion{}, fmt.Errorf("question is required")
-	}
-	if len(question) > 500 {
-		return db.LinkVisitorQuestion{}, fmt.Errorf("question must not exceed 500 characters")
-	}
-
-	q, err := s.queries.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
-		TenantID:     link.TenantID,
-		WorkspaceID:  link.WorkspaceID,
-		LinkID:       link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
-		Question:     strings.TrimSpace(question),
-	})
-	if err != nil {
-		return db.LinkVisitorQuestion{}, err
-	}
-	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	return q, nil
+	_, q, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, "legacy_questions")
+	return q, err
 }
 
 // ListMyVisitorQuestions returns all questions submitted by a specific visitor on a link.
@@ -5158,6 +5141,7 @@ func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, quest
 		}
 		return VisitorQuestion{}, err
 	}
+	s.syncAskTurnHostAnswer(ctx, link, questionID, answer, userID)
 	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
 	return mapVisitorQuestion(q), nil
