@@ -1,6 +1,9 @@
 package upload
 
 import (
+	"errors"
+	"fmt"
+	"net/http"
 	"testing"
 )
 
@@ -19,6 +22,31 @@ func TestShouldLoadDealRoomMembershipExclude(t *testing.T) {
 	for _, tc := range cases {
 		if got := shouldLoadDealRoomMembershipExclude(tc.excludeDealRoom, tc.category); got != tc.want {
 			t.Fatalf("exclude=%v category=%q: got %v want %v", tc.excludeDealRoom, tc.category, got, tc.want)
+		}
+	}
+}
+
+func TestClassifyCreateDocumentError(t *testing.T) {
+	cases := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantCode   string
+		wantExists bool
+	}{
+		{"document exists", &ExistingDocumentError{ID: "1", Title: "a.pdf"}, http.StatusConflict, "document_exists", true},
+		{"empty file", ErrEmptyFile, http.StatusBadRequest, "empty_file", false},
+		{"lock file", fmt.Errorf("%w: excel lock files cannot be uploaded", ErrUnsupportedUpload), http.StatusBadRequest, "unsupported_upload", false},
+		{"bad content", ErrInvalidFileContent, http.StatusUnsupportedMediaType, "unsupported_media_type", false},
+		{"internal", errors.New("db down"), http.StatusInternalServerError, "internal_error", false},
+	}
+	for _, tc := range cases {
+		status, code, exists := classifyCreateDocumentError(tc.err)
+		if status != tc.wantStatus || code != tc.wantCode {
+			t.Fatalf("%s: got status=%d code=%q want status=%d code=%q", tc.name, status, code, tc.wantStatus, tc.wantCode)
+		}
+		if (exists != nil) != tc.wantExists {
+			t.Fatalf("%s: exists=%v wantExists=%v", tc.name, exists != nil, tc.wantExists)
 		}
 	}
 }

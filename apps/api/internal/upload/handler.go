@@ -19,6 +19,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/watermark"
@@ -79,28 +80,18 @@ func (h *Handler) Create(c *gin.Context) {
 	replace := parseTruthyForm(c.PostForm("replace"))
 	doc, err := h.uploadService.CreateDocument(c.Request.Context(), userID, tenantID, workspaceID, category, fileHeader, replace)
 	if err != nil {
-		var existsErr *ExistingDocumentError
-		switch {
-		case errors.As(err, &existsErr):
-			c.JSON(http.StatusConflict, gin.H{
-				"code":    "document_exists",
-				"message": httpx.SafeMessage("document_exists", err),
-				"document": gin.H{
-					"id":    existsErr.ID,
-					"title": existsErr.Title,
-				},
-			})
-		case errors.Is(err, ErrFileTooLarge):
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": httpx.SafeMessage("payload_too_large", err)})
-		case errors.Is(err, ErrAgreementRequiresPDF):
-			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "agreement_pdf_required", "message": httpx.SafeMessage("agreement_pdf_required", err)})
-		case errors.Is(err, ErrCategoryDealRoomViaAPI):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "category_deal_room_via_api", "message": httpx.SafeMessage("category_deal_room_via_api", err)})
-		case errors.Is(err, ErrInvalidFileType), errors.Is(err, ErrInvalidFileContent):
-			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": httpx.SafeMessage("unsupported_media_type", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		status, code, existsErr := classifyCreateDocumentError(err)
+		if code == "internal_error" {
+			logger.ErrorCtx(c.Request.Context(), "document upload failed", err,
+				logger.Attr("filename", fileHeader.Filename),
+				logger.Attr("replace", replace),
+			)
 		}
+		body := gin.H{"code": code, "message": httpx.SafeMessage(code, err)}
+		if existsErr != nil {
+			body["document"] = gin.H{"id": existsErr.ID, "title": existsErr.Title}
+		}
+		c.JSON(status, body)
 		return
 	}
 
@@ -110,11 +101,17 @@ func (h *Handler) Create(c *gin.Context) {
 		TenantID:    pgUUID(tenantID),
 	})
 	if err != nil {
+		logger.ErrorCtx(c.Request.Context(), "document upload reload failed", err,
+			logger.Attr("document_id", doc.ID),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 	job, err := h.uploadService.queries.GetIngestionJobByDocument(c.Request.Context(), dbDoc.ID)
 	if err != nil {
+		logger.ErrorCtx(c.Request.Context(), "document upload ingestion job missing", err,
+			logger.Attr("document_id", doc.ID),
+		)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
@@ -904,5 +901,28 @@ func parseTruthyForm(v string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+// classifyCreateDocumentError maps service-layer upload failures to HTTP status/code.
+func classifyCreateDocumentError(err error) (status int, code string, exists *ExistingDocumentError) {
+	var existsErr *ExistingDocumentError
+	switch {
+	case errors.As(err, &existsErr):
+		return http.StatusConflict, "document_exists", existsErr
+	case errors.Is(err, ErrFileTooLarge):
+		return http.StatusRequestEntityTooLarge, "payload_too_large", nil
+	case errors.Is(err, ErrAgreementRequiresPDF):
+		return http.StatusUnsupportedMediaType, "agreement_pdf_required", nil
+	case errors.Is(err, ErrCategoryDealRoomViaAPI):
+		return http.StatusBadRequest, "category_deal_room_via_api", nil
+	case errors.Is(err, ErrUnsupportedUpload):
+		return http.StatusBadRequest, "unsupported_upload", nil
+	case errors.Is(err, ErrEmptyFile):
+		return http.StatusBadRequest, "empty_file", nil
+	case errors.Is(err, ErrInvalidFileType), errors.Is(err, ErrInvalidFileContent):
+		return http.StatusUnsupportedMediaType, "unsupported_media_type", nil
+	default:
+		return http.StatusInternalServerError, "internal_error", nil
 	}
 }

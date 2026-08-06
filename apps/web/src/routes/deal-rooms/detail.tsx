@@ -7,6 +7,7 @@ import { PageHeader } from "@/components/common/PageHeader";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
 import { apiErrorMessage, ingestionErrorLabel } from "@/lib/apiErrors";
+import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
@@ -394,11 +395,15 @@ export function DealRoomDetailPage() {
 
   const onFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
-      const files = Array.from(e.target.files ?? []);
+      const selected = Array.from(e.target.files ?? []);
+      const selection = filterUploadSelection(selected);
       e.target.value = "";
-      if (files.length > 0) void handleUploadFiles(files);
+      if (!notifyUploadSelectionFiltered(selection, t("folders.toolbar.sidecarFilesSkipped"), toast)) {
+        return;
+      }
+      if (selection.files.length > 0) void handleUploadFiles(selection.files);
     },
-    [handleUploadFiles]
+    [handleUploadFiles, t]
   );
 
   const isUploading = uploadItems.some((item) => item.status === "uploading" || item.status === "processing");

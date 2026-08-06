@@ -4,11 +4,13 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
 import { useTranslation } from "react-i18next";
+import { toast } from "sonner";
 import {
   UploadCancelledError,
   useDocumentUploadConflict,
 } from "@/hooks/useDocumentUploadConflict";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 
 interface UploadFile {
   id: string;
@@ -50,8 +52,14 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
   const handleFiles = useCallback((selectedFiles: FileList | null) => {
     if (!selectedFiles || selectedFiles.length === 0) return;
 
+    const selection = filterUploadSelection(Array.from(selectedFiles));
+    if (!notifyUploadSelectionFiltered(selection, t("upload.blockedFilesSkipped"), toast)) {
+      return;
+    }
+    const filtered = selection.files;
+
     const deduped: UploadFile[] = [];
-    for (const file of Array.from(selectedFiles)) {
+    for (const file of filtered) {
       const key = `${file.name}|${file.size}`;
       if (existingKeysRef.current.has(key)) continue;
       existingKeysRef.current.add(key);
@@ -66,7 +74,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
     if (deduped.length > 0) {
       setFiles((prev) => [...prev, ...deduped]);
     }
-  }, []);
+  }, [t]);
 
   const removeFile = useCallback((id: string) => {
     setFiles((prev) => {
@@ -154,7 +162,7 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
         markError(uploadFile.id, apiErrorMessage(err, { fallback: "uploadFailed" }));
       }
     },
-    [uploadingIds, category, uploadDocument, markDone, markError],
+    [uploadingIds, category, uploadDocument, markDone, markError, t],
   );
 
   const uploadAll = useCallback(async () => {

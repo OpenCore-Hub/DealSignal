@@ -20,7 +20,8 @@
     "replaceDescription": "“{{name}}” is already in the document library. Replace it with this upload?",
     "replaceConfirm": "Replace",
     "replaceCancel": "Cancel",
-    "replaceCancelled": "Upload cancelled"
+    "replaceCancelled": "Upload cancelled",
+    "blockedFilesSkipped": "Skipped hidden, empty, or temporary files. Close open workbooks and try again."
   },
   "category": {
     "agreement": "Agreement",

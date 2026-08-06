@@ -3286,18 +3286,11 @@ func (h *Handler) PublicUploadFile(c *gin.Context) {
 		result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent(),
 	)
 	if err != nil {
-		switch {
-		case strings.Contains(err.Error(), "not a file request link"):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_file_request_link", "message": httpx.SafeMessage("not_file_request_link", err)})
-		case strings.Contains(err.Error(), "unsupported file type"):
-			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_type", "message": httpx.SafeMessage("unsupported_type", err)})
-		case strings.Contains(err.Error(), "too large"):
-			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "file_too_large", "message": httpx.SafeMessage("file_too_large", err)})
-		case strings.Contains(err.Error(), "empty"):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "file_empty", "message": httpx.SafeMessage("file_empty", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		status, code := classifyLinkUploadError(err)
+		if code == "internal_error" {
+			logger.ErrorCtx(c.Request.Context(), "link public upload failed", err)
 		}
+		c.JSON(status, gin.H{"code": code, "message": httpx.SafeMessage(code, err)})
 		return
 	}
 	c.JSON(http.StatusCreated, uploadedFileToResponse(uploaded))

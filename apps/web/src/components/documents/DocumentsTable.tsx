@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import {
   useReactTable,
@@ -111,9 +112,13 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   };
 
   const handleAgreementFiles = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const picked = Array.from(e.target.files ?? []);
+    const selected = Array.from(e.target.files ?? []);
+    const selection = filterUploadSelection(selected);
     e.target.value = "";
-    if (picked.length === 0) return;
+    if (!notifyUploadSelectionFiltered(selection, t("documents:upload.blockedFilesSkipped"), toast)) {
+      return;
+    }
+    const picked = selection.files;
 
     const pdfs = picked.filter(isPdfFile);
     if (pdfs.length < picked.length) {

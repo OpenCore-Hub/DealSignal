@@ -20,7 +20,8 @@
     "replaceDescription": "「{{name}}」已在文档库中。是否替换为本次上传的文件？",
     "replaceConfirm": "替换",
     "replaceCancel": "取消",
-    "replaceCancelled": "已取消上传"
+    "replaceCancelled": "已取消上传",
+    "blockedFilesSkipped": "已跳过隐藏、空文件或临时文件。请先关闭已打开的工作簿后再试。"
   },
   "category": {
     "agreement": "协议",

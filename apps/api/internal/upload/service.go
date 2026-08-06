@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mime/multipart"
 	"path/filepath"
 	"strings"
@@ -22,6 +23,8 @@ var (
 	ErrFileTooLarge         = errors.New("file exceeds 100MB limit")
 	ErrInvalidFileType      = errors.New("unsupported file type")
 	ErrInvalidFileContent   = errors.New("file content does not match extension")
+	ErrEmptyFile            = errors.New("file is empty")
+	ErrUnsupportedUpload    = errors.New("file cannot be uploaded")
 	ErrAgreementRequiresPDF = errors.New("agreement documents must be PDF")
 	allowedExtensions       = map[string]string{
 		".pdf":  "pdf",
@@ -106,12 +109,47 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+// NormalizeUploadFilename returns the client filename without any directory prefix.
+func NormalizeUploadFilename(name string) string {
+	base := strings.TrimSpace(filepath.Base(name))
+	if base == "." {
+		return ""
+	}
+	return base
+}
+
+// ValidateUploadFilename rejects OS/editor sidecar files that commonly appear in
+// multi-select uploads (Excel lock files, AppleDouble resource forks).
+func ValidateUploadFilename(name string) error {
+	base := NormalizeUploadFilename(name)
+	if base == "" {
+		return fmt.Errorf("%w: filename is required", ErrUnsupportedUpload)
+	}
+	lower := strings.ToLower(base)
+	if strings.HasPrefix(base, "~$") {
+		return fmt.Errorf("%w: excel lock files cannot be uploaded", ErrUnsupportedUpload)
+	}
+	if strings.HasPrefix(base, "._") {
+		return fmt.Errorf("%w: hidden resource files cannot be uploaded", ErrUnsupportedUpload)
+	}
+	if lower == ".ds_store" {
+		return fmt.Errorf("%w: hidden resource files cannot be uploaded", ErrUnsupportedUpload)
+	}
+	return nil
+}
+
 // ValidateFileHeader checks file size and extension.
 func ValidateFileHeader(fileHeader *multipart.FileHeader) (string, error) {
+	if err := ValidateUploadFilename(fileHeader.Filename); err != nil {
+		return "", err
+	}
+	if fileHeader.Size == 0 {
+		return "", ErrEmptyFile
+	}
 	if fileHeader.Size > maxFileSize {
 		return "", ErrFileTooLarge
 	}
-	ext := strings.ToLower(filepath.Ext(fileHeader.Filename))
+	ext := strings.ToLower(filepath.Ext(NormalizeUploadFilename(fileHeader.Filename)))
 	sourceType, ok := allowedExtensions[ext]
 	if !ok {
 		return "", ErrInvalidFileType
@@ -136,13 +174,15 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		return Document{}, err
 	}
 
+	title := NormalizeUploadFilename(fileHeader.Filename)
+
 	tenantUUID := pgUUID(tenantID)
 	workspaceUUID := pgUUID(workspaceID)
 	userUUID := pgUUID(userID)
 
 	existing, err := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
 		WorkspaceID: workspaceUUID,
-		Title:       fileHeader.Filename,
+		Title:       title,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		return Document{}, fmt.Errorf("lookup existing document: %w", err)
@@ -157,7 +197,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 
 	file, err := fileHeader.Open()
 	if err != nil {
-		return Document{}, fmt.Errorf("open uploaded file: %w", err)
+		return Document{}, fmt.Errorf("%w: open uploaded file: %w", ErrUnsupportedUpload, err)
 	}
 	defer file.Close()
 
@@ -166,11 +206,11 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	}
 
 	if exists && replace {
-		return s.replaceExistingDocument(ctx, existing, workspaceUUID, sourceType, category, fileHeader, file)
+		return s.replaceExistingDocument(ctx, existing, workspaceUUID, sourceType, category, title, fileHeader, file)
 	}
 
 	docID := uuid.New()
-	storageKey := storage.ObjectKey(tenantID, workspaceID, docID.String(), fileHeader.Filename)
+	storageKey := storage.ObjectKey(tenantID, workspaceID, docID.String(), title)
 
 	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
 		return Document{}, fmt.Errorf("store file: %w", err)
@@ -185,7 +225,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 			TenantID:    tenantUUID,
 			WorkspaceID: workspaceUUID,
 			CreatedBy:   userUUID,
-			Title:       fileHeader.Filename,
+			Title:       title,
 			SourceType:  sourceType,
 			Status:      "uploaded",
 			StorageKey:  storageKey,
@@ -196,7 +236,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 			if isUniqueViolation(createErr) {
 				return &ExistingDocumentError{
 					ID:    docID.String(),
-					Title: fileHeader.Filename,
+					Title: title,
 				}
 			}
 			return fmt.Errorf("create document record: %w", createErr)
@@ -220,7 +260,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 			// the client can offer replace with the surviving row's id.
 			if surviving, lookupErr := s.queries.GetDocumentByTitleInWorkspace(ctx, db.GetDocumentByTitleInWorkspaceParams{
 				WorkspaceID: workspaceUUID,
-				Title:       fileHeader.Filename,
+				Title:       title,
 			}); lookupErr == nil {
 				return Document{}, &ExistingDocumentError{
 					ID:    uuid.UUID(surviving.ID.Bytes).String(),
@@ -241,13 +281,14 @@ func (s *Service) replaceExistingDocument(
 	workspaceUUID pgtype.UUID,
 	sourceType string,
 	category string,
+	title string,
 	fileHeader *multipart.FileHeader,
 	file multipart.File,
 ) (Document, error) {
 	docID := uuid.UUID(existing.ID.Bytes).String()
 	tenantID := uuid.UUID(existing.TenantID.Bytes).String()
 	workspaceID := uuid.UUID(existing.WorkspaceID.Bytes).String()
-	storageKey := storage.ObjectKey(tenantID, workspaceID, docID, fileHeader.Filename)
+	storageKey := storage.ObjectKey(tenantID, workspaceID, docID, title)
 	oldKey := existing.StorageKey
 
 	if err := s.storage.PutObject(ctx, storageKey, file, fileHeader.Size, fileHeader.Header.Get("Content-Type")); err != nil {
@@ -403,11 +444,15 @@ func (s *Service) DeleteDocument(ctx context.Context, workspaceID, documentID st
 
 func validateFileContent(file multipart.File, sourceType string) error {
 	buf := make([]byte, 8)
-	if _, err := file.Read(buf); err != nil {
-		return fmt.Errorf("read file header: %w", err)
+	n, err := file.Read(buf)
+	if err != nil && !errors.Is(err, io.EOF) {
+		return fmt.Errorf("%w: read file header: %w", ErrUnsupportedUpload, err)
+	}
+	if n == 0 {
+		return ErrEmptyFile
 	}
 	if _, err := file.Seek(0, 0); err != nil {
-		return fmt.Errorf("reset file reader: %w", err)
+		return fmt.Errorf("%w: reset file reader: %w", ErrUnsupportedUpload, err)
 	}
 
 	switch sourceType {

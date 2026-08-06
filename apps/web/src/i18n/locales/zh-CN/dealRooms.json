@@ -333,7 +333,8 @@
       "client_cancelled": "提问已停止，未完成回答",
       "query_timeout": "提问超时，请重试",
       "answer_requires_session": "带回答的提问须走研究台会话接口",
-      "knowledge_corpus_not_ready": "知识库语料未就绪，请先同步文档"
+      "knowledge_corpus_not_ready": "知识库语料未就绪，请先同步文档",
+      "stream_incomplete": "回答流传输中断，请重试"
     },
     "status": {
       "none": "未开通",
@@ -806,6 +807,7 @@
       "removeFilesSuccess": "已从本数据室移除 {{count}} 个文件",
       "batchUploadSuccess": "已上传 {{count}} 个文件",
       "batchUploadFailed": "批量上传失败",
+      "sidecarFilesSkipped": "已跳过隐藏或临时文件（例如 Excel 锁定文件）。请先关闭工作簿后再上传。",
       "lockConfirm": "锁定所选 {{count}} 项？锁定后将无法重命名、移动或删除。",
       "unlockConfirm": "解锁所选 {{count}} 项？",
       "lockSuccess": "已锁定",

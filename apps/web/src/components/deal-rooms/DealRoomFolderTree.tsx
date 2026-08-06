@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
 import { api } from "@/lib/api";
 import {
   buildFolderTree,
@@ -317,20 +318,27 @@ export function DealRoomFolderTree({
 
   const handleBulkUploadChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const target = bulkUploadTargetRef.current;
-    const files = Array.from(e.target.files ?? []);
+    const selected = Array.from(e.target.files ?? []);
+    const selection = filterUploadSelection(selected);
     e.target.value = "";
     bulkUploadTargetRef.current = null;
-    if (!target || files.length === 0 || !onFolderUpload) return;
+    if (!target || selection.files.length === 0 || !onFolderUpload) {
+      if (selection.allBlocked) {
+        toast.error(t("folders.toolbar.sidecarFilesSkipped"));
+      }
+      return;
+    }
+    notifyUploadSelectionFiltered(selection, t("folders.toolbar.sidecarFilesSkipped"), toast);
     setBulkLoading(true);
     let uploaded = 0;
     try {
       const baseSort = folderDocs.find((fd) => fd.folder === target)?.documents.length ?? 0;
       // Sequential so shared replace/cancel dialogs never race.
-      for (let index = 0; index < files.length; index++) {
-        await onFolderUpload(files[index]!, target, baseSort + index);
+      for (let index = 0; index < selection.files.length; index++) {
+        await onFolderUpload(selection.files[index]!, target, baseSort + index);
         uploaded += 1;
       }
-      toast.success(t("folders.toolbar.batchUploadSuccess", { count: files.length }));
+      toast.success(t("folders.toolbar.batchUploadSuccess", { count: selection.files.length }));
       clearSelection();
     } catch (err) {
       if (!(err instanceof UploadCancelledError)) {

@@ -5392,17 +5392,20 @@ var allowedUploadMimeTypes = map[string]bool{
 // UploadFileForLink stores a file uploaded through a file-request link.
 func (s *Service) UploadFileForLink(ctx context.Context, storage FileUploader, link db.Link, filename, mimeType string, size int64, body io.Reader, visitorID, visitorEmail, ip, ua string) (db.LinkUploadedFile, error) {
 	if link.LinkType != "file_request" {
-		return db.LinkUploadedFile{}, fmt.Errorf("link is not a file request link")
+		return db.LinkUploadedFile{}, ErrNotFileRequestLink
+	}
+	if err := upload.ValidateUploadFilename(filename); err != nil {
+		return db.LinkUploadedFile{}, err
 	}
 	if !allowedUploadMimeTypes[mimeType] {
-		return db.LinkUploadedFile{}, fmt.Errorf("unsupported file type: %s", mimeType)
+		return db.LinkUploadedFile{}, fmt.Errorf("%w: %s", ErrLinkUploadUnsupportedType, mimeType)
 	}
 	const maxSize = 50 * 1024 * 1024
 	if size > maxSize {
-		return db.LinkUploadedFile{}, fmt.Errorf("file too large (max 50MB)")
+		return db.LinkUploadedFile{}, ErrLinkUploadTooLarge
 	}
 	if size <= 0 {
-		return db.LinkUploadedFile{}, fmt.Errorf("file is empty")
+		return db.LinkUploadedFile{}, ErrLinkUploadEmpty
 	}
 
 	storageKey := fmt.Sprintf("uploads/%s/%s/%s", uuid.New().String(), link.PublicToken, filename)

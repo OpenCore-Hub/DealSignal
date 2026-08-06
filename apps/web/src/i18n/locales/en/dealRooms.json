@@ -336,7 +336,8 @@
       "client_cancelled": "The question was stopped before it finished",
       "query_timeout": "The question timed out — try again",
       "answer_requires_session": "Answered questions must use the research desk session",
-      "knowledge_corpus_not_ready": "The knowledge corpus is not ready — sync documents first"
+      "knowledge_corpus_not_ready": "The knowledge corpus is not ready — sync documents first",
+      "stream_incomplete": "The answer stream was interrupted — please try again"
     },
     "status": {
       "none": "Not provisioned",
@@ -810,6 +811,7 @@
       "removeFilesSuccess": "Removed {{count}} file(s) from this data room",
       "batchUploadSuccess": "Uploaded {{count}} file(s)",
       "batchUploadFailed": "Batch upload failed",
+      "sidecarFilesSkipped": "Skipped hidden or temporary files (for example Excel lock files). Close the workbook and upload again.",
       "lockConfirm": "Lock {{count}} selected item(s)? Locked items cannot be renamed, moved, or deleted.",
       "unlockConfirm": "Unlock {{count}} selected item(s)?",
       "lockSuccess": "Resources locked",

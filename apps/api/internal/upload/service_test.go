@@ -1,7 +1,9 @@
 package upload
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"mime/multipart"
 	"testing"
 	"time"
@@ -49,6 +51,78 @@ func TestErrIfAgreementNotPDF(t *testing.T) {
 		if !tc.wantErr && err != nil {
 			t.Fatalf("category=%q source=%q: unexpected err %v", tc.category, tc.sourceType, err)
 		}
+	}
+}
+
+func TestValidateUploadFilename(t *testing.T) {
+	cases := []struct {
+		name    string
+		wantErr bool
+	}{
+		{"report.pdf", false},
+		{"~$report.xlsx", true},
+		{"._report.xlsx", true},
+		{".DS_Store", true},
+		{"", true},
+	}
+	for _, tc := range cases {
+		err := ValidateUploadFilename(tc.name)
+		if tc.wantErr && err == nil {
+			t.Fatalf("expected error for %q", tc.name)
+		}
+		if !tc.wantErr && err != nil {
+			t.Fatalf("unexpected error for %q: %v", tc.name, err)
+		}
+	}
+}
+
+func TestValidateFileHeader_RejectsLockFile(t *testing.T) {
+	h := &multipart.FileHeader{Filename: "~$report.xlsx", Size: 1024}
+	_, err := ValidateFileHeader(h)
+	if !errors.Is(err, ErrUnsupportedUpload) {
+		t.Fatalf("expected ErrUnsupportedUpload, got %v", err)
+	}
+}
+
+func TestValidateFileHeader_RejectsEmptyFile(t *testing.T) {
+	h := &multipart.FileHeader{Filename: "report.xlsx", Size: 0}
+	_, err := ValidateFileHeader(h)
+	if !errors.Is(err, ErrEmptyFile) {
+		t.Fatalf("expected ErrEmptyFile, got %v", err)
+	}
+}
+
+func TestValidateFileContent_EmptyStream(t *testing.T) {
+	err := validateFileContent(emptyFileReader{}, "xlsx")
+	if !errors.Is(err, ErrEmptyFile) {
+		t.Fatalf("expected ErrEmptyFile, got %v", err)
+	}
+}
+
+func TestValidateFileContent_ValidXlsxMagic(t *testing.T) {
+	// PK zip header for Office Open XML.
+	data := []byte{0x50, 0x4B, 0x03, 0x04, 0x00, 0x00, 0x00, 0x00}
+	err := validateFileContent(nopSeekFile{Reader: bytes.NewReader(data)}, "xlsx")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+type emptyFileReader struct{}
+
+func (emptyFileReader) Read([]byte) (int, error) { return 0, io.EOF }
+func (emptyFileReader) ReadAt([]byte, int64) (int, error) { return 0, io.EOF }
+func (emptyFileReader) Seek(int64, int) (int64, error) { return 0, nil }
+func (emptyFileReader) Close() error { return nil }
+
+type nopSeekFile struct{ *bytes.Reader }
+
+func (n nopSeekFile) Close() error { return nil }
+func (n nopSeekFile) ReadAt(p []byte, off int64) (int, error) { return n.Reader.ReadAt(p, off) }
+
+func TestNormalizeUploadFilename(t *testing.T) {
+	if got := NormalizeUploadFilename(`financials/report.xlsx`); got != "report.xlsx" {
+		t.Fatalf("got %q", got)
 	}
 }
 
