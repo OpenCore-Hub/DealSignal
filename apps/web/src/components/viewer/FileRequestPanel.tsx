@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { PaperPlaneTilt, Spinner } from "@phosphor-icons/react";
 import type { FileRequest } from "@/types";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
 
 interface FileRequestPanelProps {
   token: string;
@@ -54,11 +55,10 @@ export function FileRequestPanel({ token, sessionToken }: FileRequestPanelProps)
       setMessage("");
       setRefreshKey((k) => k + 1);
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (msg.includes("too many")) {
+      if (e instanceof Error && e.message.includes("too many")) {
         setError(t("documents:viewer.fileRequestTooMany", "Too many pending requests"));
       } else {
-        setError(t("documents:viewer.fileRequestError", "Failed to submit request"));
+        setError(apiErrorMessage(e, { messageKey: "documents:viewer.fileRequestError" }));
       }
     } finally {
       setSubmitting(false);

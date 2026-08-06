@@ -237,6 +237,54 @@ describe("CanvasViewer", () => {
     expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined, expect.anything());
   });
 
+  it("shows friendly blocked email message without retry in public mode", async () => {
+    const { ApiError } = await import("@/lib/apiClient");
+    apiMock.getPublicDocumentPages.mockRejectedValue(
+      new ApiError({
+        status: 403,
+        code: "blocked_email",
+        message: "email is blocked",
+        requestId: "req-block",
+      })
+    );
+
+    const i18n = await createViewerI18n();
+    i18n.addResourceBundle(
+      "en",
+      "documents",
+      {
+        viewer: {
+          blocked_emailTitle: "Access unavailable",
+          blocked_emailDescription:
+            "This email has been blocked from viewing this link. If you need access, contact the sender.",
+        },
+      },
+      true,
+      true
+    );
+
+    render(
+      <I18nextProvider i18n={i18n}>
+        <MemoryRouter>
+          <CanvasViewer
+            publicToken="token-123"
+            publicDocument={mockDocument}
+            publicVisitorId="visitor-1"
+          />
+        </MemoryRouter>
+      </I18nextProvider>
+    );
+
+    expect(await screen.findByText("Access unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "This email has been blocked from viewing this link. If you need access, contact the sender."
+      )
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument();
+    expect(screen.queryByText(/email is blocked/i)).not.toBeInTheDocument();
+  });
+
   it("navigates pages and zoom with keyboard shortcuts", async () => {
     await renderWithProviders("/viewer/doc-001", { evidence: demoEvidence });
     await loadDocument();

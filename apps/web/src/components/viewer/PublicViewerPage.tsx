@@ -16,6 +16,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { api, type PublicLinkCredentials } from "@/lib/api";
 import { ApiError, setLinkSessionRefreshHandler } from "@/lib/apiClient";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { CanvasViewer } from "./CanvasViewer";
 import { RightSidebar } from "./RightSidebar";
 import { PublicDealRoomLinkViewer } from "./PublicDealRoomLinkViewer";
@@ -484,7 +485,7 @@ export function PublicViewerPage() {
           setGateError(msg);
           showFloatingGateTip(msg);
         } else {
-          setGateError(err.message ?? t("common:error.loadFailed"));
+          setGateError(apiErrorMessage(err, { context: "viewerGate" }));
         }
       } else if (
         err.code === "requires_email" ||
@@ -497,7 +498,7 @@ export function PublicViewerPage() {
         // an error message on the first visit when the visitor hasn't typed yet.
         setGateErrorCode(err.code);
         if (err.code === "invalid_signer_name") {
-          setGateError(err.message ?? t("viewer.signerNameRequired"));
+          setGateError(apiErrorMessage(err, { context: "viewerGate", messageKey: "documents:viewer.signerNameRequired" }));
         }
         if (err.requiresNda && token) {
           setNdaPreviewStatus((prev) => (prev === "ready" ? prev : "loading"));
@@ -510,7 +511,7 @@ export function PublicViewerPage() {
       } else {
         // Unknown error codes (e.g. internal_error / network_error) still need
         // a visible message instead of the generic "load failed" fallback.
-        setGateError(err.message ?? t("common:error.loadFailed"));
+        setGateError(apiErrorMessage(err, { context: "viewerGate" }));
       }
     } finally {
       if (requestId === accessRequestIdRef.current) {
@@ -743,7 +744,7 @@ export function PublicViewerPage() {
         persistNdaIntent("sign");
         return;
       }
-      setGateError(err.message ?? t("common:error.loadFailed"));
+      setGateError(apiErrorMessage(err, { context: "viewerGate" }));
     } finally {
       setNdaEmailChecking(false);
     }
@@ -836,7 +837,7 @@ export function PublicViewerPage() {
         setShowAccessRequest(false);
         setGateError(null);
       } else {
-        setGateError(err.message ?? t("viewer.accessRequestFailed"));
+        setGateError(apiErrorMessage(err, { messageKey: "documents:viewer.accessRequestFailed" }));
       }
     } finally {
       setAccessRequestSubmitting(false);
@@ -890,7 +891,7 @@ export function PublicViewerPage() {
         );
         return;
       }
-      setGateError(err.message ?? t("common:error.loadFailed"));
+      setGateError(apiErrorMessage(err, { context: "viewerGate" }));
     } finally {
       setAccessRequestSubmitting(false);
     }

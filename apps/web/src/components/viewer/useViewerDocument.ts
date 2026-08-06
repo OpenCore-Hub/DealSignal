@@ -2,6 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useParams, useSearchParams } from "react-router";
 import { api, type PublicLinkCredentials } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import {
+  type ViewerAccessErrorKind,
+  viewerAccessErrorKindFromUnknown,
+} from "@/lib/viewerAccessErrors";
 import type { Document, Evidence, PageAnalytics } from "@/types";
 import type { WatermarkInfo } from "./WatermarkOverlay";
 
@@ -35,6 +39,7 @@ interface ViewerDocumentResult {
   imageUrl: string | null;
   loading: boolean;
   error: string | null;
+  accessErrorKind: ViewerAccessErrorKind | null;
   refetch: () => void;
   page: number;
   setPage: (page: number | ((prev: number) => number)) => void;
@@ -59,6 +64,7 @@ export function useViewerDocument({
   const [page, setPage] = useState(initialPage);
   const [zoom, setZoom] = useState(100);
   const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [accessErrorKind, setAccessErrorKind] = useState<ViewerAccessErrorKind | null>(null);
   const publicAccessCredentialsRef = useRef(publicAccessCredentials);
 
   // Keep the latest credentials in a ref so that credential rotations
@@ -73,22 +79,28 @@ export function useViewerDocument({
     if (!id) {
       return { doc: null, pages: [], analytics: [] };
     }
-    if (publicDocument) {
-      if (publicDocument.status === "ready" && publicToken) {
-        const pagesRes = await api.getPublicDocumentPages(id, publicToken, publicAccessCredentialsRef.current, signal);
-        return { doc: publicDocument, pages: pagesRes.pages, analytics: [] };
+    try {
+      setAccessErrorKind(null);
+      if (publicDocument) {
+        if (publicDocument.status === "ready" && publicToken) {
+          const pagesRes = await api.getPublicDocumentPages(id, publicToken, publicAccessCredentialsRef.current, signal);
+          return { doc: publicDocument, pages: pagesRes.pages, analytics: [] };
+        }
+        return { doc: publicDocument, pages: [], analytics: [] };
       }
-      return { doc: publicDocument, pages: [], analytics: [] };
+      const [d, a] = await Promise.all([
+        api.getDocumentById(id),
+        api.getPageAnalytics(id),
+      ]);
+      if (d.status === "ready") {
+        const pagesRes = await api.getDocumentPages(id);
+        return { doc: d, pages: pagesRes.pages, analytics: a.data };
+      }
+      return { doc: d, pages: [], analytics: a.data };
+    } catch (e) {
+      setAccessErrorKind(viewerAccessErrorKindFromUnknown(e));
+      throw e;
     }
-    const [d, a] = await Promise.all([
-      api.getDocumentById(id),
-      api.getPageAnalytics(id),
-    ]);
-    if (d.status === "ready") {
-      const pagesRes = await api.getDocumentPages(id);
-      return { doc: d, pages: pagesRes.pages, analytics: a.data };
-    }
-    return { doc: d, pages: [], analytics: a.data };
   }, [documentId, publicDocument, publicToken]);
 
   const { data, loading, error, refetch } = useAsyncData(loadDocument, [loadDocument]);
@@ -175,6 +187,7 @@ export function useViewerDocument({
     imageUrl,
     loading,
     error,
+    accessErrorKind,
     refetch,
     page,
     setPage,

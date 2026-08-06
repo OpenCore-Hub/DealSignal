@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { useParams } from "react-router";
-import { FileText } from "@phosphor-icons/react";
+import { FileText, LockSimple, Prohibit } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type PublicLinkCredentials } from "@/lib/api";
+import { isViewerAccessErrorKind, viewerPolicyBlockI18nKeys } from "@/lib/viewerAccessErrors";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { ViewerToolbar } from "./ViewerToolbar";
 import { ViewerCanvas } from "./ViewerCanvas";
 import { ViewerKnowledgeRail } from "./ViewerKnowledgeRail";
@@ -69,6 +71,7 @@ export function CanvasViewer({
     imageUrl,
     loading,
     error: loadError,
+    accessErrorKind,
     refetch,
     page,
     setPage,
@@ -138,7 +141,7 @@ export function CanvasViewer({
       }
       setActionError(null);
     } catch (e) {
-      setActionError(e instanceof Error ? e.message : t("common:error.loadFailed"));
+      setActionError(apiErrorMessage(e, { fallback: "loadFailed" }));
     }
   }, [documentId, doc, publicToken, publicLink, publicVisitorId, publicAccessCredentials, t]);
 
@@ -216,11 +219,29 @@ export function CanvasViewer({
   }
 
   if (error) {
+    const accessBlocked = accessErrorKind && isViewerAccessErrorKind(accessErrorKind);
+    const policyBlockKeys = accessErrorKind ? viewerPolicyBlockI18nKeys(accessErrorKind) : null;
+    const Icon = accessErrorKind === "locked" ? LockSimple : accessBlocked ? Prohibit : FileText;
+
     return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-50 dark:bg-background">
-        <FileText size={48} className="text-muted-foreground/50" />
-        <p className="text-body text-destructive">{t("documents:viewer.loadFailed", { error })}</p>
-        <Button onClick={() => { refetch(); setActionError(null); }}>{t("common:retry")}</Button>
+      <div className="flex flex-1 flex-col items-center justify-center gap-4 bg-neutral-50 px-6 text-center dark:bg-background">
+        <Icon
+          size={48}
+          className={accessBlocked ? "text-muted-foreground" : "text-muted-foreground/50"}
+        />
+        {policyBlockKeys ? (
+          <>
+            <div className="max-w-md space-y-2">
+              <p className="text-base font-medium text-foreground">{t(policyBlockKeys.titleKey)}</p>
+              <p className="text-sm text-muted-foreground">{t(policyBlockKeys.descriptionKey)}</p>
+            </div>
+          </>
+        ) : (
+          <p className="text-body text-destructive">{error || t("documents:viewer.loadFailed")}</p>
+        )}
+        {!accessBlocked ? (
+          <Button onClick={() => { refetch(); setActionError(null); }}>{t("common:retry")}</Button>
+        ) : null}
       </div>
     );
   }
