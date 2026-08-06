@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { clearPipelineDraft, useBundlePipeline } from "./BundlePipelineContext";
 import { BundleDocumentPicker } from "./BundleDocumentPicker";
 import { PipelineProgress } from "./PipelineProgress";
-import { SHARE_CONTENT_DOCUMENT_OPTS } from "./pipelineUtils";
+import { SHARE_CONTENT_DOCUMENT_CATEGORY } from "./pipelineUtils";
 import { api } from "@/lib/api";
 import type { Document } from "@/types";
 import { toast } from "sonner";
@@ -28,7 +29,7 @@ export function StepDocuments() {
     try {
       // Share content picker: same scope as Document Library (not agreements / data-room docs).
       // NDA templates are chosen separately in the security step via category=agreement.
-      const res = await api.getDocuments("all", undefined, SHARE_CONTENT_DOCUMENT_OPTS);
+      const res = await api.getDocuments("all", SHARE_CONTENT_DOCUMENT_CATEGORY);
       dispatch({ type: "SET_DOCUMENTS", documents: res.data });
 
       // Restore selected documents from pending draft IDs (set in createInitialState).
@@ -80,7 +81,7 @@ export function StepDocuments() {
         }
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("creator.loadDocsFailed"));
+      toast.error(apiErrorMessage(e, { messageKey: "links:creator.loadDocsFailed" }));
     } finally {
       setLoading(false);
     }

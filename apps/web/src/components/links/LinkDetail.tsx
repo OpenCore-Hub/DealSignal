@@ -16,6 +16,7 @@ import { LinkAccessLog } from "./LinkAccessLog";
 import { LinkShareDialog } from "./share";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
@@ -79,7 +80,7 @@ export function LinkDetail() {
           setLogs(logData.data);
         }
       } catch (e) {
-        if (!cancelled) setError(e instanceof Error ? e.message : tc("error.loadFailed"));
+        if (!cancelled) setError(apiErrorMessage(e));
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -120,7 +121,7 @@ export function LinkDetail() {
         <SmartBackButton fallbackTo={documentsSharePath(workspaceSlug!)} fallbackLabel={t("backToLinks")} />
         <Card>
           <CardContent className="py-12 text-center">
-            <p className="text-body text-destructive mb-4">{tc("error.loadFailed")}{error ? `: ${error}` : ""}</p>
+            <p className="text-body text-destructive mb-4">{error || tc("error.loadFailed")}</p>
             <Button onClick={() => setRetryTick((t) => t + 1)}>{tc("retry")}</Button>
           </CardContent>
         </Card>

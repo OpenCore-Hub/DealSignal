@@ -29,6 +29,9 @@ function renderAccessTab(
   isDealRoomLink = true,
   documents: { id: string; title: string }[] = [],
   passwordAlreadySet = false,
+  ndaTemplates: { id: string; name: string; sourceDocumentId: string }[] = [],
+  roomSecurityFloors?: { requireEmailVerification?: boolean; requireNda?: boolean },
+  roomBlockedEmails?: string[],
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -39,7 +42,10 @@ function renderAccessTab(
         errors={errors}
         isDealRoomLink={isDealRoomLink}
         documents={documents}
+        ndaTemplates={ndaTemplates}
         passwordAlreadySet={passwordAlreadySet}
+        roomSecurityFloors={roomSecurityFloors}
+        roomBlockedEmails={roomBlockedEmails}
       />
     </Wrapper>
   );
@@ -331,6 +337,36 @@ describe("AccessTab", () => {
     });
   });
 
+  it("lists NDA templates and extra agreement docs, deduping template sources", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, requireNda: true },
+      {},
+      true,
+      [
+        { id: "doc-1", title: "NDA v1" },
+        { id: "doc_nda_1", title: "Raw agreement PDF" },
+      ],
+      false,
+      [
+        {
+          id: "nda_tpl_1",
+          name: "Standard Mutual NDA",
+          sourceDocumentId: "doc_nda_1",
+        },
+      ],
+    );
+    fireEvent.click(screen.getByRole("combobox", { name: /NDA agreement document/i }));
+    expect(screen.getByRole("option", { name: "Standard Mutual NDA" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "NDA v1" })).toBeInTheDocument();
+    // Source doc already covered by the template — do not duplicate.
+    expect(screen.queryByRole("option", { name: "Raw agreement PDF" })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("option", { name: "Standard Mutual NDA" }));
+    expect(updateDraft).toHaveBeenCalledWith({
+      ndaTemplateId: "nda_tpl_1",
+      ndaDocumentId: "doc_nda_1",
+    });
+  });
+
   it("shows NDA document required error", () => {
     renderAccessTab(
       { ...baseDraft, requireNda: true },
@@ -350,5 +386,78 @@ describe("AccessTab", () => {
     );
     fireEvent.click(screen.getByRole("switch", { name: /require NDA to view/i }));
     expect(updateDraft).toHaveBeenCalledWith({ requireNda: false, ndaDocumentId: "", ndaTemplateId: "" });
+  });
+
+  it("locks email verification and NDA when room floors are on; password stays editable", () => {
+    const { updateDraft } = renderAccessTab(
+      { ...baseDraft, requireEmailVerification: true, requireNda: true },
+      {},
+      true,
+      [{ id: "doc-1", title: "NDA v1" }],
+      false,
+      [],
+      { requireEmailVerification: true, requireNda: true },
+    );
+
+    expect(screen.queryByTestId("room-security-floor-banner")).not.toBeInTheDocument();
+    expect(screen.getByTestId("access-switch-require-verification")).toHaveAttribute(
+      "data-locked",
+      "true",
+    );
+    expect(screen.getByTestId("access-switch-require-nda")).toHaveAttribute("data-locked", "true");
+
+    const verifySwitch = screen.getByRole("switch", { name: /require email verification/i });
+    const ndaSwitch = screen.getByRole("switch", { name: /require NDA to view/i });
+    const passwordSwitch = screen.getByRole("switch", { name: /require password to view/i });
+
+    expect(verifySwitch).toBeDisabled();
+    expect(verifySwitch).toBeChecked();
+    expect(ndaSwitch).toBeDisabled();
+    expect(ndaSwitch).toBeChecked();
+    expect(passwordSwitch).not.toBeDisabled();
+
+    fireEvent.click(verifySwitch);
+    fireEvent.click(ndaSwitch);
+    expect(updateDraft).not.toHaveBeenCalled();
+
+    fireEvent.click(passwordSwitch);
+    expect(updateDraft).toHaveBeenCalledWith({ requirePassword: true });
+  });
+
+  it("keeps room blocklist entries locked and re-applies them on edit", () => {
+    const { updateDraft } = renderAccessTab(
+      {
+        ...baseDraft,
+        requireEmail: true,
+        allowedViewers: ["good@example.com"],
+        blockedViewers: ["room-block@example.com", "link-only@example.com"],
+      },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      ["room-block@example.com"],
+    );
+
+    expect(
+      screen.getByText(/Locked entries come from deal room access policy/i),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /remove room-block@example.com/i }),
+    ).not.toBeInTheDocument();
+
+    const textboxes = screen.getAllByRole("textbox");
+    const blockedInput = textboxes[textboxes.length - 1];
+    fireEvent.change(blockedInput, { target: { value: "extra@example.com" } });
+    fireEvent.keyDown(blockedInput, { key: "Enter" });
+    expect(updateDraft).toHaveBeenCalledWith({
+      blockedViewers: [
+        "room-block@example.com",
+        "link-only@example.com",
+        "extra@example.com",
+      ],
+    });
   });
 });

@@ -1,4 +1,5 @@
 import { useEffect, useCallback, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useParams } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
@@ -14,7 +15,7 @@ import {
   classifyPresetFromConfig,
 } from "../smart-link/levelConfig";
 import {
-  SHARE_CONTENT_DOCUMENT_OPTS,
+  SHARE_CONTENT_DOCUMENT_CATEGORY,
   buildEditModeDocumentLists,
 } from "./pipelineUtils";
 import type { Contact, PermissionConfig } from "@/types";
@@ -77,7 +78,7 @@ function BundlePipelineInner() {
 
         // Same scope as create mode / Document Library: no agreements or data-room docs
         // in the available picker. Selected tray may still show orphans via fallbacks.
-        const docRes = await api.getDocuments("all", undefined, SHARE_CONTENT_DOCUMENT_OPTS);
+        const docRes = await api.getDocuments("all", SHARE_CONTENT_DOCUMENT_CATEGORY);
         const { pickerDocuments, selectedDocuments: selectedDocs } = buildEditModeDocumentLists(
           docRes.data,
           link.documents,
@@ -163,7 +164,7 @@ function BundlePipelineInner() {
         }
       } catch (e) {
         if (!cancelled) {
-          toast.error(e instanceof Error ? e.message : "Failed to load link");
+          toast.error(apiErrorMessage(e, { messageKey: "links:creator.loadLinkFailed" }));
         }
       }
     })();

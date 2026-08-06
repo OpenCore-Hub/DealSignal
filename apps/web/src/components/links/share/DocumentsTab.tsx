@@ -20,13 +20,15 @@ export function DocumentsTab({
   disabled,
 }: DocumentsTabProps) {
   return (
-    <DocumentScopeSection
-      folders={folders}
-      documents={documents}
-      selectedPaths={selectedPaths}
-      scopeMode={scopeMode}
-      onChange={onChange}
-      disabled={disabled}
-    />
+    <div data-testid="documents-tab">
+      <DocumentScopeSection
+        folders={folders}
+        documents={documents}
+        selectedPaths={selectedPaths}
+        scopeMode={scopeMode}
+        onChange={onChange}
+        disabled={disabled}
+      />
+    </div>
   );
 }

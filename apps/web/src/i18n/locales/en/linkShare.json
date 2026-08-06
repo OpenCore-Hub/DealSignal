@@ -12,6 +12,7 @@
     "accessSummaryEmpty": "No access restrictions configured",
     "editAccessRules": "Edit access rules",
     "editAccessAfterCreate": "Create the link first, then manage access rules on the Access Control tab.",
+    "audienceEditedHere": "Allowed viewers for this link are configured in this dialog.",
     "expandAccessSummary": "Expand access summary",
     "collapseAccessSummary": "Collapse access summary",
     "expiresOn": "Expires on",
@@ -39,7 +40,11 @@
     "linkNameRequired": "Link name is required",
     "linkNameDuplicate": "A link with this name already exists",
     "documentScope": {
+      "modeLabel": "Document scope",
+      "modeAll": "All documents",
+      "modeCustom": "Custom",
       "allDocuments": "All documents accessible",
+      "allDocumentsExceptLocked": "All unlocked documents accessible — locked folders are excluded",
       "legacyAllDocuments": "All documents accessible (legacy)",
       "noneAuthorized": "No folders authorized — visitors cannot preview any files",
       "selectedDocuments": "{{folders}} folders / {{documents}} documents",
@@ -53,7 +58,7 @@
     "title": "Access control",
     "saveAccessRules": "Save access rules",
     "saved": "Access rules saved",
-    "savedDescription": "Changes take effect immediately; existing viewer sessions will be invalidated.",
+    "savedDescription": "Saved as room security defaults and blocklist. Allowlists stay per share link. Existing viewer sessions will be invalidated.",
     "viewers": {
       "title": "Who can access",
       "description": "Allowlist trusted emails and block specific addresses. Block rules always take priority."
@@ -67,6 +72,7 @@
       "requireVerification": "Require email verification",
       "requireVerificationDescription": "Send a one-time code; identity comes from the code (no email field on the visitor page)",
       "verificationDisabledForDocuments": "Email verification requires contacts and is only available for deal room links",
+      "verificationFloorLocked": "Required by access policy — cannot be turned off on this link",
       "requirePassword": "Require password to view",
       "requirePasswordDescription": "Viewer must enter a password",
       "passwordPlaceholder": "Enter password",
@@ -81,7 +87,9 @@
     "blockedViewers": {
       "title": "Blocked viewers",
       "placeholder": "leaker@bad.com",
-      "hint": "Block specific email addresses"
+      "hint": "Block specific email addresses",
+      "roomHint": "Blocked for every share link in this deal room",
+      "dealRoomLinkHint": "Locked entries come from deal room access policy and apply at access time. You can add extra blocks for this link only."
     },
     "additionalProtections": {
       "title": "Content protections",
@@ -90,6 +98,7 @@
       "watermarkDescription": "Overlay viewer email on documents",
       "requireNda": "Require NDA to view",
       "requireNdaDescription": "Viewer must agree to NDA before access",
+      "ndaFloorLocked": "Required by access policy — select the NDA document below",
       "ndaDocument": "NDA agreement document",
       "ndaDocumentPlaceholder": "Select a document",
       "allowDownloading": "Allow downloading",
@@ -258,6 +267,7 @@
     "emptyTitle": "No visits yet",
     "emptyDescription": "Share the link and viewer activity will appear here.",
     "loadFailed": "Failed to load analytics",
+    "deliverySendFailed": "Could not deliver the verification code. Try resending.",
     "recentVisitors": "Recent visitors",
     "noRecentVisitors": "No recent visitors yet.",
     "visitorViews": "{{count}} views",

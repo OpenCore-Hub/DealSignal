@@ -12,6 +12,7 @@
     "accessSummaryEmpty": "未配置访问限制",
     "editAccessRules": "编辑访问规则",
     "editAccessAfterCreate": "请先创建链接，再到「访问控制」页管理访问规则。",
+    "audienceEditedHere": "本链接的允许访客请在此对话框中配置。",
     "expandAccessSummary": "展开访问摘要",
     "collapseAccessSummary": "折叠访问摘要",
     "expiresOn": "过期时间",
@@ -39,7 +40,11 @@
     "linkNameRequired": "链接名称不能为空",
     "linkNameDuplicate": "链接名称已存在",
     "documentScope": {
+      "modeLabel": "目录范围",
+      "modeAll": "全部文档",
+      "modeCustom": "自定义",
       "allDocuments": "全部文档可访问",
+      "allDocumentsExceptLocked": "全部未锁定文档可访问 — 已锁定文件夹始终排除",
       "legacyAllDocuments": "全部文档可访问（历史设置）",
       "noneAuthorized": "未授权任何目录 — 访客无法预览任何文件",
       "selectedDocuments": "{{folders}} 个文件夹 / {{documents}} 个文档",
@@ -53,7 +58,7 @@
     "title": "访问控制",
     "saveAccessRules": "保存访问规则",
     "saved": "访问规则已保存",
-    "savedDescription": "更改立即生效；现有访客会话将失效。",
+    "savedDescription": "已保存为数据室安全默认与阻止名单。允许名单按分享链接单独配置；现有访客会话将失效。",
     "viewers": {
       "title": "谁可以访问",
       "description": "设置允许与阻止的邮箱名单；阻止规则始终优先。"
@@ -67,6 +72,7 @@
       "requireVerification": "要求邮箱验证",
       "requireVerificationDescription": "向访客邮箱发送一次性验证码；身份由验证码绑定（访客页无需再填邮箱）",
       "verificationDisabledForDocuments": "邮箱验证需要指定联系人，且仅适用于数据室链接",
+      "verificationFloorLocked": "访问策略已要求开启，此链接上不可关闭",
       "requirePassword": "要求密码查看",
       "requirePasswordDescription": "访客必须输入密码",
       "passwordPlaceholder": "输入密码",
@@ -81,7 +87,9 @@
     "blockedViewers": {
       "title": "阻止访问的访客",
       "placeholder": "leaker@bad.com",
-      "hint": "阻止特定邮箱地址"
+      "hint": "阻止特定邮箱地址",
+      "roomHint": "对本数据室所有分享链接生效",
+      "dealRoomLinkHint": "带锁条目来自数据室访问策略，访问时即时生效。可额外添加仅对本链接生效的阻止名单。"
     },
     "additionalProtections": {
       "title": "内容保护",
@@ -90,6 +98,7 @@
       "watermarkDescription": "在文档上叠加访客邮箱水印",
       "requireNda": "要求签署 NDA 查看",
       "requireNdaDescription": "访客必须先同意 NDA 才能访问",
+      "ndaFloorLocked": "访问策略已要求开启，请在下方选择 NDA 文档",
       "ndaDocument": "NDA 保密协议文档",
       "ndaDocumentPlaceholder": "选择文档",
       "allowDownloading": "允许下载",
@@ -258,6 +267,7 @@
     "emptyTitle": "暂无访问",
     "emptyDescription": "分享链接后，访客活动将显示在这里。",
     "loadFailed": "加载分析数据失败",
+    "deliverySendFailed": "验证码发送失败，请尝试重新发送。",
     "recentVisitors": "最近访客",
     "noRecentVisitors": "暂无最近访客。",
     "visitorViews": "{{count}} 次访问",

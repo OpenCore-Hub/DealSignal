@@ -27,7 +27,8 @@ export function ShareAccessRequestsPanel({
     error,
     refetch,
   } = useAsyncData(async () => {
-    const res = await api.getPendingLinkAccessRequests();
+    // Document Library surface: never include deal-room share applicants.
+    const res = await api.getPendingLinkAccessRequests({ scope: "document" });
     return res.data ?? [];
   }, []);
 

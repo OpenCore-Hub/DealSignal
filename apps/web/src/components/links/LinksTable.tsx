@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
   useReactTable,
@@ -92,7 +93,8 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
     const res = isFiltered && documentId
       ? await api.getLinksByDocumentId(documentId)
       : await api.getLinks();
-    return res.data;
+    // Defense in depth: Document Library must never render deal-room shares.
+    return res.data.filter((link) => !link.dealRoomId);
   }, [documentId, isFiltered]);
   const data = fetchedData ?? [];
   const [sorting, setSorting] = useState<SortingState>([]);
@@ -315,9 +317,9 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
     return <SkeletonList rows={6} />;
   }
 
-  const accessInbox = (
-    <ShareAccessRequestsPanel linkIds={isFiltered ? linkIds : undefined} />
-  );
+  // Always constrain the inbox to links visible in this table (document surface).
+  // Combined with API scope=document, this prevents deal-room applicant PII leakage.
+  const accessInbox = <ShareAccessRequestsPanel linkIds={linkIds} />;
 
   if (data.length === 0) {
     const emptyTitle = isFiltered && documentTitle ? t("empty.filteredTitle", { title: documentTitle }) : t("empty.title");
@@ -453,7 +455,7 @@ export function LinksTable({ documentId, documentTitle, embedded = false }: Link
                   setLinkToDelete(null);
                   void refetch();
                 } catch (e) {
-                  toast.error(e instanceof Error ? e.message : tc("error.deleteFailed"));
+                  toast.error(apiErrorMessage(e, { fallback: "deleteFailed" }));
                 } finally {
                   setIsDeleting(false);
                 }

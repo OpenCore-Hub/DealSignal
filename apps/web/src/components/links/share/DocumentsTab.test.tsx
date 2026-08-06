@@ -14,6 +14,9 @@ i18nInstance.use(initReactI18next).init({
       linkShare: {
         share: {
           documentScope: {
+            modeLabel: "Document scope",
+            modeAll: "All documents",
+            modeCustom: "Custom",
             allDocuments: "All documents accessible",
             legacyAllDocuments: "All documents accessible (legacy)",
             noneAuthorized: "No folders authorized — visitors cannot preview any files",

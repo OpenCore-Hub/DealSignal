@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, type ReactNode } from "react";
-import { Question } from "@phosphor-icons/react";
+import { LockSimple, Question } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
@@ -38,6 +38,14 @@ import {
 
 export type AccessTabLayout = "compact" | "sections";
 
+/**
+ * Who-can-access UI scope:
+ * - `full` — allow + block (share-link create/edit)
+ * - `block-only` — room-wide blocklist only (Access Control page)
+ * - `none` — hide audience section
+ */
+export type AccessAudienceMode = "full" | "block-only" | "none";
+
 interface AccessTabProps {
   draft: DraftLink;
   updateDraft: (patch: Partial<DraftLink>) => void;
@@ -53,6 +61,15 @@ interface AccessTabProps {
    * `sections` — numbered cards for the deal-room Access Control page.
    */
   layout?: AccessTabLayout;
+  /** Defaults to `full`. Room Access Control uses `block-only`. */
+  audienceMode?: AccessAudienceMode;
+  /** Room-mandated floors: owner cannot turn these gates off on the link. */
+  roomSecurityFloors?: {
+    requireEmailVerification?: boolean;
+    requireNda?: boolean;
+  };
+  /** Room-wide blocklist emails — read-only on deal-room share links. */
+  roomBlockedEmails?: string[];
 }
 
 function OptionSwitch({
@@ -61,25 +78,43 @@ function OptionSwitch({
   checked,
   onCheckedChange,
   disabled,
+  locked,
   highlighted,
+  testId,
 }: {
   label: string;
   description?: string;
   checked: boolean;
   onCheckedChange: (checked: boolean) => void;
   disabled?: boolean;
+  /** Room-security floor: forced ON and not user-toggleable. */
+  locked?: boolean;
   highlighted?: boolean;
+  testId?: string;
 }) {
+  const inert = Boolean(disabled || locked);
+  const shownChecked = locked ? true : checked;
   return (
     <div
       className={cn(
         "flex items-center justify-between gap-4 rounded-md p-1",
-        disabled && "opacity-50",
+        inert && "opacity-60",
+        locked && "cursor-not-allowed",
         highlighted && "bg-primary/10 motion-safe:transition-colors motion-safe:duration-200"
       )}
+      data-testid={testId}
+      data-locked={locked ? "true" : "false"}
     >
       <div className="flex min-w-0 items-center gap-1.5">
         <Label className="leading-none font-normal text-foreground">{label}</Label>
+        {locked ? (
+          <LockSimple
+            size={14}
+            weight="fill"
+            className="shrink-0 text-muted-foreground"
+            aria-hidden
+          />
+        ) : null}
         {description && (
           <TooltipProvider delay={150}>
             <Tooltip>
@@ -96,12 +131,16 @@ function OptionSwitch({
           </TooltipProvider>
         )}
       </div>
-      <Switch
-        aria-label={label}
-        checked={checked}
-        onCheckedChange={onCheckedChange}
-        disabled={disabled}
-      />
+      <div className={cn(inert && "pointer-events-none")}>
+        <Switch
+          aria-label={label}
+          aria-disabled={inert || undefined}
+          checked={shownChecked}
+          onCheckedChange={inert ? undefined : onCheckedChange}
+          disabled={inert}
+          readOnly={locked || undefined}
+        />
+      </div>
     </div>
   );
 }
@@ -226,9 +265,22 @@ export function AccessTab({
   documents = [],
   ndaTemplates = [],
   layout = "compact",
+  audienceMode = "full",
+  roomSecurityFloors,
+  roomBlockedEmails = [],
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
   const sections = layout === "sections";
+  const showAllow = audienceMode === "full";
+  const showBlock = audienceMode === "full" || audienceMode === "block-only";
+  const showViewersSection = showAllow || showBlock;
+  const verifyFloor = Boolean(roomSecurityFloors?.requireEmailVerification);
+  const ndaFloor = Boolean(roomSecurityFloors?.requireNda);
+  const roomBlockedSet = useMemo(
+    () => new Set(roomBlockedEmails.map((v) => v.trim().toLowerCase()).filter(Boolean)),
+    [roomBlockedEmails],
+  );
+  const showRoomLockedBlocks = isDealRoomLink && roomBlockedSet.size > 0 && audienceMode === "full";
 
   const isHighlighted = (field: string) => highlightedFields.includes(field);
   const [advancedOpen, setAdvancedOpen] = useState(sections);
@@ -241,11 +293,34 @@ export function AccessTab({
     }
   }, [draft.requirePassword, passwordAlreadySet]);
 
+  // Keep draft compliant when room floors turn on after dialog open.
+  useEffect(() => {
+    if (!verifyFloor && !ndaFloor) return;
+    const patch: Partial<DraftLink> = {};
+    if (verifyFloor && !draft.requireEmailVerification) {
+      patch.requireEmailVerification = true;
+      patch.requireEmail = false;
+    }
+    if (ndaFloor && !draft.requireNda) {
+      patch.requireNda = true;
+    }
+    if (Object.keys(patch).length > 0) updateDraft(patch);
+  }, [
+    verifyFloor,
+    ndaFloor,
+    draft.requireEmailVerification,
+    draft.requireNda,
+    updateDraft,
+  ]);
+
   const advancedCount = countAdvancedEnabled(draft);
   const visitorAskOn = visitorAskMasterEnabled(draft);
-  const verificationDisabled = !isDealRoomLink;
+  /** Document links cannot use email verification; room floor locks it ON. */
+  const verificationDisabledForDocuments = !isDealRoomLink;
+  const emailSelfReportDisabled = verifyFloor;
 
   const handleRequireEmailChange = (checked: boolean) => {
+    if (verifyFloor) return;
     updateDraft({
       requireEmail: checked,
       // Mutually exclusive with verification — identity is either self-reported or code-proven.
@@ -254,6 +329,8 @@ export function AccessTab({
   };
 
   const handleRequireVerificationChange = (checked: boolean) => {
+    // Room floor: never allow turning verification off.
+    if (verifyFloor) return;
     updateDraft({
       requireEmailVerification: checked,
       // Mutually exclusive with email self-report; code resolves the visitor email.
@@ -262,14 +339,38 @@ export function AccessTab({
   };
 
   const handleAllowedViewersChange = (values: string[]) => {
-    const patch: Partial<DraftLink> = { allowedViewers: values };
-    if (values.length > 0 && !draft.requireEmail && !draft.requireEmailVerification) {
+    const filtered = showRoomLockedBlocks
+      ? values.filter((v) => !roomBlockedSet.has(v.trim().toLowerCase()))
+      : values;
+    const patch: Partial<DraftLink> = { allowedViewers: filtered };
+    if (filtered.length > 0 && !draft.requireEmail && !draft.requireEmailVerification) {
       patch.requireEmail = true;
     }
     updateDraft(patch);
   };
 
+  const handleBlockedViewersChange = (values: string[]) => {
+    const linkOnly = values.filter((v) => !roomBlockedSet.has(v.trim().toLowerCase()));
+    updateDraft({
+      blockedViewers: showRoomLockedBlocks
+        ? [...roomBlockedEmails, ...linkOnly]
+        : linkOnly,
+    });
+  };
+
+  const blockedHint = (() => {
+    if (audienceMode === "block-only") {
+      return t("accessRules.blockedViewers.roomHint");
+    }
+    if (showRoomLockedBlocks) {
+      return t("accessRules.blockedViewers.dealRoomLinkHint");
+    }
+    return t("accessRules.blockedViewers.hint");
+  })();
+
   const handleRequireNdaChange = (checked: boolean) => {
+    // Room floor: never allow turning NDA off.
+    if (ndaFloor) return;
     updateDraft({
       requireNda: checked,
       ndaDocumentId: checked ? draft.ndaDocumentId : "",
@@ -277,20 +378,28 @@ export function AccessTab({
     });
   };
 
-  const ndaOptions =
-    ndaTemplates.length > 0
-      ? ndaTemplates.map((tpl) => ({
-          id: tpl.id,
-          title: tpl.name,
-          templateId: tpl.id,
-          documentId: tpl.sourceDocumentId,
-        }))
-      : documents.map((doc) => ({
-          id: doc.id,
-          title: doc.title,
-          templateId: "",
-          documentId: doc.id,
-        }));
+  // Templates first, then agreement-library docs not already covered by a template.
+  // Never mix in deal-room / share-content docs — callers must pass agreement docs only.
+  const ndaOptions = (() => {
+    const fromTemplates = ndaTemplates.map((tpl) => ({
+      id: tpl.id,
+      title: tpl.name,
+      templateId: tpl.id,
+      documentId: tpl.sourceDocumentId,
+    }));
+    const coveredDocIds = new Set(
+      fromTemplates.map((opt) => opt.documentId).filter(Boolean),
+    );
+    const fromDocs = documents
+      .filter((doc) => !coveredDocIds.has(doc.id))
+      .map((doc) => ({
+        id: doc.id,
+        title: doc.title,
+        templateId: "",
+        documentId: doc.id,
+      }));
+    return [...fromTemplates, ...fromDocs];
+  })();
 
   // Always controlled: empty selection is null (not undefined) for Base UI Select.
   const selectedNdaValue = draft.ndaTemplateId || draft.ndaDocumentId || "";
@@ -350,22 +459,32 @@ export function AccessTab({
       <div className="space-y-1 rounded-lg border border-border/70 bg-muted/20 p-3">
         <OptionSwitch
           label={t("accessRules.authentication.requireEmail")}
-          description={t("accessRules.authentication.requireEmailDescription")}
+          description={
+            emailSelfReportDisabled
+              ? t("accessRules.authentication.verificationFloorLocked")
+              : t("accessRules.authentication.requireEmailDescription")
+          }
           checked={draft.requireEmail}
           onCheckedChange={handleRequireEmailChange}
+          disabled={emailSelfReportDisabled}
           highlighted={isHighlighted("requireEmail")}
+          testId="access-switch-require-email"
         />
         <OptionSwitch
           label={t("accessRules.authentication.requireVerification")}
           description={
-            verificationDisabled
+            verificationDisabledForDocuments
               ? t("accessRules.authentication.verificationDisabledForDocuments")
-              : t("accessRules.authentication.requireVerificationDescription")
+              : verifyFloor
+                ? t("accessRules.authentication.verificationFloorLocked")
+                : t("accessRules.authentication.requireVerificationDescription")
           }
-          checked={draft.requireEmailVerification}
+          checked={verifyFloor ? true : draft.requireEmailVerification}
           onCheckedChange={handleRequireVerificationChange}
-          disabled={verificationDisabled}
+          disabled={verificationDisabledForDocuments}
+          locked={verifyFloor}
           highlighted={isHighlighted("requireEmailVerification")}
+          testId="access-switch-require-verification"
         />
         {errors.requireVerificationContacts && (
           <p className="px-1 text-xs text-destructive">{errors.requireVerificationContacts}</p>
@@ -438,50 +557,57 @@ export function AccessTab({
 
   const viewersBody = (
     <>
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <Label className="text-sm font-medium">{t("accessRules.allowedViewers.title")}</Label>
-          <p className="text-xs text-muted-foreground">{t("accessRules.allowedViewers.hint")}</p>
+      {showAllow ? (
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">{t("accessRules.allowedViewers.title")}</Label>
+            <p className="text-xs text-muted-foreground">{t("accessRules.allowedViewers.hint")}</p>
+          </div>
+          <ContactEmailTagInput
+            values={draft.allowedViewers}
+            onChange={handleAllowedViewersChange}
+            placeholder={t("accessRules.allowedViewers.placeholder")}
+            hint={undefined}
+            conflictValues={conflicts}
+            allowDomains={false}
+          />
+          {allowedViewersNeedEmail && (
+            <p className="text-xs text-muted-foreground">
+              {t("accessRules.errors.allowRequiresEmail")}
+            </p>
+          )}
+          {errors.allowedViewers && (
+            <p className="text-xs text-destructive">{errors.allowedViewers}</p>
+          )}
         </div>
-        <ContactEmailTagInput
-          values={draft.allowedViewers}
-          onChange={handleAllowedViewersChange}
-          placeholder={t("accessRules.allowedViewers.placeholder")}
-          hint={undefined}
-          conflictValues={conflicts}
-          allowDomains={false}
-        />
-        {allowedViewersNeedEmail && (
-          <p className="text-xs text-muted-foreground">
-            {t("accessRules.errors.allowRequiresEmail")}
-          </p>
-        )}
-        {errors.allowedViewers && (
-          <p className="text-xs text-destructive">{errors.allowedViewers}</p>
-        )}
-      </div>
+      ) : null}
 
-      <div className="border-t border-border/60" />
+      {showAllow && showBlock ? <div className="border-t border-border/60" /> : null}
 
-      <div className="space-y-3">
-        <div className="space-y-1">
-          <Label className="text-sm font-medium">{t("accessRules.blockedViewers.title")}</Label>
-          <p className="text-xs text-muted-foreground">{t("accessRules.blockedViewers.hint")}</p>
+      {showBlock ? (
+        <div className="space-y-3">
+          <div className="space-y-1">
+            <Label className="text-sm font-medium">{t("accessRules.blockedViewers.title")}</Label>
+            <p className="text-xs text-muted-foreground">
+              {blockedHint}
+            </p>
+          </div>
+          <ContactEmailTagInput
+            values={draft.blockedViewers}
+            onChange={handleBlockedViewersChange}
+            placeholder={t("accessRules.blockedViewers.placeholder")}
+            hint={undefined}
+            conflictValues={conflicts}
+            lockedValues={showRoomLockedBlocks ? roomBlockedEmails : undefined}
+            allowDomains={false}
+          />
+          {errors.blockedViewers && (
+            <p className="text-xs text-destructive">{errors.blockedViewers}</p>
+          )}
         </div>
-        <ContactEmailTagInput
-          values={draft.blockedViewers}
-          onChange={(values) => updateDraft({ blockedViewers: values })}
-          placeholder={t("accessRules.blockedViewers.placeholder")}
-          hint={undefined}
-          conflictValues={conflicts}
-          allowDomains={false}
-        />
-        {errors.blockedViewers && (
-          <p className="text-xs text-destructive">{errors.blockedViewers}</p>
-        )}
-      </div>
+      ) : null}
 
-      {conflicts.length > 0 && (
+      {showAllow && conflicts.length > 0 && (
         <p className="text-xs text-destructive">
           {t("accessRules.errors.conflict", { value: conflicts.join(", ") })}
         </p>
@@ -524,12 +650,18 @@ export function AccessTab({
       >
         <OptionSwitch
           label={t("accessRules.additionalProtections.requireNda")}
-          description={t("accessRules.additionalProtections.requireNdaDescription")}
-          checked={draft.requireNda}
+          description={
+            ndaFloor
+              ? t("accessRules.additionalProtections.ndaFloorLocked")
+              : t("accessRules.additionalProtections.requireNdaDescription")
+          }
+          checked={ndaFloor ? true : draft.requireNda}
           onCheckedChange={handleRequireNdaChange}
+          locked={ndaFloor}
           highlighted={isHighlighted("requireNda")}
+          testId="access-switch-require-nda"
         />
-        {draft.requireNda && (
+        {(ndaFloor || draft.requireNda) && (
           <div className="space-y-2">
             <Label className="text-xs font-normal text-muted-foreground">
               {t("accessRules.additionalProtections.ndaDocument")}
@@ -620,17 +752,23 @@ export function AccessTab({
           {authBody}
         </Section>
 
-        <Section
-          id="viewers"
-          step="2"
-          title={t("accessRules.viewers.title")}
-        >
-          {viewersBody}
-        </Section>
+        {showViewersSection ? (
+          <Section
+            id="viewers"
+            step="2"
+            title={
+              audienceMode === "block-only"
+                ? t("accessRules.blockedViewers.title")
+                : t("accessRules.viewers.title")
+            }
+          >
+            {viewersBody}
+          </Section>
+        ) : null}
 
         <Section
           id="protections"
-          step="3"
+          step={showViewersSection ? "3" : "2"}
           title={t("accessRules.additionalProtections.title")}
         >
           {protectionsBody}
@@ -638,7 +776,7 @@ export function AccessTab({
 
         <Section
           id="advanced"
-          step="4"
+          step={showViewersSection ? "4" : "3"}
           title={t("accessRules.advanced.title")}
         >
           {advancedCount > 0 ? (
@@ -666,40 +804,45 @@ export function AccessTab({
         {authBody}
       </Section>
 
-      <Section id="allowed" title={t("accessRules.allowedViewers.title")}>
-        <ContactEmailTagInput
-          values={draft.allowedViewers}
-          onChange={handleAllowedViewersChange}
-          placeholder={t("accessRules.allowedViewers.placeholder")}
-          hint={t("accessRules.allowedViewers.hint")}
-          conflictValues={conflicts}
-          allowDomains={false}
-        />
-        {allowedViewersNeedEmail && (
-          <p className="text-xs text-muted-foreground">
-            {t("accessRules.errors.allowRequiresEmail")}
-          </p>
-        )}
-        {errors.allowedViewers && (
-          <p className="text-xs text-destructive">{errors.allowedViewers}</p>
-        )}
-      </Section>
+      {showAllow ? (
+        <Section id="allowed" title={t("accessRules.allowedViewers.title")}>
+          <ContactEmailTagInput
+            values={draft.allowedViewers}
+            onChange={handleAllowedViewersChange}
+            placeholder={t("accessRules.allowedViewers.placeholder")}
+            hint={t("accessRules.allowedViewers.hint")}
+            conflictValues={conflicts}
+            allowDomains={false}
+          />
+          {allowedViewersNeedEmail && (
+            <p className="text-xs text-muted-foreground">
+              {t("accessRules.errors.allowRequiresEmail")}
+            </p>
+          )}
+          {errors.allowedViewers && (
+            <p className="text-xs text-destructive">{errors.allowedViewers}</p>
+          )}
+        </Section>
+      ) : null}
 
-      <Section id="blocked" title={t("accessRules.blockedViewers.title")}>
-        <ContactEmailTagInput
-          values={draft.blockedViewers}
-          onChange={(values) => updateDraft({ blockedViewers: values })}
-          placeholder={t("accessRules.blockedViewers.placeholder")}
-          hint={t("accessRules.blockedViewers.hint")}
-          conflictValues={conflicts}
-          allowDomains={false}
-        />
-        {errors.blockedViewers && (
-          <p className="text-xs text-destructive">{errors.blockedViewers}</p>
-        )}
-      </Section>
+      {showBlock ? (
+        <Section id="blocked" title={t("accessRules.blockedViewers.title")}>
+          <ContactEmailTagInput
+            values={draft.blockedViewers}
+            onChange={handleBlockedViewersChange}
+            placeholder={t("accessRules.blockedViewers.placeholder")}
+            hint={blockedHint}
+            conflictValues={conflicts}
+            lockedValues={showRoomLockedBlocks ? roomBlockedEmails : undefined}
+            allowDomains={false}
+          />
+          {errors.blockedViewers && (
+            <p className="text-xs text-destructive">{errors.blockedViewers}</p>
+          )}
+        </Section>
+      ) : null}
 
-      {conflicts.length > 0 && (
+      {showAllow && conflicts.length > 0 && (
         <p className="text-xs text-destructive">
           {t("accessRules.errors.conflict", { value: conflicts.join(", ") })}
         </p>

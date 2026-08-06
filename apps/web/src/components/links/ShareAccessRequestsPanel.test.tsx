@@ -10,7 +10,7 @@ const mockReject = vi.fn();
 
 vi.mock("@/lib/api", () => ({
   api: {
-    getPendingLinkAccessRequests: () => mockGetPending(),
+    getPendingLinkAccessRequests: (...args: unknown[]) => mockGetPending(...args),
     approveLinkAccessRequest: (...args: unknown[]) => mockApprove(...args),
     rejectLinkAccessRequest: (...args: unknown[]) => mockReject(...args),
   },
@@ -67,6 +67,7 @@ describe("ShareAccessRequestsPanel", () => {
     await waitFor(() => {
       expect(screen.getByTestId("share-access-requests-panel")).toBeInTheDocument();
     });
+    expect(mockGetPending).toHaveBeenCalledWith({ scope: "document" });
     expect(screen.getByText("Document: Roadmap.pdf")).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("button", { name: "accessRequests.approve" }));

@@ -105,6 +105,7 @@
   },
   "creator": {
     "loadDocsFailed": "Failed to load documents",
+    "loadLinkFailed": "Failed to load link. Please try again.",
     "draftDocsUnavailable": "{{missing}} of {{total}} documents from your saved draft are no longer available and have been removed.",
     "createFailed": "Failed to create link",
     "copySuccess": "Link copied",

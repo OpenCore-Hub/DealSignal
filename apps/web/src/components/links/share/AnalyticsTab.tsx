@@ -782,9 +782,9 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
                                 : t(`analytics.codeSendStatus.${statusKey}`)}
                               {c.used_at ? ` · ${t("analytics.codeUsed")}` : ""}
                             </p>
-                            {c.send_status === "failed" && c.send_error ? (
+                            {c.send_status === "failed" ? (
                               <p className="truncate text-xs text-destructive">
-                                {c.send_error}
+                                {t("analytics.deliverySendFailed")}
                               </p>
                             ) : null}
                           </div>

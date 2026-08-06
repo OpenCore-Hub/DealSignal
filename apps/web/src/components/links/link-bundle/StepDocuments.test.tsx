@@ -108,14 +108,7 @@ describe("StepDocuments", () => {
     await renderStepDocuments("/links/new");
 
     await waitFor(() => {
-      expect(getDocumentsMock).toHaveBeenCalledWith(
-        "all",
-        undefined,
-        expect.objectContaining({
-          excludeDealRoom: true,
-          excludeAgreement: true,
-        }),
-      );
+      expect(getDocumentsMock).toHaveBeenCalledWith("all", "general");
     });
   });
 
@@ -135,14 +128,7 @@ describe("StepDocuments", () => {
 
     // The stale draft should not trigger the "draft unavailable" warning.
     expect(warningSpy).not.toHaveBeenCalled();
-    expect(getDocumentsMock).toHaveBeenCalledWith(
-      "all",
-      undefined,
-      expect.objectContaining({
-        excludeDealRoom: true,
-        excludeAgreement: true,
-      }),
-    );
+    expect(getDocumentsMock).toHaveBeenCalledWith("all", "general");
   });
 
   it("still restores a draft and warns when some draft documents are missing", async () => {

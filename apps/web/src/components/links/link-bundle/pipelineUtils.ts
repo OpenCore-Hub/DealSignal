@@ -1,11 +1,10 @@
 import { PRESET_TEMPLATES } from "../smart-link/levelConfig";
 import type { Document, DocumentSummary, PermissionConfig, PermissionPreset } from "@/types";
 
-/** Document Library / share-content picker scope (excludes agreements + data-room docs). */
-export const SHARE_CONTENT_DOCUMENT_OPTS = {
-  excludeDealRoom: true,
-  excludeAgreement: true,
-} as const;
+import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
+
+/** Share-content picker uses the same partition as the document library. */
+export const SHARE_CONTENT_DOCUMENT_CATEGORY = LIBRARY_DOCUMENT_CATEGORY;
 
 /**
  * Edit-mode lists: keep the available picker clean (no agreement / data-room merge-back),

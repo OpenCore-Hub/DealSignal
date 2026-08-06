@@ -14,7 +14,11 @@ i18nInstance.use(initReactI18next).init({
       linkShare: {
         share: {
           documentScope: {
+            modeLabel: "Document scope",
+            modeAll: "All documents",
+            modeCustom: "Custom",
             allDocuments: "All documents accessible",
+            allDocumentsExceptLocked: "All unlocked documents accessible — locked folders are excluded",
             legacyAllDocuments: "All documents accessible (legacy)",
             noneAuthorized: "No folders authorized — visitors cannot preview any files",
             selectedDocuments: "{{folders}} folders / {{documents}} documents",
@@ -22,6 +26,11 @@ i18nInstance.use(initReactI18next).init({
             deselectAll: "Deselect",
             empty: "No folders available",
           },
+        },
+      },
+      dealRooms: {
+        folders: {
+          lockedBadge: "Locked",
         },
       },
     },
@@ -95,9 +104,32 @@ describe("DocumentScopeSection", () => {
     expect(screen.getByText("Legal")).toBeInTheDocument();
   });
 
-  it("renders legacy full-room hint", () => {
+  it("renders all-documents mode without folder tree", () => {
     renderSection({ scopeMode: "full" });
-    expect(screen.getByText("All documents accessible (legacy)")).toBeInTheDocument();
+    expect(screen.getByTestId("document-scope-mode-full")).toHaveAttribute("aria-checked", "true");
+    expect(screen.getByText("All documents accessible")).toBeInTheDocument();
+    expect(screen.queryByTestId("folder-row-/financials")).not.toBeInTheDocument();
+  });
+
+  it("switches to custom mode with all roots selected", () => {
+    const { onChange } = renderSection({ scopeMode: "full" });
+    fireEvent.click(screen.getByTestId("document-scope-mode-allowlist"));
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials", "/legal"],
+    });
+  });
+
+  it("switches back to all-documents mode", () => {
+    const { onChange } = renderSection({
+      scopeMode: "allowlist",
+      selectedPaths: ["/financials"],
+    });
+    fireEvent.click(screen.getByTestId("document-scope-mode-full"));
+    expect(onChange).toHaveBeenCalledWith({
+      scopeMode: "full",
+      selectedPaths: [],
+    });
   });
 
   it("toggles a top-level folder on and off", () => {
@@ -161,14 +193,19 @@ describe("DocumentScopeSection", () => {
     });
   });
 
-  it("converts legacy full mode to allowlist on first edit", () => {
-    const { onChange } = renderSection({ scopeMode: "full" });
-    const row = screen.getByTestId("folder-row-/legal");
-    const checkbox = row.querySelector('[role="checkbox"]') as HTMLElement;
-    fireEvent.click(checkbox);
+  it("excludes locked folders from custom scope selection", () => {
+    const lockedFolders: DealRoomFolder[] = folders.map((folder) =>
+      folder.path === "/legal" ? { ...folder, locked: true } : folder,
+    );
+    const { onChange } = renderSection({
+      scopeMode: "full",
+      folders: lockedFolders,
+    });
+    fireEvent.click(screen.getByTestId("document-scope-mode-allowlist"));
     expect(onChange).toHaveBeenCalledWith({
       scopeMode: "allowlist",
       selectedPaths: ["/financials"],
     });
   });
+
 });

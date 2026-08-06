@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import {
   EnvelopeIcon,
@@ -18,9 +18,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import type { PermissionConfig } from "@/types";
+import { useNdaPickerSources } from "@/components/links/share/hooks";
 import { useSecurityOptions } from "../smart-link/useSecurityOptions";
 
 interface NdaOption {
@@ -110,50 +110,10 @@ export function BundleSecurityOptions({
   const { t } = useTranslation("links");
   const { t: tShare } = useTranslation("linkShare");
   const [advancedOpen, setAdvancedOpen] = useState(true);
-  const [ndaTemplates, setNdaTemplates] = useState<
-    { id: string; name: string; sourceDocumentId: string }[]
-  >([]);
-  const [ndaDocuments, setNdaDocuments] = useState<{ id: string; title: string }[]>([]);
+  // Templates + agreement-library docs (协议页); shared with AccessTab loaders.
+  const { ndaTemplates, agreementDocs: ndaDocuments } = useNdaPickerSources();
 
   const { update } = useSecurityOptions(config, onChange);
-
-  useEffect(() => {
-    let cancelled = false;
-    void (async () => {
-      try {
-        // NDA picker sources agreement-library docs (协议页), not the general
-        // document library. Templates still take precedence when present.
-        const [tplRes, docRes] = await Promise.all([
-          api.listNDATemplates(),
-          api.getDocuments("all", "agreement"),
-        ]);
-        if (cancelled) return;
-        setNdaTemplates(
-          (tplRes.data ?? []).map((tpl) => ({
-            id: tpl.id,
-            name: tpl.name,
-            sourceDocumentId: tpl.source_document_id,
-          })),
-        );
-        setNdaDocuments(
-          (docRes.data ?? [])
-            .filter((doc) => doc.status === "ready")
-            .map((doc) => ({
-              id: doc.id,
-              title: doc.title,
-            })),
-        );
-      } catch {
-        if (!cancelled) {
-          setNdaTemplates([]);
-          setNdaDocuments([]);
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const excludeSet = useMemo(
     () => new Set(excludeNdaDocumentIds),

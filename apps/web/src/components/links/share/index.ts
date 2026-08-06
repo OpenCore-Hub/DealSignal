@@ -25,3 +25,11 @@ export {
   validateDraft,
   getPublicUrl,
 } from "./utils";
+export {
+  loadNdaPickerSources,
+  mapAgreementDocuments,
+  mapNdaTemplates,
+  resolveNdaDocumentFallback,
+} from "./ndaPicker";
+export type { NdaDocumentOption, NdaPickerSources, NdaTemplateOption } from "./ndaPicker";
+export { useNdaPickerSources } from "./hooks";

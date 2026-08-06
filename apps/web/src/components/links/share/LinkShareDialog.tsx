@@ -16,18 +16,27 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import type { AccessRule, Link } from "@/types";
+import { apiErrorMessage } from "@/lib/apiErrors";
+import type { AccessRule, DealRoomAccessPolicy, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
   ShareTab,
   AccessTab,
   buildDraft,
-  buildRules,
   buildLinkPayload,
   validateDraft,
   LinkAccessRequestsPanel,
 } from "./";
+import {
+  buildLinkScopedRules,
+  clampDraftToRoomPolicy,
+  hydrateEditDraftFromRoomPolicy,
+  roomBlockedEmails,
+  roomSecurityFloors,
+} from "@/components/deal-rooms/roomAccessPolicy";
+import { useNdaPickerSources } from "./hooks";
+import { resolveNdaDocumentFallback } from "./ndaPicker";
 import type { DraftLink } from "./types";
 
 interface LinkShareDialogProps {
@@ -51,6 +60,7 @@ const tabTransition = {
 interface DialogData {
   link: Link;
   rules: AccessRule[];
+  policy: DealRoomAccessPolicy | null;
 }
 
 async function fetchDialogData(linkId: string): Promise<DialogData | null> {
@@ -59,9 +69,19 @@ async function fetchDialogData(linkId: string): Promise<DialogData | null> {
     api.getLinkAccessRules(linkId),
   ]);
   if (!link) return null;
+  let policy: DealRoomAccessPolicy | null = null;
+  if (link.dealRoomId) {
+    try {
+      const policyRes = await api.getDealRoomAccessPolicy(link.dealRoomId);
+      policy = policyRes?.data ?? (policyRes as unknown as DealRoomAccessPolicy | null) ?? null;
+    } catch {
+      policy = null;
+    }
+  }
   return {
     link,
     rules: rulesRes.data,
+    policy,
   };
 }
 
@@ -84,42 +104,31 @@ function LinkShareDialogContent({
 }) {
   const { t } = useTranslation("linkShare");
   const [tab, setTab] = useState<"share" | "access">(defaultTab);
-  const [draft, setDraft] = useState<DraftLink>(() => buildDraft(data?.link, data?.rules));
-  const [ndaTemplates, setNdaTemplates] = useState<{ id: string; name: string; sourceDocumentId: string }[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.listNDATemplates();
-        if (cancelled) return;
-        setNdaTemplates(
-          (res.data ?? []).map((tpl) => ({
-            id: tpl.id,
-            name: tpl.name,
-            sourceDocumentId: tpl.source_document_id,
-          }))
-        );
-      } catch {
-        if (!cancelled) setNdaTemplates([]);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const [draft, setDraft] = useState<DraftLink>(() =>
+    data?.link?.dealRoomId
+      ? hydrateEditDraftFromRoomPolicy(data.link, data.rules, data.policy)
+      : buildDraft(data?.link, data?.rules),
+  );
+  const { ndaTemplates, agreementDocs } = useNdaPickerSources();
 
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
 
   const link = data?.link ?? null;
+  const policy = data?.policy ?? null;
+  const floors = roomSecurityFloors(policy);
+  const lockedRoomBlocks = roomBlockedEmails(policy);
+  const effectiveDraft = useMemo(
+    () => (link?.dealRoomId ? clampDraftToRoomPolicy(draft, policy) : draft),
+    [draft, link?.dealRoomId, policy],
+  );
 
   // 实时校验：所有必填项通过前，保存按钮保持禁用。
   const validationErrors = useMemo(() => {
     if (loadingData || !data || !link) return {};
-    return validateDraft(draft, link, t, now(), !!link?.dealRoomId);
-  }, [draft, link, t, loadingData, data]);
+    return validateDraft(effectiveDraft, link, t, now(), !!link?.dealRoomId);
+  }, [effectiveDraft, link, t, loadingData, data]);
 
   // Unsaved-changes tracking. We use a mutable ref instead of a callback so
   // the data-sync effect does not depend on the comparison function, which
@@ -142,14 +151,17 @@ function LinkShareDialogContent({
     const currentId = data?.link?.id;
     const keyChanged = currentId !== loadedLinkIdRef.current;
     if (keyChanged) {
-      const nextDraft = buildDraft(data?.link, data?.rules);
+      const nextDraft = link?.dealRoomId
+        ? hydrateEditDraftFromRoomPolicy(data.link, data.rules, data.policy)
+        : buildDraft(data?.link, data?.rules);
       setDraft(nextDraft);
       setHighlightedFields([]);
       hasUnsavedChangesRef.current = false;
       loadedLinkIdRef.current = currentId;
     } else if (currentId && !hasUnsavedChangesRef.current) {
-      // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
-      const nextDraft = buildDraft(data?.link, data?.rules);
+      const nextDraft = data.link.dealRoomId
+        ? hydrateEditDraftFromRoomPolicy(data.link, data.rules, data.policy)
+        : buildDraft(data?.link, data?.rules);
       setDraft(nextDraft);
       setHighlightedFields([]);
     }
@@ -176,16 +188,21 @@ function LinkShareDialogContent({
   }>({ open: false, title: "", description: "", onConfirm: () => {} });
 
   const updateDraft = (patch: Partial<DraftLink>) => {
-    setDraft((prev) => ({ ...prev, ...patch }));
+    setDraft((prev) =>
+      link?.dealRoomId
+        ? clampDraftToRoomPolicy({ ...prev, ...patch }, policy)
+        : { ...prev, ...patch },
+    );
     hasUnsavedChangesRef.current = true;
   };
 
   const saveLinkAndRules = async (): Promise<boolean> => {
     if (!link) return false;
+    const payloadDraft = link.dealRoomId ? clampDraftToRoomPolicy(draft, policy) : draft;
     setSaving(true);
     try {
-      await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
-      await api.setLinkAccessRules(link.id, buildRules(draft));
+      await api.updateLinkFull(link.id, buildLinkPayload(payloadDraft, link));
+      await api.setLinkAccessRules(link.id, buildLinkScopedRules(payloadDraft, policy));
       toast.success(t("share.saveSuccess"));
       markClean();
       await refetch();
@@ -196,8 +213,7 @@ function LinkShareDialogContent({
       if (err instanceof ApiError && err.code === "duplicate_name") {
         toast.error(t("share.linkNameDuplicate"));
       } else {
-        const message = err instanceof Error ? err.message : "";
-        toast.error(message || t("common:error.saveFailed"));
+        toast.error(apiErrorMessage(err, { fallback: "saveFailed" }));
       }
       return false;
     } finally {
@@ -207,7 +223,7 @@ function LinkShareDialogContent({
 
   const handleSave = async () => {
     if (!link) return;
-    const currentErrors = validateDraft(draft, link, t, now(), !!link?.dealRoomId);
+    const currentErrors = validateDraft(effectiveDraft, link, t, now(), !!link?.dealRoomId);
     if (Object.keys(currentErrors).length > 0) {
       return;
     }
@@ -288,7 +304,7 @@ function LinkShareDialogContent({
               <motion.div key={tab} {...tabTransition}>
                 <TabsContent value="share">
                   <ShareTab
-                    draft={draft}
+                    draft={effectiveDraft}
                     updateDraft={updateDraft}
                     link={link}
                     onEditAccess={() => setTab("access")}
@@ -315,14 +331,19 @@ function LinkShareDialogContent({
                     />
                   ) : null}
                   <AccessTab
-                    draft={draft}
+                    draft={effectiveDraft}
                     updateDraft={updateDraft}
                     errors={validationErrors}
                     highlightedFields={highlightedFields}
                     isDealRoomLink={!!link?.dealRoomId}
                     passwordAlreadySet={Boolean(link?.requirePassword)}
+                    roomSecurityFloors={{
+                      requireEmailVerification: floors.requireEmailVerification,
+                      requireNda: floors.requireNda,
+                    }}
+                    roomBlockedEmails={lockedRoomBlocks}
                     ndaTemplates={ndaTemplates}
-                    documents={link?.documents.map((d) => ({ id: d.id, title: d.title })) ?? []}
+                    documents={resolveNdaDocumentFallback(agreementDocs)}
                   />
                 </TabsContent>
 

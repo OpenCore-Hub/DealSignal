@@ -9,6 +9,7 @@ import {
 import { useTranslation } from "react-i18next";
 import {
   X,
+  LockSimple,
   UserPlus,
   CaretDown,
   MagnifyingGlass,
@@ -43,6 +44,8 @@ interface ContactEmailTagInputProps {
   hint?: string;
   disabled?: boolean;
   conflictValues?: string[];
+  /** Tags that cannot be removed (e.g. room-wide blocklist on deal-room links). */
+  lockedValues?: string[];
   allowDomains?: boolean;
 }
 
@@ -72,6 +75,7 @@ export function ContactEmailTagInput({
   hint,
   disabled,
   conflictValues = [],
+  lockedValues = [],
   allowDomains = false,
 }: ContactEmailTagInputProps) {
   const { t } = useTranslation("linkShare");
@@ -79,6 +83,11 @@ export function ContactEmailTagInput({
   const [raw, setRaw] = useState("");
   const [invalid, setInvalid] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const lockedSet = useMemo(
+    () => new Set(lockedValues.map((v) => v.trim().toLowerCase()).filter(Boolean)),
+    [lockedValues],
+  );
 
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [contactsLoading, setContactsLoading] = useState(true);
@@ -174,6 +183,7 @@ export function ContactEmailTagInput({
   };
 
   const remove = (value: string) => {
+    if (lockedSet.has(value.trim().toLowerCase())) return;
     onChange(values.filter((v) => v !== value));
   };
 
@@ -185,7 +195,13 @@ export function ContactEmailTagInput({
     }
     if (e.key === "Backspace" && raw === "" && values.length > 0) {
       e.preventDefault();
-      remove(values[values.length - 1]);
+      for (let i = values.length - 1; i >= 0; i--) {
+        const candidate = values[i];
+        if (!lockedSet.has(candidate.trim().toLowerCase())) {
+          remove(candidate);
+          break;
+        }
+      }
     }
   };
 
@@ -256,6 +272,7 @@ export function ContactEmailTagInput({
           .map((value) => {
           const label = displayValue(value);
           const isConflict = conflictValues.includes(value);
+          const isLocked = lockedSet.has(value.trim().toLowerCase());
           return (
             <span
               key={value}
@@ -263,12 +280,17 @@ export function ContactEmailTagInput({
                 "inline-flex max-w-full animate-in fade-in zoom-in items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium duration-200",
                 isConflict
                   ? "border border-destructive/30 bg-destructive/10 text-destructive"
-                  : "bg-primary/10 text-primary"
+                  : isLocked
+                    ? "border border-border/60 bg-muted text-muted-foreground"
+                    : "bg-primary/10 text-primary"
               )}
               title={value}
             >
+              {isLocked ? (
+                <LockSimple size={12} weight="fill" className="shrink-0" aria-hidden />
+              ) : null}
               <span className="truncate">{label}</span>
-              {!disabled && (
+              {!disabled && !isLocked && (
                 <button
                   type="button"
                   onClick={(e) => {

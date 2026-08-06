@@ -1,4 +1,5 @@
 import { useCallback, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useNavigate, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 
@@ -97,7 +98,7 @@ export function StepReview() {
         toast.success(t("bundle.review.successCreate"));
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("creator.createFailed"));
+      toast.error(apiErrorMessage(e, { messageKey: "links:creator.createFailed" }));
     } finally {
       dispatch({ type: "SET_SUBMITTING", isSubmitting: false });
     }
