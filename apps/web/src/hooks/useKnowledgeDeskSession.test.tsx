@@ -2,7 +2,9 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
+import { toast } from "sonner";
 import { createTestI18n } from "@/i18n/test-utils";
+import { ApiError } from "@/lib/apiClient";
 import { useKnowledgeDeskSession } from "./useKnowledgeDeskSession";
 import { useKnowledgeQueryStore } from "@/stores/knowledgeQueryStore";
 
@@ -151,6 +153,239 @@ describe("useKnowledgeDeskSession", () => {
     expect(result.current.turns.map((t) => t.id)).toContain("t-new");
     expect(result.current.activeSessionId).toBe("sess-2");
     expect(result.current.asking).toBe(false);
+  });
+
+  it("reuses clientRequestId for the same question until it succeeds", async () => {
+    stream
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 429,
+          code: "knowledge_query_busy",
+          message: "busy",
+          requestId: "",
+        }),
+      )
+      .mockResolvedValueOnce({
+        sessionId: "sess-2",
+        sessionState: null,
+        turn: {
+          id: "t-new",
+          sessionId: "sess-2",
+          sequence: 1,
+          question: "What is the price?",
+          answer: "Fifty.",
+          refused: false,
+          resultStatus: "answered",
+          hits: [],
+        },
+      });
+    const wrapper = await wrapHook();
+    const { result } = renderHook(() => useKnowledgeDeskSession("room-1"), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.sessionHydrated).toBe(true);
+    });
+    await act(async () => {
+      await result.current.onAsk("What is the price?");
+    });
+    await act(async () => {
+      await result.current.onAsk("What is the price?");
+    });
+    const firstId = stream.mock.calls[0]?.[1]?.clientRequestId;
+    const secondId = stream.mock.calls[1]?.[1]?.clientRequestId;
+    expect(firstId).toBeTruthy();
+    expect(firstId).toBe(secondId);
+  });
+
+  it("preserves composer query when done carries a cancelled error turn", async () => {
+    useKnowledgeQueryStore.getState().setDraft("room-1", {
+      query: "What is the price?",
+      turns: [],
+      activeCite: null,
+    });
+    stream.mockResolvedValueOnce({
+      sessionId: "sess-2",
+      sessionState: null,
+      turn: {
+        id: "t-cancel",
+        sessionId: "sess-2",
+        sequence: 1,
+        question: "What is the price?",
+        answer: "",
+        refused: false,
+        resultStatus: "error",
+        errorSummary: "client_cancelled",
+        hits: [],
+      },
+    });
+    const wrapper = await wrapHook();
+    const { result } = renderHook(() => useKnowledgeDeskSession("room-1"), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.sessionHydrated).toBe(true);
+    });
+    await act(async () => {
+      await result.current.onAsk("What is the price?");
+    });
+    expect(result.current.query).toBe("What is the price?");
+  });
+
+  it("does not toast client_cancelled when done carries a cancelled error turn", async () => {
+    vi.mocked(toast.error).mockClear();
+    stream.mockResolvedValueOnce({
+      sessionId: "sess-2",
+      sessionState: null,
+      turn: {
+        id: "t-cancel",
+        sessionId: "sess-2",
+        sequence: 1,
+        question: "What is the price?",
+        answer: "",
+        refused: false,
+        resultStatus: "error",
+        errorSummary: "client_cancelled",
+        hits: [],
+      },
+    });
+    const wrapper = await wrapHook();
+    const { result } = renderHook(() => useKnowledgeDeskSession("room-1"), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.sessionHydrated).toBe(true);
+    });
+    await act(async () => {
+      await result.current.onAsk("What is the price?");
+    });
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    expect(result.current.turns.map((t) => t.id)).toContain("t-cancel");
+  });
+
+  it("hydrates silently when busy overlaps a stop-and-reask", async () => {
+    vi.mocked(toast.error).mockClear();
+    let hydrateCalls = 0;
+    getActive.mockImplementation(async () => {
+      hydrateCalls++;
+      if (hydrateCalls >= 2) {
+        return {
+          session: { id: "sess-2", roomId: "room-1", status: "active" },
+          turns: [
+            {
+              id: "t-audit",
+              sessionId: "sess-2",
+              sequence: 1,
+              question: "What is the price?",
+              answer: "",
+              refused: false,
+              resultStatus: "error",
+              errorSummary: "client_cancelled",
+              hits: [],
+            },
+          ],
+        };
+      }
+      return { session: null, turns: [] };
+    });
+    stream
+      .mockImplementationOnce(
+        async (
+          _roomId: string,
+          _body: unknown,
+          opts: { signal?: AbortSignal },
+        ) => {
+          await new Promise<void>((resolve) => {
+            opts.signal?.addEventListener("abort", () => resolve(), { once: true });
+          });
+          throw new DOMException("Aborted", "AbortError");
+        },
+      )
+      .mockRejectedValueOnce(
+        new ApiError({
+          status: 429,
+          code: "knowledge_query_busy",
+          message: "busy",
+          requestId: "",
+        }),
+      );
+    const wrapper = await wrapHook();
+    const { result } = renderHook(() => useKnowledgeDeskSession("room-1"), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.sessionHydrated).toBe(true);
+    });
+    await act(async () => {
+      const first = result.current.onAsk("What is the price?");
+      await new Promise((r) => setTimeout(r, 10));
+      result.current.onStop();
+      await first;
+    });
+    await act(async () => {
+      await result.current.onAsk("What is the price?");
+    });
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    expect(result.current.turns.map((t) => t.id)).toContain("t-audit");
+  });
+
+  it("hydrates silently when stream_incomplete follows a user stop", async () => {
+    vi.mocked(toast.error).mockClear();
+    let hydrateCalls = 0;
+    getActive.mockImplementation(async () => {
+      hydrateCalls++;
+      if (hydrateCalls >= 2) {
+        return {
+          session: { id: "sess-2", roomId: "room-1", status: "active" },
+          turns: [
+            {
+              id: "t-stop",
+              sessionId: "sess-2",
+              sequence: 1,
+              question: "What is the price?",
+              answer: "",
+              refused: false,
+              resultStatus: "error",
+              errorSummary: "client_cancelled",
+              hits: [],
+            },
+          ],
+        };
+      }
+      return { session: null, turns: [] };
+    });
+    stream.mockImplementation(
+      async (
+        _roomId: string,
+        _body: unknown,
+        opts: { signal?: AbortSignal },
+      ) => {
+        await new Promise<void>((resolve) => {
+          opts.signal?.addEventListener("abort", () => resolve(), { once: true });
+        });
+        throw new ApiError({
+          status: 0,
+          code: "stream_incomplete",
+          message: "stream_incomplete",
+          requestId: "",
+        });
+      },
+    );
+    const wrapper = await wrapHook();
+    const { result } = renderHook(() => useKnowledgeDeskSession("room-1"), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.sessionHydrated).toBe(true);
+    });
+    await act(async () => {
+      const pending = result.current.onAsk("What is the price?");
+      await new Promise((r) => setTimeout(r, 10));
+      result.current.onStop();
+      await pending;
+    });
+    expect(vi.mocked(toast.error)).not.toHaveBeenCalled();
+    expect(result.current.turns.map((t) => t.id)).toContain("t-stop");
   });
 
   it("upserts feedback onto the matching turn", async () => {

@@ -370,6 +370,9 @@ async function streamDealRoomKnowledgeSession(
     if (err instanceof ApiError) {
       throw err;
     }
+    if (opts.signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     throw new ApiError({
       status: 0,
       code: "stream_incomplete",
@@ -379,6 +382,9 @@ async function streamDealRoomKnowledgeSession(
   }
 
   if (!doneResult) {
+    if (opts.signal?.aborted) {
+      throw new DOMException("Aborted", "AbortError");
+    }
     throw new ApiError({
       status: 0,
       code: "stream_incomplete",

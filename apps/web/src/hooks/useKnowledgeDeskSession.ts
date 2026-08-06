@@ -53,6 +53,10 @@ export function useKnowledgeDeskSession(
   const [liveTurn, setLiveTurn] = useState<KnowledgeTurn | null>(null);
   const askAbortRef = useRef<AbortController | null>(null);
   const askingRef = useRef(false);
+  const userStoppedRef = useRef(false);
+  const pendingAskRef = useRef<{ query: string; clientRequestId: string } | null>(
+    null,
+  );
   const hydratedCbRef = useRef(onActiveSessionHydrated);
   hydratedCbRef.current = onActiveSessionHydrated;
 
@@ -98,7 +102,10 @@ export function useKnowledgeDeskSession(
     };
   }, [roomId]);
 
-  const hydratePendingTurns = async (baselineTurnCount: number) => {
+  const hydratePendingTurns = async (
+    baselineTurnCount: number,
+    question?: string,
+  ) => {
     const deadline = Date.now() + 11_000;
     let delayMs = 120;
     while (Date.now() < deadline) {
@@ -106,7 +113,13 @@ export function useKnowledgeDeskSession(
         const detail = await api.getActiveDealRoomKnowledgeSession(roomId);
         const serverTurns = detail.turns ?? [];
         const sessionId = detail.session?.id ?? null;
-        if (sessionId && serverTurns.length > baselineTurnCount) {
+        const matchedQuestion =
+          question &&
+          serverTurns.some((turn) => turn.question === question);
+        if (
+          sessionId &&
+          (serverTurns.length > baselineTurnCount || matchedQuestion)
+        ) {
           useKnowledgeQueryStore.getState().setDraft(roomId, {
             activeSessionId: sessionId,
             turns: serverTurns,
@@ -124,8 +137,14 @@ export function useKnowledgeDeskSession(
   };
 
   const onStop = () => {
+    userStoppedRef.current = true;
     askAbortRef.current?.abort();
   };
+
+  const newClientRequestId = () =>
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `kqa_${Date.now()}_${Math.random().toString(36).slice(2)}`;
 
   const onAsk = async (overrideQuery?: string) => {
     const q = (typeof overrideQuery === "string" ? overrideQuery : query).trim();
@@ -139,6 +158,8 @@ export function useKnowledgeDeskSession(
     }
     askingRef.current = true;
     askAbortRef.current?.abort();
+    const resumingAfterStop = userStoppedRef.current;
+    userStoppedRef.current = false;
     const ac = new AbortController();
     askAbortRef.current = ac;
     setAsking(true);
@@ -147,9 +168,10 @@ export function useKnowledgeDeskSession(
     const baselineTurnCount =
       useKnowledgeQueryStore.getState().byRoom[roomId]?.turns?.length ?? 0;
     const clientRequestId =
-      typeof crypto !== "undefined" && "randomUUID" in crypto
-        ? crypto.randomUUID()
-        : `kqa_${Date.now()}_${Math.random().toString(36).slice(2)}`;
+      pendingAskRef.current?.query === q
+        ? pendingAskRef.current.clientRequestId
+        : newClientRequestId();
+    pendingAskRef.current = { query: q, clientRequestId };
     try {
       const res = await api.streamDealRoomKnowledgeSession(
         roomId,
@@ -172,31 +194,73 @@ export function useKnowledgeDeskSession(
       const merged = [...current.filter((x) => x.id !== res.turn.id), res.turn].sort(
         (a, b) => a.sequence - b.sequence,
       );
+      const cancelledTurn =
+        res.turn.resultStatus === "error" &&
+        res.turn.errorSummary === "client_cancelled";
       useKnowledgeQueryStore.getState().setDraft(roomId, {
         activeSessionId: res.sessionId,
         turns: merged,
-        query: "",
         activeCite: null,
         sessionState: res.sessionState ?? null,
+        ...(cancelledTurn ? {} : { query: "" }),
       });
       setLiveTurn(null);
-      if (res.turn.resultStatus === "error") {
+      pendingAskRef.current = null;
+      if (
+        res.turn.resultStatus === "error" &&
+        res.turn.errorSummary !== "client_cancelled"
+      ) {
         toast.error(knowledgeErrorMessage(t, res.turn.errorSummary));
       }
     } catch (e) {
       setLiveTurn(null);
-      if (ac.signal.aborted) {
-        await hydratePendingTurns(baselineTurnCount);
+      const stopped =
+        ac.signal.aborted || userStoppedRef.current;
+      if (stopped) {
+        await hydratePendingTurns(baselineTurnCount, q);
         return;
       }
       if (e instanceof ApiError) {
-        toast.error(knowledgeErrorMessage(t, e.code));
-        if (!isKnowledgeAskGateReject(e.status, e.code)) {
-          await hydratePendingTurns(baselineTurnCount);
+        if (
+          e.code === "client_cancelled" ||
+          (e.code === "stream_incomplete" && userStoppedRef.current)
+        ) {
+          await hydratePendingTurns(baselineTurnCount, q);
+          return;
         }
+        if (
+          e.code === "knowledge_query_busy" &&
+          pendingAskRef.current?.query === q &&
+          resumingAfterStop
+        ) {
+          const existingTurns =
+            useKnowledgeQueryStore.getState().byRoom[roomId]?.turns ?? [];
+          if (existingTurns.some((turn) => turn.question === q)) {
+            pendingAskRef.current = null;
+            return;
+          }
+          await hydratePendingTurns(baselineTurnCount, q);
+          const afterTurns =
+            useKnowledgeQueryStore.getState().byRoom[roomId]?.turns ?? [];
+          if (
+            afterTurns.some((turn) => turn.question === q) ||
+            afterTurns.length > baselineTurnCount
+          ) {
+            pendingAskRef.current = null;
+            return;
+          }
+        }
+        toast.error(knowledgeErrorMessage(t, e.code));
+        if (isKnowledgeAskGateReject(e.status, e.code)) {
+          if (e.code !== "knowledge_query_busy") {
+            pendingAskRef.current = null;
+          }
+          return;
+        }
+        await hydratePendingTurns(baselineTurnCount, q);
       } else {
         toast.error(t("knowledge.queryFailed"));
-        await hydratePendingTurns(baselineTurnCount);
+        await hydratePendingTurns(baselineTurnCount, q);
       }
     } finally {
       if (askAbortRef.current === ac) askAbortRef.current = null;
