@@ -22,6 +22,25 @@ type Limiter interface {
 	RateLimitAllow(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error)
 }
 
+// Ask AI hard limits (per visitor + link). Phase B stream path uses this channel.
+const (
+	AskAIDailyLimit  = 50
+	AskAIDailyWindow = 24 * time.Hour
+)
+
+// AllowAskAI enforces the AI lane daily cap (separate from Ask Host).
+func AllowAskAI(ctx context.Context, lim Limiter, linkID, visitorID string) (bool, error) {
+	if lim == nil {
+		return true, nil
+	}
+	key := fmt.Sprintf("ask_ai_day:%s:%s", linkID, visitorID)
+	ok, _, err := lim.RateLimitAllow(ctx, key, AskAIDailyLimit, AskAIDailyWindow)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
+	}
+	return ok, nil
+}
+
 // AllowAskHost enforces 30/day.
 // Returns (true, nil) when allowed; (false, nil) when the visitor exceeded the limit;
 // (false, ErrLimiterUnavailable) when Redis/limiter errors (fail closed).

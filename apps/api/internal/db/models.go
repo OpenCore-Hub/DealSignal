@@ -450,6 +450,12 @@ type Link struct {
 	NdaDocumentID               pgtype.UUID
 	FolderScopeMode             string
 	NdaTemplateID               pgtype.UUID
+	// Visitor Ask routing mode: self_serve | supervised | formal
+	AskMode string
+	// When true, Pro+ links may use AI lane (Phase B); Standard remains host-only
+	AskAiEnabled bool
+	// Optional per-link AI Ask monthly cap; NULL uses workspace/plan default
+	AskAiMonthlyQuota pgtype.Int4
 }
 
 type LinkAccessRequest struct {

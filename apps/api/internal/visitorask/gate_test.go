@@ -40,6 +40,13 @@ func TestCheckAllow(t *testing.T) {
 	}
 }
 
+func TestCheckAskAIAllow(t *testing.T) {
+	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskAI, "link-1", "v1")
+	if d != DecisionAllow {
+		t.Fatalf("got %v, want Allow", d)
+	}
+}
+
 func TestCheckUnknownChannelFailsClosed(t *testing.T) {
 	d := Check(context.Background(), &mockLimiter{allow: true}, Channel("unknown"), "link-1", "v1")
 	if d != DecisionLimiterUnavailable {

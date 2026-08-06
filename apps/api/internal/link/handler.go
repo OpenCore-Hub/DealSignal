@@ -214,6 +214,7 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions)
 	r.POST("/links/:publicToken/ask", h.PublicCreateAsk)
 	r.GET("/links/:publicToken/ask/me", h.PublicListMyAskTurns)
+	r.GET("/links/:publicToken/ask/:turnId/stream", h.PublicStreamAskTurn)
 	r.POST("/links/:publicToken/file-requests", h.PublicCreateFileRequest)
 	r.GET("/links/:publicToken/file-requests/me", h.PublicListMyFileRequests)
 	r.GET("/links/:publicToken/index-file", h.PublicGetLinkIndexFile)
@@ -3301,6 +3302,28 @@ func (h *Handler) PublicListMyAskTurns(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": turns})
+}
+
+// PublicStreamAskTurn streams AI lane tokens for a turn (Phase B; stub until retriever wired).
+func (h *Handler) PublicStreamAskTurn(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	if !loadAskPolicy(result.Link).AIEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "ai_not_enabled", "message": "AI Ask is not enabled for this link"})
+		return
+	}
+	c.JSON(http.StatusNotImplemented, gin.H{
+		"code":    "ai_lane_not_available",
+		"message": "AI Ask streaming is not available yet",
+	})
 }
 
 // PublicListMyVisitorQuestions returns the visitor's own questions.

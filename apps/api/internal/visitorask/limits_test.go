@@ -60,3 +60,14 @@ func TestAllowAskHostNilLimiterAllows(t *testing.T) {
 		t.Fatalf("expected allow with nil limiter, ok=%v err=%v", ok, err)
 	}
 }
+
+func TestAllowAskAIUsesSeparateKey(t *testing.T) {
+	lim := &mockLimiter{allow: true}
+	ok, err := AllowAskAI(context.Background(), lim, "link-1", "v1")
+	if err != nil || !ok {
+		t.Fatalf("expected AI allowed, ok=%v err=%v", ok, err)
+	}
+	if len(lim.keys) != 1 || lim.keys[0] != "ask_ai_day:link-1:v1" {
+		t.Fatalf("unexpected keys: %v", lim.keys)
+	}
+}

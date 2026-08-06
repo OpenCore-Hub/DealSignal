@@ -255,6 +255,22 @@ func (s *Service) createHostAskTurn(
 	return turn, legacyQ, nil
 }
 
+// SubmitPublicAsk is the unified visitor Ask entry (policy-aware routing; Phase B AI lane hooks here).
+func (s *Service) SubmitPublicAsk(
+	ctx context.Context,
+	link db.Link,
+	visitorID, visitorEmail, question string,
+	escalate bool,
+) (PublicAskTurn, error) {
+	policy := loadAskPolicy(link)
+	routeReason := resolveAskRouteReason(policy, escalate)
+	turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+	if err != nil {
+		return PublicAskTurn{}, err
+	}
+	return mapPublicAskTurn(turn), nil
+}
+
 // CreateHostAskTurn creates a host-lane unified Ask turn (public POST /ask).
 func (s *Service) CreateHostAskTurn(
 	ctx context.Context,
@@ -262,15 +278,7 @@ func (s *Service) CreateHostAskTurn(
 	visitorID, visitorEmail, question string,
 	escalate bool,
 ) (PublicAskTurn, error) {
-	routeReason := "unified_ask"
-	if escalate {
-		routeReason = "user_escalate"
-	}
-	turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
-	if err != nil {
-		return PublicAskTurn{}, err
-	}
-	return mapPublicAskTurn(turn), nil
+	return s.SubmitPublicAsk(ctx, link, visitorID, visitorEmail, question, escalate)
 }
 
 // AnswerAskTurnHostAnswer records a host reply on a unified Ask turn (owner PATCH .../ask/:turnId/host-answer).

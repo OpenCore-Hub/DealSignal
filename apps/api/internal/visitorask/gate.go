@@ -10,6 +10,7 @@ type Channel string
 
 const (
 	ChannelAskHost Channel = "ask_host"
+	ChannelAskAI   Channel = "ask_ai"
 )
 
 // Shared API / security-event codes for Visitor Ask gates.
@@ -38,6 +39,8 @@ func Check(ctx context.Context, lim Limiter, ch Channel, linkID, visitorID strin
 	switch ch {
 	case ChannelAskHost:
 		ok, err = AllowAskHost(ctx, lim, linkID, visitorID)
+	case ChannelAskAI:
+		ok, err = AllowAskAI(ctx, lim, linkID, visitorID)
 	default:
 		return DecisionLimiterUnavailable
 	}

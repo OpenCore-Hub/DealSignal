@@ -217,6 +217,40 @@ func TestCreateHostAskTurn_EscalateRouteReason_Integration(t *testing.T) {
 	}
 }
 
+func TestSubmitPublicAsk_AILanePending_Integration(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+	enableLinkQA(t, f)
+	if _, err := f.tx.Exec(f.ctx, `UPDATE links SET ask_ai_enabled = true WHERE id = $1`, f.link.ID); err != nil {
+		t.Fatalf("enable ask ai: %v", err)
+	}
+	f.link.AskAiEnabled = true
+
+	visitorID := "visitor-" + uuid.NewString()
+	turn, err := f.svc.SubmitPublicAsk(f.ctx, f.link, visitorID, "visitor@example.com", "AI route?", false)
+	if err != nil {
+		t.Fatalf("SubmitPublicAsk: %v", err)
+	}
+	if turn.RouteReason != routeReasonAILanePending {
+		t.Fatalf("route_reason = %q", turn.RouteReason)
+	}
+}
+
+func TestSubmitPublicAsk_AINotEnabled_Integration(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+	enableLinkQA(t, f)
+
+	visitorID := "visitor-" + uuid.NewString()
+	turn, err := f.svc.SubmitPublicAsk(f.ctx, f.link, visitorID, "visitor@example.com", "Host only?", false)
+	if err != nil {
+		t.Fatalf("SubmitPublicAsk: %v", err)
+	}
+	if turn.RouteReason != routeReasonAINotEnabled {
+		t.Fatalf("route_reason = %q", turn.RouteReason)
+	}
+}
+
 func TestAnswerAskTurnHostAnswer_Integration(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()
