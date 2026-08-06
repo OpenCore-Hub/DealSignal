@@ -2894,14 +2894,19 @@ func (s *Service) sendAccessNotificationEmail(ctx context.Context, workspaceID, 
 	}
 }
 
-// recordSecurityEvent writes a security event for a link.
+// recordSecurityEvent writes owner-side security audit events (rule updates,
+// link lifecycle). Public access failures are recorded once in the HTTP handler
+// via recordSecurityEventFromAccessError so visitor context (IP, visitor_id) is
+// captured consistently and events are not duplicated.
 func (s *Service) recordSecurityEvent(ctx context.Context, link db.Link, visitorID, email, eventType, reason string) {
 	if err := s.queries.CreateSecurityEvent(ctx, db.CreateSecurityEventParams{
-		LinkID:    link.ID,
-		EventType: eventType,
-		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
-		Email:     pgtype.Text{String: email, Valid: email != ""},
-		Reason:    pgtype.Text{String: reason, Valid: reason != ""},
+		TenantID:    link.TenantID,
+		WorkspaceID: link.WorkspaceID,
+		LinkID:      link.ID,
+		EventType:   eventType,
+		VisitorID:   pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		Email:       pgtype.Text{String: email, Valid: email != ""},
+		Reason:      pgtype.Text{String: reason, Valid: reason != ""},
 	}); err != nil {
 		logger.ErrorCtx(ctx, "failed to record security event", err,
 			logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
@@ -3030,12 +3035,17 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	if req.InviteToken != "" {
 		inv, err := s.ResolveInviteToken(ctx, req.InviteToken)
 		if err != nil {
-			s.recordSecurityEvent(ctx, link, "", submittedEmail, "invite_token_failed", err.Error())
-			return AccessResult{}, err
+			if errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
+				return AccessResult{}, err
+			}
+			reason := err.Error()
+			if errors.Is(err, ErrLinkNotFound) {
+				reason = "invalid_or_unknown_token"
+			}
+			return AccessResult{}, &InviteTokenError{Reason: reason}
 		}
 		if inv.LinkID != uuid.UUID(link.ID.Bytes).String() {
-			s.recordSecurityEvent(ctx, link, "", submittedEmail, "invite_token_failed", "invitation does not belong to link")
-			return AccessResult{}, ErrLinkNotFound
+			return AccessResult{}, &InviteTokenError{Reason: "invitation does not belong to link"}
 		}
 		invUUID, parseErr := uuid.Parse(inv.ID)
 		if parseErr != nil {
@@ -3043,7 +3053,6 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 		}
 		if _, err := s.queries.ConsumeLinkInvitation(ctx, pgtype.UUID{Bytes: invUUID, Valid: true}); err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
-				s.recordSecurityEvent(ctx, link, "", submittedEmail, "invite_token_failed", "invitation already used or expired")
 				return AccessResult{}, ErrInviteAlreadyUsed
 			}
 			return AccessResult{}, fmt.Errorf("consume invitation: %w", err)
@@ -3101,7 +3110,6 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 			}
 		}
 		if !eval.Allowed {
-			s.recordSecurityEvent(ctx, link, "", effectiveEmail, eval.Reason, "")
 			return AccessResult{}, mapRuleError(eval.Reason)
 		}
 	}
@@ -3115,7 +3123,6 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 	// Password verification.
 	if link.RequirePassword {
 		if err := s.verifyPassword(link.PasswordHash.String, req.Password); err != nil {
-			s.recordSecurityEvent(ctx, link, "", effectiveEmail, "invalid_password", "")
 			return AccessResult{}, err
 		}
 	}
@@ -3153,12 +3160,10 @@ func (s *Service) Access(ctx context.Context, token string, req AccessRequest) (
 			return AccessResult{}, ErrRequiresEmail
 		}
 		if emailForRecords == "" || !strings.EqualFold(submittedEmail, emailForRecords) {
-			s.recordSecurityEvent(ctx, link, "", emailForRecords, "delivery_email_mismatch", submittedEmail)
 			return AccessResult{}, &DeliveryEmailMismatchError{AuthorizedEmail: emailForRecords}
 		}
 	} else if submittedEmail != "" && emailForRecords != "" && !strings.EqualFold(submittedEmail, emailForRecords) {
 		// Non-NDA verification: submitted claim must still match the code mailbox.
-		s.recordSecurityEvent(ctx, link, "", emailForRecords, "delivery_email_mismatch", submittedEmail)
 		return AccessResult{}, &DeliveryEmailMismatchError{AuthorizedEmail: emailForRecords}
 	}
 

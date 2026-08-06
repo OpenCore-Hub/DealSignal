@@ -197,6 +197,7 @@ var clientFallbacks = map[string]string{
 	"invite_expired":          "invitation expired",
 	"invite_revoked":          "invitation revoked",
 	"invite_already_used":     "invitation already used",
+	"invite_token_failed":     "invitation link is invalid or cannot be used",
 	"link_revoked":            "link has been revoked",
 	"link_archived":           "link is archived",
 	"link_max_access_reached": "link access limit reached",

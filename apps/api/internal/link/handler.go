@@ -83,14 +83,22 @@ func (h *Handler) visitorAskLimiter() visitorask.Limiter {
 }
 
 func (h *Handler) recordAskSecurityEvent(ctx context.Context, row db.Link, eventType, visitorID, email, ip, ua, reason string) {
+	h.writeLinkSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+}
+
+// writeLinkSecurityEvent persists a security event via the test sink or analytics service.
+func (h *Handler) writeLinkSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) {
 	var err error
-	if h.securitySink != nil {
-		err = h.securitySink.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
-	} else if h.analytics != nil {
-		err = h.analytics.RecordSecurityEvent(ctx, row, eventType, visitorID, email, ip, ua, reason)
+	switch {
+	case h.securitySink != nil:
+		err = h.securitySink.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
+	case h.analytics != nil:
+		err = h.analytics.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
+	default:
+		return
 	}
 	if err != nil {
-		logger.ErrorCtx(ctx, "record ask security event failed", err,
+		logger.ErrorCtx(ctx, "record security event failed", err,
 			logger.Attr("event_type", eventType),
 			logger.Attr("reason", reason),
 		)
@@ -1590,7 +1598,7 @@ func (h *Handler) Access(c *gin.Context) {
 
 			// For credential-gate errors, include the link's security flags so the
 			// UI can render all required fields on the first attempt.
-			if errors.Is(err, ErrRequiresEmail) || errors.Is(err, ErrRequiresEmailCode) || errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrRequiresNDA) || errors.Is(err, ErrInvalidSignerName) || errors.Is(err, ErrRequiresPassword) || errors.Is(err, ErrInvalidPassword) || errors.Is(err, ErrBlockedEmail) || errors.Is(err, ErrNotAllowedEmail) || errors.Is(err, ErrDeliveryEmailMismatch) || errors.Is(err, ErrInviteExpired) || errors.Is(err, ErrInviteRevoked) || errors.Is(err, ErrInviteAlreadyUsed) {
+			if isCredentialGateAccessError(err) {
 				requiresEmail, requiresEmailVerification, requiresNda := linkSecurityFlags(link)
 				status := http.StatusForbidden
 				if errors.Is(err, ErrInvalidEmailCode) || errors.Is(err, ErrInvalidPassword) {
@@ -2355,47 +2363,12 @@ func mapAccessError(c *gin.Context, err error) {
 	case errors.Is(err, ErrInviteAlreadyUsed):
 		c.JSON(http.StatusForbidden, gin.H{"code": "invite_already_used", "message": httpx.SafeMessage("invite_already_used", err)})
 	default:
+		var inviteFail *InviteTokenError
+		if errors.As(err, &inviteFail) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "invite_token_failed", "message": httpx.SafeMessage("invite_token_failed", err)})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-	}
-}
-
-// securityEventFromError maps an access error to a security event type and reason.
-// The third return value indicates whether the event represents a security gate
-// failure that should contribute to abnormal-access-pattern detection.
-func securityEventFromError(err error) (eventType, reason string, gateFailure bool) {
-	switch {
-	case errors.Is(err, ErrLinkExpired):
-		return "expired_link_accessed", "", false
-	case errors.Is(err, ErrLinkRevoked), errors.Is(err, ErrLinkDisabled):
-		return "revoked_link_accessed", "", false
-	case errors.Is(err, ErrLinkArchived):
-		return "revoked_link_accessed", "archived", false
-	case errors.Is(err, ErrLinkMaxAccessReached):
-		return "max_access_reached", "", false
-	case errors.Is(err, ErrInvalidEmailCode):
-		return "security_gate_failed", "invalid_email_code", true
-	case errors.Is(err, ErrRequiresEmail):
-		return "security_gate_failed", "email_required", true
-	case errors.Is(err, ErrRequiresEmailCode):
-		return "security_gate_failed", "email_code_required", true
-	case errors.Is(err, ErrRequiresNDA):
-		return "security_gate_failed", "nda_required", true
-	case errors.Is(err, ErrRequiresPassword), errors.Is(err, ErrInvalidPassword):
-		return "security_gate_failed", "password", true
-	case errors.Is(err, ErrBlockedEmail):
-		return "blocked_email", "", true
-	case errors.Is(err, ErrNotAllowedEmail):
-		return "not_in_allow_list", "", true
-	case errors.Is(err, ErrDeliveryEmailMismatch):
-		return "security_gate_failed", "delivery_email_mismatch", true
-	case errors.Is(err, ErrInviteExpired):
-		return "invite_token_expired", "", false
-	case errors.Is(err, ErrInviteRevoked):
-		return "invite_token_revoked", "", false
-	case errors.Is(err, ErrInviteAlreadyUsed):
-		return "invite_token_already_used", "", false
-	default:
-		return "", "", false
 	}
 }
 
@@ -2406,14 +2379,13 @@ func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link d
 	if eventType == "" {
 		return
 	}
-	if h.analytics == nil {
-		return
+	h.writeLinkSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
+	if h.service != nil {
+		_ = h.service.EvaluateNotificationRules(ctx, link, "abnormal_access", visitorID, email, map[string]string{
+			"event_type": eventType,
+			"reason":     reason,
+		})
 	}
-	_ = h.analytics.RecordSecurityEvent(ctx, link, eventType, visitorID, email, ip, ua, reason)
-	_ = h.service.EvaluateNotificationRules(ctx, link, "abnormal_access", visitorID, email, map[string]string{
-		"event_type": eventType,
-		"reason":     reason,
-	})
 	if gateFailure {
 		h.checkAndRecordAbnormalAccessPattern(ctx, link, visitorID, email, ip, ua)
 	}
@@ -2422,6 +2394,9 @@ func (h *Handler) recordSecurityEventFromAccessError(ctx context.Context, link d
 // checkAndRecordAbnormalAccessPattern records an abnormal_access_pattern event when
 // the same IP generates too many security_gate_failed events within the window.
 func (h *Handler) checkAndRecordAbnormalAccessPattern(ctx context.Context, link db.Link, visitorID, email, ip, ua string) {
+	if h.analytics == nil || h.cfg == nil {
+		return
+	}
 	res, aerr := h.analytics.CheckAnomaly(ctx, ip, "security_gate_failed", h.cfg.SecurityAnomalyWindow, int64(h.cfg.SecurityAnomalyThreshold))
 	if aerr != nil || !res.Triggered {
 		return
@@ -2484,6 +2459,10 @@ func accessErrorCode(err error) string {
 	case errors.Is(err, ErrInviteAlreadyUsed):
 		return "invite_already_used"
 	default:
+		var inviteFail *InviteTokenError
+		if errors.As(err, &inviteFail) {
+			return "invite_token_failed"
+		}
 		return "internal_error"
 	}
 }
