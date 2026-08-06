@@ -35,6 +35,7 @@ type ActionItem struct {
 	UpdatedAt   pgtype.Timestamptz
 	SourceType  pgtype.Text
 	SourceID    pgtype.Text
+	TargetID    pgtype.Text
 }
 
 type Chunk struct {
@@ -125,6 +126,31 @@ type DealRoom struct {
 	UpdatedAt        pgtype.Timestamptz
 	DeletedAt        pgtype.Timestamptz
 	ExpiresAt        pgtype.Timestamptz
+}
+
+type DealRoomAccessPolicy struct {
+	DealRoomID                  pgtype.UUID
+	TenantID                    pgtype.UUID
+	WorkspaceID                 pgtype.UUID
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequirePassword             bool
+	PasswordHash                pgtype.Text
+	RequireNda                  bool
+	NdaTemplateID               pgtype.UUID
+	NdaDocumentID               pgtype.UUID
+	WatermarkEnabled            bool
+	DownloadEnabled             bool
+	ScreenshotProtectionEnabled bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	QaEnabled                   bool
+	AllowedEmails               []string
+	BlockedEmails               []string
+	Configured                  bool
+	UpdatedBy                   pgtype.UUID
+	CreatedAt                   pgtype.Timestamptz
+	UpdatedAt                   pgtype.Timestamptz
 }
 
 type DealRoomDocument struct {

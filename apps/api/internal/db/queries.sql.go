@@ -215,6 +215,122 @@ func (q *Queries) AnswerVisitorQuestion(ctx context.Context, arg AnswerVisitorQu
 	return i, err
 }
 
+const appendDealRoomAccessPolicyAllowEmail = `-- name: AppendDealRoomAccessPolicyAllowEmail :one
+UPDATE deal_room_access_policies
+SET allowed_emails = (
+        SELECT ARRAY(
+            SELECT DISTINCT lower(trim(e))
+            FROM unnest(allowed_emails || ARRAY[$1::text]) AS e
+            WHERE trim(e) <> ''
+        )
+    ),
+    updated_at = now()
+WHERE deal_room_id = $2
+  AND workspace_id = $3
+  AND configured = true
+RETURNING deal_room_id, tenant_id, workspace_id, require_email, require_email_verification, require_password, password_hash, require_nda, nda_template_id, nda_document_id, watermark_enabled, download_enabled, screenshot_protection_enabled, file_requests_enabled, index_file_enabled, qa_enabled, allowed_emails, blocked_emails, configured, updated_by, created_at, updated_at
+`
+
+type AppendDealRoomAccessPolicyAllowEmailParams struct {
+	Email       string
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) AppendDealRoomAccessPolicyAllowEmail(ctx context.Context, arg AppendDealRoomAccessPolicyAllowEmailParams) (DealRoomAccessPolicy, error) {
+	row := q.db.QueryRow(ctx, appendDealRoomAccessPolicyAllowEmail, arg.Email, arg.DealRoomID, arg.WorkspaceID)
+	var i DealRoomAccessPolicy
+	err := row.Scan(
+		&i.DealRoomID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RequireEmail,
+		&i.RequireEmailVerification,
+		&i.RequirePassword,
+		&i.PasswordHash,
+		&i.RequireNda,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
+		&i.WatermarkEnabled,
+		&i.DownloadEnabled,
+		&i.ScreenshotProtectionEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.QaEnabled,
+		&i.AllowedEmails,
+		&i.BlockedEmails,
+		&i.Configured,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const applyDealRoomLinkAccessFromPolicy = `-- name: ApplyDealRoomLinkAccessFromPolicy :exec
+UPDATE links
+SET require_email = $1,
+    require_email_verification = $2,
+    require_password = $3,
+    password_hash = $4,
+    require_nda = $5,
+    nda_template_id = $6,
+    nda_document_id = $7,
+    watermark_enabled = $8,
+    download_enabled = $9,
+    screenshot_protection_enabled = $10,
+    file_requests_enabled = $11,
+    index_file_enabled = $12,
+    qa_enabled = $13,
+    security_version = security_version + 1,
+    updated_at = now()
+WHERE id = $14
+  AND workspace_id = $15
+  AND deal_room_id = $16
+  AND status NOT IN ('deleted', 'disabled')
+`
+
+type ApplyDealRoomLinkAccessFromPolicyParams struct {
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequirePassword             bool
+	PasswordHash                pgtype.Text
+	RequireNda                  bool
+	NdaTemplateID               pgtype.UUID
+	NdaDocumentID               pgtype.UUID
+	WatermarkEnabled            bool
+	DownloadEnabled             bool
+	ScreenshotProtectionEnabled bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	QaEnabled                   bool
+	ID                          pgtype.UUID
+	WorkspaceID                 pgtype.UUID
+	DealRoomID                  pgtype.UUID
+}
+
+func (q *Queries) ApplyDealRoomLinkAccessFromPolicy(ctx context.Context, arg ApplyDealRoomLinkAccessFromPolicyParams) error {
+	_, err := q.db.Exec(ctx, applyDealRoomLinkAccessFromPolicy,
+		arg.RequireEmail,
+		arg.RequireEmailVerification,
+		arg.RequirePassword,
+		arg.PasswordHash,
+		arg.RequireNda,
+		arg.NdaTemplateID,
+		arg.NdaDocumentID,
+		arg.WatermarkEnabled,
+		arg.DownloadEnabled,
+		arg.ScreenshotProtectionEnabled,
+		arg.FileRequestsEnabled,
+		arg.IndexFileEnabled,
+		arg.QaEnabled,
+		arg.ID,
+		arg.WorkspaceID,
+		arg.DealRoomID,
+	)
+	return err
+}
+
 const archiveDocument = `-- name: ArchiveDocument :exec
 UPDATE documents
 SET status = 'archived', updated_at = now()
@@ -426,6 +542,43 @@ func (q *Queries) ConsumeLinkInvitation(ctx context.Context, id pgtype.UUID) (Co
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const countDealRoomMembershipsByDocument = `-- name: CountDealRoomMembershipsByDocument :one
+SELECT COUNT(*)::bigint AS count
+FROM deal_room_documents
+WHERE document_id = $1
+`
+
+func (q *Queries) CountDealRoomMembershipsByDocument(ctx context.Context, documentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDealRoomMembershipsByDocument, documentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countDealRoomsByWorkspace = `-- name: CountDealRoomsByWorkspace :one
+SELECT COUNT(*)::bigint AS count
+FROM deal_rooms
+WHERE workspace_id = $1
+  AND deleted_at IS NULL
+  AND (
+    $2::text = ''
+    OR name ILIKE '%' || $2 || '%'
+    OR COALESCE(description, '') ILIKE '%' || $2 || '%'
+  )
+`
+
+type CountDealRoomsByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	Query       string
+}
+
+func (q *Queries) CountDealRoomsByWorkspace(ctx context.Context, arg CountDealRoomsByWorkspaceParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDealRoomsByWorkspace, arg.WorkspaceID, arg.Query)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countDocumentChunks = `-- name: CountDocumentChunks :one
@@ -1097,7 +1250,7 @@ INSERT INTO action_items (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (signal_id) DO UPDATE SET
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 `
 
 type CreateActionItemParams struct {
@@ -1137,6 +1290,7 @@ func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemPara
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -2461,11 +2615,20 @@ func (q *Queries) CreateOAuthState(ctx context.Context, arg CreateOAuthStatePara
 
 const createOperationalActionItem = `-- name: CreateOperationalActionItem :one
 INSERT INTO action_items (
-    tenant_id, workspace_id, source_type, source_id, title, impact, due_at, status, action_type
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+    tenant_id, workspace_id, source_type, source_id, target_id, title, impact, due_at, status, action_type
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
+    target_id = EXCLUDED.target_id,
+    title = EXCLUDED.title,
+    impact = EXCLUDED.impact,
+    due_at = EXCLUDED.due_at,
+    -- Re-open resolved items when the event is still pending; respect snooze/ignore.
+    status = CASE
+        WHEN action_items.status IN ('snoozed', 'ignored') THEN action_items.status
+        ELSE 'pending'
+    END,
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 `
 
 type CreateOperationalActionItemParams struct {
@@ -2473,6 +2636,7 @@ type CreateOperationalActionItemParams struct {
 	WorkspaceID pgtype.UUID
 	SourceType  pgtype.Text
 	SourceID    pgtype.Text
+	TargetID    pgtype.Text
 	Title       string
 	Impact      string
 	DueAt       pgtype.Timestamptz
@@ -2480,12 +2644,15 @@ type CreateOperationalActionItemParams struct {
 	ActionType  string
 }
 
+// Upsert keeps source_* as the resolve key; target_id is the navigation parent
+// (e.g. deal_room id). Re-open done items when the underlying event is still pending.
 func (q *Queries) CreateOperationalActionItem(ctx context.Context, arg CreateOperationalActionItemParams) (ActionItem, error) {
 	row := q.db.QueryRow(ctx, createOperationalActionItem,
 		arg.TenantID,
 		arg.WorkspaceID,
 		arg.SourceType,
 		arg.SourceID,
+		arg.TargetID,
 		arg.Title,
 		arg.Impact,
 		arg.DueAt,
@@ -2507,6 +2674,7 @@ func (q *Queries) CreateOperationalActionItem(ctx context.Context, arg CreateOpe
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -3223,6 +3391,29 @@ func (q *Queries) DeleteDealRoomDocumentsByDocument(ctx context.Context, arg Del
 	return err
 }
 
+const deleteDealRoomLinkBlocksForEmails = `-- name: DeleteDealRoomLinkBlocksForEmails :exec
+DELETE FROM link_access_rules lar
+USING links l
+WHERE lar.link_id = l.id
+  AND l.deal_room_id = $1
+  AND l.workspace_id = $2
+  AND l.status NOT IN ('deleted', 'disabled')
+  AND lar.action = 'block'
+  AND lar.rule_type = 'email'
+  AND lar.value = ANY($3::text[])
+`
+
+type DeleteDealRoomLinkBlocksForEmailsParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	Emails      []string
+}
+
+func (q *Queries) DeleteDealRoomLinkBlocksForEmails(ctx context.Context, arg DeleteDealRoomLinkBlocksForEmailsParams) error {
+	_, err := q.db.Exec(ctx, deleteDealRoomLinkBlocksForEmails, arg.DealRoomID, arg.WorkspaceID, arg.Emails)
+	return err
+}
+
 const deleteExpiredKnowledgeQASessions = `-- name: DeleteExpiredKnowledgeQASessions :execrows
 DELETE FROM knowledge_qa_sessions
 WHERE COALESCE(last_turn_at, updated_at) < $1
@@ -3746,7 +3937,7 @@ func (q *Queries) GetAccessRequestByID(ctx context.Context, arg GetAccessRequest
 }
 
 const getActionItemByID = `-- name: GetActionItemByID :one
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 FROM action_items
 WHERE id = $1 AND workspace_id = $2 LIMIT 1
 `
@@ -3773,12 +3964,13 @@ func (q *Queries) GetActionItemByID(ctx context.Context, arg GetActionItemByIDPa
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+		&i.TargetID,
 	)
 	return i, err
 }
 
 const getActionItemBySource = `-- name: GetActionItemBySource :one
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 FROM action_items
 WHERE workspace_id = $1 AND source_type = $2 AND source_id = $3 LIMIT 1
 `
@@ -3806,6 +3998,7 @@ func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBy
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -3850,17 +4043,46 @@ func (q *Queries) GetAverageDurationByLink(ctx context.Context, linkID pgtype.UU
 }
 
 const getContactAggregateByEmail = `-- name: GetContactAggregateByEmail :one
+WITH email_logs AS (
+    SELECT
+        al.id,
+        al.link_id,
+        al.visitor_id,
+        al.event_type,
+        al.created_at
+    FROM access_logs al
+    WHERE al.workspace_id = $1 AND al.visitor_email ILIKE $2
+),
+log_stats AS (
+    SELECT
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
+        COUNT(DISTINCT link_id)::bigint AS unique_links,
+        COUNT(DISTINCT visitor_id) FILTER (WHERE visitor_id IS NOT NULL AND visitor_id <> '')::bigint AS unique_visitors,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads,
+        MAX(created_at)::timestamptz AS last_seen_at
+    FROM email_logs
+),
+visitor_ids AS (
+    SELECT DISTINCT visitor_id
+    FROM email_logs
+    WHERE visitor_id IS NOT NULL AND visitor_id <> ''
+),
+pv_stats AS (
+    SELECT
+        COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
+        COUNT(pv.id)::bigint AS total_page_views
+    FROM page_views pv
+    WHERE pv.workspace_id = $1
+      AND pv.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+)
 SELECT
-    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
-    COUNT(DISTINCT al.link_id) AS unique_links,
-    COUNT(DISTINCT al.visitor_id) AS unique_visitors,
-    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
-    COUNT(pv.id)::bigint AS total_page_views,
-    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
-    MAX(al.created_at)::timestamptz AS last_seen_at
-FROM access_logs al
-LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
-WHERE al.workspace_id = $1 AND al.visitor_email ILIKE $2
+    COALESCE((SELECT opens FROM log_stats), 0)::bigint AS opens,
+    COALESCE((SELECT unique_links FROM log_stats), 0)::bigint AS unique_links,
+    COALESCE((SELECT unique_visitors FROM log_stats), 0)::bigint AS unique_visitors,
+    COALESCE((SELECT total_duration_seconds FROM pv_stats), 0)::bigint AS total_duration_seconds,
+    COALESCE((SELECT total_page_views FROM pv_stats), 0)::bigint AS total_page_views,
+    COALESCE((SELECT downloads FROM log_stats), 0)::bigint AS downloads,
+    (SELECT last_seen_at FROM log_stats) AS last_seen_at
 `
 
 type GetContactAggregateByEmailParams struct {
@@ -3894,22 +4116,58 @@ func (q *Queries) GetContactAggregateByEmail(ctx context.Context, arg GetContact
 }
 
 const getContactAggregatesByWorkspace = `-- name: GetContactAggregatesByWorkspace :many
+WITH email_logs AS (
+    SELECT
+        LOWER(al.visitor_email) AS email,
+        al.id,
+        al.link_id,
+        al.visitor_id,
+        al.event_type,
+        al.created_at
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+),
+log_stats AS (
+    SELECT
+        email,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
+        COUNT(DISTINCT link_id)::bigint AS unique_links,
+        COUNT(DISTINCT visitor_id) FILTER (WHERE visitor_id IS NOT NULL AND visitor_id <> '')::bigint AS unique_visitors,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads,
+        MAX(created_at)::timestamptz AS last_seen_at
+    FROM email_logs
+    GROUP BY email
+),
+visitor_emails AS (
+    SELECT DISTINCT email, visitor_id
+    FROM email_logs
+    WHERE visitor_id IS NOT NULL AND visitor_id <> ''
+),
+pv_stats AS (
+    SELECT
+        ve.email,
+        COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
+        COUNT(pv.id)::bigint AS total_page_views
+    FROM visitor_emails ve
+    JOIN page_views pv ON pv.workspace_id = $1 AND pv.visitor_id = ve.visitor_id
+    GROUP BY ve.email
+)
 SELECT
     c.id AS contact_id,
-    LOWER(COALESCE(c.email, al.visitor_email)) AS email,
-    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'link_opened') AS opens,
-    COUNT(DISTINCT al.link_id) AS unique_links,
-    COUNT(DISTINCT al.visitor_id) AS unique_visitors,
-    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds,
-    COUNT(pv.id)::bigint AS total_page_views,
-    COUNT(DISTINCT al.id) FILTER (WHERE al.event_type = 'download_attempted') AS downloads,
-    MAX(al.created_at)::timestamptz AS last_seen_at
-FROM access_logs al
-LEFT JOIN contacts c ON c.email = al.visitor_email AND c.workspace_id = al.workspace_id
-LEFT JOIN page_views pv ON pv.workspace_id = al.workspace_id AND pv.visitor_id = al.visitor_id
-WHERE al.workspace_id = $1 AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
-GROUP BY c.id, LOWER(COALESCE(c.email, al.visitor_email))
-ORDER BY opens DESC
+    ls.email,
+    ls.opens,
+    ls.unique_links,
+    ls.unique_visitors,
+    COALESCE(ps.total_duration_seconds, 0)::bigint AS total_duration_seconds,
+    COALESCE(ps.total_page_views, 0)::bigint AS total_page_views,
+    ls.downloads,
+    ls.last_seen_at
+FROM log_stats ls
+LEFT JOIN contacts c ON c.workspace_id = $1 AND LOWER(c.email) = ls.email
+LEFT JOIN pv_stats ps ON ps.email = ls.email
+ORDER BY ls.opens DESC
 LIMIT $2
 `
 
@@ -3930,6 +4188,7 @@ type GetContactAggregatesByWorkspaceRow struct {
 	LastSeenAt           pgtype.Timestamptz
 }
 
+// Split log stats and page-view stats to avoid access_logs ⨯ page_views row explosion.
 func (q *Queries) GetContactAggregatesByWorkspace(ctx context.Context, arg GetContactAggregatesByWorkspaceParams) ([]GetContactAggregatesByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, getContactAggregatesByWorkspace, arg.WorkspaceID, arg.Limit)
 	if err != nil {
@@ -4041,33 +4300,115 @@ func (q *Queries) GetDealByID(ctx context.Context, arg GetDealByIDParams) (Deal,
 	return i, err
 }
 
+const getDealRoomAccessPolicy = `-- name: GetDealRoomAccessPolicy :one
+SELECT deal_room_id, tenant_id, workspace_id, require_email, require_email_verification, require_password, password_hash, require_nda, nda_template_id, nda_document_id, watermark_enabled, download_enabled, screenshot_protection_enabled, file_requests_enabled, index_file_enabled, qa_enabled, allowed_emails, blocked_emails, configured, updated_by, created_at, updated_at
+FROM deal_room_access_policies
+WHERE deal_room_id = $1 AND workspace_id = $2
+LIMIT 1
+`
+
+type GetDealRoomAccessPolicyParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) GetDealRoomAccessPolicy(ctx context.Context, arg GetDealRoomAccessPolicyParams) (DealRoomAccessPolicy, error) {
+	row := q.db.QueryRow(ctx, getDealRoomAccessPolicy, arg.DealRoomID, arg.WorkspaceID)
+	var i DealRoomAccessPolicy
+	err := row.Scan(
+		&i.DealRoomID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RequireEmail,
+		&i.RequireEmailVerification,
+		&i.RequirePassword,
+		&i.PasswordHash,
+		&i.RequireNda,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
+		&i.WatermarkEnabled,
+		&i.DownloadEnabled,
+		&i.ScreenshotProtectionEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.QaEnabled,
+		&i.AllowedEmails,
+		&i.BlockedEmails,
+		&i.Configured,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getDealRoomAggregatesByWorkspace = `-- name: GetDealRoomAggregatesByWorkspace :many
+WITH rooms AS (
+    SELECT id
+    FROM deal_rooms
+    WHERE deal_rooms.workspace_id = $1 AND deal_rooms.deleted_at IS NULL
+),
+doc_counts AS (
+    SELECT room_id, COUNT(*)::bigint AS document_count
+    FROM deal_room_documents
+    WHERE room_id IN (SELECT id FROM rooms)
+    GROUP BY room_id
+),
+member_counts AS (
+    SELECT room_id, COUNT(*)::bigint AS member_count
+    FROM room_members
+    WHERE room_id IN (SELECT id FROM rooms)
+    GROUP BY room_id
+),
+pending_counts AS (
+    SELECT room_id, COUNT(*)::bigint AS pending_count
+    FROM room_access_requests
+    WHERE room_id IN (SELECT id FROM rooms) AND status = 'pending'
+    GROUP BY room_id
+),
+room_links AS (
+    SELECT id AS link_id, deal_room_id AS room_id
+    FROM links
+    WHERE deal_room_id IN (SELECT id FROM rooms)
+      AND status NOT IN ('deleted', 'disabled')
+),
+visitor_stats AS (
+    SELECT
+        rl.room_id,
+        (COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.visitor_id IS NOT NULL) +
+         COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_id IS NULL))::bigint AS visitor_count,
+        COUNT(DISTINCT al.id)::bigint AS access_event_count,
+        MAX(al.created_at)::timestamptz AS last_accessed_at
+    FROM room_links rl
+    JOIN access_logs al ON al.link_id = rl.link_id
+    GROUP BY rl.room_id
+),
+question_counts AS (
+    SELECT
+        rl.room_id,
+        COUNT(DISTINCT q.id) FILTER (WHERE q.status = 'pending')::bigint AS pending_question_count
+    FROM room_links rl
+    JOIN link_visitor_questions q ON q.link_id = rl.link_id
+    GROUP BY rl.room_id
+)
 SELECT
-    dr.id AS room_id,
-    COUNT(DISTINCT drd.id) AS document_count,
-    COUNT(DISTINCT rm.id) AS member_count,
-    COUNT(DISTINCT rar.id) FILTER (WHERE rar.status = 'pending') AS pending_count,
-    (COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.visitor_id IS NOT NULL) +
-    COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_id IS NULL))::bigint AS visitor_count,
-    COUNT(DISTINCT q.id) FILTER (WHERE q.status = 'pending') AS pending_question_count,
-    MAX(al.created_at)::timestamptz AS last_accessed_at,
+    r.id AS room_id,
+    COALESCE(d.document_count, 0)::bigint AS document_count,
+    COALESCE(m.member_count, 0)::bigint AS member_count,
+    COALESCE(p.pending_count, 0)::bigint AS pending_count,
+    COALESCE(v.visitor_count, 0)::bigint AS visitor_count,
+    COALESCE(q.pending_question_count, 0)::bigint AS pending_question_count,
+    v.last_accessed_at,
     COALESCE(
-        LEAST(100,
-            (COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.visitor_id IS NOT NULL) +
-             COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_id IS NULL)) * 5
-            + COUNT(DISTINCT al.id) * 2
-        ),
+        LEAST(100, COALESCE(v.visitor_count, 0) * 5 + COALESCE(v.access_event_count, 0) * 2),
         0
     )::int AS heat_score
-FROM deal_rooms dr
-LEFT JOIN deal_room_documents drd ON drd.room_id = dr.id
-LEFT JOIN room_members rm ON rm.room_id = dr.id
-LEFT JOIN room_access_requests rar ON rar.room_id = dr.id
-LEFT JOIN links l ON l.deal_room_id = dr.id AND l.status NOT IN ('deleted', 'disabled')
-LEFT JOIN access_logs al ON al.link_id = l.id
-LEFT JOIN link_visitor_questions q ON q.link_id = l.id
-WHERE dr.workspace_id = $1 AND dr.deleted_at IS NULL
-GROUP BY dr.id
+FROM rooms r
+LEFT JOIN doc_counts d ON d.room_id = r.id
+LEFT JOIN member_counts m ON m.room_id = r.id
+LEFT JOIN pending_counts p ON p.room_id = r.id
+LEFT JOIN visitor_stats v ON v.room_id = r.id
+LEFT JOIN question_counts q ON q.room_id = r.id
 `
 
 type GetDealRoomAggregatesByWorkspaceRow struct {
@@ -4081,6 +4422,8 @@ type GetDealRoomAggregatesByWorkspaceRow struct {
 	HeatScore            int32
 }
 
+// Aggregate per metric in independent CTEs to avoid LEFT JOIN row explosion
+// (docs × members × requests × access_logs) which tanks list latency.
 func (q *Queries) GetDealRoomAggregatesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]GetDealRoomAggregatesByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, getDealRoomAggregatesByWorkspace, workspaceID)
 	if err != nil {
@@ -4090,6 +4433,123 @@ func (q *Queries) GetDealRoomAggregatesByWorkspace(ctx context.Context, workspac
 	var items []GetDealRoomAggregatesByWorkspaceRow
 	for rows.Next() {
 		var i GetDealRoomAggregatesByWorkspaceRow
+		if err := rows.Scan(
+			&i.RoomID,
+			&i.DocumentCount,
+			&i.MemberCount,
+			&i.PendingCount,
+			&i.VisitorCount,
+			&i.PendingQuestionCount,
+			&i.LastAccessedAt,
+			&i.HeatScore,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDealRoomAggregatesForRooms = `-- name: GetDealRoomAggregatesForRooms :many
+WITH rooms AS (
+    SELECT id
+    FROM deal_rooms
+    WHERE deal_rooms.workspace_id = $1
+      AND deal_rooms.deleted_at IS NULL
+      AND deal_rooms.id = ANY($2::uuid[])
+),
+doc_counts AS (
+    SELECT room_id, COUNT(*)::bigint AS document_count
+    FROM deal_room_documents
+    WHERE room_id IN (SELECT id FROM rooms)
+    GROUP BY room_id
+),
+member_counts AS (
+    SELECT room_id, COUNT(*)::bigint AS member_count
+    FROM room_members
+    WHERE room_id IN (SELECT id FROM rooms)
+    GROUP BY room_id
+),
+pending_counts AS (
+    SELECT room_id, COUNT(*)::bigint AS pending_count
+    FROM room_access_requests
+    WHERE room_id IN (SELECT id FROM rooms) AND status = 'pending'
+    GROUP BY room_id
+),
+room_links AS (
+    SELECT id AS link_id, deal_room_id AS room_id
+    FROM links
+    WHERE deal_room_id IN (SELECT id FROM rooms)
+      AND status NOT IN ('deleted', 'disabled')
+),
+visitor_stats AS (
+    SELECT
+        rl.room_id,
+        (COUNT(DISTINCT al.visitor_id) FILTER (WHERE al.visitor_id IS NOT NULL) +
+         COUNT(DISTINCT al.visitor_email) FILTER (WHERE al.visitor_email IS NOT NULL AND al.visitor_id IS NULL))::bigint AS visitor_count,
+        COUNT(DISTINCT al.id)::bigint AS access_event_count,
+        MAX(al.created_at)::timestamptz AS last_accessed_at
+    FROM room_links rl
+    JOIN access_logs al ON al.link_id = rl.link_id
+    GROUP BY rl.room_id
+),
+question_counts AS (
+    SELECT
+        rl.room_id,
+        COUNT(DISTINCT q.id) FILTER (WHERE q.status = 'pending')::bigint AS pending_question_count
+    FROM room_links rl
+    JOIN link_visitor_questions q ON q.link_id = rl.link_id
+    GROUP BY rl.room_id
+)
+SELECT
+    r.id AS room_id,
+    COALESCE(d.document_count, 0)::bigint AS document_count,
+    COALESCE(m.member_count, 0)::bigint AS member_count,
+    COALESCE(p.pending_count, 0)::bigint AS pending_count,
+    COALESCE(v.visitor_count, 0)::bigint AS visitor_count,
+    COALESCE(q.pending_question_count, 0)::bigint AS pending_question_count,
+    v.last_accessed_at,
+    COALESCE(
+        LEAST(100, COALESCE(v.visitor_count, 0) * 5 + COALESCE(v.access_event_count, 0) * 2),
+        0
+    )::int AS heat_score
+FROM rooms r
+LEFT JOIN doc_counts d ON d.room_id = r.id
+LEFT JOIN member_counts m ON m.room_id = r.id
+LEFT JOIN pending_counts p ON p.room_id = r.id
+LEFT JOIN visitor_stats v ON v.room_id = r.id
+LEFT JOIN question_counts q ON q.room_id = r.id
+`
+
+type GetDealRoomAggregatesForRoomsParams struct {
+	WorkspaceID pgtype.UUID
+	RoomIds     []pgtype.UUID
+}
+
+type GetDealRoomAggregatesForRoomsRow struct {
+	RoomID               pgtype.UUID
+	DocumentCount        int64
+	MemberCount          int64
+	PendingCount         int64
+	VisitorCount         int64
+	PendingQuestionCount int64
+	LastAccessedAt       pgtype.Timestamptz
+	HeatScore            int32
+}
+
+// Page-scoped aggregates: same CTE shape as workspace aggregates, filtered to room IDs.
+func (q *Queries) GetDealRoomAggregatesForRooms(ctx context.Context, arg GetDealRoomAggregatesForRoomsParams) ([]GetDealRoomAggregatesForRoomsRow, error) {
+	rows, err := q.db.Query(ctx, getDealRoomAggregatesForRooms, arg.WorkspaceID, arg.RoomIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDealRoomAggregatesForRoomsRow
+	for rows.Next() {
+		var i GetDealRoomAggregatesForRoomsRow
 		if err := rows.Scan(
 			&i.RoomID,
 			&i.DocumentCount,
@@ -5634,16 +6094,26 @@ func (q *Queries) GetLinkBounceCount24h(ctx context.Context, linkID pgtype.UUID)
 }
 
 const getLinkBounceCountsBatch = `-- name: GetLinkBounceCountsBatch :many
-SELECT a.link_id, COUNT(*)::bigint AS bounce_count
-FROM access_logs a
-WHERE a.link_id = ANY($1::uuid[])
-  AND a.event_type = 'link_opened'
-  AND a.visitor_id IS NOT NULL
-  AND NOT EXISTS (
-      SELECT 1 FROM page_views p
-      WHERE p.link_id = a.link_id AND p.visitor_id = a.visitor_id
-  )
-GROUP BY a.link_id
+WITH opens AS (
+    SELECT a.link_id, a.visitor_id
+    FROM access_logs a
+    WHERE a.link_id = ANY($1::uuid[])
+      AND a.event_type = 'link_opened'
+      AND a.visitor_id IS NOT NULL
+      AND a.visitor_id <> ''
+),
+viewed AS (
+    SELECT DISTINCT p.link_id, p.visitor_id
+    FROM page_views p
+    WHERE p.link_id = ANY($1::uuid[])
+      AND p.visitor_id IS NOT NULL
+      AND p.visitor_id <> ''
+)
+SELECT o.link_id, COUNT(*)::bigint AS bounce_count
+FROM opens o
+LEFT JOIN viewed v ON v.link_id = o.link_id AND v.visitor_id = o.visitor_id
+WHERE v.visitor_id IS NULL
+GROUP BY o.link_id
 `
 
 type GetLinkBounceCountsBatchRow struct {
@@ -5651,6 +6121,8 @@ type GetLinkBounceCountsBatchRow struct {
 	BounceCount int64
 }
 
+// Anti-join via visitor sets; count open rows (same metric as the old
+// correlated NOT EXISTS) for visitors who never recorded a page view.
 func (q *Queries) GetLinkBounceCountsBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkBounceCountsBatchRow, error) {
 	rows, err := q.db.Query(ctx, getLinkBounceCountsBatch, dollar_1)
 	if err != nil {
@@ -8069,7 +8541,7 @@ func (q *Queries) ListActionItemsBySignal(ctx context.Context, signalID pgtype.U
 }
 
 const listActionItemsByWorkspace = `-- name: ListActionItemsByWorkspace :many
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 FROM action_items
 WHERE workspace_id = $1
   AND (
@@ -8106,6 +8578,7 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 			&i.UpdatedAt,
 			&i.SourceType,
 			&i.SourceID,
+			&i.TargetID,
 		); err != nil {
 			return nil, err
 		}
@@ -8118,7 +8591,7 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 }
 
 const listActionItemsByWorkspaceForUser = `-- name: ListActionItemsByWorkspaceForUser :many
-SELECT a.id, a.tenant_id, a.workspace_id, a.signal_id, a.title, a.impact, a.due_at, a.status, a.action_type, a.created_at, a.updated_at, a.source_type, a.source_id
+SELECT a.id, a.tenant_id, a.workspace_id, a.signal_id, a.title, a.impact, a.due_at, a.status, a.action_type, a.created_at, a.updated_at, a.source_type, a.source_id, a.target_id
 FROM action_items a
 WHERE a.workspace_id = $1
   AND (
@@ -8127,7 +8600,10 @@ WHERE a.workspace_id = $1
       OR (a.status IN ('snoozed', 'ignored') AND a.updated_at > now() - interval '30 days')
   )
   AND (
-      a.source_type IS DISTINCT FROM 'link_access_request'
+      (
+          a.source_type IS DISTINCT FROM 'link_access_request'
+          AND a.source_type IS DISTINCT FROM 'deal_room_link_access_request'
+      )
       OR EXISTS (
           SELECT 1
           FROM links l
@@ -8144,8 +8620,9 @@ type ListActionItemsByWorkspaceForUserParams struct {
 	CreatedBy   pgtype.UUID
 }
 
-// Same retention window as ListActionItemsByWorkspace, but link_access_request
-// todos are only visible to the link creator (source_id = link id).
+// Same retention window as ListActionItemsByWorkspace, but share-link access
+// todos (document or deal-room) are only visible to the link creator
+// (source_id = link id).
 func (q *Queries) ListActionItemsByWorkspaceForUser(ctx context.Context, arg ListActionItemsByWorkspaceForUserParams) ([]ActionItem, error) {
 	rows, err := q.db.Query(ctx, listActionItemsByWorkspaceForUser, arg.WorkspaceID, arg.CreatedBy)
 	if err != nil {
@@ -8169,10 +8646,45 @@ func (q *Queries) ListActionItemsByWorkspaceForUser(ctx context.Context, arg Lis
 			&i.UpdatedAt,
 			&i.SourceType,
 			&i.SourceID,
+			&i.TargetID,
 		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveDealRoomLinkIDs = `-- name: ListActiveDealRoomLinkIDs :many
+SELECT id
+FROM links
+WHERE deal_room_id = $1
+  AND workspace_id = $2
+  AND status NOT IN ('deleted', 'disabled')
+ORDER BY created_at ASC
+`
+
+type ListActiveDealRoomLinkIDsParams struct {
+	DealRoomID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) ListActiveDealRoomLinkIDs(ctx context.Context, arg ListActiveDealRoomLinkIDsParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listActiveDealRoomLinkIDs, arg.DealRoomID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -8635,6 +9147,56 @@ func (q *Queries) ListContactViewedDocumentIDs(ctx context.Context, arg ListCont
 	return items, nil
 }
 
+const listContactViewedDocumentIDsByWorkspace = `-- name: ListContactViewedDocumentIDsByWorkspace :many
+SELECT DISTINCT
+    LOWER(al.visitor_email) AS email,
+    l.document_id::text AS document_id
+FROM access_logs al
+JOIN links l ON l.id = al.link_id AND l.document_id IS NOT NULL
+WHERE al.workspace_id = $1
+  AND al.visitor_email IS NOT NULL
+  AND al.visitor_email <> ''
+UNION
+SELECT DISTINCT
+    LOWER(al.visitor_email) AS email,
+    l.document_id::text AS document_id
+FROM access_logs al
+JOIN page_views pv ON pv.workspace_id = al.workspace_id
+    AND pv.visitor_id = al.visitor_id
+JOIN links l ON l.id = pv.link_id AND l.document_id IS NOT NULL
+WHERE al.workspace_id = $1
+  AND al.visitor_email IS NOT NULL
+  AND al.visitor_email <> ''
+  AND al.visitor_id IS NOT NULL
+  AND al.visitor_id <> ''
+`
+
+type ListContactViewedDocumentIDsByWorkspaceRow struct {
+	Email      string
+	DocumentID string
+}
+
+// One-shot batch of viewed documents for all visitor emails in a workspace.
+func (q *Queries) ListContactViewedDocumentIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListContactViewedDocumentIDsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listContactViewedDocumentIDsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListContactViewedDocumentIDsByWorkspaceRow
+	for rows.Next() {
+		var i ListContactViewedDocumentIDsByWorkspaceRow
+		if err := rows.Scan(&i.Email, &i.DocumentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listContactsByWorkspace = `-- name: ListContactsByWorkspace :many
 SELECT id, workspace_id, email, name, created_at
 FROM contacts
@@ -8911,6 +9473,69 @@ func (q *Queries) ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgty
 	return items, nil
 }
 
+const listDealRoomsByWorkspacePage = `-- name: ListDealRoomsByWorkspacePage :many
+SELECT id, tenant_id, workspace_id, slug, name, description, template_type, settings, requires_nda, requires_approval, status, created_by, created_at, updated_at, deleted_at, expires_at
+FROM deal_rooms
+WHERE workspace_id = $1
+  AND deleted_at IS NULL
+  AND (
+    $4::text = ''
+    OR name ILIKE '%' || $4 || '%'
+    OR COALESCE(description, '') ILIKE '%' || $4 || '%'
+  )
+ORDER BY created_at DESC
+LIMIT $2 OFFSET $3
+`
+
+type ListDealRoomsByWorkspacePageParams struct {
+	WorkspaceID pgtype.UUID
+	Limit       int32
+	Offset      int32
+	Query       string
+}
+
+func (q *Queries) ListDealRoomsByWorkspacePage(ctx context.Context, arg ListDealRoomsByWorkspacePageParams) ([]DealRoom, error) {
+	rows, err := q.db.Query(ctx, listDealRoomsByWorkspacePage,
+		arg.WorkspaceID,
+		arg.Limit,
+		arg.Offset,
+		arg.Query,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []DealRoom
+	for rows.Next() {
+		var i DealRoom
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.Slug,
+			&i.Name,
+			&i.Description,
+			&i.TemplateType,
+			&i.Settings,
+			&i.RequiresNda,
+			&i.RequiresApproval,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDealsByWorkspace = `-- name: ListDealsByWorkspace :many
 SELECT id, workspace_id, contact_id, name, stage, amount, currency, status, close_date, created_at, updated_at
 FROM deals
@@ -8970,6 +9595,76 @@ func (q *Queries) ListDocumentIDsInDealRoomsByWorkspace(ctx context.Context, wor
 			return nil, err
 		}
 		items = append(items, document_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentLinksByWorkspace = `-- name: ListDocumentLinksByWorkspace :many
+SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
+FROM links
+WHERE workspace_id = $1
+  AND deal_room_id IS NULL
+  AND document_id IS NOT NULL
+  AND status NOT IN ('deleted', 'disabled')
+ORDER BY created_at DESC
+`
+
+// Document Library share list: document links only (never deal-room shares).
+func (q *Queries) ListDocumentLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Link, error) {
+	rows, err := q.db.Query(ctx, listDocumentLinksByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Link
+	for rows.Next() {
+		var i Link
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.DocumentID,
+			&i.PublicToken,
+			&i.Name,
+			&i.PermissionType,
+			&i.ExpiresAt,
+			&i.MaxAccessCount,
+			&i.AccessCount,
+			&i.DownloadEnabled,
+			&i.WatermarkEnabled,
+			&i.Status,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.RequireEmail,
+			&i.RequireNda,
+			&i.RequireEmailVerification,
+			&i.DealRoomID,
+			&i.RequirePassword,
+			&i.PasswordHash,
+			&i.CustomDomain,
+			&i.Tags,
+			&i.NotifyOnAccess,
+			&i.SecurityVersion,
+			&i.QaEnabled,
+			&i.FileRequestsEnabled,
+			&i.IndexFileEnabled,
+			&i.LinkType,
+			&i.TargetFolderPath,
+			&i.ScreenshotProtectionEnabled,
+			&i.LastReminderSentAt,
+			&i.HasDocumentScope,
+			&i.FolderScopePaths,
+			&i.NdaDocumentID,
+			&i.FolderScopeMode,
+			&i.NdaTemplateID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -10244,6 +10939,7 @@ type ListLinksByDealRoomParams struct {
 	DealRoomID  pgtype.UUID
 }
 
+// Deal-room share list: room-scoped links only (never document-library shares).
 func (q *Queries) ListLinksByDealRoom(ctx context.Context, arg ListLinksByDealRoomParams) ([]Link, error) {
 	rows, err := q.db.Query(ctx, listLinksByDealRoom, arg.WorkspaceID, arg.DealRoomID)
 	if err != nil {
@@ -10464,7 +11160,10 @@ func (q *Queries) ListLinksByDealRoomPage(ctx context.Context, arg ListLinksByDe
 const listLinksByDocument = `-- name: ListLinksByDocument :many
 SELECT id, tenant_id, workspace_id, document_id, public_token, name, permission_type, expires_at, max_access_count, access_count, download_enabled, watermark_enabled, status, created_by, created_at, updated_at, require_email, require_nda, require_email_verification, deal_room_id, require_password, password_hash, custom_domain, tags, notify_on_access, security_version, qa_enabled, file_requests_enabled, index_file_enabled, link_type, target_folder_path, screenshot_protection_enabled, last_reminder_sent_at, has_document_scope, folder_scope_paths, nda_document_id, folder_scope_mode, nda_template_id
 FROM links
-WHERE workspace_id = $1 AND document_id = $2 AND status NOT IN ('deleted', 'disabled')
+WHERE workspace_id = $1
+  AND document_id = $2
+  AND deal_room_id IS NULL
+  AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 `
 
@@ -10539,6 +11238,7 @@ WHERE workspace_id = $1 AND status NOT IN ('deleted', 'disabled')
 ORDER BY created_at DESC
 `
 
+// All non-deleted workspace links (document + deal-room). Used by analytics/billing.
 func (q *Queries) ListLinksByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]Link, error) {
 	rows, err := q.db.Query(ctx, listLinksByWorkspace, workspaceID)
 	if err != nil {
@@ -10841,7 +11541,7 @@ func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUI
 }
 
 const listPendingActionItemsBySourceType = `-- name: ListPendingActionItemsBySourceType :many
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 FROM action_items
 WHERE workspace_id = $1 AND source_type = $2 AND status = 'pending'
 ORDER BY created_at DESC
@@ -10875,6 +11575,293 @@ func (q *Queries) ListPendingActionItemsBySourceType(ctx context.Context, arg Li
 			&i.UpdatedAt,
 			&i.SourceType,
 			&i.SourceID,
+			&i.TargetID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingDealRoomLinkAccessRequestsByWorkspace = `-- name: ListPendingDealRoomLinkAccessRequestsByWorkspace :many
+SELECT r.id, r.email, r.link_id, l.deal_room_id, l.name AS link_name, dr.name AS room_name
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+JOIN deal_rooms dr ON dr.id = l.deal_room_id
+WHERE r.workspace_id = $1
+  AND r.status = 'pending'
+  AND l.deal_room_id IS NOT NULL
+ORDER BY r.created_at DESC
+`
+
+type ListPendingDealRoomLinkAccessRequestsByWorkspaceRow struct {
+	ID         pgtype.UUID
+	Email      string
+	LinkID     pgtype.UUID
+	DealRoomID pgtype.UUID
+	LinkName   pgtype.Text
+	RoomName   string
+}
+
+// Dashboard sync: deal-room share applications only (never document library).
+func (q *Queries) ListPendingDealRoomLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingDealRoomLinkAccessRequestsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingDealRoomLinkAccessRequestsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingDealRoomLinkAccessRequestsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingDealRoomLinkAccessRequestsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.LinkID,
+			&i.DealRoomID,
+			&i.LinkName,
+			&i.RoomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingDealRoomLinkAccessRequestsDetailedByWorkspace = `-- name: ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace :many
+SELECT
+    r.id,
+    r.link_id,
+    r.email,
+    r.reason,
+    r.signer_name,
+    r.status,
+    r.created_at,
+    r.updated_at,
+    l.name AS link_name,
+    l.public_token,
+    l.custom_domain,
+    COALESCE(
+        (
+            SELECT d.title
+            FROM documents d
+            WHERE d.id = l.document_id
+              AND d.deleted_at IS NULL
+        ),
+        (
+            SELECT d.title
+            FROM link_documents ld
+            JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+            WHERE ld.link_id = l.id
+            ORDER BY ld.sort_order ASC, ld.created_at ASC
+            LIMIT 1
+        ),
+        COALESCE(l.name, '')
+    )::text AS document_title
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1
+  AND l.workspace_id = $1
+  AND l.created_by = $2
+  AND r.status = 'pending'
+  AND l.status NOT IN ('deleted', 'disabled')
+  AND l.deal_room_id = $3
+ORDER BY r.created_at DESC
+`
+
+type ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+	DealRoomID  pgtype.UUID
+}
+
+type ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow struct {
+	ID            pgtype.UUID
+	LinkID        pgtype.UUID
+	Email         string
+	Reason        pgtype.Text
+	SignerName    pgtype.Text
+	Status        string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	LinkName      pgtype.Text
+	PublicToken   string
+	CustomDomain  pgtype.Text
+	DocumentTitle string
+}
+
+// Deal-room share inbox: pending requests for links in one room only.
+// Creator-scoped: only link.created_by may see applicant emails.
+func (q *Queries) ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace(ctx context.Context, arg ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams) ([]ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingDealRoomLinkAccessRequestsDetailedByWorkspace, arg.WorkspaceID, arg.CreatedBy, arg.DealRoomID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.Email,
+			&i.Reason,
+			&i.SignerName,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LinkName,
+			&i.PublicToken,
+			&i.CustomDomain,
+			&i.DocumentTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingDocumentLinkAccessRequestsByWorkspace = `-- name: ListPendingDocumentLinkAccessRequestsByWorkspace :many
+SELECT r.id, r.email, r.link_id, l.name AS link_name
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1
+  AND r.status = 'pending'
+  AND l.deal_room_id IS NULL
+  AND l.document_id IS NOT NULL
+ORDER BY r.created_at DESC
+`
+
+type ListPendingDocumentLinkAccessRequestsByWorkspaceRow struct {
+	ID       pgtype.UUID
+	Email    string
+	LinkID   pgtype.UUID
+	LinkName pgtype.Text
+}
+
+// Dashboard sync: document-library share applications only.
+func (q *Queries) ListPendingDocumentLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingDocumentLinkAccessRequestsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingDocumentLinkAccessRequestsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingDocumentLinkAccessRequestsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingDocumentLinkAccessRequestsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Email,
+			&i.LinkID,
+			&i.LinkName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingDocumentLinkAccessRequestsDetailedByWorkspace = `-- name: ListPendingDocumentLinkAccessRequestsDetailedByWorkspace :many
+SELECT
+    r.id,
+    r.link_id,
+    r.email,
+    r.reason,
+    r.signer_name,
+    r.status,
+    r.created_at,
+    r.updated_at,
+    l.name AS link_name,
+    l.public_token,
+    l.custom_domain,
+    COALESCE(
+        (
+            SELECT d.title
+            FROM documents d
+            WHERE d.id = l.document_id
+              AND d.deleted_at IS NULL
+        ),
+        (
+            SELECT d.title
+            FROM link_documents ld
+            JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
+            WHERE ld.link_id = l.id
+            ORDER BY ld.sort_order ASC, ld.created_at ASC
+            LIMIT 1
+        ),
+        COALESCE(l.name, '')
+    )::text AS document_title
+FROM link_access_requests r
+JOIN links l ON l.id = r.link_id
+WHERE r.workspace_id = $1
+  AND l.workspace_id = $1
+  AND l.created_by = $2
+  AND r.status = 'pending'
+  AND l.status NOT IN ('deleted', 'disabled')
+  AND l.deal_room_id IS NULL
+  AND l.document_id IS NOT NULL
+ORDER BY r.created_at DESC
+`
+
+type ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceParams struct {
+	WorkspaceID pgtype.UUID
+	CreatedBy   pgtype.UUID
+}
+
+type ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow struct {
+	ID            pgtype.UUID
+	LinkID        pgtype.UUID
+	Email         string
+	Reason        pgtype.Text
+	SignerName    pgtype.Text
+	Status        string
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	LinkName      pgtype.Text
+	PublicToken   string
+	CustomDomain  pgtype.Text
+	DocumentTitle string
+}
+
+// Document Library share inbox: document links only (never deal-room shares).
+// Creator-scoped: only link.created_by may see applicant emails.
+func (q *Queries) ListPendingDocumentLinkAccessRequestsDetailedByWorkspace(ctx context.Context, arg ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceParams) ([]ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingDocumentLinkAccessRequestsDetailedByWorkspace, arg.WorkspaceID, arg.CreatedBy)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.Email,
+			&i.Reason,
+			&i.SignerName,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LinkName,
+			&i.PublicToken,
+			&i.CustomDomain,
+			&i.DocumentTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -11000,140 +11987,6 @@ func (q *Queries) ListPendingKnowledgeSyncJobs(ctx context.Context, limit int32)
 			&i.LastError,
 			&i.CreatedAt,
 			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPendingLinkAccessRequestsByWorkspace = `-- name: ListPendingLinkAccessRequestsByWorkspace :many
-SELECT r.id, r.email, r.link_id, l.name AS link_name
-FROM link_access_requests r
-JOIN links l ON l.id = r.link_id
-WHERE r.workspace_id = $1 AND r.status = 'pending'
-ORDER BY r.created_at DESC
-`
-
-type ListPendingLinkAccessRequestsByWorkspaceRow struct {
-	ID       pgtype.UUID
-	Email    string
-	LinkID   pgtype.UUID
-	LinkName pgtype.Text
-}
-
-func (q *Queries) ListPendingLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingLinkAccessRequestsByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, listPendingLinkAccessRequestsByWorkspace, workspaceID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPendingLinkAccessRequestsByWorkspaceRow
-	for rows.Next() {
-		var i ListPendingLinkAccessRequestsByWorkspaceRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Email,
-			&i.LinkID,
-			&i.LinkName,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPendingLinkAccessRequestsDetailedByWorkspace = `-- name: ListPendingLinkAccessRequestsDetailedByWorkspace :many
-SELECT
-    r.id,
-    r.link_id,
-    r.email,
-    r.reason,
-    r.signer_name,
-    r.status,
-    r.created_at,
-    r.updated_at,
-    l.name AS link_name,
-    l.public_token,
-    l.custom_domain,
-    COALESCE(
-        (
-            SELECT d.title
-            FROM documents d
-            WHERE d.id = l.document_id
-              AND d.deleted_at IS NULL
-        ),
-        (
-            SELECT d.title
-            FROM link_documents ld
-            JOIN documents d ON d.id = ld.document_id AND d.deleted_at IS NULL
-            WHERE ld.link_id = l.id
-            ORDER BY ld.sort_order ASC, ld.created_at ASC
-            LIMIT 1
-        ),
-        COALESCE(l.name, '')
-    )::text AS document_title
-FROM link_access_requests r
-JOIN links l ON l.id = r.link_id
-WHERE r.workspace_id = $1
-  AND l.workspace_id = $1
-  AND l.created_by = $2
-  AND r.status = 'pending'
-  AND l.status NOT IN ('deleted', 'disabled')
-ORDER BY r.created_at DESC
-`
-
-type ListPendingLinkAccessRequestsDetailedByWorkspaceParams struct {
-	WorkspaceID pgtype.UUID
-	CreatedBy   pgtype.UUID
-}
-
-type ListPendingLinkAccessRequestsDetailedByWorkspaceRow struct {
-	ID            pgtype.UUID
-	LinkID        pgtype.UUID
-	Email         string
-	Reason        pgtype.Text
-	SignerName    pgtype.Text
-	Status        string
-	CreatedAt     pgtype.Timestamptz
-	UpdatedAt     pgtype.Timestamptz
-	LinkName      pgtype.Text
-	PublicToken   string
-	CustomDomain  pgtype.Text
-	DocumentTitle string
-}
-
-// Creator share-page inbox: pending requests the reviewer can approve (link.created_by).
-func (q *Queries) ListPendingLinkAccessRequestsDetailedByWorkspace(ctx context.Context, arg ListPendingLinkAccessRequestsDetailedByWorkspaceParams) ([]ListPendingLinkAccessRequestsDetailedByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, listPendingLinkAccessRequestsDetailedByWorkspace, arg.WorkspaceID, arg.CreatedBy)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []ListPendingLinkAccessRequestsDetailedByWorkspaceRow
-	for rows.Next() {
-		var i ListPendingLinkAccessRequestsDetailedByWorkspaceRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.LinkID,
-			&i.Email,
-			&i.Reason,
-			&i.SignerName,
-			&i.Status,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.LinkName,
-			&i.PublicToken,
-			&i.CustomDomain,
-			&i.DocumentTitle,
 		); err != nil {
 			return nil, err
 		}
@@ -11427,52 +12280,67 @@ SELECT
     object_id,
     created_at
 FROM (
-    SELECT
-        al.id::text AS id,
-        CASE al.event_type
-            WHEN 'link_opened' THEN 'visit'
-            ELSE 'download'
-        END AS event_type,
-        COALESCE(NULLIF(al.visitor_email, ''), al.visitor_id, 'Unknown') AS actor,
-        CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
-        COALESCE(dr.name, d.title, 'Shared link') AS object_name,
-        COALESCE(dr.id, d.id, l.id)::text AS object_id,
-        al.created_at
-    FROM access_logs al
-    JOIN links l ON l.id = al.link_id
-    LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
-    LEFT JOIN documents d ON d.id = l.document_id
-    WHERE al.workspace_id = $1
+    (
+        SELECT
+            al.id::text AS id,
+            CASE al.event_type
+                WHEN 'link_opened' THEN 'visit'
+                ELSE 'download'
+            END AS event_type,
+            COALESCE(NULLIF(al.visitor_email, ''), al.visitor_id, 'Unknown') AS actor,
+            CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
+            COALESCE(dr.name, d.title, 'Shared link') AS object_name,
+            COALESCE(dr.id, d.id, l.id)::text AS object_id,
+            al.created_at
+        FROM access_logs al
+        JOIN links l ON l.id = al.link_id
+        LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
+        LEFT JOIN documents d ON d.id = l.document_id
+        WHERE al.workspace_id = $1
+          AND al.created_at >= now() - interval '30 days'
+        ORDER BY al.created_at DESC
+        LIMIT $2
+    )
 
     UNION ALL
 
-    SELECT
-        q.id::text AS id,
-        'question' AS event_type,
-        COALESCE(NULLIF(q.visitor_email, ''), q.visitor_id, 'Unknown') AS actor,
-        CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
-        COALESCE(dr.name, d.title, 'Shared link') AS object_name,
-        COALESCE(dr.id, d.id, l.id)::text AS object_id,
-        q.created_at
-    FROM link_visitor_questions q
-    JOIN links l ON l.id = q.link_id
-    LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
-    LEFT JOIN documents d ON d.id = l.document_id
-    WHERE q.workspace_id = $1
+    (
+        SELECT
+            q.id::text AS id,
+            'question' AS event_type,
+            COALESCE(NULLIF(q.visitor_email, ''), q.visitor_id, 'Unknown') AS actor,
+            CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
+            COALESCE(dr.name, d.title, 'Shared link') AS object_name,
+            COALESCE(dr.id, d.id, l.id)::text AS object_id,
+            q.created_at
+        FROM link_visitor_questions q
+        JOIN links l ON l.id = q.link_id
+        LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
+        LEFT JOIN documents d ON d.id = l.document_id
+        WHERE q.workspace_id = $1
+          AND q.created_at >= now() - interval '30 days'
+        ORDER BY q.created_at DESC
+        LIMIT $2
+    )
 
     UNION ALL
 
-    SELECT
-        d.id::text AS id,
-        'upload' AS event_type,
-        COALESCE(NULLIF(u.email, ''), 'System') AS actor,
-        'document' AS object_type,
-        d.title AS object_name,
-        d.id::text AS object_id,
-        d.created_at
-    FROM documents d
-    LEFT JOIN users u ON u.id = d.created_by
-    WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+    (
+        SELECT
+            d.id::text AS id,
+            'upload' AS event_type,
+            COALESCE(NULLIF(u.email, ''), 'System') AS actor,
+            'document' AS object_type,
+            d.title AS object_name,
+            d.id::text AS object_id,
+            d.created_at
+        FROM documents d
+        LEFT JOIN users u ON u.id = d.created_by
+        WHERE d.workspace_id = $1 AND d.deleted_at IS NULL
+          AND d.created_at >= now() - interval '30 days'
+        ORDER BY d.created_at DESC
+        LIMIT $2
+    )
 ) combined
 ORDER BY created_at DESC
 LIMIT $2
@@ -11493,6 +12361,7 @@ type ListRecentActivitiesByWorkspaceRow struct {
 	CreatedAt  pgtype.Timestamptz
 }
 
+// Bound each leg before UNION so access_logs/questions/uploads cannot unbounded-scan.
 func (q *Queries) ListRecentActivitiesByWorkspace(ctx context.Context, arg ListRecentActivitiesByWorkspaceParams) ([]ListRecentActivitiesByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listRecentActivitiesByWorkspace, arg.WorkspaceID, arg.Limit)
 	if err != nil {
@@ -11825,16 +12694,24 @@ func (q *Queries) ListRecentVisitorsByLink(ctx context.Context, arg ListRecentVi
 }
 
 const listRecentlyAccessedDocumentsByWorkspace = `-- name: ListRecentlyAccessedDocumentsByWorkspace :many
+WITH last_access AS (
+    SELECT
+        l.document_id,
+        MAX(al.created_at) AS last_accessed_at
+    FROM access_logs al
+    JOIN links l ON l.id = al.link_id
+        AND l.status = 'active'
+        AND l.document_id IS NOT NULL
+    WHERE al.workspace_id = $1
+    GROUP BY l.document_id
+)
 SELECT
     d.id, d.tenant_id, d.workspace_id, d.created_by, COALESCE(d.title, ''::text) as title, d.source_type, d.status, d.storage_key, COALESCE(d.file_size, 0::bigint) as file_size, d.category, d.page_count, d.created_at, d.updated_at, d.deleted_at,
-    COALESCE(MAX(al.created_at), d.created_at) as last_accessed_at
+    la.last_accessed_at::timestamptz AS last_accessed_at
 FROM documents d
-LEFT JOIN links l ON l.document_id = d.id AND l.status = 'active'
-LEFT JOIN access_logs al ON al.link_id = l.id
+JOIN last_access la ON la.document_id = d.id
 WHERE d.workspace_id = $1 AND d.deleted_at IS NULL AND d.status != 'archived'
-GROUP BY d.id
-HAVING MAX(al.created_at) IS NOT NULL
-ORDER BY last_accessed_at DESC, d.created_at DESC
+ORDER BY la.last_accessed_at DESC, d.created_at DESC
 `
 
 type ListRecentlyAccessedDocumentsByWorkspaceRow struct {
@@ -11855,6 +12732,7 @@ type ListRecentlyAccessedDocumentsByWorkspaceRow struct {
 	LastAccessedAt pgtype.Timestamptz
 }
 
+// Aggregate last-access per document first to avoid docs × links × access_logs explosion.
 func (q *Queries) ListRecentlyAccessedDocumentsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListRecentlyAccessedDocumentsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listRecentlyAccessedDocumentsByWorkspace, workspaceID)
 	if err != nil {
@@ -13944,7 +14822,7 @@ const updateActionItemStatus = `-- name: UpdateActionItemStatus :one
 UPDATE action_items
 SET status = $1, updated_at = now()
 WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
 `
 
 type UpdateActionItemStatusParams struct {
@@ -13970,6 +14848,7 @@ func (q *Queries) UpdateActionItemStatus(ctx context.Context, arg UpdateActionIt
 		&i.UpdatedAt,
 		&i.SourceType,
 		&i.SourceID,
+		&i.TargetID,
 	)
 	return i, err
 }
@@ -15070,6 +15949,118 @@ func (q *Queries) UpsertCrmSyncState(ctx context.Context, arg UpsertCrmSyncState
 		arg.Summary,
 	)
 	return err
+}
+
+const upsertDealRoomAccessPolicy = `-- name: UpsertDealRoomAccessPolicy :one
+INSERT INTO deal_room_access_policies (
+    deal_room_id, tenant_id, workspace_id,
+    require_email, require_email_verification, require_password, password_hash,
+    require_nda, nda_template_id, nda_document_id,
+    watermark_enabled, download_enabled, screenshot_protection_enabled,
+    file_requests_enabled, index_file_enabled, qa_enabled,
+    allowed_emails, blocked_emails, configured, updated_by
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6, $7,
+    $8, $9, $10,
+    $11, $12, $13,
+    $14, $15, $16,
+    $17, $18, $19, $20
+)
+ON CONFLICT (deal_room_id) DO UPDATE SET
+    require_email = EXCLUDED.require_email,
+    require_email_verification = EXCLUDED.require_email_verification,
+    require_password = EXCLUDED.require_password,
+    password_hash = EXCLUDED.password_hash,
+    require_nda = EXCLUDED.require_nda,
+    nda_template_id = EXCLUDED.nda_template_id,
+    nda_document_id = EXCLUDED.nda_document_id,
+    watermark_enabled = EXCLUDED.watermark_enabled,
+    download_enabled = EXCLUDED.download_enabled,
+    screenshot_protection_enabled = EXCLUDED.screenshot_protection_enabled,
+    file_requests_enabled = EXCLUDED.file_requests_enabled,
+    index_file_enabled = EXCLUDED.index_file_enabled,
+    qa_enabled = EXCLUDED.qa_enabled,
+    allowed_emails = EXCLUDED.allowed_emails,
+    blocked_emails = EXCLUDED.blocked_emails,
+    configured = EXCLUDED.configured,
+    updated_by = EXCLUDED.updated_by,
+    updated_at = now()
+RETURNING deal_room_id, tenant_id, workspace_id, require_email, require_email_verification, require_password, password_hash, require_nda, nda_template_id, nda_document_id, watermark_enabled, download_enabled, screenshot_protection_enabled, file_requests_enabled, index_file_enabled, qa_enabled, allowed_emails, blocked_emails, configured, updated_by, created_at, updated_at
+`
+
+type UpsertDealRoomAccessPolicyParams struct {
+	DealRoomID                  pgtype.UUID
+	TenantID                    pgtype.UUID
+	WorkspaceID                 pgtype.UUID
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequirePassword             bool
+	PasswordHash                pgtype.Text
+	RequireNda                  bool
+	NdaTemplateID               pgtype.UUID
+	NdaDocumentID               pgtype.UUID
+	WatermarkEnabled            bool
+	DownloadEnabled             bool
+	ScreenshotProtectionEnabled bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
+	QaEnabled                   bool
+	AllowedEmails               []string
+	BlockedEmails               []string
+	Configured                  bool
+	UpdatedBy                   pgtype.UUID
+}
+
+func (q *Queries) UpsertDealRoomAccessPolicy(ctx context.Context, arg UpsertDealRoomAccessPolicyParams) (DealRoomAccessPolicy, error) {
+	row := q.db.QueryRow(ctx, upsertDealRoomAccessPolicy,
+		arg.DealRoomID,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.RequireEmail,
+		arg.RequireEmailVerification,
+		arg.RequirePassword,
+		arg.PasswordHash,
+		arg.RequireNda,
+		arg.NdaTemplateID,
+		arg.NdaDocumentID,
+		arg.WatermarkEnabled,
+		arg.DownloadEnabled,
+		arg.ScreenshotProtectionEnabled,
+		arg.FileRequestsEnabled,
+		arg.IndexFileEnabled,
+		arg.QaEnabled,
+		arg.AllowedEmails,
+		arg.BlockedEmails,
+		arg.Configured,
+		arg.UpdatedBy,
+	)
+	var i DealRoomAccessPolicy
+	err := row.Scan(
+		&i.DealRoomID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.RequireEmail,
+		&i.RequireEmailVerification,
+		&i.RequirePassword,
+		&i.PasswordHash,
+		&i.RequireNda,
+		&i.NdaTemplateID,
+		&i.NdaDocumentID,
+		&i.WatermarkEnabled,
+		&i.DownloadEnabled,
+		&i.ScreenshotProtectionEnabled,
+		&i.FileRequestsEnabled,
+		&i.IndexFileEnabled,
+		&i.QaEnabled,
+		&i.AllowedEmails,
+		&i.BlockedEmails,
+		&i.Configured,
+		&i.UpdatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const upsertDealRoomRagCorpus = `-- name: UpsertDealRoomRagCorpus :one
