@@ -296,7 +296,8 @@ export async function seedRealBackend(): Promise<SeedResult> {
 // ── Document upload + wait for ingestion ──────────────────────────
 export async function seedDocument(workspaceSlug: string): Promise<SeedDocument> {
   const buffer = fs.readFileSync(PDF_PATH);
-  const file = new File([buffer], "sample.pdf", { type: "application/pdf" });
+  const uniqueName = `sample-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`;
+  const file = new File([buffer], uniqueName, { type: "application/pdf" });
   const form = new FormData();
   form.append("file", file);
 
@@ -518,6 +519,97 @@ export async function waitForKnowledgeCorpusReady(
     }
   }
   throw new Error(`knowledge corpus not ready within ${timeoutS}s`);
+}
+
+// ── Document category tri-state helpers ───────────────────────────
+
+export async function fetchDocument(
+  workspaceSlug: string,
+  documentId: string,
+): Promise<{ id: string; category?: string; title?: string; status?: string }> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${documentId}`);
+  if (!res.ok) {
+    throw new Error(`fetch document failed: ${res.status} ${await res.text()}`);
+  }
+  return (await res.json()) as { id: string; category?: string; title?: string; status?: string };
+}
+
+export async function listDocumentsByCategory(
+  workspaceSlug: string,
+  category: "general" | "agreement" | "deal_room",
+): Promise<{ id: string; category?: string }[]> {
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/documents?category=${encodeURIComponent(category)}`,
+  );
+  if (!res.ok) {
+    throw new Error(`list documents failed: ${res.status} ${await res.text()}`);
+  }
+  const body = (await res.json()) as { data: { id: string; category?: string }[] };
+  return body.data;
+}
+
+/** POST /documents without waiting for ingestion — for contract/error tests. */
+export async function uploadDocumentRaw(
+  workspaceSlug: string,
+  opts?: { category?: string; filename?: string },
+): Promise<Response> {
+  const buffer = fs.readFileSync(PDF_PATH);
+  const uniqueName = opts?.filename ?? `sample-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`;
+  const form = new FormData();
+  form.append("file", new File([buffer], uniqueName, { type: "application/pdf" }));
+  if (opts?.category) form.append("category", opts.category);
+  return apiFetch(`/api/workspaces/${workspaceSlug}/documents`, { method: "POST", body: form });
+}
+
+export async function seedAgreementDocument(workspaceSlug: string): Promise<SeedDocument> {
+  const buffer = fs.readFileSync(PDF_PATH);
+  const uniqueName = `nda-${Date.now()}-${Math.random().toString(36).slice(2, 8)}.pdf`;
+  const file = new File([buffer], uniqueName, { type: "application/pdf" });
+  const form = new FormData();
+  form.append("file", file);
+  form.append("category", "agreement");
+
+  const uploadRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
+    method: "POST",
+    body: form,
+  });
+  if (!uploadRes.ok) {
+    throw new Error(`agreement upload failed: ${uploadRes.status} ${await uploadRes.text()}`);
+  }
+  const doc = (await uploadRes.json()) as { id: string; title: string; category?: string };
+  for (let i = 0; i < 30; i++) {
+    await sleep(1000);
+    const fetched = await fetchDocument(workspaceSlug, doc.id);
+    if (fetched.status === "ready") {
+      return { id: doc.id, title: doc.title, pageCount: 10 };
+    }
+    if (fetched.status === "failed") {
+      throw new Error(`agreement ingestion failed for doc ${doc.id}`);
+    }
+  }
+  throw new Error(`agreement document ${doc.id} did not become ready in 30s`);
+}
+
+export async function attachDocumentToRoom(
+  workspaceSlug: string,
+  roomId: string,
+  documentId: string,
+  folderPath = "/general",
+): Promise<Response> {
+  return apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents`, {
+    method: "POST",
+    body: JSON.stringify({ document_id: documentId, folder_path: folderPath }),
+  });
+}
+
+export async function detachDocumentFromRoom(
+  workspaceSlug: string,
+  roomId: string,
+  documentId: string,
+): Promise<Response> {
+  return apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents/${documentId}`, {
+    method: "DELETE",
+  });
 }
 
 function sleep(ms: number): Promise<void> {

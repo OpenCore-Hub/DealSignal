@@ -4,7 +4,8 @@ const TEST_PORT = 5175;
 
 export default defineConfig({
   testDir: "./e2e",
-  testIgnore: ["**/real-backend.spec.ts"],
+  // MSW mock e2e only — specs that hit a live API use playwright.real.config.ts.
+  testIgnore: ["**/real-backend.spec.ts", "**/*-real.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

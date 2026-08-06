@@ -52,6 +52,9 @@ export async function setupAuthenticatedPage(page: Page) {
   await resetMockState(page);
   await authenticate(page);
   await page.goto(`/${WORKSPACE_SLUG}/dashboard`);
+  // Full navigation reloads the document; wait until the worker controls fetch again
+  // or evaluate() can hit Vite's SPA HTML fallback (200) instead of MSW.
+  await waitForMsw(page);
 }
 
 /** Force MSW session ask to return JSON 429 before opening SSE (busy / RPM / quota). */

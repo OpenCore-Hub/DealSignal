@@ -1,9 +1,13 @@
 /**
- * Document operations — archive/unarchive, category, download URL.
- * Covers: POST archive/unarchive, PATCH category, GET download-url, GET document pages
+ * Document operations — archive/unarchive, category tri-state, download URL.
  */
 import { test, expect } from "@playwright/test";
-import { seedRealBackend, seedDocument, apiFetch } from "./real-helpers";
+import {
+  seedRealBackend,
+  seedDocument,
+  fetchDocument,
+  apiFetch,
+} from "./real-helpers";
 
 let workspaceSlug: string;
 let docId: string;
@@ -17,7 +21,6 @@ test.describe("Document operations (real backend)", () => {
   });
 
   test("archives and unarchives a document", async () => {
-    // Archive
     const archiveRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/archive`, {
       method: "POST",
     });
@@ -25,7 +28,6 @@ test.describe("Document operations (real backend)", () => {
     const archived = (await archiveRes.json()) as { status: string };
     expect(archived.status).toBe("archived");
 
-    // Unarchive
     const unarchiveRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/unarchive`, {
       method: "POST",
     });
@@ -34,38 +36,42 @@ test.describe("Document operations (real backend)", () => {
     expect(unarchived.status).toBe("ready");
   });
 
-  test("updates document category", async () => {
+  test("rejects invalid category on PATCH", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/category`, {
       method: "PATCH",
-      body: JSON.stringify({ category: "pitch_deck" }),
+      body: JSON.stringify({ category: "deal_room" }),
     });
-    // May succeed or return 400 if category values are enum-restricted
-    const ok = res.ok || res.status === 400;
-    expect(ok).toBe(true);
+    expect(res.status).toBe(400);
+  });
 
-    // Verify category persisted if successful
-    if (res.ok) {
-      const getRes = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}`, {
-      });
-      const doc = (await getRes.json()) as { category?: string };
-      if (doc.category) {
-        expect(doc.category).toBe("pitch_deck");
-      }
-    }
+  test("marks general PDF as agreement and back to general", async () => {
+    const toAgreement = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/category`, {
+      method: "PATCH",
+      body: JSON.stringify({ category: "agreement" }),
+    });
+    expect(toAgreement.ok).toBe(true);
+    let fetched = await fetchDocument(workspaceSlug, docId);
+    expect(fetched.category).toBe("agreement");
+
+    const toGeneral = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/category`, {
+      method: "PATCH",
+      body: JSON.stringify({ category: "general" }),
+    });
+    expect(toGeneral.ok).toBe(true);
+    fetched = await fetchDocument(workspaceSlug, docId);
+    expect(fetched.category).toBe("general");
   });
 
   test("gets document download URL", async () => {
-    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/download-url`, {
-    });
+    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/download-url`, {});
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { download_url: string; filename: string };
     expect(body.download_url).toBeTruthy();
-    expect(body.filename).toContain("sample.pdf");
+    expect(body.filename).toMatch(/\.pdf$/i);
   });
 
   test("gets document pages", async () => {
-    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/pages`, {
-    });
+    const res = await apiFetch(`/api/workspaces/${workspaceSlug}/documents/${docId}/pages`, {});
     expect(res.ok).toBe(true);
     const body = (await res.json()) as { total: number; pages: unknown[] };
     expect(body.total).toBeGreaterThan(0);
@@ -83,22 +89,26 @@ test.describe("Document operations (real backend)", () => {
     expect(body.page_number).toBe(1);
   });
 
-  test("lists documents with filters", async () => {
-    // Without filter
-    const resAll = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {
-    });
+  test("lists documents with tri-state category filters", async () => {
+    const resAll = await apiFetch(`/api/workspaces/${workspaceSlug}/documents`, {});
     expect(resAll.ok).toBe(true);
     const all = (await resAll.json()) as { data: unknown[] };
     expect(all.data.length).toBeGreaterThan(0);
 
-    // With category filter
-    const resCategory = await apiFetch(`/api/workspaces/${workspaceSlug}/documents?category=pitch_deck`, {
-    });
-    expect(resCategory.ok).toBe(true);
+    for (const category of ["general", "agreement", "deal_room"] as const) {
+      const res = await apiFetch(
+        `/api/workspaces/${workspaceSlug}/documents?category=${category}`,
+      );
+      expect(res.ok).toBe(true);
+      const body = (await res.json()) as { data: { category?: string }[] };
+      for (const row of body.data) {
+        if (row.category) {
+          expect(row.category).toBe(category);
+        }
+      }
+    }
 
-    // With status filter
-    const resFilter = await apiFetch(`/api/workspaces/${workspaceSlug}/documents?filter=recent`, {
-    });
+    const resFilter = await apiFetch(`/api/workspaces/${workspaceSlug}/documents?filter=recent`, {});
     expect(resFilter.ok).toBe(true);
   });
 });
