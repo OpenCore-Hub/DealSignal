@@ -15,6 +15,8 @@ const mockFns = vi.hoisted(() => ({
   getSignals: vi.fn(),
   updateActionStatus: vi.fn(),
   fetchSignals: vi.fn(),
+  navigate: vi.fn(),
+  storeActions: [] as ActionItem[],
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -24,7 +26,7 @@ vi.mock("@/lib/api", () => ({
 vi.mock("@/stores/signalStore", () => ({
   useSignalStore: () => ({
     signals: [] as Signal[],
-    actions: [] as ActionItem[],
+    actions: mockFns.storeActions,
     fetchSignals: mockFns.fetchSignals,
     updateActionStatus: mockFns.updateActionStatus,
   }),
@@ -32,7 +34,11 @@ vi.mock("@/stores/signalStore", () => ({
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
-  return { ...actual, useParams: () => ({ workspaceSlug: "acme" }) };
+  return {
+    ...actual,
+    useParams: () => ({ workspaceSlug: "acme" }),
+    useNavigate: () => mockFns.navigate,
+  };
 });
 
 function makeStats(): DashboardStats {
@@ -169,6 +175,7 @@ async function renderPage(waitForLoad = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockFns.storeActions = [];
   mockFns.getDashboardStats.mockResolvedValue(makeStats());
   mockFns.getDealRooms.mockResolvedValue({ data: [makeRoom()] });
   mockFns.getInsightsOverview.mockResolvedValue(makeInsights());
@@ -214,5 +221,66 @@ describe("DashboardPage", () => {
     await waitFor(() => {
       expect(mockFns.getDashboardStats).toHaveBeenCalledTimes(2);
     });
+  });
+
+  it("routes document and deal-room share todos to isolated surfaces", async () => {
+    const now = "2026-06-20T18:00:00Z";
+    mockFns.storeActions = [
+      {
+        id: "act-doc",
+        sourceType: "link_access_request",
+        sourceId: "link-doc",
+        title: "Approve access request from doc@example.com for Pitch",
+        impact: "high",
+        dueAt: "2026-06-21T18:00:00Z",
+        status: "pending",
+        actionType: "approve",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "act-room-link",
+        sourceType: "deal_room_link_access_request",
+        sourceId: "link-room",
+        targetId: "room-9",
+        title: "Approve deal room share access from room@example.com for Seed",
+        impact: "high",
+        dueAt: "2026-06-21T18:00:00Z",
+        status: "pending",
+        actionType: "approve",
+        createdAt: now,
+        updatedAt: now,
+      },
+      {
+        id: "act-room-member",
+        sourceType: "room_access_request",
+        sourceId: "room-9",
+        title: "Approve room access request from member@example.com for Seed",
+        impact: "high",
+        dueAt: "2026-06-21T18:00:00Z",
+        status: "pending",
+        actionType: "approve",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Approve access request from doc@example.com/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Approve access request from doc@example.com/i));
+    expect(mockFns.navigate).toHaveBeenCalledWith(
+      "/acme/documents?tab=shared&linkId=link-doc",
+    );
+
+    fireEvent.click(screen.getByText(/Approve deal room share access from room@example.com/i));
+    expect(mockFns.navigate).toHaveBeenCalledWith(
+      "/acme/deal-rooms/room-9?tab=access&linkId=link-room",
+    );
+
+    fireEvent.click(screen.getByText(/Approve room access request from member@example.com/i));
+    expect(mockFns.navigate).toHaveBeenCalledWith("/acme/deal-rooms/room-9?tab=access");
   });
 });

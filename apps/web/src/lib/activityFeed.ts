@@ -97,9 +97,9 @@ export interface ActivityGroup {
 }
 
 export function buildActivityGroups(
-  activities: RecentActivityItem[]
+  activities: RecentActivityItem[] | null | undefined
 ): ActivityGroup[] {
-  return groupByDate(activities).map((g) => ({
+  return groupByDate(activities ?? []).map((g) => ({
     key: g.key,
     items: combineAdjacent(g.activities),
   }));

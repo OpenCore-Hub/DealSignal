@@ -12,7 +12,7 @@ import { api, type DashboardStats, type InsightsOverview } from "@/lib/api";
 import { useSignalStore } from "@/stores/signalStore";
 import { sortSignals } from "@/lib/sortSignals";
 import type { ActionItem, DealRoom } from "@/types";
-import { documentsSharePath } from "@/lib/documentsSharePath";
+import { actionNavigatePath } from "@/lib/actionNavigation";
 import { MetricsCards } from "./MetricsCards";
 import { AttentionZone } from "./AttentionZone";
 import { ActiveRoomsSection } from "./ActiveRoomsSection";
@@ -46,7 +46,7 @@ export function DashboardPage() {
       const [statsRes, signalsRes, roomsRes, insightsRes] = await Promise.allSettled([
         api.getDashboardStats(),
         fetchSignals(),
-        api.getDealRooms(),
+        api.getDealRooms({ page: 1, page_size: 12 }),
         api.getInsightsOverview(),
       ]);
 
@@ -70,23 +70,9 @@ export function DashboardPage() {
   const sortedSignals = useMemo(() => sortSignals(signals), [signals]);
 
   const handleActionClick = (action: ActionItem) => {
-    if (!workspaceSlug || !action.sourceType || !action.sourceId) return;
-    switch (action.sourceType) {
-      case "link_access_request":
-        // Approve inbox lives on Document Library → Share; sourceId is the link id.
-        navigate(documentsSharePath(workspaceSlug, { linkId: action.sourceId }));
-        break;
-      case "link_question":
-      case "uploaded_file":
-      case "expiring_link":
-        navigate(`/${workspaceSlug}/links/${action.sourceId}`);
-        break;
-      case "room_access_request":
-      case "room_nda":
-      case "expiring_room":
-        navigate(`/${workspaceSlug}/deal-rooms/${action.sourceId}`);
-        break;
-    }
+    if (!workspaceSlug) return;
+    const path = actionNavigatePath(workspaceSlug, action);
+    if (path) navigate(path);
   };
 
   if (error) {
@@ -164,7 +150,7 @@ export function DashboardPage() {
           />
 
           <RecentActivityFeed
-            activities={stats.recentActivities}
+            activities={stats.recentActivities ?? []}
             workspaceSlug={slug}
           />
         </div>
@@ -178,7 +164,7 @@ export function DashboardPage() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <HeatMap links={stats.recentLinks} />
+              <HeatMap links={stats.recentLinks ?? []} />
             </CardContent>
           </Card>
 
