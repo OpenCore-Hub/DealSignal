@@ -336,7 +336,9 @@ func (s *Server) registerRoutes() error {
 					),
 				)
 			}
-			knowledgeHandler := knowledge.NewHandler(knowledgeSvc, knowledgeOpts...)
+			knowledgeHandler := knowledge.NewHandler(knowledgeSvc,
+				append(knowledgeOpts, knowledge.WithHTTPWriteTimeout(s.cfg.HTTPWriteTimeout))...,
+			)
 			if knowledgeSvc.Enabled() {
 				knowledgeWorker := knowledge.NewWorker(knowledgeSvc, 3*time.Second)
 				s.registerWorker(knowledgeWorker)

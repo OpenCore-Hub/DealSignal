@@ -84,6 +84,12 @@ func New(cfg *config.Config) *Server {
 // NewWithDB creates a configured HTTP server with a database connection.
 func NewWithDB(cfg *config.Config, dbPool DBPool) *Server {
 	logger.Init(cfg.LogLevel)
+	if cfg.HTTPReadTimeout <= 0 {
+		cfg.HTTPReadTimeout = 30 * time.Second
+	}
+	if cfg.HTTPWriteTimeout <= 0 {
+		cfg.HTTPWriteTimeout = config.DefaultHTTPWriteTimeout()
+	}
 
 	s := &Server{cfg: cfg, dbPool: dbPool}
 	s.shutdownCtx, s.cancelShutdown = context.WithCancel(context.Background())
@@ -145,8 +151,8 @@ func (s *Server) Run() error {
 	srv := &http.Server{
 		Addr:           fmt.Sprintf("0.0.0.0:%s", s.cfg.Port),
 		Handler:        s.engine,
-		ReadTimeout:    30 * time.Second,
-		WriteTimeout:   30 * time.Second,
+		ReadTimeout:    s.cfg.HTTPReadTimeout,
+		WriteTimeout:   s.cfg.HTTPWriteTimeout,
 		IdleTimeout:    120 * time.Second,
 		MaxHeaderBytes: 1 << 20,
 	}

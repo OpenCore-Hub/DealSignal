@@ -88,6 +88,9 @@ services:
     environment:
       # Always listen on 8080 inside the container; host publish via API_HOST_PORT.
       PORT: "8080"
+      # Long-running knowledge SSE asks; must exceed DOCLING_RAG_HTTP_TIMEOUT_MS + headroom.
+      HTTP_WRITE_TIMEOUT_SECONDS: ${HTTP_WRITE_TIMEOUT_SECONDS:-210}
+      HTTP_READ_TIMEOUT_SECONDS: ${HTTP_READ_TIMEOUT_SECONDS:-30}
       DATABASE_URL: postgres://${POSTGRES_USER:-dealsignal}:${POSTGRES_PASSWORD:-dealsignal}@postgres:5432/${POSTGRES_DB:-dealsignal}?sslmode=disable
       REDIS_URL: redis:6379
       S3_ENDPOINT: http://minio:9000

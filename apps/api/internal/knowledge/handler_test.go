@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/gin-gonic/gin"
 )
 
@@ -53,6 +54,17 @@ func testKnowledgeRouter(h *Handler) *gin.Engine {
 	api := r.Group("/api/workspaces/:workspaceSlug")
 	h.RegisterWorkspaceRoutes(api)
 	return r
+}
+
+func TestHandlerStreamWriteBudgetUsesHTTPWriteTimeout(t *testing.T) {
+	h := &Handler{
+		httpWriteTimeout: 300 * time.Second,
+	}
+	got := h.streamWriteBudget()
+	want := config.StreamWriteBudget(300*time.Second, 0)
+	if got != want {
+		t.Fatalf("budget=%v want=%v", got, want)
+	}
 }
 
 func TestQuerySessionStreamSSEDone(t *testing.T) {
@@ -111,6 +123,51 @@ func TestQuerySessionStreamSSEDone(t *testing.T) {
 		if !strings.Contains(out, want) {
 			t.Fatalf("missing %q in\n%s", want, out)
 		}
+	}
+}
+
+func TestQuerySessionStreamClientCancelEmitsError(t *testing.T) {
+	admission := newMemoryAskAdmission(0)
+	block := make(chan struct{})
+	h := &Handler{
+		admission: admission,
+		runner: stubSessionRunner{fn: func(
+			ctx context.Context, _, _, _ string, _ SessionQueryRequest, _ string,
+		) (SessionQueryResponse, error) {
+			<-block
+			return SessionQueryResponse{}, ctx.Err()
+		}},
+	}
+	r := testKnowledgeRouter(h)
+
+	reqCtx, cancelClient := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost,
+		"/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query/stream",
+		strings.NewReader(`{"query":"cancel me","clientRequestId":"cr-cancel"}`),
+	)
+	req = req.WithContext(reqCtx)
+	req.Header.Set("Content-Type", "application/json")
+
+	done := make(chan struct{})
+	var body string
+	go func() {
+		w := httptest.NewRecorder()
+		r.ServeHTTP(w, req)
+		body = w.Body.String()
+		close(done)
+	}()
+
+	time.Sleep(30 * time.Millisecond)
+	cancelClient()
+	close(block)
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("handler did not exit")
+	}
+	if !strings.Contains(body, "event: error") || !strings.Contains(body, "client_cancelled") {
+		t.Fatalf("expected SSE client_cancelled error, got:\n%s", body)
 	}
 }
 

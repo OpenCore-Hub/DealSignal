@@ -131,6 +131,9 @@ type Config struct {
 	MetricsEnabled     bool
 	PprofEnabled       bool
 
+	HTTPReadTimeout  time.Duration
+	HTTPWriteTimeout time.Duration
+
 	// TableIngest holds TABLE_INGEST_* spreadsheet chunking flags.
 	TableIngest TableIngestConfig
 
@@ -256,6 +259,16 @@ func Load() (*Config, error) {
 	}
 	cfg.TableIngest = TableIngestFromEnv(cfg.AppEnv)
 	cfg.DoclingRAG = DoclingRAGFromEnv()
+	cfg.HTTPReadTimeout = time.Duration(getEnvInt("HTTP_READ_TIMEOUT_SECONDS", 30)) * time.Second
+	writeOverrideSec := getEnvInt("HTTP_WRITE_TIMEOUT_SECONDS", 0)
+	minWrite := LongRunningWriteDeadline(cfg.DoclingRAG.HTTPTimeout)
+	if writeOverrideSec > 0 && time.Duration(writeOverrideSec)*time.Second < minWrite {
+		fmt.Fprintf(os.Stderr,
+			"warning: HTTP_WRITE_TIMEOUT_SECONDS=%d is below the knowledge minimum %s; clamping to minimum\n",
+			writeOverrideSec, minWrite,
+		)
+	}
+	cfg.HTTPWriteTimeout = resolveHTTPWriteTimeout(cfg.DoclingRAG, writeOverrideSec)
 
 	if cfg.DatabaseURL == "" {
 		return nil, fmt.Errorf("DATABASE_URL is required")

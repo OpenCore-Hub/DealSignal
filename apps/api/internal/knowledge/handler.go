@@ -2,7 +2,6 @@ package knowledge
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
@@ -46,6 +46,7 @@ type Handler struct {
 	followUpAdmission AskAdmission
 	quota             answersQuotaChecker
 	corpus            corpusReadyChecker
+	httpWriteTimeout  time.Duration
 }
 
 // HandlerOption configures NewHandler.
@@ -67,6 +68,27 @@ func WithFollowUpAdmission(a AskAdmission) HandlerOption {
 			h.followUpAdmission = a
 		}
 	}
+}
+
+// WithHTTPWriteTimeout sets the resolved server write deadline for SSE flush budgets.
+func WithHTTPWriteTimeout(d time.Duration) HandlerOption {
+	return func(h *Handler) {
+		if d > 0 {
+			h.httpWriteTimeout = d
+		}
+	}
+}
+
+func (h *Handler) streamWriteBudget() time.Duration {
+	server := h.httpWriteTimeout
+	if server <= 0 {
+		server = config.DefaultHTTPWriteTimeout()
+	}
+	upstream := time.Duration(0)
+	if h.service != nil {
+		upstream = h.service.doclingTimeout()
+	}
+	return config.StreamWriteBudget(server, upstream)
 }
 
 // NewHandler constructs a knowledge handler.
@@ -264,14 +286,15 @@ func (h *Handler) QuerySession(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	if err := h.admitAsk(c.Request.Context(), roomID, userID, "json"); err != nil {
+	lease, err := h.acquireAskLease(c, roomID, userID, "json")
+	if err != nil {
 		writeKnowledgeError(c, err)
 		return
 	}
-	defer h.releaseAsk(c.Request.Context(), roomID, userID)
+	defer lease.release()
 
 	res, err := h.runner.runSessionQuery(
-		c.Request.Context(),
+		lease.workCtx,
 		roomID,
 		wsID,
 		userID,
@@ -306,17 +329,18 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 		writeKnowledgeError(c, err)
 		return
 	}
-	if err := h.admitAsk(c.Request.Context(), roomID, userID, "stream"); err != nil {
-		writeKnowledgeError(c, err)
-		return
-	}
-	defer h.releaseAsk(c.Request.Context(), roomID, userID)
-
-	flusher, ok := c.Writer.(http.Flusher)
-	if !ok {
+	if _, ok := c.Writer.(http.Flusher); !ok {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "streaming not supported"})
 		return
 	}
+	lease, err := h.acquireAskLease(c, roomID, userID, "stream")
+	if err != nil {
+		writeKnowledgeError(c, err)
+		return
+	}
+	defer lease.release()
+
+	flusher := c.Writer.(http.Flusher)
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -324,75 +348,36 @@ func (h *Handler) QuerySessionStream(c *gin.Context) {
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Status(http.StatusOK)
 
-	writeEvent := func(name string, payload any) {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			logger.ErrorCtx(c.Request.Context(), "knowledge stream marshal", err)
-			return
-		}
-		fmt.Fprintf(c.Writer, "event: %s\ndata: %s\n\n", name, data)
-		flusher.Flush()
-	}
+	stream := newSessionStream(c, flusher, h.streamWriteBudget())
+	stream.begin()
 
-	writeEvent("phase", streamPhasePayload{Phase: "retrieving"})
-
-	res, err := h.runner.runSessionQuery(
-		c.Request.Context(),
-		roomID,
-		wsID,
-		userID,
-		req,
-		"stream",
-	)
-	if err != nil {
-		payload := streamErrorFrom(err)
-		recordKnowledgeQAStreamError(payload.Code)
-		writeEvent("error", payload)
+	if !stream.writeEvent("phase", streamPhasePayload{Phase: "retrieving"}) {
+		recordKnowledgeQAStreamError("client_cancelled")
+		stream.writeEvent("error", streamErrorFrom(errStreamClientCancelled))
 		return
 	}
 
-	// Leave retrieving once the audited answer exists (philosophy §5).
-	// Attach rewrite audit here so FE can show “searched as” during token*.
-	if req.Answer || strings.TrimSpace(res.Answer) != "" {
-		gen := streamPhasePayload{Phase: "generating"}
-		if res.Turn.RewriteApplied {
-			gen.RewriteApplied = true
-			gen.RetrieveQuery = res.Turn.RetrieveQuery
+	queryHandle := stream.startSessionQuery(lease, h.runner, roomID, wsID, userID, req)
+	defer queryHandle.waitDone()
+
+	res, queryErr := stream.waitForSessionQuery(queryHandle)
+	if errors.Is(queryErr, errStreamClientCancelled) {
+		recordKnowledgeQAStreamError("client_cancelled")
+		stream.writeEvent("error", streamErrorFrom(queryErr))
+		return
+	}
+	if queryErr != nil {
+		payload := streamErrorFrom(queryErr)
+		recordKnowledgeQAStreamError(payload.Code)
+		if !stream.writeEvent("error", payload) {
+			recordKnowledgeQAStreamError("client_cancelled")
 		}
-		writeEvent("phase", gen)
+		return
 	}
 
-	hits := res.Turn.Hits
-	if hits == nil {
-		hits = []QueryHit{}
+	if !stream.writeAuditedResult(req, res) {
+		recordKnowledgeQAStreamError("client_cancelled")
 	}
-	// Emit sources only after refuse classification (shouldEmitGroundedSources).
-	if shouldEmitGroundedSources(res.Turn) {
-		writeEvent("sources", streamSourcesPayload{Results: hits, Grounded: true})
-	}
-
-	// Token* before done so liveTurn can grow; done still carries the full answer.
-	if shouldEmitAnswerTokens(res.Answer, res.Turn) {
-		for _, chunk := range answerTokenChunks(res.Answer, defaultAnswerTokenRunes) {
-			if err := c.Request.Context().Err(); err != nil {
-				recordKnowledgeQAStreamError("client_cancelled")
-				return
-			}
-			writeEvent("token", streamTokenPayload{Text: chunk})
-		}
-	}
-
-	writeEvent("done", streamDonePayload{
-		SessionID:    res.SessionID,
-		Turn:         res.Turn,
-		Query:        res.Query,
-		Mode:         res.Mode,
-		Answer:       res.Answer,
-		Results:      res.Results,
-		Refused:      res.Turn.Refused,
-		ResultStatus: res.Turn.ResultStatus,
-		SessionState: res.SessionState,
-	})
 }
 
 // ListSessions returns a keyset page of session summaries for the room.

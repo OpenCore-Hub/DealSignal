@@ -255,8 +255,25 @@ if ! grep -q 'event: phase' "$STREAM_FILE" || ! grep -q 'event: done' "$STREAM_F
   echo ""
   exit 1
 fi
+if grep -q ': keepalive' "$STREAM_FILE"; then
+  echo -n "(keepalive present) "
+fi
 echo "ok frames=$(grep -c '^event:' "$STREAM_FILE" || true)"
 rm -f "$STREAM_FILE"
+
+echo -n "[sse idempotent replay] "
+REPLAY_STREAM=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \
+  "$BASE_URL/api/workspaces/$WS_SLUG/deal-rooms/$ROOM_ID/knowledge/sessions/query/stream" \
+  -H "Content-Type: application/json" \
+  -H "Accept: text/event-stream" \
+  -d "{\"sessionId\":\"$SESSION_ID\",\"query\":\"$QUESTION\",\"answer\":true,\"top_k\":8,\"clientRequestId\":\"$CLIENT_REQ\"}")
+REPLAY_STREAM_TURN=$(echo "$REPLAY_STREAM" | awk '/^data: /{sub(/^data: /,""); last=$0} END{print last}' | jq -r '.turn.id // empty')
+if [[ -z "$REPLAY_STREAM_TURN" ]] || [[ "$REPLAY_STREAM_TURN" != "$TURN_ID" ]]; then
+  echo "ERROR: stream replay did not return original turn (got=$REPLAY_STREAM_TURN want=$TURN_ID)"
+  echo "$REPLAY_STREAM" | head -c 400
+  exit 1
+fi
+echo "ok turn=$REPLAY_STREAM_TURN"
 
 echo -n "[follow-ups] "
 FU_CODE=$(curl -sS -o /tmp/kqa-fu.json -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST \

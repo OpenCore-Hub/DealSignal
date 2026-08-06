@@ -1,6 +1,7 @@
 package knowledge
 
 import (
+	"context"
 	"errors"
 	"net/http"
 )
@@ -34,6 +35,10 @@ func mapKnowledgeError(err error) knowledgeErrorBody {
 		return knowledgeErrorBody{http.StatusTooManyRequests, "knowledge_query_quota_exceeded", "answer quota for this plan is exhausted"}
 	case errors.Is(err, ErrQueryQuotaCheckFailed):
 		return knowledgeErrorBody{http.StatusServiceUnavailable, "knowledge_query_quota_unavailable", "answer quota could not be verified"}
+	case errors.Is(err, errStreamClientCancelled):
+		return knowledgeErrorBody{http.StatusOK, "client_cancelled", "client disconnected"}
+	case errors.Is(err, context.Canceled):
+		return knowledgeErrorBody{http.StatusOK, "client_cancelled", "client disconnected"}
 	default:
 		return knowledgeErrorBody{http.StatusInternalServerError, "internal_error", "internal error"}
 	}

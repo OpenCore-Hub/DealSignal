@@ -172,9 +172,17 @@ func (s *Service) WithPreviewPDFConverter(c PreviewPDFConverter) *Service {
 	return s
 }
 
-// Enabled reports whether external RAG is configured.
+// Enabled reports whether docling-rag integration is configured.
 func (s *Service) Enabled() bool {
 	return s != nil && s.client != nil && s.client.Enabled()
+}
+
+// doclingTimeout returns upstream RAG HTTP timeout for long-running write budgets.
+func (s *Service) doclingTimeout() time.Duration {
+	if s == nil {
+		return 0
+	}
+	return s.cfg.HTTPTimeout
 }
 
 // QuotaPair is used/limit for one entitlement dimension.
