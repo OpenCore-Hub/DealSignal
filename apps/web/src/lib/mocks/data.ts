@@ -85,6 +85,49 @@ export const mockDocuments: Document[] = [
     createdAt: "2026-05-10T10:00:00Z",
     updatedAt: "2026-05-10T10:00:00Z",
   },
+  {
+    id: "doc_nda_1",
+    title: "Standard Mutual NDA",
+    sourceType: "pdf",
+    fileName: "Standard Mutual NDA.pdf",
+    fileType: "pdf",
+    fileSize: 420_000,
+    pageCount: 6,
+    status: "ready",
+    category: "agreement",
+    createdAt: "2026-06-01T09:00:00Z",
+    updatedAt: "2026-06-01T09:05:00Z",
+  },
+];
+
+/** Workspace NDA template row matching GET /nda/templates. */
+export type MockNdaTemplate = {
+  id: string;
+  name: string;
+  source_document_id: string;
+  content_sha256: string;
+  require_signer_name: boolean;
+  status: string;
+  response_count: number;
+  link_count: number;
+  created_at: string;
+  updated_at: string;
+};
+
+/** Workspace NDA templates (sourced from agreement documents). */
+export const mockNdaTemplates: MockNdaTemplate[] = [
+  {
+    id: "nda_tpl_1",
+    name: "Standard Mutual NDA",
+    source_document_id: "doc_nda_1",
+    content_sha256: "mock-nda-sha256",
+    require_signer_name: true,
+    status: "active",
+    response_count: 0,
+    link_count: 0,
+    created_at: "2026-06-01T09:10:00Z",
+    updated_at: "2026-06-01T09:10:00Z",
+  },
 ];
 
 export const mockLinks: Link[] = [
@@ -105,7 +148,6 @@ export const mockLinks: Link[] = [
     permissionType: "email",
     isBundle: false,
     qaEnabled: false,
-    dealRoomId: "room_1",
     documents: [
       {
         id: "doc_1",
@@ -116,6 +158,26 @@ export const mockLinks: Link[] = [
         fileSize: 4_200_000,
       },
     ],
+  },
+  {
+    id: "link_room_1",
+    // Deal-room share: no documentId (room-scoped), must not appear in Document Library.
+    documentIds: [],
+    folderPaths: [],
+    documentTitle: "Acme Seed Data Room",
+    shortUrl: "https://invest.acme.capital/r/RoomShare1",
+    accessCount: 8,
+    heatLevel: "warm",
+    createdAt: "2026-06-18T12:00:00Z",
+    expiresAt: "2026-08-18T12:00:00Z",
+    isActive: true,
+    avgDurationSeconds: 240,
+    lastViewedAt: "2026-06-20T16:00:00Z",
+    permissionType: "email",
+    isBundle: false,
+    qaEnabled: true,
+    dealRoomId: "room_1",
+    documents: [],
   },
   {
     id: "link_visitor_ask_smoke",
@@ -199,14 +261,24 @@ export const mockLinks: Link[] = [
 
 export const mockLinkAccessRequests: LinkAccessRequest[] = [
   {
-    id: "lar_1",
+    id: "lar_doc_1",
     link_id: "link_1",
-    email: "partner@example.com",
-    signer_name: "Alex Partner",
-    reason: "Need access to review the data room materials",
+    email: "doc-share-applicant@example.com",
+    signer_name: "Doc Applicant",
+    reason: "Need access to the pitch deck",
     status: "pending",
     created_at: "2026-06-20T12:00:00Z",
     updated_at: "2026-06-20T12:00:00Z",
+  },
+  {
+    id: "lar_room_1",
+    link_id: "link_room_1",
+    email: "room-share-applicant@example.com",
+    signer_name: "Room Applicant",
+    reason: "Need access via the deal-room share link",
+    status: "pending",
+    created_at: "2026-06-20T12:30:00Z",
+    updated_at: "2026-06-20T12:30:00Z",
   },
 ];
 
@@ -872,6 +944,44 @@ export const mockActionItems: ActionItem[] = [
     createdAt: "2026-06-20T18:00:00Z",
     updatedAt: "2026-06-20T18:00:00Z",
   },
+  // Surface-isolated operational todos (dashboard deep-link contract).
+  {
+    id: "act_doc_share_access",
+    sourceType: "link_access_request",
+    sourceId: "link_1",
+    title: "Approve access request from doc-share-applicant@example.com for Acme Seed Round Pitch Deck",
+    impact: "high",
+    dueAt: "2026-06-21T20:00:00Z",
+    status: "pending",
+    actionType: "approve",
+    createdAt: "2026-06-20T12:00:00Z",
+    updatedAt: "2026-06-20T12:00:00Z",
+  },
+  {
+    id: "act_room_share_access",
+    sourceType: "deal_room_link_access_request",
+    sourceId: "link_room_1",
+    targetId: "room_1",
+    title: "Approve deal room share access from room-share-applicant@example.com for Acme Seed Data Room",
+    impact: "high",
+    dueAt: "2026-06-21T20:30:00Z",
+    status: "pending",
+    actionType: "approve",
+    createdAt: "2026-06-20T12:30:00Z",
+    updatedAt: "2026-06-20T12:30:00Z",
+  },
+  {
+    id: "act_room_member_access",
+    sourceType: "room_access_request",
+    sourceId: "room_1",
+    title: "Approve room access request from marcus@boldstart.vc for Startup Fundraising",
+    impact: "high",
+    dueAt: "2026-06-21T21:00:00Z",
+    status: "pending",
+    actionType: "approve",
+    createdAt: "2026-06-20T13:00:00Z",
+    updatedAt: "2026-06-20T13:00:00Z",
+  },
 ];
 
 const mockRiskAlerts: RiskAlert[] = mockSignals
@@ -893,17 +1003,41 @@ const mockRiskAlerts: RiskAlert[] = mockSignals
     createdAt: s.createdAt,
   }));
 
+const mockRecentActivities = [
+  {
+    id: "ra_visit_1",
+    eventType: "visit" as const,
+    actor: "sarah.chen@horizon.vc",
+    objectType: "document" as const,
+    objectName: "Acme Seed Round Pitch Deck",
+    objectId: "doc_1",
+    createdAt: "2026-08-05T08:00:00Z",
+  },
+  {
+    id: "ra_upload_1",
+    eventType: "upload" as const,
+    actor: "yangqx401@gmail.com",
+    objectType: "document" as const,
+    objectName: "YourCompany_Standard_NDA_CN.pdf",
+    objectId: "doc_nda_1",
+    createdAt: "2026-08-05T07:55:00Z",
+  },
+];
+
 export function getMockDashboardStats() {
   return {
     hotCount: mockHeatAlerts.filter((a) => a.heatLevel === "hot").length,
     warmCount: mockHeatAlerts.filter((a) => a.heatLevel === "warm").length,
     coldCount: mockLinks.filter((l) => l.heatLevel === "cold").length,
+    weeklyVisitors: 12,
+    pendingQuestions: 2,
     recentDocuments: mockDocuments.slice(0, 5),
     recentLinks: mockLinks.slice(0, 5),
     heatAlerts: mockHeatAlerts,
     riskAlerts: mockRiskAlerts,
     signals: mockSignals,
     actionItems: mockActionItems,
+    recentActivities: mockRecentActivities,
   };
 }
 

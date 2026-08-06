@@ -218,7 +218,15 @@ jobs:
           done
           exit 1
 
+      - name: Verify document category migration 128
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '128_document_category_deal_room.up.sql';" | grep -q 1
+
       - name: Run E2E tests
+        env:
+          REAL_API_BASE_URL: http://localhost:8080
         run: pnpm test:e2e:real
 
       - name: Upload Playwright report
@@ -262,6 +270,15 @@ jobs:
           done
           exit 1
 
+      - name: Verify document category migration 128
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '128_document_category_deal_room.up.sql';" | grep -q 1
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'documents'::regclass AND conname = 'chk_documents_category';" \
+            | grep -q deal_room
+
       - name: Run backend E2E
         run: PDF=../web/e2e/fixtures/sample.pdf ./e2e-test.sh
 
@@ -299,6 +316,12 @@ jobs:
             sleep 2
           done
           exit 1
+
+      - name: Verify document category migration 128
+        run: |
+          cd apps/api
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '128_document_category_deal_room.up.sql';" | grep -q 1
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6

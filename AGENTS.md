@@ -38,7 +38,9 @@ Backend:
 cd apps/api
 go test ./...
 go test ./internal/link -tags=integration  # requires PostgreSQL (default: localhost:5435)
-./e2e-test.sh      # P0 backend E2E
+./e2e-test.sh      # P0 backend E2E (includes document category tri-state gate)
+BASE_URL=http://localhost:8090 ./e2e-test.sh  # against local Docker API on 8090
+./e2e-staging-verify.sh  # staging smoke (set BASE_URL=https://staging-api...)
 BASE_URL=http://localhost:8090 ./e2e-knowledge.sh  # deal-room knowledge Q&A (needs docling-rag; KNOWLEDGE_QA_FOLLOWUP_RPM gates chip LLM)
 # Ceiling freeze gates: docs/designs/plan/deal-room-knowledge-qa-ceiling.md §9
 ```
@@ -52,6 +54,7 @@ pnpm typecheck
 pnpm test
 pnpm test:e2e          # MSW mocks
 ./e2e-real-backend.sh  # real backend
+REAL_API_BASE_URL=http://localhost:8090 pnpm test:e2e:category-real  # document category tri-state API gate
 REAL_API_BASE_URL=http://localhost:8090 ./e2e-knowledge-real.sh  # knowledge desk UI smoke
 ```
 

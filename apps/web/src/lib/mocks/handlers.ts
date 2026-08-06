@@ -3,6 +3,7 @@ import type {
   ActionItem,
   Contact,
   DealRoom,
+  DealRoomAccessPolicy,
   DealRoomDocumentItem,
   DealRoomFolder,
   DealRoomFolderDocs,
@@ -22,6 +23,7 @@ import {
   mockHeatAlerts,
   mockLinks,
   mockLinkAccessRequests,
+  mockNdaTemplates,
   mockPageAnalytics,
   mockSignals,
   mockSuggestions,
@@ -92,6 +94,8 @@ const initialState = {
   links: structuredClone(mockLinks),
   dealRooms: structuredClone(mockDealRooms),
   members: structuredClone(mockWorkspaceMembers),
+  linkAccessRequests: structuredClone(mockLinkAccessRequests),
+  ndaTemplates: structuredClone(mockNdaTemplates),
   settings: structuredClone(defaultWorkspaceSettings),
   integrations: structuredClone(integrationsStatus),
   security: structuredClone(securitySettings),
@@ -109,6 +113,21 @@ const mockUsers = new Map<string, MockUser>();
 const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
 /** Per-link Ask Host questions for owner inbox (room + link). */
 const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
+/** Thin room security: blocklist + outbound floors. */
+const mockRoomAccessPolicies = new Map<string, DealRoomAccessPolicy>();
+
+function defaultMockRoomAccessPolicy(roomId: string): DealRoomAccessPolicy {
+  return {
+    dealRoomId: roomId,
+    configured: false,
+    requireEmailVerificationFloor: false,
+    requireNdaFloor: false,
+    requireEmailVerification: false,
+    requireNda: false,
+    blockedEmails: [],
+    allowedEmails: [],
+  };
+}
 
 /** In-memory knowledge Q&A sessions/turns/feedback for MSW e2e (Phase A–C). */
 type MockKnowledgeFeedback = { kind: string; note?: string };
@@ -486,6 +505,17 @@ function resetMockState() {
   mockLinks.splice(0, mockLinks.length, ...initialState.links);
   mockDealRooms.splice(0, mockDealRooms.length, ...initialState.dealRooms);
   mockWorkspaceMembers.splice(0, mockWorkspaceMembers.length, ...initialState.members);
+  mockRoomAccessPolicies.clear();
+  mockLinkAccessRequests.splice(
+    0,
+    mockLinkAccessRequests.length,
+    ...structuredClone(initialState.linkAccessRequests),
+  );
+  mockNdaTemplates.splice(
+    0,
+    mockNdaTemplates.length,
+    ...structuredClone(initialState.ndaTemplates),
+  );
   workspaceSettings = { ...initialState.settings };
   integrationsStatus = { ...initialState.integrations };
   securitySettings = { ...initialState.security };
@@ -930,7 +960,7 @@ export const handlers = [
   // Test-only reset (+ optional corpus override for A5). Same path always — MSW
   // already intercepts `/__e2e/reset` reliably in Playwright.
   http.post("*/__e2e/reset", async ({ request }) => {
-    let body: {
+    type E2EResetBody = {
       action?: string;
       roomId?: string;
       status?: string;
@@ -939,10 +969,12 @@ export const handlers = [
       code?: string;
       httpStatus?: number;
       clear?: boolean;
-    } | null = null;
+    };
+    let body: E2EResetBody | null = null;
     try {
       const text = await request.text();
-      if (text.trim()) body = JSON.parse(text) as NonNullable<typeof body>;
+      // Do not use NonNullable<typeof body> — when body is null-narrowed that becomes never.
+      if (text.trim()) body = JSON.parse(text) as E2EResetBody;
     } catch {
       body = null;
     }
@@ -1068,6 +1100,7 @@ export const handlers = [
       docs = docs.filter((d) => (d.category ?? "general") !== "agreement");
     }
     if (excludeDealRoom) {
+      docs = docs.filter((d) => (d.category ?? "general") !== "deal_room");
       const inRoom = new Set(
         mockDealRooms.flatMap((room) =>
           (room.documents ?? []).flatMap((fd) => fd.documents.map((d) => d.document_id || d.id)),
@@ -1091,6 +1124,24 @@ export const handlers = [
     const category = (body.category ?? "").toLowerCase();
     if (category !== "general" && category !== "agreement") {
       return HttpResponse.json({ code: "invalid_input", message: "invalid category" }, { status: 400 });
+    }
+    if (doc.category === "deal_room") {
+      return HttpResponse.json(
+        { code: "category_immutable", message: "document category cannot be changed" },
+        { status: 409 },
+      );
+    }
+    const inRoom = mockDealRooms.some((r) =>
+      (r.documents ?? []).some((fd) => fd.documents.some((d) => d.document_id === doc.id)),
+    );
+    if (inRoom) {
+      return HttpResponse.json(
+        {
+          code: "category_while_in_room",
+          message: "remove the document from deal rooms before changing category",
+        },
+        { status: 409 },
+      );
     }
     if (category === "agreement" && doc.fileType !== "pdf" && doc.sourceType !== "pdf") {
       return HttpResponse.json(
@@ -1161,6 +1212,15 @@ export const handlers = [
         { status: 415 },
       );
     }
+    if (category === "deal_room") {
+      return HttpResponse.json(
+        {
+          code: "category_deal_room_via_api",
+          message: "deal room category is managed by membership",
+        },
+        { status: 400 },
+      );
+    }
     const existing = mockDocuments.find((d) => d.title === title);
     if (existing && !replace) {
       return HttpResponse.json(
@@ -1192,7 +1252,9 @@ export const handlers = [
       fileSize: file?.size ?? 1_000_000,
       pageCount: 10,
       status: "ready" as const,
-      category: (category === "agreement" ? "agreement" : "general") as import("@/types").DocumentCategory,
+      category: (category === "agreement"
+        ? category
+        : "general") as import("@/types").DocumentCategory,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -1236,6 +1298,60 @@ export const handlers = [
     });
   }),
 
+  // NDA templates (workspace agreement documents). Static path before /nda/templates/:id.
+  http.get("*/api/workspaces/:workspaceSlug/nda/templates", ({ request }) => {
+    const url = new URL(request.url);
+    const includeArchived = url.searchParams.get("include_archived") === "true";
+    const data = includeArchived
+      ? mockNdaTemplates
+      : mockNdaTemplates.filter((tpl) => tpl.status === "active");
+    return HttpResponse.json({ data });
+  }),
+
+  http.post("*/api/workspaces/:workspaceSlug/nda/templates", async ({ request }) => {
+    const body = (await request.json()) as { document_id?: string; name?: string; require_signer_name?: boolean };
+    const documentId = body.document_id?.trim() ?? "";
+    const doc = mockDocuments.find((d) => d.id === documentId);
+    if (!doc) {
+      return HttpResponse.json({ code: "not_found", message: "document not found" }, { status: 404 });
+    }
+    if ((doc.category ?? "general") !== "agreement" && doc.fileType !== "pdf" && doc.sourceType !== "pdf") {
+      return HttpResponse.json(
+        { code: "invalid_input", message: "nda template source must be a PDF agreement" },
+        { status: 400 },
+      );
+    }
+    const existing = mockNdaTemplates.find(
+      (tpl) => tpl.source_document_id === documentId && tpl.status === "active",
+    );
+    if (existing) {
+      return HttpResponse.json({ data: existing }, { status: 201 });
+    }
+    const now = new Date().toISOString();
+    const created = {
+      id: generateId("nda_tpl"),
+      name: (body.name?.trim() || doc.title || "NDA Agreement").trim(),
+      source_document_id: documentId,
+      content_sha256: `mock-sha-${documentId}`,
+      require_signer_name: body.require_signer_name !== false,
+      status: "active",
+      response_count: 0,
+      link_count: 0,
+      created_at: now,
+      updated_at: now,
+    };
+    mockNdaTemplates.unshift(created);
+    return HttpResponse.json({ data: created }, { status: 201 });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/nda/templates/:templateId", ({ params }) => {
+    const tpl = mockNdaTemplates.find((t) => t.id === params.templateId);
+    if (!tpl) {
+      return HttpResponse.json({ code: "not_found", message: "template not found" }, { status: 404 });
+    }
+    return HttpResponse.json({ data: tpl });
+  }),
+
   // Viewer events
   http.post("*/api/workspaces/:workspaceSlug/events", async () => {
     return new HttpResponse(null, { status: 204 });
@@ -1245,11 +1361,61 @@ export const handlers = [
   http.get("*/api/workspaces/:workspaceSlug/links", ({ request }) => {
     const url = new URL(request.url);
     const documentId = url.searchParams.get("documentId");
-    const data = documentId ? mockLinks.filter((l) => l.documentId === documentId) : mockLinks;
+    // Document Library share list: never include deal-room shares.
+    const documentLinks = mockLinks.filter((l) => !l.dealRoomId && l.documentId);
+    const data = documentId
+      ? documentLinks.filter((l) => l.documentId === documentId)
+      : documentLinks;
+    return HttpResponse.json({ data });
+  }),
+
+  // Static path MUST be registered before /links/:id or MSW treats it as an id (404).
+  http.get("*/api/workspaces/:workspaceSlug/links/pending-access-requests", ({ request }) => {
+    const url = new URL(request.url);
+    const scope = url.searchParams.get("scope") || "document";
+    const dealRoomId = url.searchParams.get("deal_room_id") || "";
+    if (scope === "deal_room" && !dealRoomId) {
+      return HttpResponse.json(
+        { code: "invalid_input", message: "deal_room_id is required when scope=deal_room" },
+        { status: 400 },
+      );
+    }
+    if (scope !== "document" && scope !== "deal_room") {
+      return HttpResponse.json(
+        { code: "invalid_input", message: "scope must be document or deal_room" },
+        { status: 400 },
+      );
+    }
+    const data = mockLinkAccessRequests
+      .filter((r) => r.status === "pending")
+      .map((r) => {
+        const link = mockLinks.find((l) => l.id === r.link_id);
+        return {
+          ...r,
+          link_name: link?.name ?? "",
+          document_title: link?.documentTitle ?? "",
+          short_url: link?.shortUrl ?? "",
+          _dealRoomId: link?.dealRoomId,
+          _documentId: link?.documentId,
+        };
+      })
+      .filter((r) => {
+        if (scope === "deal_room") {
+          return r._dealRoomId === dealRoomId;
+        }
+        return !r._dealRoomId && !!r._documentId;
+      })
+      .map(({ _dealRoomId: _dr, _documentId: _doc, ...rest }) => rest);
     return HttpResponse.json({ data });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/links/:id", ({ params }) => {
+    if (params.id === "pending-access-requests") {
+      return HttpResponse.json(
+        { code: "not_found", message: "use /links/pending-access-requests" },
+        { status: 404 },
+      );
+    }
     const link = mockLinks.find((l) => l.id === params.id);
     if (!link) return new HttpResponse(null, { status: 404 });
     return HttpResponse.json(link);
@@ -1336,21 +1502,6 @@ export const handlers = [
     if (index === -1) return new HttpResponse(null, { status: 404 });
     mockLinks.splice(index, 1);
     return new HttpResponse(null, { status: 204 });
-  }),
-
-  http.get("*/api/workspaces/:workspaceSlug/links/pending-access-requests", () => {
-    const data = mockLinkAccessRequests
-      .filter((r) => r.status === "pending")
-      .map((r) => {
-        const link = mockLinks.find((l) => l.id === r.link_id);
-        return {
-          ...r,
-          link_name: link?.name ?? "",
-          document_title: link?.documentTitle ?? "",
-          short_url: link?.shortUrl ?? "",
-        };
-      });
-    return HttpResponse.json({ data });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/links/:id/access-requests", ({ params }) => {
@@ -1623,8 +1774,34 @@ export const handlers = [
   }),
 
   // Deal rooms
-  http.get("*/api/workspaces/:workspaceSlug/deal-rooms", () => {
-    return HttpResponse.json({ data: mockDealRooms });
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms", ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") || "").toLowerCase().trim();
+    const filtered = q
+      ? mockDealRooms.filter(
+          (room) =>
+            room.name.toLowerCase().includes(q) ||
+            (room.description || "").toLowerCase().includes(q),
+        )
+      : mockDealRooms;
+    const pageRaw = url.searchParams.get("page");
+    if (!pageRaw) {
+      return HttpResponse.json({ data: filtered });
+    }
+    const page = Math.max(1, Number(pageRaw) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(url.searchParams.get("page_size")) || 24));
+    const total = filtered.length;
+    const start = (page - 1) * pageSize;
+    const slice = filtered.slice(start, start + pageSize);
+    return HttpResponse.json({
+      data: slice,
+      pagination: {
+        page,
+        page_size: pageSize,
+        total,
+        has_more: start + pageSize < total,
+      },
+    });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id", ({ params }) => {
@@ -2343,11 +2520,49 @@ export const handlers = [
     },
   ),
 
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/access-policy", ({ params }) => {
+    const roomId = params.id as string;
+    if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+    return HttpResponse.json({
+      data: mockRoomAccessPolicies.get(roomId) ?? defaultMockRoomAccessPolicy(roomId),
+    });
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/deal-rooms/:id/access-policy", async ({ params, request }) => {
+    const roomId = params.id as string;
+    if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json()) as {
+      require_email_verification_floor?: boolean;
+      require_nda_floor?: boolean;
+      require_email_verification?: boolean;
+      require_nda?: boolean;
+      blocked_emails?: string[];
+    };
+    const verifyFloor = !!(body.require_email_verification_floor ?? body.require_email_verification);
+    const ndaFloor = !!(body.require_nda_floor ?? body.require_nda);
+    const blocked = (body.blocked_emails ?? []).map((e) => e.trim().toLowerCase()).filter(Boolean);
+    const policy: DealRoomAccessPolicy = {
+      dealRoomId: roomId,
+      configured: true,
+      requireEmailVerificationFloor: verifyFloor,
+      requireNdaFloor: ndaFloor,
+      requireEmailVerification: verifyFloor,
+      requireNda: ndaFloor,
+      allowedEmails: [],
+      blockedEmails: blocked,
+      updatedAt: new Date().toISOString(),
+    };
+    mockRoomAccessPolicies.set(roomId, policy);
+    // Room save syncs blocklist only — never broadcast-overwrite link gates.
+    return HttpResponse.json({ data: policy });
+  }),
+
   http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:id/links", ({ params, request }) => {
     const roomId = params.id as string;
     if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
     const url = new URL(request.url);
     const pageRaw = url.searchParams.get("page");
+    // Deal-room share list: room-scoped links only (never document-library shares).
     let data = mockLinks.filter((l) => l.dealRoomId === roomId);
     const q = (url.searchParams.get("q") || "").trim().toLowerCase();
     if (q) {
@@ -2388,6 +2603,7 @@ export const handlers = [
       name?: string;
       qa_enabled?: boolean;
       folder_paths?: string[];
+      folder_scope_mode?: "full" | "allowlist";
       document_ids?: string[];
       require_email?: boolean;
       require_email_verification?: boolean;
@@ -2395,14 +2611,30 @@ export const handlers = [
       require_nda?: boolean;
       download_enabled?: boolean;
       watermark_enabled?: boolean;
+      allowed_emails?: string[];
+      blocked_emails?: string[];
+    };
+    const policy = mockRoomAccessPolicies.get(roomId);
+    const floors = {
+      verify: Boolean(policy?.requireEmailVerificationFloor ?? policy?.requireEmailVerification),
+      nda: Boolean(policy?.requireNdaFloor ?? policy?.requireNda),
     };
     const documentIds = body.document_ids?.length ? body.document_ids : ["doc_1"];
+    const folderScopeMode =
+      body.folder_scope_mode === "allowlist" || (body.folder_paths?.length ?? 0) > 0
+        ? "allowlist"
+        : "full";
+    // Allowlist is always link-scoped — never inherited from room policy.
+    const allowedEmails = (body.allowed_emails ?? []).map((e) => e.trim().toLowerCase());
+    const requireEmailVerification =
+      floors.verify || !!body.require_email_verification;
     const newLink: Link = {
       id: generateId("link"),
       name: body.name,
       documentId: documentIds[0],
       documentIds,
-      folderPaths: body.folder_paths ?? [],
+      folderPaths: folderScopeMode === "allowlist" ? (body.folder_paths ?? []) : [],
+      folderScopeMode,
       documentTitle: "Deal room link",
       shortUrl: `https://invest.acme.capital/d/${generateId("sh")}`,
       accessCount: 0,
@@ -2412,17 +2644,31 @@ export const handlers = [
       avgDurationSeconds: 0,
       permissionType: "public",
       isBundle: documentIds.length > 1,
-      qaEnabled: !!body.qa_enabled,
+      qaEnabled: body.qa_enabled ?? false,
       dealRoomId: roomId,
-      requireEmail: !!body.require_email,
-      requireEmailVerification: !!body.require_email_verification,
+      requireEmail: requireEmailVerification ? false : !!body.require_email,
+      requireEmailVerification,
       requirePassword: !!body.require_password,
-      requireNda: !!body.require_nda,
+      requireNda: floors.nda || !!body.require_nda,
       downloadEnabled: body.download_enabled,
       watermarkEnabled: body.watermark_enabled,
       documents: [],
     };
+    (newLink as MockLinkExt)._allowedEmails = allowedEmails;
     mockLinks.unshift(newLink);
+    if (!policy?.configured) {
+      mockRoomAccessPolicies.set(roomId, {
+        ...defaultMockRoomAccessPolicy(roomId),
+        configured: true,
+        requireEmailVerificationFloor: false,
+        requireNdaFloor: false,
+        requireEmailVerification: false,
+        requireNda: false,
+        allowedEmails: [],
+        blockedEmails: (body.blocked_emails ?? []).map((e) => e.trim().toLowerCase()),
+        updatedAt: new Date().toISOString(),
+      });
+    }
     return HttpResponse.json(newLink, { status: 201 });
   }),
 
@@ -2755,6 +3001,15 @@ export const handlers = [
     };
     const doc = mockDocuments.find((d) => d.id === body.document_id);
     if (!doc) return new HttpResponse(null, { status: 404 });
+    if (doc.category === "agreement") {
+      return HttpResponse.json(
+        {
+          code: "agreement_not_allowed_in_deal_room",
+          message: "agreement documents cannot be added to a deal room",
+        },
+        { status: 400 },
+      );
+    }
     const folders = getRoomFolders(room);
     const folderPath = body.folder_path ?? folders[0]?.path ?? "/general";
     if (!folders.some((f) => f.path === folderPath)) {
@@ -2780,6 +3035,7 @@ export const handlers = [
     };
     fd.documents.push(item);
     room.documents = docs;
+    doc.category = "deal_room";
     updateRoomDerivedFields(room);
     return HttpResponse.json(item, { status: 201 });
   }),
@@ -2836,14 +3092,25 @@ export const handlers = [
     const room = findRoom(params.id as string);
     if (!room) return new HttpResponse(null, { status: 404 });
     const docs = getRoomFolderDocs(room);
+    let removedDocId: string | undefined;
     for (const fd of docs) {
       const idx = fd.documents.findIndex((d) => d.id === params.docId);
       if (idx !== -1) {
+        removedDocId = fd.documents[idx]?.document_id;
         fd.documents.splice(idx, 1);
         break;
       }
     }
     room.documents = docs.filter((fd) => fd.documents.length > 0);
+    if (removedDocId) {
+      const stillInAnyRoom = mockDealRooms.some((r) =>
+        (r.documents ?? []).some((fd) => fd.documents.some((d) => d.document_id === removedDocId)),
+      );
+      if (!stillInAnyRoom) {
+        const libDoc = mockDocuments.find((d) => d.id === removedDocId);
+        if (libDoc?.category === "deal_room") libDoc.category = "general";
+      }
+    }
     updateRoomDerivedFields(room);
     return new HttpResponse(null, { status: 204 });
   }),
@@ -3296,7 +3563,7 @@ export const handlers = [
       );
     }
 
-    const doc = mockDocuments.find((d) => d.id === link.documentId) ?? mockDocuments[0];
+    const doc = mockDocuments.find((d) => d.id === extended.documentId) ?? mockDocuments[0];
     const publicDocument = {
       id: doc.id,
       title: doc.title,
@@ -3307,16 +3574,16 @@ export const handlers = [
     };
     return HttpResponse.json({
       link: {
-        id: link.id,
-        name: link.documentTitle,
-        documentId: link.documentId,
-        permissionType: link.permissionType ?? "public",
+        id: extended.id,
+        name: extended.documentTitle,
+        documentId: extended.documentId,
+        permissionType: extended.permissionType ?? "public",
         downloadEnabled: true,
         watermarkEnabled: false,
-        qaEnabled: Boolean(link.qaEnabled),
-        fileRequestsEnabled: Boolean(link.fileRequestsEnabled),
-        isBundle: Boolean(link.isBundle),
-        dealRoomId: link.dealRoomId,
+        qaEnabled: Boolean(extended.qaEnabled),
+        fileRequestsEnabled: Boolean(extended.fileRequestsEnabled),
+        isBundle: Boolean(extended.isBundle),
+        dealRoomId: extended.dealRoomId,
       },
       document: publicDocument,
       documents: [publicDocument],
