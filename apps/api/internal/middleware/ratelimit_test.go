@@ -77,6 +77,54 @@ func TestRateLimitMiddleware_BlocksRequest(t *testing.T) {
 	}
 }
 
+func TestRateLimitMiddleware_SkipsKnowledgeGatedPaths(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RateLimitWorkspaceRPM: 200}
+	store := &mockRateLimiter{allowed: true, remaining: 199}
+	r := gin.New()
+	r.Use(RateLimitMiddleware(store, cfg))
+	r.POST("/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/sessions/query/stream", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+	r.POST("/api/workspaces/:workspaceSlug/deal-rooms/:roomId/knowledge/turns/:turnId/follow-ups", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	for _, path := range []string{
+		"/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query/stream",
+		"/api/workspaces/acme/deal-rooms/room-1/knowledge/turns/t1/follow-ups",
+	} {
+		w := httptest.NewRecorder()
+		req, _ := http.NewRequest(http.MethodPost, path, nil)
+		r.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("path %s: expected 200, got %d", path, w.Code)
+		}
+	}
+	if store.calls != 0 {
+		t.Fatalf("expected knowledge gated paths to skip global rate limit, got %d calls", store.calls)
+	}
+}
+
+func TestIsKnowledgeGatedPath(t *testing.T) {
+	cases := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{http.MethodPost, "/api/workspaces/acme/deal-rooms/r1/knowledge/sessions/query/stream", true},
+		{http.MethodPost, "/api/workspaces/acme/deal-rooms/r1/knowledge/sessions/query", true},
+		{http.MethodPost, "/api/workspaces/acme/deal-rooms/r1/knowledge/turns/t1/follow-ups", true},
+		{http.MethodGet, "/api/workspaces/acme/deal-rooms/r1/knowledge/sessions/query/stream", false},
+		{http.MethodPost, "/api/workspaces/acme/deal-rooms/r1/knowledge/sessions", false},
+	}
+	for _, tc := range cases {
+		if got := isKnowledgeGatedPath(tc.path, tc.method); got != tc.want {
+			t.Fatalf("isKnowledgeGatedPath(%q, %q)=%v, want %v", tc.path, tc.method, got, tc.want)
+		}
+	}
+}
+
 func TestIsUploadPath(t *testing.T) {
 	cases := []struct {
 		method string

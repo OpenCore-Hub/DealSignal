@@ -29,6 +29,12 @@ describe("knowledgeErrorMessage", () => {
     expect(knowledgeErrorMessage(t, "knowledge_corpus_not_ready")).toBe(
       "i18n:knowledge.errors.knowledge_corpus_not_ready",
     );
+    expect(knowledgeErrorMessage(t, "rate_limit_exceeded")).toBe(
+      "i18n:knowledge.errors.knowledge_query_rate_limited",
+    );
+    expect(knowledgeErrorMessage(t, "stream_incomplete")).toBe(
+      "i18n:knowledge.errors.stream_incomplete",
+    );
   });
 
   it("falls back for unknown codes", () => {

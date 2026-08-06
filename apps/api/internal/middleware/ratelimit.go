@@ -24,6 +24,11 @@ func RateLimitMiddleware(store RateLimiter, cfg *config.Config) gin.HandlerFunc 
 			c.Next()
 			return
 		}
+		// Knowledge desk routes enforce their own admission (in-flight + RPM + quota).
+		if isKnowledgeGatedPath(c.Request.URL.Path, c.Request.Method) {
+			c.Next()
+			return
+		}
 
 		category, key := rateLimitKey(c)
 		limit, window := rateLimitForCategory(category, cfg)
@@ -118,6 +123,28 @@ func isUploadPath(path, method string) bool {
 	}
 	slug := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
 	return slug != "" && !strings.Contains(slug, "/")
+}
+
+// isKnowledgeGatedPath matches deal-room knowledge ask endpoints that already
+// enforce per-member RPM, single-flight, and plan quotas in the knowledge
+// handler. Skipping the global workspace bucket avoids double 429s on SSE asks.
+func isKnowledgeGatedPath(path, method string) bool {
+	if method != http.MethodPost {
+		return false
+	}
+	const marker = "/knowledge/"
+	if !strings.Contains(path, marker) {
+		return false
+	}
+	switch {
+	case strings.HasSuffix(path, "/knowledge/sessions/query"),
+		strings.HasSuffix(path, "/knowledge/sessions/query/stream"):
+		return true
+	case strings.Contains(path, "/knowledge/turns/") && strings.HasSuffix(path, "/follow-ups"):
+		return true
+	default:
+		return false
+	}
 }
 
 func rateLimitForCategory(cat rateLimitCategory, cfg *config.Config) (int, time.Duration) {

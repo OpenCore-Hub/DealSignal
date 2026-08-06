@@ -367,7 +367,15 @@ async function streamDealRoomKnowledgeSession(
     if (opts.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
       throw err;
     }
-    throw err;
+    if (err instanceof ApiError) {
+      throw err;
+    }
+    throw new ApiError({
+      status: 0,
+      code: "stream_incomplete",
+      message: "stream_incomplete",
+      requestId: "",
+    });
   }
 
   if (!doneResult) {

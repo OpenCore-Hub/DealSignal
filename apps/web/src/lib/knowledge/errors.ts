@@ -11,6 +11,8 @@ const KNOWLEDGE_ERROR_CODES = new Set([
   "knowledge_query_rate_limited",
   "knowledge_query_quota_exceeded",
   "knowledge_query_quota_unavailable",
+  "rate_limit_exceeded",
+  "stream_incomplete",
 ]);
 
 /** Codes / statuses that never persist an audit turn (skip post-fail hydrate). */
@@ -24,6 +26,7 @@ const KNOWLEDGE_ASK_GATE_CODES = new Set([
   "knowledge_query_rate_limited",
   "knowledge_query_quota_exceeded",
   "knowledge_query_quota_unavailable",
+  "rate_limit_exceeded",
 ]);
 
 /** Map stable server error codes to locale strings; never surface raw Go text. */
@@ -32,6 +35,9 @@ export function knowledgeErrorMessage(
   code?: string | null,
 ): string {
   const c = (code ?? "").trim();
+  if (c === "rate_limit_exceeded") {
+    return t("knowledge.errors.knowledge_query_rate_limited");
+  }
   if (c && KNOWLEDGE_ERROR_CODES.has(c)) {
     return t(`knowledge.errors.${c}`);
   }

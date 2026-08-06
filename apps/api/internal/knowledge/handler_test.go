@@ -266,32 +266,44 @@ func TestQuerySessionStreamRejectsQuotaExceeded(t *testing.T) {
 }
 
 func TestQuerySessionStreamRejectsRateLimited(t *testing.T) {
-	a := newMemoryAskAdmission(1)
-	h := &Handler{
-		admission: a,
-		runner: stubSessionRunner{fn: func(
-			context.Context, string, string, string, SessionQueryRequest, string,
-		) (SessionQueryResponse, error) {
-			return SessionQueryResponse{SessionID: "s", Turn: QATurn{ResultStatus: "answered"}}, nil
-		}},
+	paths := []string{
+		"/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query",
+		"/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query/stream",
 	}
-	r := testKnowledgeRouter(h)
-	req1 := httptest.NewRequest(http.MethodPost, "/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query", strings.NewReader(`{"query":"a"}`))
-	req1.Header.Set("Content-Type", "application/json")
-	w1 := httptest.NewRecorder()
-	r.ServeHTTP(w1, req1)
-	if w1.Code != http.StatusOK {
-		t.Fatalf("first=%d %s", w1.Code, w1.Body.String())
-	}
-	req2 := httptest.NewRequest(http.MethodPost, "/api/workspaces/acme/deal-rooms/room-1/knowledge/sessions/query", strings.NewReader(`{"query":"b"}`))
-	req2.Header.Set("Content-Type", "application/json")
-	w2 := httptest.NewRecorder()
-	r.ServeHTTP(w2, req2)
-	if w2.Code != http.StatusTooManyRequests {
-		t.Fatalf("status=%d body=%s", w2.Code, w2.Body.String())
-	}
-	if !strings.Contains(w2.Body.String(), "knowledge_query_rate_limited") {
-		t.Fatalf("body=%s", w2.Body.String())
+	for _, path := range paths {
+		path := path
+		t.Run(path, func(t *testing.T) {
+			a := newMemoryAskAdmission(1)
+			h := &Handler{
+				admission: a,
+				runner: stubSessionRunner{fn: func(
+					context.Context, string, string, string, SessionQueryRequest, string,
+				) (SessionQueryResponse, error) {
+					return SessionQueryResponse{SessionID: "s", Turn: QATurn{ResultStatus: "answered"}}, nil
+				}},
+			}
+			r := testKnowledgeRouter(h)
+			req1 := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"query":"a"}`))
+			req1.Header.Set("Content-Type", "application/json")
+			w1 := httptest.NewRecorder()
+			r.ServeHTTP(w1, req1)
+			if w1.Code != http.StatusOK {
+				t.Fatalf("first=%d %s", w1.Code, w1.Body.String())
+			}
+			req2 := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"query":"b"}`))
+			req2.Header.Set("Content-Type", "application/json")
+			w2 := httptest.NewRecorder()
+			r.ServeHTTP(w2, req2)
+			if w2.Code != http.StatusTooManyRequests {
+				t.Fatalf("status=%d body=%s", w2.Code, w2.Body.String())
+			}
+			if !strings.Contains(w2.Body.String(), "knowledge_query_rate_limited") {
+				t.Fatalf("body=%s", w2.Body.String())
+			}
+			if strings.HasSuffix(path, "/stream") && strings.Contains(w2.Header().Get("Content-Type"), "text/event-stream") {
+				t.Fatalf("stream path must reject with JSON before SSE headers")
+			}
+		})
 	}
 }
 
