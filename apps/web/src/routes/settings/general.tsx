@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { Building, Globe } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -32,7 +33,7 @@ export function SettingsGeneralPage() {
       setDraft(res);
       toast.success(t("general.saved"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
     } finally {
       setSaving(false);
     }

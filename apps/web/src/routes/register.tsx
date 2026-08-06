@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
 
 export function RegisterPage() {
   const navigate = useNavigate();
@@ -58,7 +59,7 @@ export function RegisterPage() {
       await api.register(trimmedEmail, password);
       navigate("/login?registered=true", { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("register.errorRegistrationFailed"));
+      setError(apiErrorMessage(err, { context: "register", messageKey: "auth:register.errorRegistrationFailed" }));
       setLoading(false);
     }
   };

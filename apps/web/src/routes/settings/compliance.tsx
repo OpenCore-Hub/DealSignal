@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { ShieldCheck, Download, UserMinus, Trash } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -10,7 +11,6 @@ import { useTranslation } from "react-i18next";
 
 export function SettingsCompliancePage() {
   const { t } = useTranslation("settings");
-  const { t: tc } = useTranslation("common");
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,7 +31,7 @@ export function SettingsCompliancePage() {
       URL.revokeObjectURL(url);
       toast.success(t("compliance.exportSuccess"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
     } finally {
       setLoading(false);
     }
@@ -46,7 +46,7 @@ export function SettingsCompliancePage() {
       toast.success(t("compliance.anonymizeSuccess", { count: summary.total }));
       setEmail("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
     } finally {
       setLoading(false);
     }
@@ -61,7 +61,7 @@ export function SettingsCompliancePage() {
       toast.success(t("compliance.deleteSuccess", { count: summary.total }));
       setEmail("");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
     } finally {
       setLoading(false);
     }

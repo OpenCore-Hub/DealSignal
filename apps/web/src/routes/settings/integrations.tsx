@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { Plug, CloudArrowUp, Database, Envelope } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -31,7 +32,7 @@ export function SettingsIntegrationsPage() {
       toast.success(t("integrations.emailNotificationsSaved"));
       refetch();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("integrations.emailNotificationsSaveFailed"));
+      toast.error(apiErrorMessage(e, { messageKey: "settings:integrations.emailNotificationsSaveFailed" }));
     } finally {
       setSavingEmail(false);
     }
@@ -50,8 +51,9 @@ export function SettingsIntegrationsPage() {
       toast.success(t("integrations.connectedSuccess", { provider: provider.charAt(0).toUpperCase() + provider.slice(1) }));
       refetch();
     } else if (result === "error") {
-      const message = searchParams.get("message") || "";
-      toast.error(t("integrations.connectionFailed", { provider, message }));
+      toast.error(t("integrations.connectionFailed", {
+        provider: provider.charAt(0).toUpperCase() + provider.slice(1),
+      }));
     }
 
     // Clean query params so a refresh does not re-trigger the toast.
@@ -72,7 +74,7 @@ export function SettingsIntegrationsPage() {
       const res = id === "slack" ? await api.connectSlack() : await api.connectHubSpot();
       window.open(res.url, "_blank", "noopener,noreferrer");
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("integrations.connectionFailed", { provider: id }));
+      toast.error(apiErrorMessage(e, { messageKey: "settings:integrations.connectionFailed", messageKeyParams: { provider: id } }));
     } finally {
       setConnecting(null);
     }
@@ -89,7 +91,7 @@ export function SettingsIntegrationsPage() {
       toast.success(t("integrations.disconnectedSuccess", { provider: id }));
       refetch();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("integrations.disconnectFailed", { provider: id }));
+      toast.error(apiErrorMessage(e, { messageKey: "settings:integrations.disconnectFailed", messageKeyParams: { provider: id } }));
     }
   };
 

@@ -60,12 +60,12 @@ export function VerifyEmailPage() {
       .then((res) => {
         if (cancelled) return;
         setStatus(res.code === "verified" ? "success" : "error");
-        setMessage(res.message);
+        setMessage(res.code === "verified" ? t("verifyEmail.success") : t("verifyEmail.error"));
       })
-      .catch((err) => {
+      .catch(() => {
         if (cancelled) return;
         setStatus("error");
-        setMessage(err instanceof Error ? err.message : t("verifyEmail.error"));
+        setMessage(t("verifyEmail.error"));
       });
 
     return () => {

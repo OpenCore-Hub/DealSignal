@@ -64,7 +64,7 @@
     "disconnect": "Disconnect",
     "connectedSuccess": "{{provider}} connected successfully",
     "disconnectedSuccess": "{{provider}} disconnected",
-    "connectionFailed": "Failed to connect {{provider}}: {{message}}",
+    "connectionFailed": "Could not connect {{provider}}. Please try again.",
     "disconnectFailed": "Failed to disconnect {{provider}}",
     "comingSoon": "This integration is coming soon",
     "slackDescription": "Push heat alerts to a Slack channel",

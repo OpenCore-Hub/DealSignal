@@ -20,6 +20,7 @@ import { ActivityTimeline } from "@/components/common/ActivityTimeline";
 import { TrendChart } from "@/components/common/TrendChart";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { EmptyState } from "@/components/common/EmptyState";
+import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { useTranslation } from "react-i18next";
@@ -60,7 +61,8 @@ export function ContactDetailPage() {
     const [c, a, docsRes] = await Promise.all([
       api.getContactById(contactId),
       api.getActivitiesByContactId(contactId),
-      api.getDocuments(),
+      // Viewed docs may be library (general) or data-room uploads; exclude agreements.
+      api.getDocuments(undefined, undefined, { excludeAgreement: true }),
     ]);
     return { contact: c, activities: a.data, documents: docsRes.data };
   }, [contactId, t]);

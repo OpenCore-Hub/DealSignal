@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useTranslation } from "react-i18next";
 import { PaperPlaneTilt, Envelope } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -49,7 +50,7 @@ export function MarketingBatchDialog({ contacts }: MarketingBatchDialogProps) {
       });
       setResult({ sent: res.data.sent, failed: res.data.failed });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("marketingBatch.error"));
+      setError(apiErrorMessage(err, { messageKey: "contacts:marketingBatch.error" }));
     } finally {
       setLoading(false);
     }

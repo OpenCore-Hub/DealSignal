@@ -13,6 +13,7 @@ import {
 import { DocumentAnalytics } from "@/components/documents/DocumentAnalytics";
 import { EmptyState } from "@/components/common/EmptyState";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { api } from "@/lib/api";
 import { documentDetailPath } from "@/lib/documentDetailNav";
 import { useTranslation } from "react-i18next";
@@ -29,7 +30,7 @@ export function InsightsPagesPage() {
     error,
     refetch,
   } = useAsyncData(async () => {
-    const res = await api.getDocuments();
+    const res = await api.getDocuments("all", LIBRARY_DOCUMENT_CATEGORY);
     const docs = res.data;
     setSelectedDocId(docs[0]?.id || "");
     return docs;

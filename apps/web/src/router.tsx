@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, lazy, useEffect } from "react";
-import { createBrowserRouter, Navigate, useOutlet, useRouteError, useParams } from "react-router";
+import { createBrowserRouter, Navigate, useOutlet, useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import { AppShell } from "@/components/layout/AppShell";
 import { Button } from "@/components/ui/button";
@@ -102,12 +102,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 
 function RouteError() {
   const { t } = useTranslation("common");
-  const error = useRouteError() as Error;
   return (
     <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-4 p-6 text-center">
       <h1 className="text-h1 text-foreground">{t("error.title")}</h1>
       <p className="max-w-md text-body text-muted-foreground">
-        {error?.message || t("error.pageLoadFailed")}
+        {t("error.pageLoadFailed")}
       </p>
       <div className="flex gap-3">
         <Button variant="outline" onClick={() => window.location.reload()}>

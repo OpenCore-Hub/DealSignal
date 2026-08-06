@@ -6,6 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
 
 export function LoginPage() {
   const navigate = useNavigate();
@@ -38,7 +39,7 @@ export function LoginPage() {
       const safeRedirect = redirect && /^\/[^/]/.test(redirect) ? redirect : "/";
       navigate(safeRedirect, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : t("login.errorLoginFailed"));
+      setError(apiErrorMessage(err, { context: "login", messageKey: "auth:login.errorLoginFailed" }));
       setLoading(false);
     }
   };

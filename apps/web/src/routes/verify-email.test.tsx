@@ -17,7 +17,15 @@ vi.mock("@/lib/api", () => ({
 }));
 
 async function renderPage(token: string) {
-  const i18n = await createTestI18n();
+  const i18n = await createTestI18n({
+    auth: {
+      "verifyEmail.error": "Verification failed. The link may be invalid or expired.",
+      "verifyEmail.success": "Email verified.",
+      "verifyEmail.verifying": "Verifying…",
+      "login.submit": "Sign in",
+      "register.signIn": "Sign in",
+    },
+  });
   const view = render(
     <MemoryRouter initialEntries={[`/verify-email/${token}`]}>
       <I18nextProvider i18n={i18n}>
@@ -44,7 +52,7 @@ describe("VerifyEmailPage", () => {
     await renderPage("valid-token");
 
     await waitFor(() => {
-      expect(screen.getByRole("button", { name: /login.submit/i })).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
     });
     expect(verifyEmailMock).toHaveBeenCalledWith("valid-token");
   });
@@ -54,9 +62,9 @@ describe("VerifyEmailPage", () => {
     await renderPage("bad-token");
 
     await waitFor(() => {
-      expect(screen.getByText(/invalid or expired token/i)).toBeInTheDocument();
+      expect(screen.getAllByText(/verification failed/i).length).toBeGreaterThan(0);
     });
-    expect(screen.getByRole("button", { name: /register.signIn/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /sign in/i })).toBeInTheDocument();
   });
 
 

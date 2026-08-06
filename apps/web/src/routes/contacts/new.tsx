@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { motion } from "motion/react";
 import { UserPlus } from "@phosphor-icons/react";
@@ -43,7 +44,7 @@ export function NewContactPage() {
         navigate(`/${workspaceSlug}/contacts`);
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("new.createFailed"));
+      toast.error(apiErrorMessage(e, { messageKey: "contacts:new.createFailed" }));
     } finally {
       setCreating(false);
     }

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { api } from "@/lib/api";
-import { ApiError } from "@/lib/apiClient";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { useTranslation } from "react-i18next";
 
 function slugify(name: string): string {
@@ -46,19 +46,7 @@ export function CreateWorkspacePage() {
       });
       navigate(`/${workspace.slug}/dashboard`, { replace: true });
     } catch (err) {
-      let message = t("error.saveFailed");
-      if (err instanceof ApiError) {
-        if (err.code === "slug_conflict") {
-          message = t("error.duplicateSlug");
-        } else if (err.code === "invalid_slug") {
-          message = t("error.invalidSlug");
-        } else if (err.message) {
-          message = err.message;
-        }
-      } else if (err instanceof Error && err.message) {
-        message = err.message;
-      }
-      setError(message);
+      setError(apiErrorMessage(err, { fallback: "saveFailed" }));
       setLoading(false);
     }
   };

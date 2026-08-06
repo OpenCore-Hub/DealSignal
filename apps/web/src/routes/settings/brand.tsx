@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { Palette, Upload } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -33,7 +34,7 @@ export function SettingsBrandPage() {
       setDraft(res);
       toast.success(t("brand.saved"));
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
     } finally {
       setSaving(false);
     }
@@ -80,7 +81,7 @@ export function SettingsBrandPage() {
     } catch (err) {
       cleanupPreview();
       setDraft((prev) => (prev ?? data ? { ...(prev ?? data!), logoUrl: previousUrl } : prev));
-      toast.error(err instanceof Error ? err.message : t("brand.uploadFailed"));
+      toast.error(apiErrorMessage(err, { fallback: "uploadFailed", messageKey: "settings:brand.uploadFailed" }));
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";

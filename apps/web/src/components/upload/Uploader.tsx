@@ -8,6 +8,7 @@ import {
   UploadCancelledError,
   useDocumentUploadConflict,
 } from "@/hooks/useDocumentUploadConflict";
+import { apiErrorMessage } from "@/lib/apiErrors";
 
 interface UploadFile {
   id: string;
@@ -147,10 +148,10 @@ export function Uploader({ onUploadComplete, category }: UploaderProps) {
       } catch (err) {
         stopProgress();
         if (err instanceof UploadCancelledError) {
-          markError(uploadFile.id, err.message);
+          markError(uploadFile.id, t("documents:upload.replaceCancelled"));
           return;
         }
-        markError(uploadFile.id, err instanceof Error ? err.message : String(err));
+        markError(uploadFile.id, apiErrorMessage(err, { fallback: "uploadFailed" }));
       }
     },
     [uploadingIds, category, uploadDocument, markDone, markError],

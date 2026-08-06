@@ -64,7 +64,7 @@
     "disconnect": "断开",
     "connectedSuccess": "{{provider}} 连接成功",
     "disconnectedSuccess": "{{provider}} 已断开",
-    "connectionFailed": "连接 {{provider}} 失败：{{message}}",
+    "connectionFailed": "无法连接 {{provider}}，请重试。",
     "disconnectFailed": "断开 {{provider}} 失败",
     "comingSoon": "该集成即将上线",
     "slackDescription": "热度提醒推送到 Slack 频道",

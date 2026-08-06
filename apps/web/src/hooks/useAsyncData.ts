@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 
 export interface AsyncDataState<T> {
   data: T | null;
@@ -55,7 +56,7 @@ export function useAsyncData<T>(
         ) {
           return;
         }
-        setError(e instanceof Error ? e.message : "Failed to load");
+        setError(apiErrorMessage(e));
       } finally {
         if (generation === generationRef.current && !controller.signal.aborted) {
           setLoading(false);
