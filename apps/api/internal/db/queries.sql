@@ -3193,6 +3193,113 @@ WHERE host_question_id = $3
   AND link_id = $5
   AND status = 'host_pending';
 
+-- name: MarkLinkAskTurnHostAnsweredByID :execrows
+UPDATE link_ask_turns
+SET status = 'host_answered',
+    host_answer = $1,
+    answered_by = $2,
+    updated_at = now()
+WHERE id = $3
+  AND workspace_id = $4
+  AND link_id = $5
+  AND status = 'host_pending';
+
+-- name: GetLinkAskTurnByID :one
+SELECT *
+FROM link_ask_turns
+WHERE id = $1
+  AND workspace_id = $2
+  AND link_id = $3
+LIMIT 1;
+
+-- name: GetOwnerAskTurnByID :one
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+FROM link_ask_turns t
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
+WHERE t.id = $1
+  AND t.workspace_id = $2
+  AND t.link_id = $3
+LIMIT 1;
+
+-- name: GetLinkAskTurnByHostQuestionID :one
+SELECT *
+FROM link_ask_turns
+WHERE host_question_id = $1
+  AND workspace_id = $2
+  AND link_id = $3
+LIMIT 1;
+
+-- name: ListLinkAskTurnsByLink :many
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+FROM link_ask_turns t
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
+WHERE t.link_id = $1
+  AND t.workspace_id = $2
+ORDER BY t.created_at DESC;
+
+-- name: ListRoomAskTurns :many
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+FROM link_ask_turns t
+INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
+WHERE t.workspace_id = $2
+ORDER BY t.created_at DESC
+LIMIT $3;
+
 
 -- name: UpdateVisitorQuestionAnswer :exec
 UPDATE link_visitor_questions

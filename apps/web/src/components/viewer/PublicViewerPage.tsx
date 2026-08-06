@@ -19,7 +19,9 @@ import { apiErrorMessage } from "@/lib/apiErrors";
 import { cn } from "@/lib/utils";
 import { CanvasViewer } from "./CanvasViewer";
 import { VisitorWorkspacePanel } from "./VisitorWorkspacePanel";
+import { RightSidebar } from "./RightSidebar";
 import { shouldShowVisitorWorkspace } from "./visitorWorkspace";
+import { visitorAskUnifiedEnabled } from "@/lib/visitorAskUnified";
 import { PublicDealRoomLinkViewer } from "./PublicDealRoomLinkViewer";
 import {
   PublicGateCard,
@@ -47,7 +49,7 @@ interface PublicDocumentSummary {
 }
 
 interface AccessResult {
-  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+  link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; watermarkText?: string; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; visitorAskUnified?: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
   documents: PublicDocumentSummary[];
   visitorId: string;
   requiresEmail: boolean;
@@ -985,11 +987,18 @@ export function PublicViewerPage() {
     };
   }, [selectedDoc]);
 
-  const showWorkspace = shouldShowVisitorWorkspace({
-    documentCount: access?.documents.length ?? 0,
-    fileRequestsEnabled: Boolean(access?.link.fileRequestsEnabled),
-    qaEnabled: Boolean(access?.link.qaEnabled),
-  });
+  const unifiedAsk = access ? visitorAskUnifiedEnabled(access.link) : false;
+  const showWorkspace = unifiedAsk
+    ? shouldShowVisitorWorkspace({
+        documentCount: access?.documents.length ?? 0,
+        fileRequestsEnabled: Boolean(access?.link.fileRequestsEnabled),
+        qaEnabled: Boolean(access?.link.qaEnabled),
+      })
+    : Boolean(
+        access?.link.qaEnabled ||
+          access?.link.fileRequestsEnabled ||
+          (access?.documents.length ?? 0) > 1,
+      );
 
   const toggleSidebar = useCallback(() => {
     if (!showWorkspace) return;
@@ -1594,17 +1603,33 @@ export function PublicViewerPage() {
         onToggleSidebar={showWorkspace ? toggleSidebar : undefined}
         sidebar={
           showWorkspace ? (
-            <VisitorWorkspacePanel
-              open={sidebarOpen}
-              onClose={() => setSidebarOpen(false)}
-              documents={access.documents}
-              selectedDocIndex={selectedDocIndex}
-              onSelectDoc={setSelectedDocIndex}
-              qaEnabled={access.link.qaEnabled}
-              fileRequestsEnabled={access.link.fileRequestsEnabled}
-              publicToken={token}
-              publicSessionToken={accessCredentials.sessionToken}
-            />
+            unifiedAsk ? (
+              <VisitorWorkspacePanel
+                open={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+                documents={access.documents}
+                selectedDocIndex={selectedDocIndex}
+                onSelectDoc={setSelectedDocIndex}
+                qaEnabled={access.link.qaEnabled}
+                unifiedAskEnabled
+                fileRequestsEnabled={access.link.fileRequestsEnabled}
+                publicToken={token}
+                publicSessionToken={accessCredentials.sessionToken}
+              />
+            ) : (
+              <RightSidebar
+                open={sidebarOpen}
+                onClose={() => setSidebarOpen(false)}
+                documents={access.documents}
+                selectedDocIndex={selectedDocIndex}
+                onSelectDoc={setSelectedDocIndex}
+                qaEnabled={access.link.qaEnabled}
+                unifiedAskEnabled={false}
+                fileRequestsEnabled={access.link.fileRequestsEnabled}
+                publicToken={token}
+                publicSessionToken={accessCredentials.sessionToken}
+              />
+            )
           ) : undefined
         }
       />

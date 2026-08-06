@@ -23,6 +23,7 @@ import { EmptyState } from "@/components/common/EmptyState";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import { formatRelativeTime } from "@/lib/formatters";
+import { ownerAskTurnsToVisitorQuestions, answerOwnerAskQuestion } from "@/lib/ownerAskTurn";
 import type { Link, VisitorQuestion } from "@/types";
 
 interface DealRoomQATabProps {
@@ -42,12 +43,12 @@ export function DealRoomQATab({ roomId }: DealRoomQATabProps) {
   const [localOverrides, setLocalOverrides] = useState<Record<string, VisitorQuestion>>({});
 
   const { data, loading, error, refetch } = useAsyncData(async () => {
-    const [questionsRes, linksRes] = await Promise.all([
-      api.listRoomQuestions(roomId),
+    const [askRes, linksRes] = await Promise.all([
+      api.listRoomAsk(roomId, { lane: "host" }),
       api.getDealRoomLinks(roomId),
     ]);
     return {
-      questions: questionsRes.data ?? [],
+      questions: ownerAskTurnsToVisitorQuestions(askRes.data ?? []),
       links: linksRes.data ?? [],
     } satisfies RoomAskHostData;
   }, [roomId]);
@@ -77,8 +78,7 @@ export function DealRoomQATab({ roomId }: DealRoomQATabProps) {
     if (!text) return;
     setAnswerLoading((prev) => ({ ...prev, [question.id]: true }));
     try {
-      const res = await api.answerQuestion(question.link_id, question.id, text);
-      const updated = res.data ?? { ...question, answer: text, status: "answered" as const };
+      const updated = await answerOwnerAskQuestion(question, text);
       setLocalOverrides((prev) => ({ ...prev, [question.id]: updated }));
       setAnswerDraft((prev) => ({ ...prev, [question.id]: "" }));
       toast.success(t("qa.answerSuccess"));

@@ -113,8 +113,6 @@
       "enabledCount": "{{count}} enabled",
       "dealRoomAskHostTitle": "Ask Host included",
       "dealRoomAskHostDescription": "Visitors on deal room share links can send async questions to you. Document-only links do not include visitor Ask yet.",
-      "visitorAsk": "Enable Ask Host",
-      "visitorAskDescription": "Let visitors send async questions to the link owner (standard feature)",
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",
       "indexFile": "Enable index file generation",

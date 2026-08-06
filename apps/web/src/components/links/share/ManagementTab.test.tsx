@@ -10,7 +10,7 @@ import type { FileRequest, VisitorQuestion } from "@/types";
 async function renderTab(props: {
   questions?: VisitorQuestion[];
   fileRequests?: FileRequest[];
-  onAnswer?: (id: string, answer: string) => Promise<void>;
+  onAnswer?: (question: VisitorQuestion, answer: string) => Promise<void>;
   onUpdateFileRequest?: (id: string, status: string) => Promise<void>;
 }) {
   const i18n = await createTestI18n({
@@ -84,7 +84,7 @@ describe("ManagementTab", () => {
     fireEvent.click(screen.getByText("Send answer"));
 
     await waitFor(() => {
-      expect(onAnswer).toHaveBeenCalledWith("q1", "Pricing starts at $99.");
+      expect(onAnswer).toHaveBeenCalledWith(makeQuestion(), "Pricing starts at $99.");
     });
   });
 });

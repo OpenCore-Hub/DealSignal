@@ -1,0 +1,1 @@
+DROP INDEX IF EXISTS idx_link_ask_turns_host_question_unique;

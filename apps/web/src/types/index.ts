@@ -82,6 +82,8 @@ export interface Link {
   watermarkEnabled?: boolean;
   /** Q&A feature toggle (available from v2.7+ backend). */
   qaEnabled?: boolean;
+  /** Unified visitor Ask UI (Phase A; requires VISITOR_ASK_UNIFIED=1 on API). */
+  visitorAskUnified?: boolean;
   /** File request feature toggle (available from v2.7+ backend). */
   fileRequestsEnabled?: boolean;
   /** Index file feature toggle (available from v2.7+ backend). */
@@ -125,6 +127,8 @@ export interface Link {
 
 export interface VisitorQuestion {
   id: string;
+  /** Unified Ask turn id when loaded from owner /ask inbox. */
+  ask_turn_id?: string;
   link_id: string;
   visitor_id: string;
   visitor_email?: string;
@@ -155,6 +159,13 @@ export interface PublicAskTurn {
   route_reason?: string;
   created_at: string;
   updated_at: string;
+}
+
+/** Owner-facing unified Ask turn (host inbox). */
+export interface OwnerAskTurn extends PublicAskTurn {
+  link_id: string;
+  visitor_id: string;
+  visitor_email?: string;
 }
 
 export interface FileRequest {

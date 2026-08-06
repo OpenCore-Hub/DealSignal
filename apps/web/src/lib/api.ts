@@ -56,6 +56,7 @@ import type {
   WorkspaceSettings,
   VisitorQuestion,
   PublicAskTurn,
+  OwnerAskTurn,
   FileRequest,
   AskSecurityEvent,
 } from "@/types";
@@ -537,7 +538,7 @@ export const api = {
     }
   ) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; visitorAskUnified?: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
       documents: { id: string; title: string; pageCount: number; sourceType: string; folderPath?: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -996,6 +997,16 @@ export const api = {
   // Visitor Q&A / Ask Host
   listLinkQuestions: (linkId: string) =>
     request<{ data: VisitorQuestion[] }>(getWorkspaceSlug(), `/links/${linkId}/questions`),
+  listLinkAsk: (linkId: string, params: { lane?: string; status?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (params.lane) search.set("lane", params.lane);
+    if (params.status) search.set("status", params.status);
+    const qs = search.toString();
+    return request<{ data: OwnerAskTurn[] }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask${qs ? `?${qs}` : ""}`,
+    );
+  },
   listRoomQuestions: (roomId: string, params: { linkId?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.linkId) search.set("link_id", params.linkId);
@@ -1005,8 +1016,24 @@ export const api = {
       `/deal-rooms/${roomId}/visitor-questions${qs ? `?${qs}` : ""}`,
     );
   },
+  listRoomAsk: (roomId: string, params: { linkId?: string; lane?: string; status?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (params.linkId) search.set("link_id", params.linkId);
+    if (params.lane) search.set("lane", params.lane);
+    if (params.status) search.set("status", params.status);
+    const qs = search.toString();
+    return request<{ data: OwnerAskTurn[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/ask${qs ? `?${qs}` : ""}`,
+    );
+  },
   answerQuestion: (linkId: string, questionId: string, answer: string) =>
     request<{ data: VisitorQuestion }>(getWorkspaceSlug(), `/links/${linkId}/questions/${questionId}/answer`, {
+      method: "PATCH",
+      body: JSON.stringify({ answer }),
+    }),
+  answerAskTurn: (linkId: string, turnId: string, answer: string) =>
+    request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/host-answer`, {
       method: "PATCH",
       body: JSON.stringify({ answer }),
     }),

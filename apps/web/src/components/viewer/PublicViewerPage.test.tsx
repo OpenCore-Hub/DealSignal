@@ -94,6 +94,7 @@ const dealRoomAskAccess = {
     downloadEnabled: false,
     watermarkEnabled: false,
     qaEnabled: true,
+    visitorAskUnified: true,
     fileRequestsEnabled: false,
     isBundle: false,
     dealRoomId: "room-1",

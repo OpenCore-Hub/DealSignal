@@ -24,7 +24,7 @@ import { formatRelativeTime } from "@/lib/formatters";
 interface ManagementTabProps {
   questions: VisitorQuestion[];
   fileRequests: FileRequest[];
-  onAnswer: (questionId: string, answer: string) => Promise<void>;
+  onAnswer: (question: VisitorQuestion, answer: string) => Promise<void>;
   onUpdateFileRequest: (requestId: string, status: FileRequest["status"]) => Promise<void>;
 }
 
@@ -43,7 +43,7 @@ export function ManagementTab({
     if (!text) return;
     setAnswerLoading((prev) => ({ ...prev, [question.id]: true }));
     try {
-      await onAnswer(question.id, text);
+      await onAnswer(question, text);
       setAnswerDraft((prev) => ({ ...prev, [question.id]: "" }));
     } finally {
       setAnswerLoading((prev) => ({ ...prev, [question.id]: false }));
