@@ -6,6 +6,7 @@ import type {
   BillingInfo,
   Contact,
   DealRoom,
+  DealRoomAccessPolicy,
   DealRoomAccessRequest,
   DealRoomAnalytics,
   DealRoomKnowledgeCorpus,
@@ -136,10 +137,19 @@ export interface CreateDealRoomLinkPayload {
   custom_domain?: string;
   tags?: string[];
   notify_on_access?: boolean;
-  // Allowlist of deal-room folders. Empty deny-all. Creates always use allowlist mode.
+  /** Folder allowlist when folder_scope_mode=allowlist. */
   folder_paths?: string[];
-  // "full" (legacy whole-room) or "allowlist". Creates ignore this and always allowlist.
+  /** "full" (whole room, default) or "allowlist". */
   folder_scope_mode?: "full" | "allowlist";
+}
+
+export interface UpsertDealRoomAccessPolicyPayload {
+  require_email_verification_floor: boolean;
+  require_nda_floor: boolean;
+  blocked_emails: string[];
+  /** Legacy aliases — same DB columns as floors; kept for older API builds. */
+  require_email_verification?: boolean;
+  require_nda?: boolean;
 }
 
 export interface SendMarketingBatchRequest {
@@ -175,6 +185,31 @@ function publicAccessHeaders(creds?: PublicLinkCredentials): Record<string, stri
     nda_agreed: creds.ndaAgreed,
   };
   return { "X-Link-Access": btoa(JSON.stringify(payload)) };
+}
+
+/** Normalize GET/PUT access-policy responses whether wrapped or unwrapped. */
+function unwrapDealRoomAccessPolicy(
+  res: DealRoomAccessPolicy | { data: DealRoomAccessPolicy } | null | undefined,
+): DealRoomAccessPolicy {
+  if (!res || typeof res !== "object") {
+    return {
+      dealRoomId: "",
+      configured: false,
+      blockedEmails: [],
+    };
+  }
+  if ("dealRoomId" in res && typeof (res as DealRoomAccessPolicy).dealRoomId === "string") {
+    return res as DealRoomAccessPolicy;
+  }
+  const nested = (res as { data?: DealRoomAccessPolicy }).data;
+  if (nested && typeof nested === "object" && typeof nested.dealRoomId === "string") {
+    return nested;
+  }
+  return {
+    dealRoomId: "",
+    configured: false,
+    blockedEmails: [],
+  };
 }
 
 function getWorkspaceSlug(): string {
@@ -346,6 +381,20 @@ async function streamDealRoomKnowledgeSession(
   return doneResult;
 }
 
+/** Coalesce concurrent deal-room list fetches per workspace+query (dashboard + list storms). */
+const dealRoomsInflight = new Map<
+  string,
+  Promise<{
+    data: DealRoom[];
+    pagination?: {
+      page: number;
+      page_size: number;
+      total: number;
+      has_more: boolean;
+    };
+  }>
+>();
+
 export const api = {
   login: async (email: string, password: string) => {
     const res = await request<{ user: User; expires_in: number }>(
@@ -395,6 +444,7 @@ export const api = {
   getDocuments: (
     filter?: DocumentFilter,
     category?: string,
+    /** @deprecated Prefer explicit `category` (e.g. general | agreement). Legacy exclude flags remain for old clients. */
     opts?: { excludeDealRoom?: boolean; excludeAgreement?: boolean },
   ) => {
     const params = new URLSearchParams();
@@ -815,6 +865,26 @@ export const api = {
       method: "POST",
     }),
 
+  // Deal-room access policy (Room Security source of truth).
+  getDealRoomAccessPolicy: async (roomId: string) => {
+    const res = await request<DealRoomAccessPolicy | { data: DealRoomAccessPolicy }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/access-policy`,
+    );
+    return { data: unwrapDealRoomAccessPolicy(res) };
+  },
+  upsertDealRoomAccessPolicy: async (
+    roomId: string,
+    payload: UpsertDealRoomAccessPolicyPayload,
+  ) => {
+    const res = await request<DealRoomAccessPolicy | { data: DealRoomAccessPolicy }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/access-policy`,
+      { method: "PUT", body: JSON.stringify(payload) },
+    );
+    return { data: unwrapDealRoomAccessPolicy(res) };
+  },
+
   // Deal-room share links.
   createDealRoomLink: (roomId: string, payload: CreateDealRoomLinkPayload) =>
     request<Link>(getWorkspaceSlug(), `/deal-rooms/${roomId}/links`, {
@@ -858,11 +928,26 @@ export const api = {
     }),
 
   // Link access requests (visitor authorization applications).
-  getPendingLinkAccessRequests: () =>
-    request<{ data: PendingLinkAccessRequest[] }>(
+  // scope defaults to document — never fetch an unscoped inbox (PII boundary).
+  getPendingLinkAccessRequests: (opts?: {
+    scope?: "document" | "deal_room";
+    dealRoomId?: string;
+  }) => {
+    const params = new URLSearchParams();
+    const scope = opts?.scope ?? "document";
+    params.set("scope", scope);
+    if (scope === "deal_room") {
+      const roomId = opts?.dealRoomId?.trim();
+      if (!roomId) {
+        return Promise.reject(new Error("dealRoomId is required when scope=deal_room"));
+      }
+      params.set("deal_room_id", roomId);
+    }
+    return request<{ data: PendingLinkAccessRequest[] }>(
       getWorkspaceSlug(),
-      "/links/pending-access-requests",
-    ),
+      `/links/pending-access-requests?${params.toString()}`,
+    );
+  },
   getLinkAccessRequests: (linkId: string) =>
     request<{ data: LinkAccessRequest[] }>(getWorkspaceSlug(), `/links/${linkId}/access-requests`),
   approveLinkAccessRequest: (linkId: string, requestId: string) =>
@@ -968,8 +1053,36 @@ export const api = {
       `/contacts/${contactId}/activities`
     ),
 
-  getDealRooms: () =>
-    request<{ data: DealRoom[] }>(getWorkspaceSlug(), "/deal-rooms"),
+  getDealRooms: (opts?: { page?: number; page_size?: number; q?: string }) => {
+    const slug = getWorkspaceSlug();
+    const params = new URLSearchParams();
+    if (opts?.page != null) params.set("page", String(opts.page));
+    if (opts?.page_size != null) params.set("page_size", String(opts.page_size));
+    const q = opts?.q?.trim();
+    if (q) params.set("q", q);
+    const qs = params.toString();
+    const path = qs ? `/deal-rooms?${qs}` : "/deal-rooms";
+    const inflightKey = `${slug}:${qs || "all"}`;
+    const existing = dealRoomsInflight.get(inflightKey);
+    if (existing) {
+      return existing;
+    }
+    const pending = request<{
+      data: DealRoom[];
+      pagination?: {
+        page: number;
+        page_size: number;
+        total: number;
+        has_more: boolean;
+      };
+    }>(slug, path).finally(() => {
+      if (dealRoomsInflight.get(inflightKey) === pending) {
+        dealRoomsInflight.delete(inflightKey);
+      }
+    });
+    dealRoomsInflight.set(inflightKey, pending);
+    return pending;
+  },
   getDealRoomById: (id: string) =>
     request<DealRoom>(getWorkspaceSlug(), `/deal-rooms/${id}`),
   getDealRoomAnalytics: (roomId: string) =>

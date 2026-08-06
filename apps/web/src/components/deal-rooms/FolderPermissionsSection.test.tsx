@@ -25,10 +25,6 @@ i18nInstance.use(initReactI18next).init({
             noSearchResults: "No links match your search.",
             selectAll: "Select all links",
             selectRow: "Select {{name}}",
-            setupAccessFirstTitle: "Set security rules first",
-            setupAccessFirstDescription: "Configure access control first.",
-            goToAccessControlNow: "Go now",
-            redirectCountdown: "Redirecting in {{seconds}}s",
             emptyTitle: "No links yet",
             table: {
               name: "Name",
@@ -134,26 +130,6 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn(), custom: vi.fn(), dismiss: vi.fn() },
 }));
 
-vi.mock("./SetupAccessRedirectToast", () => ({
-  SetupAccessRedirectOverlay: ({
-    open,
-    title,
-    onRedirect,
-  }: {
-    open: boolean;
-    title: string;
-    onRedirect: () => void;
-  }) =>
-    open ? (
-      <div data-testid="setup-access-redirect-toast">
-        <p>{title}</p>
-        <button type="button" onClick={onRedirect}>
-          Go now
-        </button>
-      </div>
-    ) : null,
-}));
-
 function makeLink(overrides: Partial<Link> = {}): Link {
   return {
     id: "link-1",
@@ -208,31 +184,8 @@ describe("FolderPermissionsSection refresh", () => {
     expect(api.getDealRoomLinks).toHaveBeenCalledTimes(2);
   });
 
-  it("shows centered redirect overlay before creating the first link when access is unset", async () => {
+  it("opens create share dialog without requiring room security setup first", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([]));
-    const onSetupAccess = vi.fn();
-
-    render(
-      <I18nextProvider i18n={i18nInstance}>
-        <FolderPermissionsSection roomId="room-1" onSetupAccess={onSetupAccess} />
-      </I18nextProvider>,
-    );
-
-    expect(await screen.findByText("No links yet")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
-    expect(screen.queryByTestId("deal-room-share-dialog")).not.toBeInTheDocument();
-    expect(screen.getByTestId("setup-access-redirect-toast")).toBeInTheDocument();
-    expect(screen.getByText("Set security rules first")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Go now" }));
-    expect(onSetupAccess).toHaveBeenCalledTimes(1);
-  });
-
-  it("opens create share dialog when access defaults already exist", async () => {
-    vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([]));
-    localStorage.setItem(
-      "dealsignal:deal-room-access-defaults:room-1",
-      JSON.stringify({ requireEmail: true })
-    );
 
     render(
       <I18nextProvider i18n={i18nInstance}>
@@ -286,10 +239,6 @@ describe("FolderPermissionsSection refresh", () => {
   it("shows create-new-link above the table when links already exist", async () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue(pageResponse([makeLink()]));
     vi.mocked(api.getPendingLinkAccessRequests).mockResolvedValue({ data: [] });
-    localStorage.setItem(
-      "dealsignal:deal-room-access-defaults:room-1",
-      JSON.stringify({ requireEmail: true })
-    );
 
     render(
       <I18nextProvider i18n={i18nInstance}>

@@ -7,12 +7,10 @@ import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
 
 const {
   getDealRoomAccessRequestsMock,
-  getDealRoomLinksMock,
   getPendingLinkAccessRequestsMock,
   approveLinkAccessRequestMock,
 } = vi.hoisted(() => ({
   getDealRoomAccessRequestsMock: vi.fn(),
-  getDealRoomLinksMock: vi.fn(),
   getPendingLinkAccessRequestsMock: vi.fn(),
   approveLinkAccessRequestMock: vi.fn(),
 }));
@@ -20,7 +18,6 @@ const {
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomAccessRequests: getDealRoomAccessRequestsMock,
-    getDealRoomLinks: getDealRoomLinksMock,
     getPendingLinkAccessRequests: getPendingLinkAccessRequestsMock,
     approveLinkAccessRequest: approveLinkAccessRequestMock,
     rejectLinkAccessRequest: vi.fn(),
@@ -33,7 +30,7 @@ vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
-async function renderPanel() {
+async function renderPanel(opts?: { focusLinkId?: string }) {
   const i18nInstance = await createTestI18n({
     dealRooms: {
       "accessRequests.title": "Access requests",
@@ -61,7 +58,7 @@ async function renderPanel() {
   });
   const view = render(
     <I18nextProvider i18n={i18nInstance}>
-      <DealRoomAccessRequestsPanel roomId="room-1" />
+      <DealRoomAccessRequestsPanel roomId="room-1" focusLinkId={opts?.focusLinkId} />
     </I18nextProvider>
   );
   await act(async () => {
@@ -73,14 +70,10 @@ async function renderPanel() {
 describe("DealRoomAccessRequestsPanel", () => {
   beforeEach(() => {
     getDealRoomAccessRequestsMock.mockReset();
-    getDealRoomLinksMock.mockReset();
     getPendingLinkAccessRequestsMock.mockReset();
     approveLinkAccessRequestMock.mockReset();
 
     getDealRoomAccessRequestsMock.mockResolvedValue({ data: [] });
-    getDealRoomLinksMock.mockResolvedValue({
-      data: [{ id: "link-1", name: "测啊" }],
-    });
     getPendingLinkAccessRequestsMock.mockResolvedValue({
       data: [
         {
@@ -89,6 +82,7 @@ describe("DealRoomAccessRequestsPanel", () => {
           email: "visitor@example.com",
           reason: "need docs",
           signer_name: "Visitor",
+          link_name: "测啊",
           status: "pending",
           created_at: "2026-07-21T00:00:00Z",
           updated_at: "2026-07-21T00:00:00Z",
@@ -106,7 +100,10 @@ describe("DealRoomAccessRequestsPanel", () => {
     });
     expect(screen.getByText("visitor@example.com")).toBeInTheDocument();
     expect(screen.getByText(/测啊/)).toBeInTheDocument();
-    expect(getPendingLinkAccessRequestsMock).toHaveBeenCalled();
+    expect(getPendingLinkAccessRequestsMock).toHaveBeenCalledWith({
+      scope: "deal_room",
+      dealRoomId: "room-1",
+    });
   });
 
   it("approves via the link access-request API", async () => {
@@ -118,6 +115,17 @@ describe("DealRoomAccessRequestsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
     await waitFor(() => {
       expect(approveLinkAccessRequestMock).toHaveBeenCalledWith("link-1", "req-1");
+    });
+  });
+
+  it("highlights the deep-linked share link applicant", async () => {
+    await renderPanel({ focusLinkId: "link-1" });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-access-request-req-1")).toHaveAttribute(
+        "data-focused",
+        "true",
+      );
     });
   });
 });

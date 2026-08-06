@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router";
 import { Plus, Lock, Folder, MagnifyingGlass, Tag } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -22,9 +22,7 @@ import type { DealRoom } from "@/types";
 
 export type { DealRoom };
 
-function normalizeSearch(value: string): string {
-  return value.toLowerCase().trim();
-}
+const PAGE_SIZE = 24;
 
 export function DealRoomsPage() {
   const { t, i18n } = useTranslation("dealRooms");
@@ -34,13 +32,30 @@ export function DealRoomsPage() {
   const location = useLocation();
   const [search, setSearch] = useState("");
   const [selectedTag, setSelectedTag] = useState<string>("all");
+  const [page, setPage] = useState(1);
+  const searchQuery = search.trim();
 
-  const { data: rooms, loading, error, refetch } = useAsyncData(
+  useEffect(() => {
+    setPage(1);
+  }, [search, selectedTag]);
+
+  const { data, loading, error, refetch } = useAsyncData(
     async () => {
-      const res = await api.getDealRooms();
-      return res.data;
+      const res = await api.getDealRooms({
+        page,
+        page_size: PAGE_SIZE,
+        q: searchQuery || undefined,
+      });
+      return res;
     },
-    []
+    [page, searchQuery],
+  );
+
+  const rooms = data?.data;
+  const pagination = data?.pagination;
+  const totalPages = Math.max(
+    1,
+    Math.ceil((pagination?.total ?? rooms?.length ?? 0) / (pagination?.page_size ?? PAGE_SIZE)),
   );
 
   const allTags = useMemo(() => {
@@ -51,23 +66,17 @@ export function DealRoomsPage() {
     return Array.from(tags).sort();
   }, [rooms]);
 
+  // Tag filter is client-side on the current page (tags are not a server index yet).
   const filteredRooms = useMemo(() => {
     if (!rooms) return [];
-    const query = normalizeSearch(search);
-    return rooms.filter((room) => {
-      const matchesSearch =
-        query.length === 0 ||
-        normalizeSearch(room.name).includes(query) ||
-        normalizeSearch(room.description).includes(query);
-      const matchesTag =
-        selectedTag === "all" || room.tags?.includes(selectedTag);
-      return matchesSearch && matchesTag;
-    });
-  }, [rooms, search, selectedTag]);
+    if (selectedTag === "all") return rooms;
+    return rooms.filter((room) => room.tags?.includes(selectedTag));
+  }, [rooms, selectedTag]);
+  // Hide server pagination while a client-only tag filter is active (totals would lie).
+  const filtering = selectedTag !== "all";
 
-  const navigateToRoom = (roomId: string, opts?: { addDocuments?: boolean; tab?: string }) => {
+  const navigateToRoom = (roomId: string, opts?: { tab?: string }) => {
     const params = new URLSearchParams();
-    if (opts?.addDocuments) params.set("addDocuments", "1");
     if (opts?.tab) params.set("tab", opts.tab);
     const qs = params.toString();
     navigate(`/${workspaceSlug}/deal-rooms/${roomId}${qs ? `?${qs}` : ""}`, {
@@ -76,11 +85,6 @@ export function DealRoomsPage() {
         returnLabel: t("detail.back"),
       },
     });
-  };
-
-  const handleAddDocuments = (roomId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
-    navigateToRoom(roomId, { addDocuments: true });
   };
 
   const handleViewDocuments = (roomId: string, e: React.MouseEvent) => {
@@ -156,7 +160,7 @@ export function DealRoomsPage() {
           <Skeleton className="h-64" />
           <Skeleton className="h-64" />
         </div>
-      ) : rooms?.length === 0 ? (
+      ) : rooms?.length === 0 && !searchQuery && selectedTag === "all" ? (
         <div className="flex min-h-0 flex-1 flex-col">
           <EmptyState
             icon={<Folder size={48} />}
@@ -258,14 +262,6 @@ export function DealRoomsPage() {
                           variant="outline"
                           size="sm"
                           className="h-8"
-                          onClick={(e) => handleAddDocuments(room.id, e)}
-                        >
-                          {t("card.addDocuments")}
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8"
                           onClick={(e) => handleViewDocuments(room.id, e)}
                         >
                           {t("card.viewDocuments")}
@@ -275,6 +271,34 @@ export function DealRoomsPage() {
                   </CardContent>
                 </Card>
               ))}
+            </div>
+          )}
+          {!filtering && pagination && totalPages > 1 && (
+            <div className="mt-4 flex items-center justify-between gap-3">
+              <p className="text-caption text-muted-foreground">
+                {t("page.pagination.pageOf", {
+                  page: pagination.page,
+                  totalPages,
+                })}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  {t("page.pagination.prev")}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={!pagination.has_more}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  {t("page.pagination.next")}
+                </Button>
+              </div>
             </div>
           )}
         </div>

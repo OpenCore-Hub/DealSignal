@@ -113,7 +113,7 @@ export function DocumentsTab({ roomId, selectedPaths, onChange }: DocumentsTabPr
   if (error) {
     return (
       <div className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-8 text-center text-sm text-destructive">
-        {tc("error.loadFailed")}: {error}
+        {error}
       </div>
     );
   }

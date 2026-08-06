@@ -172,7 +172,6 @@ void i18nInstance.use(initReactI18next).init({
           activeLinks: "Active links",
         },
         card: {
-          addDocuments: "Add Documents",
           viewDocuments: "View Documents",
           noViewsYet: "No views yet",
         },

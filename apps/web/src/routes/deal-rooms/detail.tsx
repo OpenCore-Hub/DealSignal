@@ -6,11 +6,11 @@ import { Card, CardContent } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { api } from "@/lib/api";
+import { apiErrorMessage, ingestionErrorLabel } from "@/lib/apiErrors";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { toast } from "sonner";
-import { DealRoomDocumentsDialog } from "@/components/deal-rooms/DealRoomDocumentsDialog";
 import { DealRoomFolderTree } from "@/components/deal-rooms/DealRoomFolderTree";
 import {
   DEAL_ROOM_PAGE_TAB_LABEL_KEY,
@@ -21,6 +21,7 @@ import {
 import type { DealRoomTab } from "@/hooks/useDealRoomTab";
 import { FolderPermissionsSection } from "@/components/deal-rooms/FolderPermissionsSection";
 import { DealRoomAccessControlTab } from "@/components/deal-rooms/DealRoomAccessControlTab";
+import { UnsavedTabLeaveOverlay } from "@/components/deal-rooms/UnsavedTabLeaveOverlay";
 import { DealRoomAnalyticsTab } from "@/components/deal-rooms/DealRoomAnalyticsTab";
 import { DealRoomQATab } from "@/components/deal-rooms/DealRoomQATab";
 import { DealRoomDocumentsHome } from "@/components/deal-rooms/DealRoomDocumentsHome";
@@ -74,9 +75,8 @@ export function DealRoomDetailPage() {
   const { workspaceSlug, roomId } = useParams<{ workspaceSlug: string; roomId: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const shouldOpenDocuments = searchParams.get("addDocuments") === "1";
-  const [documentsDialogOpen, setDocumentsDialogOpen] = useState(shouldOpenDocuments);
+  const [searchParams] = useSearchParams();
+  const deepLinkAccessLinkId = searchParams.get("linkId") ?? undefined;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetFolderRef = useRef<string | null>(null);
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
@@ -86,7 +86,34 @@ export function DealRoomDetailPage() {
   const [roomLinks, setRoomLinks] = useState<Link[]>([]);
   const [descriptionExpanded, setDescriptionExpanded] = useState(false);
   const [accessLinkId, setAccessLinkId] = useState<string | undefined>();
+  const [accessPolicyDirty, setAccessPolicyDirty] = useState(false);
+  const [pendingLeaveTab, setPendingLeaveTab] = useState<DealRoomTab | null>(null);
   const { tab, setTab } = useDealRoomTab();
+
+  const requestTabChange = useCallback(
+    (next: DealRoomTab) => {
+      if (next === tab) return;
+      if (tab === "access" && accessPolicyDirty) {
+        setPendingLeaveTab(next);
+        return;
+      }
+      setTab(next);
+    },
+    [tab, accessPolicyDirty, setTab],
+  );
+
+  const confirmLeaveAccessTab = useCallback(() => {
+    if (!pendingLeaveTab) return;
+    const next = pendingLeaveTab;
+    setAccessPolicyDirty(false);
+    setPendingLeaveTab(null);
+    setTab(next);
+  }, [pendingLeaveTab, setTab]);
+
+  const stayOnAccessTab = useCallback(() => {
+    setPendingLeaveTab(null);
+  }, []);
+  const resolvedAccessLinkId = accessLinkId ?? deepLinkAccessLinkId;
   const reducedMotion = useReducedMotion();
   const setBreadcrumbTail = useUIStore((state) => state.setBreadcrumbTail);
   const navSignals = useDealRoomNavStore();
@@ -110,26 +137,15 @@ export function DealRoomDetailPage() {
     };
   }, []);
 
-  // Auto-open documents dialog from query param and reset selected folder when tab changes.
-  useEffect(() => {
-    if (shouldOpenDocuments) {
-      setDocumentsDialogOpen(true);
-      const next = new URLSearchParams(searchParams);
-      next.delete("addDocuments");
-      setSearchParams(next, { replace: true });
-    }
-  }, [shouldOpenDocuments, searchParams, setSearchParams]);
-
   const fetchRoom = useCallback(async () => {
     if (!roomId) {
       throw new Error(t("detail.notFound"));
     }
-    const [r, tRes, docsRes] = await Promise.all([
+    const [r, tRes] = await Promise.all([
       api.getDealRoomById(roomId),
       api.getDealRoomTemplates(),
-      api.getDocuments(),
     ]);
-    return { room: r, templates: tRes.data, workspaceDocs: docsRes.data };
+    return { room: r, templates: tRes.data };
   }, [roomId, t]);
 
   const { data, loading, error, refetch } = useAsyncData(fetchRoom, [roomId]);
@@ -217,7 +233,7 @@ export function DealRoomDetailPage() {
             await refetch();
           } else if (doc.status === "failed") {
             stopPolling(itemId);
-            toast.error(doc.ingestionJob?.errorMessage ?? tc("error.saveFailed"));
+            toast.error(ingestionErrorLabel(doc.ingestionJob?.errorMessage) ?? tc("error.saveFailed"));
           }
         } catch (e) {
           consecutiveErrors++;
@@ -226,11 +242,11 @@ export function DealRoomDetailPage() {
             setUploadItems((prev) =>
               prev.map((item) =>
                 item.id === itemId
-                  ? { ...item, status: "error", error: e instanceof Error ? e.message : tc("error.saveFailed") }
+                  ? { ...item, status: "error", error: apiErrorMessage(e, { fallback: "saveFailed" }) }
                   : item
               )
             );
-            toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+            toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
           }
         }
       };
@@ -272,6 +288,7 @@ export function DealRoomDetailPage() {
       activeIntervalsRef.current.add(interval);
 
       try {
+        // Upload as general; AddDocument promotes to deal_room atomically in sequence.
         const doc = await uploadDocument(file);
         clearInterval(interval);
         activeIntervalsRef.current.delete(interval);
@@ -306,9 +323,7 @@ export function DealRoomDetailPage() {
         const cancelled = e instanceof UploadCancelledError;
         const message = cancelled
           ? td("upload.replaceCancelled")
-          : e instanceof Error
-            ? e.message
-            : tc("error.saveFailed");
+          : apiErrorMessage(e, { fallback: "saveFailed" });
         setUploadItems((prev) =>
           prev.map((item) =>
             item.id === id
@@ -415,7 +430,7 @@ export function DealRoomDetailPage() {
         toast.success(t("folders.created", { name }));
         refetch();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : t("folders.createFailed"));
+        toast.error(apiErrorMessage(e, { messageKey: "dealRooms:folders.createFailed" }));
       }
     },
     [roomId, t, refetch]
@@ -429,7 +444,7 @@ export function DealRoomDetailPage() {
         toast.success(t("folders.renamed"));
         refetch();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : t("folders.renameFailed"));
+        toast.error(apiErrorMessage(e, { messageKey: "dealRooms:folders.renameFailed" }));
       }
     },
     [roomId, t, refetch]
@@ -443,7 +458,7 @@ export function DealRoomDetailPage() {
         toast.success(t("folders.deleted"));
         refetch();
       } catch (e) {
-        toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+        toast.error(apiErrorMessage(e, { messageKey: "dealRooms:folders.deleteFailed" }));
       }
     },
     [roomId, t, refetch]
@@ -456,27 +471,6 @@ export function DealRoomDetailPage() {
       await api.removeDealRoomDocument(roomId, docId);
     },
     [roomId],
-  );
-
-  const handleDocumentsAdd = useCallback(
-    async (documentIds: string[], folderPath: string) => {
-      if (!roomId) return;
-      try {
-        let lastOrder = (room?.documents ?? []).find((fd) => fd.folder === folderPath)?.documents.length ?? 0;
-        for (const documentId of documentIds) {
-          await api.addDealRoomDocument(roomId, {
-            document_id: documentId,
-            folder_path: folderPath,
-            sort_order: lastOrder++,
-          });
-        }
-        toast.success(t("documents.added", { count: documentIds.length }));
-        refetch();
-      } catch (e) {
-        toast.error(e instanceof Error ? e.message : t("documents.addFailed"));
-      }
-    },
-    [roomId, room?.documents, t, refetch]
   );
 
   // Only show the full loading/error placeholders on the initial load. During
@@ -543,7 +537,7 @@ export function DealRoomDetailPage() {
       {showPageTabs && (
         <Tabs
           value={tab}
-          onValueChange={(value) => setTab(value as DealRoomTab)}
+          onValueChange={(value) => requestTabChange(value as DealRoomTab)}
           className="gap-0"
         >
           <TabsList
@@ -583,14 +577,12 @@ export function DealRoomDetailPage() {
                     roomId={room.id}
                     folders={room.folders ?? []}
                     folderDocs={room.documents ?? []}
-                    workspaceDocuments={data?.workspaceDocs ?? []}
                     roomDocuments={allRoomDocuments}
                     isAdmin={true}
                     onFolderCreate={handleFolderCreate}
                     onFolderRename={handleFolderRename}
                     onFolderDelete={handleFolderDelete}
                     onDocumentRemove={handleDocumentRemove}
-                    onDocumentsAdd={handleDocumentsAdd}
                     onFolderUpload={uploadFileToFolder}
                     onChanged={refetch}
                     onDocumentOpen={(docId) =>
@@ -610,7 +602,9 @@ export function DealRoomDetailPage() {
           {tab === "access" && (
             <DealRoomAccessControlTab
               roomId={room.id}
-              initialLinkId={accessLinkId}
+              initialLinkId={resolvedAccessLinkId}
+              focusLinkId={deepLinkAccessLinkId}
+              onDirtyChange={setAccessPolicyDirty}
               onChanged={async () => {
                 await refetch();
               }}
@@ -625,11 +619,7 @@ export function DealRoomDetailPage() {
               onLinksChanged={bumpLinksRevision}
               onManageAccess={(linkId) => {
                 setAccessLinkId(linkId);
-                setTab("access");
-              }}
-              onSetupAccess={() => {
-                setAccessLinkId(undefined);
-                setTab("access");
+                requestTabChange("access");
               }}
             />
           )}
@@ -642,8 +632,8 @@ export function DealRoomDetailPage() {
             <DealRoomActivityTab
               recentVisitors={room.recentVisitors}
               links={roomLinks}
-              onOpenShare={() => setTab("links")}
-              onOpenAnalytics={() => setTab("analytics")}
+              onOpenShare={() => requestTabChange("links")}
+              onOpenAnalytics={() => requestTabChange("analytics")}
             />
           )}
 
@@ -661,16 +651,6 @@ export function DealRoomDetailPage() {
           )}
         </motion.div>
       </AnimatePresence>
-
-      <DealRoomDocumentsDialog
-        roomId={room.id}
-        folders={room.folders ?? []}
-        folderDocs={room.documents ?? []}
-        workspaceDocuments={data?.workspaceDocs ?? []}
-        onChanged={refetch}
-        open={documentsDialogOpen}
-        onOpenChange={(open) => setDocumentsDialogOpen(open)}
-      />
 
       {/* Full-screen centered upload progress overlay.
           The deal room page is pushed into the background with a blur. */}
@@ -727,6 +707,19 @@ export function DealRoomDetailPage() {
       />
 
       {conflictDialog}
+
+      <UnsavedTabLeaveOverlay
+        open={pendingLeaveTab != null}
+        title={t("accessControl.unsavedLeaveTitle")}
+        description={t("accessControl.unsavedLeaveDescription")}
+        countdownLabel={(seconds) =>
+          t("accessControl.unsavedLeaveCountdown", { seconds })
+        }
+        stayLabel={t("accessControl.unsavedLeaveStay")}
+        leaveNowLabel={t("accessControl.unsavedLeaveNow")}
+        onStay={stayOnAccessTab}
+        onLeave={confirmLeaveAccessTab}
+      />
     </motion.div>
   );
 }

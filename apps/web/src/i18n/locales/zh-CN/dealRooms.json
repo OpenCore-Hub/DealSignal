@@ -2,7 +2,12 @@
   "page": {
     "title": "数据室",
     "description": "集中管理尽调资料、LP 报告与销售提案的数据室。",
-    "create": "新建数据室"
+    "create": "新建数据室",
+    "pagination": {
+      "prev": "上一页",
+      "next": "下一页",
+      "pageOf": "第 {{page}} / {{totalPages}} 页"
+    }
   },
   "empty": {
     "title": "暂无数据室",
@@ -47,7 +52,6 @@
     "activeLinks": "活跃链接"
   },
   "card": {
-    "addDocuments": "添加文档",
     "viewDocuments": "查看文档",
     "noViewsYet": "暂无浏览"
   },
@@ -55,7 +59,6 @@
     "back": "返回数据室",
     "notFound": "数据室未找到",
     "invite": "邀请成员",
-    "manageDocs": "管理文档",
     "documents": "文档",
     "members": "成员",
     "security": "安全",
@@ -81,7 +84,7 @@
   },
   "pageTabs": {
     "resources": "资源文件",
-    "access": "访问控制",
+    "access": "访问策略",
     "links": "分享链接",
     "analytics": "数据分析",
     "knowledge": "知识库"
@@ -91,11 +94,26 @@
     "selectLink": "选择分享链接",
     "newLink": "新建分享链接",
     "emptyTitle": "暂无分享链接",
-    "emptyDescription": "请先在「分享链接」中创建链接，再在此配置访问规则。",
+    "emptyDescription": "请在「分享链接」中创建链接。允许访客按链接单独设置。",
     "goCreateLink": "去创建链接",
-    "pageTitle": "访问控制",
-    "pageDescription": "配置本数据室的访客身份验证、准入名单与内容保护策略。",
-    "defaultsHint": "尚未创建分享链接时，此处设置会保存为数据室默认规则，并在创建链接时自动应用。"
+    "pageTitle": "访问策略",
+    "pageDescription": "审批访问申请、设置访问黑名单，并可选择要求每条新分享链接必须验证邮箱或签署 NDA。",
+    "defaultsHint": "完整受众与内容保护在每条分享链接中配置。",
+    "blocklistTitle": "访问黑名单",
+    "blocklistDescription": "这些邮箱无法打开本数据室的任何分享链接。",
+    "floorsTitle": "安全域",
+    "floorsDescription": "可选的最低门槛。保存后，创建/编辑分享时会强制开启并锁定这些开关。密码、水印、允许名单仍按链接单独设置。",
+    "floorMustVerify": "必须验证邮箱",
+    "floorMustVerifyHint": "保存后：每条分享链接必须开启邮箱验证，创建/编辑时开关锁定不可关。",
+    "floorMustNda": "必须要求 NDA",
+    "floorMustNdaHint": "保存后：每条分享链接必须要求 NDA，开关锁定；协议在创建/编辑链接时选择。",
+    "saveButton": "保存访问策略",
+    "saveHint": "请先保存。访问黑名单会立即对本数据室所有分享链接生效。安全域会在创建/编辑分享时锁定验证与 NDA。",
+    "unsavedLeaveTitle": "访问策略尚未保存",
+    "unsavedLeaveDescription": "离开此页将丢弃当前修改。",
+    "unsavedLeaveCountdown": "{{seconds}} 秒后离开…",
+    "unsavedLeaveStay": "继续编辑",
+    "unsavedLeaveNow": "立即离开"
   },
   "knowledge": {
     "title": "知识库",
@@ -559,8 +577,8 @@
       "noSearchResults": "没有匹配的链接",
       "selectAll": "全选链接",
       "selectRow": "选择 {{name}}",
-      "setupAccessFirstTitle": "先设置安全规则",
-      "setupAccessFirstDescription": "创建分享链接前，请先在「访问控制」中配置身份验证与内容保护规则。",
+      "setupAccessFirstTitle": "先设置数据室安全默认",
+      "setupAccessFirstDescription": "创建分享链接前，请先在「访问控制」中保存身份验证与内容保护默认。允许访客将在创建链接时选择。",
       "goToAccessControlNow": "立即前往",
       "redirectCountdown": "{{seconds}} 秒后自动前往访问控制",
       "emptyTitle": "未找到该数据室的链接",
@@ -798,6 +816,8 @@
   },
   "documents": {
     "dialogDescription": "整理文件夹并管理该数据室中的文档。",
+    "workspaceLoading": "正在加载工作区文档…",
+    "workspaceLoadFailed": "加载工作区文档失败",
     "addFromWorkspace": "从工作区添加文档",
     "addToRoom": "加入数据室",
     "addToRoomDescription": "将文档 '{{title}}' 添加到所选数据室的文件夹中。",

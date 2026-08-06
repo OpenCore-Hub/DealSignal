@@ -35,7 +35,7 @@ vi.mock("@/lib/api", () => ({
     getLinkAccessRules: vi.fn(),
     getContactById: vi.fn(),
     getContacts: vi.fn(),
-    sendEmailVerificationCode: vi.fn(),
+    resendLinkAccessCode: vi.fn(),
   },
 }));
 
@@ -122,7 +122,7 @@ describe("SendVerificationCodeDialog", () => {
     vi.mocked(api.getLinkAccessRules).mockReset();
     vi.mocked(api.getContactById).mockReset();
     vi.mocked(api.getContacts).mockReset();
-    vi.mocked(api.sendEmailVerificationCode).mockReset();
+    vi.mocked(api.resendLinkAccessCode).mockReset();
   });
 
   it("lists only this link's allowed visitors and never loads workspace contacts", async () => {
@@ -144,7 +144,7 @@ describe("SendVerificationCodeDialog", () => {
       totalDurationSeconds: 0,
       viewedDocuments: [],
     });
-    vi.mocked(api.sendEmailVerificationCode).mockResolvedValue(undefined);
+    vi.mocked(api.resendLinkAccessCode).mockResolvedValue(undefined);
 
     const { onOpenChange } = renderDialog();
 
@@ -162,10 +162,11 @@ describe("SendVerificationCodeDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Send code" }));
 
     await waitFor(() => {
-      expect(api.sendEmailVerificationCode).toHaveBeenCalledTimes(1);
-      expect(api.sendEmailVerificationCode).toHaveBeenCalledWith(
-        "token-abc",
+      expect(api.resendLinkAccessCode).toHaveBeenCalledTimes(1);
+      expect(api.resendLinkAccessCode).toHaveBeenCalledWith(
+        "link-1",
         "alice@example.com",
+        true,
       );
       expect(onOpenChange).toHaveBeenCalledWith(false);
     });

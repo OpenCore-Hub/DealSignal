@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { createPortal } from "react-dom";
 import {
   Folder,
@@ -35,7 +36,7 @@ import {
 } from "@/lib/dealRoomFolderTree";
 import { ResourcesToolbarHostContext } from "./DealRoomDocumentsHome";
 import { UploadCancelledError } from "@/hooks/useDocumentUploadConflict";
-import type { DealRoomDocumentItem, DealRoomFolder, DealRoomFolderDocs, Document } from "@/types";
+import type { DealRoomDocumentItem, DealRoomFolder, DealRoomFolderDocs } from "@/types";
 
 /** Backend treats parent_path "/" as a top-level (root) folder create. */
 const ROOT_PARENT = "/";
@@ -44,7 +45,6 @@ interface DealRoomFolderTreeProps {
   roomId: string;
   folders: DealRoomFolder[];
   folderDocs: DealRoomFolderDocs[];
-  workspaceDocuments?: Document[];
   roomDocuments?: DealRoomDocumentItem[];
   isAdmin?: boolean;
   /** When provided, the tree works as a pure folder navigator without inline documents. */
@@ -56,7 +56,6 @@ interface DealRoomFolderTreeProps {
   onDocumentMove?: (docId: string, folderPath: string) => Promise<void>;
   onDocumentReorder?: (docId: string, sortOrder: number) => Promise<void>;
   onDocumentRemove?: (docId: string) => Promise<void>;
-  onDocumentsAdd?: (documentIds: string[], folderPath: string) => Promise<void>;
   onDocumentOpen?: (docId: string) => void;
   /** Upload one or more local files into a folder (multi-select supported). */
   onFolderUpload?: (file: File, folderPath: string, sortOrder?: number) => Promise<void>;
@@ -295,7 +294,7 @@ export function DealRoomFolderTree({
       clearSelection();
       await onChanged?.();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("folders.deleteFailed"));
+      toast.error(apiErrorMessage(e, { messageKey: "dealRooms:folders.deleteFailed" }));
     } finally {
       setBulkLoading(false);
     }
@@ -335,7 +334,7 @@ export function DealRoomFolderTree({
       clearSelection();
     } catch (err) {
       if (!(err instanceof UploadCancelledError)) {
-        toast.error(err instanceof Error ? err.message : t("folders.toolbar.batchUploadFailed"));
+        toast.error(apiErrorMessage(err, { fallback: "uploadFailed", messageKey: "dealRooms:folders.toolbar.batchUploadFailed" }));
       }
     } finally {
       // Refresh even when a later file is cancelled/fails so earlier successes appear.
@@ -367,7 +366,7 @@ export function DealRoomFolderTree({
       clearSelection();
       await onChanged?.();
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : t("documents.removeFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "deleteFailed", messageKey: "dealRooms:documents.removeFailed" }));
     } finally {
       setBulkLoading(false);
     }

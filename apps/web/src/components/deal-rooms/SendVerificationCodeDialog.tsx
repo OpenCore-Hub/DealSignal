@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import type { AccessRule, Contact, Link } from "@/types";
 
 export interface AllowedVisitor {
@@ -80,10 +81,6 @@ export function buildAllowedVisitors(
     });
   }
   return out;
-}
-
-function extractLinkToken(shortUrl: string): string {
-  return shortUrl.split("/").pop() ?? shortUrl;
 }
 
 /** Resolve display names only for contacts already attached to this link. */
@@ -198,9 +195,8 @@ export function SendVerificationCodeDialog({
     if (emails.length === 0) return;
 
     setSending(true);
-    const token = extractLinkToken(link.shortUrl);
     const results = await Promise.allSettled(
-      emails.map((email) => api.sendEmailVerificationCode(token, email)),
+      emails.map((email) => api.resendLinkAccessCode(link.id, email, true)),
     );
     const failed = results.filter((r) => r.status === "rejected").length;
     const succeeded = emails.length - failed;
@@ -220,7 +216,12 @@ export function SendVerificationCodeDialog({
       );
       return;
     }
-    toast.error(t("permissions.links.sendCode.error"));
+    const firstError = results.find((r) => r.status === "rejected");
+    toast.error(
+      apiErrorMessage(firstError?.status === "rejected" ? firstError.reason : undefined, {
+        messageKey: "dealRooms:permissions.links.sendCode.error",
+      }),
+    );
   };
 
   return (

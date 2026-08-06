@@ -29,10 +29,20 @@ type PendingAccessRequest = {
 
 interface DealRoomAccessRequestsPanelProps {
   roomId: string;
-  onChanged?: () => void;
+  /** When set (e.g. dashboard deep link), highlight matching share-link applicants. */
+  focusLinkId?: string;
+  onChanged?: (detail?: {
+    email?: string;
+    action: "approve" | "reject";
+    source: "room" | "link";
+  }) => void;
 }
 
-export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAccessRequestsPanelProps) {
+export function DealRoomAccessRequestsPanel({
+  roomId,
+  focusLinkId,
+  onChanged,
+}: DealRoomAccessRequestsPanelProps) {
   const { t } = useTranslation(["dealRooms", "linkShare", "common"]);
   const [busyId, setBusyId] = useState<string | null>(null);
   const {
@@ -41,12 +51,10 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
     error,
     refetch,
   } = useAsyncData(async () => {
-    // Creator-scoped pending inbox + room membership requests. Avoids N+1
-    // per-link list calls that previously leaked emails to non-creators.
-    const [roomRes, linksRes, pendingLinkRes] = await Promise.all([
+    // Room membership requests + deal-room-scoped link inbox (creator-only emails).
+    const [roomRes, pendingLinkRes] = await Promise.all([
       api.getDealRoomAccessRequests(roomId),
-      api.getDealRoomLinks(roomId),
-      api.getPendingLinkAccessRequests(),
+      api.getPendingLinkAccessRequests({ scope: "deal_room", dealRoomId: roomId }),
     ]);
     const roomPending: PendingAccessRequest[] = (roomRes.data ?? [])
       .filter((r) => r.status === "pending")
@@ -57,32 +65,28 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
         source: "room" as const,
       }));
 
-    const links = linksRes.data ?? [];
-    const linkMeta = new Map(
-      links.map((link) => [link.id, link.name || undefined] as const),
-    );
-    const roomLinkIds = new Set(links.map((link) => link.id));
-    const linkPending: PendingAccessRequest[] = (pendingLinkRes.data ?? [])
-      .filter((r) => roomLinkIds.has(r.link_id))
-      .map((r) => ({
-        id: r.id,
-        email: r.email,
-        reason: r.reason,
-        signerName: r.signer_name,
-        linkId: r.link_id,
-        linkName: linkMeta.get(r.link_id) || r.link_name || undefined,
-        source: "link" as const,
-      }));
+    const linkPending: PendingAccessRequest[] = (pendingLinkRes.data ?? []).map((r) => ({
+      id: r.id,
+      email: r.email,
+      reason: r.reason,
+      signerName: r.signer_name,
+      linkId: r.link_id,
+      linkName: r.link_name || undefined,
+      source: "link" as const,
+    }));
 
     return [...roomPending, ...linkPending];
   }, [roomId]);
 
   const pending = requests ?? [];
 
-  const afterLinkReview = useCallback(async () => {
-    await refetch();
-    onChanged?.();
-  }, [onChanged, refetch]);
+  const afterLinkReview = useCallback(
+    async (detail: { email: string; action: "approve" | "reject" }) => {
+      await refetch();
+      onChanged?.({ ...detail, source: "link" });
+    },
+    [onChanged, refetch],
+  );
   const {
     busyId: linkBusyId,
     approve: approveLink,
@@ -100,7 +104,11 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
         await api.approveDealRoomAccessRequest(roomId, request.id);
         toast.success(t("dealRooms:accessRequests.approveSuccess"));
         await refetch();
-        onChanged?.();
+        onChanged?.({
+          email: request.email,
+          action: "approve",
+          source: "room",
+        });
       } catch (err) {
         toast.error(
           accessRequestReviewErrorMessage(
@@ -127,7 +135,11 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
         await api.rejectDealRoomAccessRequest(roomId, request.id);
         toast.success(t("dealRooms:accessRequests.rejectSuccess"));
         await refetch();
-        onChanged?.();
+        onChanged?.({
+          email: request.email,
+          action: "reject",
+          source: "room",
+        });
       } catch (err) {
         toast.error(
           accessRequestReviewErrorMessage(
@@ -189,11 +201,19 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
         <CardDescription>{t("dealRooms:accessRequests.description")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
-        {pending.map((request) => (
+        {pending.map((request) => {
+          const focused =
+            Boolean(focusLinkId) &&
+            request.source === "link" &&
+            request.linkId === focusLinkId;
+          return (
           <div
             key={`${request.source}-${request.id}`}
-            className="flex flex-col gap-3 rounded-lg border bg-background p-3 sm:flex-row sm:items-start sm:justify-between"
+            className={`flex flex-col gap-3 rounded-lg border bg-background p-3 sm:flex-row sm:items-start sm:justify-between${
+              focused ? " ring-2 ring-primary/40" : ""
+            }`}
             data-testid={`deal-room-access-request-${request.id}`}
+            data-focused={focused ? "true" : undefined}
           >
             <div className="min-h-0 min-w-0 space-y-1">
               <p className="truncate text-sm font-medium">{request.email}</p>
@@ -233,7 +253,8 @@ export function DealRoomAccessRequestsPanel({ roomId, onChanged }: DealRoomAcces
               </Button>
             </div>
           </div>
-        ))}
+          );
+        })}
       </CardContent>
     </Card>
   );

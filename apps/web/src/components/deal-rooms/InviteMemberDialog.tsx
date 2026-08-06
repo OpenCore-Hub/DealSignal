@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { Envelope, Minus, Plus, UserPlus } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import {
@@ -119,7 +120,7 @@ export function InviteMemberDialog({ roomId, onInvited, children }: InviteMember
         );
       }
     } catch (e) {
-      toast.error(e instanceof Error ? e.message : tc("error.saveFailed"));
+      toast.error(apiErrorMessage(e, { fallback: "saveFailed" }));
     } finally {
       setSubmitting(false);
     }

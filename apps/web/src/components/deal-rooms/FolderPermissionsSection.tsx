@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import {
   CaretDown,
   CaretLeft,
@@ -43,8 +44,6 @@ import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { SendVerificationCodeDialog } from "./SendVerificationCodeDialog";
 import { LinkActivityDialog } from "@/components/links/share";
 import { RowActions } from "@/components/common/RowActions";
-import { hasRoomAccessDefaults } from "./roomAccessDefaults";
-import { SetupAccessRedirectOverlay } from "./SetupAccessRedirectToast";
 import type { Link } from "@/types";
 
 const PAGE_SIZE = 10;
@@ -59,10 +58,8 @@ interface FolderPermissionsSectionProps {
   refreshKey?: number;
   /** Notify parent so documents/analytics active-link signals stay in sync. */
   onLinksChanged?: () => void;
-  /** Open Access Control tab for a specific link. */
+  /** Open Room Security tab for a specific link (approval inbox deep link). */
   onManageAccess?: (linkId: string) => void;
-  /** Open Access Control tab to configure room security before the first link. */
-  onSetupAccess?: () => void;
 }
 
 function formatDateTime(value: string | undefined, emptyLabel: string): string {
@@ -84,7 +81,6 @@ export function FolderPermissionsSection({
   refreshKey = 0,
   onLinksChanged,
   onManageAccess,
-  onSetupAccess,
 }: FolderPermissionsSectionProps) {
   const { t } = useTranslation("dealRooms");
   const emptyCell = t("common:emDash");
@@ -145,7 +141,10 @@ export function FolderPermissionsSection({
   const { data: pendingByLinkId, error: pendingError, refetch: refetchPending } = useAsyncData(async () => {
     if (linkList.length === 0) return {} as Record<string, number>;
     // Creator-scoped workspace inbox — empty for non-creators; one request vs N+1.
-    const res = await api.getPendingLinkAccessRequests();
+    const res = await api.getPendingLinkAccessRequests({
+      scope: "deal_room",
+      dealRoomId: roomId,
+    });
     const onPage = new Set(linkList.map((link) => link.id));
     const counts: Record<string, number> = {};
     for (const request of res.data ?? []) {
@@ -157,7 +156,6 @@ export function FolderPermissionsSection({
 
   const [viewLink, setViewLink] = useState<Link | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
-  const [setupRedirectOpen, setSetupRedirectOpen] = useState(false);
   const [editLink, setEditLink] = useState<Link | null>(null);
   const [sendCodeLink, setSendCodeLink] = useState<Link | null>(null);
   const [deleteLink, setDeleteLink] = useState<Link | null>(null);
@@ -166,24 +164,12 @@ export function FolderPermissionsSection({
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [bulkDeleteLoading, setBulkDeleteLoading] = useState(false);
 
-  const accessControlConfigured =
-    total > 0 || hasRoomAccessDefaults(roomId);
-
   const allPageSelected =
     linkList.length > 0 && linkList.every((link) => selectedIds.has(link.id));
   const somePageSelected = linkList.some((link) => selectedIds.has(link.id));
 
   const handleCreateLink = () => {
-    if (!accessControlConfigured) {
-      setSetupRedirectOpen(true);
-      return;
-    }
     setCreateOpen(true);
-  };
-
-  const handleSetupRedirect = () => {
-    setSetupRedirectOpen(false);
-    onSetupAccess?.();
   };
 
   const totalPending = useMemo(() => {
@@ -261,7 +247,7 @@ export function FolderPermissionsSection({
       setDeleteLink(null);
       await refreshAll();
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("permissions.links.delete.error"));
+      toast.error(apiErrorMessage(err, { fallback: "deleteFailed", messageKey: "dealRooms:permissions.links.delete.error" }));
     } finally {
       setDeleteLoading(false);
     }
@@ -647,17 +633,6 @@ export function FolderPermissionsSection({
           onOpenChange={(open) => !open && setViewLink(null)}
         />
       )}
-
-      <SetupAccessRedirectOverlay
-        open={setupRedirectOpen}
-        title={t("permissions.links.setupAccessFirstTitle")}
-        description={t("permissions.links.setupAccessFirstDescription")}
-        countdownLabel={(seconds) =>
-          t("permissions.links.redirectCountdown", { seconds })
-        }
-        goNowLabel={t("permissions.links.goToAccessControlNow")}
-        onRedirect={handleSetupRedirect}
-      />
 
       <DealRoomShareDialog
         roomId={roomId}

@@ -1,188 +1,94 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Check } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
-import type { AccessRule, DealRoomFolderDocs, Link } from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { ContactEmailTagInput } from "@/components/links/share";
 import { DealRoomAccessRequestsPanel } from "./DealRoomAccessRequestsPanel";
 import {
-  AccessTab,
-  LinkAccessRequestsPanel,
-  buildDraft,
-  buildRules,
-  buildLinkPayload,
-  validateDraft,
-} from "@/components/links/share";
+  draftFromRoomAccessPolicy,
+  roomAccessPolicyPayloadFromDraft,
+} from "./roomAccessPolicy";
 import type { DraftLink } from "@/components/links/share";
-import {
-  loadRoomAccessDefaults,
-  saveRoomAccessDefaults,
-} from "./roomAccessDefaults";
-
-interface LinkEditorData {
-  links: Link[];
-  selectedLink: Link | null;
-  rules: AccessRule[];
-  documents: DealRoomFolderDocs[];
-}
-
-async function fetchEditorData(roomId: string, linkId?: string | null): Promise<LinkEditorData> {
-  const [linksRes, docsRes] = await Promise.all([
-    api.getDealRoomLinks(roomId),
-    api.getDealRoomDocuments(roomId),
-  ]);
-  const links = linksRes.data ?? [];
-  const documents = docsRes.data ?? [];
-
-  const preferredId = linkId && linkId !== "__new__" ? linkId : links[0]?.id;
-  if (!preferredId) {
-    return { links, selectedLink: null, rules: [], documents };
-  }
-
-  let selectedLink = links.find((l) => l.id === preferredId) ?? null;
-  if (!selectedLink) {
-    try {
-      const direct = await api.getLinkById(preferredId);
-      if (direct.dealRoomId === roomId) selectedLink = direct;
-    } catch {
-      selectedLink = null;
-    }
-  }
-  if (!selectedLink) {
-    return { links, selectedLink: null, rules: [], documents };
-  }
-
-  const rulesRes = await api.getLinkAccessRules(selectedLink.id);
-  return { links, selectedLink, rules: rulesRes.data ?? [], documents };
-}
-
-/** Access-control tab only validates visitor-security fields (not share-link naming). */
-function validateAccessFields(
-  draft: DraftLink,
-  selectedLink: Link | null,
-  lt: (key: string, options?: Record<string, unknown>) => string,
-  existingNames: string[]
-): Record<string, string> {
-  const errors = validateDraft(draft, selectedLink, lt, Date.now(), true, existingNames);
-  delete errors.name;
-  delete errors.expiresAt;
-  delete errors.customDomain;
-  return errors;
-}
 
 interface DealRoomAccessControlTabProps {
   roomId: string;
-  /** Prefer this link when applying settings that are stored per share link. */
+  /** @deprecated Room policy is room-scoped; kept for call-site compatibility. */
   initialLinkId?: string;
+  /** Highlight a pending share-link applicant from a dashboard deep link. */
+  focusLinkId?: string;
   onChanged?: () => void | Promise<void>;
+  /** Notifies parent when local edits are unsaved (for tab-leave guard). */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 export function DealRoomAccessControlTab({
   roomId,
-  initialLinkId,
+  focusLinkId,
   onChanged,
+  onDirtyChange,
 }: DealRoomAccessControlTabProps) {
+  const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
 
-  const [draft, setDraft] = useState<DraftLink>(() => buildDraft(null, []));
+  const [draft, setDraft] = useState<DraftLink>(() => draftFromRoomAccessPolicy(null));
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
-  const [ndaTemplates, setNdaTemplates] = useState<
-    { id: string; name: string; sourceDocumentId: string }[]
-  >([]);
   const dirtyRef = useRef(false);
 
-  const preferredLinkId =
-    initialLinkId && initialLinkId !== "__new__" ? initialLinkId : undefined;
+  const { data, loading, refetch } = useAsyncData(
+    () => api.getDealRoomAccessPolicy(roomId).then((res) => res.data),
+    [roomId],
+  );
 
-  const {
-    data,
-    loading,
-    refetch,
-  } = useAsyncData(() => fetchEditorData(roomId, preferredLinkId), [roomId, preferredLinkId]);
+  const setDirtyState = useCallback(
+    (next: boolean) => {
+      if (dirtyRef.current === next) return;
+      dirtyRef.current = next;
+      onDirtyChange?.(next);
+    },
+    [onDirtyChange],
+  );
 
   useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await api.listNDATemplates();
-        if (cancelled) return;
-        setNdaTemplates(
-          (res.data ?? []).map((tpl) => ({
-            id: tpl.id,
-            name: tpl.name,
-            sourceDocumentId: tpl.source_document_id,
-          }))
-        );
-      } catch {
-        if (!cancelled) setNdaTemplates([]);
-      }
-    })();
+    onDirtyChange?.(dirtyRef.current);
     return () => {
-      cancelled = true;
+      onDirtyChange?.(false);
     };
-  }, []);
-
-  const selectedLink = data?.selectedLink ?? null;
-  const existingNames = useMemo(
-    () =>
-      (data?.links ?? [])
-        .filter((link) => link.id !== selectedLink?.id)
-        .map((link) => link.name ?? "")
-        .filter((name) => name.trim().length > 0),
-    [data?.links, selectedLink?.id]
-  );
+  }, [onDirtyChange]);
 
   const loadedKeyRef = useRef<string | undefined>(undefined);
   useEffect(() => {
     if (!data) return;
-    const currentKey = data.selectedLink?.id ?? `room:${roomId}`;
+    const currentKey = `policy:${roomId}:${data.updatedAt ?? data.configured}`;
     const keyChanged = currentKey !== loadedKeyRef.current;
     if (keyChanged || !dirtyRef.current) {
-      if (data.selectedLink) {
-        setDraft(buildDraft(data.selectedLink, data.rules));
-      } else {
-        setDraft(loadRoomAccessDefaults(roomId) ?? buildDraft(null, []));
-      }
-      setHighlightedFields([]);
-      dirtyRef.current = false;
+      setDraft(draftFromRoomAccessPolicy(data));
+      setDirtyState(false);
       loadedKeyRef.current = currentKey;
     }
-  }, [data, roomId]);
+  }, [data, roomId, setDirtyState]);
 
-  const validationErrors = useMemo(() => {
-    if (loading || !data) return {};
-    return validateAccessFields(draft, selectedLink, lt, existingNames);
-  }, [draft, selectedLink, lt, loading, data, existingNames]);
-
-  const updateDraft = useCallback((patch: Partial<DraftLink>) => {
-    setDraft((prev) => ({ ...prev, ...patch }));
-    dirtyRef.current = true;
-  }, []);
+  const updateDraft = useCallback(
+    (patch: Partial<DraftLink>) => {
+      setDraft((prev) => ({ ...prev, ...patch }));
+      setDirtyState(true);
+    },
+    [setDirtyState],
+  );
 
   const handleSave = async () => {
-    const currentErrors = validateAccessFields(draft, selectedLink, lt, existingNames);
-    if (Object.keys(currentErrors).length > 0) {
-      setHighlightedFields(Object.keys(currentErrors));
-      return;
-    }
-
     setSaving(true);
     try {
-      if (selectedLink) {
-        await api.updateLinkFull(selectedLink.id, buildLinkPayload(draft, selectedLink));
-        await api.setLinkAccessRules(selectedLink.id, buildRules(draft));
-      } else {
-        // Room-level defaults until the first share link exists; create-link dialog hydrates these.
-        saveRoomAccessDefaults(roomId, draft);
-      }
-
-      dirtyRef.current = false;
+      await api.upsertDealRoomAccessPolicy(roomId, roomAccessPolicyPayloadFromDraft(draft));
+      setDirtyState(false);
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 1500);
       toast.success(lt("accessRules.saved"));
@@ -201,55 +107,79 @@ export function DealRoomAccessControlTab({
 
   return (
     <div className="space-y-5" data-testid="deal-room-access-control-tab">
-      <DealRoomAccessRequestsPanel roomId={roomId} onChanged={() => void refetch()} />
-
-      {selectedLink ? (
-        <LinkAccessRequestsPanel
-          linkId={selectedLink.id}
-          onChanged={(detail) => {
-            if (detail?.action === "approve" && detail.email) {
-              const email = detail.email.trim().toLowerCase();
-              setDraft((prev) => {
-                if (prev.allowedViewers.some((v) => v.trim().toLowerCase() === email)) {
-                  return prev;
-                }
-                return { ...prev, allowedViewers: [...prev.allowedViewers, email] };
-              });
-              dirtyRef.current = true;
-            }
-            void refetch();
-          }}
-        />
-      ) : null}
+      <DealRoomAccessRequestsPanel
+        roomId={roomId}
+        focusLinkId={focusLinkId}
+        onChanged={() => {
+          void refetch();
+        }}
+      />
 
       {loading || !data ? (
         <p className="py-10 text-center text-sm text-muted-foreground">{tc("loading")}</p>
       ) : (
-        <AccessTab
-          layout="sections"
-          draft={draft}
-          updateDraft={updateDraft}
-          errors={validationErrors}
-          highlightedFields={highlightedFields}
-          isDealRoomLink
-          passwordAlreadySet={Boolean(selectedLink?.requirePassword)}
-          ndaTemplates={ndaTemplates}
-          documents={(data.documents ?? [])
-            .flatMap((folder) => folder.documents ?? [])
-            .map((d) => ({ id: d.document_id, title: d.title }))}
-        />
+        <div className="space-y-4" data-testid="room-security-form">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-normal text-muted-foreground">
+                {t("accessControl.blocklistTitle")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ContactEmailTagInput
+                values={draft.blockedViewers}
+                onChange={(values) => updateDraft({ blockedViewers: values })}
+                placeholder={lt("accessRules.blockedViewers.placeholder")}
+                hint={lt("accessRules.blockedViewers.roomHint")}
+              />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-sm font-normal text-muted-foreground">
+                {t("accessControl.floorsTitle")}
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-xs font-normal text-foreground/80">
+                  {t("accessControl.floorMustVerify")}
+                </Label>
+                <Switch
+                  checked={draft.requireEmailVerification}
+                  onCheckedChange={(checked) =>
+                    updateDraft({
+                      requireEmailVerification: checked,
+                      requireEmail: checked ? false : draft.requireEmail,
+                    })
+                  }
+                  aria-label={t("accessControl.floorMustVerify")}
+                />
+              </div>
+              <div className="flex items-center justify-between gap-4">
+                <Label className="text-xs font-normal text-foreground/80">
+                  {t("accessControl.floorMustNda")}
+                </Label>
+                <Switch
+                  checked={draft.requireNda}
+                  onCheckedChange={(checked) => updateDraft({ requireNda: checked })}
+                  aria-label={t("accessControl.floorMustNda")}
+                />
+              </div>
+            </CardContent>
+          </Card>
+        </div>
       )}
 
       {!loading && data ? (
-        // Offset by AppShell main padding (p-6 / md:p-8) so the bar sits flush
-        // with the viewport bottom instead of floating above the padded edge.
         <div className="sticky bottom-[-1.5rem] z-10 -mx-6 border-t bg-background/95 px-6 pt-3 pb-[calc(0.75rem+1.5rem)] backdrop-blur supports-[backdrop-filter]:bg-background/80 md:bottom-[-2rem] md:-mx-8 md:px-8 md:pb-[calc(0.75rem+2rem)]">
           <div className="flex items-center justify-between gap-3">
-            <p className="text-xs text-muted-foreground">{lt("accessRules.savedDescription")}</p>
+            <p className="text-xs text-muted-foreground">{t("accessControl.saveHint")}</p>
             <Button
               type="button"
               onClick={() => void handleSave()}
-              disabled={saving || Object.keys(validationErrors).length > 0}
+              disabled={saving}
               className="min-w-[140px]"
             >
               {saving ? (
@@ -260,7 +190,7 @@ export function DealRoomAccessControlTab({
                   {lt("share.savedButtonLabel")}
                 </span>
               ) : (
-                lt("accessRules.saveAccessRules")
+                t("accessControl.saveButton")
               )}
             </Button>
           </div>

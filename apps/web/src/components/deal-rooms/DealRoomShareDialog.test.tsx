@@ -6,12 +6,15 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { createTestI18n } from "@/i18n/test-utils";
+import * as shareModule from "@/components/links/share";
+import type { Link } from "@/types";
 
 vi.mock("@/lib/api", () => ({
   api: {
     getDealRoomLinks: vi.fn(),
     getDealRoomDocuments: vi.fn(),
     getDealRoomFolders: vi.fn(),
+    getDealRoomAccessPolicy: vi.fn(),
     getLinkAccessRules: vi.fn(),
     getLinkById: vi.fn(),
     createDealRoomLink: vi.fn(),
@@ -19,6 +22,7 @@ vi.mock("@/lib/api", () => ({
     setLinkAccessRules: vi.fn(),
     updateLink: vi.fn(),
     listNDATemplates: vi.fn(),
+    getDocuments: vi.fn(),
   },
 }));
 
@@ -50,6 +54,7 @@ async function renderDialog(ui: React.ReactNode) {
       "share.title": "Basic configuration",
       "share.savedButtonLabel": "Saved",
       "documents.title": "Scope",
+      "share.documentScope.modeLabel": "Document scope",
     },
     common: {
       loading: "Loading...",
@@ -72,11 +77,33 @@ describe("DealRoomShareDialog", () => {
     vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
     vi.mocked(api.getDealRoomDocuments).mockResolvedValue({ data: [] });
     vi.mocked(api.getDealRoomFolders).mockResolvedValue({ data: [] });
+    vi.mocked(api.getDealRoomAccessPolicy).mockResolvedValue({
+      data: {
+        dealRoomId: "room-1",
+        configured: true,
+        requireEmail: false,
+        requireEmailVerification: true,
+        requirePassword: false,
+        hasPassword: false,
+        requireNda: false,
+        watermarkEnabled: true,
+        downloadEnabled: false,
+        screenshotProtectionEnabled: false,
+        fileRequestsEnabled: false,
+        indexFileEnabled: false,
+        qaEnabled: false,
+        allowedEmails: [],
+        blockedEmails: [],
+      },
+    });
+    vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
+    vi.mocked(api.getDocuments).mockResolvedValue({ data: [] });
     vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
     vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
+    vi.mocked(api.getDocuments).mockResolvedValue({ data: [] });
   });
 
-  it("opens in create mode with share settings only (no basic heading or scope section)", async () => {
+  it("opens in create mode with share settings and document scope", async () => {
     await renderDialog(
       <DealRoomShareDialog roomId="room-1">
         <Button>Open</Button>
@@ -90,7 +117,37 @@ describe("DealRoomShareDialog", () => {
     });
     expect(await screen.findByTestId("share-tab")).toBeInTheDocument();
     expect(screen.queryByText("Basic configuration")).not.toBeInTheDocument();
-    expect(screen.queryByTestId("documents-tab")).not.toBeInTheDocument();
-    expect(screen.queryByText("Scope")).not.toBeInTheDocument();
+    expect(await screen.findByTestId("documents-tab")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Scope" })).toBeInTheDocument();
+  });
+
+  it("closes create dialog before refetch after successful create", async () => {
+    const onOpenChange = vi.fn();
+    const validateSpy = vi.spyOn(shareModule, "validateDraft").mockReturnValue({});
+    const createdLink = {
+      id: "link-new",
+      name: "Investor pack",
+      shortUrl: "http://localhost/l/abc",
+      dealRoomId: "room-1",
+      isActive: true,
+    } as Link;
+    vi.mocked(api.createDealRoomLink).mockResolvedValue(createdLink);
+
+    await renderDialog(
+      <DealRoomShareDialog roomId="room-1" open onOpenChange={onOpenChange} />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Create share link")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(api.createDealRoomLink).toHaveBeenCalled();
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+    });
+
+    validateSpy.mockRestore();
   });
 });

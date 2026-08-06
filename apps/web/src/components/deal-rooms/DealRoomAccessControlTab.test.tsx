@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { api } from "@/lib/api";
 import { DealRoomAccessControlTab } from "./DealRoomAccessControlTab";
@@ -8,13 +8,8 @@ import { createTestI18n } from "@/i18n/test-utils";
 
 vi.mock("@/lib/api", () => ({
   api: {
-    getDealRoomLinks: vi.fn(),
-    getDealRoomDocuments: vi.fn(),
-    getLinkAccessRules: vi.fn(),
-    getLinkById: vi.fn(),
-    updateLinkFull: vi.fn(),
-    setLinkAccessRules: vi.fn(),
-    listNDATemplates: vi.fn(),
+    getDealRoomAccessPolicy: vi.fn(),
+    upsertDealRoomAccessPolicy: vi.fn(),
     getDealRoomAccessRequests: vi.fn(),
   },
 }));
@@ -27,50 +22,63 @@ vi.mock("@/components/links/share", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/components/links/share")>();
   return {
     ...actual,
-    AccessTab: ({ layout }: { layout?: string }) => (
-      <div data-testid="access-tab" data-layout={layout ?? "compact"}>
-        Access settings form
-      </div>
+    ContactEmailTagInput: ({
+      values,
+      onChange,
+    }: {
+      values: string[];
+      onChange: (values: string[]) => void;
+    }) => (
+      <input
+        data-testid="blocked-emails-input"
+        value={values.join(",")}
+        onChange={(e) =>
+          onChange(
+            e.target.value
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean),
+          )
+        }
+      />
     ),
-    LinkAccessRequestsPanel: () => <div data-testid="link-access-requests" />,
   };
 });
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+const emptyPolicy = {
+  dealRoomId: "room-1",
+  configured: false,
+  requireEmailVerificationFloor: false,
+  requireNdaFloor: false,
+  blockedEmails: [] as string[],
+};
+
 describe("DealRoomAccessControlTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    localStorage.clear();
-    vi.mocked(api.getDealRoomDocuments).mockResolvedValue({ data: [] });
-    vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
-    vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
+    vi.mocked(api.getDealRoomAccessPolicy).mockResolvedValue({ data: emptyPolicy });
     vi.mocked(api.getDealRoomAccessRequests).mockResolvedValue({ data: [] });
+    vi.mocked(api.upsertDealRoomAccessPolicy).mockResolvedValue({
+      data: { ...emptyPolicy, configured: true },
+    });
   });
 
-  it("renders sectioned access control layout without page header", async () => {
-    vi.mocked(api.getDealRoomLinks).mockResolvedValue({
-      data: [
-        {
-          id: "link-1",
-          name: "Investor pack",
-          shortUrl: "http://localhost/l/abc",
-          dealRoomId: "room-1",
-          requirePassword: false,
-        } as never,
-      ],
-    });
-
+  it("renders thin room security form without full AccessTab", async () => {
     const i18n = await createTestI18n({
       dealRooms: {
-        "accessControl.pageTitle": "Access control",
-        "accessControl.pageDescription": "Configure visitor security",
-        "accessControl.defaultsHint": "Saved as room defaults",
+        "accessControl.blocklistTitle": "Access blacklist",
+        "accessControl.floorsTitle": "Security domain",
+        "accessControl.floorMustVerify": "Must verify email",
+        "accessControl.floorMustNda": "Must require NDA",
+        "accessControl.saveButton": "Save access policy",
+        "accessControl.saveHint": "Access blacklist syncs",
       },
       linkShare: {
-        "accessRules.title": "Access control",
-        "accessRules.saveAccessRules": "Save access rules",
-        "accessRules.savedDescription": "Changes take effect immediately",
+        "accessRules.blockedViewers.placeholder": "bad@example.com",
+        "accessRules.blockedViewers.roomHint": "Blocked for every link",
+        "accessRules.saved": "Saved",
         "share.savedButtonLabel": "Saved",
       },
       common: { loading: "Loading...", saving: "Saving..." },
@@ -79,43 +87,89 @@ describe("DealRoomAccessControlTab", () => {
     render(
       <I18nextProvider i18n={i18n}>
         <DealRoomAccessControlTab roomId="room-1" />
-      </I18nextProvider>
+      </I18nextProvider>,
     );
 
     expect(await screen.findByTestId("deal-room-access-control-tab")).toBeInTheDocument();
-    expect(screen.queryByRole("heading", { name: "Access control" })).not.toBeInTheDocument();
-    expect(screen.queryByText("Configure visitor security")).not.toBeInTheDocument();
-    await waitFor(() => {
-      expect(screen.getByTestId("access-tab")).toHaveAttribute("data-layout", "sections");
-    });
-    expect(screen.getByRole("button", { name: "Save access rules" })).toBeInTheDocument();
+    expect(screen.getByTestId("room-access-requests")).toBeInTheDocument();
+    expect(await screen.findByTestId("room-security-form")).toBeInTheDocument();
+    expect(screen.queryByTestId("access-tab")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Save access policy" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Must verify email")).toBeInTheDocument();
+    expect(screen.getByLabelText("Must require NDA")).toBeInTheDocument();
   });
 
-  it("still shows access control when there are no share links", async () => {
-    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
-
+  it("saves thin floor + blocklist payload", async () => {
     const i18n = await createTestI18n({
       dealRooms: {
-        "accessControl.pageTitle": "Access control",
-        "accessControl.pageDescription": "Configure visitor security",
-        "accessControl.defaultsHint": "Saved as room defaults",
+        "accessControl.blocklistTitle": "Access blacklist",
+        "accessControl.floorsTitle": "Security domain",
+        "accessControl.floorMustVerify": "Must verify email",
+        "accessControl.floorMustNda": "Must require NDA",
+        "accessControl.saveButton": "Save access policy",
+        "accessControl.saveHint": "Access blacklist syncs",
       },
       linkShare: {
-        "accessRules.saveAccessRules": "Save access rules",
-        "accessRules.savedDescription": "Changes take effect immediately",
+        "accessRules.blockedViewers.placeholder": "bad@example.com",
+        "accessRules.blockedViewers.roomHint": "Blocked for every link",
+        "accessRules.saved": "Saved",
         "share.savedButtonLabel": "Saved",
       },
-      common: { loading: "Loading...", saving: "Saving..." },
+      common: { loading: "Loading...", saving: "Saving...", "error.saveFailed": "Save failed" },
     });
 
     render(
       <I18nextProvider i18n={i18n}>
         <DealRoomAccessControlTab roomId="room-1" />
-      </I18nextProvider>
+      </I18nextProvider>,
     );
 
-    expect(await screen.findByTestId("access-tab")).toBeInTheDocument();
-    expect(screen.queryByText("Saved as room defaults")).not.toBeInTheDocument();
-    expect(screen.getAllByRole("button", { name: "Save access rules" }).length).toBeGreaterThan(0);
+    await waitFor(() => expect(screen.getByTestId("room-security-form")).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("Must verify email"));
+    fireEvent.click(screen.getByRole("button", { name: "Save access policy" }));
+
+    await waitFor(() => {
+      expect(api.upsertDealRoomAccessPolicy).toHaveBeenCalledWith("room-1", {
+        require_email_verification_floor: true,
+        require_nda_floor: false,
+        require_email_verification: true,
+        require_nda: false,
+        blocked_emails: [],
+      });
+    });
+  });
+
+  it("reports dirty then clean after save", async () => {
+    const onDirtyChange = vi.fn();
+    const i18n = await createTestI18n({
+      dealRooms: {
+        "accessControl.blocklistTitle": "Access blacklist",
+        "accessControl.floorsTitle": "Security domain",
+        "accessControl.floorMustVerify": "Must verify email",
+        "accessControl.floorMustNda": "Must require NDA",
+        "accessControl.saveButton": "Save access policy",
+        "accessControl.saveHint": "Access blacklist syncs",
+      },
+      linkShare: {
+        "accessRules.blockedViewers.placeholder": "bad@example.com",
+        "accessRules.blockedViewers.roomHint": "Blocked for every link",
+        "accessRules.saved": "Saved",
+        "share.savedButtonLabel": "Saved",
+      },
+      common: { loading: "Loading...", saving: "Saving...", "error.saveFailed": "Save failed" },
+    });
+
+    render(
+      <I18nextProvider i18n={i18n}>
+        <DealRoomAccessControlTab roomId="room-1" onDirtyChange={onDirtyChange} />
+      </I18nextProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId("room-security-form")).toBeInTheDocument());
+    fireEvent.click(screen.getByLabelText("Must verify email"));
+    expect(onDirtyChange).toHaveBeenCalledWith(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Save access policy" }));
+    await waitFor(() => expect(onDirtyChange).toHaveBeenCalledWith(false));
   });
 });

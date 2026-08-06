@@ -330,6 +330,8 @@ describe("DealRoomDetailPage", () => {
     expect(screen.queryByTestId("deal-room-readiness")).not.toBeInTheDocument();
     expect(screen.queryByText("Folder structure")).not.toBeInTheDocument();
     expect(screen.queryByTestId("upload-progress-popup")).not.toBeInTheDocument();
+    // Workspace catalog must stay off the enter-room critical path.
+    expect(getDocumentsMock).not.toHaveBeenCalled();
   });
 
   it("switches to links tab and shows links section", async () => {

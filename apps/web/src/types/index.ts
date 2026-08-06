@@ -21,7 +21,8 @@ export interface IngestionJob {
   errorMessage?: string | null;
 }
 
-export type DocumentCategory = "general" | "agreement";
+/** Library partition: general (文档页) | deal_room (数据室) | agreement (协议). */
+export type DocumentCategory = "general" | "agreement" | "deal_room";
 
 export type DocumentStatus = "uploading" | "processing" | "ready" | "failed" | "archived";
 
@@ -57,7 +58,8 @@ export interface DocumentSummary {
 
 export interface Link {
   id: string;
-  documentId: string;
+  /** Present for document shares; omitted/empty for deal-room shares. */
+  documentId?: string;
   documentIds: string[];
   folderPaths: string[];
   /** Deal-room folder scope mode. Missing/undefined treated as allowlist for new drafts. */
@@ -178,6 +180,36 @@ export interface AccessRule {
   ruleType: "email";
   value: string;
   action: "allow" | "block";
+}
+
+/**
+ * Thin deal-room security policy: room-wide blocklist + optional outbound floors.
+ * Allowlists and full protection toggles live on each share link.
+ */
+export interface DealRoomAccessPolicy {
+  dealRoomId: string;
+  configured: boolean;
+  requireEmailVerificationFloor?: boolean;
+  requireNdaFloor?: boolean;
+  blockedEmails: string[];
+  updatedAt?: string;
+  /** @deprecated Prefer requireEmailVerificationFloor; mirrored during rollout. */
+  requireEmailVerification?: boolean;
+  /** @deprecated Prefer requireNdaFloor; mirrored during rollout. */
+  requireNda?: boolean;
+  /** Legacy wire fields — always empty/false from thin room security API. */
+  requireEmail?: boolean;
+  requirePassword?: boolean;
+  hasPassword?: boolean;
+  ndaTemplateId?: string;
+  ndaDocumentId?: string;
+  watermarkEnabled?: boolean;
+  downloadEnabled?: boolean;
+  screenshotProtectionEnabled?: boolean;
+  fileRequestsEnabled?: boolean;
+  indexFileEnabled?: boolean;
+  qaEnabled?: boolean;
+  allowedEmails?: string[];
 }
 
 export interface HeatAlert {
@@ -923,13 +955,17 @@ export interface ActionItem {
   signalId?: string;
   sourceType?:
     | "link_access_request"
+    | "deal_room_link_access_request"
     | "room_access_request"
     | "room_nda"
     | "link_question"
     | "uploaded_file"
     | "expiring_link"
     | "expiring_room";
+  /** Operational identity for upsert/resolve (link id or room id). */
   sourceId?: string;
+  /** Navigation parent when sourceId alone is not enough (deal room id for room-share links). */
+  targetId?: string;
   title: string;
   impact: Priority;
   dueAt: string;

@@ -14,29 +14,36 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { ApiError } from "@/lib/apiClient";
 import { api } from "@/lib/api";
-import type { AccessRule, DealRoomFolderDocs, Link } from "@/types";
+import type {
+  AccessRule,
+  DealRoomAccessPolicy,
+  DealRoomFolder,
+  DealRoomFolderDocs,
+  Link,
+} from "@/types";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import {
+  AccessTab,
+  DocumentsTab,
   ShareTab,
-  buildDraft,
-  buildRules,
   buildAllowedLists,
   buildLinkPayload,
   toRFC3339,
   validateDraft,
 } from "@/components/links/share";
 import type { DraftLink } from "@/components/links/share";
-import { clearRoomAccessDefaults, loadRoomAccessDefaults } from "./roomAccessDefaults";
-
-/** Create-link dialog no longer exposes scope UI; default to full room access. */
-function withCreateScopeDefaults(draft: DraftLink): DraftLink {
-  return {
-    ...draft,
-    folderScopeMode: "full",
-    folderPaths: [],
-  };
-}
+import { useNdaPickerSources } from "@/components/links/share/hooks";
+import { resolveNdaDocumentFallback } from "@/components/links/share/ndaPicker";
+import {
+  clampDraftToRoomPolicy,
+  buildLinkScopedRules,
+  hydrateCreateDraftFromRoomPolicy,
+  hydrateEditDraftFromRoomPolicy,
+  linkOnlyBlockedViewers,
+  roomBlockedEmails,
+  roomSecurityFloors,
+} from "./roomAccessPolicy";
 
 interface DealRoomShareDialogProps {
   roomId: string;
@@ -60,19 +67,26 @@ interface DialogData {
   links: Link[];
   selectedLink: Link | null;
   rules: AccessRule[];
+  folders: DealRoomFolder[];
   documents: DealRoomFolderDocs[];
+  policy: DealRoomAccessPolicy | null;
 }
 
 async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogData> {
-  const [linksRes, docsRes] = await Promise.all([
+  const [linksRes, docsRes, foldersRes, policyRes] = await Promise.all([
     api.getDealRoomLinks(roomId),
     api.getDealRoomDocuments(roomId),
+    api.getDealRoomFolders(roomId),
+    api.getDealRoomAccessPolicy(roomId),
   ]);
   const loadedLinks = linksRes.data;
   const documents = docsRes.data ?? [];
+  const folders = foldersRes.data ?? [];
+  // Always prefer unwrapped policy object; never drop floors to null silently.
+  const policy = policyRes?.data ?? (policyRes as unknown as DealRoomAccessPolicy | null) ?? null;
 
   if (!linkId) {
-    return { links: loadedLinks, selectedLink: null, rules: [], documents };
+    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents, policy };
   }
 
   let selectedLink = loadedLinks.find((l) => l.id === linkId) || null;
@@ -92,7 +106,7 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
   }
 
   if (!selectedLink) {
-    return { links: loadedLinks, selectedLink: null, rules: [], documents };
+    return { links: loadedLinks, selectedLink: null, rules: [], folders, documents, policy };
   }
 
   const rulesRes = await api.getLinkAccessRules(selectedLink.id);
@@ -101,7 +115,9 @@ async function fetchDialogData(roomId: string, linkId?: string): Promise<DialogD
     links: loadedLinks,
     selectedLink,
     rules: rulesRes.data,
+    folders,
     documents,
+    policy,
   };
 }
 
@@ -131,15 +147,15 @@ function DealRoomShareDialogContent({
   const { t } = useTranslation("dealRooms");
   const { t: lt } = useTranslation("linkShare");
   const [draft, setDraft] = useState<DraftLink>(() => {
-    const base = buildDraft(data?.selectedLink, data?.rules);
-    if (data?.selectedLink) return base;
-    const defaults = loadRoomAccessDefaults(roomId);
-    const merged = defaults ? { ...base, ...defaults, name: base.name } : base;
-    return withCreateScopeDefaults(merged);
+    if (data?.selectedLink) {
+      return hydrateEditDraftFromRoomPolicy(data.selectedLink, data.rules, data.policy);
+    }
+    return hydrateCreateDraftFromRoomPolicy(data?.policy);
   });
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [highlightedFields, setHighlightedFields] = useState<string[]>([]);
+  const { ndaTemplates, agreementDocs } = useNdaPickerSources();
 
   // Unsaved-changes tracking. We use a mutable ref instead of a callback so
   // the data-sync effect does not depend on the comparison function, which
@@ -154,6 +170,8 @@ function DealRoomShareDialogContent({
   const selectedLink = data?.selectedLink ?? null;
   const isNew = !selectedLink;
   const isDealRoomLink = !isNew ? !!selectedLink?.dealRoomId : true;
+  const floors = roomSecurityFloors(data?.policy);
+  const lockedRoomBlocks = roomBlockedEmails(data?.policy);
   const existingNames = useMemo(
     () =>
       (data?.links ?? [])
@@ -163,19 +181,24 @@ function DealRoomShareDialogContent({
     [data?.links, selectedLink?.id]
   );
 
-  // 实时校验：所有必填项通过前，创建/保存按钮保持禁用。
+  // Always validate the floor-clamped draft so create cannot bypass room security.
+  const effectiveDraft = useMemo(
+    () => clampDraftToRoomPolicy(draft, data?.policy),
+    [draft, data?.policy],
+  );
   const validationErrors = useMemo(() => {
     if (loadingData || !data) return {};
-    return validateDraft(draft, selectedLink, lt, now(), isDealRoomLink, existingNames);
-  }, [draft, selectedLink, lt, isDealRoomLink, loadingData, data, existingNames]);
+    return validateDraft(effectiveDraft, selectedLink, lt, now(), isDealRoomLink, existingNames);
+  }, [effectiveDraft, selectedLink, lt, isDealRoomLink, loadingData, data, existingNames]);
 
   // Rebuild draft when the underlying link data changes (first load, create vs
   // edit, or switching to a different link). The parent key already remounts the
   // component in most cases, but this effect defends against stale state if the
   // data arrives after mount without a key change, and resets the unsaved-
   // changes baseline so the loaded data itself is not treated as a modification.
-  // It also re-echoes server state after a successful save/refetch when there are
-  // no pending user edits.
+  // Edit mode only: re-echo server state after save/refetch when there are no
+  // pending user edits. Create mode must not reset on links-list refresh — that
+  // runs before the dialog closes and would flash empty-name validation.
   const loadedKeyRef = useRef<string | undefined>(
     data ? (data.selectedLink?.id ?? "new") : undefined
   );
@@ -183,24 +206,20 @@ function DealRoomShareDialogContent({
     const currentKey = data ? (data.selectedLink?.id ?? "new") : undefined;
     const keyChanged = currentKey !== loadedKeyRef.current;
     if (keyChanged) {
-      let nextDraft = buildDraft(data?.selectedLink, data?.rules);
-      if (!data?.selectedLink) {
-        const defaults = loadRoomAccessDefaults(roomId);
-        if (defaults) nextDraft = { ...nextDraft, ...defaults, name: nextDraft.name };
-        nextDraft = withCreateScopeDefaults(nextDraft);
-      }
+      const nextDraft = data?.selectedLink
+        ? hydrateEditDraftFromRoomPolicy(data.selectedLink, data.rules, data.policy)
+        : hydrateCreateDraftFromRoomPolicy(data?.policy);
       setDraft(nextDraft);
       setHighlightedFields([]);
       hasUnsavedChangesRef.current = false;
       loadedKeyRef.current = currentKey;
-    } else if (currentKey && !hasUnsavedChangesRef.current) {
+    } else if (data?.selectedLink && currentKey && !hasUnsavedChangesRef.current) {
       // Same link, data refreshed (e.g. after save), no unsaved edits: echo server.
-      let nextDraft = buildDraft(data?.selectedLink, data?.rules);
-      if (!data?.selectedLink) {
-        const defaults = loadRoomAccessDefaults(roomId);
-        if (defaults) nextDraft = { ...nextDraft, ...defaults, name: nextDraft.name };
-        nextDraft = withCreateScopeDefaults(nextDraft);
-      }
+      const nextDraft = hydrateEditDraftFromRoomPolicy(
+        data.selectedLink,
+        data.rules,
+        data.policy,
+      );
       setDraft(nextDraft);
       setHighlightedFields([]);
     }
@@ -238,51 +257,68 @@ function DealRoomShareDialogContent({
     registerCloseGuard(handleConditionalClose);
   }, [registerCloseGuard, handleConditionalClose]);
 
-  const updateDraft = (patch: Partial<DraftLink>) => {
-    setDraft((prev) => ({ ...prev, ...patch }));
-    hasUnsavedChangesRef.current = true;
-  };
+  const updateDraft = useCallback(
+    (patch: Partial<DraftLink>) => {
+      setDraft((prev) =>
+        clampDraftToRoomPolicy({ ...prev, ...patch }, data?.policy ?? null),
+      );
+      hasUnsavedChangesRef.current = true;
+    },
+    [data?.policy],
+  );
 
   const saveLinkAndRules = async (): Promise<Link | null> => {
     setSaving(true);
     try {
+      // Floor clamp is mandatory — never trust a draft that dropped room gates.
+      const payloadDraft = clampDraftToRoomPolicy(draft, data?.policy);
       let link = selectedLink;
       if (!link) {
-        const { allowedEmails, blockedEmails } = buildAllowedLists(draft);
+        const { allowedEmails } = buildAllowedLists(payloadDraft);
+        const linkOnlyBlocked = linkOnlyBlockedViewers(payloadDraft, data?.policy);
         link = await api.createDealRoomLink(roomId, {
-          name: draft.name.trim(),
-          require_email: draft.requireEmail,
-          require_email_verification: draft.requireEmailVerification,
-          require_nda: draft.requireNda,
-          nda_template_id: draft.requireNda ? (draft.ndaTemplateId || undefined) : undefined,
-          nda_document_id: draft.requireNda ? draft.ndaDocumentId : undefined,
-          require_password: draft.requirePassword,
-          password: draft.requirePassword && draft.password ? draft.password : undefined,
+          name: payloadDraft.name.trim(),
+          require_email: payloadDraft.requireEmail,
+          require_email_verification: payloadDraft.requireEmailVerification,
+          require_nda: payloadDraft.requireNda,
+          nda_template_id: payloadDraft.requireNda
+            ? payloadDraft.ndaTemplateId || undefined
+            : undefined,
+          nda_document_id: payloadDraft.requireNda ? payloadDraft.ndaDocumentId : undefined,
+          require_password: payloadDraft.requirePassword,
+          password:
+            payloadDraft.requirePassword && payloadDraft.password
+              ? payloadDraft.password
+              : undefined,
           allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
-          blocked_emails: blockedEmails.length > 0 ? blockedEmails : undefined,
-          expires_at: toRFC3339(draft.expiresAt) || undefined,
-          download_enabled: draft.allowDownloading,
-          watermark_enabled: draft.watermarkEnabled,
-          qa_enabled: draft.enableQaConversations,
-          file_requests_enabled: draft.enableFileRequests,
-          index_file_enabled: draft.enableIndexFileGeneration,
-          screenshot_protection_enabled: draft.enableScreenshotProtection,
-          custom_domain: draft.customDomain || undefined,
-          notify_on_access: draft.notifyOnAccess,
-          folder_paths: draft.folderPaths,
+          blocked_emails: linkOnlyBlocked.length > 0 ? linkOnlyBlocked : undefined,
+          expires_at: toRFC3339(payloadDraft.expiresAt) || undefined,
+          download_enabled: payloadDraft.allowDownloading,
+          watermark_enabled: payloadDraft.watermarkEnabled,
+          qa_enabled: payloadDraft.enableQaConversations,
+          file_requests_enabled: payloadDraft.enableFileRequests,
+          index_file_enabled: payloadDraft.enableIndexFileGeneration,
+          screenshot_protection_enabled: payloadDraft.enableScreenshotProtection,
+          custom_domain: payloadDraft.customDomain || undefined,
+          notify_on_access: payloadDraft.notifyOnAccess,
+          folder_paths:
+            payloadDraft.folderScopeMode === "allowlist" ? payloadDraft.folderPaths : undefined,
+          folder_scope_mode: payloadDraft.folderScopeMode === "allowlist" ? "allowlist" : "full",
         });
-        clearRoomAccessDefaults(roomId);
       } else {
-        await api.updateLinkFull(link.id, buildLinkPayload(draft, link));
-        await api.setLinkAccessRules(link.id, buildRules(draft));
+        await api.updateLinkFull(link.id, buildLinkPayload(payloadDraft, link));
+        await api.setLinkAccessRules(link.id, buildLinkScopedRules(payloadDraft, data?.policy));
       }
 
       markClean();
       setSaveSuccess(true);
       setTimeout(() => setSaveSuccess(false), 1500);
       toast.success(t(selectedLink ? "share.saveSuccess" : "share.createSuccess"));
-      await refetch();
-      await onChanged?.();
+      // Create: close dialog before refetch so empty create draft is never re-validated.
+      if (selectedLink) {
+        await refetch();
+        await onChanged?.();
+      }
       return link;
     } catch (err) {
       if (err instanceof ApiError && err.code === "duplicate_name") {
@@ -297,7 +333,18 @@ function DealRoomShareDialogContent({
   };
 
   const handleSave = async () => {
-    const currentErrors = validateDraft(draft, selectedLink, lt, now(), isDealRoomLink, existingNames);
+    const payloadDraft = clampDraftToRoomPolicy(draft, data?.policy);
+    if (payloadDraft !== draft) {
+      setDraft(payloadDraft);
+    }
+    const currentErrors = validateDraft(
+      payloadDraft,
+      selectedLink,
+      lt,
+      now(),
+      isDealRoomLink,
+      existingNames,
+    );
     if (Object.keys(currentErrors).length > 0) {
       setHighlightedFields(Object.keys(currentErrors));
       return;
@@ -305,6 +352,8 @@ function DealRoomShareDialogContent({
     const link = await saveLinkAndRules();
     if (link && isNew) {
       onClose();
+      await refetch();
+      await onChanged?.();
     }
   };
 
@@ -338,14 +387,13 @@ function DealRoomShareDialogContent({
   };
 
   const handleEditAccess = () => {
-    if (!selectedLink) {
-      toast.message(lt("share.editAccessAfterCreate"));
-      return;
-    }
-    if (onEditAccess) {
+    // Audience + gates are edited in this dialog; Access Control is room defaults.
+    if (onEditAccess && selectedLink) {
       onClose();
       onEditAccess(selectedLink.id);
+      return;
     }
+    toast.message(lt("share.audienceEditedHere"));
   };
 
   const primaryLabel = saveSuccess
@@ -384,16 +432,52 @@ function DealRoomShareDialogContent({
             {t("common:loading")}
           </div>
         ) : (
-          <ShareTab
-            draft={draft}
-            updateDraft={updateDraft}
-            link={selectedLink}
-            onEditAccess={handleEditAccess}
-            errors={validationErrors}
-            slug={slug}
-            highlightedFields={highlightedFields}
-            documents={data.documents}
-          />
+          <>
+            <ShareTab
+              draft={effectiveDraft}
+              updateDraft={updateDraft}
+              link={selectedLink}
+              onEditAccess={handleEditAccess}
+              errors={validationErrors}
+              slug={slug}
+              highlightedFields={highlightedFields}
+              documents={data.documents}
+            />
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <h4 className="text-sm font-medium">{lt("documents.title")}</h4>
+                <p className="text-xs text-muted-foreground">
+                  {lt("share.documentScope.modeLabel")}
+                </p>
+              </div>
+              <DocumentsTab
+                folders={data.folders}
+                documents={data.documents}
+                selectedPaths={effectiveDraft.folderPaths}
+                scopeMode={effectiveDraft.folderScopeMode}
+                onChange={({ scopeMode, selectedPaths }) =>
+                  updateDraft({ folderScopeMode: scopeMode, folderPaths: selectedPaths })
+                }
+              />
+            </div>
+            <AccessTab
+              layout="compact"
+              audienceMode="full"
+              draft={effectiveDraft}
+              updateDraft={updateDraft}
+              errors={validationErrors}
+              highlightedFields={highlightedFields}
+              isDealRoomLink
+              passwordAlreadySet={Boolean(selectedLink?.requirePassword)}
+              roomSecurityFloors={{
+                requireEmailVerification: floors.requireEmailVerification,
+                requireNda: floors.requireNda,
+              }}
+              roomBlockedEmails={lockedRoomBlocks}
+              ndaTemplates={ndaTemplates}
+              documents={resolveNdaDocumentFallback(agreementDocs)}
+            />
+          </>
         )}
       </div>
 
@@ -404,7 +488,9 @@ function DealRoomShareDialogContent({
         <Button
           className="min-w-[140px]"
           onClick={handleSave}
-          disabled={saving || Object.keys(validationErrors).length > 0}
+          disabled={
+            saving || loadingData || !data || Object.keys(validationErrors).length > 0
+          }
         >
           {saving ? (
             t("common:saving")
@@ -472,7 +558,7 @@ export function DealRoomShareDialog({
     [open, roomId, linkId]
   );
 
-  const dataKey = data ? (data.selectedLink?.id ?? "new") : "loading";
+  const dataKey = linkId ?? data?.selectedLink?.id ?? "new";
 
   // Close guard: the content registers a function that returns true when
   // unsaved changes exist. The wrapper's onOpenChange defers to it.

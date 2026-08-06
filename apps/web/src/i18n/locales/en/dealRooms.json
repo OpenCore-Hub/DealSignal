@@ -2,7 +2,12 @@
   "page": {
     "title": "Deal Rooms",
     "description": "Centralize due diligence materials, LP reports, and sales proposals in secure deal rooms.",
-    "create": "New deal room"
+    "create": "New deal room",
+    "pagination": {
+      "prev": "Previous",
+      "next": "Next",
+      "pageOf": "Page {{page}} of {{totalPages}}"
+    }
   },
   "empty": {
     "title": "No deal rooms yet",
@@ -50,7 +55,6 @@
     "activeLinks": "Active Links"
   },
   "card": {
-    "addDocuments": "Add Documents",
     "viewDocuments": "View Documents",
     "noViewsYet": "No views yet"
   },
@@ -58,7 +62,6 @@
     "back": "Back to deal rooms",
     "notFound": "Deal room not found",
     "invite": "Invite members",
-    "manageDocs": "Manage documents",
     "documents": "Documents",
     "members": "Members",
     "security": "Security",
@@ -84,7 +87,7 @@
   },
   "pageTabs": {
     "resources": "Resources",
-    "access": "Access control",
+    "access": "Access policy",
     "links": "Share links",
     "analytics": "Analytics",
     "knowledge": "Knowledge base"
@@ -94,11 +97,26 @@
     "selectLink": "Select share link",
     "newLink": "New share link",
     "emptyTitle": "No share links yet",
-    "emptyDescription": "Create a share link first, then configure access rules here.",
+    "emptyDescription": "Create share links from the Share links tab. Allowed viewers are set per link.",
     "goCreateLink": "Create share link",
-    "pageTitle": "Access control",
-    "pageDescription": "Configure how visitors prove their identity, who is allowed in, and how content is protected for this deal room.",
-    "defaultsHint": "No share link yet — these settings are saved as room defaults and applied when you create a link."
+    "pageTitle": "Access policy",
+    "pageDescription": "Approve access requests, manage the access blacklist, and optionally require verification or NDA on every new share link.",
+    "defaultsHint": "Full audience and protection settings live on each share link.",
+    "blocklistTitle": "Access blacklist",
+    "blocklistDescription": "These emails cannot open any share link in this deal room.",
+    "floorsTitle": "Security domain",
+    "floorsDescription": "Optional minimum gates for every share link. After you save, create/edit share will force these on and lock them. Password, watermark, and allowlists are still set per link.",
+    "floorMustVerify": "Must verify email",
+    "floorMustVerifyHint": "After save: every share link must use email verification — the switch is locked on in create/edit.",
+    "floorMustNda": "Must require NDA",
+    "floorMustNdaHint": "After save: every share link must require an NDA — locked on; pick the agreement when creating/editing the link.",
+    "saveButton": "Save access policy",
+    "saveHint": "Save first. Access blacklist applies to every share link immediately. Security domain locks verification/NDA on create and edit.",
+    "unsavedLeaveTitle": "Unsaved access policy",
+    "unsavedLeaveDescription": "Your edits will be discarded if you leave this tab.",
+    "unsavedLeaveCountdown": "Leaving in {{seconds}}s…",
+    "unsavedLeaveStay": "Stay",
+    "unsavedLeaveNow": "Leave now"
   },
   "knowledge": {
     "title": "Knowledge base",
@@ -562,8 +580,8 @@
       "noSearchResults": "No links match your search.",
       "selectAll": "Select all links",
       "selectRow": "Select {{name}}",
-      "setupAccessFirstTitle": "Set security rules first",
-      "setupAccessFirstDescription": "Before creating a share link, configure authentication and content protections on the Access Control tab.",
+      "setupAccessFirstTitle": "Set room security defaults first",
+      "setupAccessFirstDescription": "Before creating a share link, save identity and protection defaults on the Access Control tab. You will choose allowed viewers when creating the link.",
       "goToAccessControlNow": "Go now",
       "redirectCountdown": "Redirecting in {{seconds}}s",
       "emptyTitle": "No links found for this dataroom",
@@ -802,6 +820,8 @@
   },
   "documents": {
     "dialogDescription": "Organize folders and manage documents in this deal room.",
+    "workspaceLoading": "Loading workspace documents...",
+    "workspaceLoadFailed": "Failed to load workspace documents",
     "addFromWorkspace": "Add documents from workspace",
     "addToRoom": "Add to Deal Room",
     "addToRoomDescription": "Add '{{title}}' to a folder in the selected deal room.",
