@@ -261,6 +261,61 @@ func TestDealRoomEmailVerification_Resend(t *testing.T) {
 	}
 }
 
+// TestOwnerResendAccessCode_DealRoomProvisionsMissingContact ensures owners can
+// manually resend even when link_contacts were not provisioned yet (e.g. async
+// create-time send still pending or initial delivery failed before upsert).
+func TestOwnerResendAccessCode_DealRoomProvisionsMissingContact(t *testing.T) {
+	f := newFixture(t)
+	defer f.tx.Rollback(f.ctx)
+
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+
+	drSvc := dealroom.NewService(f.q, f.tx, &config.Config{})
+	room, err := drSvc.CreateRoom(f.ctx, userID, wsID, dealroom.CreateRoomRequest{
+		Slug:         "room-" + uuid.NewString(),
+		Name:         "Owner resend provision room",
+		TemplateType: "custom",
+	})
+	if err != nil {
+		t.Fatalf("create deal room: %v", err)
+	}
+	roomID := uuid.UUID(room.ID.Bytes).String()
+
+	link, err := f.svc.CreateDealRoomLink(f.ctx, userID, wsID, roomID, DealRoomLinkRequest{
+		Name:                     "Owner resend link",
+		RequireEmailVerification: true,
+		AllowedEmails:            []string{"alice@example.com"},
+	})
+	if err != nil {
+		t.Fatalf("create deal room link: %v", err)
+	}
+	linkID := uuid.UUID(link.ID.Bytes).String()
+
+	if err := f.svc.OwnerResendAccessCode(f.ctx, linkID, wsID, "alice@example.com", true); err != nil {
+		t.Fatalf("owner resend without pre-existing contact: %v", err)
+	}
+	jobs := f.mailer.snapshotJobs()
+	if len(jobs) == 0 {
+		t.Fatal("expected owner resend to deliver an access code email")
+	}
+	last := jobs[len(jobs)-1]
+	if !strings.EqualFold(last.Recipient, "alice@example.com") || last.Code == "" {
+		t.Fatalf("unexpected mail job: %+v", last)
+	}
+
+	lc, err := f.q.GetLinkContactByEmail(f.ctx, db.GetLinkContactByEmailParams{
+		PublicToken: link.PublicToken,
+		Email:       pgtypeText("alice@example.com"),
+	})
+	if err != nil {
+		t.Fatalf("expected link_contact to be provisioned: %v", err)
+	}
+	if lc.AccessCode != last.Code {
+		t.Fatalf("contact code=%q want mailed code %q", lc.AccessCode, last.Code)
+	}
+}
+
 func pgtypeText(s string) pgtype.Text {
 	return pgtype.Text{String: s, Valid: true}
 }

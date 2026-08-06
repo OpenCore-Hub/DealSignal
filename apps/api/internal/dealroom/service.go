@@ -16,9 +16,11 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/upload"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -41,6 +43,8 @@ var (
 	ErrNDANotRequired      = errors.New("nda is not required for this room")
 	ErrAccessRequestExists = errors.New("access request already exists")
 	ErrRateLimited         = errors.New("too many requests")
+	// ErrAgreementNotAllowedInDealRoom blocks attaching agreement-library docs to rooms.
+	ErrAgreementNotAllowedInDealRoom = errors.New("agreement documents cannot be added to a deal room")
 )
 
 // Beginner starts a database transaction.
@@ -61,6 +65,9 @@ type Service struct {
 	actionSyncer      ActionSyncer
 	rateLimiter       RateLimiter
 	knowledgeEnqueuer KnowledgeEnqueuer
+	// kvCache backs list cards and room analytics (JSON get/set/del).
+	kvCache    ListCache
+	listFlight singleflight.Group
 }
 
 // ActionSyncer resolves operational action items when room events are handled.
@@ -90,6 +97,11 @@ func WithRateLimiter(r RateLimiter) ServiceOption {
 // WithKnowledgeEnqueuer wires knowledge-base sync hooks for room document changes.
 func WithKnowledgeEnqueuer(k KnowledgeEnqueuer) ServiceOption {
 	return func(s *Service) { s.knowledgeEnqueuer = k }
+}
+
+// WithListCache wires a Redis (or compatible) KV cache for room lists and analytics.
+func WithListCache(c ListCache) ServiceOption {
+	return func(s *Service) { s.kvCache = c }
 }
 
 // NewService creates a deal room service.
@@ -268,6 +280,7 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 		}
 		return db.DealRoom{}, fmt.Errorf("create room: %w", err)
 	}
+	s.invalidateListCache(ctx, workspaceID)
 	return room, nil
 }
 
@@ -283,15 +296,135 @@ type RoomSummary struct {
 	HeatScore        int32
 }
 
+// RoomListPage is a paginated deal-room list response.
+type RoomListPage struct {
+	Items    []RoomSummary
+	Page     int
+	PageSize int
+	Total    int64
+	HasMore  bool
+}
+
 // ListRooms returns all rooms in a workspace with computed aggregates.
 func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSummary, error) {
+	return s.loadCachedRoomSummaries(ctx, workspaceID)
+}
+
+// ListRoomsPage returns a page of rooms with aggregates. Prefer this for UI lists.
+// query filters by name/description (case-insensitive); empty means no text filter.
+func (s *Service) ListRoomsPage(ctx context.Context, workspaceID string, page, pageSize int, query string) (RoomListPage, error) {
+	wsUUID := pgUUID(workspaceID)
+	query = strings.TrimSpace(query)
+	total, err := s.queries.CountDealRoomsByWorkspace(ctx, db.CountDealRoomsByWorkspaceParams{
+		WorkspaceID: wsUUID,
+		Query:       query,
+	})
+	if err != nil {
+		return RoomListPage{}, err
+	}
+	page, pageSize, offset := normalizeDealRoomsPaging(page, pageSize, total)
+	if total == 0 {
+		return RoomListPage{Items: []RoomSummary{}, Page: page, PageSize: pageSize, Total: 0}, nil
+	}
+
+	// Unfiltered small/medium workspaces: slice the slim full-list cache.
+	if query == "" && total <= int64(dealRoomsMaxPageSize) {
+		all, loadErr := s.loadCachedRoomSummaries(ctx, workspaceID)
+		if loadErr != nil {
+			return RoomListPage{}, loadErr
+		}
+		end := offset + pageSize
+		if end > len(all) {
+			end = len(all)
+		}
+		items := []RoomSummary{}
+		if offset < len(all) {
+			items = all[offset:end]
+		}
+		return RoomListPage{
+			Items:    items,
+			Page:     page,
+			PageSize: pageSize,
+			Total:    total,
+			HasMore:  int64(page*pageSize) < total,
+		}, nil
+	}
+
+	// Filtered or large workspaces: DB page + aggregates only for those room IDs.
+	rooms, err := s.queries.ListDealRoomsByWorkspacePage(ctx, db.ListDealRoomsByWorkspacePageParams{
+		WorkspaceID: wsUUID,
+		Limit:       int32(pageSize),
+		Offset:      int32(offset),
+		Query:       query,
+	})
+	if err != nil {
+		return RoomListPage{}, err
+	}
+	roomIDs := make([]pgtype.UUID, len(rooms))
+	for i, room := range rooms {
+		roomIDs[i] = room.ID
+	}
+	items, err := s.summariesForRooms(ctx, wsUUID, rooms, roomIDs)
+	if err != nil {
+		return RoomListPage{}, err
+	}
+	return RoomListPage{
+		Items:    items,
+		Page:     page,
+		PageSize: pageSize,
+		Total:    total,
+		HasMore:  int64(page*pageSize) < total,
+	}, nil
+}
+
+func (s *Service) loadCachedRoomSummaries(ctx context.Context, workspaceID string) ([]RoomSummary, error) {
+	cacheKey := listCacheKey(workspaceID)
+	if s.kvCache != nil {
+		var cached []cachedRoomListItem
+		if err := s.kvCache.Get(ctx, cacheKey, &cached); err == nil {
+			return cachedToRoomSummaries(cached), nil
+		}
+	}
+
+	flightCtx := context.WithoutCancel(ctx)
+	v, err, _ := s.listFlight.Do(cacheKey, func() (interface{}, error) {
+		if s.kvCache != nil {
+			var cached []cachedRoomListItem
+			if getErr := s.kvCache.Get(flightCtx, cacheKey, &cached); getErr == nil {
+				return cachedToRoomSummaries(cached), nil
+			}
+		}
+		out, loadErr := s.loadRoomSummaries(flightCtx, workspaceID)
+		if loadErr != nil {
+			return nil, loadErr
+		}
+		if s.kvCache != nil {
+			if setErr := s.kvCache.Set(flightCtx, cacheKey, roomSummariesToCached(out), listCacheTTL); setErr != nil {
+				logger.ErrorCtx(flightCtx, "cache deal room list", setErr)
+			}
+		}
+		return out, nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	out, ok := v.([]RoomSummary)
+	if !ok {
+		return nil, fmt.Errorf("unexpected list rooms cache type %T", v)
+	}
+	return out, nil
+}
+
+func (s *Service) loadRoomSummaries(ctx context.Context, workspaceID string) ([]RoomSummary, error) {
 	wsUUID := pgUUID(workspaceID)
 	rooms, err := s.queries.ListDealRoomsByWorkspace(ctx, wsUUID)
 	if err != nil {
 		return nil, err
 	}
+	return s.summariesForWorkspace(ctx, wsUUID, rooms)
+}
 
-	// Single batched query replaces 3N per-room queries.
+func (s *Service) summariesForWorkspace(ctx context.Context, wsUUID pgtype.UUID, rooms []db.DealRoom) ([]RoomSummary, error) {
 	aggregates, err := s.queries.GetDealRoomAggregatesByWorkspace(ctx, wsUUID)
 	if err != nil {
 		return nil, err
@@ -300,7 +433,6 @@ func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSumm
 	for _, a := range aggregates {
 		aggByRoom[uuid.UUID(a.RoomID.Bytes).String()] = a
 	}
-
 	out := make([]RoomSummary, len(rooms))
 	for i, room := range rooms {
 		roomIDStr := uuid.UUID(room.ID.Bytes).String()
@@ -320,6 +452,75 @@ func (s *Service) ListRooms(ctx context.Context, workspaceID string) ([]RoomSumm
 		}
 	}
 	return out, nil
+}
+
+func (s *Service) summariesForRooms(ctx context.Context, wsUUID pgtype.UUID, rooms []db.DealRoom, roomIDs []pgtype.UUID) ([]RoomSummary, error) {
+	if len(rooms) == 0 {
+		return []RoomSummary{}, nil
+	}
+	aggregates, err := s.queries.GetDealRoomAggregatesForRooms(ctx, db.GetDealRoomAggregatesForRoomsParams{
+		WorkspaceID: wsUUID,
+		RoomIds:     roomIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	aggByRoom := make(map[string]db.GetDealRoomAggregatesForRoomsRow, len(aggregates))
+	for _, a := range aggregates {
+		aggByRoom[uuid.UUID(a.RoomID.Bytes).String()] = a
+	}
+	out := make([]RoomSummary, len(rooms))
+	for i, room := range rooms {
+		roomIDStr := uuid.UUID(room.ID.Bytes).String()
+		agg, ok := aggByRoom[roomIDStr]
+		if !ok {
+			agg = db.GetDealRoomAggregatesForRoomsRow{}
+		}
+		out[i] = RoomSummary{
+			Room:             room,
+			DocumentCount:    agg.DocumentCount,
+			MemberCount:      agg.MemberCount,
+			PendingApprovals: agg.PendingCount,
+			VisitorCount:     agg.VisitorCount,
+			UnreadQuestions:  agg.PendingQuestionCount,
+			LastAccessedAt:   agg.LastAccessedAt,
+			HeatScore:        agg.HeatScore,
+		}
+	}
+	return out, nil
+}
+
+func (s *Service) invalidateListCache(ctx context.Context, workspaceID string) {
+	if s == nil || s.kvCache == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	if err := s.kvCache.Del(ctx, listCacheKey(workspaceID)); err != nil {
+		logger.ErrorCtx(ctx, "invalidate deal room list cache", err)
+	}
+}
+
+const listInvalidateDebounce = 5 * time.Second
+
+// SoftInvalidateListCache drops the workspace list cache, debounced so access-log
+// write storms do not stampede Redis DEL. Structural writers should call
+// invalidateListCache (hard) instead.
+func (s *Service) SoftInvalidateListCache(ctx context.Context, workspaceID string) {
+	if s == nil || s.kvCache == nil || strings.TrimSpace(workspaceID) == "" {
+		return
+	}
+	if debouncer, ok := s.kvCache.(interface {
+		TryAcquireDebounce(context.Context, string, time.Duration) bool
+	}); ok {
+		if !debouncer.TryAcquireDebounce(ctx, listCacheKey(workspaceID)+":inv", listInvalidateDebounce) {
+			return
+		}
+	}
+	s.invalidateListCache(ctx, workspaceID)
+}
+
+// InvalidateListCache exposes hard list-cache invalidation for sibling packages.
+func (s *Service) InvalidateListCache(ctx context.Context, workspaceID string) {
+	s.invalidateListCache(ctx, workspaceID)
 }
 
 // GetRoom returns a room scoped to a workspace.
@@ -365,6 +566,8 @@ type RoomAnalytics struct {
 	RecentVisitors []RoomRecentVisitor `json:"recentVisitors"`
 }
 
+const roomAnalyticsCacheTTL = 20 * time.Second
+
 // GetRoomAnalytics returns aggregated view/visitor metrics for a deal room.
 func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, userID string) (RoomAnalytics, error) {
 	room, err := s.GetRoom(ctx, roomID, workspaceID)
@@ -373,6 +576,14 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 	}
 	if err := s.requireActiveRoomMember(ctx, room.ID, userID); err != nil {
 		return RoomAnalytics{}, err
+	}
+
+	cacheKey := roomAnalyticsCacheKey(workspaceID, roomID)
+	if s.kvCache != nil {
+		var cached RoomAnalytics
+		if getErr := s.kvCache.Get(ctx, cacheKey, &cached); getErr == nil {
+			return cached, nil
+		}
 	}
 
 	row, err := s.queries.GetDealRoomAnalytics(ctx, db.GetDealRoomAnalyticsParams{
@@ -421,6 +632,11 @@ func (s *Service) GetRoomAnalytics(ctx context.Context, roomID, workspaceID, use
 			item.LastAccessAt = v.LastAccessAt.Time
 		}
 		out.RecentVisitors = append(out.RecentVisitors, item)
+	}
+	if s.kvCache != nil {
+		if setErr := s.kvCache.Set(ctx, cacheKey, out, roomAnalyticsCacheTTL); setErr != nil {
+			logger.ErrorCtx(ctx, "cache deal room analytics", setErr)
+		}
 	}
 	return out, nil
 }
@@ -551,7 +767,7 @@ func (s *Service) AddMember(ctx context.Context, roomID, workspaceID, inviterUse
 		return db.RoomMember{}, errors.New("member already exists")
 	}
 
-	return s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
+	member, err := s.queries.AddRoomMember(ctx, db.AddRoomMemberParams{
 		TenantID:    room.TenantID,
 		WorkspaceID: room.WorkspaceID,
 		RoomID:      room.ID,
@@ -560,6 +776,11 @@ func (s *Service) AddMember(ctx context.Context, roomID, workspaceID, inviterUse
 		NdaStatus:   ndaStatusFor(room.RequiresNda),
 		Status:      "active",
 	})
+	if err != nil {
+		return db.RoomMember{}, err
+	}
+	s.invalidateListCache(ctx, workspaceID)
+	return member, nil
 }
 
 // ListMembers returns all members of a room. Only admins can list members.
@@ -618,10 +839,14 @@ func (s *Service) RemoveMember(ctx context.Context, roomID, workspaceID, userID,
 	if member.Role == "owner" {
 		return errors.New("cannot remove room owner")
 	}
-	return s.queries.DeleteRoomMember(ctx, db.DeleteRoomMemberParams{
+	if err := s.queries.DeleteRoomMember(ctx, db.DeleteRoomMemberParams{
 		ID:     member.ID,
 		RoomID: room.ID,
-	})
+	}); err != nil {
+		return err
+	}
+	s.invalidateListCache(ctx, workspaceID)
+	return nil
 }
 
 // CreateAccessRequest creates a public access request for a room.
@@ -695,6 +920,7 @@ func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reas
 		}); err != nil {
 			return db.RoomAccessRequest{}, fmt.Errorf("create access request: %w", err)
 		}
+		s.invalidateListCache(ctx, uuid.UUID(room.WorkspaceID.Bytes).String())
 		return created, nil
 	}
 
@@ -712,6 +938,7 @@ func (s *Service) CreateAccessRequest(ctx context.Context, roomSlug, email, reas
 		}
 		return db.RoomAccessRequest{}, fmt.Errorf("create access request: %w", err)
 	}
+	s.invalidateListCache(ctx, uuid.UUID(room.WorkspaceID.Bytes).String())
 	return created, nil
 }
 
@@ -799,7 +1026,8 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, requestID, roomID, w
 
 	req.Status = "approved"
 	req.ReviewedBy = approverUUID
-	s.resolveRoomAccessRequest(workspaceID, requestID)
+	s.resolveRoomAccessRequest(workspaceID, roomID)
+	s.invalidateListCache(ctx, workspaceID)
 	return req, nil
 }
 
@@ -837,7 +1065,8 @@ func (s *Service) RejectAccessRequest(ctx context.Context, requestID, roomID, wo
 	}
 	req.Status = "rejected"
 	req.ReviewedBy = reviewerUUID
-	s.resolveRoomAccessRequest(workspaceID, requestID)
+	s.resolveRoomAccessRequest(workspaceID, roomID)
+	s.invalidateListCache(ctx, workspaceID)
 	return req, nil
 }
 
@@ -1038,6 +1267,9 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 		}
 		return db.DealRoomDocument{}, err
 	}
+	if strings.EqualFold(doc.Category, upload.CategoryAgreement) {
+		return db.DealRoomDocument{}, ErrAgreementNotAllowedInDealRoom
+	}
 
 	// Idempotent: replacing an upload keeps the same document id; re-adding it
 	// to the room should update folder placement instead of failing UNIQUE.
@@ -1065,6 +1297,9 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 			}
 			existing.SortOrder = sortOrder
 		}
+		if err := s.ensureDealRoomDocumentCategory(ctx, doc); err != nil {
+			return db.DealRoomDocument{}, err
+		}
 		if s.knowledgeEnqueuer != nil {
 			if kerr := s.knowledgeEnqueuer.EnqueueIngestDocument(
 				ctx,
@@ -1075,6 +1310,7 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 				logger.ErrorCtx(ctx, "enqueue knowledge ingest after re-add document", kerr)
 			}
 		}
+		s.invalidateListCache(ctx, workspaceID)
 		return existing, nil
 	} else if !errors.Is(getErr, pgx.ErrNoRows) {
 		return db.DealRoomDocument{}, getErr
@@ -1091,6 +1327,9 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 	if err != nil {
 		return db.DealRoomDocument{}, err
 	}
+	if err := s.ensureDealRoomDocumentCategory(ctx, doc); err != nil {
+		return db.DealRoomDocument{}, err
+	}
 	if s.knowledgeEnqueuer != nil {
 		if kerr := s.knowledgeEnqueuer.EnqueueIngestDocument(
 			ctx,
@@ -1101,7 +1340,23 @@ func (s *Service) AddDocument(ctx context.Context, roomID, workspaceID, adminUse
 			logger.ErrorCtx(ctx, "enqueue knowledge ingest after add document", kerr)
 		}
 	}
+	s.invalidateListCache(ctx, workspaceID)
 	return row, nil
+}
+
+// ensureDealRoomDocumentCategory promotes general → deal_room after a successful attach.
+func (s *Service) ensureDealRoomDocumentCategory(ctx context.Context, doc db.GetDocumentByIDRow) error {
+	if strings.EqualFold(doc.Category, upload.CategoryDealRoom) {
+		return nil
+	}
+	if strings.EqualFold(doc.Category, upload.CategoryAgreement) {
+		return ErrAgreementNotAllowedInDealRoom
+	}
+	return s.queries.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
+		Category:    upload.CategoryDealRoom,
+		ID:          doc.ID,
+		WorkspaceID: doc.WorkspaceID,
+	})
 }
 
 // RemoveDocument removes a document from a room. Only admins can remove.
@@ -1130,8 +1385,9 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 	if existing.Locked {
 		return ErrResourceLocked
 	}
+	docUUID := pgtype.UUID{Bytes: id, Valid: true}
 	if err := s.queries.DeleteDealRoomDocument(ctx, db.DeleteDealRoomDocumentParams{
-		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
+		DocumentID: docUUID,
 		RoomID:     room.ID,
 	}); err != nil {
 		return err
@@ -1139,9 +1395,12 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 	// Also remove the document from any deal-room share-link scopes so that
 	// scoped links do not continue serving a document that is no longer in the room.
 	if err := s.queries.DeleteLinkDocumentsByDealRoomDocument(ctx, db.DeleteLinkDocumentsByDealRoomDocumentParams{
-		DocumentID: pgtype.UUID{Bytes: id, Valid: true},
+		DocumentID: docUUID,
 		DealRoomID: room.ID,
 	}); err != nil {
+		return err
+	}
+	if err := s.demoteDealRoomCategoryIfOrphaned(ctx, docUUID, room.WorkspaceID); err != nil {
 		return err
 	}
 	if s.knowledgeEnqueuer != nil {
@@ -1154,7 +1413,37 @@ func (s *Service) RemoveDocument(ctx context.Context, roomID, workspaceID, userI
 			logger.ErrorCtx(ctx, "enqueue knowledge delete after remove document", kerr)
 		}
 	}
+	s.invalidateListCache(ctx, workspaceID)
 	return nil
+}
+
+// demoteDealRoomCategoryIfOrphaned sets deal_room → general when no room membership remains.
+func (s *Service) demoteDealRoomCategoryIfOrphaned(ctx context.Context, documentID, workspaceID pgtype.UUID) error {
+	n, err := s.queries.CountDealRoomMembershipsByDocument(ctx, documentID)
+	if err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          documentID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return err
+	}
+	if !strings.EqualFold(doc.Category, upload.CategoryDealRoom) {
+		return nil
+	}
+	return s.queries.UpdateDocumentCategory(ctx, db.UpdateDocumentCategoryParams{
+		Category:    upload.CategoryGeneral,
+		ID:          documentID,
+		WorkspaceID: workspaceID,
+	})
 }
 
 // MoveDocument moves a document to another folder. Only admins can move.
@@ -2059,20 +2348,44 @@ func pgUUID(id string) pgtype.UUID {
 	return pgtype.UUID{Bytes: parsed, Valid: true}
 }
 
-func (s *Service) resolveRoomAccessRequest(workspaceID, requestID string) {
+func (s *Service) resolveRoomAccessRequest(workspaceID, roomID string) {
 	if s.actionSyncer == nil {
 		return
 	}
-	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeRoomAccessRequest, requestID)
+	// Actions are keyed by room ID. Only clear when no pending membership
+	// requests remain for this room.
+	id, err := uuid.Parse(roomID)
+	if err != nil {
+		return
+	}
+	rows, err := s.queries.ListAccessRequestsByRoom(context.Background(), pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		return
+	}
+	for _, r := range rows {
+		if r.Status == "pending" {
+			return
+		}
+	}
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeRoomAccessRequest, roomID)
 }
 
 func (s *Service) resolveRoomNDA(ctx context.Context, workspaceID string, roomID pgtype.UUID, email string) {
 	if s.actionSyncer == nil {
 		return
 	}
-	member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{RoomID: roomID, Email: email})
-	if err != nil || !member.ID.Valid {
+	_ = email // member email is the signed party; action is room-scoped.
+	if !roomID.Valid {
 		return
 	}
-	s.actionSyncer.ResolveBySource(ctx, workspaceID, action.SourceTypeRoomNDA, uuid.UUID(member.ID.Bytes).String())
+	members, err := s.queries.ListRoomMembers(ctx, roomID)
+	if err != nil {
+		return
+	}
+	for _, m := range members {
+		if m.NdaStatus == "pending" {
+			return
+		}
+	}
+	s.actionSyncer.ResolveBySource(ctx, workspaceID, action.SourceTypeRoomNDA, uuid.UUID(roomID.Bytes).String())
 }

@@ -22,6 +22,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/nda"
@@ -57,20 +58,26 @@ type Notifier interface {
 	Evaluate(ctx context.Context, ev notification.Event) error
 }
 
+// RoomListInvalidator soft-invalidates deal-room list caches after Q&A writes.
+type RoomListInvalidator interface {
+	SoftInvalidateListCache(ctx context.Context, workspaceID string)
+}
+
 // Service handles smart links.
 type Service struct {
-	queries        *db.Queries
-	pool           Beginner
-	redisClient    *redis.Client
-	mailer         mailer.Mailer
-	notifier       Notifier
-	viewerBaseURL  string
-	cfg            *config.Config
-	llm            LLMClient
-	emailSem       chan struct{} // limits concurrent email sends (bounded goroutines)
-	indexGenGroup  singleflight.Group
-	actionSyncer   ActionSyncer
-	ndaSvc         *nda.Service
+	queries             *db.Queries
+	pool                Beginner
+	redisClient         *redis.Client
+	mailer              mailer.Mailer
+	notifier            Notifier
+	viewerBaseURL       string
+	cfg                 *config.Config
+	llm                 LLMClient
+	emailSem            chan struct{} // limits concurrent email sends (bounded goroutines)
+	indexGenGroup       singleflight.Group
+	actionSyncer        ActionSyncer
+	ndaSvc              *nda.Service
+	roomListInvalidator RoomListInvalidator
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
@@ -93,6 +100,18 @@ func WithActionSyncer(a ActionSyncer) ServiceOption {
 // WithNDAService wires One-Click NDA sealing and notifications.
 func WithNDAService(n *nda.Service) ServiceOption {
 	return func(s *Service) { s.ndaSvc = n }
+}
+
+// WithRoomListInvalidator wires soft invalidation of deal-room list caches.
+func (s *Service) WithRoomListInvalidator(v RoomListInvalidator) {
+	s.roomListInvalidator = v
+}
+
+func (s *Service) softInvalidateRoomList(ctx context.Context, workspaceID pgtype.UUID) {
+	if s == nil || s.roomListInvalidator == nil || !workspaceID.Valid {
+		return
+	}
+	s.roomListInvalidator.SoftInvalidateListCache(ctx, uuid.UUID(workspaceID.Bytes).String())
 }
 
 // LLMClient is the subset of llm.Client used by the link service.
@@ -230,6 +249,7 @@ type CreateLinkRequest struct {
 	NDATemplateID               string
 	RequirePassword             bool
 	Password                    string // plaintext; stored as bcrypt hash
+	PasswordHash                string // optional precomputed hash when Password is empty
 	AllowedEmails               []string
 	BlockedEmails               []string
 	ExpiresAt                   *time.Time
@@ -249,9 +269,7 @@ type CreateLinkRequest struct {
 	// FolderPaths scopes a deal-room link to a set of folder paths when the
 	// link uses allowlist mode. Empty allowlist denies all documents.
 	FolderPaths []string
-	// FolderScopeMode is "full" (legacy whole-room) or "allowlist".
-	// Deal-room creates always persist allowlist. Omit on update to leave unchanged
-	// unless FolderPaths is provided (which forces allowlist).
+	// FolderScopeMode is "full" (whole-room) or "allowlist".
 	FolderScopeMode string
 }
 
@@ -319,29 +337,31 @@ type LinkInvitation struct {
 
 // DealRoomLinkRequest is the input for creating a link tied to a deal room.
 type DealRoomLinkRequest struct {
-	Name                     string
-	RequireEmail             bool
-	RequireEmailVerification bool
-	RequireNDA               bool
-	NDADocumentID            string
-	NDATemplateID            string
-	RequirePassword          bool
-	Password                 string
-	AllowedEmails            []string
-	BlockedEmails            []string
-	ExpiresAt                *time.Time
-	DownloadEnabled          bool
-	WatermarkEnabled         bool
-	QaEnabled                bool
-	FileRequestsEnabled      bool
-	IndexFileEnabled         bool
+	Name                        string
+	RequireEmail                bool
+	RequireEmailVerification    bool
+	RequireNDA                  bool
+	NDADocumentID               string
+	NDATemplateID               string
+	RequirePassword             bool
+	Password                    string
+	PasswordHash                string // inherited from room policy when Password is empty
+	AllowedEmails               []string
+	BlockedEmails               []string
+	ExpiresAt                   *time.Time
+	DownloadEnabled             bool
+	WatermarkEnabled            bool
+	QaEnabled                   bool
+	FileRequestsEnabled         bool
+	IndexFileEnabled            bool
 	ScreenshotProtectionEnabled bool
-	CustomDomain             string
-	Tags                     []string
-	NotifyOnAccess           bool
-	// FolderPaths is the allowlist of deal-room folders. Empty deny-all.
-	// New deal-room links always persist folder_scope_mode=allowlist.
+	CustomDomain                string
+	Tags                        []string
+	NotifyOnAccess              bool
+	// FolderPaths is the allowlist of deal-room folders when mode=allowlist.
 	FolderPaths []string
+	// FolderScopeMode is "full" (whole room) or "allowlist". Default: full.
+	FolderScopeMode string
 }
 
 // CreateLink creates a smart link for one or more documents.
@@ -391,6 +411,13 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	}
 
 	passwordHash, err := s.hashPasswordIfRequired(req.RequirePassword, req.Password)
+	if err != nil {
+		// Allow create to reuse a room-policy (or other) precomputed hash.
+		if errors.Is(err, ErrRequiresPassword) && strings.TrimSpace(req.PasswordHash) != "" {
+			passwordHash = pgtype.Text{String: req.PasswordHash, Valid: true}
+			err = nil
+		}
+	}
 	if err != nil {
 		return db.Link{}, err
 	}
@@ -507,9 +534,21 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	folderScopeMode := FolderScopeModeFull
 	hasDocumentScope := false
 	if hasDealRoom {
-		// Secure default: deal-room links are allowlists (empty = deny-all).
-		folderScopeMode = FolderScopeModeAllowlist
-		hasDocumentScope = true
+		mode := normalizeFolderScopeMode(req.FolderScopeMode)
+		if len(folderScopePaths) > 0 {
+			// Explicit paths always mean allowlist scope.
+			mode = FolderScopeModeAllowlist
+		} else if mode == "" {
+			// Whole-room access is the product default for new share links.
+			mode = FolderScopeModeFull
+		}
+		folderScopeMode = mode
+		if mode == FolderScopeModeAllowlist {
+			hasDocumentScope = true
+		} else {
+			folderScopePaths = []string{}
+			hasDocumentScope = false
+		}
 	}
 
 	link, err := qtx.CreateLink(ctx, db.CreateLinkParams{
@@ -743,6 +782,17 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
 	if err != nil {
 		return db.Link{}, err
+	}
+
+	if isDealRoomLink {
+		roomID := uuid.UUID(existing.DealRoomID.Bytes).String()
+		if policyRow, ok, loadErr := s.loadRoomAccessPolicyRow(ctx, workspaceID, roomID); loadErr != nil {
+			return db.Link{}, loadErr
+		} else if ok {
+			if floorErr := enforceRoomSecurityFloors(policyRow, requireEmailVerification, requireNDA); floorErr != nil {
+				return db.Link{}, floorErr
+			}
+		}
 	}
 
 	// Validate contacts for email verification (document links only).
@@ -1091,20 +1141,45 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 }
 
 // CreateDealRoomLink creates a share link scoped to a deal room.
+// Room security contributes blocklist + outbound floors only; allowlists and
+// other protections stay on the link request. Unconfigured rooms bootstrap a
+// thin policy from the link's blocklist.
 func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, dealRoomID string, req DealRoomLinkRequest) (db.Link, error) {
-	return s.CreateLink(ctx, userID, workspaceID, CreateLinkRequest{
-		DealRoomID:               dealRoomID,
-		Name:                     req.Name,
-		RequireEmail:             req.RequireEmail,
-		RequireEmailVerification: req.RequireEmailVerification,
-		RequireNDA:               req.RequireNDA,
-		NDADocumentID:            req.NDADocumentID,
-		NDATemplateID:            req.NDATemplateID,
-		RequirePassword:          req.RequirePassword,
-		Password:                 req.Password,
-		AllowedEmails:            req.AllowedEmails,
-		BlockedEmails:            req.BlockedEmails,
-		ExpiresAt:                req.ExpiresAt,
+	policyRow, hasPolicy, err := s.loadRoomAccessPolicyRow(ctx, workspaceID, dealRoomID)
+	if err != nil {
+		return db.Link{}, err
+	}
+	if hasPolicy && policyRow.Configured {
+		var applyErr error
+		req, applyErr = applyRoomSecurityToDealRoomLinkRequest(req, policyRow)
+		if applyErr != nil {
+			return db.Link{}, applyErr
+		}
+		if err := enforceRoomSecurityFloors(policyRow, req.RequireEmailVerification, req.RequireNDA); err != nil {
+			return db.Link{}, err
+		}
+	}
+
+	if len(req.FolderPaths) > 0 {
+		req.FolderScopeMode = FolderScopeModeAllowlist
+	} else if normalizeFolderScopeMode(req.FolderScopeMode) == "" {
+		req.FolderScopeMode = FolderScopeModeFull
+	}
+
+	link, err := s.CreateLink(ctx, userID, workspaceID, CreateLinkRequest{
+		DealRoomID:                  dealRoomID,
+		Name:                        req.Name,
+		RequireEmail:                req.RequireEmail,
+		RequireEmailVerification:    req.RequireEmailVerification,
+		RequireNDA:                  req.RequireNDA,
+		NDADocumentID:               req.NDADocumentID,
+		NDATemplateID:               req.NDATemplateID,
+		RequirePassword:             req.RequirePassword,
+		Password:                    req.Password,
+		PasswordHash:                req.PasswordHash,
+		AllowedEmails:               req.AllowedEmails,
+		BlockedEmails:               req.BlockedEmails,
+		ExpiresAt:                   req.ExpiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
 		QaEnabled:                   req.QaEnabled,
@@ -1115,11 +1190,20 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		Tags:                        req.Tags,
 		NotifyOnAccess:              req.NotifyOnAccess,
 		FolderPaths:                 req.FolderPaths,
+		FolderScopeMode:             req.FolderScopeMode,
 	})
+	if err != nil {
+		return db.Link{}, err
+	}
+
+	if !hasPolicy || !policyRow.Configured {
+		_ = s.bootstrapRoomAccessPolicyFromLinkRequest(ctx, userID, workspaceID, dealRoomID, req, link.PasswordHash)
+	}
+	return link, nil
 }
 
 // validateDealRoomFolderPaths checks that every provided folder path exists in
-// the deal room's folder structure.
+// the deal room's folder structure and is not locked (or under a locked folder).
 func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queries, workspaceID pgtype.UUID, dealRoomID pgtype.UUID, folderPaths []string) error {
 	if len(folderPaths) == 0 {
 		return nil
@@ -1132,7 +1216,8 @@ func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queri
 		return fmt.Errorf("get deal room folders: %w", err)
 	}
 	var folders []struct {
-		Path string `json:"path"`
+		Path   string `json:"path"`
+		Locked bool   `json:"locked"`
 	}
 	if err := json.Unmarshal([]byte(foldersJSON), &folders); err != nil {
 		return fmt.Errorf("parse deal room folders: %w", err)
@@ -1141,9 +1226,13 @@ func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queri
 	for _, f := range folders {
 		allowed[f.Path] = true
 	}
+	lockedFolders := dealroom.LockedFolderPathSetFromFolderJSON([]byte(foldersJSON))
 	for _, p := range folderPaths {
 		if !allowed[p] {
 			return fmt.Errorf("folder path not found in deal room: %s", p)
+		}
+		if dealroom.FolderPathLocked(p, lockedFolders) {
+			return fmt.Errorf("%w: %s", ErrLockedFolderScope, p)
 		}
 	}
 	return nil
@@ -1456,6 +1545,22 @@ func (s *Service) EvaluateAccessRules(ctx context.Context, linkID, email string)
 	if err != nil {
 		return AccessEvaluation{}, errors.New("invalid link id")
 	}
+	link, err := s.queries.GetLinkByID(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return AccessEvaluation{}, ErrLinkNotFound
+		}
+		return AccessEvaluation{}, fmt.Errorf("get link: %w", err)
+	}
+
+	var roomBlocked []string
+	if link.DealRoomID.Valid {
+		roomBlocked, err = s.cachedRoomBlockedEmails(ctx, link.WorkspaceID, link.DealRoomID)
+		if err != nil {
+			return AccessEvaluation{}, fmt.Errorf("load room blocklist: %w", err)
+		}
+	}
+
 	dbRules, err := s.queries.ListLinkAccessRulesByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
 		return AccessEvaluation{}, fmt.Errorf("list access rules: %w", err)
@@ -1464,7 +1569,7 @@ func (s *Service) EvaluateAccessRules(ctx context.Context, linkID, email string)
 	for _, r := range dbRules {
 		rules = append(rules, AccessRule{RuleType: r.RuleType, Value: r.Value, Action: r.Action})
 	}
-	return evaluateAccessRules(rules, email), nil
+	return evaluateAccessWithRoomBlocks(rules, roomBlocked, email), nil
 }
 
 // evaluateAccessRules is the pure rule-evaluation engine. It is exposed
@@ -1562,10 +1667,6 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 		return errors.New("invalid link id")
 	}
 
-	if err := validateAccessRules(rules); err != nil {
-		return err
-	}
-
 	// Verify link exists in workspace.
 	link, err := s.GetByID(ctx, linkID, workspaceID)
 	if err != nil {
@@ -1573,6 +1674,24 @@ func (s *Service) UpdateAccessRules(ctx context.Context, userID, workspaceID, li
 	}
 	if link.Status == "deleted" {
 		return ErrNotFoundInWorkspace
+	}
+
+	if link.DealRoomID.Valid {
+		dealRoomID := uuid.UUID(link.DealRoomID.Bytes).String()
+		policyRow, hasPolicy, policyErr := s.loadRoomAccessPolicyRow(ctx, workspaceID, dealRoomID)
+		if policyErr != nil {
+			return policyErr
+		}
+		if hasPolicy && policyRow.Configured {
+			if err := validateNoRoomBlockedAllows(rules, policyRow.BlockedEmails); err != nil {
+				return err
+			}
+			rules = stripRoomBlocksFromLinkRules(rules, policyRow.BlockedEmails)
+		}
+	}
+
+	if err := validateAccessRules(rules); err != nil {
+		return err
 	}
 
 	// If any allow rule exists, an email identity is required so the rule can be
@@ -2352,9 +2471,24 @@ func (s *Service) ListAccessRequests(ctx context.Context, workspaceID, linkID, r
 	return out, nil
 }
 
+// PendingInboxScope selects which product surface may see pending link access
+// requests. There is intentionally no "all" scope — mixing document and
+// deal-room applicant emails across surfaces is a privacy/trust boundary.
+type PendingInboxScope struct {
+	// Kind is "document" (Document Library) or "deal_room" (one deal room).
+	Kind string
+	// DealRoomID is required when Kind is "deal_room".
+	DealRoomID string
+}
+
+const (
+	PendingInboxScopeDocument = "document"
+	PendingInboxScopeDealRoom = "deal_room"
+)
+
 // ListPendingAccessRequests returns pending visitor access requests the reviewer
-// can act on (links they created) within the workspace share inbox.
-func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, reviewerID string) ([]PendingLinkAccessRequest, error) {
+// can act on (links they created), scoped to a single product surface.
+func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, reviewerID string, scope PendingInboxScope) ([]PendingLinkAccessRequest, error) {
 	wsUUID, err := uuid.Parse(workspaceID)
 	if err != nil {
 		return nil, errors.New("invalid workspace id")
@@ -2363,33 +2497,94 @@ func (s *Service) ListPendingAccessRequests(ctx context.Context, workspaceID, re
 	if err != nil {
 		return nil, errors.New("invalid reviewer id")
 	}
-	rows, err := s.queries.ListPendingLinkAccessRequestsDetailedByWorkspace(ctx, db.ListPendingLinkAccessRequestsDetailedByWorkspaceParams{
-		WorkspaceID: pgtype.UUID{Bytes: wsUUID, Valid: true},
-		CreatedBy:   pgtype.UUID{Bytes: reviewerUUID, Valid: true},
-	})
-	if err != nil {
-		return nil, fmt.Errorf("list pending access requests: %w", err)
-	}
-	out := make([]PendingLinkAccessRequest, 0, len(rows))
-	for _, r := range rows {
-		out = append(out, PendingLinkAccessRequest{
-			LinkAccessRequest: LinkAccessRequest{
-				ID:         uuid.UUID(r.ID.Bytes).String(),
-				LinkID:     uuid.UUID(r.LinkID.Bytes).String(),
-				Email:      r.Email,
-				Reason:     r.Reason.String,
-				SignerName: r.SignerName.String,
-				Status:     r.Status,
-				CreatedAt:  r.CreatedAt.Time,
-				UpdatedAt:  r.UpdatedAt.Time,
-			},
-			LinkName:      r.LinkName.String,
-			DocumentTitle: r.DocumentTitle,
-			PublicToken:   r.PublicToken,
-			CustomDomain:  r.CustomDomain.String,
+	wsPG := pgtype.UUID{Bytes: wsUUID, Valid: true}
+	reviewerPG := pgtype.UUID{Bytes: reviewerUUID, Valid: true}
+
+	switch strings.TrimSpace(scope.Kind) {
+	case "", PendingInboxScopeDocument:
+		rows, qerr := s.queries.ListPendingDocumentLinkAccessRequestsDetailedByWorkspace(ctx, db.ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceParams{
+			WorkspaceID: wsPG,
+			CreatedBy:   reviewerPG,
 		})
+		if qerr != nil {
+			return nil, fmt.Errorf("list pending document access requests: %w", qerr)
+		}
+		out := make([]PendingLinkAccessRequest, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, pendingFromDocumentRow(r))
+		}
+		return out, nil
+
+	case PendingInboxScopeDealRoom:
+		roomUUID, perr := uuid.Parse(strings.TrimSpace(scope.DealRoomID))
+		if perr != nil {
+			return nil, errors.New("invalid deal room id")
+		}
+		// Bound the room to this workspace so a guessed UUID cannot probe another tenant.
+		if _, gerr := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+			ID:          pgtype.UUID{Bytes: roomUUID, Valid: true},
+			WorkspaceID: wsPG,
+		}); gerr != nil {
+			if errors.Is(gerr, pgx.ErrNoRows) {
+				return nil, ErrDealRoomNotFound
+			}
+			return nil, fmt.Errorf("get deal room: %w", gerr)
+		}
+		rows, qerr := s.queries.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace(ctx, db.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceParams{
+			WorkspaceID: wsPG,
+			CreatedBy:   reviewerPG,
+			DealRoomID:  pgtype.UUID{Bytes: roomUUID, Valid: true},
+		})
+		if qerr != nil {
+			return nil, fmt.Errorf("list pending deal-room access requests: %w", qerr)
+		}
+		out := make([]PendingLinkAccessRequest, 0, len(rows))
+		for _, r := range rows {
+			out = append(out, pendingFromDealRoomRow(r))
+		}
+		return out, nil
+
+	default:
+		return nil, errors.New("invalid pending inbox scope")
 	}
-	return out, nil
+}
+
+func pendingFromDocumentRow(r db.ListPendingDocumentLinkAccessRequestsDetailedByWorkspaceRow) PendingLinkAccessRequest {
+	return PendingLinkAccessRequest{
+		LinkAccessRequest: LinkAccessRequest{
+			ID:         uuid.UUID(r.ID.Bytes).String(),
+			LinkID:     uuid.UUID(r.LinkID.Bytes).String(),
+			Email:      r.Email,
+			Reason:     r.Reason.String,
+			SignerName: r.SignerName.String,
+			Status:     r.Status,
+			CreatedAt:  r.CreatedAt.Time,
+			UpdatedAt:  r.UpdatedAt.Time,
+		},
+		LinkName:      r.LinkName.String,
+		DocumentTitle: r.DocumentTitle,
+		PublicToken:   r.PublicToken,
+		CustomDomain:  r.CustomDomain.String,
+	}
+}
+
+func pendingFromDealRoomRow(r db.ListPendingDealRoomLinkAccessRequestsDetailedByWorkspaceRow) PendingLinkAccessRequest {
+	return PendingLinkAccessRequest{
+		LinkAccessRequest: LinkAccessRequest{
+			ID:         uuid.UUID(r.ID.Bytes).String(),
+			LinkID:     uuid.UUID(r.LinkID.Bytes).String(),
+			Email:      r.Email,
+			Reason:     r.Reason.String,
+			SignerName: r.SignerName.String,
+			Status:     r.Status,
+			CreatedAt:  r.CreatedAt.Time,
+			UpdatedAt:  r.UpdatedAt.Time,
+		},
+		LinkName:      r.LinkName.String,
+		DocumentTitle: r.DocumentTitle,
+		PublicToken:   r.PublicToken,
+		CustomDomain:  r.CustomDomain.String,
+	}
 }
 
 // pendingAccessRequestForReview loads a pending request only when the link is in
@@ -2505,7 +2700,7 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 	// client-side; seal still happens only on successful Access). Approval is already
 	// committed; surface send failures so the owner can retry via resend.
 	if link.RequireEmailVerification {
-		if codeErr := s.sendDealRoomEmailVerificationCode(ctx, link, reqRow.Email, s.viewerBaseURL); codeErr != nil {
+		if codeErr := s.sendDealRoomEmailVerificationCode(ctx, link, reqRow.Email, s.viewerBaseURL, false); codeErr != nil {
 			logger.ErrorCtx(ctx, "send access code after approval failed", codeErr,
 				logger.Attr("link_id", linkID),
 				logger.Attr("email", reqRow.Email),
@@ -3188,7 +3383,7 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 	// Deal-room links generate contacts on demand so allow-listed recipients can
 	// receive a code (owner resend or legacy public callers).
 	if link.DealRoomID.Valid {
-		return s.sendDealRoomEmailVerificationCode(ctx, link, email, viewerBaseURL)
+		return s.sendDealRoomEmailVerificationCode(ctx, link, email, viewerBaseURL, false)
 	}
 
 	// Document links use pre-defined contacts only; silently fail to avoid
@@ -3224,7 +3419,8 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 // given email, evaluates the link's access rules, rotates the one-time code,
 // then attempts delivery. The code is committed before send so a delivery
 // failure still leaves a durable (rotated) code that a retry can email.
-func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db.Link, email, viewerBaseURL string) error {
+// When ownerResend is true, visitor resend rate limits are skipped.
+func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db.Link, email, viewerBaseURL string, ownerResend bool) error {
 	linkID := uuid.UUID(link.ID.Bytes).String()
 	email = strings.TrimSpace(strings.ToLower(email))
 
@@ -3242,7 +3438,7 @@ func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db
 	if err != nil {
 		return fmt.Errorf("rate limit check: %w", err)
 	}
-	if !allowed {
+	if !ownerResend && !allowed {
 		return ErrEmailCodeRateLimited
 	}
 
@@ -3291,6 +3487,22 @@ func (s *Service) OwnerResendAccessCode(ctx context.Context, linkID, workspaceID
 		return ErrRequiresEmail
 	}
 
+	if link.DealRoomID.Valid {
+		if !force {
+			lc, lcErr := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
+				PublicToken: link.PublicToken,
+				Email:       pgtype.Text{String: email, Valid: true},
+			})
+			if lcErr == nil && !accessCodeNeedsRemediation(lc.CodeSendStatus, lc.CreatedAt.Time, time.Now()) {
+				return ErrAccessCodeResendNotNeeded
+			}
+			if lcErr != nil && !errors.Is(lcErr, pgx.ErrNoRows) {
+				return fmt.Errorf("get link contact: %w", lcErr)
+			}
+		}
+		return s.sendDealRoomEmailVerificationCode(ctx, link, email, s.viewerBaseURL, true)
+	}
+
 	lc, err := s.queries.GetLinkContactByEmail(ctx, db.GetLinkContactByEmailParams{
 		PublicToken: link.PublicToken,
 		Email:       pgtype.Text{String: email, Valid: true},
@@ -3304,10 +3516,6 @@ func (s *Service) OwnerResendAccessCode(ctx context.Context, linkID, workspaceID
 
 	if !force && !accessCodeNeedsRemediation(lc.CodeSendStatus, lc.CreatedAt.Time, time.Now()) {
 		return ErrAccessCodeResendNotNeeded
-	}
-
-	if link.DealRoomID.Valid {
-		return s.sendDealRoomEmailVerificationCode(ctx, link, email, s.viewerBaseURL)
 	}
 
 	allowed, err := s.allowEmailCodeSend(ctx, link.PublicToken, email)
@@ -3610,9 +3818,10 @@ func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string)
 	}, nil
 }
 
-// List returns all non-deleted links in a workspace.
+// List returns document share links in a workspace (excludes deal-room shares).
+// Deal-room shares are listed via ListDealRoomLinks / ListDealRoomLinksPage.
 func (s *Service) List(ctx context.Context, workspaceID string) ([]db.Link, error) {
-	return s.queries.ListLinksByWorkspace(ctx, pgUUID(workspaceID))
+	return s.queries.ListDocumentLinksByWorkspace(ctx, pgUUID(workspaceID))
 }
 
 // ListByDocument returns links for a specific document.
@@ -4032,6 +4241,12 @@ type QARecord struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+const linkAnalyticsCacheTTL = 20 * time.Second
+
+func linkAnalyticsCacheKey(workspaceID, linkID string) string {
+	return fmt.Sprintf("links:analytics:v1:%s:%s", workspaceID, linkID)
+}
+
 // GetLinkAnalytics returns aggregated access metrics for a link.
 func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID string) (LinkAnalytics, error) {
 	id, err := uuid.Parse(linkID)
@@ -4041,6 +4256,16 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 	// Verify link exists in workspace.
 	if _, err := s.GetByID(ctx, linkID, workspaceID); err != nil {
 		return LinkAnalytics{}, err
+	}
+
+	cacheKey := linkAnalyticsCacheKey(workspaceID, linkID)
+	if s.redisClient != nil {
+		if raw, getErr := s.redisClient.Get(ctx, cacheKey); getErr == nil {
+			var cached LinkAnalytics
+			if json.Unmarshal([]byte(raw), &cached) == nil {
+				return cached, nil
+			}
+		}
 	}
 
 	row, err := s.queries.GetLinkAnalytics(ctx, pgtype.UUID{Bytes: id, Valid: true})
@@ -4148,6 +4373,14 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 		logger.ErrorCtx(ctx, "failed to count remediable access code contacts", err)
 	} else {
 		analytics.AccessCodeRemediableCount = remediableCount
+	}
+
+	if s.redisClient != nil {
+		if raw, marshalErr := json.Marshal(analytics); marshalErr == nil {
+			if setErr := s.redisClient.Set(ctx, cacheKey, string(raw), linkAnalyticsCacheTTL); setErr != nil {
+				logger.ErrorCtx(ctx, "cache link analytics", setErr)
+			}
+		}
 	}
 
 	return analytics, nil
@@ -4810,7 +5043,7 @@ func (s *Service) CreateVisitorQuestion(ctx context.Context, link db.Link, visit
 		return db.LinkVisitorQuestion{}, fmt.Errorf("question must not exceed 500 characters")
 	}
 
-	return s.queries.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
+	q, err := s.queries.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
 		TenantID:     link.TenantID,
 		WorkspaceID:  link.WorkspaceID,
 		LinkID:       link.ID,
@@ -4818,6 +5051,11 @@ func (s *Service) CreateVisitorQuestion(ctx context.Context, link db.Link, visit
 		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
 		Question:     strings.TrimSpace(question),
 	})
+	if err != nil {
+		return db.LinkVisitorQuestion{}, err
+	}
+	s.softInvalidateRoomList(ctx, link.WorkspaceID)
+	return q, nil
 }
 
 // ListMyVisitorQuestions returns all questions submitted by a specific visitor on a link.
@@ -4916,6 +5154,7 @@ func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, quest
 		return VisitorQuestion{}, err
 	}
 	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
+	s.softInvalidateRoomList(ctx, link.WorkspaceID)
 	return mapVisitorQuestion(q), nil
 }
 
@@ -5438,13 +5677,15 @@ func (s *Service) resolveLinkAccessRequest(workspaceID, linkID string) {
 	if s.actionSyncer == nil {
 		return
 	}
-	// Actions are keyed by link ID (see syncLinkAccessRequests). Only clear when
-	// no pending requests remain for this link.
+	// Actions are keyed by link ID. Document and deal-room shares use distinct
+	// source_types so dashboard deep-links stay surface-isolated. Only clear
+	// when no pending requests remain for this link.
 	id, err := uuid.Parse(linkID)
 	if err != nil {
 		return
 	}
-	rows, err := s.queries.ListLinkAccessRequestsByLink(context.Background(), pgtype.UUID{Bytes: id, Valid: true})
+	linkPG := pgtype.UUID{Bytes: id, Valid: true}
+	rows, err := s.queries.ListLinkAccessRequestsByLink(context.Background(), linkPG)
 	if err != nil {
 		return
 	}
@@ -5453,7 +5694,10 @@ func (s *Service) resolveLinkAccessRequest(workspaceID, linkID string) {
 			return
 		}
 	}
+	// Resolve both surface keys so pre-split document-typed rows for deal-room
+	// links (and the inverse) cannot linger after approval/rejection.
 	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkAccessRequest, linkID)
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeDealRoomLinkAccessRequest, linkID)
 }
 
 func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {

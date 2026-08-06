@@ -132,6 +132,9 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 	if err := errIfAgreementNotPDF(category, sourceType); err != nil {
 		return Document{}, err
 	}
+	if err := ValidateCreateCategory(category); err != nil {
+		return Document{}, err
+	}
 
 	tenantUUID := pgUUID(tenantID)
 	workspaceUUID := pgUUID(workspaceID)
@@ -173,10 +176,7 @@ func (s *Service) CreateDocument(ctx context.Context, userID, tenantID, workspac
 		return Document{}, fmt.Errorf("store file: %w", err)
 	}
 
-	docCategory := "general"
-	if category == "agreement" {
-		docCategory = "agreement"
-	}
+	docCategory := NormalizeCreateCategory(category)
 
 	var created db.CreateDocumentRow
 	err = s.withTx(ctx, func(q *db.Queries) error {
@@ -254,15 +254,19 @@ func (s *Service) replaceExistingDocument(
 		return Document{}, fmt.Errorf("store file: %w", err)
 	}
 
+	if err := ValidateCreateCategory(category); err != nil {
+		return Document{}, err
+	}
+
 	// Preserve the library category unless the caller explicitly overrides it.
 	docCategory := existing.Category
-	if category == "agreement" {
-		docCategory = "agreement"
+	if category == CategoryAgreement || category == CategoryGeneral {
+		docCategory = NormalizeCreateCategory(category)
 	} else if category != "" && category != "uploaded" {
-		docCategory = category
+		docCategory = NormalizeCreateCategory(category)
 	}
 	if docCategory == "" {
-		docCategory = "general"
+		docCategory = CategoryGeneral
 	}
 
 	var rebound db.ReplaceDocumentFileRow

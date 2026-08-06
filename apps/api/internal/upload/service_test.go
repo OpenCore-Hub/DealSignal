@@ -21,6 +21,15 @@ func TestCreateDocument_AgreementRequiresPDF(t *testing.T) {
 	}
 }
 
+func TestCreateDocument_RejectsDealRoomCategory(t *testing.T) {
+	s := NewService(nil, nil, nil)
+	h := &multipart.FileHeader{Filename: "room.pdf", Size: 1024}
+	_, err := s.CreateDocument(t.Context(), uuid.NewString(), uuid.NewString(), uuid.NewString(), "deal_room", h, false)
+	if !errors.Is(err, ErrCategoryDealRoomViaAPI) {
+		t.Fatalf("expected ErrCategoryDealRoomViaAPI, got %v", err)
+	}
+}
+
 func TestErrIfAgreementNotPDF(t *testing.T) {
 	cases := []struct {
 		category, sourceType string

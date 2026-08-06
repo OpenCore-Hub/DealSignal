@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -79,19 +80,77 @@ type CreateRequest struct {
 	RequiresApproval bool                   `json:"requires_approval,omitempty"`
 }
 
-// List returns all deal rooms in the workspace.
+// List returns deal rooms in the workspace.
+// Optional query params enable server-side pagination:
+//   - page (1-based; when omitted, returns the full list for backward compatibility)
+//   - page_size (default 24, max 100)
+//   - q (name/description search; applied with pagination)
 func (h *Handler) List(c *gin.Context) {
-	rooms, err := h.service.ListRooms(c.Request.Context(), middleware.WorkspaceIDFrom(c))
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	query := strings.TrimSpace(c.Query("q"))
+	pageRaw := strings.TrimSpace(c.Query("page"))
+	if pageRaw == "" {
+		rooms, err := h.service.ListRooms(c.Request.Context(), workspaceID)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+			return
+		}
+		if query != "" {
+			filtered := make([]RoomSummary, 0, len(rooms))
+			qLower := strings.ToLower(query)
+			for _, r := range rooms {
+				name := strings.ToLower(r.Room.Name)
+				desc := ""
+				if r.Room.Description.Valid {
+					desc = strings.ToLower(r.Room.Description.String)
+				}
+				if strings.Contains(name, qLower) || strings.Contains(desc, qLower) {
+					filtered = append(filtered, r)
+				}
+			}
+			rooms = filtered
+		}
+		out := make([]gin.H, len(rooms))
+		for i, r := range rooms {
+			out[i] = roomSummaryResponse(r)
+		}
+		c.JSON(http.StatusOK, gin.H{"data": out})
+		return
+	}
+
+	page, err := strconv.Atoi(pageRaw)
+	if err != nil || page < 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page must be a positive integer"})
+		return
+	}
+	pageSize := dealRoomsDefaultPageSize
+	if raw := strings.TrimSpace(c.Query("page_size")); raw != "" {
+		n, perr := strconv.Atoi(raw)
+		if perr != nil || n < 1 {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page_size must be a positive integer"})
+			return
+		}
+		pageSize = n
+	}
+
+	result, err := h.service.ListRoomsPage(c.Request.Context(), workspaceID, page, pageSize, query)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-
-	out := make([]gin.H, len(rooms))
-	for i, r := range rooms {
+	out := make([]gin.H, len(result.Items))
+	for i, r := range result.Items {
 		out[i] = roomSummaryResponse(r)
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	c.JSON(http.StatusOK, gin.H{
+		"data": out,
+		"pagination": gin.H{
+			"page":      result.Page,
+			"page_size": result.PageSize,
+			"total":     result.Total,
+			"has_more":  result.HasMore,
+		},
+	})
 }
 
 // ListTemplates returns available deal room templates.
@@ -366,6 +425,8 @@ func (h *Handler) AddDocument(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "folder_not_found", "message": httpx.SafeMessage("folder_not_found", err)})
 		case errors.Is(err, ErrResourceLocked):
 			c.JSON(http.StatusConflict, gin.H{"code": "resource_locked", "message": httpx.SafeMessage("resource_locked", err)})
+		case errors.Is(err, ErrAgreementNotAllowedInDealRoom):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "agreement_not_allowed_in_deal_room", "message": httpx.SafeMessage("agreement_not_allowed_in_deal_room", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}

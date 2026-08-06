@@ -76,6 +76,17 @@ func (m *mockContactQuerier) ListContactViewedDocumentIDs(_ context.Context, _ d
 	return m.viewedDocs, nil
 }
 
+func (m *mockContactQuerier) ListContactViewedDocumentIDsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListContactViewedDocumentIDsByWorkspaceRow, error) {
+	out := make([]db.ListContactViewedDocumentIDsByWorkspaceRow, 0, len(m.viewedDocs))
+	for _, id := range m.viewedDocs {
+		out = append(out, db.ListContactViewedDocumentIDsByWorkspaceRow{
+			Email:      "a@example.com",
+			DocumentID: id,
+		})
+	}
+	return out, nil
+}
+
 func TestDisplayNameFallsBackToEmailLocalPart(t *testing.T) {
 	c := db.Contact{Name: pgtype.Text{Valid: false}}
 	got := displayName(c, "sarah.chen@horizon.vc")

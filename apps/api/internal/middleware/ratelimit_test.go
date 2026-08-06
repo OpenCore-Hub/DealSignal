@@ -77,6 +77,25 @@ func TestRateLimitMiddleware_BlocksRequest(t *testing.T) {
 	}
 }
 
+func TestIsUploadPath(t *testing.T) {
+	cases := []struct {
+		method string
+		path   string
+		want   bool
+	}{
+		{http.MethodPost, "/api/workspaces/acme/documents", true},
+		{http.MethodGet, "/api/workspaces/acme/documents", false},
+		{http.MethodPost, "/api/workspaces/acme/deal-rooms/room-1/documents", false},
+		{http.MethodPost, "/api/workspaces/acme/documents/extra", false},
+		{http.MethodPost, "/api/v1/public/links/tok/upload", false},
+	}
+	for _, tc := range cases {
+		if got := isUploadPath(tc.path, tc.method); got != tc.want {
+			t.Fatalf("isUploadPath(%q, %q)=%v, want %v", tc.path, tc.method, got, tc.want)
+		}
+	}
+}
+
 func TestRateLimitMiddleware_SkipsOptions(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{RateLimitPublicRPM: 100}

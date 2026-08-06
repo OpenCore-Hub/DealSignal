@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
@@ -101,8 +102,22 @@ func isAuthPath(path string) bool {
 	return hasPrefix(path, "/api/auth/")
 }
 
+// isUploadPath matches the multipart document create endpoint only:
+// POST /api/workspaces/{slug}/documents
+// Deal-room attach (POST .../deal-rooms/{id}/documents) is a lightweight JSON
+// link and must use the workspace bucket so batch folder uploads are not
+// double-charged against the tight upload RPM.
 func isUploadPath(path, method string) bool {
-	return method == http.MethodPost && (path == "/api/workspaces/:workspaceSlug/documents" || hasPrefix(path, "/api/workspaces/") && hasSuffix(path, "/documents"))
+	if method != http.MethodPost {
+		return false
+	}
+	const prefix = "/api/workspaces/"
+	const suffix = "/documents"
+	if !hasPrefix(path, prefix) || !hasSuffix(path, suffix) {
+		return false
+	}
+	slug := strings.TrimSuffix(strings.TrimPrefix(path, prefix), suffix)
+	return slug != "" && !strings.Contains(slug, "/")
 }
 
 func rateLimitForCategory(cat rateLimitCategory, cfg *config.Config) (int, time.Duration) {

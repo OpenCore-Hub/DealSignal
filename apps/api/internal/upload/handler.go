@@ -94,6 +94,8 @@ func (h *Handler) Create(c *gin.Context) {
 			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"code": "payload_too_large", "message": httpx.SafeMessage("payload_too_large", err)})
 		case errors.Is(err, ErrAgreementRequiresPDF):
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "agreement_pdf_required", "message": httpx.SafeMessage("agreement_pdf_required", err)})
+		case errors.Is(err, ErrCategoryDealRoomViaAPI):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "category_deal_room_via_api", "message": httpx.SafeMessage("category_deal_room_via_api", err)})
 		case errors.Is(err, ErrInvalidFileType), errors.Is(err, ErrInvalidFileContent):
 			c.JSON(http.StatusUnsupportedMediaType, gin.H{"code": "unsupported_media_type", "message": httpx.SafeMessage("unsupported_media_type", err)})
 		default:
@@ -170,7 +172,7 @@ func (h *Handler) List(c *gin.Context) {
 	excludeAgreement := parseTruthyForm(c.Query("exclude_agreement"))
 
 	var dealRoomDocIDs map[string]struct{}
-	if excludeDealRoom {
+	if shouldLoadDealRoomMembershipExclude(excludeDealRoom, category) {
 		ids, err := h.uploadService.queries.ListDocumentIDsInDealRoomsByWorkspace(ctx, wsPgUUID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -183,7 +185,11 @@ func (h *Handler) List(c *gin.Context) {
 	}
 
 	appendDoc := func(out []gin.H, info docInfo, job db.IngestionJob) []gin.H {
-		if excludeAgreement && strings.EqualFold(info.Category, "agreement") {
+		if excludeAgreement && strings.EqualFold(info.Category, CategoryAgreement) {
+			return out
+		}
+		// Prefer category truth; keep membership exclude as defense for legacy rows.
+		if excludeDealRoom && strings.EqualFold(info.Category, CategoryDealRoom) {
 			return out
 		}
 		if dealRoomDocIDs != nil {
@@ -722,6 +728,24 @@ func (h *Handler) UpdateCategory(c *gin.Context) {
 		h.handleDocError(c, err)
 		return
 	}
+	memberships, mErr := h.uploadService.queries.CountDealRoomMembershipsByDocument(ctx, pgtype.UUID{Bytes: docID, Valid: true})
+	if mErr != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", mErr)})
+		return
+	}
+	if err := ValidateManualCategoryChange(doc.Category, req.Category, memberships); err != nil {
+		code := "category_immutable"
+		status := http.StatusConflict
+		switch {
+		case errors.Is(err, ErrCategoryDealRoomViaAPI):
+			code = "category_deal_room_via_api"
+			status = http.StatusBadRequest
+		case errors.Is(err, ErrCategoryWhileInRoom):
+			code = "category_while_in_room"
+		}
+		c.JSON(status, gin.H{"code": code, "message": httpx.SafeMessage(code, err)})
+		return
+	}
 	if err := errIfAgreementNotPDF(req.Category, doc.SourceType); err != nil {
 		c.JSON(http.StatusUnsupportedMediaType, gin.H{
 			"code":    "agreement_pdf_required",
@@ -866,6 +890,12 @@ func textOrNil(t pgtype.Text) interface{} {
 
 func uuidToString(u pgtype.UUID) string {
 	return uuid.UUID(u.Bytes).String()
+}
+
+func shouldLoadDealRoomMembershipExclude(excludeDealRoom bool, category string) bool {
+	// category=general already excludes deal_room at the DB layer; membership
+	// lookup is only needed for legacy clients that omit category.
+	return excludeDealRoom && !strings.EqualFold(strings.TrimSpace(category), CategoryGeneral)
 }
 
 func parseTruthyForm(v string) bool {

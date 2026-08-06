@@ -32,8 +32,14 @@ func (h *Handler) RegisterRoutes(rg *gin.RouterGroup) {
 	rg.GET("/links/:id/nda-responses", h.ListLinkResponses)
 }
 
+// workspaceID resolves the authenticated workspace UUID injected by
+// workspace.AuthMiddleware. Route param is :workspaceSlug (not a UUID).
+func workspaceID(c *gin.Context) string {
+	return middleware.WorkspaceIDFrom(c)
+}
+
 func (h *Handler) ListTemplates(c *gin.Context) {
-	wsID := c.Param("workspaceId")
+	wsID := workspaceID(c)
 	includeArchived := c.Query("include_archived") == "true"
 	items, err := h.svc.ListTemplates(c.Request.Context(), wsID, includeArchived)
 	if err != nil {
@@ -44,7 +50,7 @@ func (h *Handler) ListTemplates(c *gin.Context) {
 }
 
 func (h *Handler) CreateTemplate(c *gin.Context) {
-	wsID := c.Param("workspaceId")
+	wsID := workspaceID(c)
 	userID := middleware.UserIDFrom(c)
 	var body struct {
 		DocumentID        string `json:"document_id" binding:"required"`
@@ -68,7 +74,7 @@ func (h *Handler) CreateTemplate(c *gin.Context) {
 }
 
 func (h *Handler) GetTemplate(c *gin.Context) {
-	view, err := h.svc.GetTemplate(c.Request.Context(), c.Param("workspaceId"), c.Param("templateId"))
+	view, err := h.svc.GetTemplate(c.Request.Context(), workspaceID(c), c.Param("templateId"))
 	if err != nil {
 		mapNDAError(c, err)
 		return
@@ -89,7 +95,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 	if body.RequireSignerName != nil {
 		requireName = *body.RequireSignerName
 	}
-	view, err := h.svc.UpdateTemplate(c.Request.Context(), c.Param("workspaceId"), c.Param("templateId"), body.Name, requireName)
+	view, err := h.svc.UpdateTemplate(c.Request.Context(), workspaceID(c), c.Param("templateId"), body.Name, requireName)
 	if err != nil {
 		mapNDAError(c, err)
 		return
@@ -98,7 +104,7 @@ func (h *Handler) UpdateTemplate(c *gin.Context) {
 }
 
 func (h *Handler) ArchiveTemplate(c *gin.Context) {
-	view, err := h.svc.ArchiveTemplate(c.Request.Context(), c.Param("workspaceId"), c.Param("templateId"))
+	view, err := h.svc.ArchiveTemplate(c.Request.Context(), workspaceID(c), c.Param("templateId"))
 	if err != nil {
 		mapNDAError(c, err)
 		return
@@ -107,7 +113,7 @@ func (h *Handler) ArchiveTemplate(c *gin.Context) {
 }
 
 func (h *Handler) ListResponses(c *gin.Context) {
-	items, err := h.svc.ListResponses(c.Request.Context(), c.Param("workspaceId"), c.Param("templateId"))
+	items, err := h.svc.ListResponses(c.Request.Context(), workspaceID(c), c.Param("templateId"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -116,7 +122,7 @@ func (h *Handler) ListResponses(c *gin.Context) {
 }
 
 func (h *Handler) ListLinkResponses(c *gin.Context) {
-	items, err := h.svc.ListLinkResponses(c.Request.Context(), c.Param("workspaceId"), c.Param("id"))
+	items, err := h.svc.ListLinkResponses(c.Request.Context(), workspaceID(c), c.Param("id"))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -125,7 +131,7 @@ func (h *Handler) ListLinkResponses(c *gin.Context) {
 }
 
 func (h *Handler) DownloadResponse(c *gin.Context) {
-	row, err := h.svc.GetResponse(c.Request.Context(), c.Param("workspaceId"), c.Param("responseId"))
+	row, err := h.svc.GetResponse(c.Request.Context(), workspaceID(c), c.Param("responseId"))
 	if err != nil {
 		mapNDAError(c, err)
 		return

@@ -33,16 +33,38 @@ type Querier interface {
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
 	ListContactActivitiesByEmail(ctx context.Context, arg db.ListContactActivitiesByEmailParams) ([]db.ListContactActivitiesByEmailRow, error)
 	ListContactViewedDocumentIDs(ctx context.Context, arg db.ListContactViewedDocumentIDsParams) ([]string, error)
+	ListContactViewedDocumentIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListContactViewedDocumentIDsByWorkspaceRow, error)
 }
+
+// Cache is a minimal key/value cache for contact list enrichment.
+type Cache interface {
+	Get(ctx context.Context, key string, dest interface{}) error
+	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+}
+
+const contactListCacheTTL = 20 * time.Second
 
 // Service aggregates visitor activity into contact records.
 type Service struct {
 	queries Querier
+	cache   Cache
+}
+
+// ServiceOption configures a contact Service.
+type ServiceOption func(*Service)
+
+// WithCache enables Redis caching for enriched contact lists.
+func WithCache(c Cache) ServiceOption {
+	return func(s *Service) { s.cache = c }
 }
 
 // NewService creates a contact service.
-func NewService(q Querier) *Service {
-	return &Service{queries: q}
+func NewService(q Querier, opts ...ServiceOption) *Service {
+	s := &Service{queries: q}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 // Contact is the enriched response model for a workspace contact.
@@ -144,6 +166,14 @@ func (s *Service) SyncContacts(ctx context.Context, workspaceID string) error {
 
 // ListContacts returns enriched contacts for a workspace.
 func (s *Service) ListContacts(ctx context.Context, workspaceID string) ([]Contact, error) {
+	cacheKey := fmt.Sprintf("contacts:list:v1:%s", workspaceID)
+	if s.cache != nil {
+		var cached []Contact
+		if err := s.cache.Get(ctx, cacheKey, &cached); err == nil {
+			return cached, nil
+		}
+	}
+
 	wsUUID, err := parseUUID(workspaceID)
 	if err != nil {
 		return nil, err
@@ -170,22 +200,27 @@ func (s *Service) ListContacts(ctx context.Context, workspaceID string) ([]Conta
 		aggByEmail[strings.ToLower(a.Email)] = a
 	}
 
+	viewedRows, err := s.queries.ListContactViewedDocumentIDsByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return nil, fmt.Errorf("batch viewed documents: %w", err)
+	}
+	viewedByEmail := make(map[string][]string, len(rows))
+	for _, row := range viewedRows {
+		email := strings.ToLower(row.Email)
+		viewedByEmail[email] = append(viewedByEmail[email], row.DocumentID)
+	}
+
 	out := make([]Contact, 0, len(rows))
 	for _, c := range rows {
-		email := c.Email.String
-		agg := aggByEmail[strings.ToLower(email)]
-		viewed, err := s.queries.ListContactViewedDocumentIDs(ctx, db.ListContactViewedDocumentIDsParams{
-			WorkspaceID:  wsUUID,
-			VisitorEmail: c.Email,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("viewed documents for %s: %w", email, err)
-		}
-		contact := s.buildContact(c, agg, viewed)
-		out = append(out, contact)
+		email := strings.ToLower(c.Email.String)
+		agg := aggByEmail[email]
+		out = append(out, s.buildContact(c, agg, viewedByEmail[email]))
 	}
 
 	sortContacts(out)
+	if s.cache != nil {
+		_ = s.cache.Set(ctx, cacheKey, out, contactListCacheTTL)
+	}
 	return out, nil
 }
 

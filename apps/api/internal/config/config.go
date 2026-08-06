@@ -213,7 +213,9 @@ func Load() (*Config, error) {
 
 		RateLimitPublicRPM:     getEnvInt("RATE_LIMIT_PUBLIC_RPM", 100),
 		RateLimitAuthRPM:       getEnvInt("RATE_LIMIT_AUTH_RPM", 20),
-		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", 10),
+		// Batch deal-room folder uploads issue one create per file; 10/min is too
+		// low for normal diligence packs (dozens of xlsx/pdf). Default 60/min.
+		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", 60),
 		RateLimitWorkspaceRPM:  getEnvInt("RATE_LIMIT_WORKSPACE_RPM", 200),
 		IdempotencyTTLHours:    getEnvInt("IDEMPOTENCY_TTL_HOURS", 24),
 		IdempotencyMaxBodySize: getEnvInt("IDEMPOTENCY_MAX_BODY_SIZE", 1<<20),

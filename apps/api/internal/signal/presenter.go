@@ -63,6 +63,9 @@ func ActionItem(a db.ActionItem) gin.H {
 	if a.SourceID.Valid {
 		item["sourceId"] = a.SourceID.String
 	}
+	if a.TargetID.Valid {
+		item["targetId"] = a.TargetID.String
+	}
 	return item
 }
 

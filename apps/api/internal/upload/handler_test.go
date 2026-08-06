@@ -4,6 +4,25 @@ import (
 	"testing"
 )
 
+func TestShouldLoadDealRoomMembershipExclude(t *testing.T) {
+	cases := []struct {
+		excludeDealRoom bool
+		category        string
+		want            bool
+	}{
+		{true, CategoryGeneral, false},
+		{true, "", true},
+		{true, CategoryAgreement, true},
+		{false, "", false},
+		{false, CategoryGeneral, false},
+	}
+	for _, tc := range cases {
+		if got := shouldLoadDealRoomMembershipExclude(tc.excludeDealRoom, tc.category); got != tc.want {
+			t.Fatalf("exclude=%v category=%q: got %v want %v", tc.excludeDealRoom, tc.category, got, tc.want)
+		}
+	}
+}
+
 func TestParseTruthyForm(t *testing.T) {
 	cases := map[string]bool{
 		"true":  true,

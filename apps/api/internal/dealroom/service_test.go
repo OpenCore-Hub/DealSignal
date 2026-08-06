@@ -614,6 +614,89 @@ func TestDocumentMoveRemoveReorder(t *testing.T) {
 	}
 }
 
+func TestDocumentCategoryTransitions(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	roomA, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "cat-room-a",
+		Name: "Cat Room A",
+	})
+	if err != nil {
+		t.Fatalf("create room a: %v", err)
+	}
+	roomAID := uuid.UUID(roomA.ID.Bytes).String()
+
+	roomB, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug: "cat-room-b",
+		Name: "Cat Room B",
+	})
+	if err != nil {
+		t.Fatalf("create room b: %v", err)
+	}
+	roomBID := uuid.UUID(roomB.ID.Bytes).String()
+
+	generalID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(generalID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "General Doc",
+		Category:    "general",
+	})
+
+	if _, err := svc.AddDocument(context.Background(), roomAID, wsID, ownerID, generalID, "/general", 0); err != nil {
+		t.Fatalf("add general doc: %v", err)
+	}
+	if got := fake.findDocument(pgUUID(generalID)).Category; got != "deal_room" {
+		t.Fatalf("after add: category=%q, want deal_room", got)
+	}
+
+	if _, err := svc.AddDocument(context.Background(), roomBID, wsID, ownerID, generalID, "/general", 0); err != nil {
+		t.Fatalf("add to second room: %v", err)
+	}
+	if got := fake.findDocument(pgUUID(generalID)).Category; got != "deal_room" {
+		t.Fatalf("after second add: category=%q, want deal_room", got)
+	}
+
+	if err := svc.RemoveDocument(context.Background(), roomAID, wsID, ownerID, generalID); err != nil {
+		t.Fatalf("remove from first room: %v", err)
+	}
+	if got := fake.findDocument(pgUUID(generalID)).Category; got != "deal_room" {
+		t.Fatalf("after remove one room: category=%q, want deal_room", got)
+	}
+
+	if err := svc.RemoveDocument(context.Background(), roomBID, wsID, ownerID, generalID); err != nil {
+		t.Fatalf("remove from last room: %v", err)
+	}
+	if got := fake.findDocument(pgUUID(generalID)).Category; got != "general" {
+		t.Fatalf("after last remove: category=%q, want general", got)
+	}
+
+	agreementID := uuid.NewString()
+	fake.documents = append(fake.documents, db.Document{
+		ID:          pgUUID(agreementID),
+		WorkspaceID: pgUUID(wsID),
+		TenantID:    fake.workspace.TenantID,
+		Title:       "NDA",
+		Category:    "agreement",
+	})
+	if _, err := svc.AddDocument(context.Background(), roomAID, wsID, ownerID, agreementID, "/general", 0); !errors.Is(err, ErrAgreementNotAllowedInDealRoom) {
+		t.Fatalf("add agreement: got %v, want ErrAgreementNotAllowedInDealRoom", err)
+	}
+	if got := fake.findDocument(pgUUID(agreementID)).Category; got != "agreement" {
+		t.Fatalf("agreement category mutated: %q", got)
+	}
+}
+
 func TestAdminAuthorization(t *testing.T) {
 	fake := newFakeDB(t)
 	svc := NewService(db.New(fake), nil, testCfg())
@@ -1006,6 +1089,15 @@ func (f *fakeDB) Exec(ctx context.Context, sql string, arguments ...interface{})
 			}
 		}
 		f.roomDocs = filtered
+	case strings.Contains(sqlLower, "update documents") && strings.Contains(sqlLower, "set category"):
+		category := argString(arguments, 0)
+		id := argUUID(arguments, 1)
+		wsID := argUUID(arguments, 2)
+		for i := range f.documents {
+			if f.documents[i].ID == id && f.documents[i].WorkspaceID == wsID {
+				f.documents[i].Category = category
+			}
+		}
 	case strings.Contains(sqlLower, "update deal_room_documents") && strings.Contains(sqlLower, "set locked"):
 		locked := argBool(arguments, 0)
 		roomID := argUUID(arguments, 1)
@@ -1161,6 +1253,73 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 		}
 		return &fakeRows{rows: rows}, nil
 
+	case (strings.Contains(sqlLower, "from deal_rooms dr") && strings.Contains(sqlLower, "group by dr.id")) ||
+		(strings.Contains(sqlLower, "with rooms as") && strings.Contains(sqlLower, "as heat_score")):
+		// Must run before the generic "from deal_rooms … where workspace_id" branch:
+		// the CTE aggregate query also contains those substrings.
+		rows := make([][]interface{}, 0, len(f.rooms))
+		for _, r := range f.rooms {
+			if r.WorkspaceID != argUUID(args, 0) {
+				continue
+			}
+			var docCount, memberCount, pendingCount int64
+			for _, d := range f.roomDocs {
+				if d.RoomID == r.ID {
+					docCount++
+				}
+			}
+			for _, m := range f.members {
+				if m.RoomID == r.ID {
+					memberCount++
+				}
+			}
+			for _, req := range f.requests {
+				if req.RoomID == r.ID && req.Status == "pending" {
+					pendingCount++
+				}
+			}
+			rows = append(rows, []interface{}{
+				r.ID, docCount, memberCount, pendingCount, int64(0), int64(0), pgtype.Timestamptz{}, int32(0),
+			})
+		}
+		return &fakeRows{rows: rows}, nil
+
+	case strings.Contains(sqlLower, "from deal_rooms") && strings.Contains(sqlLower, "where workspace_id") &&
+		strings.Contains(sqlLower, "limit") && strings.Contains(sqlLower, "offset"):
+		limit := int(argInt32(args, 1))
+		offset := int(argInt32(args, 2))
+		query := ""
+		if len(args) >= 4 {
+			query = strings.ToLower(strings.TrimSpace(argString(args, 3)))
+		}
+		matched := make([]db.DealRoom, 0, len(f.rooms))
+		for _, r := range f.rooms {
+			if query == "" ||
+				strings.Contains(strings.ToLower(r.Name), query) ||
+				(r.Description.Valid && strings.Contains(strings.ToLower(r.Description.String), query)) {
+				matched = append(matched, r)
+			}
+		}
+		if limit < 0 {
+			limit = 0
+		}
+		if offset < 0 {
+			offset = 0
+		}
+		end := offset + limit
+		if offset > len(matched) {
+			offset = len(matched)
+		}
+		if end > len(matched) {
+			end = len(matched)
+		}
+		slice := matched[offset:end]
+		rows := make([][]interface{}, len(slice))
+		for i, r := range slice {
+			rows[i] = roomRow(r)
+		}
+		return &fakeRows{rows: rows}, nil
+
 	case strings.Contains(sqlLower, "from deal_rooms") && strings.Contains(sqlLower, "where workspace_id"):
 		rows := make([][]interface{}, len(f.rooms))
 		for i, r := range f.rooms {
@@ -1204,34 +1363,6 @@ func (f *fakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pg
 					r.Status, r.ReviewedBy, r.ReviewedAt, r.CreatedAt, r.UpdatedAt,
 				})
 			}
-		}
-		return &fakeRows{rows: rows}, nil
-
-	case strings.Contains(sqlLower, "from deal_rooms dr") && strings.Contains(sqlLower, "group by dr.id"):
-		rows := make([][]interface{}, 0, len(f.rooms))
-		for _, r := range f.rooms {
-			if r.WorkspaceID != argUUID(args, 0) {
-				continue
-			}
-			var docCount, memberCount, pendingCount int64
-			for _, d := range f.roomDocs {
-				if d.RoomID == r.ID {
-					docCount++
-				}
-			}
-			for _, m := range f.members {
-				if m.RoomID == r.ID {
-					memberCount++
-				}
-			}
-			for _, req := range f.requests {
-				if req.RoomID == r.ID && req.Status == "pending" {
-					pendingCount++
-				}
-			}
-			rows = append(rows, []interface{}{
-				r.ID, docCount, memberCount, pendingCount, int64(0), int64(0), pgtype.Timestamptz{}, int32(0),
-			})
 		}
 		return &fakeRows{rows: rows}, nil
 
@@ -1445,6 +1576,33 @@ func (f *fakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) 
 			}
 		}
 		return fakeRow{err: pgx.ErrNoRows}
+
+	case strings.Contains(sqlLower, "select count(*)") && strings.Contains(sqlLower, "from deal_rooms") &&
+		strings.Contains(sqlLower, "where workspace_id"):
+		query := ""
+		if len(args) >= 2 {
+			query = strings.ToLower(strings.TrimSpace(argString(args, 1)))
+		}
+		var count int64
+		for _, r := range f.rooms {
+			if query == "" ||
+				strings.Contains(strings.ToLower(r.Name), query) ||
+				(r.Description.Valid && strings.Contains(strings.ToLower(r.Description.String), query)) {
+				count++
+			}
+		}
+		return fakeRow{values: []interface{}{count}}
+
+	case strings.Contains(sqlLower, "select count(*)") && strings.Contains(sqlLower, "from deal_room_documents") &&
+		strings.Contains(sqlLower, "where document_id"):
+		docID := argUUID(args, 0)
+		var count int64
+		for _, d := range f.roomDocs {
+			if d.DocumentID == docID {
+				count++
+			}
+		}
+		return fakeRow{values: []interface{}{count}}
 
 	case strings.Contains(sqlLower, "select count(*) as count") && strings.Contains(sqlLower, "deal_room_documents"):
 		roomID := argUUID(args, 0)

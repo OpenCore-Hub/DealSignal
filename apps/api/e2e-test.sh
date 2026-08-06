@@ -4,6 +4,10 @@ set -euo pipefail
 BASE_URL="${BASE_URL:-http://localhost:8080}"
 PDF="${PDF:-e2e-test.pdf}"
 
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+# shellcheck source=scripts/e2e-category-tristate.sh
+source "$SCRIPT_DIR/scripts/e2e-category-tristate.sh"
+
 echo "=== DealSignal E2E P0 verification ==="
 echo "BASE_URL=$BASE_URL"
 
@@ -132,5 +136,7 @@ echo -n "[heat score] "
 SCORE=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
   "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/analytics/links/$LINK_ID/score")
 echo "$SCORE" | jq -c '{score: .score, level: .level, trend: .trend}'
+
+run_e2e_category_tristate
 
 echo "=== E2E P0 verification complete ==="

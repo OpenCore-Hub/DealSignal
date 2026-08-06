@@ -4,6 +4,7 @@ package link
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
@@ -822,6 +823,54 @@ func TestDealRoomScope_NonExistentDocumentDenied(t *testing.T) {
 	h := &Handler{service: drf.f.svc}
 	if h.verifyLinkDocumentAccess(drf.ctx(), link, randomDocID) {
 		t.Fatal("expected random document to be denied")
+	}
+}
+
+func (drf *dealRoomFixture) lockFolder(t *testing.T, folderPaths ...string) {
+	t.Helper()
+	if err := drf.drSvc.SetResourceLocks(drf.ctx(), drf.roomID, drf.wsID, drf.userID, dealroom.SetResourceLocksRequest{
+		FolderPaths: folderPaths,
+	}, true); err != nil {
+		t.Fatalf("lock folders %v: %v", folderPaths, err)
+	}
+}
+
+func TestDealRoomScope_LockedFolderExcludedFromFullLink(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.cleanup()
+
+	general := "/general"
+	legal := drf.createFolder(t, "Legal", "/")
+	d1 := drf.createDocument(t, "doc-general")
+	d2 := drf.createDocument(t, "doc-legal")
+	drf.addDocumentToFolder(t, d1, general, 0)
+	drf.addDocumentToFolder(t, d2, legal, 0)
+	drf.lockFolder(t, legal)
+
+	link := drf.createLegacyFullLink(t, "Full minus locked")
+	titles := drf.docTitlesByAccess(link)
+	if len(titles) != 1 || titles[0] != "doc-general" {
+		t.Fatalf("expected only unlocked folder doc, got %v", titles)
+	}
+	drf.assertAccess(t, link, []db.CreateDocumentRow{d1}, []db.CreateDocumentRow{d2})
+}
+
+func TestDealRoomScope_CreateAllowlistRejectsLockedFolder(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.cleanup()
+
+	legal := drf.createFolder(t, "Legal", "/")
+	drf.lockFolder(t, legal)
+
+	_, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name:        "Locked scope",
+		FolderPaths: []string{legal},
+	})
+	if err == nil {
+		t.Fatal("expected locked folder path to be rejected")
+	}
+	if !errors.Is(err, ErrLockedFolderScope) {
+		t.Fatalf("expected ErrLockedFolderScope, got %v", err)
 	}
 }
 

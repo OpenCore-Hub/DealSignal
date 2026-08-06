@@ -175,6 +175,10 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	dr.POST("", h.CreateDealRoomLink)
 	dr.GET("", h.ListDealRoomLinks)
 
+	// Room-level access policy (Access Control tab source of truth).
+	r.GET("/deal-rooms/:roomId/access-policy", h.GetRoomAccessPolicy)
+	r.PUT("/deal-rooms/:roomId/access-policy", h.UpsertRoomAccessPolicy)
+
 	// Room-wide Ask Host inbox (across all links in the deal room).
 	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
 	r.GET("/deal-rooms/:roomId/ask-security-events", h.ListRoomAskSecurityEvents)
@@ -364,7 +368,8 @@ type UpdateRequest struct {
 	FolderScopeMode string `json:"folder_scope_mode,omitempty"`
 }
 
-// List returns links for the workspace, optionally filtered by document_id.
+// List returns document share links for the workspace, optionally filtered by document_id.
+// Deal-room shares are never included; use deal-room link routes for those.
 func (h *Handler) List(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	ctx := c.Request.Context()
@@ -571,19 +576,20 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		NotifyOnAccess:              req.NotifyOnAccess,
 	})
 	if err != nil {
-		if errors.Is(err, ErrNotFoundInWorkspace) {
+		switch {
+		case errors.Is(err, ErrNotFoundInWorkspace):
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
-			return
-		}
-		if errors.Is(err, ErrDocumentNotReady) {
+		case errors.Is(err, ErrDocumentNotReady):
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
-			return
-		}
-		if errors.Is(err, ErrDuplicateName) {
+		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
-			return
+		case errors.Is(err, ErrRoomSecurityFloor), errors.Is(err, ErrInvalidPermission),
+			errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword),
+			errors.Is(err, ErrRequiresPassword), errors.Is(err, ErrConflictingAccessRule):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
@@ -872,12 +878,37 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": requests})
 }
 
-// ListPendingAccessRequests returns pending visitor access requests for the workspace share inbox.
+// ListPendingAccessRequests returns pending visitor access requests for one product surface.
+// Query params:
+//   - scope=document (default): Document Library inbox only
+//   - scope=deal_room&deal_room_id=: one deal-room share inbox only
+// There is no unscoped "all" mode — that would mix applicant PII across surfaces.
 func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	userID := middleware.UserIDFrom(c)
-	requests, err := h.service.ListPendingAccessRequests(c.Request.Context(), workspaceID, userID)
+	scopeKind := strings.TrimSpace(c.DefaultQuery("scope", PendingInboxScopeDocument))
+	scope := PendingInboxScope{Kind: scopeKind}
+	if scopeKind == PendingInboxScopeDealRoom {
+		scope.DealRoomID = strings.TrimSpace(c.Query("deal_room_id"))
+		if scope.DealRoomID == "" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "deal_room_id is required when scope=deal_room"})
+			return
+		}
+	} else if scopeKind != PendingInboxScopeDocument {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "scope must be document or deal_room"})
+		return
+	}
+
+	requests, err := h.service.ListPendingAccessRequests(c.Request.Context(), workspaceID, userID, scope)
 	if err != nil {
+		if errors.Is(err, ErrDealRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+			return
+		}
+		if strings.Contains(err.Error(), "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
@@ -970,9 +1001,10 @@ type CreateDealRoomLinkRequest struct {
 	CustomDomain                string   `json:"custom_domain,omitempty"`
 	Tags                        []string `json:"tags,omitempty"`
 	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
-	// FolderPaths is the allowlist of deal-room folders. Empty deny-all.
-	// Creates always persist folder_scope_mode=allowlist.
+	// FolderPaths is the allowlist of deal-room folders when mode=allowlist.
 	FolderPaths []string `json:"folder_paths,omitempty"`
+	// FolderScopeMode is "full" (whole room) or "allowlist". Default: full.
+	FolderScopeMode string `json:"folder_scope_mode,omitempty"`
 }
 
 // CreateDealRoomLink creates a share link scoped to a deal room.
@@ -1015,6 +1047,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		Tags:                        req.Tags,
 		NotifyOnAccess:              req.NotifyOnAccess,
 		FolderPaths:                 req.FolderPaths,
+		FolderScopeMode:             req.FolderScopeMode,
 	})
 	if err != nil {
 		switch {
@@ -1022,7 +1055,10 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
-		case errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword):
+		case errors.Is(err, ErrRoomAccessPolicyInvalid), errors.Is(err, ErrRoomSecurityFloor),
+			errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput),
+			errors.Is(err, ErrInvalidPassword), errors.Is(err, ErrRequiresPassword),
+			errors.Is(err, ErrConflictingAccessRule):
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		default:
 			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -1036,6 +1072,61 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusCreated, item)
+}
+
+type upsertRoomAccessPolicyBody struct {
+	RequireEmailVerificationFloor bool     `json:"require_email_verification_floor"`
+	RequireNdaFloor               bool     `json:"require_nda_floor"`
+	BlockedEmails                 []string `json:"blocked_emails"`
+	// Legacy aliases accepted during rollout.
+	RequireEmailVerification bool `json:"require_email_verification"`
+	RequireNDA               bool `json:"require_nda"`
+}
+
+// GetRoomAccessPolicy returns the deal-room security policy (unconfigured default when absent).
+func (h *Handler) GetRoomAccessPolicy(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	policy, err := h.service.GetRoomAccessPolicy(c.Request.Context(), workspaceID, c.Param("roomId"))
+	if err != nil {
+		if errors.Is(err, ErrDealRoomNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": policy})
+}
+
+// UpsertRoomAccessPolicy saves room blocklist + outbound floors (thin room security).
+func (h *Handler) UpsertRoomAccessPolicy(c *gin.Context) {
+	var body upsertRoomAccessPolicyBody
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	userID := middleware.UserIDFrom(c)
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	verifyFloor := body.RequireEmailVerificationFloor || body.RequireEmailVerification
+	ndaFloor := body.RequireNdaFloor || body.RequireNDA
+	policy, err := h.service.UpsertRoomAccessPolicy(c.Request.Context(), userID, workspaceID, c.Param("roomId"), UpsertRoomAccessPolicyRequest{
+		RequireEmailVerificationFloor: verifyFloor,
+		RequireNdaFloor:               ndaFloor,
+		BlockedEmails:                 body.BlockedEmails,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrDealRoomNotFound):
+			c.JSON(http.StatusNotFound, gin.H{"code": "deal_room_not_found", "message": httpx.SafeMessage("deal_room_not_found", err)})
+		case errors.Is(err, ErrRoomAccessPolicyInvalid), errors.Is(err, ErrConflictingAccessRule),
+			errors.Is(err, ErrInvalidPermission), errors.Is(err, ErrInvalidInput):
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		default:
+			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		}
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": policy})
 }
 
 // ListDealRoomLinks returns active share links for a deal room.
@@ -1811,34 +1902,16 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 
 // verifyLinkDocumentAccess checks whether docID belongs to the link.
 // For document links it checks the primary document or link_documents.
-// For deal-room links it honors folder_scope_mode (full vs allowlist) and
-// verifies the document is still present in the deal room (stale-scope guard).
+// For deal-room links it honors folder_scope_mode (full vs allowlist),
+// excludes locked folders/documents, and verifies the document is still
+// present in the deal room (stale-scope guard).
 func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, docID uuid.UUID) bool {
-	if uuid.UUID(link.DocumentID.Bytes) == docID {
-		return true
-	}
+	return evaluateLinkDocumentAccess(ctx, h.service.queries, link, docID) == linkDocAccessAllowed
+}
 
-	if link.DealRoomID.Valid {
-		// Stale-scope guard: document must still exist in the room.
-		folderPath, err := h.service.queries.GetDealRoomDocumentFolderPath(ctx, db.GetDealRoomDocumentFolderPathParams{
-			RoomID:     link.DealRoomID,
-			DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
-		})
-		if err != nil {
-			return false
-		}
-		return folderPathInDealRoomScope(link, folderPath)
-	}
-
-	// Document links fall back to link_documents / primary document.
-	inScope, err := h.service.queries.HasLinkDocument(ctx, db.HasLinkDocumentParams{
-		LinkID:     pgtype.UUID{Bytes: link.ID.Bytes, Valid: true},
-		DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
-	})
-	if err != nil {
-		return false
-	}
-	return inScope
+func (h *Handler) ensurePublicDocumentAccess(c *gin.Context, link db.Link, docID uuid.UUID) bool {
+	denial := evaluateLinkDocumentAccess(c.Request.Context(), h.service.queries, link, docID)
+	return writeLinkDocumentAccessDenied(c, denial)
 }
 
 // PublicSignedURL returns a presigned image URL for a public link visitor.
@@ -1856,8 +1929,7 @@ func (h *Handler) PublicSignedURL(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
 		return
 	}
-	if !h.verifyLinkDocumentAccess(ctx, result.Link, docID) {
-		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
+	if !h.ensurePublicDocumentAccess(c, result.Link, docID) {
 		return
 	}
 
@@ -1903,8 +1975,7 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
 		return
 	}
-	if !h.verifyLinkDocumentAccess(ctx, result.Link, docID) {
-		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
+	if !h.ensurePublicDocumentAccess(c, result.Link, docID) {
 		return
 	}
 	if !result.Link.DownloadEnabled {
@@ -2058,8 +2129,7 @@ func (h *Handler) PublicDocumentPages(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid document id"})
 		return
 	}
-	if !h.verifyLinkDocumentAccess(ctx, result.Link, docID) {
-		c.JSON(http.StatusForbidden, gin.H{"code": "access_denied", "message": "token does not match document"})
+	if !h.ensurePublicDocumentAccess(c, result.Link, docID) {
 		return
 	}
 

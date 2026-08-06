@@ -14,6 +14,15 @@ type fakeAuthorizedDocQuerier struct {
 	linkDocs []db.ListLinkDocumentsByPublicTokenRow
 	legacy   db.GetDocumentByIDRow
 	legacyOK bool
+	room     db.DealRoom
+	roomOK   bool
+}
+
+func (f *fakeAuthorizedDocQuerier) GetDealRoomByID(_ context.Context, _ db.GetDealRoomByIDParams) (db.DealRoom, error) {
+	if !f.roomOK {
+		return db.DealRoom{}, context.Canceled
+	}
+	return f.room, nil
 }
 
 func (f *fakeAuthorizedDocQuerier) ListDealRoomDocumentsWithMeta(_ context.Context, _ pgtype.UUID) ([]db.ListDealRoomDocumentsWithMetaRow, error) {
@@ -37,6 +46,11 @@ func TestAuthorizedDocumentIDs_DealRoomAllowlistExcludesOutOfScope(t *testing.T)
 	roomID := pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true}
 
 	q := &fakeAuthorizedDocQuerier{
+		roomOK: true,
+		room: db.DealRoom{
+			ID:       roomID,
+			Settings: []byte(`{}`),
+		},
 		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
 			{DocumentID: pgtype.UUID{Bytes: inScope, Valid: true}, FolderPath: "/general"},
 			{DocumentID: pgtype.UUID{Bytes: outOfScope, Valid: true}, FolderPath: "/legal"},
@@ -63,6 +77,11 @@ func TestAuthorizedDocumentIDs_EmptyAllowlistReturnsEmpty(t *testing.T) {
 	roomID := pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true}
 
 	q := &fakeAuthorizedDocQuerier{
+		roomOK: true,
+		room: db.DealRoom{
+			ID:       roomID,
+			Settings: []byte(`{}`),
+		},
 		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
 			{DocumentID: pgtype.UUID{Bytes: docID, Valid: true}, FolderPath: "/general"},
 		},
@@ -101,5 +120,66 @@ func TestAuthorizedDocumentIDs_SingleDocumentLink(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != docID {
 		t.Fatalf("expected single doc %s, got %v", docID, got)
+	}
+}
+
+func TestAuthorizedDocumentIDs_FullModeExcludesLockedFolder(t *testing.T) {
+	openDoc := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	lockedDoc := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	roomID := pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true}
+
+	q := &fakeAuthorizedDocQuerier{
+		roomOK: true,
+		room: db.DealRoom{
+			ID: roomID,
+			Settings: []byte(`{"folders":[{"path":"/legal","locked":true},{"path":"/general","locked":false}]}`),
+		},
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: openDoc, Valid: true}, FolderPath: "/general"},
+			{DocumentID: pgtype.UUID{Bytes: lockedDoc, Valid: true}, FolderPath: "/legal"},
+		},
+	}
+	link := db.Link{
+		DealRoomID:      roomID,
+		FolderScopeMode: FolderScopeModeFull,
+		PublicToken:     "tok",
+	}
+
+	got, err := AuthorizedDocumentIDs(context.Background(), q, link)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != openDoc {
+		t.Fatalf("expected only unlocked folder doc %s, got %v", openDoc, got)
+	}
+}
+
+func TestAuthorizedDocumentIDs_AllowlistRejectsLockedDocInUnlockedFolder(t *testing.T) {
+	docID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	roomID := pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true}
+
+	q := &fakeAuthorizedDocQuerier{
+		roomOK: true,
+		room: db.DealRoom{
+			ID:       roomID,
+			Settings: []byte(`{}`),
+		},
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: docID, Valid: true}, FolderPath: "/general", Locked: true},
+		},
+	}
+	link := db.Link{
+		DealRoomID:       roomID,
+		FolderScopeMode:  FolderScopeModeAllowlist,
+		FolderScopePaths: []string{"/general"},
+		PublicToken:      "tok",
+	}
+
+	got, err := AuthorizedDocumentIDs(context.Background(), q, link)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected locked document to be excluded, got %v", got)
 	}
 }

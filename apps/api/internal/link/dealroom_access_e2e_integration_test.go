@@ -496,3 +496,90 @@ func TestUpdateLink_EnablesVerification_SendsCodesWithoutRulesRewrite(t *testing
 		t.Fatalf("expected no re-send on unchanged allow list, got %d jobs", got)
 	}
 }
+
+// TestUpdateAccessRules_EnforcesRoomBlocklist ensures owners cannot allow-list
+// a room-blocked email via link rule edits, and runtime evaluation still denies.
+func TestUpdateAccessRules_EnforcesRoomBlocklist(t *testing.T) {
+	f := newFixture(t)
+	defer f.tx.Rollback(f.ctx)
+
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+
+	roomID, link := createVerifiedDealRoomLink(t, f, DealRoomLinkRequest{
+		Name:          "Room block enforce link",
+		RequireEmail:  true,
+		AllowedEmails: []string{"good@example.com"},
+	})
+
+	blocked := "blocked@example.com"
+	if _, err := f.svc.UpsertRoomAccessPolicy(f.ctx, userID, wsID, roomID, UpsertRoomAccessPolicyRequest{
+		BlockedEmails: []string{blocked},
+	}); err != nil {
+		t.Fatalf("UpsertRoomAccessPolicy: %v", err)
+	}
+
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	err := f.svc.UpdateAccessRules(f.ctx, userID, wsID, linkID, []AccessRule{
+		{RuleType: "email", Value: "good@example.com", Action: "allow"},
+		{RuleType: "email", Value: blocked, Action: "allow"},
+	})
+	if err == nil {
+		t.Fatal("expected allow for room-blocked email to be rejected")
+	}
+	if !errors.Is(err, ErrInvalidAccessRule) {
+		t.Fatalf("expected ErrInvalidAccessRule, got %v", err)
+	}
+
+	eval, err := f.svc.EvaluateAccessRules(f.ctx, linkID, blocked)
+	if err != nil {
+		t.Fatalf("EvaluateAccessRules: %v", err)
+	}
+	if eval.Allowed {
+		t.Fatal("room-blocked visitor must be denied at runtime")
+	}
+}
+
+// TestUpsertRoomAccessPolicy_DoesNotRewriteLinkRules verifies policy saves are
+// O(1) and do not fan out writes to every active link.
+func TestUpsertRoomAccessPolicy_DoesNotRewriteLinkRules(t *testing.T) {
+	f := newFixture(t)
+	defer f.tx.Rollback(f.ctx)
+
+	userID := uuid.UUID(f.user.ID.Bytes).String()
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+
+	roomID, link := createVerifiedDealRoomLink(t, f, DealRoomLinkRequest{
+		Name:          "No sync link",
+		RequireEmail:  true,
+		AllowedEmails: []string{"good@example.com"},
+	})
+	linkID := uuid.UUID(link.ID.Bytes).String()
+
+	before, err := f.svc.ListAccessRules(f.ctx, wsID, linkID)
+	if err != nil {
+		t.Fatalf("ListAccessRules before: %v", err)
+	}
+
+	if _, err := f.svc.UpsertRoomAccessPolicy(f.ctx, userID, wsID, roomID, UpsertRoomAccessPolicyRequest{
+		BlockedEmails: []string{"blocked@example.com"},
+	}); err != nil {
+		t.Fatalf("UpsertRoomAccessPolicy: %v", err)
+	}
+
+	after, err := f.svc.ListAccessRules(f.ctx, wsID, linkID)
+	if err != nil {
+		t.Fatalf("ListAccessRules after: %v", err)
+	}
+	if len(after) != len(before) {
+		t.Fatalf("expected link rules unchanged after policy save, before=%d after=%d", len(before), len(after))
+	}
+
+	eval, err := f.svc.EvaluateAccessRules(f.ctx, linkID, "blocked@example.com")
+	if err != nil {
+		t.Fatalf("EvaluateAccessRules: %v", err)
+	}
+	if eval.Allowed {
+		t.Fatal("runtime room block must deny even without link rule rewrite")
+	}
+}

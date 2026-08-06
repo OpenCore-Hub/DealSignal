@@ -77,18 +77,36 @@ type Cache interface {
 	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
 }
 
+// RoomListInvalidator soft-invalidates deal-room list caches after access events.
+type RoomListInvalidator interface {
+	SoftInvalidateListCache(ctx context.Context, workspaceID string)
+}
+
 // Service records events and computes heat scores.
 type Service struct {
-	queries      Querier
-	dedup        DedupChecker
-	cfg          *config.Config
-	signalSyncer SignalSyncer
-	cache        Cache
+	queries             Querier
+	dedup               DedupChecker
+	cfg                 *config.Config
+	signalSyncer        SignalSyncer
+	cache               Cache
+	roomListInvalidator RoomListInvalidator
 }
 
 // WithCache enables a cache for DashboardStats.
 func (s *Service) WithCache(c Cache) {
 	s.cache = c
+}
+
+// WithRoomListInvalidator wires soft invalidation of deal-room list caches.
+func (s *Service) WithRoomListInvalidator(v RoomListInvalidator) {
+	s.roomListInvalidator = v
+}
+
+func (s *Service) softInvalidateRoomList(ctx context.Context, workspaceID pgtype.UUID) {
+	if s == nil || s.roomListInvalidator == nil || !workspaceID.Valid {
+		return
+	}
+	s.roomListInvalidator.SoftInvalidateListCache(ctx, uuid.UUID(workspaceID.Bytes).String())
 }
 
 // NewService creates an analytics service.
@@ -131,6 +149,7 @@ func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID,
 	if rows == 0 {
 		return ErrLinkMaxAccessReached
 	}
+	s.softInvalidateRoomList(ctx, link.WorkspaceID)
 	return nil
 }
 
@@ -162,7 +181,7 @@ func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID st
 
 // RecordDownload records a download attempt event.
 func (s *Service) RecordDownload(ctx context.Context, link db.Link, visitorID, email, ip, ua string) error {
-	return s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
+	if err := s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
 		TenantID:     link.TenantID,
 		WorkspaceID:  link.WorkspaceID,
 		LinkID:       link.ID,
@@ -171,7 +190,11 @@ func (s *Service) RecordDownload(ctx context.Context, link db.Link, visitorID, e
 		EventType:    "download_attempted",
 		Ip:           hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
-	})
+	}); err != nil {
+		return err
+	}
+	s.softInvalidateRoomList(ctx, link.WorkspaceID)
+	return nil
 }
 
 // RecordSecurityEvent records a security-related access event.
@@ -191,7 +214,7 @@ func (s *Service) RecordSecurityEvent(ctx context.Context, link db.Link, eventTy
 
 // RecordCustomEvent records an arbitrary event type in the access_logs table.
 func (s *Service) RecordCustomEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua string) error {
-	return s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
+	if err := s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
 		TenantID:     link.TenantID,
 		WorkspaceID:  link.WorkspaceID,
 		LinkID:       link.ID,
@@ -200,7 +223,11 @@ func (s *Service) RecordCustomEvent(ctx context.Context, link db.Link, eventType
 		EventType:    eventType,
 		Ip:           hashIPText(s.cfg.IPHashKey, ip),
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
-	})
+	}); err != nil {
+		return err
+	}
+	s.softInvalidateRoomList(ctx, link.WorkspaceID)
+	return nil
 }
 
 // DetectForwardOrReturn checks whether this is a first-time visit (forward_signal)

@@ -348,8 +348,14 @@ func (s *Server) registerRoutes() error {
 				dealroom.WithRateLimiter(s.redisClient),
 				dealroom.WithKnowledgeEnqueuer(knowledgeSvc),
 			}
+			if s.redisClient != nil {
+				dealroomOpts = append(dealroomOpts, dealroom.WithListCache(dealroom.NewRedisListCache(s.redisClient)))
+			}
 			dealroomSvc := dealroom.NewService(queries, s.dbPool, s.cfg, dealroomOpts...)
 			dealroomHandler := dealroom.NewHandler(dealroomSvc)
+			// Access-log and Q&A writers soft-invalidate list cards (debounced).
+			analyticsSvc.WithRoomListInvalidator(dealroomSvc)
+			linkSvc.WithRoomListInvalidator(dealroomSvc)
 
 			complianceSvc := compliance.NewService(queries, s.dbPool, s.cfg)
 			complianceHandler := compliance.NewHandler(complianceSvc, workspaceSvc)
@@ -357,7 +363,11 @@ func (s *Server) registerRoutes() error {
 			suggestionHandler := suggestions.NewHandler(suggestionSvc)
 			signalHandler := signal.NewHandler(signalSvc)
 
-			contactSvc := contact.NewService(queries)
+			contactOpts := []contact.ServiceOption{}
+			if s.redisClient != nil {
+				contactOpts = append(contactOpts, contact.WithCache(analytics.NewRedisCache(s.redisClient)))
+			}
+			contactSvc := contact.NewService(queries, contactOpts...)
 			contactHandler := contact.NewHandler(contactSvc)
 
 			marketingSvc := marketing.NewService(queries, appMailer, mailer.ProviderForConfig(s.cfg))

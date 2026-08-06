@@ -1308,7 +1308,7 @@ func TestApproveAccessRequest(t *testing.T) {
 		}
 
 		// Creator can still list/approve in the owning workspace.
-		pending, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, userID)
+		pending, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, userID, PendingInboxScope{Kind: PendingInboxScopeDocument})
 		if err != nil {
 			t.Fatalf("list pending: %v", err)
 		}
@@ -1385,7 +1385,7 @@ func TestApproveAccessRequest(t *testing.T) {
 			t.Fatalf("request access: %v", err)
 		}
 
-		mine, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, userID)
+		mine, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, userID, PendingInboxScope{Kind: PendingInboxScopeDocument})
 		if err != nil {
 			t.Fatalf("list pending for creator: %v", err)
 		}
@@ -1400,7 +1400,7 @@ func TestApproveAccessRequest(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create other user: %v", err)
 		}
-		otherList, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, uuid.UUID(other.ID.Bytes).String())
+		otherList, err := f.svc.ListPendingAccessRequests(f.ctx, wsID, uuid.UUID(other.ID.Bytes).String(), PendingInboxScope{Kind: PendingInboxScopeDocument})
 		if err != nil {
 			t.Fatalf("list pending for non-creator: %v", err)
 		}

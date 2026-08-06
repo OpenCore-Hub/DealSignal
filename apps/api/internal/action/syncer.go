@@ -12,14 +12,21 @@ import (
 )
 
 // SourceType identifies the operational source of an action item.
+//
+// Share-link access requests are split by product surface so Document Library
+// and Deal Room inboxes never share a dashboard deep-link:
+//   - link_access_request            → document library share (source_id = link id)
+//   - deal_room_link_access_request  → deal-room share (source_id = link id, target_id = room id)
+// Room-level items use source_id = room id for both resolve and navigation.
 const (
-	SourceTypeLinkAccessRequest = "link_access_request"
-	SourceTypeRoomAccessRequest = "room_access_request"
-	SourceTypeRoomNDA           = "room_nda"
-	SourceTypeLinkQuestion      = "link_question"
-	SourceTypeUploadedFile      = "uploaded_file"
-	SourceTypeExpiringLink      = "expiring_link"
-	SourceTypeExpiringRoom      = "expiring_room"
+	SourceTypeLinkAccessRequest         = "link_access_request"
+	SourceTypeDealRoomLinkAccessRequest = "deal_room_link_access_request"
+	SourceTypeRoomAccessRequest         = "room_access_request"
+	SourceTypeRoomNDA                   = "room_nda"
+	SourceTypeLinkQuestion              = "link_question"
+	SourceTypeUploadedFile              = "uploaded_file"
+	SourceTypeExpiringLink              = "expiring_link"
+	SourceTypeExpiringRoom              = "expiring_room"
 )
 
 // Syncer converts pending operational events into action items.
@@ -45,7 +52,10 @@ func (s *Syncer) SyncWorkspace(ctx context.Context, workspaceID string) error {
 		return fmt.Errorf("get workspace: %w", err)
 	}
 
-	if err := s.syncLinkAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncDocumentLinkAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
+		return err
+	}
+	if err := s.syncDealRoomLinkAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
 		return err
 	}
 	if err := s.syncRoomAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
@@ -91,22 +101,42 @@ func (s *Syncer) ResolveBySource(ctx context.Context, workspaceID, sourceType, s
 	}
 }
 
-func (s *Syncer) syncLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
-	rows, err := s.queries.ListPendingLinkAccessRequestsByWorkspace(ctx, workspaceID)
+func (s *Syncer) syncDocumentLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+	rows, err := s.queries.ListPendingDocumentLinkAccessRequestsByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return fmt.Errorf("list pending link access requests: %w", err)
+		return fmt.Errorf("list pending document link access requests: %w", err)
 	}
 	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
 		linkID := uuid.UUID(r.LinkID.Bytes).String()
 		current[linkID] = true
-		// Source ID is the link so dashboard navigation opens the share link
-		// (not the request UUID). One pending action per link with open requests.
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkAccessRequest, r.LinkID, pgtype.Text{String: r.Email, Valid: true}, r.LinkName, "approve"); err != nil {
+		// source_id = link id; no target_id (Document Library surface).
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkAccessRequest, r.LinkID, pgtype.UUID{}, pgtype.Text{String: r.Email, Valid: true}, r.LinkName, "approve"); err != nil {
 			return err
 		}
 	}
 	return s.closeStaleActions(ctx, workspaceID, SourceTypeLinkAccessRequest, current)
+}
+
+func (s *Syncer) syncDealRoomLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+	rows, err := s.queries.ListPendingDealRoomLinkAccessRequestsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list pending deal-room link access requests: %w", err)
+	}
+	current := make(map[string]bool, len(rows))
+	for _, r := range rows {
+		linkID := uuid.UUID(r.LinkID.Bytes).String()
+		current[linkID] = true
+		// source_id = link id (resolve key); target_id = room id (navigation).
+		targetName := pgtype.Text{String: r.RoomName, Valid: r.RoomName != ""}
+		if r.LinkName.Valid && r.LinkName.String != "" {
+			targetName = r.LinkName
+		}
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeDealRoomLinkAccessRequest, r.LinkID, r.DealRoomID, pgtype.Text{String: r.Email, Valid: true}, targetName, "approve"); err != nil {
+			return err
+		}
+	}
+	return s.closeStaleActions(ctx, workspaceID, SourceTypeDealRoomLinkAccessRequest, current)
 }
 
 func (s *Syncer) syncRoomAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
@@ -114,12 +144,16 @@ func (s *Syncer) syncRoomAccessRequests(ctx context.Context, tenantID, workspace
 	if err != nil {
 		return fmt.Errorf("list pending room access requests: %w", err)
 	}
+	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeRoomAccessRequest, r.ID, pgtype.Text{String: r.Email, Valid: true}, pgtype.Text{String: r.RoomName, Valid: true}, "approve"); err != nil {
+		roomID := uuid.UUID(r.RoomID.Bytes).String()
+		current[roomID] = true
+		// source_id = room id so dashboard navigates to the deal room access tab.
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeRoomAccessRequest, r.RoomID, pgtype.UUID{}, pgtype.Text{String: r.Email, Valid: true}, pgtype.Text{String: r.RoomName, Valid: true}, "approve"); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.closeStaleActions(ctx, workspaceID, SourceTypeRoomAccessRequest, current)
 }
 
 func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
@@ -127,12 +161,15 @@ func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.
 	if err != nil {
 		return fmt.Errorf("list pending room ndas: %w", err)
 	}
+	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeRoomNDA, r.ID, pgtype.Text{String: r.Email, Valid: true}, pgtype.Text{String: r.RoomName, Valid: true}, "sign"); err != nil {
+		roomID := uuid.UUID(r.RoomID.Bytes).String()
+		current[roomID] = true
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeRoomNDA, r.RoomID, pgtype.UUID{}, pgtype.Text{String: r.Email, Valid: true}, pgtype.Text{String: r.RoomName, Valid: true}, "sign"); err != nil {
 			return err
 		}
 	}
-	return nil
+	return s.closeStaleActions(ctx, workspaceID, SourceTypeRoomNDA, current)
 }
 
 func (s *Syncer) syncLinkQuestions(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
@@ -141,7 +178,7 @@ func (s *Syncer) syncLinkQuestions(ctx context.Context, tenantID, workspaceID pg
 		return fmt.Errorf("list pending link questions: %w", err)
 	}
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkQuestion, r.ID, r.VisitorEmail, r.LinkName, "answer"); err != nil {
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkQuestion, r.ID, pgtype.UUID{}, r.VisitorEmail, r.LinkName, "answer"); err != nil {
 			return err
 		}
 	}
@@ -154,7 +191,7 @@ func (s *Syncer) syncUploadedFiles(ctx context.Context, tenantID, workspaceID pg
 		return fmt.Errorf("list pending uploaded files: %w", err)
 	}
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeUploadedFile, r.ID, pgtype.Text{String: r.OriginalFilename, Valid: true}, r.LinkName, "verify"); err != nil {
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeUploadedFile, r.ID, pgtype.UUID{}, pgtype.Text{String: r.OriginalFilename, Valid: true}, r.LinkName, "verify"); err != nil {
 			return err
 		}
 	}
@@ -170,7 +207,7 @@ func (s *Syncer) syncExpiringLinks(ctx context.Context, tenantID, workspaceID pg
 	for _, r := range rows {
 		id := uuid.UUID(r.ID.Bytes).String()
 		current[id] = true
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeExpiringLink, r.ID, pgtype.Text{}, r.Name, "renew"); err != nil {
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeExpiringLink, r.ID, pgtype.UUID{}, pgtype.Text{}, r.Name, "renew"); err != nil {
 			return err
 		}
 	}
@@ -186,7 +223,7 @@ func (s *Syncer) syncExpiringRooms(ctx context.Context, tenantID, workspaceID pg
 	for _, r := range rows {
 		id := uuid.UUID(r.ID.Bytes).String()
 		current[id] = true
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeExpiringRoom, r.ID, pgtype.Text{}, pgtype.Text{String: r.Name, Valid: true}, "renew"); err != nil {
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeExpiringRoom, r.ID, pgtype.UUID{}, pgtype.Text{}, pgtype.Text{String: r.Name, Valid: true}, "renew"); err != nil {
 			return err
 		}
 	}
@@ -213,12 +250,20 @@ func (s *Syncer) closeStaleActions(ctx context.Context, workspaceID pgtype.UUID,
 	return nil
 }
 
-func (s *Syncer) upsertOperational(ctx context.Context, tenantID, workspaceID pgtype.UUID, sourceType string, sourceID pgtype.UUID, actor pgtype.Text, target pgtype.Text, actionType string) error {
+func (s *Syncer) upsertOperational(
+	ctx context.Context,
+	tenantID, workspaceID pgtype.UUID,
+	sourceType string,
+	sourceID, targetID pgtype.UUID,
+	actor, target pgtype.Text,
+	actionType string,
+) error {
 	_, err := s.queries.CreateOperationalActionItem(ctx, db.CreateOperationalActionItemParams{
 		TenantID:    tenantID,
 		WorkspaceID: workspaceID,
 		SourceType:  pgtype.Text{String: sourceType, Valid: true},
 		SourceID:    pgtype.Text{String: uuid.UUID(sourceID.Bytes).String(), Valid: sourceID.Valid},
+		TargetID:    pgtype.Text{String: uuid.UUID(targetID.Bytes).String(), Valid: targetID.Valid},
 		Title:       titleFor(sourceType, actor.String, target.String),
 		Impact:      impactFor(sourceType),
 		DueAt:       pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
@@ -235,6 +280,11 @@ func titleFor(sourceType, actor, target string) string {
 			return fmt.Sprintf("Approve access request from %s for %s", actor, target)
 		}
 		return fmt.Sprintf("Approve access request from %s", actor)
+	case SourceTypeDealRoomLinkAccessRequest:
+		if target != "" {
+			return fmt.Sprintf("Approve deal room share access from %s for %s", actor, target)
+		}
+		return fmt.Sprintf("Approve deal room share access from %s", actor)
 	case SourceTypeRoomAccessRequest:
 		if target != "" {
 			return fmt.Sprintf("Approve room access request from %s for %s", actor, target)
@@ -272,7 +322,7 @@ func titleFor(sourceType, actor, target string) string {
 
 func impactFor(sourceType string) string {
 	switch sourceType {
-	case SourceTypeLinkAccessRequest, SourceTypeRoomAccessRequest, SourceTypeRoomNDA, SourceTypeExpiringLink, SourceTypeExpiringRoom:
+	case SourceTypeLinkAccessRequest, SourceTypeDealRoomLinkAccessRequest, SourceTypeRoomAccessRequest, SourceTypeRoomNDA, SourceTypeExpiringLink, SourceTypeExpiringRoom:
 		return "high"
 	default:
 		return "medium"
@@ -282,7 +332,7 @@ func impactFor(sourceType string) string {
 func pgUUID(id string) (pgtype.UUID, error) {
 	parsed, err := uuid.Parse(id)
 	if err != nil {
-		return pgtype.UUID{}, err
+		return pgtype.UUID{}, fmt.Errorf("invalid uuid %q: %w", id, err)
 	}
 	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
 }
