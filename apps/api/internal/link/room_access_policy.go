@@ -211,7 +211,7 @@ func (s *Service) UpsertRoomAccessPolicy(
 		ScreenshotProtectionEnabled: false,
 		FileRequestsEnabled:         false,
 		IndexFileEnabled:            false,
-		QaEnabled:                   false,
+		QaEnabled:                   true,
 		AllowedEmails:               []string{},
 		BlockedEmails:               blocked,
 		Configured:                  true,

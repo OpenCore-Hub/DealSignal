@@ -32,9 +32,7 @@ import type { DraftLink } from "./types";
 import {
   STANDALONE_ADVANCED_KEYS,
   countAdvancedEnabled,
-  visitorAskMasterEnabled,
-  visitorAskMasterPatch,
-} from "./visitorAskAdvanced";
+} from "./shareAdvanced";
 
 export type AccessTabLayout = "compact" | "sections";
 
@@ -314,7 +312,6 @@ export function AccessTab({
   ]);
 
   const advancedCount = countAdvancedEnabled(draft);
-  const visitorAskOn = visitorAskMasterEnabled(draft);
   /** Document links cannot use email verification; room floor locks it ON. */
   const verificationDisabledForDocuments = !isDealRoomLink;
   const emailSelfReportDisabled = verifyFloor;
@@ -721,13 +718,17 @@ export function AccessTab({
 
   const advancedBody = (
     <>
-      <OptionSwitch
-        label={t("accessRules.advanced.visitorAsk")}
-        description={t("accessRules.advanced.visitorAskDescription")}
-        checked={visitorAskOn}
-        onCheckedChange={(checked) => updateDraft(visitorAskMasterPatch(checked))}
-        highlighted={isHighlighted("enableQaConversations")}
-      />
+      {isDealRoomLink ? (
+        <div
+          className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5"
+          data-testid="deal-room-ask-host-included"
+        >
+          <p className="text-sm font-medium">{t("accessRules.advanced.dealRoomAskHostTitle")}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {t("accessRules.advanced.dealRoomAskHostDescription")}
+          </p>
+        </div>
+      ) : null}
       {STANDALONE_ADVANCED_KEYS.map((key) => (
         <OptionSwitch
           key={key}

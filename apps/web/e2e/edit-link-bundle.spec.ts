@@ -56,7 +56,6 @@ test("edit mode backfills selected documents, security settings and review summa
     nda_document_id: doc1Id,
     download_enabled: false,
     watermark_enabled: true,
-    qa_enabled: true,
     expires_at: expiresAt,
     max_access_count: 10,
     contact_ids: [contactId],
@@ -93,8 +92,6 @@ test("edit mode backfills selected documents, security settings and review summa
   await expect(page.getByText("Bundle Edit Backfill")).toBeVisible();
   await expect(page.getByText(/NDA signing|Require NDA agreement/i)).toBeVisible();
   await expect(page.getByText(/Dynamic watermark/i)).toBeVisible();
-  await expect(page.getByText(/Visitor Ask/i)).toBeVisible();
-  await expect(page.getByText(/Ask Host/i)).toBeVisible();
   await expect(page.getByText(/Download disabled/i)).toBeVisible();
 
   // Edit: add doc2, disable NDA, enable download.

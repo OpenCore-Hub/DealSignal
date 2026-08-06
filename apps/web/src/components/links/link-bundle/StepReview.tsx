@@ -12,11 +12,9 @@ import {
   WarningIcon,
   FileTextIcon,
   DownloadIcon,
-  RobotIcon,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Switch } from "@/components/ui/switch";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +47,6 @@ const FEATURE_META: {
   { key: "email", icon: EnvelopeIcon, labelKey: "creator.featureEmailVerification" },
   { key: "nda", icon: FileTextIcon, labelKey: "creator.featureNDA" },
   { key: "watermark", icon: CopyIcon, labelKey: "creator.featureWatermark" },
-  { key: "askHost", icon: RobotIcon, labelKey: "creator.featureAskHost", activeClass: "bg-primary/10 border-primary/20 text-primary" },
 ];
 
 function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"]["config"]) {
@@ -57,7 +54,6 @@ function useFeatureConfig(config: ReturnType<typeof useBundlePipeline>["state"][
     email: config.requireEmailVerification,
     nda: config.ndaEnabled,
     watermark: config.watermarkEnabled,
-    askHost: config.qaEnabled,
     download: config.allowDownload,
   };
 }
@@ -255,33 +251,6 @@ export function StepReview() {
                   {t("creator.frictionScore")}: <strong className="text-foreground">{frictionScore}/10</strong>
                 </span>
               </div>
-            </div>
-          </div>
-
-          {/* Visitor Ask (Ask Host) toggle */}
-          <div className="rounded-lg border border-border p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <RobotIcon size={18} className="text-primary" />
-                <div className="space-y-0.5">
-                  <p className="text-sm font-medium">{t("creator.visitorAsk")}</p>
-                  <p className="text-xs text-muted-foreground">{t("creator.visitorAskDescription")}</p>
-                </div>
-              </div>
-              <Switch
-                checked={config.qaEnabled}
-                onCheckedChange={(checked) =>
-                  dispatch({
-                    type: "SET_CONFIG",
-                    config: {
-                      ...config,
-                      qaEnabled: checked,
-                      level: "customized",
-                      isCustomized: true,
-                    },
-                  })
-                }
-              />
             </div>
           </div>
         </CardContent>

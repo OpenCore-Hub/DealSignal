@@ -130,10 +130,10 @@ export function UnifiedQAPanel({
   const busy = ownerSubmitting;
 
   return (
-    <div className="flex h-full flex-col bg-card">
+    <div className="flex h-full flex-col bg-transparent">
       <div
         ref={scrollRef}
-        className="flex-1 space-y-4 overflow-y-auto p-3"
+        className="flex-1 space-y-4 overflow-y-auto p-4"
         aria-live="polite"
         aria-busy={busy}
       >
@@ -142,9 +142,10 @@ export function UnifiedQAPanel({
             <Spinner size={20} className="animate-spin text-muted-foreground" />
           </div>
         ) : allMessages.length === 0 ? (
-          <div className="flex flex-col items-center py-10 text-center text-muted-foreground">
-            <ChatCenteredDots size={28} className="mb-3 opacity-25" />
-            <p className="text-sm font-medium">{t("viewer.qaEmptyUnified")}</p>
+          <div className="flex flex-col items-center rounded-2xl border border-border/60 bg-background/60 px-6 py-10 text-center text-muted-foreground">
+            <ChatCenteredDots size={28} className="mb-3 opacity-30" />
+            <p className="text-sm font-medium text-foreground">{t("viewer.qaEmptyUnified")}</p>
+            <p className="mt-1 max-w-[28ch] text-xs leading-relaxed">{t("viewer.qaEmptyHint")}</p>
           </div>
         ) : (
           allMessages.map((msg) => {
@@ -153,16 +154,16 @@ export function UnifiedQAPanel({
               <div key={msg.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[90%] ${isUser ? "items-end" : "items-start"} flex flex-col gap-1`}>
                   {!isUser && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-warm-100 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-warm-700 dark:bg-warm-900 dark:text-warm-300">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
                       <User size={10} />
                       {t("viewer.qaSourceOwner")}
                     </span>
                   )}
                   <div
-                    className={`rounded-lg px-3 py-2 text-sm ${
+                    className={`rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
                       isUser
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-foreground"
+                        ? "bg-foreground text-background"
+                        : "border border-border/60 bg-background/90 text-foreground"
                     }`}
                   >
                     <p className="whitespace-pre-wrap break-words">{msg.content}</p>
@@ -180,10 +181,10 @@ export function UnifiedQAPanel({
       </div>
 
       {questionError && (
-        <p className="px-3 pt-2 text-center text-xs text-destructive">{questionError}</p>
+        <p className="px-4 pt-2 text-center text-xs text-destructive">{questionError}</p>
       )}
 
-      <div className="space-y-2 border-t border-border p-3">
+      <div className="space-y-2 border-t border-border/60 p-3">
         <form onSubmit={handleSubmit} className="flex gap-2">
           <Textarea
             value={input}
@@ -191,17 +192,17 @@ export function UnifiedQAPanel({
             placeholder={t("viewer.qaOwnerPlaceholder")}
             maxLength={500}
             rows={2}
-            className="min-h-0 flex-1 resize-none text-sm"
+            className="min-h-0 flex-1 resize-none rounded-xl border-border/70 bg-background/80 text-sm"
             disabled={busy}
           />
           <Button
             type="submit"
             size="icon"
-            className="h-auto shrink-0"
-            disabled={!input.trim() || busy}
+            className="h-auto shrink-0 rounded-xl"
+            disabled={busy || !input.trim()}
             aria-label={t("viewer.qaSubmit")}
           >
-            {busy ? <Spinner size={16} className="animate-spin" /> : <PaperPlaneRight size={16} weight="bold" />}
+            <PaperPlaneRight size={16} />
           </Button>
         </form>
       </div>

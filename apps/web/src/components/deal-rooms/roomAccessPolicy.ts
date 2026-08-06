@@ -168,7 +168,6 @@ export function draftFromRoomAccessPolicy(policy: DealRoomAccessPolicy | null | 
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
-    enableQaConversations: false,
     allowedViewers: [],
     blockedViewers: [...(policy.blockedEmails ?? [])],
     folderScopeMode: "full",

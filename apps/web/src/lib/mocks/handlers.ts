@@ -12,6 +12,7 @@ import type {
   VisitorQuestion,
   WorkspaceMember,
 } from "@/types";
+import { qaEnabledForLinkId } from "@/lib/qaScope";
 import {
   mockAccessLogs,
   mockActionItems,
@@ -1477,7 +1478,7 @@ export const handlers = [
     if (typeof payload.max_access_count === "number") link.maxAccessCount = payload.max_access_count;
     if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
     if (typeof payload.watermark_enabled === "boolean") link.watermarkEnabled = payload.watermark_enabled;
-    if (typeof payload.qa_enabled === "boolean") link.qaEnabled = payload.qa_enabled;
+    link.qaEnabled = qaEnabledForLinkId(link.dealRoomId);
     if (payload.contact_ids) link.contactIds = payload.contact_ids;
     const nextAllows = resolveDocumentAllowEmails({
       contactIds: payload.contact_ids ?? link.contactIds,
@@ -1494,6 +1495,7 @@ export const handlers = [
     if (!link) return new HttpResponse(null, { status: 404 });
     const patch = (await request.json()) as Partial<typeof link>;
     Object.assign(link, patch);
+    link.qaEnabled = qaEnabledForLinkId(link.dealRoomId);
     return HttpResponse.json(link);
   }),
 
@@ -1734,6 +1736,7 @@ export const handlers = [
       _requireNDA: requireNDA,
       _password: body.password,
       _allowedEmails: allowEmails,
+      qaEnabled: false,
     } as MockLinkExt;
     mockLinks.unshift(newLink);
     return HttpResponse.json(newLink, { status: 201 });
@@ -2644,7 +2647,7 @@ export const handlers = [
       avgDurationSeconds: 0,
       permissionType: "public",
       isBundle: documentIds.length > 1,
-      qaEnabled: body.qa_enabled ?? false,
+      qaEnabled: qaEnabledForLinkId(roomId),
       dealRoomId: roomId,
       requireEmail: requireEmailVerification ? false : !!body.require_email,
       requireEmailVerification,

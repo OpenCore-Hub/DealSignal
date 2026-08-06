@@ -182,8 +182,6 @@ describe("Exact JSON output (toCreateLinkPayload → JSON → backend parse)", (
       ndaEnabled: false,
       allowDownload: true,
       watermarkEnabled: true,
-      qaEnabled: false,
-      qaEnabled: false,
       fileRequestsEnabled: false,
       indexFileEnabled: false,
       expiryDays: 30,
@@ -202,7 +200,7 @@ describe("Exact JSON output (toCreateLinkPayload → JSON → backend parse)", (
     expect(payload.contact_ids).toBeUndefined();
     expect(payload.download_enabled).toBe(true);
     expect(payload.watermark_enabled).toBe(true);
-    expect(payload.qa_enabled).toBe(false);
+    expect(payload.qa_enabled).toBeUndefined();
     expect(payload.permission_type).toBe("public");
 
     const json = JSON.stringify(payload);
@@ -261,8 +259,6 @@ describe("normalizeAndStore → accessGate full chain", () => {
       ndaEnabled: false,
       allowDownload: true,
       watermarkEnabled: true,
-      qaEnabled: false,
-      qaEnabled: false,
       fileRequestsEnabled: false,
       indexFileEnabled: false,
       expiryDays: 30,
@@ -362,7 +358,6 @@ describe("Boolean switch cartesian product → backend storage correctness", () 
         ndaTemplateId: "",
         allowDownload: combo.allowDownload,
         watermarkEnabled: combo.watermarkEnabled,
-        qaEnabled: false,
         fileRequestsEnabled: false,
         indexFileEnabled: false,
         expiryDays: 30,

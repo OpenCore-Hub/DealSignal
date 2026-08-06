@@ -83,7 +83,6 @@ export function toCreateLinkPayload(
         : undefined,
     download_enabled: config.allowDownload,
     watermark_enabled: config.watermarkEnabled,
-    qa_enabled: config.qaEnabled,
     screenshot_protection_enabled: config.screenshotProtectionEnabled,
   };
 

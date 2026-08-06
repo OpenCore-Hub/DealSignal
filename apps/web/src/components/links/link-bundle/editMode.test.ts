@@ -40,7 +40,6 @@ function reconstructConfig(link: Link): Omit<PermissionConfig, "level" | "isCust
     ndaEnabled: link.permissionType === "nda",
     allowDownload: link.downloadEnabled ?? true,
     watermarkEnabled: link.watermarkEnabled ?? true,
-    qaEnabled: link.qaEnabled ?? false,
     fileRequestsEnabled: link.fileRequestsEnabled ?? false,
     indexFileEnabled: link.indexFileEnabled ?? false,
     expiryDays,

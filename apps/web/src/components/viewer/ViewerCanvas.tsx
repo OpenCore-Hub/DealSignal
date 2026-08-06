@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { FileText, Warning } from "@phosphor-icons/react";
 import { ThumbnailNav } from "./ThumbnailNav";
+import { PublicViewerThumbnailRail } from "./PublicViewerThumbnailRail";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
 import { formatDuration } from "@/lib/formatters";
@@ -28,6 +29,8 @@ interface ViewerCanvasProps {
   screenshotProtectionEnabled?: boolean;
   onSelectPage: (page: number) => void;
   sidebar?: React.ReactNode;
+  /** Public share-link visitor styling */
+  variant?: "default" | "public";
 }
 
 export function ViewerCanvas({
@@ -42,8 +45,10 @@ export function ViewerCanvas({
   screenshotProtectionEnabled,
   onSelectPage,
   sidebar,
+  variant = "default",
 }: ViewerCanvasProps) {
   const { t } = useTranslation("documents");
+  const isPublic = variant === "public";
   const viewportRef = useRef<HTMLDivElement>(null);
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
   const [printWarning, setPrintWarning] = useState(false);
@@ -162,20 +167,33 @@ export function ViewerCanvas({
 
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
-      <ThumbnailNav
-        pages={pageList}
-        currentPage={page}
-        onSelect={onSelectPage}
-        className="hidden h-full w-48 shrink-0 md:flex"
-      />
+      {isPublic ? (
+        <PublicViewerThumbnailRail
+          pages={pageList.map((p) => ({ pageNumber: p.pageNumber }))}
+          currentPage={page}
+          onSelect={onSelectPage}
+          className="hidden h-full shrink-0 md:flex"
+        />
+      ) : (
+        <ThumbnailNav
+          pages={pageList}
+          currentPage={page}
+          onSelect={onSelectPage}
+          className="hidden h-full w-48 shrink-0 md:flex"
+        />
+      )}
 
       <div
         ref={viewportRef}
-        className="relative flex min-h-0 flex-1 items-start justify-center overflow-auto p-2 sm:p-4 lg:p-8"
+        className={cn(
+          "relative flex min-h-0 flex-1 items-start justify-center overflow-auto",
+          isPublic ? "px-2 py-2 sm:px-3 sm:py-3" : "p-2 sm:p-4 lg:p-8"
+        )}
       >
         <div
           className={cn(
-            "relative overflow-hidden rounded-md bg-white shadow-card",
+            "relative overflow-hidden bg-white",
+            isPublic ? "public-viewer-stage rounded-2xl" : "rounded-md shadow-card",
             screenshotProtectionEnabled && "select-none"
           )}
           style={{ width: `${pageWidth}px`, height: `${pageHeight}px` }}
@@ -241,14 +259,14 @@ export function ViewerCanvas({
           )}
         </div>
 
-        {pageAnalytics && (
+        {pageAnalytics && !isPublic ? (
           <p className="absolute bottom-2 left-1/2 -translate-x-1/2 text-caption text-muted-foreground">
             {t("documents:viewer.currentPageStats", {
               count: pageAnalytics.viewCount,
               duration: formatDuration(pageAnalytics.avgDurationSeconds),
             })}
           </p>
-        )}
+        ) : null}
       </div>
 
       {sidebar}

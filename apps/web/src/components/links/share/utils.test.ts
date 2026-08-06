@@ -18,7 +18,6 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
-  enableQaConversations: false,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",

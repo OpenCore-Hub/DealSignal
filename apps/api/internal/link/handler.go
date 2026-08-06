@@ -539,10 +539,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.WatermarkEnabled != nil {
 		watermarkEnabled = *req.WatermarkEnabled
 	}
-	qaEnabled := existing.QaEnabled
-	if req.QaEnabled != nil {
-		qaEnabled = *req.QaEnabled
-	}
+	qaEnabled := QaEnabledForLink(existing.DealRoomID.Valid)
 	fileRequestsEnabled := existing.FileRequestsEnabled
 	if req.FileRequestsEnabled != nil {
 		fileRequestsEnabled = *req.FileRequestsEnabled
@@ -1047,7 +1044,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		ExpiresAt:                   expiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		QaEnabled:                   req.QaEnabled,
+		QaEnabled:                   QaEnabledForLink(true),
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -1436,7 +1433,7 @@ func (h *Handler) Create(c *gin.Context) {
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		QaEnabled:                req.QaEnabled,
+		QaEnabled:                QaEnabledForLink(strings.TrimSpace(req.DealRoomID) != ""),
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
 		LinkType:                 req.LinkType,

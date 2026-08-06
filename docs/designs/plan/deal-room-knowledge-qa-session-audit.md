@@ -55,9 +55,9 @@
 
 - ChatGPT 气泡墙 / 人格化 / 无出处闲聊
 - 来源默认收缩为「来源 N >」侧栏
-- 访客 AI Ask Docs 通道（可预留 `actor` 字段，本里程碑不做）
+- 访客 AI Ask Docs 通道（可预留 `actor` 字段，本里程碑不做）→ **终态**见 [Visitor Ask 统一设计](./visitor-ask-unified-product.md)
 - 上游 docling 原生 token 流（阻塞 JSON 时已合成 `…/query/stream`：phase→sources?→token*→done）
-- 与 Ask Host（`link_visitor_questions`）混为同一面板
+- 成员 Knowledge Desk 与访客 Ask Host **共用同一 UI 面板**（访客终态为统一 Ask，引擎仍分 lane）
 
 ---
 

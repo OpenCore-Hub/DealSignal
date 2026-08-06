@@ -31,7 +31,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
-    qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
     expiryDays: 30,
@@ -45,7 +44,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
-    qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
     expiryDays: 30,
@@ -59,7 +57,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: true,
     allowDownload: false,
     watermarkEnabled: true,
-    qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
     expiryDays: 30,
@@ -73,7 +70,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: true,
     watermarkEnabled: true,
-    qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
     expiryDays: 30,
@@ -87,7 +83,6 @@ export const PRESET_TEMPLATES: Record<PermissionPreset, PresetConfigTemplate> = 
     ndaEnabled: false,
     allowDownload: false,
     watermarkEnabled: true,
-    qaEnabled: false,
     fileRequestsEnabled: false,
     indexFileEnabled: false,
     expiryDays: 30,
@@ -178,14 +173,13 @@ const NAMED_PRESETS: PermissionPreset[] = PRESET_ORDER.filter(
  *   - 5 boolean flags
  *   - 2 mixed-value fields (expiryDays, maxViews)
  *
- * Total = 7 (computed as MAX_SCORE below — do NOT hardcode elsewhere).
+ * Total = 6 (computed as MAX_SCORE below — do NOT hardcode elsewhere).
  */
 const SCORED_DIMENSION_NAMES = [
   "requireEmailVerification",
   "ndaEnabled",
   "allowDownload",
   "watermarkEnabled",
-  "qaEnabled",
   "expiryDays",
   "maxViews",
 ] as const;
@@ -223,13 +217,12 @@ function presetMatchScore(
   template: PresetConfigTemplate,
 ): number {
   let score = 0;
-  // These 7 lines correspond to the first 7 entries in SCORED_DIMENSION_NAMES.
+  // These 6 lines correspond to the first 6 entries in SCORED_DIMENSION_NAMES.
   // When adding/removing a field here, update SCORED_DIMENSION_NAMES above.
   if (config.requireEmailVerification === template.requireEmailVerification) score++;
   if (config.ndaEnabled === template.ndaEnabled) score++;
   if (config.allowDownload === template.allowDownload) score++;
   if (config.watermarkEnabled === template.watermarkEnabled) score++;
-  if (config.qaEnabled === template.qaEnabled) score++;
   if (config.expiryDays === template.expiryDays) score++;
   if (config.maxViews === template.maxViews) score++;
 
