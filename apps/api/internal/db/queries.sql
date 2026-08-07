@@ -416,6 +416,17 @@ RETURNING *;
 
 
 
+-- name: UpdateLinkAskPolicy :one
+UPDATE links SET
+    ask_mode = $3,
+    ask_ai_enabled = $4,
+    ask_ai_monthly_quota = $5,
+    updated_at = now()
+WHERE id = $1 AND workspace_id = $2
+RETURNING *;
+
+
+
 -- name: SetLinkNDABinding :exec
 UPDATE links
 SET nda_template_id = $1,
@@ -2126,7 +2137,7 @@ WHERE m.workspace_id = $1 AND m.nda_status = 'pending'
 ORDER BY m.created_at DESC;
 
 -- name: ListPendingLinkQuestionsByWorkspace :many
-SELECT q.id, q.visitor_email, q.question, q.link_id, l.name AS link_name
+SELECT q.id, q.visitor_email, q.question, q.link_id, l.name AS link_name, l.deal_room_id
 FROM link_visitor_questions q
 JOIN links l ON l.id = q.link_id
 WHERE q.workspace_id = $1 AND q.status = 'pending'
@@ -2780,7 +2791,10 @@ WHERE link_id = sqlc.arg(link_id)
     'scope_violation',
     'blocked_email',
     'blocked_domain',
-    'not_in_allow_list'
+    'not_in_allow_list',
+    'ask_ai_rate_limited',
+    'ask_escalated',
+    'ask_formal_submitted'
   ]::text[])
   AND (sqlc.narg(event_type)::text IS NULL OR event_type = sqlc.narg(event_type))
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR created_at >= sqlc.narg(created_after))
@@ -2810,7 +2824,10 @@ WHERE l.deal_room_id = sqlc.arg(deal_room_id)
     'scope_violation',
     'blocked_email',
     'blocked_domain',
-    'not_in_allow_list'
+    'not_in_allow_list',
+    'ask_ai_rate_limited',
+    'ask_escalated',
+    'ask_formal_submitted'
   ]::text[])
   AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR se.created_at >= sqlc.narg(created_after))
@@ -3149,6 +3166,12 @@ FROM link_ask_sessions
 WHERE link_id = $1 AND visitor_id = $2
 LIMIT 1;
 
+-- name: GetLinkAskSessionByID :one
+SELECT *
+FROM link_ask_sessions
+WHERE id = $1
+LIMIT 1;
+
 -- name: CreateLinkAskSession :one
 INSERT INTO link_ask_sessions (
     tenant_id, workspace_id, link_id, visitor_id, visitor_email
@@ -3172,8 +3195,10 @@ INSERT INTO link_ask_turns (
     lane,
     status,
     host_question_id,
-    route_reason
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+    route_reason,
+    formal_status,
+    formal_anonymize
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING *;
 
 -- name: ListLinkAskTurnsByVisitor :many
@@ -3191,7 +3216,7 @@ SET status = 'host_answered',
 WHERE host_question_id = $3
   AND workspace_id = $4
   AND link_id = $5
-  AND status = 'host_pending';
+  AND status IN ('host_pending', 'host_escalated');
 
 -- name: MarkLinkAskTurnHostAnsweredByID :execrows
 UPDATE link_ask_turns
@@ -3202,7 +3227,7 @@ SET status = 'host_answered',
 WHERE id = $3
   AND workspace_id = $4
   AND link_id = $5
-  AND status = 'host_pending';
+  AND status IN ('host_pending', 'host_escalated');
 
 -- name: GetLinkAskTurnByID :one
 SELECT *
@@ -3211,6 +3236,59 @@ WHERE id = $1
   AND workspace_id = $2
   AND link_id = $3
 LIMIT 1;
+
+-- name: GetLinkAskTurnByVisitor :one
+SELECT *
+FROM link_ask_turns
+WHERE id = $1
+  AND link_id = $2
+  AND visitor_id = $3
+  AND workspace_id = $4
+LIMIT 1;
+
+-- name: CountLinkAskAITurnsThisMonth :one
+SELECT COUNT(*)::int AS count
+FROM link_ask_turns
+WHERE link_id = $1
+  AND lane = 'ai'
+  AND created_at >= date_trunc('month', now() AT TIME ZONE 'UTC');
+
+-- name: GetLinkAskTurnSummary :one
+SELECT
+  COUNT(*)::bigint AS total_turns,
+  COUNT(*) FILTER (WHERE lane = 'ai' AND status = 'ai_answered')::bigint AS ai_answered,
+  COUNT(*) FILTER (WHERE lane = 'ai' AND status = 'ai_refused')::bigint AS ai_refused,
+  COUNT(*) FILTER (WHERE lane IN ('host', 'hybrid') AND status IN ('host_pending', 'host_escalated'))::bigint AS host_pending,
+  COUNT(*) FILTER (WHERE lane IN ('host', 'hybrid') AND status = 'host_answered')::bigint AS host_answered,
+  COUNT(*) FILTER (WHERE route_reason = 'user_escalate')::bigint AS user_escalated,
+  COUNT(*) FILTER (WHERE route_reason = 'low_confidence')::bigint AS auto_escalated
+FROM link_ask_turns
+WHERE link_id = $1;
+
+-- name: EscalateLinkAskTurnToHost :execrows
+UPDATE link_ask_turns
+SET lane = 'hybrid',
+    status = 'host_escalated',
+    host_question_id = $1,
+    route_reason = $2,
+    updated_at = now()
+WHERE id = $3
+  AND link_id = $4
+  AND workspace_id = $5
+  AND visitor_id = $6
+  AND status IN ('ai_refused', 'ai_answered')
+  AND host_question_id IS NULL;
+
+-- name: UpdateLinkAskTurnAIResult :execrows
+UPDATE link_ask_turns
+SET status = $1,
+    ai_payload = $2,
+    updated_at = now()
+WHERE id = $3
+  AND link_id = $4
+  AND workspace_id = $5
+  AND visitor_id = $6
+  AND status IN ('routing', 'ai_streaming');
 
 -- name: GetOwnerAskTurnByID :one
 SELECT
@@ -3228,6 +3306,13 @@ SELECT
     t.host_answer,
     t.answered_by,
     t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
     t.created_at,
     t.updated_at,
     COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
@@ -3263,6 +3348,13 @@ SELECT
     t.host_answer,
     t.answered_by,
     t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
     t.created_at,
     t.updated_at,
     COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
@@ -3289,6 +3381,13 @@ SELECT
     t.host_answer,
     t.answered_by,
     t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
     t.created_at,
     t.updated_at,
     COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
@@ -3298,6 +3397,237 @@ LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
 WHERE t.workspace_id = $2
 ORDER BY t.created_at DESC
+LIMIT $3;
+
+-- name: PinLinkAskTurnFAQ :execrows
+UPDATE link_ask_turns
+SET pinned_faq_at = now(),
+    pinned_faq_by = $1,
+    pinned_faq_sort = $5,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND link_id = $4
+  AND pinned_faq_at IS NULL;
+
+-- name: MaxLinkPinnedFAQSort :one
+SELECT COALESCE(MAX(pinned_faq_sort), -1)::int AS max_sort
+FROM link_ask_turns
+WHERE link_id = $1
+  AND workspace_id = $2
+  AND pinned_faq_at IS NOT NULL;
+
+-- name: SetLinkAskTurnFAQSort :exec
+UPDATE link_ask_turns
+SET pinned_faq_sort = $1,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND link_id = $4
+  AND pinned_faq_at IS NOT NULL;
+
+-- name: UnpinLinkAskTurnFAQ :execrows
+UPDATE link_ask_turns
+SET pinned_faq_at = NULL,
+    pinned_faq_by = NULL,
+    pinned_faq_sort = NULL,
+    updated_at = now()
+WHERE id = $1
+  AND workspace_id = $2
+  AND link_id = $3
+  AND pinned_faq_at IS NOT NULL;
+
+-- name: ListLinkPinnedAskFAQs :many
+SELECT *
+FROM link_ask_turns
+WHERE link_id = $1
+  AND workspace_id = $2
+  AND pinned_faq_at IS NOT NULL
+ORDER BY pinned_faq_sort ASC NULLS LAST, pinned_faq_at DESC
+LIMIT $3;
+
+-- name: ListRoomPublicAskFAQs :many
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.created_at,
+    t.updated_at,
+    l.name AS link_name
+FROM link_ask_turns t
+INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
+WHERE t.workspace_id = $2
+  AND t.pinned_faq_at IS NOT NULL
+ORDER BY t.pinned_faq_sort ASC NULLS LAST, t.pinned_faq_at DESC
+LIMIT $3;
+
+-- name: ListLinkPinnedAskTurnsByLink :many
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+FROM link_ask_turns t
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
+WHERE t.link_id = $1
+  AND t.workspace_id = $2
+  AND t.pinned_faq_at IS NOT NULL
+ORDER BY t.pinned_faq_sort ASC NULLS LAST, t.pinned_faq_at DESC
+LIMIT $3;
+
+-- name: ListRoomPinnedAskTurns :many
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+FROM link_ask_turns t
+INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
+WHERE t.workspace_id = $2
+  AND t.pinned_faq_at IS NOT NULL
+ORDER BY t.pinned_faq_sort ASC NULLS LAST, t.pinned_faq_at DESC
+LIMIT $3;
+
+-- name: PublishDueFormalAskTurns :many
+UPDATE link_ask_turns
+SET formal_status = 'published',
+    formal_published_at = now(),
+    status = 'host_answered',
+    updated_at = now()
+WHERE link_id = $1
+  AND workspace_id = $2
+  AND formal_status = 'scheduled'
+  AND formal_publish_at IS NOT NULL
+  AND formal_publish_at <= now()
+RETURNING id, link_id, host_question_id, host_answer, answered_by;
+
+-- name: PublishDueFormalAskTurnsByRoom :many
+UPDATE link_ask_turns t
+SET formal_status = 'published',
+    formal_published_at = now(),
+    status = 'host_answered',
+    updated_at = now()
+FROM links l
+WHERE l.id = t.link_id
+  AND l.deal_room_id = $1
+  AND t.workspace_id = $2
+  AND t.formal_status = 'scheduled'
+  AND t.formal_publish_at IS NOT NULL
+  AND t.formal_publish_at <= now()
+RETURNING t.id, t.link_id, t.host_question_id, t.host_answer, t.answered_by;
+
+-- name: ScheduleFormalAskTurn :execrows
+UPDATE link_ask_turns
+SET host_answer = $1,
+    answered_by = $2,
+    formal_status = $3,
+    formal_publish_at = $4,
+    formal_published_at = $5,
+    formal_anonymize = $6,
+    status = $7,
+    updated_at = now()
+WHERE id = $8
+  AND workspace_id = $9
+  AND link_id = $10
+  AND formal_status IN ('pending_review', 'scheduled');
+
+-- name: ListLinkPublishedFormalAsk :many
+SELECT *
+FROM link_ask_turns
+WHERE link_id = $1
+  AND workspace_id = $2
+  AND formal_status = 'published'
+ORDER BY formal_published_at DESC NULLS LAST, created_at DESC
+LIMIT $3;
+
+-- name: ListRoomPublishedFormalAsk :many
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_question_id,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
+    t.created_at,
+    t.updated_at,
+    l.name AS link_name
+FROM link_ask_turns t
+INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
+WHERE t.workspace_id = $2
+  AND t.formal_status = 'published'
+ORDER BY t.formal_published_at DESC NULLS LAST, t.created_at DESC
 LIMIT $3;
 
 

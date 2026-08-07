@@ -524,6 +524,17 @@ type LinkAskTurn struct {
 	RouteReason    pgtype.Text
 	CreatedAt      pgtype.Timestamptz
 	UpdatedAt      pgtype.Timestamptz
+	PinnedFaqAt    pgtype.Timestamptz
+	PinnedFaqBy    pgtype.UUID
+	PinnedFaqSort  pgtype.Int4
+	// Formal Q&A lifecycle: pending_review | scheduled | published
+	FormalStatus pgtype.Text
+	// When a scheduled formal answer becomes public
+	FormalPublishAt pgtype.Timestamptz
+	// When the formal answer was published to visitors
+	FormalPublishedAt pgtype.Timestamptz
+	// Whether visitor identity is hidden on the public formal board
+	FormalAnonymize bool
 }
 
 type LinkContact struct {
