@@ -2711,6 +2711,7 @@ ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
     title = EXCLUDED.title,
     impact = EXCLUDED.impact,
     due_at = EXCLUDED.due_at,
+    action_type = EXCLUDED.action_type,
     -- Re-open resolved items when the event is still pending; respect snooze/ignore.
     status = CASE
         WHEN action_items.status IN ('snoozed', 'ignored') THEN action_items.status
@@ -12715,6 +12716,54 @@ func (q *Queries) ListPendingDocumentLinkAccessRequestsDetailedByWorkspace(ctx c
 			&i.PublicToken,
 			&i.CustomDomain,
 			&i.DocumentTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingFormalAskTurnsByWorkspace = `-- name: ListPendingFormalAskTurnsByWorkspace :many
+SELECT t.id, s.visitor_email, t.question, t.link_id, l.name AS link_name, l.deal_room_id
+FROM link_ask_turns t
+JOIN link_ask_sessions s ON s.id = t.session_id
+JOIN links l ON l.id = t.link_id
+WHERE t.workspace_id = $1
+  AND t.lane IN ('host', 'hybrid')
+  AND t.status IN ('host_pending', 'host_escalated')
+  AND t.formal_status IN ('pending_review', 'scheduled')
+ORDER BY t.created_at DESC
+`
+
+type ListPendingFormalAskTurnsByWorkspaceRow struct {
+	ID           pgtype.UUID
+	VisitorEmail pgtype.Text
+	Question     string
+	LinkID       pgtype.UUID
+	LinkName     pgtype.Text
+	DealRoomID   pgtype.UUID
+}
+
+func (q *Queries) ListPendingFormalAskTurnsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingFormalAskTurnsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listPendingFormalAskTurnsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPendingFormalAskTurnsByWorkspaceRow
+	for rows.Next() {
+		var i ListPendingFormalAskTurnsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.VisitorEmail,
+			&i.Question,
+			&i.LinkID,
+			&i.LinkName,
+			&i.DealRoomID,
 		); err != nil {
 			return nil, err
 		}

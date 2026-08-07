@@ -210,6 +210,14 @@ run_e2e_visitor_ask() {
     echo "FAIL targetId=$target_id expected ${room_id}/${link_id}"
     return 1
   fi
+  local action_type
+  action_type=$(echo "$stats" | jq -r --arg sid "$action_source_id" \
+    '[.actionItems[]? | select(.sourceType == "deal_room_link_question" and .sourceId == $sid)] | .[0].actionType // empty')
+  if [[ "$action_type" != "answer" ]]; then
+    echo "FAIL actionType=$action_type expected answer"
+    echo "$stats" | jq -c '[.actionItems[]? | {sourceType, sourceId, actionType, status}] | .[:5]'
+    return 1
+  fi
   echo "ok"
 
   echo -n "[host answer] "
@@ -288,4 +296,151 @@ run_e2e_visitor_ask() {
   echo "ok"
 
   echo "=== Visitor Ask OK ==="
+}
+
+run_e2e_visitor_ask_formal() {
+  set -euo pipefail
+
+  : "${BASE_URL:?BASE_URL required}"
+  : "${COOKIE_JAR:?COOKIE_JAR required}"
+  : "${WORKSPACE_SLUG:?WORKSPACE_SLUG required}"
+  : "${DOC_ID:?DOC_ID required}"
+
+  local tmp_dir visitor_jar
+  tmp_dir=$(mktemp -d)
+  visitor_jar=$(mktemp)
+  trap 'rm -rf "$tmp_dir"; rm -f "$visitor_jar"' RETURN
+
+  echo "=== Visitor Ask formal queue (dashboard review todo) ==="
+
+  echo -n "[create deal room for formal ask] "
+  local room_slug room room_id
+  room_slug="e2e-formal-$(date +%s)"
+  room=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/deal-rooms" \
+    -H "Content-Type: application/json" \
+    -d "{\"name\":\"E2E Formal Ask Room\",\"slug\":\"$room_slug\",\"template_type\":\"seed\"}")
+  room_id=$(echo "$room" | jq -r '.id')
+  echo "$room" | jq -c '{id: .id, slug: .slug}'
+
+  echo -n "[attach doc to formal room] "
+  local http_attach attach_body="$tmp_dir/formal-attach.json"
+  http_attach=$(curl -sS -o "$attach_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/deal-rooms/$room_id/documents" \
+    -H "Content-Type: application/json" \
+    -d "{\"document_id\":\"$DOC_ID\",\"folder_path\":\"/general\"}")
+  if [[ "$http_attach" != "200" && "$http_attach" != "201" ]]; then
+    echo "FAIL attach HTTP $http_attach"
+    cat "$attach_body"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[create formal deal-room link] "
+  local dr_link link_id public_token formal_question formal_answer turn_id
+  dr_link=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/deal-rooms/$room_id/links" \
+    -H "Content-Type: application/json" \
+    -d '{"name":"E2E Formal Ask Link","download_enabled":true}')
+  link_id=$(echo "$dr_link" | jq -r '.id')
+  public_token=$(echo "$dr_link" | jq -r '.public_token // .publicToken // empty')
+  if [[ -z "$public_token" || "$public_token" == "null" ]]; then
+    public_token=$(echo "$dr_link" | jq -r '.shortUrl // .short_url' | sed 's|.*/l/||')
+  fi
+  echo "$dr_link" | jq -c '{id: .id, public_token: "'"$public_token"'"}'
+
+  formal_question="E2E formal disclosure: revenue guidance?"
+  formal_answer="Approved public guidance: mid-teens growth."
+
+  echo -n "[set ask_mode formal] "
+  local policy_body="$tmp_dir/formal-policy.json" policy_http
+  policy_http=$(curl -sS -o "$policy_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X PATCH "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask-policy" \
+    -H "Content-Type: application/json" \
+    -d '{"ask_mode":"formal"}')
+  if [[ "$policy_http" != "200" ]]; then
+    echo "FAIL PATCH ask-policy HTTP $policy_http"
+    cat "$policy_body"
+    return 1
+  fi
+  if [[ "$(jq -r '.data.ask_mode // .data.askMode // empty' "$policy_body")" != "formal" ]]; then
+    echo "FAIL ask_mode not formal"
+    cat "$policy_body"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[visitor public access] "
+  curl -fsS -c "$visitor_jar" -b "$visitor_jar" -X POST "$BASE_URL/api/v1/public/links/$public_token" \
+    -H "Content-Type: application/json" \
+    -d '{"email":"e2e-formal-visitor@example.com"}' >/dev/null
+  echo "ok"
+
+  echo -n "[public ask formal lane] "
+  local ask_body="$tmp_dir/formal-ask.json" ask_http
+  ask_http=$(curl -sS -o "$ask_body" -w "%{http_code}" -c "$visitor_jar" -b "$visitor_jar" \
+    -X POST "$BASE_URL/api/v1/public/links/$public_token/ask" \
+    -H "Content-Type: application/json" \
+    -d "{\"question\":\"$formal_question\"}")
+  if [[ "$ask_http" != "201" ]]; then
+    echo "FAIL ask HTTP $ask_http"
+    cat "$ask_body"
+    return 1
+  fi
+  turn_id=$(jq -r '.data.id' "$ask_body")
+  if [[ "$(jq -r '.data.formal_status // .data.formalStatus // empty' "$ask_body")" != "pending_review" ]]; then
+    echo "FAIL formal_status not pending_review"
+    cat "$ask_body"
+    return 1
+  fi
+  echo "ok turn=$turn_id"
+
+  echo -n "[dashboard formal review action] "
+  local stats todo_count action_type target_id
+  stats=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/dashboard/stats")
+  todo_count=$(echo "$stats" | jq -r --arg sid "$turn_id" \
+    '[.actionItems[]? | select(.sourceType == "deal_room_link_question" and .sourceId == $sid and .status == "pending")] | length')
+  if [[ "$todo_count" != "1" ]]; then
+    echo "FAIL expected pending formal review action, got $todo_count"
+    echo "$stats" | jq -c '[.actionItems[]? | {sourceType, sourceId, actionType, status}] | .[:8]'
+    return 1
+  fi
+  action_type=$(echo "$stats" | jq -r --arg sid "$turn_id" \
+    '[.actionItems[]? | select(.sourceType == "deal_room_link_question" and .sourceId == $sid)] | .[0].actionType // empty')
+  if [[ "$action_type" != "review" ]]; then
+    echo "FAIL actionType=$action_type expected review"
+    echo "$stats" | jq -c '[.actionItems[]? | {sourceType, sourceId, actionType, status}] | .[:8]'
+    return 1
+  fi
+  target_id=$(echo "$stats" | jq -r --arg sid "$turn_id" \
+    '[.actionItems[]? | select(.sourceType == "deal_room_link_question" and .sourceId == $sid)] | .[0].targetId // empty')
+  if [[ "$target_id" != "${room_id}/${link_id}" ]]; then
+    echo "FAIL targetId=$target_id expected ${room_id}/${link_id}"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[formal publish clears dashboard todo] "
+  local publish_body="$tmp_dir/formal-publish.json" publish_http
+  publish_http=$(curl -sS -o "$publish_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X PATCH "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask/$turn_id/formal-publish" \
+    -H "Content-Type: application/json" \
+    -d "{\"answer\":\"$formal_answer\"}")
+  if [[ "$publish_http" != "200" ]]; then
+    echo "FAIL formal-publish HTTP $publish_http"
+    cat "$publish_body"
+    return 1
+  fi
+  stats=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/dashboard/stats")
+  todo_count=$(echo "$stats" | jq -r --arg sid "$turn_id" \
+    '[.actionItems[]? | select(.sourceType == "deal_room_link_question" and .sourceId == $sid and .status == "pending")] | length')
+  if [[ "$todo_count" != "0" ]]; then
+    echo "FAIL expected formal action resolved after publish, got $todo_count pending"
+    echo "$stats" | jq -c '[.actionItems[]? | select(.sourceId == $sid)]' --arg sid "$turn_id"
+    return 1
+  fi
+  echo "ok"
+
+  echo "=== Visitor Ask formal OK ==="
 }

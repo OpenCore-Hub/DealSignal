@@ -1,6 +1,7 @@
 package action
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -69,5 +70,15 @@ func TestTitleForDealRoomLinkQuestion(t *testing.T) {
 	got := titleFor(SourceTypeDealRoomLinkQuestion, "a@x.com", "Investor Link")
 	if got == "" || got == titleFor(SourceTypeLinkQuestion, "a@x.com", "Investor Link") {
 		t.Fatalf("deal-room ask title should differ from legacy link_question: %q", got)
+	}
+}
+
+func TestTitleForFormalAskReview(t *testing.T) {
+	got := titleForAction(SourceTypeDealRoomLinkQuestion, operationalActionTypeReview, "a@x.com", "Investor Link")
+	if got == "" || got == titleFor(SourceTypeDealRoomLinkQuestion, "a@x.com", "Investor Link") {
+		t.Fatalf("formal review title should differ from host answer: %q", got)
+	}
+	if !strings.Contains(got, "formal") {
+		t.Fatalf("expected formal wording, got %q", got)
 	}
 }

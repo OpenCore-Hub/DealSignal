@@ -1946,6 +1946,7 @@ ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
     title = EXCLUDED.title,
     impact = EXCLUDED.impact,
     due_at = EXCLUDED.due_at,
+    action_type = EXCLUDED.action_type,
     -- Re-open resolved items when the event is still pending; respect snooze/ignore.
     status = CASE
         WHEN action_items.status IN ('snoozed', 'ignored') THEN action_items.status
@@ -2153,6 +2154,17 @@ WHERE t.workspace_id = $1
   AND t.lane IN ('host', 'hybrid')
   AND t.status IN ('host_pending', 'host_escalated')
   AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
+ORDER BY t.created_at DESC;
+
+-- name: ListPendingFormalAskTurnsByWorkspace :many
+SELECT t.id, s.visitor_email, t.question, t.link_id, l.name AS link_name, l.deal_room_id
+FROM link_ask_turns t
+JOIN link_ask_sessions s ON s.id = t.session_id
+JOIN links l ON l.id = t.link_id
+WHERE t.workspace_id = $1
+  AND t.lane IN ('host', 'hybrid')
+  AND t.status IN ('host_pending', 'host_escalated')
+  AND t.formal_status IN ('pending_review', 'scheduled')
 ORDER BY t.created_at DESC;
 
 -- name: ListPendingUploadedFilesByWorkspace :many

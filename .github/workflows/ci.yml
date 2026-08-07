@@ -519,6 +519,12 @@ jobs:
             "SELECT column_name FROM information_schema.columns WHERE table_name = 'link_ask_turns' AND column_name = 'host_question_id';" \
             | grep -qx ''
 
+      - name: Verify ask action source heal migration 142
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '142_heal_ask_turn_action_sources.up.sql';" | grep -q 1
+
       - name: Run backend E2E
         run: PDF=../web/e2e/fixtures/sample.pdf ./e2e-test.sh
 

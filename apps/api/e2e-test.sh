@@ -143,6 +143,7 @@ echo "$SCORE" | jq -c '{score: .score, level: .level, trend: .trend}'
 
 run_e2e_category_tristate
 run_e2e_visitor_ask
+run_e2e_visitor_ask_formal
 
 set +e
 run_e2e_visitor_ask_ai
