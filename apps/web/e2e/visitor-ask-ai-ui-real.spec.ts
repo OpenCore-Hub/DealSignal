@@ -1,5 +1,5 @@
 /**
- * Owner enables grounded AI (Engage UI) → visitor receives AI answer in viewer UI.
+ * Owner enables grounded AI (ask-policy API) → visitor receives AI answer in viewer UI.
  * Optional: requires docling-rag on API (same skip as visitor-ask-ai-stream-real).
  *
  * Run:
@@ -14,7 +14,7 @@ import {
   waitForKnowledgeCorpusReady,
   probeKnowledgeEnabled,
   fetchLinkById,
-  enableGroundedAiInEngageTab,
+  enableGroundedAiForLink,
   openRealVisitorAskPanel,
   attachDebug,
 } from "./real-helpers";
@@ -59,7 +59,7 @@ test.describe("Visitor Ask AI UI loop (real backend)", () => {
     test.setTimeout(240_000);
     attachDebug(page);
 
-    await enableGroundedAiInEngageTab(page, { workspaceSlug, roomId, linkId });
+    await enableGroundedAiForLink(workspaceSlug, linkId);
     const enabled = await fetchLinkById(workspaceSlug, linkId);
     expect(enabled.askAiEnabled).toBe(true);
 

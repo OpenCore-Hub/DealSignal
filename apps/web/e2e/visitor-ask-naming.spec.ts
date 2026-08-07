@@ -110,7 +110,7 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
     await page.getByRole("tab", { name: /Engage/i }).click();
 
     await expect(page.getByText(/Ask activity/i)).toBeVisible({ timeout: 10000 });
-    await expect(page.getByTestId("link-ask-ai-enabled")).toBeVisible();
+    await expect(page.getByTestId("visitor-ask-experience")).toHaveCount(0);
     await expect(page.getByText("Ask inbox", { exact: true })).toBeVisible();
     await expect(page.getByTestId("ask-docs-audit-panel")).toHaveCount(0);
     await expect(page.getByText(/Visitor questions/i)).toHaveCount(0);

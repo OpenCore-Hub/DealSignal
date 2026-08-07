@@ -505,30 +505,26 @@ export async function openRealVisitorAskPanel(page: Page, shortUrl: string) {
   return input;
 }
 
-/** Owner: Deal Room link row → Share dialog Engage → enable grounded AI. */
+/** Enable grounded AI on a deal-room link via ask-policy API (used by real-backend e2e). */
+export async function enableGroundedAiForLink(
+  workspaceSlug: string,
+  linkId: string,
+  askMode: "supervised" | "self_serve" = "supervised",
+) {
+  await updateLinkAskPolicy(workspaceSlug, linkId, {
+    askAiEnabled: true,
+    askMode,
+  });
+}
+
+/** @deprecated Use enableGroundedAiForLink — policy UI lives on share Access, not Engage. */
 export async function enableGroundedAiInEngageTab(
   page: Page,
   opts: { workspaceSlug: string; roomId: string; linkId: string },
 ) {
-  await authenticatePage(page);
-  await page.goto(`/${opts.workspaceSlug}/deal-rooms/${opts.roomId}?tab=links`);
-  await page.getByTestId(`deal-room-link-row-${opts.linkId}`).click({ timeout: 20000 });
-  await page.getByRole("dialog").waitFor({ state: "visible", timeout: 15000 });
-  await page.getByRole("tab", { name: /Engage/i }).click();
-
-  const policyCard = page.getByTestId("link-ask-ai-enabled");
-  await policyCard.waitFor({ state: "visible", timeout: 15000 });
-  const toggle = policyCard.getByRole("switch");
-  if (!(await toggle.isChecked())) {
-    const patchPromise = page.waitForResponse(
-      (res) =>
-        res.request().method() === "PATCH" &&
-        res.url().includes(`/links/${opts.linkId}/ask-policy`) &&
-        res.ok(),
-    );
-    await toggle.click();
-    await patchPromise;
-  }
+  void page;
+  void opts.roomId;
+  await enableGroundedAiForLink(opts.workspaceSlug, opts.linkId);
 }
 
 /** Returns false when docling-rag is not configured (optional AI gates skip). */

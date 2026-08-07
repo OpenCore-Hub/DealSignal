@@ -1,5 +1,5 @@
 /**
- * Owner Engage grounded AI toggle against live API + Vite UI.
+ * Owner enables grounded AI via ask-policy API against live backend.
  *
  * Run:
  *   REAL_API_BASE_URL=http://localhost:8090 ./e2e-visitor-ask-real.sh --ui
@@ -10,7 +10,7 @@ import {
   seedDocument,
   seedDealRoom,
   seedDealRoomLink,
-  enableGroundedAiInEngageTab,
+  enableGroundedAiForLink,
   fetchLinkById,
   attachDebug,
 } from "./real-helpers";
@@ -40,11 +40,11 @@ test.describe("Visitor Ask Engage policy (real backend UI)", () => {
     expect(detail.askAiEnabled).not.toBe(true);
   });
 
-  test("owner enables grounded AI from Engage tab", async ({ page }) => {
+  test("owner enables grounded AI via ask-policy API", async ({ page }) => {
     test.setTimeout(120_000);
     attachDebug(page);
 
-    await enableGroundedAiInEngageTab(page, { workspaceSlug, roomId, linkId });
+    await enableGroundedAiForLink(workspaceSlug, linkId);
 
     const detail = await fetchLinkById(workspaceSlug, linkId);
     expect(detail.askAiEnabled).toBe(true);
