@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { AccessTab } from "./AccessTab";
 import type { DraftLink } from "./types";
+import { api } from "@/lib/api";
 import enLinkShare from "@/i18n/locales/en/linkShare.json";
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    getLinkAskPolicy: vi.fn(),
+  },
+}));
 
 const i18nInstance = i18n.createInstance();
 i18nInstance.use(initReactI18next).init({
@@ -32,6 +39,7 @@ function renderAccessTab(
   ndaTemplates: { id: string; name: string; sourceDocumentId: string }[] = [],
   roomSecurityFloors?: { requireEmailVerification?: boolean; requireNda?: boolean },
   roomBlockedEmails?: string[],
+  linkId?: string,
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -46,6 +54,7 @@ function renderAccessTab(
         passwordAlreadySet={passwordAlreadySet}
         roomSecurityFloors={roomSecurityFloors}
         roomBlockedEmails={roomBlockedEmails}
+        linkId={linkId}
       />
     </Wrapper>
   );
@@ -78,6 +87,10 @@ const baseDraft: DraftLink = {
 };
 
 describe("AccessTab", () => {
+  beforeEach(() => {
+    vi.mocked(api.getLinkAskPolicy).mockReset();
+  });
+
   it("toggles require email and clears verification", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
@@ -467,5 +480,39 @@ describe("AccessTab", () => {
         "extra@example.com",
       ],
     });
+  });
+
+  it("renders AI quota panel when editing an existing deal-room link", async () => {
+    vi.mocked(api.getLinkAskPolicy).mockResolvedValue({
+      data: {
+        id: "link-edit-1",
+        askMode: "supervised",
+        askAiEnabled: true,
+        askAiMonthlyQuota: 100,
+        askAiMonthlyUsed: 3,
+        askAiMonthlyLimit: 100,
+        askAiQuotaExceeded: false,
+        askAiEntitled: true,
+      },
+    });
+
+    renderAccessTab(
+      { ...baseDraft, visitorAskExperience: "ai_supervised" },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      "link-edit-1",
+    );
+
+    fireEvent.click(screen.getByText(/advanced/i));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("link-ask-policy-quota")).toBeInTheDocument();
+    });
+    expect(api.getLinkAskPolicy).toHaveBeenCalledWith("link-edit-1");
   });
 });

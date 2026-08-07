@@ -34,6 +34,7 @@ import {
   countAdvancedEnabled,
 } from "./shareAdvanced";
 import { VisitorAskExperienceField } from "./VisitorAskExperienceField";
+import { LinkAskPolicyQuotaPanel } from "./LinkAskPolicyQuotaPanel";
 import type { VisitorAskExperience } from "./visitorAskExperience";
 
 export type AccessTabLayout = "compact" | "sections";
@@ -70,6 +71,8 @@ interface AccessTabProps {
   };
   /** Room-wide blocklist emails — read-only on deal-room share links. */
   roomBlockedEmails?: string[];
+  /** Existing link id — enables read-only AI quota on edit. */
+  linkId?: string;
 }
 
 function OptionSwitch({
@@ -268,6 +271,7 @@ export function AccessTab({
   audienceMode = "full",
   roomSecurityFloors,
   roomBlockedEmails = [],
+  linkId,
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
   const sections = layout === "sections";
@@ -721,13 +725,21 @@ export function AccessTab({
   const advancedBody = (
     <>
       {isDealRoomLink ? (
-        <VisitorAskExperienceField
-          value={draft.visitorAskExperience}
-          onChange={(visitorAskExperience: VisitorAskExperience) =>
-            updateDraft({ visitorAskExperience })
-          }
-          highlighted={isHighlighted("visitorAskExperience")}
-        />
+        <>
+          <VisitorAskExperienceField
+            value={draft.visitorAskExperience}
+            onChange={(visitorAskExperience: VisitorAskExperience) =>
+              updateDraft({ visitorAskExperience })
+            }
+            highlighted={isHighlighted("visitorAskExperience")}
+          />
+          {linkId ? (
+            <LinkAskPolicyQuotaPanel
+              linkId={linkId}
+              experience={draft.visitorAskExperience}
+            />
+          ) : null}
+        </>
       ) : null}
       {STANDALONE_ADVANCED_KEYS.map((key) => (
         <OptionSwitch

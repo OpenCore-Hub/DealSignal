@@ -454,6 +454,7 @@ function DealRoomShareDialogContent({
               roomBlockedEmails={lockedRoomBlocks}
               ndaTemplates={ndaTemplates}
               documents={resolveNdaDocumentFallback(agreementDocs)}
+              linkId={selectedLink?.id}
             />
           </>
         )}
