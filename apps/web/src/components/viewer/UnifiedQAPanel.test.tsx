@@ -6,15 +6,19 @@ import i18n from "i18next";
 import { UnifiedQAPanel } from "./UnifiedQAPanel";
 import enDocuments from "@/i18n/locales/en/documents.json";
 
-const { listPublicAskTurnsMock, createPublicAskMock } = vi.hoisted(() => ({
+const { listPublicAskTurnsMock, createPublicAskMock, streamPublicAskTurnMock, listPublicAskFAQsMock } = vi.hoisted(() => ({
   listPublicAskTurnsMock: vi.fn(),
   createPublicAskMock: vi.fn(),
+  streamPublicAskTurnMock: vi.fn(),
+  listPublicAskFAQsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     listPublicAskTurns: listPublicAskTurnsMock,
+    listPublicAskFAQs: listPublicAskFAQsMock,
     createPublicAsk: createPublicAskMock,
+    streamPublicAskTurn: streamPublicAskTurnMock,
   },
 }));
 
@@ -39,8 +43,12 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
 describe("UnifiedQAPanel (unified Ask host lane)", () => {
   beforeEach(() => {
     listPublicAskTurnsMock.mockReset();
+    listPublicAskFAQsMock.mockReset();
     createPublicAskMock.mockReset();
+    streamPublicAskTurnMock.mockReset();
     listPublicAskTurnsMock.mockResolvedValue({ data: [] });
+    listPublicAskFAQsMock.mockResolvedValue({ data: [] });
+    streamPublicAskTurnMock.mockResolvedValue(null);
     createPublicAskMock.mockResolvedValue({
       data: {
         id: "turn1",
@@ -57,12 +65,12 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
   it("loads and shows empty state", async () => {
     await renderPanel();
     expect(screen.getByText(/No messages yet/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/Ask the host a question/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/materials you can access/i)).toBeInTheDocument();
   });
 
   it("submits unified Ask turn", async () => {
     await renderPanel();
-    fireEvent.change(screen.getByPlaceholderText(/Ask the host a question/i), {
+    fireEvent.change(screen.getByPlaceholderText(/materials you can access/i), {
       target: { value: "Can you share the model?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Ask/i }));
@@ -81,12 +89,36 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
       new ApiError({ status: 429, code: "rate_limit_exceeded", message: "rate limited", requestId: "r1" })
     );
     await renderPanel();
-    fireEvent.change(screen.getByPlaceholderText(/Ask the host a question/i), {
+    fireEvent.change(screen.getByPlaceholderText(/materials you can access/i), {
       target: { value: "spam" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Ask/i }));
     await waitFor(() => {
-      expect(screen.getByText(/Too many Ask Host questions/i)).toBeInTheDocument();
+      expect(screen.getByText(/Too many questions/i)).toBeInTheDocument();
+    });
+  });
+
+  it("starts AI stream for ai_streaming turns", async () => {
+    listPublicAskTurnsMock.mockResolvedValue({
+      data: [
+        {
+          id: "turn_ai",
+          session_id: "sess1",
+          question: "What was revenue?",
+          lane: "ai",
+          status: "ai_streaming",
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    await renderPanel();
+    await waitFor(() => {
+      expect(streamPublicAskTurnMock).toHaveBeenCalledWith(
+        "tok123",
+        "turn_ai",
+        expect.objectContaining({ creds: { sessionToken: "sess456" } }),
+      );
     });
   });
 
@@ -108,5 +140,22 @@ describe("UnifiedQAPanel (unified Ask host lane)", () => {
     await renderPanel();
     expect(await screen.findByText("Where is the cap table?")).toBeInTheDocument();
     expect(screen.getByText("In the Legal folder.")).toBeInTheDocument();
+  });
+
+  it("renders pinned FAQ section", async () => {
+    listPublicAskFAQsMock.mockResolvedValue({
+      data: [
+        {
+          id: "faq1",
+          question: "What is the data room password policy?",
+          answer: "Use your invite email to sign in.",
+          source: "host",
+          pinned_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    });
+    await renderPanel();
+    expect(await screen.findByText(/Common questions/i)).toBeInTheDocument();
+    expect(screen.getByText("What is the data room password policy?")).toBeInTheDocument();
   });
 });

@@ -190,6 +190,7 @@ export function hydrateCreateDraftFromRoomPolicy(
       allowedViewers: [],
       folderScopeMode: "full",
       folderPaths: [],
+      enableAiAssistant: true,
     },
     policy,
   );

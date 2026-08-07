@@ -311,7 +311,7 @@ export function AccessTab({
     updateDraft,
   ]);
 
-  const advancedCount = countAdvancedEnabled(draft);
+  const advancedCount = countAdvancedEnabled(draft, { countAiAssistant: isDealRoomLink });
   /** Document links cannot use email verification; room floor locks it ON. */
   const verificationDisabledForDocuments = !isDealRoomLink;
   const emailSelfReportDisabled = verifyFloor;
@@ -719,15 +719,14 @@ export function AccessTab({
   const advancedBody = (
     <>
       {isDealRoomLink ? (
-        <div
-          className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5"
-          data-testid="deal-room-ask-host-included"
-        >
-          <p className="text-sm font-medium">{t("accessRules.advanced.dealRoomAskHostTitle")}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("accessRules.advanced.dealRoomAskHostDescription")}
-          </p>
-        </div>
+        <OptionSwitch
+          label={t("accessRules.advanced.aiAssistant")}
+          description={t("accessRules.advanced.aiAssistantDescription")}
+          checked={draft.enableAiAssistant}
+          onCheckedChange={(checked) => updateDraft({ enableAiAssistant: checked })}
+          highlighted={isHighlighted("enableAiAssistant")}
+          testId="deal-room-ai-assistant-toggle"
+        />
       ) : null}
       {STANDALONE_ADVANCED_KEYS.map((key) => (
         <OptionSwitch

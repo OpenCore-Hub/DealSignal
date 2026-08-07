@@ -631,7 +631,9 @@ export function DealRoomDetailPage() {
 
           {tab === "knowledge" && <DealRoomKnowledgeTab roomId={room.id} />}
 
-          {tab === "qa" && <DealRoomQATab roomId={room.id} />}
+          {tab === "qa" && (
+            <DealRoomQATab roomId={room.id} initialLinkId={deepLinkAccessLinkId} />
+          )}
 
           {tab === "activity" && (
             <DealRoomActivityTab

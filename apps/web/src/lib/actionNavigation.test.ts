@@ -55,4 +55,34 @@ describe("actionNavigatePath", () => {
     expect(path).toContain("/documents?");
     expect(path).not.toContain("/deal-rooms/");
   });
+
+  it("routes deal-room visitor Ask todos to QA inbox with link filter", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "deal_room_link_question",
+        sourceId: "question-1",
+        targetId: "room-1/link-room",
+      }),
+    ).toBe("/acme/deal-rooms/room-1?tab=qa&linkId=link-room");
+  });
+
+  it("refuses legacy link_question rows without a deal-room target", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "link_question",
+        sourceId: "question-legacy",
+      }),
+    ).toBeNull();
+  });
+
+  it("does not route deal-room Ask todos to document share surfaces", () => {
+    const path = actionNavigatePath("acme", {
+      sourceType: "deal_room_link_question",
+      sourceId: "question-1",
+      targetId: "room-1/link-room",
+    });
+    expect(path).toContain("/deal-rooms/room-1?tab=qa");
+    expect(path).not.toContain("/documents");
+    expect(path).not.toMatch(/\/links\//);
+  });
 });

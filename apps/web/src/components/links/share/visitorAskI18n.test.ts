@@ -20,13 +20,13 @@ describe("Share link Ask Host i18n (deal-room owner surfaces)", () => {
     }
   });
 
-  it("separates Ask Host management copy from Signal inbox (B7)", () => {
-    expect(enLinkShare.management.questionsTitle).toMatch(/Ask Host/i);
-    expect(zhLinkShare.management.questionsTitle).toContain("问发起方");
+  it("separates Ask management copy from Signal inbox (B7)", () => {
+    expect(enLinkShare.management.questionsTitle).toMatch(/Ask inbox/i);
+    expect(zhLinkShare.management.questionsTitle).toContain("Ask");
     expect(enLinkShare.management.questionsDescription).toMatch(/not the Signal inbox/i);
     expect(zhLinkShare.management.questionsDescription).toContain("信号");
 
-    expect(enLinkShare.analytics.qaRecords).toMatch(/Ask Host/i);
-    expect(zhLinkShare.analytics.qaRecords).toContain("问发起方");
+    expect(enLinkShare.analytics.qaRecords).toMatch(/Ask activity/i);
+    expect(zhLinkShare.analytics.qaRecords).toContain("Ask");
   });
 });

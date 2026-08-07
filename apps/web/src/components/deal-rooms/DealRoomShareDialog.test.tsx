@@ -6,8 +6,18 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { createTestI18n } from "@/i18n/test-utils";
+import enLinkShare from "@/i18n/locales/en/linkShare.json";
 import * as shareModule from "@/components/links/share";
 import type { Link } from "@/types";
+
+function expandAdvancedAndToggleAiAssistant(enabled: boolean) {
+  fireEvent.click(screen.getByText(/advanced/i));
+  const switchEl = screen.getByRole("switch", { name: /AI assistant/i });
+  const isChecked = switchEl.getAttribute("aria-checked") === "true";
+  if (isChecked !== enabled) {
+    fireEvent.click(switchEl);
+  }
+}
 
 vi.mock("@/lib/api", () => ({
   api: {
@@ -50,12 +60,7 @@ async function renderDialog(ui: React.ReactNode) {
       "share.active": "Active",
       "share.inactive": "Inactive",
     },
-    linkShare: {
-      "share.title": "Basic configuration",
-      "share.savedButtonLabel": "Saved",
-      "documents.title": "Scope",
-      "share.documentScope.modeLabel": "Document scope",
-    },
+    linkShare: enLinkShare,
     common: {
       loading: "Loading...",
       cancel: "Cancel",
@@ -149,5 +154,102 @@ describe("DealRoomShareDialog", () => {
     });
 
     validateSpy.mockRestore();
+  });
+
+  it("sends ask_ai_enabled false on create when AI assistant is disabled", async () => {
+    const validateSpy = vi.spyOn(shareModule, "validateDraft").mockReturnValue({});
+    vi.mocked(api.createDealRoomLink).mockResolvedValue({
+      id: "link-new",
+      name: "No AI",
+      shortUrl: "http://localhost/l/abc",
+      dealRoomId: "room-1",
+      isActive: true,
+      qaEnabled: true,
+      askAiEnabled: false,
+    } as Link);
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Create share link")).toBeInTheDocument();
+    });
+
+    await expandAdvancedAndToggleAiAssistant(false);
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(api.createDealRoomLink).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({ ask_ai_enabled: false }),
+      );
+    });
+
+    validateSpy.mockRestore();
+  });
+
+  it("sends ask_ai_enabled true on create by default for deal-room links", async () => {
+    const validateSpy = vi.spyOn(shareModule, "validateDraft").mockReturnValue({});
+    vi.mocked(api.createDealRoomLink).mockResolvedValue({
+      id: "link-new",
+      name: "With AI",
+      shortUrl: "http://localhost/l/abc",
+      dealRoomId: "room-1",
+      isActive: true,
+      qaEnabled: true,
+      askAiEnabled: true,
+    } as Link);
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByText("Create share link")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Create link" }));
+
+    await waitFor(() => {
+      expect(api.createDealRoomLink).toHaveBeenCalledWith(
+        "room-1",
+        expect.objectContaining({ ask_ai_enabled: true }),
+      );
+    });
+
+    validateSpy.mockRestore();
+  });
+
+  it("sends ask_ai_enabled false and qa_enabled true on update when AI assistant is disabled", async () => {
+    const existingLink = {
+      id: "link-1",
+      name: "Investor pack",
+      shortUrl: "http://localhost/l/abc",
+      dealRoomId: "room-1",
+      isActive: true,
+      qaEnabled: true,
+      askAiEnabled: true,
+      requireEmailVerification: true,
+      watermarkEnabled: true,
+    } as Link;
+    vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [existingLink] });
+    vi.mocked(api.getLinkAccessRules).mockResolvedValue({
+      data: [{ ruleType: "email", value: "alice@vc.com", action: "allow" }],
+    });
+    vi.mocked(api.updateLinkFull).mockResolvedValue({ ...existingLink, askAiEnabled: false });
+    vi.mocked(api.setLinkAccessRules).mockResolvedValue(undefined);
+
+    await renderDialog(<DealRoomShareDialog roomId="room-1" linkId="link-1" open />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Save link settings" })).toBeInTheDocument();
+    });
+
+    await expandAdvancedAndToggleAiAssistant(false);
+    fireEvent.click(screen.getByRole("button", { name: "Save link settings" }));
+
+    await waitFor(() => {
+      expect(api.updateLinkFull).toHaveBeenCalledWith(
+        "link-1",
+        expect.objectContaining({ qa_enabled: true, ask_ai_enabled: false }),
+      );
+    });
   });
 });

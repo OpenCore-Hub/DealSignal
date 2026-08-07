@@ -28,8 +28,8 @@ import {
   DocumentsTab,
   ShareTab,
   buildAllowedLists,
+  buildDealRoomLinkCreatePayload,
   buildLinkPayload,
-  toRFC3339,
   validateDraft,
 } from "@/components/links/share";
 import type { DraftLink } from "@/components/links/share";
@@ -276,34 +276,13 @@ function DealRoomShareDialogContent({
       if (!link) {
         const { allowedEmails } = buildAllowedLists(payloadDraft);
         const linkOnlyBlocked = linkOnlyBlockedViewers(payloadDraft, data?.policy);
-        link = await api.createDealRoomLink(roomId, {
-          name: payloadDraft.name.trim(),
-          require_email: payloadDraft.requireEmail,
-          require_email_verification: payloadDraft.requireEmailVerification,
-          require_nda: payloadDraft.requireNda,
-          nda_template_id: payloadDraft.requireNda
-            ? payloadDraft.ndaTemplateId || undefined
-            : undefined,
-          nda_document_id: payloadDraft.requireNda ? payloadDraft.ndaDocumentId : undefined,
-          require_password: payloadDraft.requirePassword,
-          password:
-            payloadDraft.requirePassword && payloadDraft.password
-              ? payloadDraft.password
-              : undefined,
-          allowed_emails: allowedEmails.length > 0 ? allowedEmails : undefined,
-          blocked_emails: linkOnlyBlocked.length > 0 ? linkOnlyBlocked : undefined,
-          expires_at: toRFC3339(payloadDraft.expiresAt) || undefined,
-          download_enabled: payloadDraft.allowDownloading,
-          watermark_enabled: payloadDraft.watermarkEnabled,
-          file_requests_enabled: payloadDraft.enableFileRequests,
-          index_file_enabled: payloadDraft.enableIndexFileGeneration,
-          screenshot_protection_enabled: payloadDraft.enableScreenshotProtection,
-          custom_domain: payloadDraft.customDomain || undefined,
-          notify_on_access: payloadDraft.notifyOnAccess,
-          folder_paths:
-            payloadDraft.folderScopeMode === "allowlist" ? payloadDraft.folderPaths : undefined,
-          folder_scope_mode: payloadDraft.folderScopeMode === "allowlist" ? "allowlist" : "full",
-        });
+        link = await api.createDealRoomLink(
+          roomId,
+          buildDealRoomLinkCreatePayload(payloadDraft, {
+            allowedEmails,
+            blockedEmails: linkOnlyBlocked,
+          }),
+        );
       } else {
         await api.updateLinkFull(link.id, buildLinkPayload(payloadDraft, link));
         await api.setLinkAccessRules(link.id, buildLinkScopedRules(payloadDraft, data?.policy));

@@ -67,6 +67,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
+  enableAiAssistant: true,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -237,7 +238,7 @@ describe("AccessTab", () => {
   });
 
   it("shows advanced count badge when file requests is enabled", () => {
-    renderAccessTab({ ...baseDraft, enableFileRequests: true });
+    renderAccessTab({ ...baseDraft, enableFileRequests: true, enableAiAssistant: false }, {}, true);
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
@@ -246,8 +247,14 @@ describe("AccessTab", () => {
       ...baseDraft,
       enableFileRequests: true,
       enableIndexFileGeneration: true,
-    });
+      enableAiAssistant: false,
+    }, {}, true);
     expect(screen.getByText("2 enabled")).toBeInTheDocument();
+  });
+
+  it("counts AI assistant in advanced badge for deal-room links", () => {
+    renderAccessTab({ ...baseDraft, enableAiAssistant: true }, {}, true);
+    expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
   it("renders advanced options without Ask Host toggle", () => {
@@ -259,18 +266,25 @@ describe("AccessTab", () => {
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
   });
 
-  it("shows Ask Host included notice for deal-room links", () => {
+  it("shows AI assistant toggle for deal-room links", () => {
     renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByTestId("deal-room-ask-host-included")).toBeInTheDocument();
-    expect(screen.getByText(/Ask Host included/i)).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: /Visitor Ask/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("deal-room-ai-assistant-toggle")).toBeInTheDocument();
+    expect(screen.getByText(/AI assistant/i)).toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /AI assistant/i })).toBeInTheDocument();
   });
 
-  it("does not show Ask Host included notice for document-only links", () => {
+  it("toggles AI assistant for deal-room links", () => {
+    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
+    fireEvent.click(screen.getByText(/advanced/i));
+    fireEvent.click(screen.getByRole("switch", { name: /AI assistant/i }));
+    expect(updateDraft).toHaveBeenCalledWith({ enableAiAssistant: false });
+  });
+
+  it("does not show AI assistant toggle for document-only links", () => {
     renderAccessTab(baseDraft, {}, false);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.queryByTestId("deal-room-ask-host-included")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("deal-room-ai-assistant-toggle")).not.toBeInTheDocument();
   });
 
   it("renders all advanced options when section is expanded", () => {
@@ -285,7 +299,7 @@ describe("AccessTab", () => {
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
     expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
-    expect(screen.queryByRole("switch", { name: /Enable AI assistant/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("switch", { name: /AI assistant/i })).not.toBeDisabled();
   });
 
   it("displays validation errors", () => {

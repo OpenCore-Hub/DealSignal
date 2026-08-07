@@ -23,6 +23,7 @@ import { RightSidebar } from "./RightSidebar";
 import { shouldShowVisitorWorkspace } from "./visitorWorkspace";
 import { visitorAskUnifiedEnabled } from "@/lib/visitorAskUnified";
 import { PublicDealRoomLinkViewer } from "./PublicDealRoomLinkViewer";
+import type { DealRoomKnowledgeQueryHit } from "@/types";
 import {
   PublicGateCard,
   PublicGateCardBody,
@@ -226,6 +227,7 @@ export function PublicViewerPage() {
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [requestedViewerPage, setRequestedViewerPage] = useState<number | null>(null);
   // Monotonic id so in-flight Access responses are ignored after a newer
   // tryAccess starts (token/invite change or double-submit). Replaces a
   // boolean lock that could drop the newer request entirely.
@@ -1005,6 +1007,23 @@ export function PublicViewerPage() {
     setSidebarOpen((v) => !v);
   }, [showWorkspace]);
 
+  const handleOpenCitation = useCallback(
+    (hit: DealRoomKnowledgeQueryHit) => {
+      if (!access?.documents.length) return;
+      const documentId = hit.documentId?.trim();
+      if (!documentId) return;
+      const idx = access.documents.findIndex((doc) => doc.id === documentId);
+      if (idx < 0) return;
+      setSelectedDocIndex(idx);
+      const page = hit.viewerPage ?? hit.pages?.[0];
+      if (page && page > 0) {
+        setRequestedViewerPage(page);
+      }
+      setSidebarOpen(false);
+    },
+    [access?.documents],
+  );
+
   if (loading) {
     return <PublicGateLoadingScreen />;
   }
@@ -1598,6 +1617,8 @@ export function PublicViewerPage() {
         publicDocument={doc}
         publicVisitorId={access.visitorId}
         publicAccessCredentials={accessCredentials}
+        requestedPage={requestedViewerPage}
+        onRequestedPageApplied={() => setRequestedViewerPage(null)}
         watermark={access.link.watermarkEnabled ? { watermarkText: access.link.watermarkText } : null}
         sidebarOpen={showWorkspace && sidebarOpen}
         onToggleSidebar={showWorkspace ? toggleSidebar : undefined}
@@ -1615,6 +1636,7 @@ export function PublicViewerPage() {
                 fileRequestsEnabled={access.link.fileRequestsEnabled}
                 publicToken={token}
                 publicSessionToken={accessCredentials.sessionToken}
+                onOpenCitation={handleOpenCitation}
               />
             ) : (
               <RightSidebar

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAllowedLists, buildDraft, buildLinkPayload, buildRules, toDateTimeLocal, toRFC3339, validateDraft, isValidCustomDomain, normalizeEmailIdentityGates } from "./utils";
+import { buildAllowedLists, buildDraft, buildDealRoomLinkCreatePayload, buildLinkPayload, buildRules, resolveAskAiEnabledFromDraft, toDateTimeLocal, toRFC3339, validateDraft, isValidCustomDomain, normalizeEmailIdentityGates } from "./utils";
 import type { DraftLink } from "./types";
 import type { AccessRule, Link } from "@/types";
 
@@ -18,6 +18,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
+  enableAiAssistant: false,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -102,6 +103,23 @@ describe("buildLinkPayload", () => {
     expect(payload.expires_at).toBeUndefined();
   });
 
+  it("always sends qa_enabled false for document links", () => {
+    const payload = buildLinkPayload({ ...baseDraft, enableAiAssistant: false });
+    expect(payload.qa_enabled).toBe(false);
+    expect(payload.ask_ai_enabled).toBeUndefined();
+  });
+
+  it("sends qa_enabled true and ask_ai_enabled from toggle for deal-room links", () => {
+    const existingLink = { id: "link-1", dealRoomId: "room-1" } as unknown as Link;
+    const offPayload = buildLinkPayload({ ...baseDraft, enableAiAssistant: false }, existingLink);
+    expect(offPayload.qa_enabled).toBe(true);
+    expect(offPayload.ask_ai_enabled).toBe(false);
+
+    const onPayload = buildLinkPayload({ ...baseDraft, enableAiAssistant: true }, existingLink);
+    expect(onPayload.qa_enabled).toBe(true);
+    expect(onPayload.ask_ai_enabled).toBe(true);
+  });
+
   it("includes contact_ids for document links when verification is enabled", () => {
     const draft: DraftLink = {
       ...baseDraft,
@@ -182,6 +200,29 @@ describe("buildLinkPayload", () => {
     const payload = buildLinkPayload(draft);
     expect(payload.folder_scope_mode).toBe("full");
     expect(payload.folder_paths).toBeUndefined();
+  });
+});
+
+describe("resolveAskAiEnabledFromDraft", () => {
+  it("returns true only when enableAiAssistant is explicitly true", () => {
+    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, enableAiAssistant: true })).toBe(true);
+    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, enableAiAssistant: false })).toBe(false);
+  });
+});
+
+describe("buildDealRoomLinkCreatePayload", () => {
+  it("maps create fields and ask_ai_enabled from the AI assistant toggle", () => {
+    const payload = buildDealRoomLinkCreatePayload(
+      { ...baseDraft, name: " Room Link ", enableAiAssistant: false, requirePassword: true, password: "password123" },
+      { allowedEmails: ["a@b.com"], blockedEmails: ["c@d.com"] },
+    );
+    expect(payload.name).toBe("Room Link");
+    expect(payload.ask_ai_enabled).toBe(false);
+    expect(JSON.stringify(payload)).toContain('"ask_ai_enabled":false');
+    expect(payload).not.toHaveProperty("qa_enabled");
+    expect(payload.allowed_emails).toEqual(["a@b.com"]);
+    expect(payload.blocked_emails).toEqual(["c@d.com"]);
+    expect(payload.password).toBe("password123");
   });
 });
 

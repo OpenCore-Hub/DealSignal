@@ -1,0 +1,218 @@
+import { describe, expect, it } from "vitest";
+import {
+  attachOwnerAskRepeatCounts,
+  countSimilarAskQuestions,
+  matchesOwnerAskInboxFilter,
+  moveOwnerAskPinnedFAQ,
+  normalizeAskQuestionKey,
+  ownerAskFaqReorderEnabled,
+  ownerAskInboxUsesPinnedFAQApi,
+  ownerAskInboxQuery,
+  ownerAskTurnCanPinFAQ,
+  ownerAskTurnCanUnpinFAQ,
+  ownerAskTurnNeedsHostReply,
+  ownerAskTurnSuggestPinFAQ,
+  sortOwnerAskPinnedFAQs,
+} from "./ownerAskInbox";
+import type { OwnerAskTurn } from "@/types";
+
+describe("ownerAskInboxQuery", () => {
+  it("maps needs_host to host pending", () => {
+    expect(ownerAskInboxQuery("needs_host")).toEqual({
+      lane: "host",
+      status: "host_pending",
+    });
+  });
+
+  it("maps formal_queue to formal_queue status", () => {
+    expect(ownerAskInboxQuery("formal_queue")).toEqual({ status: "formal_queue" });
+  });
+
+  it("maps ai_handled to ai answered", () => {
+    expect(ownerAskInboxQuery("ai_handled")).toEqual({
+      lane: "ai",
+      status: "ai_answered",
+    });
+  });
+
+  it("uses pinned FAQ API for pinned_faq view", () => {
+    expect(ownerAskInboxUsesPinnedFAQApi("pinned_faq")).toBe(true);
+    expect(ownerAskInboxUsesPinnedFAQApi("all")).toBe(false);
+  });
+});
+
+describe("matchesOwnerAskInboxFilter", () => {
+  it("includes hybrid host_pending in needs_host view", () => {
+    const turn = {
+      lane: "hybrid",
+      status: "host_pending",
+    } as OwnerAskTurn;
+    expect(matchesOwnerAskInboxFilter(turn, "host", "host_pending")).toBe(true);
+  });
+
+  it("includes hybrid host_escalated in needs_host view", () => {
+    const turn = {
+      lane: "hybrid",
+      status: "host_escalated",
+    } as OwnerAskTurn;
+    expect(matchesOwnerAskInboxFilter(turn, "host", "host_pending")).toBe(true);
+  });
+
+  it("excludes formal queue from needs_host and includes in formal_queue", () => {
+    const formalTurn = {
+      lane: "host",
+      status: "host_pending",
+      route_reason: "policy_formal",
+      formal_status: "pending_review",
+    } as OwnerAskTurn;
+    expect(matchesOwnerAskInboxFilter(formalTurn, "host", "host_pending")).toBe(false);
+    expect(matchesOwnerAskInboxFilter(formalTurn, "", "formal_queue")).toBe(true);
+  });
+
+  it("excludes hybrid pending from ai_handled view", () => {
+    const turn = {
+      lane: "hybrid",
+      status: "host_pending",
+    } as OwnerAskTurn;
+    expect(matchesOwnerAskInboxFilter(turn, "ai", "ai_answered")).toBe(false);
+  });
+});
+
+describe("ownerAskTurnNeedsHostReply", () => {
+  it("detects host pending turns", () => {
+    const turn = {
+      lane: "host",
+      status: "host_pending",
+    } as OwnerAskTurn;
+    expect(ownerAskTurnNeedsHostReply(turn)).toBe(true);
+  });
+
+  it("detects hybrid escalated turns", () => {
+    const turn = {
+      lane: "hybrid",
+      status: "host_escalated",
+    } as OwnerAskTurn;
+    expect(ownerAskTurnNeedsHostReply(turn)).toBe(true);
+  });
+});
+
+describe("ownerAskTurnCanPinFAQ", () => {
+  it("allows ai answered turns with answer text", () => {
+    const turn = {
+      status: "ai_answered",
+      ai_payload: { answer: "yes", refused: false, resultStatus: "answered" },
+    } as OwnerAskTurn;
+    expect(ownerAskTurnCanPinFAQ(turn)).toBe(true);
+  });
+
+  it("rejects already pinned turns", () => {
+    const turn = {
+      status: "ai_answered",
+      pinned_faq_at: "2026-01-01T00:00:00Z",
+      ai_payload: { answer: "yes", refused: false, resultStatus: "answered" },
+    } as OwnerAskTurn;
+    expect(ownerAskTurnCanPinFAQ(turn)).toBe(false);
+  });
+});
+
+describe("ownerAskTurnCanUnpinFAQ", () => {
+  it("detects pinned turns", () => {
+    const turn = {
+      pinned_faq_at: "2026-01-01T00:00:00Z",
+    } as OwnerAskTurn;
+    expect(ownerAskTurnCanUnpinFAQ(turn)).toBe(true);
+  });
+});
+
+describe("sortOwnerAskPinnedFAQs", () => {
+  it("orders by pinned_faq_sort ascending", () => {
+    const turns = [
+      { id: "b", pinned_faq_at: "2026-01-02T00:00:00Z", pinned_faq_sort: 1 },
+      { id: "a", pinned_faq_at: "2026-01-01T00:00:00Z", pinned_faq_sort: 0 },
+    ] as OwnerAskTurn[];
+    expect(sortOwnerAskPinnedFAQs(turns).map((t) => t.id)).toEqual(["a", "b"]);
+  });
+});
+
+describe("moveOwnerAskPinnedFAQ", () => {
+  it("swaps adjacent pinned FAQs", () => {
+    const turns = [
+      { id: "a", pinned_faq_at: "2026-01-01T00:00:00Z", pinned_faq_sort: 0 },
+      { id: "b", pinned_faq_at: "2026-01-02T00:00:00Z", pinned_faq_sort: 1 },
+    ] as OwnerAskTurn[];
+    const moved = moveOwnerAskPinnedFAQ(turns, "b", "up");
+    expect(moved.map((t) => t.id)).toEqual(["b", "a"]);
+    expect(moved.map((t) => t.pinned_faq_sort)).toEqual([0, 1]);
+  });
+});
+
+describe("ownerAskFaqReorderEnabled", () => {
+  it("enables reorder on link pinned_faq view", () => {
+    expect(ownerAskFaqReorderEnabled("pinned_faq", { type: "link" })).toBe(true);
+  });
+
+  it("requires single-link filter in room scope", () => {
+    expect(ownerAskFaqReorderEnabled("pinned_faq", { type: "room", linkFilter: "all" })).toBe(
+      false,
+    );
+    expect(ownerAskFaqReorderEnabled("pinned_faq", { type: "room", linkFilter: "link_1" })).toBe(
+      true,
+    );
+  });
+});
+
+describe("normalizeAskQuestionKey", () => {
+  it("normalizes casing and punctuation", () => {
+    expect(normalizeAskQuestionKey("  What is NDA?  ")).toBe("what is nda");
+  });
+});
+
+describe("countSimilarAskQuestions", () => {
+  it("counts same-link repeats only", () => {
+    const turns = [
+      { id: "1", link_id: "l1", question: "What is NDA?" },
+      { id: "2", link_id: "l1", question: "what is nda" },
+      { id: "3", link_id: "l2", question: "what is nda" },
+    ] as OwnerAskTurn[];
+    expect(countSimilarAskQuestions(turns, turns[0])).toBe(2);
+  });
+});
+
+describe("attachOwnerAskRepeatCounts", () => {
+  it("sets repeat_count per link and normalized question", () => {
+    const turns = [
+      { id: "1", link_id: "l1", question: "What is NDA?" },
+      { id: "2", link_id: "l1", question: "what is nda" },
+      { id: "3", link_id: "l2", question: "what is nda" },
+    ] as OwnerAskTurn[];
+    const out = attachOwnerAskRepeatCounts(turns);
+    expect(out[0].repeat_count).toBe(2);
+    expect(out[2].repeat_count).toBe(1);
+  });
+});
+
+describe("ownerAskTurnSuggestPinFAQ", () => {
+  it("suggests pin when repeat_count meets threshold", () => {
+    const turn = {
+      id: "1",
+      link_id: "l1",
+      question: "pricing?",
+      status: "ai_answered",
+      repeat_count: 3,
+      ai_payload: { answer: "x", refused: false, resultStatus: "answered" },
+    } as OwnerAskTurn;
+    expect(ownerAskTurnSuggestPinFAQ(turn)).toBe(true);
+  });
+
+  it("does not suggest when repeat_count is below threshold", () => {
+    const turn = {
+      id: "1",
+      link_id: "l1",
+      question: "pricing?",
+      status: "ai_answered",
+      repeat_count: 2,
+      ai_payload: { answer: "x", refused: false, resultStatus: "answered" },
+    } as OwnerAskTurn;
+    expect(ownerAskTurnSuggestPinFAQ(turn)).toBe(false);
+  });
+});

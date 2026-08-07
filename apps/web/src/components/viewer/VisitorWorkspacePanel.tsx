@@ -20,6 +20,7 @@ import {
   type VisitorWorkspaceTab,
 } from "./visitorWorkspace";
 import { cn } from "@/lib/utils";
+import type { DealRoomKnowledgeQueryHit } from "@/types";
 
 interface DocSummary {
   id: string;
@@ -39,6 +40,7 @@ interface VisitorWorkspacePanelProps {
   fileRequestsEnabled?: boolean;
   publicToken?: string;
   publicSessionToken?: string;
+  onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
 }
 
 export function VisitorWorkspacePanel({
@@ -52,6 +54,7 @@ export function VisitorWorkspacePanel({
   fileRequestsEnabled,
   publicToken,
   publicSessionToken,
+  onOpenCitation,
 }: VisitorWorkspacePanelProps) {
   const { t } = useTranslation("documents");
   const hasFolderStructure = shouldGroupDocumentsByFolder(documents ?? []);
@@ -228,6 +231,7 @@ export function VisitorWorkspacePanel({
                 sessionToken={publicSessionToken}
                 qaEnabled={showAskTab}
                 unifiedAskEnabled={unifiedAskEnabled}
+                onOpenCitation={onOpenCitation}
               />
             ) : null}
             {activeTab === "requests" && showRequestsTab && publicToken ? (

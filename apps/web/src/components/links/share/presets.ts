@@ -21,6 +21,7 @@ export interface PresetValues {
   enableScreenshotProtection: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
+  enableAiAssistant: boolean;
   expiresAt: string;
 }
 
@@ -37,6 +38,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
+    enableAiAssistant: false,
     expiresAt: "",
   },
   standard: {
@@ -51,6 +53,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
+    enableAiAssistant: false,
     expiresAt: daysFromNow(30),
   },
   confidential: {
@@ -65,6 +68,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
+    enableAiAssistant: false,
     expiresAt: daysFromNow(7),
   },
 };

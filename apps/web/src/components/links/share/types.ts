@@ -15,6 +15,8 @@ export interface AccessConfig {
   enableScreenshotProtection: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
+  /** Deal-room links only: visitor Ask Docs on the public viewer. */
+  enableAiAssistant: boolean;
 }
 
 export interface DraftLink extends AccessConfig {

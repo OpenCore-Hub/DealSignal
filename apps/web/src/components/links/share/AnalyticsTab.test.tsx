@@ -53,6 +53,14 @@ vi.mock("@/lib/api", () => ({
 
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+vi.mock("./ManagementTab", () => ({
+  ManagementTab: () => <div data-testid="management-tab-stub" />,
+}));
+
+vi.mock("./AskSecurityEventsPanel", () => ({
+  AskSecurityEventsPanel: () => null,
+}));
+
 const baseLink = {
   id: "link-1",
   name: "Acme Corp",
@@ -586,5 +594,46 @@ describe("AnalyticsTab", () => {
       });
     });
     expect(await screen.findByText("contact10@example.com")).toBeInTheDocument();
+  });
+
+  it("shows Ask activity summary on Engage tab for deal-room links", async () => {
+    vi.mocked(api.getLinkAnalytics).mockResolvedValue({
+      data: {
+        ...emptyAnalytics,
+        ask_summary: {
+          total_turns: 5,
+          ai_answered: 2,
+          ai_refused: 1,
+          host_pending: 1,
+          host_answered: 1,
+          user_escalated: 1,
+          auto_escalated: 0,
+          deflection_rate: 2 / 3,
+          refuse_rate: 1 / 3,
+          escalation_rate: 1 / 3,
+        },
+      },
+    });
+    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
+
+    render(
+      <Wrapper>
+        <AnalyticsTab
+          link={{ ...baseLink, dealRoomId: "room_1" } as Link}
+          logs={[]}
+        />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(api.getLinkAnalytics).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /Engage/i }));
+    expect(await screen.findByText("Ask activity")).toBeInTheDocument();
+    expect(screen.getByText("AI answered")).toBeInTheDocument();
+    expect(screen.getByText("67%")).toBeInTheDocument();
+    expect(screen.getByText("Refuse rate")).toBeInTheDocument();
+    expect(screen.getByText("Escalation rate")).toBeInTheDocument();
+    expect(screen.getAllByText("33%").length).toBeGreaterThanOrEqual(2);
   });
 });

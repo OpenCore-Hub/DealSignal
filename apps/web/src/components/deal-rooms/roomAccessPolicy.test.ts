@@ -45,6 +45,7 @@ describe("roomAccessPolicy", () => {
     expect(draft.requireEmailVerification).toBe(true);
     expect(draft.requireNda).toBe(true);
     expect(draft.folderScopeMode).toBe("full");
+    expect(draft.enableAiAssistant).toBe(true);
   });
 
   it("clamp refuses turning floors off before save", () => {

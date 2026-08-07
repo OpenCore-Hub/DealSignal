@@ -140,7 +140,7 @@
       "whitelist_denied": "您的邮箱不在该链接的允许列表中。",
       "access_code_send_failed": "无法发送验证码，请重试。",
       "stream_error": "连接中断，请重试。",
-      "qa_disabled": "此链接暂不支持 Ask Host。",
+      "qa_disabled": "此链接暂不支持 Ask。",
       "rate_limit_exceeded": "请求过于频繁，请稍后再试。",
       "limiter_unavailable": "服务暂时不可用，请稍后重试。"
     }

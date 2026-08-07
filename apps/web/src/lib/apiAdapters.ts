@@ -20,6 +20,7 @@ export interface CreateLinkPayload {
   download_enabled?: boolean;
   watermark_enabled?: boolean;
   qa_enabled?: boolean;
+  ask_ai_enabled?: boolean;
   file_requests_enabled?: boolean;
   index_file_enabled?: boolean;
   screenshot_protection_enabled?: boolean;
@@ -30,6 +31,33 @@ export interface CreateLinkPayload {
 }
 
 export type UpdateLinkPayload = CreateLinkPayload;
+
+/** POST /deal-rooms/:roomId/links */
+export interface CreateDealRoomLinkPayload {
+  name?: string;
+  require_email?: boolean;
+  require_email_verification?: boolean;
+  require_nda?: boolean;
+  nda_document_id?: string;
+  nda_template_id?: string;
+  require_password?: boolean;
+  password?: string;
+  allowed_emails?: string[];
+  blocked_emails?: string[];
+  expires_at?: string;
+  download_enabled?: boolean;
+  watermark_enabled?: boolean;
+  qa_enabled?: boolean;
+  ask_ai_enabled?: boolean;
+  file_requests_enabled?: boolean;
+  index_file_enabled?: boolean;
+  screenshot_protection_enabled?: boolean;
+  custom_domain?: string;
+  tags?: string[];
+  notify_on_access?: boolean;
+  folder_paths?: string[];
+  folder_scope_mode?: "full" | "allowlist";
+}
 
 // Note: document sort_order is implicit — the backend stores the array index
 // position (i=0,1,2…) of each document_id in the `document_ids` field as the

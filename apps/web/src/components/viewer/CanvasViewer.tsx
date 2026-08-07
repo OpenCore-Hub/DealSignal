@@ -32,6 +32,8 @@ interface CanvasViewerProps {
   sidebarOpen?: boolean;
   onToggleSidebar?: () => void;
   sidebar?: React.ReactNode;
+  requestedPage?: number | null;
+  onRequestedPageApplied?: () => void;
   /**
    * Authenticated owner Viewer only: deal-room id for grounded knowledge rail.
    * Ignored when `publicToken` is set (Visitor channel stays separate).
@@ -50,6 +52,8 @@ export function CanvasViewer({
   sidebarOpen = false,
   onToggleSidebar,
   sidebar,
+  requestedPage = null,
+  onRequestedPageApplied,
   knowledgeRoomId,
 }: CanvasViewerProps = {}) {
   const { t } = useTranslation(["documents", "common"]);
@@ -88,6 +92,12 @@ export function CanvasViewer({
   });
 
   const totalPages = doc ? (pages.length > 0 ? pages.length : doc.pageCount) : 0;
+
+  useEffect(() => {
+    if (requestedPage == null || requestedPage < 1) return;
+    setPage(Math.min(requestedPage, Math.max(totalPages, 1)));
+    onRequestedPageApplied?.();
+  }, [requestedPage, totalPages, setPage, onRequestedPageApplied]);
 
   const goToPreviousPage = useCallback(() => {
     setPage((p) => Math.max(1, p - 1));

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import {
   CaretDown,
@@ -182,6 +182,14 @@ export function FolderPermissionsSection({
     await refetchPending();
     onLinksChanged?.();
   };
+
+  const handleViewLinkUpdate = useCallback(
+    (patch: Partial<Link>) => {
+      setViewLink((prev) => (prev ? { ...prev, ...patch } : null));
+      void refetch();
+    },
+    [refetch],
+  );
 
   const goToPage = (next: number) => {
     const clamped = Math.min(totalPages, Math.max(1, next));
@@ -631,6 +639,7 @@ export function FolderPermissionsSection({
           link={viewLink}
           open
           onOpenChange={(open) => !open && setViewLink(null)}
+          onLinkUpdate={handleViewLinkUpdate}
         />
       )}
 

@@ -141,7 +141,7 @@
       "whitelist_denied": "Your email is not on the allowed list for this link.",
       "access_code_send_failed": "Could not send the verification code. Please try again.",
       "stream_error": "Connection interrupted. Please try again.",
-      "qa_disabled": "Ask Host is not available for this link.",
+      "qa_disabled": "Ask is not available for this link.",
       "rate_limit_exceeded": "Too many requests. Please wait and try again.",
       "limiter_unavailable": "Service is temporarily unavailable. Please try again later."
     }
