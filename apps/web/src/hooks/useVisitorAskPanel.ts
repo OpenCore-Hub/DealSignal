@@ -11,33 +11,18 @@ import {
   publicAskTurnToKnowledgeTurn,
   turnNeedsAIStream,
 } from "@/lib/visitorAsk/turnModel";
-import type { PublicAskTurn, VisitorQuestion } from "@/types";
+import type { PublicAskTurn } from "@/types";
 
 type Creds = { sessionToken?: string } | undefined;
 
 const creds = (token?: string): Creds => (token ? { sessionToken: token } : undefined);
 
-function legacyQuestionToTurn(q: VisitorQuestion): PublicAskTurn {
-  return {
-    id: q.id,
-    session_id: "",
-    question: q.question,
-    lane: "host",
-    status: q.status === "answered" ? "host_answered" : "host_pending",
-    host_question_id: q.id,
-    host_answer: q.answer,
-    created_at: q.created_at,
-    updated_at: q.updated_at,
-  };
-}
-
 export function useVisitorAskPanel(opts: {
   token: string;
   sessionToken?: string;
   qaEnabled?: boolean;
-  unifiedAskEnabled?: boolean;
 }) {
-  const { token, sessionToken, qaEnabled = true, unifiedAskEnabled = true } = opts;
+  const { token, sessionToken, qaEnabled = true } = opts;
   const { t } = useTranslation("documents");
   const sessionTokenRef = useRef(sessionToken);
   sessionTokenRef.current = sessionToken;
@@ -57,21 +42,14 @@ export function useVisitorAskPanel(opts: {
     setError(null);
     setLoading(true);
     try {
-      const res = unifiedAskEnabled
-        ? await api.listPublicAskTurns(token, creds(sessionTokenRef.current))
-        : await api.listPublicQuestions(token, creds(sessionTokenRef.current));
-      const rows = res.data ?? [];
-      setTurns(
-        unifiedAskEnabled
-          ? (rows as PublicAskTurn[])
-          : (rows as VisitorQuestion[]).map(legacyQuestionToTurn),
-      );
+      const res = await api.listPublicAskTurns(token, creds(sessionTokenRef.current));
+      setTurns(res.data ?? []);
     } catch {
       setError(t("viewer.askLoadError"));
     } finally {
       setLoading(false);
     }
-  }, [qaEnabled, t, token, unifiedAskEnabled]);
+  }, [qaEnabled, t, token]);
 
   useEffect(() => {
     void reloadTurns();
@@ -153,15 +131,8 @@ export function useVisitorAskPanel(opts: {
       setSubmitting(true);
       setError(null);
       try {
-        let created: PublicAskTurn;
-        if (unifiedAskEnabled) {
-          const res = await api.createPublicAsk(token, text, creds(sessionTokenRef.current));
-          created = res.data;
-        } else {
-          await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
-          setRefreshKey((k) => k + 1);
-          return;
-        }
+        const res = await api.createPublicAsk(token, text, creds(sessionTokenRef.current));
+        const created = res.data;
         if (turnNeedsAIStream(created)) {
           setTurns((prev) => [...prev, created]);
           void streamTurn(created);
@@ -181,7 +152,7 @@ export function useVisitorAskPanel(opts: {
         setSubmitting(false);
       }
     },
-    [streamTurn, t, token, unifiedAskEnabled],
+    [streamTurn, t, token],
   );
 
   const escalateToHost = useCallback(

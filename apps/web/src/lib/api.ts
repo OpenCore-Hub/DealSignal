@@ -532,22 +532,7 @@ export const api = {
       method: "GET",
     }),
 
-  // Public Visitor Q&A
-  createPublicQuestion: (token: string, question: string, creds?: PublicLinkCredentials) =>
-    request<{ data: VisitorQuestion }>(undefined, `/v1/public/links/${token}/questions`, {
-      method: "POST",
-      skipAuth: true,
-      headers: publicAccessHeaders(creds),
-      body: JSON.stringify({ question }),
-    }),
-  listPublicQuestions: (token: string, creds?: PublicLinkCredentials) =>
-    request<{ data: VisitorQuestion[] }>(undefined, `/v1/public/links/${token}/questions/me`, {
-      method: "GET",
-      skipAuth: true,
-      headers: publicAccessHeaders(creds),
-    }),
-
-  // Unified public Visitor Ask (Phase A)
+  // Public Visitor Ask (unified)
   createPublicAsk: (
     token: string,
     question: string,
@@ -915,9 +900,7 @@ export const api = {
       { method: "POST" }
     ),
 
-  // Visitor Q&A / Ask Host
-  listLinkQuestions: (linkId: string) =>
-    request<{ data: VisitorQuestion[] }>(getWorkspaceSlug(), `/links/${linkId}/questions`),
+  // Owner Ask inbox (unified turns)
   listLinkAsk: (linkId: string, params: { lane?: string; status?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.lane) search.set("lane", params.lane);
@@ -935,15 +918,6 @@ export const api = {
       method: "PATCH",
       body: JSON.stringify({ turn_ids: turnIds }),
     }),
-  listRoomQuestions: (roomId: string, params: { linkId?: string } = {}) => {
-    const search = new URLSearchParams();
-    if (params.linkId) search.set("link_id", params.linkId);
-    const qs = search.toString();
-    return request<{ data: VisitorQuestion[] }>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/visitor-questions${qs ? `?${qs}` : ""}`,
-    );
-  },
   listRoomAsk: (roomId: string, params: { linkId?: string; lane?: string; status?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.linkId) search.set("link_id", params.linkId);
@@ -964,6 +938,7 @@ export const api = {
       `/deal-rooms/${roomId}/ask/faq${qs ? `?${qs}` : ""}`,
     );
   },
+  /** Legacy host-answer path for turns without ask_turn_id (pre-unified rows). */
   answerQuestion: (linkId: string, questionId: string, answer: string) =>
     request<{ data: VisitorQuestion }>(getWorkspaceSlug(), `/links/${linkId}/questions/${questionId}/answer`, {
       method: "PATCH",

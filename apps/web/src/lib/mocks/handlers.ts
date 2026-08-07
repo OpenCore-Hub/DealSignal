@@ -3178,33 +3178,6 @@ export const handlers = [
     return HttpResponse.json(newLink, { status: 201 });
   }),
 
-  http.get(
-    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/visitor-questions",
-    ({ params, request }) => {
-      const roomId = params.roomId as string;
-      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
-      const filterLinkId = new URL(request.url).searchParams.get("link_id");
-      const roomLinkIds = new Set(
-        mockLinks.filter((l) => l.dealRoomId === roomId).map((l) => l.id),
-      );
-      const rows: VisitorQuestion[] = [];
-      for (const [linkId, list] of mockOwnerQuestions) {
-        if (!roomLinkIds.has(linkId)) continue;
-        if (filterLinkId && linkId !== filterLinkId) continue;
-        rows.push(...list);
-      }
-      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return HttpResponse.json({ data: rows });
-    },
-  ),
-
-  http.get("*/api/workspaces/:workspaceSlug/links/:id/questions", ({ params }) => {
-    const linkId = params.id as string;
-    const link = mockLinks.find((l) => l.id === linkId);
-    if (!link) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json({ data: mockOwnerQuestions.get(linkId) ?? [] });
-  }),
-
   http.get("*/api/workspaces/:workspaceSlug/links/:id/ask", async ({ params, request }) => {
     await hydrateVisitorAskState();
     const linkId = params.id as string;
@@ -4458,53 +4431,6 @@ export const handlers = [
       requiresNda,
       sessionToken: "mock_session_token",
     });
-  }),
-
-  http.get("*/api/v1/public/links/:token/questions/me", ({ params }) => {
-    const token = params.token as string;
-    return HttpResponse.json({ data: mockPublicQuestionsDualRead(token) });
-  }),
-
-  http.post("*/api/v1/public/links/:token/questions", async ({ params, request }) => {
-    const token = params.token as string;
-    const body = (await request.json().catch(() => ({}))) as { question?: string };
-    const question = (body.question ?? "").trim();
-    if (!question) {
-      return HttpResponse.json({ code: "invalid_request", message: "question required" }, { status: 400 });
-    }
-    const lower = question.toLowerCase();
-    if (lower.includes("__rate_limit__")) {
-      return HttpResponse.json(
-        { code: "rate_limit_exceeded", message: "too many Ask requests, please try again later" },
-        { status: 429 },
-      );
-    }
-    if (lower.includes("__limiter_down__")) {
-      return HttpResponse.json(
-        {
-          code: "limiter_unavailable",
-          message: "Ask is temporarily unavailable, please try again later",
-        },
-        { status: 503 },
-      );
-    }
-    const row: VisitorQuestion = {
-      id: generateId("q"),
-      link_id: token,
-      visitor_id: "visitor_mock",
-      question,
-      status: "pending",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    const list = mockPublicQuestions.get(token) ?? [];
-    list.push(row);
-    mockPublicQuestions.set(token, list);
-    const link = findMockLinkByPublicToken(token);
-    if (link) {
-      appendOwnerQuestionFromPublicAsk(link, { ...row, link_id: link.id });
-    }
-    return HttpResponse.json({ data: row }, { status: 201 });
   }),
 
   http.get("*/api/v1/public/links/:token/ask/me", async ({ params }) => {

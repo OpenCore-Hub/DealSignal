@@ -15,8 +15,6 @@ interface UnifiedQAPanelProps {
   token: string;
   sessionToken?: string;
   qaEnabled?: boolean;
-  /** When false, uses legacy POST/GET /questions (pre-unified rollout). */
-  unifiedAskEnabled?: boolean;
   onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
 }
 
@@ -24,7 +22,6 @@ export function UnifiedQAPanel({
   token,
   sessionToken,
   qaEnabled,
-  unifiedAskEnabled = true,
   onOpenCitation,
 }: UnifiedQAPanelProps) {
   const { t } = useTranslation("documents");
@@ -43,7 +40,6 @@ export function UnifiedQAPanel({
     token,
     sessionToken,
     qaEnabled,
-    unifiedAskEnabled,
   });
   const { faqs: pinnedFaqs } = useVisitorPinnedFAQs({
     token,

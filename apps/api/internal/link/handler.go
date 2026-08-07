@@ -193,7 +193,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/renew", h.RenewLink)
 	g.POST("/:id/generate-index", h.GenerateLinkIndex)
 	g.GET("/:id/index-file", h.GetLinkIndexFile)
-	g.GET("/:id/questions", h.ListLinkVisitorQuestions)
+	g.GET("/:id/questions", h.ListLinkVisitorQuestions) // deprecated: use GET /:id/ask
 	g.GET("/:id/ask", h.ListLinkAskInbox)
 	g.GET("/:id/ask/faq", h.ListLinkAskPinnedFAQ)
 	g.PATCH("/:id/ask/faq/order", h.ReorderLinkAskFAQ)
@@ -203,7 +203,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/ask/:turnId/unpin-faq", h.UnpinAskTurnFAQ)
 	g.GET("/:id/ask-policy", h.GetLinkAskPolicy)
 	g.PATCH("/:id/ask-policy", h.PatchLinkAskPolicy)
-	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion)
+	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion) // deprecated: use PATCH /:id/ask/:turnId/host-answer
 	g.GET("/:id/ask-security-events", h.ListAskSecurityEvents)
 	g.GET("/:id/file-requests", h.ListLinkFileRequests)
 	g.PATCH("/:id/file-requests/:requestId/status", h.UpdateFileRequestStatus)
@@ -220,8 +220,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	r.GET("/deal-rooms/:roomId/access-policy", h.GetRoomAccessPolicy)
 	r.PUT("/deal-rooms/:roomId/access-policy", h.UpsertRoomAccessPolicy)
 
-	// Room-wide Ask Host inbox (across all links in the deal room).
-	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
+	// Room-wide Ask inbox (across all links in the deal room).
+	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions) // deprecated: use GET /deal-rooms/:roomId/ask
 	r.GET("/deal-rooms/:roomId/ask", h.ListRoomAskInbox)
 	r.GET("/deal-rooms/:roomId/ask/faq", h.ListRoomAskPinnedFAQ)
 	r.GET("/deal-rooms/:roomId/ask-security-events", h.ListRoomAskSecurityEvents)
@@ -242,8 +242,8 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
 	r.GET("/documents/:documentId/download-url", h.PublicDownloadURL)
 	r.GET("/deal-rooms/:slug/redirect", h.PublicDealRoomRedirect)
-	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion)
-	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions)
+	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion) // deprecated: use POST /links/:publicToken/ask
+	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions) // deprecated: use GET /links/:publicToken/ask/me
 	r.POST("/links/:publicToken/ask", h.PublicCreateAsk)
 	r.GET("/links/:publicToken/ask/me", h.PublicListMyAskTurns)
 	r.GET("/links/:publicToken/ask/faq", h.PublicListAskFAQ)

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   attachOwnerAskRepeatCounts,
   countSimilarAskQuestions,
+  countUnreadOwnerAskTurns,
   matchesOwnerAskInboxFilter,
   moveOwnerAskPinnedFAQ,
   normalizeAskQuestionKey,
@@ -38,6 +39,18 @@ describe("ownerAskInboxQuery", () => {
   it("uses pinned FAQ API for pinned_faq view", () => {
     expect(ownerAskInboxUsesPinnedFAQApi("pinned_faq")).toBe(true);
     expect(ownerAskInboxUsesPinnedFAQApi("all")).toBe(false);
+  });
+});
+
+describe("countUnreadOwnerAskTurns", () => {
+  it("counts host_pending and host_escalated turns", () => {
+    const turns = [
+      { status: "host_pending" },
+      { status: "host_escalated" },
+      { status: "host_answered" },
+      { status: "ai_answered" },
+    ] as OwnerAskTurn[];
+    expect(countUnreadOwnerAskTurns(turns)).toBe(2);
   });
 });
 

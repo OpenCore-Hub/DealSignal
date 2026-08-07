@@ -15,7 +15,6 @@ const {
   getPublicDocumentPagesMock,
   getPublicPageSignedUrlMock,
   recordPublicEventMock,
-  listPublicQuestionsMock,
   listPublicAskTurnsMock,
 } = vi.hoisted(() => ({
   accessPublicLinkMock: vi.fn(),
@@ -25,7 +24,6 @@ const {
   getPublicDocumentPagesMock: vi.fn(),
   getPublicPageSignedUrlMock: vi.fn(),
   recordPublicEventMock: vi.fn(),
-  listPublicQuestionsMock: vi.fn(),
   listPublicAskTurnsMock: vi.fn(),
 }));
 
@@ -38,7 +36,6 @@ vi.mock("@/lib/api", () => ({
     getPublicDocumentPages: getPublicDocumentPagesMock,
     getPublicPageSignedUrl: getPublicPageSignedUrlMock,
     recordPublicEvent: recordPublicEventMock,
-    listPublicQuestions: listPublicQuestionsMock,
     listPublicAskTurns: listPublicAskTurnsMock,
   },
 }));
@@ -135,7 +132,7 @@ describe("PublicViewerPage", () => {
     getPublicDocumentPagesMock.mockReset();
     getPublicPageSignedUrlMock.mockReset();
     recordPublicEventMock.mockReset();
-    listPublicQuestionsMock.mockReset();
+    listPublicAskTurnsMock.mockReset();
     listPublicAskTurnsMock.mockReset();
     getPublicDocumentPagesMock.mockResolvedValue({
       documentId: "doc-1",
@@ -150,7 +147,7 @@ describe("PublicViewerPage", () => {
       height: 792,
     });
     recordPublicEventMock.mockResolvedValue(undefined);
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    listPublicAskTurnsMock.mockResolvedValue({ data: [] });
     listPublicAskTurnsMock.mockResolvedValue({ data: [] });
     getPublicNDAPreviewMock.mockResolvedValue({
       ndaTemplate: {

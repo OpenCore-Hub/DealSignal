@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import { api } from "@/lib/api";
+import { countUnreadOwnerAskTurns } from "@/lib/ownerAskInbox";
 import { useDealRoomNavStore } from "@/stores/dealRoomNavStore";
-import type { Link } from "@/types";
+import type { Link, OwnerAskTurn } from "@/types";
 
 const ANALYTICS_LINK_CAP = 8;
 
@@ -68,8 +69,8 @@ export function useDealRoomNavSignals(roomId: string | undefined, refreshKey = 0
           viewCount,
         });
 
-        const [roomQuestionsRes, analyticsResults] = await Promise.all([
-          api.listRoomQuestions(roomId!).catch(() => ({ data: [] as { status: string }[] })),
+        const [roomAskRes, analyticsResults] = await Promise.all([
+          api.listRoomAsk(roomId!).catch(() => ({ data: [] as OwnerAskTurn[] })),
           Promise.all(
             links.slice(0, ANALYTICS_LINK_CAP).map(async (link) => {
               if (!link.requireEmailVerification) return null;
@@ -80,13 +81,9 @@ export function useDealRoomNavSignals(roomId: string | undefined, refreshKey = 0
 
         if (cancelled || generation !== generationRef.current) return;
 
-        const questionPayload = roomQuestionsRes as
-          | { data?: { status: string }[] }
-          | { status: string }[];
-        const questionRows = Array.isArray(questionPayload)
-          ? questionPayload
-          : (questionPayload.data ?? []);
-        const unreadQuestions = questionRows.filter((q) => q.status === "pending").length;
+        const askPayload = roomAskRes as { data?: OwnerAskTurn[] } | OwnerAskTurn[];
+        const askTurns = Array.isArray(askPayload) ? askPayload : (askPayload.data ?? []);
+        const unreadQuestions = countUnreadOwnerAskTurns(askTurns);
 
         let failedDeliveries = 0;
         for (const analyticsRes of analyticsResults) {

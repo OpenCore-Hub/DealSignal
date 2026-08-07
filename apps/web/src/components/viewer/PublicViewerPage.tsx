@@ -1632,7 +1632,6 @@ export function PublicViewerPage() {
                 selectedDocIndex={selectedDocIndex}
                 onSelectDoc={setSelectedDocIndex}
                 qaEnabled={access.link.qaEnabled}
-                unifiedAskEnabled
                 fileRequestsEnabled={access.link.fileRequestsEnabled}
                 publicToken={token}
                 publicSessionToken={accessCredentials.sessionToken}
@@ -1646,7 +1645,6 @@ export function PublicViewerPage() {
                 selectedDocIndex={selectedDocIndex}
                 onSelectDoc={setSelectedDocIndex}
                 qaEnabled={access.link.qaEnabled}
-                unifiedAskEnabled={false}
                 fileRequestsEnabled={access.link.fileRequestsEnabled}
                 publicToken={token}
                 publicSessionToken={accessCredentials.sessionToken}

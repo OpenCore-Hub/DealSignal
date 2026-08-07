@@ -22,7 +22,7 @@ const {
   createDealRoomFolderMock,
   getDealRoomLinksMock,
   getLinkAnalyticsMock,
-  listRoomQuestionsMock,
+  listRoomAskMock,
   getDealRoomKnowledgeMock,
   getDealRoomAnalyticsMock,
 } = vi.hoisted(() => ({
@@ -35,7 +35,7 @@ const {
   createDealRoomFolderMock: vi.fn(),
   getDealRoomLinksMock: vi.fn(),
   getLinkAnalyticsMock: vi.fn(),
-  listRoomQuestionsMock: vi.fn(),
+  listRoomAskMock: vi.fn(),
   getDealRoomKnowledgeMock: vi.fn(),
   getDealRoomAnalyticsMock: vi.fn(),
 }));
@@ -52,7 +52,7 @@ vi.mock("@/lib/api", () => ({
     createDealRoomFolder: createDealRoomFolderMock,
     getDealRoomLinks: getDealRoomLinksMock,
     getLinkAnalytics: getLinkAnalyticsMock,
-    listRoomQuestions: listRoomQuestionsMock,
+    listRoomAsk: listRoomAskMock,
     getDealRoomKnowledge: getDealRoomKnowledgeMock,
     getDealRoomAnalytics: getDealRoomAnalyticsMock,
     syncDealRoomKnowledge: vi.fn().mockResolvedValue(undefined),
@@ -272,14 +272,14 @@ describe("DealRoomDetailPage", () => {
     getDocumentByIdMock.mockReset();
     getDealRoomLinksMock.mockReset();
     getLinkAnalyticsMock.mockReset();
-    listRoomQuestionsMock.mockReset();
+    listRoomAskMock.mockReset();
     getDealRoomKnowledgeMock.mockReset();
     getDealRoomAnalyticsMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
     getDealRoomLinksMock.mockResolvedValue({ data: [] });
     getLinkAnalyticsMock.mockResolvedValue({ data: { access_code_contacts: [] } });
-    listRoomQuestionsMock.mockResolvedValue({ data: [] });
+    listRoomAskMock.mockResolvedValue({ data: [] });
     getDealRoomKnowledgeMock.mockResolvedValue({
       enabled: true,
       status: "ready",

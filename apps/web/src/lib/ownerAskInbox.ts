@@ -27,6 +27,11 @@ export function isOwnerAskNeedsHostStatus(status: OwnerAskTurn["status"]): boole
   return status === "host_pending" || status === "host_escalated";
 }
 
+/** Pending host attention across a room or link (nav badges, metrics). */
+export function countUnreadOwnerAskTurns(turns: OwnerAskTurn[]): number {
+  return turns.filter((turn) => isOwnerAskNeedsHostStatus(turn.status)).length;
+}
+
 /** Mirrors backend inbox filter semantics for MSW and tests. */
 export function matchesOwnerAskInboxFilter(
   turn: OwnerAskTurn,

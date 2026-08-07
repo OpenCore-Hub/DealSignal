@@ -7,7 +7,7 @@ func QaEnabledForLink(isDealRoomLink bool) bool {
 }
 
 // ResolveQaEnabled returns the persisted qa_enabled flag.
-// Document-only links always disable Ask; deal-room links always enable Ask Host baseline.
+// Document-only links always disable visitor Ask; deal-room links always enable it.
 func ResolveQaEnabled(isDealRoomLink bool, requested bool) bool {
 	if !isDealRoomLink {
 		return false

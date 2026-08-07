@@ -207,7 +207,7 @@ vi.mock("@/lib/api", () => ({
     listDealRoomKnowledgeArchives: vi.fn(),
     getDealRoomKnowledgeArchive: vi.fn(),
     getDealRoomAnalytics: vi.fn(),
-    listRoomQuestions: vi.fn(),
+    listRoomAsk: vi.fn(),
     getDealRoomLinks: vi.fn(),
   },
 }));
@@ -243,7 +243,7 @@ function mockRoomMetrics() {
     viewsOverTime: [],
     recentVisitors: [],
   });
-  vi.mocked(api.listRoomQuestions).mockResolvedValue({ data: [] });
+  vi.mocked(api.listRoomAsk).mockResolvedValue({ data: [] });
   vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
   vi.mocked(api.getActiveDealRoomKnowledgeSession).mockResolvedValue({
     session: null,

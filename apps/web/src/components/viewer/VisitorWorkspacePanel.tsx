@@ -36,7 +36,6 @@ interface VisitorWorkspacePanelProps {
   selectedDocIndex?: number;
   onSelectDoc?: (index: number) => void;
   qaEnabled?: boolean;
-  unifiedAskEnabled?: boolean;
   fileRequestsEnabled?: boolean;
   publicToken?: string;
   publicSessionToken?: string;
@@ -50,7 +49,6 @@ export function VisitorWorkspacePanel({
   selectedDocIndex = 0,
   onSelectDoc,
   qaEnabled,
-  unifiedAskEnabled = true,
   fileRequestsEnabled,
   publicToken,
   publicSessionToken,
@@ -230,7 +228,6 @@ export function VisitorWorkspacePanel({
                 token={publicToken}
                 sessionToken={publicSessionToken}
                 qaEnabled={showAskTab}
-                unifiedAskEnabled={unifiedAskEnabled}
                 onOpenCitation={onOpenCitation}
               />
             ) : null}

@@ -27,7 +27,6 @@ interface RightSidebarProps {
   onSelectDoc?: (index: number) => void;
   activeDocumentId?: string;
   qaEnabled?: boolean;
-  unifiedAskEnabled?: boolean;
   fileRequestsEnabled?: boolean;
   publicToken?: string;
   publicSessionToken?: string;
@@ -43,7 +42,6 @@ export function RightSidebar({
   onSelectDoc,
   activeDocumentId,
   qaEnabled,
-  unifiedAskEnabled = true,
   fileRequestsEnabled,
   publicToken,
   publicSessionToken,
@@ -251,7 +249,6 @@ export function RightSidebar({
                 token={publicToken}
                 sessionToken={publicSessionToken}
                 qaEnabled={qaEnabled}
-                unifiedAskEnabled={unifiedAskEnabled}
               />
             )}
           </div>
