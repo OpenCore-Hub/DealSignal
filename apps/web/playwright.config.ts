@@ -36,6 +36,7 @@ export default defineConfig({
         "**/visitor-ask-ai-stream.spec.ts",
         "**/visitor-ask-host-inbox.spec.ts",
         "**/visitor-ask-engage-policy.spec.ts",
+        "**/visitor-ask-repeat-routing.spec.ts",
       ],
       fullyParallel: false,
       workers: 1,

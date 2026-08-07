@@ -168,28 +168,24 @@ export async function setMockLinkAskPolicy(
   linkId: string,
   policy: { askAiEnabled?: boolean },
 ) {
-  await page.context().addCookies([
-    {
-      name: "auth_session",
-      value: "1",
-      url: "http://localhost:5175",
-      sameSite: "Lax",
-    },
-  ]);
   await page.goto("/");
   await waitForMsw(page);
   const res = await page.evaluate(
-    async ({ linkId: id, askAiEnabled, workspaceSlug }) => {
-      const r = await fetch(`/api/workspaces/${workspaceSlug}/links/${id}/ask-policy`, {
-        method: "PATCH",
+    async ({ linkId: id, askAiEnabled }) => {
+      const r = await fetch("/__e2e/reset", {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ask_ai_enabled: askAiEnabled }),
+        body: JSON.stringify({
+          action: "link-ask-policy",
+          linkId: id,
+          ...(typeof askAiEnabled === "boolean" ? { askAiEnabled } : {}),
+        }),
       });
       return r.status;
     },
-    { linkId, askAiEnabled: policy.askAiEnabled, workspaceSlug: WORKSPACE_SLUG },
+    { linkId, askAiEnabled: policy.askAiEnabled },
   );
-  if (res !== 200) {
+  if (res !== 204) {
     throw new Error(`setMockLinkAskPolicy failed: HTTP ${res}`);
   }
 }

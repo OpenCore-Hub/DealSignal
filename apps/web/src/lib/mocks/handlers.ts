@@ -3520,8 +3520,8 @@ export const handlers = [
     return HttpResponse.json({
       data: {
         id: link.id,
-        ask_mode: link.askMode ?? "supervised",
-        ask_ai_enabled: link.askAiEnabled ?? false,
+        ask_mode: resolveLinkAskMode(link),
+        ask_ai_enabled: resolveLinkAskAiEnabled(link),
         ask_ai_monthly_quota: null,
         ask_ai_monthly_used: used,
         ask_ai_monthly_limit: limit,
@@ -3556,8 +3556,8 @@ export const handlers = [
     return HttpResponse.json({
       data: {
         id: link.id,
-        ask_mode: link.askMode ?? "supervised",
-        ask_ai_enabled: link.askAiEnabled ?? false,
+        ask_mode: resolveLinkAskMode(link),
+        ask_ai_enabled: resolveLinkAskAiEnabled(link),
         ask_ai_monthly_quota: null,
         ask_ai_monthly_used: 0,
         ask_ai_monthly_limit: 500,
@@ -4535,7 +4535,9 @@ export const handlers = [
     const forceAI = lower.includes("__ai__");
     const askMode = resolveLinkAskMode(link);
     const isFormal = askMode === "formal" && !forceAI && !body.escalate;
-    const isAIAsk = forceAI;
+    const aiEnabled = resolveLinkAskAiEnabled(link);
+    const isAIAsk =
+      forceAI || (aiEnabled && !isFormal && !body.escalate);
     const isSlowStream = lower.includes("__slow__");
     const cleanedQuestion =
       question.replace(/__ai__/gi, "").replace(/__slow__/gi, "").trim() || question;

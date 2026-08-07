@@ -327,6 +327,70 @@ func TestSubmitPublicAsk_AIQuotaExceeded_FallsBackHost_Integration(t *testing.T)
 	}
 }
 
+func TestSubmitPublicAsk_RepeatQuestionAfterEnableAI_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	enableLinkQA(t, drf.f)
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name: "Repeat Ask Link",
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	link.AskAiEnabled = false
+	drf.f.svc.WithVisitorAskKnowledge(stubVisitorAskKnowledge{enabled: true})
+
+	visitorID := "visitor-" + uuid.NewString()
+	qRepeat := "2025年净利润多少"
+	qOther := "预测2027年净利润多少"
+
+	first, err := drf.f.svc.SubmitPublicAsk(drf.ctx(), link, visitorID, "visitor@example.com", qRepeat, false)
+	if err != nil {
+		t.Fatalf("first SubmitPublicAsk: %v", err)
+	}
+	if first.Lane != askLaneHost {
+		t.Fatalf("first lane = %q want host", first.Lane)
+	}
+
+	if _, err := drf.f.tx.Exec(drf.ctx(), `UPDATE links SET ask_ai_enabled = true WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("enable ask ai: %v", err)
+	}
+	link.AskAiEnabled = true
+
+	second, err := drf.f.svc.SubmitPublicAsk(drf.ctx(), link, visitorID, "visitor@example.com", qOther, false)
+	if err != nil {
+		t.Fatalf("second SubmitPublicAsk: %v", err)
+	}
+	if second.Lane != askLaneAI {
+		t.Fatalf("second lane = %q want ai", second.Lane)
+	}
+
+	third, err := drf.f.svc.SubmitPublicAsk(drf.ctx(), link, visitorID, "visitor@example.com", qRepeat, false)
+	if err != nil {
+		t.Fatalf("third SubmitPublicAsk: %v", err)
+	}
+	if third.Lane != askLaneAI {
+		t.Fatalf("third lane = %q want ai (repeat question must re-route)", third.Lane)
+	}
+	if third.ID == first.ID {
+		t.Fatal("repeat submit must create a new turn")
+	}
+
+	turns, err := drf.f.svc.ListMyAskTurns(drf.ctx(), link.ID, visitorID)
+	if err != nil {
+		t.Fatalf("ListMyAskTurns: %v", err)
+	}
+	var repeatCount int
+	for _, row := range turns {
+		if row.Question == qRepeat {
+			repeatCount++
+		}
+	}
+	if repeatCount != 2 {
+		t.Fatalf("expected 2 turns for %q, got %d", qRepeat, repeatCount)
+	}
+}
+
 func TestSubmitPublicAsk_AINotEnabled_Integration(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()

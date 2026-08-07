@@ -82,4 +82,46 @@ test.describe("Visitor Ask AI stream (real backend)", () => {
     expect(turn?.status).toBe("ai_answered");
     restoreCookieJar(authCookies);
   });
+
+  test("re-ask same question after enabling AI routes new turn to AI lane", async () => {
+    test.skip(!knowledgeEnabled, "docling-rag not configured on API");
+    test.setTimeout(180_000);
+
+    const authCookies = snapshotCookieJar();
+    await updateLinkAskPolicy(workspaceSlug, linkId, { askAiEnabled: false });
+
+    const visitorEmail = `repeat-ask-${Date.now()}@example.com`;
+    restoreCookieJar([]);
+    await accessPublicLinkApi(publicToken, visitorEmail);
+    const visitorCookies = snapshotCookieJar();
+
+    const qProfit = "What is the valuation cap in the materials?";
+    const qOther = "Summarize the key financial metrics.";
+
+    const first = await submitPublicAsk(publicToken, qProfit);
+    expect(first.lane).toBe("host");
+    expect(first.status).toBe("host_pending");
+
+    restoreCookieJar(authCookies);
+    await updateLinkAskPolicy(workspaceSlug, linkId, { askAiEnabled: true });
+
+    restoreCookieJar(visitorCookies);
+    const second = await submitPublicAsk(publicToken, qOther);
+    expect(second.lane).toBe("ai");
+
+    const streamRes = await streamPublicAskTurn(publicToken, second.id);
+    expect(streamRes.status).toBe(200);
+
+    const third = await submitPublicAsk(publicToken, qProfit);
+    expect(third.lane).toBe("ai");
+    expect(third.id).not.toBe(first.id);
+
+    const mine = await listMyPublicAskTurns(publicToken);
+    const profitTurns = mine.filter((t) => t.question === qProfit);
+    expect(profitTurns).toHaveLength(2);
+    expect(profitTurns.some((t) => t.lane === "host" && t.id === first.id)).toBe(true);
+    expect(profitTurns.some((t) => t.lane === "ai" && t.id === third.id)).toBe(true);
+
+    restoreCookieJar(authCookies);
+  });
 });
