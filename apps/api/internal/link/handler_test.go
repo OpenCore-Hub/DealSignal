@@ -712,6 +712,92 @@ func TestRejectIfAskHostLimitedWritesSecurityEvent(t *testing.T) {
 	}
 }
 
+func TestWriteAccessCodeSendFailed(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	writeAccessCodeSendFailed(c, wrapAccessCodeSendErr(errors.New(`smtp close data: 550 "Queueing failed"`)))
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status=%d want %d", w.Code, http.StatusBadGateway)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "access_code_send_failed") {
+		t.Fatalf("body %q missing access_code_send_failed", body)
+	}
+	if strings.Contains(body, "Queueing failed") {
+		t.Fatalf("body leaked SMTP detail: %q", body)
+	}
+}
+
+func TestWriteOwnerResendAccessCodeError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		err  error
+		code int
+		body string
+	}{
+		{ErrNotFoundInWorkspace, http.StatusNotFound, "link_not_found"},
+		{ErrAccessCodeContactNotFound, http.StatusNotFound, "contact_not_found"},
+		{ErrEmailVerificationDisabled, http.StatusBadRequest, "verification_disabled"},
+		{ErrAccessCodeResendNotNeeded, http.StatusConflict, "resend_not_needed"},
+		{ErrEmailCodeRateLimited, http.StatusTooManyRequests, "rate_limited"},
+		{ErrBlockedEmail, http.StatusForbidden, "not_allowed"},
+		{wrapAccessCodeSendErr(errors.New(`550 "Queueing failed"`)), http.StatusBadGateway, "access_code_send_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			writeOwnerResendAccessCodeError(c, tc.err)
+			if w.Code != tc.code {
+				t.Fatalf("status=%d want %d", w.Code, tc.code)
+			}
+			if !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("body %q missing %q", w.Body.String(), tc.body)
+			}
+			if tc.code == http.StatusBadGateway && strings.Contains(w.Body.String(), "Queueing failed") {
+				t.Fatalf("body leaked SMTP detail: %q", w.Body.String())
+			}
+		})
+	}
+}
+
+func TestWritePublicEmailVerificationCodeError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cases := []struct {
+		err  error
+		code int
+		body string
+	}{
+		{ErrLinkNotFound, http.StatusNotFound, "link_not_found"},
+		{ErrRequiresEmail, http.StatusBadRequest, "email_required"},
+		{ErrBlockedEmail, http.StatusForbidden, "blocked_email"},
+		{ErrNotAllowedEmail, http.StatusForbidden, "not_allowed"},
+		{ErrEmailCodeRateLimited, http.StatusTooManyRequests, "rate_limited"},
+		{wrapAccessCodeSendErr(errors.New(`550 "Queueing failed"`)), http.StatusBadGateway, "access_code_send_failed"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.body, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			writePublicEmailVerificationCodeError(c, tc.err)
+			if w.Code != tc.code {
+				t.Fatalf("status=%d want %d", w.Code, tc.code)
+			}
+			if !strings.Contains(w.Body.String(), tc.body) {
+				t.Fatalf("body %q missing %q", w.Body.String(), tc.body)
+			}
+			if tc.code == http.StatusBadGateway && strings.Contains(w.Body.String(), "Queueing failed") {
+				t.Fatalf("body leaked SMTP detail: %q", w.Body.String())
+			}
+		})
+	}
+}
+
 func TestWriteAccessRequestReviewError(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

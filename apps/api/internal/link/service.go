@@ -195,10 +195,10 @@ var (
 	ErrAccessCodeContactNotFound = errors.New("access code contact not found")
 	ErrAccessCodeResendNotNeeded = errors.New("access code already delivered; pass force=true to resend")
 	ErrEmailVerificationDisabled = errors.New("email verification is not enabled for this link")
-	// ErrAccessCodeSendFailed means the access request was approved (allow rule
-	// committed) but the verification-code email could not be delivered. Callers
-	// should surface this so the owner can retry via resend.
-	ErrAccessCodeSendFailed = errors.New("access approved but verification code could not be sent")
+	// ErrAccessCodeSendFailed means an access code was provisioned (or an access
+	// request approval was committed) but the verification-code email could not
+	// be delivered. Callers should surface this so the owner or visitor can retry.
+	ErrAccessCodeSendFailed = errors.New("verification code could not be sent")
 	ErrAccessAlreadyAllowed = errors.New("email already has access")
 )
 
@@ -206,6 +206,30 @@ var (
 // owner remediates UI treats it as stuck (async send likely lost). Shorter
 // windows would encourage duplicate sends while the background job is in flight.
 const ownerResendPendingStale = 2 * time.Minute
+
+func wrapAccessCodeSendErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", ErrAccessCodeSendFailed, err)
+}
+
+func accessCodeSendClientDetail(err error) string {
+	switch {
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		return "verification code could not be sent"
+	case errors.Is(err, ErrEmailCodeRateLimited):
+		return "rate limited"
+	case errors.Is(err, ErrAccessCodeResendNotNeeded):
+		return "resend not needed"
+	case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
+		return "email not allowed"
+	case errors.Is(err, ErrEmailVerificationDisabled):
+		return "verification disabled"
+	default:
+		return "send failed"
+	}
+}
 
 // ResolvePublicLink validates a public token and returns the active link.
 // It checks status, expiry, and max access limits. It is intended for
@@ -2767,7 +2791,7 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 				logger.Attr("link_id", linkID),
 				logger.Attr("email", reqRow.Email),
 			)
-			return LinkAccessRequest{}, fmt.Errorf("%w: %v", ErrAccessCodeSendFailed, codeErr)
+			return LinkAccessRequest{}, wrapAccessCodeSendErr(codeErr)
 		}
 	}
 
@@ -3476,7 +3500,7 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
-		return fmt.Errorf("send email: %w", err)
+		return wrapAccessCodeSendErr(err)
 	}
 	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
@@ -3520,7 +3544,7 @@ func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, codes[0].code, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
-		return fmt.Errorf("send email: %w", err)
+		return wrapAccessCodeSendErr(err)
 	}
 	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
@@ -3608,7 +3632,7 @@ func (s *Service) OwnerResendAccessCode(ctx context.Context, linkID, workspaceID
 	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
-		return fmt.Errorf("send email: %w", err)
+		return wrapAccessCodeSendErr(err)
 	}
 	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
@@ -3644,7 +3668,7 @@ func (s *Service) OwnerResendFailedAccessCodes(ctx context.Context, linkID, work
 		summary.Attempted++
 		if err := s.OwnerResendAccessCode(ctx, linkID, workspaceID, row.ContactEmail, false); err != nil {
 			summary.Failed++
-			summary.Errors = append(summary.Errors, row.ContactEmail+": "+err.Error())
+			summary.Errors = append(summary.Errors, row.ContactEmail+": "+accessCodeSendClientDetail(err))
 			continue
 		}
 		summary.Sent++
@@ -4170,7 +4194,6 @@ type AccessCodeContact struct {
 	Email      string     `json:"email"`
 	Name       string     `json:"name,omitempty"`
 	SendStatus string     `json:"send_status"` // pending | sent | failed
-	SendError  string     `json:"send_error,omitempty"`
 	CodeSentAt *time.Time `json:"code_sent_at,omitempty"`
 	UsedAt     *time.Time `json:"used_at,omitempty"`
 	// CanResend is true for failed or stuck-pending contacts. Delivered contacts
@@ -4231,7 +4254,6 @@ func mapAccessCodeContactRows(rows []db.ListLinkAccessCodeContactsByLinkRow, now
 			Email:      c.ContactEmail,
 			Name:       c.ContactName,
 			SendStatus: c.CodeSendStatus,
-			SendError:  c.CodeSendError,
 			CanResend:  accessCodeNeedsRemediation(c.CodeSendStatus, c.CreatedAt.Time, now),
 		}
 		if c.CodeSentAt.Valid {

@@ -1010,6 +1010,53 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": ar})
 }
 
+func writeAccessCodeSendFailed(c *gin.Context, err error) {
+	c.JSON(http.StatusBadGateway, gin.H{
+		"code":    "access_code_send_failed",
+		"message": httpx.SafeMessage("access_code_send_failed", err),
+	})
+}
+
+func writeOwnerResendAccessCodeError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrNotFoundInWorkspace):
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+	case errors.Is(err, ErrAccessCodeContactNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
+	case errors.Is(err, ErrEmailVerificationDisabled):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": httpx.SafeMessage("verification_disabled", err)})
+	case errors.Is(err, ErrAccessCodeResendNotNeeded):
+		c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": httpx.SafeMessage("resend_not_needed", err)})
+	case errors.Is(err, ErrEmailCodeRateLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
+	case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		writeAccessCodeSendFailed(c, err)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access code"})
+	}
+}
+
+func writePublicEmailVerificationCodeError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrLinkNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+	case errors.Is(err, ErrRequiresEmail):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": httpx.SafeMessage("email_required", err)})
+	case errors.Is(err, ErrBlockedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": httpx.SafeMessage("blocked_email", err)})
+	case errors.Is(err, ErrNotAllowedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
+	case errors.Is(err, ErrEmailCodeRateLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		writeAccessCodeSendFailed(c, err)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
+	}
+}
+
 func writeAccessRequestReviewError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrNotFoundInWorkspace),
@@ -1022,8 +1069,7 @@ func writeAccessRequestReviewError(c *gin.Context, err error) {
 	case errors.Is(err, ErrAccessRequestBlocked):
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
 	case errors.Is(err, ErrAccessCodeSendFailed):
-		// Approval already committed; owner should resend the access code.
-		c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": httpx.SafeMessage("access_code_send_failed", err)})
+		writeAccessCodeSendFailed(c, err)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
 	}
@@ -1418,22 +1464,7 @@ func (h *Handler) OwnerResendAccessCode(c *gin.Context) {
 	}
 
 	if err := h.service.OwnerResendAccessCode(c.Request.Context(), c.Param("id"), workspaceID, body.Email, body.Force); err != nil {
-		switch {
-		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-		case errors.Is(err, ErrAccessCodeContactNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
-		case errors.Is(err, ErrEmailVerificationDisabled):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": httpx.SafeMessage("verification_disabled", err)})
-		case errors.Is(err, ErrAccessCodeResendNotNeeded):
-			c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": httpx.SafeMessage("resend_not_needed", err)})
-		case errors.Is(err, ErrEmailCodeRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
-		case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access code"})
-		}
+		writeOwnerResendAccessCodeError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -1948,20 +1979,7 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 	}
 
 	if err := h.service.SendEmailVerificationCode(c.Request.Context(), token, body.Email, h.cfg.ViewerBaseURL); err != nil {
-		switch {
-		case errors.Is(err, ErrLinkNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-		case errors.Is(err, ErrRequiresEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": httpx.SafeMessage("email_required", err)})
-		case errors.Is(err, ErrBlockedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": httpx.SafeMessage("blocked_email", err)})
-		case errors.Is(err, ErrNotAllowedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
-		case errors.Is(err, ErrEmailCodeRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
-		}
+		writePublicEmailVerificationCodeError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
