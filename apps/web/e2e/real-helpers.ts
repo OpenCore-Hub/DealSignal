@@ -517,16 +517,6 @@ export async function enableGroundedAiForLink(
   });
 }
 
-/** @deprecated Use enableGroundedAiForLink — policy UI lives on share Access, not Engage. */
-export async function enableGroundedAiInEngageTab(
-  page: Page,
-  opts: { workspaceSlug: string; roomId: string; linkId: string },
-) {
-  void page;
-  void opts.roomId;
-  await enableGroundedAiForLink(opts.workspaceSlug, opts.linkId);
-}
-
 /** Returns false when docling-rag is not configured (optional AI gates skip). */
 export async function probeKnowledgeEnabled(
   workspaceSlug: string,

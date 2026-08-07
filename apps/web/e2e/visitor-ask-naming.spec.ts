@@ -6,7 +6,7 @@ import { test, expect } from "@playwright/test";
 import { setupAuthenticatedPage, attachDebug, WORKSPACE_SLUG } from "./helpers";
 
 test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
-  test("deal-room Access advanced shows AI assistant toggle", async ({ page }) => {
+  test("deal-room Access advanced shows Q&A strategy", async ({ page }) => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
 
@@ -21,20 +21,17 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
       timeout: 10000,
     });
     await dialog.getByRole("button", { name: /^Advanced$/i }).click();
-    await expect(dialog.getByTestId("deal-room-ai-assistant-toggle")).toBeVisible({
+    await expect(dialog.getByTestId("visitor-ask-experience")).toBeVisible({
       timeout: 5000,
     });
-    await expect(dialog.getByText(/AI assistant/i)).toBeVisible({ timeout: 5000 });
-    await expect(dialog.getByRole("switch", { name: /AI assistant/i })).toBeVisible({
-      timeout: 5000,
-    });
+    await expect(dialog.getByText(/Q&A strategy/i)).toBeVisible({ timeout: 5000 });
 
     await expect(dialog.getByText(/AI Agents/i)).toHaveCount(0);
     await expect(dialog.getByText(/AI Copilot/i)).toHaveCount(0);
     await expect(dialog.getByText(/Q&A conversations/i)).toHaveCount(0);
   });
 
-  test("disabling AI assistant persists ask_ai_enabled on save and reload", async ({ page }) => {
+  test("selecting Host replies persists ask_ai_enabled on save and reload", async ({ page }) => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
 
@@ -43,32 +40,34 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 10000 });
-    await dialog.getByLabel(/Link name/i).fill(`No AI ${Date.now()}`);
+    const linkName = `No AI ${Date.now()}`;
+    await dialog.getByLabel(/Link name/i).fill(linkName);
 
+    await dialog.getByRole("tab", { name: /Access/i }).click();
     await dialog.getByRole("button", { name: /^Advanced$/i }).click();
-    const aiToggle = dialog.getByTestId("deal-room-ai-assistant-toggle").getByRole("switch");
-    await expect(aiToggle).toBeVisible({ timeout: 5000 });
-    if (await aiToggle.isChecked()) {
-      await aiToggle.click();
-    }
-    await expect(aiToggle).not.toBeChecked();
+    await dialog.getByTestId("visitor-ask-experience-host_only").click();
+    await expect(dialog.getByTestId("visitor-ask-experience-host_only")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
 
     await dialog.getByRole("button", { name: /Create link/i }).click();
     await expect(dialog).toBeHidden({ timeout: 15000 });
 
     const createdRow = page.locator('[data-testid^="deal-room-link-row-"]').filter({
-      hasText: /No AI /,
+      hasText: linkName,
     });
     await expect(createdRow).toBeVisible({ timeout: 10000 });
-    await createdRow.click();
+    await createdRow.getByRole("button", { name: "Edit" }).click();
 
     const editDialog = page.getByRole("dialog");
     await expect(editDialog).toBeVisible({ timeout: 10000 });
     await editDialog.getByRole("button", { name: /^Advanced$/i }).click();
-    const reloadedToggle = editDialog
-      .getByTestId("deal-room-ai-assistant-toggle")
-      .getByRole("switch");
-    await expect(reloadedToggle).not.toBeChecked({ timeout: 5000 });
+    await expect(editDialog.getByTestId("visitor-ask-experience-host_only")).toHaveAttribute(
+      "aria-checked",
+      "true",
+      { timeout: 5000 },
+    );
   });
 
   test("bundle review step shows security summary without visitor Ask toggle", async ({ page }) => {

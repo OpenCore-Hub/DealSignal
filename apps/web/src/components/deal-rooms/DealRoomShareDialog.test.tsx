@@ -10,13 +10,15 @@ import enLinkShare from "@/i18n/locales/en/linkShare.json";
 import * as shareModule from "@/components/links/share";
 import type { Link } from "@/types";
 
-function expandAdvancedAndToggleAiAssistant(enabled: boolean) {
+function expandAdvancedAndSelectExperience(
+  experience: "host_only" | "ai_supervised" | "ai_self_serve" | "formal",
+) {
   fireEvent.click(screen.getByText(/advanced/i));
-  const switchEl = screen.getByRole("switch", { name: /AI assistant/i });
-  const isChecked = switchEl.getAttribute("aria-checked") === "true";
-  if (isChecked !== enabled) {
-    fireEvent.click(switchEl);
-  }
+  fireEvent.click(screen.getByTestId(`visitor-ask-experience-${experience}`));
+}
+
+function expandAdvancedAndToggleAiAssistant(enabled: boolean) {
+  expandAdvancedAndSelectExperience(enabled ? "ai_supervised" : "host_only");
 }
 
 vi.mock("@/lib/api", () => ({
@@ -33,6 +35,7 @@ vi.mock("@/lib/api", () => ({
     updateLink: vi.fn(),
     listNDATemplates: vi.fn(),
     getDocuments: vi.fn(),
+    getLinkAskPolicy: vi.fn(),
   },
 }));
 
@@ -104,6 +107,18 @@ describe("DealRoomShareDialog", () => {
     vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
     vi.mocked(api.getDocuments).mockResolvedValue({ data: [] });
     vi.mocked(api.getLinkAccessRules).mockResolvedValue({ data: [] });
+    vi.mocked(api.getLinkAskPolicy).mockResolvedValue({
+      data: {
+        id: "link-1",
+        askMode: "supervised",
+        askAiEnabled: true,
+        askAiMonthlyQuota: null,
+        askAiMonthlyUsed: 0,
+        askAiMonthlyLimit: 500,
+        askAiQuotaExceeded: false,
+        askAiEntitled: true,
+      },
+    });
     vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });
     vi.mocked(api.getDocuments).mockResolvedValue({ data: [] });
   });

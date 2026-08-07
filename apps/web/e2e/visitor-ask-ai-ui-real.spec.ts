@@ -54,7 +54,7 @@ test.describe("Visitor Ask AI UI loop (real backend)", () => {
     expect(detail.askAiEnabled).not.toBe(true);
   });
 
-  test("owner enables AI in Engage then visitor UI shows grounded answer", async ({ page }) => {
+  test("owner enables AI via policy API then visitor UI shows grounded answer", async ({ page }) => {
     test.skip(!knowledgeEnabled, "docling-rag not configured on API");
     test.setTimeout(240_000);
     attachDebug(page);
