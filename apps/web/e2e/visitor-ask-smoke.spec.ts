@@ -2,7 +2,7 @@
  * Visitor Ask smoke (MSW) — Ask Host empty state, submit question, pending badge.
  */
 import { test, expect } from "@playwright/test";
-import { resetMockState, attachDebug } from "./helpers";
+import { resetMockState, attachDebug, openVisitorAskPanel } from "./helpers";
 
 const SMOKE_TOKEN = "AskSmoke1";
 
@@ -11,19 +11,7 @@ test.describe("Visitor Ask smoke (MSW)", () => {
     attachDebug(page);
     await resetMockState(page);
 
-    await page.goto(`/l/${SMOKE_TOKEN}`);
-    await expect(page.locator("img[alt*='Page']").first()).toBeVisible({ timeout: 15000 });
-
-    const openSidebar = page.getByRole("button", { name: /Open sidebar/i });
-    if (await openSidebar.isVisible().catch(() => false)) {
-      await openSidebar.click();
-    }
-    const askTab = page.locator('button[type="button"]').filter({ hasText: /^Ask$/ });
-    await expect(askTab).toBeVisible({ timeout: 10000 });
-    await askTab.click();
-
-    const hostInput = page.getByPlaceholder(/Ask the host a question/i);
-    await expect(hostInput).toBeVisible({ timeout: 5000 });
+    const hostInput = await openVisitorAskPanel(page, SMOKE_TOKEN);
 
     await hostInput.fill("Can you share the full model?");
     await page.getByRole("button", { name: "Ask", exact: true }).and(page.locator('[type="submit"]')).click();
@@ -36,18 +24,11 @@ test.describe("Visitor Ask smoke (MSW)", () => {
     attachDebug(page);
     await resetMockState(page);
 
-    await page.goto(`/l/${SMOKE_TOKEN}`);
-    await expect(page.locator("img[alt*='Page']").first()).toBeVisible({ timeout: 15000 });
-    const openSidebar = page.getByRole("button", { name: /Open sidebar/i });
-    if (await openSidebar.isVisible().catch(() => false)) {
-      await openSidebar.click();
-    }
-    await page.locator('button[type="button"]').filter({ hasText: /^Ask$/ }).click();
+    const hostInput = await openVisitorAskPanel(page, SMOKE_TOKEN);
 
-    const hostInput = page.getByPlaceholder(/Ask the host a question/i);
     await hostInput.fill("__rate_limit__ spam");
     await page.getByRole("button", { name: "Ask", exact: true }).and(page.locator('[type="submit"]')).click();
 
-    await expect(page.getByText(/Too many Ask Host questions/i)).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText(/Too many questions/i)).toBeVisible({ timeout: 10000 });
   });
 });

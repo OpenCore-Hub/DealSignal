@@ -90,6 +90,212 @@ jobs:
           name: playwright-knowledge-report
           path: apps/web/playwright-report/
 
+  # Phase B: Visitor Ask MSW e2e (serial cross-surface flows + naming/smoke).
+  frontend-visitor-ask-e2e:
+    name: Frontend Visitor Ask E2E (MSW)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+          package_json_file: apps/web/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright browsers
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run visitor ask MSW e2e
+        run: pnpm test:e2e:visitor-ask
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-visitor-ask-report
+          path: apps/web/playwright-report/
+
+  # Phase B: Visitor Ask on live backend — API contract + UI closed loop + dashboard nav.
+  frontend-visitor-ask-real-e2e:
+    name: Frontend Visitor Ask E2E (real backend)
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Ensure docker-compose binary
+        run: |
+          if ! command -v docker-compose &> /dev/null; then
+            echo 'docker compose "$@"' | sudo tee /usr/local/bin/docker-compose > /dev/null
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+
+      - name: Prepare API env
+        working-directory: apps/api
+        run: |
+          cp .env.example .env
+          sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' .env
+          sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' .env
+          sed -i 's/^RATE_LIMIT_AUTH_RPM=.*/RATE_LIMIT_AUTH_RPM=10000/' .env
+          sed -i 's/^RATE_LIMIT_PUBLIC_RPM=.*/RATE_LIMIT_PUBLIC_RPM=10000/' .env
+          sed -i 's/^RATE_LIMIT_WORKSPACE_RPM=.*/RATE_LIMIT_WORKSPACE_RPM=10000/' .env
+          sed -i 's/^RATE_LIMIT_UPLOAD_RPM=.*/RATE_LIMIT_UPLOAD_RPM=10000/' .env
+
+      - name: Start backend services
+        working-directory: apps/api
+        run: docker-compose up -d
+
+      - name: Wait for API
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:8080/healthz && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Clear rate-limit counters
+        working-directory: apps/api
+        run: docker-compose exec -T redis redis-cli FLUSHALL || true
+
+      - name: Verify visitor Ask migration 131
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '131_link_ask_turns.up.sql';" | grep -q 1
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT to_regclass('public.link_ask_turns');" | grep -q link_ask_turns
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+          package_json_file: apps/web/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright (test runner)
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run visitor ask real backend gates
+        env:
+          REAL_API_BASE_URL: http://localhost:8080
+        run: ./e2e-visitor-ask-real.sh --ui
+
+      - name: Upload Playwright report
+        uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-visitor-ask-real-report
+          path: apps/web/playwright-report/
+
+      - name: Tear down backend
+        if: always()
+        working-directory: apps/api
+        run: docker-compose down
+
+  # Phase B AI lane — optional docling-rag gate (skip when knowledge disabled).
+  frontend-visitor-ask-ai-real-e2e:
+    name: Frontend Visitor Ask AI E2E (real, optional)
+    timeout-minutes: 60
+    continue-on-error: true
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Ensure docker-compose binary
+        run: |
+          if ! command -v docker-compose &> /dev/null; then
+            echo 'docker compose "$@"' | sudo tee /usr/local/bin/docker-compose > /dev/null
+            sudo chmod +x /usr/local/bin/docker-compose
+          fi
+
+      - name: Prepare API env
+        working-directory: apps/api
+        run: |
+          cp .env.example .env
+          sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' .env
+          sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' .env
+          sed -i 's/^RATE_LIMIT_AUTH_RPM=.*/RATE_LIMIT_AUTH_RPM=10000/' .env
+          sed -i 's/^RATE_LIMIT_PUBLIC_RPM=.*/RATE_LIMIT_PUBLIC_RPM=10000/' .env
+          sed -i 's/^RATE_LIMIT_WORKSPACE_RPM=.*/RATE_LIMIT_WORKSPACE_RPM=10000/' .env
+          sed -i 's/^RATE_LIMIT_UPLOAD_RPM=.*/RATE_LIMIT_UPLOAD_RPM=10000/' .env
+
+      - name: Start backend services
+        working-directory: apps/api
+        run: docker-compose up -d
+
+      - name: Wait for API
+        run: |
+          for i in {1..60}; do
+            curl -fsS http://localhost:8080/healthz && exit 0
+            sleep 2
+          done
+          exit 1
+
+      - name: Clear rate-limit counters
+        working-directory: apps/api
+        run: docker-compose exec -T redis redis-cli FLUSHALL || true
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 11.9.0
+          package_json_file: apps/web/package.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: apps/web/pnpm-lock.yaml
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install Playwright (test runner)
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Run visitor ask AI real gate (skip if no docling)
+        env:
+          REAL_API_BASE_URL: http://localhost:8080
+        run: ./e2e-visitor-ask-real.sh --ai
+
+      - name: Tear down backend
+        if: always()
+        working-directory: apps/api
+        run: docker-compose down
+
   backend-test:
     name: Backend test
     runs-on: ubuntu-latest
@@ -279,6 +485,29 @@ jobs:
             "SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conrelid = 'documents'::regclass AND conname = 'chk_documents_category';" \
             | grep -q deal_room
 
+      - name: Verify visitor Ask migration 131
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '131_link_ask_turns.up.sql';" | grep -q 1
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT to_regclass('public.link_ask_turns');" | grep -q link_ask_turns
+
+      - name: Verify visitor Ask policy migration 133
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '133_link_ask_policy.up.sql';" | grep -q 1
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'links' AND column_name = 'ask_ai_enabled';" \
+            | grep -q ask_ai_enabled
+
+      - name: Verify action surface heal migration 134
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '134_heal_link_question_action_surfaces.up.sql';" | grep -q 1
+
       - name: Run backend E2E
         run: PDF=../web/e2e/fixtures/sample.pdf ./e2e-test.sh
 
@@ -352,7 +581,17 @@ jobs:
   docker-push-api:
     name: Build and push API Docker image
     runs-on: ubuntu-latest
-    needs: [frontend, frontend-knowledge-e2e, backend-test, backend-lint, backend-security]
+    needs:
+      [
+        frontend,
+        frontend-knowledge-e2e,
+        frontend-visitor-ask-e2e,
+        frontend-visitor-ask-real-e2e,
+        backend-test,
+        backend-e2e,
+        backend-lint,
+        backend-security,
+      ]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read
@@ -395,7 +634,7 @@ jobs:
   docker-push-web:
     name: Build and push web Docker image
     runs-on: ubuntu-latest
-    needs: [frontend]
+    needs: [frontend, frontend-visitor-ask-e2e, frontend-visitor-ask-real-e2e]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     permissions:
       contents: read

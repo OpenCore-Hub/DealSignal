@@ -29,6 +29,10 @@ Readiness probe: `curl http://localhost:8080/readyz`
 - `OPENAI_REFERER` / `OPENAI_APP_TITLE` — optional headers for OpenRouter-compatible providers.
 - `KNOWLEDGE_QA_REWRITE_ENABLED` — optional (default `true`). Set `false` to disable elliptical retrieve-query rewrite without disabling follow-up chips.
 - `KNOWLEDGE_QA_MEMBER_RPM` / `KNOWLEDGE_QA_FOLLOWUP_RPM` — optional per-member ask / follow-up chip RPM gates.
+- `VISITOR_ASK_AI_RPM` — optional visitor AI lane RPM per link+visitor (default `10`).
+- `VISITOR_ASK_AI_DAILY_LIMIT` — optional visitor AI lane daily cap (default `50`).
+- `VISITOR_ASK_AI_MONTHLY_QUOTA_DEFAULT` — link-level monthly AI cap when `ask_ai_monthly_quota` is NULL (default `500`).
+- `VISITOR_ASK_UNIFIED` — set `1` to expose unified visitor Ask UI on public links (Phase A/B rollout gate).
 
 ## Testing
 
@@ -38,9 +42,10 @@ Backend:
 cd apps/api
 go test ./...
 go test ./internal/link -tags=integration  # requires PostgreSQL (default: localhost:5435)
-./e2e-test.sh      # P0 backend E2E (includes document category tri-state gate)
+./e2e-test.sh      # P0 backend E2E (category tri-state + visitor Ask host loop; AI lane skips without docling)
 BASE_URL=http://localhost:8090 ./e2e-test.sh  # against local Docker API on 8090
 ./e2e-staging-verify.sh  # staging smoke (set BASE_URL=https://staging-api...)
+BASE_URL=http://localhost:8090 ./scripts/e2e-visitor-ask-ai.sh  # AI lane only (needs docling-rag; exit 2 = skip)
 BASE_URL=http://localhost:8090 ./e2e-knowledge.sh  # deal-room knowledge Q&A (needs docling-rag; KNOWLEDGE_QA_FOLLOWUP_RPM gates chip LLM)
 # Ceiling freeze gates: docs/designs/plan/deal-room-knowledge-qa-ceiling.md §9
 ```
@@ -53,8 +58,11 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm test:e2e          # MSW mocks
+pnpm test:e2e:visitor-ask  # Phase B visitor Ask MSW gate (13 specs)
 ./e2e-real-backend.sh  # real backend
 REAL_API_BASE_URL=http://localhost:8090 pnpm test:e2e:category-real  # document category tri-state API gate
+REAL_API_BASE_URL=http://localhost:8090 ./e2e-visitor-ask-real.sh --ui  # visitor Ask real UI (host loop + Engage policy)
+REAL_API_BASE_URL=http://localhost:8090 ./e2e-visitor-ask-real.sh --ai  # visitor Ask AI loop (optional docling)
 REAL_API_BASE_URL=http://localhost:8090 ./e2e-knowledge-real.sh  # knowledge desk UI smoke
 ```
 

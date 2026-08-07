@@ -19,6 +19,26 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
+      testIgnore: [
+        "**/real-backend.spec.ts",
+        "**/*-real.spec.ts",
+        "**/visitor-ask-owner-reply-loop.spec.ts",
+        "**/visitor-ask-ai-stream.spec.ts",
+        "**/visitor-ask-host-inbox.spec.ts",
+        "**/visitor-ask-engage-policy.spec.ts",
+      ],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "visitor-ask-serial",
+      testMatch: [
+        "**/visitor-ask-owner-reply-loop.spec.ts",
+        "**/visitor-ask-ai-stream.spec.ts",
+        "**/visitor-ask-host-inbox.spec.ts",
+        "**/visitor-ask-engage-policy.spec.ts",
+      ],
+      fullyParallel: false,
+      workers: 1,
       use: { ...devices["Desktop Chrome"] },
     },
   ],

@@ -3,7 +3,11 @@ import { defineConfig } from "@playwright/test";
 /** API-only real-backend specs — no Vite webServer (avoids port conflicts). */
 export default defineConfig({
   testDir: "./e2e",
-  testMatch: "**/document-category-tristate-real.spec.ts",
+  testMatch: [
+    "**/document-category-tristate-real.spec.ts",
+    "**/visitor-ask-real.spec.ts",
+    "**/visitor-ask-ai-stream-real.spec.ts",
+  ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
