@@ -16,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { OwnerAskInboxPanel } from "@/components/ask/OwnerAskInboxPanel";
+import type { OwnerAskInboxView } from "@/lib/ownerAskInbox";
 import { useOwnerAskCitationNavigation } from "@/lib/ownerAskCitation";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
@@ -25,9 +26,11 @@ interface DealRoomQATabProps {
   roomId: string;
   /** Deep-link from dashboard or share surface (?linkId=). */
   initialLinkId?: string;
+  /** Deep-link from dashboard formal Q&A todo (?askInbox=formal_queue). */
+  initialAskInbox?: OwnerAskInboxView;
 }
 
-export function DealRoomQATab({ roomId, initialLinkId }: DealRoomQATabProps) {
+export function DealRoomQATab({ roomId, initialLinkId, initialAskInbox }: DealRoomQATabProps) {
   const { t } = useTranslation("dealRooms");
   const [linkFilter, setLinkFilter] = useState<string>(() => initialLinkId ?? "all");
   const onOpenCitation = useOwnerAskCitationNavigation(roomId);
@@ -88,9 +91,11 @@ export function DealRoomQATab({ roomId, initialLinkId }: DealRoomQATabProps) {
         </CardHeader>
         <CardContent>
           <OwnerAskInboxPanel
+            key={`${initialAskInbox ?? "default"}:${initialLinkId ?? "all"}`}
             scope={{ type: "room", roomId, linkFilter }}
             i18nNs="dealRooms"
             linkLabels={linkNameById}
+            initialView={initialAskInbox}
             onOpenCitation={onOpenCitation}
           />
         </CardContent>

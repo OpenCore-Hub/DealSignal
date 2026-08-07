@@ -13,6 +13,12 @@ describe("dealRoomAskPath", () => {
       "/acme/deal-rooms/room-1?tab=qa&linkId=link-9",
     );
   });
+
+  it("deep-links the formal queue inbox tab", () => {
+    expect(dealRoomAskPath("acme", "room-1", { formalQueue: true })).toBe(
+      "/acme/deal-rooms/room-1?tab=qa&askInbox=formal_queue",
+    );
+  });
 });
 
 describe("parseDealRoomAskTarget", () => {

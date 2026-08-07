@@ -9,6 +9,7 @@ import {
   ownerAskFaqReorderEnabled,
   ownerAskInboxUsesPinnedFAQApi,
   ownerAskInboxQuery,
+  parseOwnerAskInboxView,
   ownerAskTurnCanPinFAQ,
   ownerAskTurnCanUnpinFAQ,
   ownerAskTurnNeedsHostReply,
@@ -16,6 +17,17 @@ import {
   sortOwnerAskPinnedFAQs,
 } from "./ownerAskInbox";
 import type { OwnerAskTurn } from "@/types";
+
+describe("parseOwnerAskInboxView", () => {
+  it("accepts known inbox views", () => {
+    expect(parseOwnerAskInboxView("formal_queue")).toBe("formal_queue");
+  });
+
+  it("rejects unknown values", () => {
+    expect(parseOwnerAskInboxView("legacy_questions")).toBeUndefined();
+    expect(parseOwnerAskInboxView(null)).toBeUndefined();
+  });
+});
 
 describe("ownerAskInboxQuery", () => {
   it("maps needs_host to host pending", () => {

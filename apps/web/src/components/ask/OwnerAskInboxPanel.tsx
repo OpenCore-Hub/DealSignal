@@ -27,6 +27,7 @@ export interface OwnerAskInboxPanelProps {
   scope: OwnerAskInboxScope;
   i18nNs: "dealRooms" | "linkShare";
   linkLabels?: Map<string, string>;
+  initialView?: OwnerAskInboxView;
   onPendingCountChange?: (count: number) => void;
   onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
 }
@@ -74,12 +75,13 @@ export function OwnerAskInboxPanel({
   scope,
   i18nNs,
   linkLabels,
+  initialView,
   onPendingCountChange,
   onOpenCitation,
 }: OwnerAskInboxPanelProps) {
   const { t } = useTranslation(i18nNs);
   const prefix = i18nNs === "linkShare" ? "management" : "qa";
-  const [view, setView] = useState<OwnerAskInboxView>("needs_host");
+  const [view, setView] = useState<OwnerAskInboxView>(() => initialView ?? "needs_host");
   const [answerDraft, setAnswerDraft] = useState<Record<string, string>>({});
   const [localOverrides, setLocalOverrides] = useState<Record<string, OwnerAskTurn>>({});
   const [reordering, setReordering] = useState(false);
@@ -87,6 +89,7 @@ export function OwnerAskInboxPanel({
   const roomId = scope.type === "room" ? scope.roomId : undefined;
   const linkId = scope.type === "link" ? scope.linkId : undefined;
   const linkFilter = scope.type === "room" ? scope.linkFilter : undefined;
+
   const faqReorderLinkId =
     scope.type === "link"
       ? linkId

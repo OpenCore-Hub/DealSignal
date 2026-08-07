@@ -110,7 +110,6 @@ vi.mock("@/lib/api", () => ({
     }),
     listDealRoomKnowledgeArchives: vi.fn().mockResolvedValue({ items: [] }),
     getDealRoomKnowledgeArchive: vi.fn().mockRejectedValue(new Error("not found")),
-    answerQuestion: vi.fn(),
   },
 }));
 
@@ -374,7 +373,7 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("network error")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load")).toBeInTheDocument();
     });
 
     getDealRoomByIdMock.mockResolvedValue(mockRoom);

@@ -3,6 +3,22 @@ import type { OwnerAskTurn } from "@/types";
 /** Owner Ask Inbox lane tabs (Phase B/C). */
 export type OwnerAskInboxView = "all" | "needs_host" | "ai_handled" | "pinned_faq" | "formal_queue";
 
+const ownerAskInboxViews = new Set<OwnerAskInboxView>([
+  "all",
+  "needs_host",
+  "ai_handled",
+  "pinned_faq",
+  "formal_queue",
+]);
+
+/** Parse ?askInbox= deep links from dashboard or bookmarks. */
+export function parseOwnerAskInboxView(raw: string | null | undefined): OwnerAskInboxView | undefined {
+  if (!raw) return undefined;
+  return ownerAskInboxViews.has(raw as OwnerAskInboxView)
+    ? (raw as OwnerAskInboxView)
+    : undefined;
+}
+
 export function ownerAskInboxQuery(view: OwnerAskInboxView): {
   lane?: string;
   status?: string;

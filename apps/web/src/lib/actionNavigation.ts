@@ -3,7 +3,12 @@ import { dealRoomAskPath, parseDealRoomAskTarget } from "@/lib/dealRoomAskPath";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import type { ActionItem } from "@/types";
 
-type NavAction = Pick<ActionItem, "sourceType" | "sourceId" | "targetId">;
+type NavAction = Pick<ActionItem, "sourceType" | "sourceId" | "targetId" | "actionType">;
+
+/** Formal Q&A dashboard todos use actionType review on deal_room_link_question rows. */
+export function isFormalAskReviewAction(action: Pick<ActionItem, "sourceType" | "actionType">): boolean {
+  return action.sourceType === "deal_room_link_question" && action.actionType === "review";
+}
 
 /**
  * Resolve dashboard operational-action deep links.
@@ -42,7 +47,10 @@ export function actionNavigatePath(
     case "deal_room_link_question": {
       if (!action.targetId) return null;
       const { roomId, linkId } = parseDealRoomAskTarget(action.targetId);
-      return dealRoomAskPath(workspaceSlug, roomId, linkId ? { linkId } : undefined);
+      return dealRoomAskPath(workspaceSlug, roomId, {
+        linkId: linkId ? linkId : undefined,
+        formalQueue: isFormalAskReviewAction(action),
+      });
     }
 
     case "link_question":

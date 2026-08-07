@@ -2,12 +2,15 @@
 export function dealRoomAskPath(
   workspaceSlug: string,
   roomId: string,
-  opts?: { linkId?: string },
+  opts?: { linkId?: string; formalQueue?: boolean },
 ): string {
   const params = new URLSearchParams();
   params.set("tab", "qa");
   if (opts?.linkId) {
     params.set("linkId", opts.linkId);
+  }
+  if (opts?.formalQueue) {
+    params.set("askInbox", "formal_queue");
   }
   return `/${workspaceSlug}/deal-rooms/${roomId}?${params.toString()}`;
 }

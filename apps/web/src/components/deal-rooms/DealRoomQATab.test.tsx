@@ -13,7 +13,6 @@ vi.mock("@/lib/api", () => ({
   api: {
     listRoomAsk: vi.fn(),
     getDealRoomLinks: vi.fn(),
-    answerQuestion: vi.fn(),
     answerAskTurn: vi.fn(),
   },
 }));
@@ -39,7 +38,6 @@ describe("DealRoomQATab", () => {
   beforeEach(() => {
     vi.mocked(api.listRoomAsk).mockReset();
     vi.mocked(api.getDealRoomLinks).mockReset();
-    vi.mocked(api.answerQuestion).mockReset();
     vi.mocked(api.answerAskTurn).mockReset();
   });
 
