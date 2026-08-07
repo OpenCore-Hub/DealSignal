@@ -11,7 +11,6 @@ import type {
   Link,
   OwnerAskTurn,
   PublicFormalAsk,
-  VisitorQuestion,
   PublicAskTurn,
   WorkspaceMember,
 } from "@/types";
@@ -150,11 +149,8 @@ interface MockUser {
   name: string;
 }
 const mockUsers = new Map<string, MockUser>();
-/** Per-link visitor Ask Host questions for public MSW e2e. */
-const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
+/** Per-link visitor Ask turns for public MSW e2e. */
 const mockPublicAskTurns = new Map<string, PublicAskTurn[]>();
-/** Per-link Ask Host questions for owner inbox (room + link). */
-const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
 /** Per-link AI Ask turns for owner inbox review. */
 const mockOwnerAskAITurns = new Map<string, OwnerAskTurn[]>();
 /** Per-link Formal queue turns for owner inbox (Phase C). */
@@ -560,22 +556,12 @@ async function hydrateVisitorAskState() {
     if (!res) return;
     const data = (await res.json()) as {
       publicAskTurns?: [string, PublicAskTurn[]][];
-      publicQuestions?: [string, VisitorQuestion[]][];
-      ownerQuestions?: [string, VisitorQuestion[]][];
       ownerAskAITurns?: [string, OwnerAskTurn[]][];
     };
     mockPublicAskTurns.clear();
-    mockPublicQuestions.clear();
-    mockOwnerQuestions.clear();
     mockOwnerAskAITurns.clear();
     for (const [token, turns] of data.publicAskTurns ?? []) {
       mockPublicAskTurns.set(token, turns);
-    }
-    for (const [token, rows] of data.publicQuestions ?? []) {
-      mockPublicQuestions.set(token, rows);
-    }
-    for (const [linkId, rows] of data.ownerQuestions ?? []) {
-      mockOwnerQuestions.set(linkId, rows);
     }
     for (const [linkId, rows] of data.ownerAskAITurns ?? []) {
       mockOwnerAskAITurns.set(linkId, rows);
@@ -594,8 +580,6 @@ async function persistVisitorAskState() {
       new Response(
         JSON.stringify({
           publicAskTurns: [...mockPublicAskTurns.entries()],
-          publicQuestions: [...mockPublicQuestions.entries()],
-          ownerQuestions: [...mockOwnerQuestions.entries()],
           ownerAskAITurns: [...mockOwnerAskAITurns.entries()],
         }),
         { headers: { "Content-Type": "application/json" } },
@@ -608,8 +592,6 @@ async function persistVisitorAskState() {
 
 async function resetVisitorAskState() {
   mockPublicAskTurns.clear();
-  mockPublicQuestions.clear();
-  mockOwnerQuestions.clear();
   mockOwnerAskAITurns.clear();
   if (typeof caches === "undefined") return;
   try {
@@ -945,16 +927,15 @@ async function executeMockKnowledgeSessionQuery(
 }
 
 function seedOwnerAskHostQuestions() {
-  mockOwnerQuestions.clear();
   const now = new Date().toISOString();
-  mockOwnerQuestions.set("link_room_1", [
+  mockPublicAskTurns.set("RoomShare1", [
     {
       id: "owner_q_pending_1",
+      session_id: "sess_host_1",
       link_id: "link_room_1",
-      visitor_id: "visitor_owner_inbox",
-      visitor_email: "lp@example.com",
       question: "Can you share the updated financial model?",
-      status: "pending",
+      lane: "host",
+      status: "host_pending",
       created_at: now,
       updated_at: now,
     },
@@ -1043,16 +1024,6 @@ function syncPublicAskTurnAnswer(linkId: string, turnId: string, answer: string)
   }
 }
 
-function appendOwnerQuestionFromPublicAsk(link: MockLinkExt, legacy: VisitorQuestion, turnId?: string) {
-  const ownerList = mockOwnerQuestions.get(link.id) ?? [];
-  ownerList.push({
-    ...legacy,
-    link_id: link.id,
-    ask_turn_id: turnId,
-  });
-  mockOwnerQuestions.set(link.id, ownerList);
-}
-
 function syncOwnerAskAITurnFromPublic(token: string, turn: PublicAskTurn) {
   const link = findMockLinkByPublicToken(token);
   if (!link || turn.lane !== "ai") return;
@@ -1076,27 +1047,6 @@ function syncOwnerAskAITurnFromPublic(token: string, turn: PublicAskTurn) {
     list.push(row);
   }
   mockOwnerAskAITurns.set(link.id, list);
-}
-
-function mockPublicQuestionsDualRead(token: string): VisitorQuestion[] {
-  const link = findMockLinkByPublicToken(token);
-  const linkId = link?.id ?? token;
-  const turns = mockPublicAskTurns.get(token) ?? [];
-  return turns
-    .map((turn) => ({
-      id: turn.id,
-      ask_turn_id: turn.id,
-      link_id: linkId,
-      visitor_id: "visitor_mock",
-      question: turn.question,
-      answer: turn.host_answer,
-      status: turn.status === "host_answered" ? "answered" : "pending",
-      created_at: turn.created_at,
-      updated_at: turn.updated_at,
-    }))
-    .sort(
-      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-    );
 }
 
 function mockOwnerAskTurnsForLink(linkId: string): OwnerAskTurn[] {
@@ -1125,24 +1075,6 @@ function mockOwnerAskTurnsForLink(linkId: string): OwnerAskTurn[] {
         updated_at: turn.updated_at,
       });
     }
-  }
-
-  for (const q of mockOwnerQuestions.get(linkId) ?? []) {
-    const turnId = q.ask_turn_id ?? q.id;
-    if (byId.has(turnId)) continue;
-    byId.set(turnId, {
-      id: turnId,
-      session_id: "",
-      link_id: linkId,
-      visitor_id: q.visitor_id,
-      visitor_email: q.visitor_email,
-      question: q.question,
-      lane: "host",
-      status: q.status === "answered" ? "host_answered" : "host_pending",
-      host_answer: q.answer,
-      created_at: q.created_at,
-      updated_at: q.updated_at,
-    });
   }
 
   for (const ai of mockOwnerAskAITurns.get(linkId) ?? []) {
@@ -4446,18 +4378,6 @@ export const handlers = [
     const list = mockPublicAskTurns.get(token) ?? [];
     list.push(turn);
     mockPublicAskTurns.set(token, list);
-    if (!isAIAsk && link) {
-      appendOwnerQuestionFromPublicAsk(link, {
-        id: turn.id,
-        link_id: link.id,
-        visitor_id: "visitor_mock",
-        question: forceAI ? cleanedQuestion : question,
-        status: "pending",
-        created_at: turn.created_at,
-        updated_at: turn.updated_at,
-        ask_turn_id: turn.id,
-      }, turn.id);
-    }
     await persistVisitorAskState();
     return HttpResponse.json({ data: turn }, { status: 201 });
   }),
@@ -4490,19 +4410,6 @@ export const handlers = [
     };
     list[idx] = updated;
     mockPublicAskTurns.set(token, list);
-    const link = findMockLinkByPublicToken(token);
-    if (link) {
-      appendOwnerQuestionFromPublicAsk(link, {
-        id: updated.id,
-        link_id: link.id,
-        visitor_id: "visitor_mock",
-        question: turn.question,
-        status: "pending",
-        created_at: updated.updated_at,
-        updated_at: updated.updated_at,
-        ask_turn_id: updated.id,
-      }, updated.id);
-    }
     await persistVisitorAskState();
     return HttpResponse.json({ data: updated });
   }),

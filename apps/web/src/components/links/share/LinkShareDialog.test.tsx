@@ -42,7 +42,6 @@ vi.mock("@/lib/api", () => ({
     getAccessLogs: vi.fn(),
     listLinkAsk: vi.fn(),
     listLinkFileRequests: vi.fn(),
-    answerQuestion: vi.fn(),
     updateFileRequestStatus: vi.fn(),
     listNDATemplates: vi.fn(() => Promise.resolve({ data: [] })),
     getDocuments: vi.fn(() => Promise.resolve({ data: [] })),

@@ -13,7 +13,6 @@ vi.mock("@/lib/api", () => ({
   api: {
     listLinkAsk: vi.fn(),
     answerAskTurn: vi.fn(),
-    answerQuestion: vi.fn(),
     updateLinkAskPolicy: vi.fn(),
     getLinkAskPolicy: vi.fn(),
   },
