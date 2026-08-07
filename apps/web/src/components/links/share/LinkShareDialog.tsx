@@ -344,6 +344,7 @@ function LinkShareDialogContent({
                     roomBlockedEmails={lockedRoomBlocks}
                     ndaTemplates={ndaTemplates}
                     documents={resolveNdaDocumentFallback(agreementDocs)}
+                    linkId={link.id}
                   />
                 </TabsContent>
 

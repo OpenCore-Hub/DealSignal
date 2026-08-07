@@ -58,7 +58,7 @@ startxref
 	}
 	tmpFile.Close()
 
-	data, bounds, err := renderPDFPageWithPdftoppm(tmpFile.Name(), 1)
+	data, bounds, err := renderPDFPageWithPdftoppm(tmpFile.Name(), 1, defaultRenderDPI)
 	if err != nil {
 		t.Fatalf("render PDF page: %v", err)
 	}

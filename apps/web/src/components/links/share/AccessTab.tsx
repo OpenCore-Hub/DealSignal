@@ -33,6 +33,9 @@ import {
   STANDALONE_ADVANCED_KEYS,
   countAdvancedEnabled,
 } from "./shareAdvanced";
+import { VisitorAskExperienceField } from "./VisitorAskExperienceField";
+import { LinkAskPolicyQuotaPanel } from "./LinkAskPolicyQuotaPanel";
+import type { VisitorAskExperience } from "./visitorAskExperience";
 
 export type AccessTabLayout = "compact" | "sections";
 
@@ -68,6 +71,8 @@ interface AccessTabProps {
   };
   /** Room-wide blocklist emails — read-only on deal-room share links. */
   roomBlockedEmails?: string[];
+  /** Existing link id — enables read-only AI quota on edit. */
+  linkId?: string;
 }
 
 function OptionSwitch({
@@ -266,6 +271,7 @@ export function AccessTab({
   audienceMode = "full",
   roomSecurityFloors,
   roomBlockedEmails = [],
+  linkId,
 }: AccessTabProps) {
   const { t } = useTranslation("linkShare");
   const sections = layout === "sections";
@@ -311,7 +317,7 @@ export function AccessTab({
     updateDraft,
   ]);
 
-  const advancedCount = countAdvancedEnabled(draft);
+  const advancedCount = countAdvancedEnabled(draft, { countVisitorAsk: isDealRoomLink });
   /** Document links cannot use email verification; room floor locks it ON. */
   const verificationDisabledForDocuments = !isDealRoomLink;
   const emailSelfReportDisabled = verifyFloor;
@@ -719,15 +725,21 @@ export function AccessTab({
   const advancedBody = (
     <>
       {isDealRoomLink ? (
-        <div
-          className="rounded-lg border border-border/60 bg-muted/30 px-3 py-2.5"
-          data-testid="deal-room-ask-host-included"
-        >
-          <p className="text-sm font-medium">{t("accessRules.advanced.dealRoomAskHostTitle")}</p>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            {t("accessRules.advanced.dealRoomAskHostDescription")}
-          </p>
-        </div>
+        <>
+          <VisitorAskExperienceField
+            value={draft.visitorAskExperience}
+            onChange={(visitorAskExperience: VisitorAskExperience) =>
+              updateDraft({ visitorAskExperience })
+            }
+            highlighted={isHighlighted("visitorAskExperience")}
+          />
+          {linkId ? (
+            <LinkAskPolicyQuotaPanel
+              linkId={linkId}
+              experience={draft.visitorAskExperience}
+            />
+          ) : null}
+        </>
       ) : null}
       {STANDALONE_ADVANCED_KEYS.map((key) => (
         <OptionSwitch

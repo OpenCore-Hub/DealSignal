@@ -100,6 +100,11 @@ func TestParseAskSecurityEventsQuery(t *testing.T) {
 	if _, err := parseAskSecurityEventsQuery("", "", "not_a_type", "", ""); !errors.Is(err, errInvalidAskSecurityEventType) {
 		t.Fatalf("want invalid event type, got %v", err)
 	}
+	for _, eventType := range []string{"ask_escalated", "ask_formal_submitted", "ask_ai_rate_limited"} {
+		if _, err := parseAskSecurityEventsQuery("", "", eventType, "", ""); err != nil {
+			t.Fatalf("event_type %q should be allowed: %v", eventType, err)
+		}
+	}
 	if _, err := parseAskSecurityEventsQuery("abc", "", "", "", ""); !errors.Is(err, errInvalidAskSecurityLimit) {
 		t.Fatalf("want invalid limit, got %v", err)
 	}

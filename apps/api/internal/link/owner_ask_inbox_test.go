@@ -4,73 +4,29 @@ import (
 	"testing"
 	"time"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5/pgtype"
 )
 
-func TestMergeOwnerAskInbox(t *testing.T) {
-	turnID := uuid.New()
-	hostQID := uuid.New()
-	legacyOnly := uuid.New()
-	now := time.Now().UTC()
-
-	turns := []OwnerAskTurn{
-		{
-			PublicAskTurn: PublicAskTurn{
-				ID:             turnID.String(),
-				HostQuestionID: hostQID.String(),
-				Question:       "from turn",
-				Status:         askStatusHostPending,
-				CreatedAt:      now,
-			},
-			LinkID: "link-1",
-		},
-	}
-	legacy := []db.LinkVisitorQuestion{
-		{
-			ID:        pgtype.UUID{Bytes: legacyOnly, Valid: true},
-			LinkID:    pgtype.UUID{Bytes: uuid.New(), Valid: true},
-			Question:  "legacy only",
-			Status:    "pending",
-			CreatedAt: pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true},
-			UpdatedAt: pgtype.Timestamptz{Time: now.Add(-time.Hour), Valid: true},
-		},
-		{
-			ID:        pgtype.UUID{Bytes: hostQID, Valid: true},
-			LinkID:    pgtype.UUID{Bytes: uuid.New(), Valid: true},
-			Question:  "duplicate",
-			Status:    "pending",
-			CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
-			UpdatedAt: pgtype.Timestamptz{Time: now, Valid: true},
-		},
-	}
-
-	merged := mergeOwnerAskInbox(turns, legacy)
-	if len(merged) != 2 {
-		t.Fatalf("expected 2 items, got %d", len(merged))
-	}
-}
-
 func TestOwnerAskTurnToVisitorQuestion(t *testing.T) {
-	hostQID := uuid.New().String()
-	got := OwnerAskTurnToVisitorQuestion(OwnerAskTurn{
+	hostQID := uuid.New()
+	turn := OwnerAskTurn{
 		PublicAskTurn: PublicAskTurn{
-			ID:             uuid.New().String(),
-			HostQuestionID: hostQID,
-			Question:       "hello",
-			Status:         askStatusHostAnswered,
-			HostAnswer:     "world",
-			CreatedAt:      time.Now(),
-			UpdatedAt:      time.Now(),
+			ID:         hostQID.String(),
+			Question:   "Pricing?",
+			Status:     askStatusHostAnswered,
+			HostAnswer: "See deck slide 12",
+			CreatedAt:  time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC),
+			UpdatedAt:  time.Date(2026, 1, 2, 4, 4, 5, 0, time.UTC),
 		},
-		LinkID:    "link-1",
-		VisitorID: "visitor-1",
-	})
-	if got.ID != hostQID {
-		t.Fatalf("id = %q", got.ID)
+		LinkID:       "link-1",
+		VisitorID:    "visitor-1",
+		VisitorEmail: "a@example.com",
 	}
-	if got.Status != "answered" || got.Answer != "world" {
-		t.Fatalf("mapping wrong: %+v", got)
+	got := OwnerAskTurnToVisitorQuestion(turn)
+	if got.ID != hostQID.String() || got.AskTurnID != hostQID.String() {
+		t.Fatalf("id = %q ask_turn_id = %q", got.ID, got.AskTurnID)
+	}
+	if got.Status != "answered" || got.Answer != "See deck slide 12" {
+		t.Fatalf("status=%q answer=%q", got.Status, got.Answer)
 	}
 }

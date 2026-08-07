@@ -89,6 +89,10 @@ echo "BASE_URL=$BASE_URL"
 
 # shellcheck source=scripts/e2e-category-tristate.sh
 source "$API_DIR/scripts/e2e-category-tristate.sh"
+# shellcheck source=scripts/e2e-visitor-ask.sh
+source "$API_DIR/scripts/e2e-visitor-ask.sh"
+# shellcheck source=scripts/e2e-visitor-ask-ai.sh
+source "$API_DIR/scripts/e2e-visitor-ask-ai.sh"
 
 echo -n "[healthz] "
 curl -fsS "$BASE_URL/healthz" | jq -c .
@@ -140,5 +144,17 @@ for i in $(seq 1 45); do
 done
 
 run_e2e_category_tristate
+run_e2e_visitor_ask
+run_e2e_visitor_ask_formal
 
-echo "=== Staging category verify complete ==="
+set +e
+run_e2e_visitor_ask_ai
+visitor_ask_ai_rc=$?
+set -e
+if [[ "$visitor_ask_ai_rc" -eq 2 ]]; then
+  echo "SKIP: Visitor Ask AI lane (docling-rag not configured)"
+elif [[ "$visitor_ask_ai_rc" -ne 0 ]]; then
+  exit "$visitor_ask_ai_rc"
+fi
+
+echo "=== Staging category + visitor ask verify complete ==="

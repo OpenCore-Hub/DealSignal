@@ -24,6 +24,7 @@ const (
 	SourceTypeRoomAccessRequest         = "room_access_request"
 	SourceTypeRoomNDA                   = "room_nda"
 	SourceTypeLinkQuestion              = "link_question"
+	SourceTypeDealRoomLinkQuestion      = "deal_room_link_question"
 	SourceTypeUploadedFile              = "uploaded_file"
 	SourceTypeExpiringLink              = "expiring_link"
 	SourceTypeExpiringRoom              = "expiring_room"
@@ -64,7 +65,7 @@ func (s *Syncer) SyncWorkspace(ctx context.Context, workspaceID string) error {
 	if err := s.syncRoomNDAs(ctx, ws.TenantID, wsUUID); err != nil {
 		return err
 	}
-	if err := s.syncLinkQuestions(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncPendingAskTurns(ctx, ws.TenantID, wsUUID); err != nil {
 		return err
 	}
 	if err := s.syncUploadedFiles(ctx, ws.TenantID, wsUUID); err != nil {
@@ -172,14 +173,100 @@ func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.
 	return s.closeStaleActions(ctx, workspaceID, SourceTypeRoomNDA, current)
 }
 
-func (s *Syncer) syncLinkQuestions(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
-	rows, err := s.queries.ListPendingLinkQuestionsByWorkspace(ctx, workspaceID)
+const (
+	operationalActionTypeAnswer = "answer"
+	operationalActionTypeReview = "review"
+)
+
+func (s *Syncer) syncPendingAskTurns(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+	hostRows, err := s.queries.ListPendingAskTurnsByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return fmt.Errorf("list pending link questions: %w", err)
+		return fmt.Errorf("list pending ask turns: %w", err)
 	}
-	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkQuestion, r.ID, pgtype.UUID{}, r.VisitorEmail, r.LinkName, "answer"); err != nil {
+	formalRows, err := s.queries.ListPendingFormalAskTurnsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("list pending formal ask turns: %w", err)
+	}
+	currentDealRoom := make(map[string]bool, len(hostRows)+len(formalRows))
+	for _, r := range hostRows {
+		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeAnswer, currentDealRoom); err != nil {
 			return err
+		}
+	}
+	for _, r := range formalRows {
+		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeReview, currentDealRoom); err != nil {
+			return err
+		}
+	}
+	if err := s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeDealRoomLinkQuestion, currentDealRoom); err != nil {
+		return err
+	}
+	return s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeLinkQuestion, map[string]bool{})
+}
+
+func (s *Syncer) upsertPendingAskTurnAction(
+	ctx context.Context,
+	tenantID, workspaceID pgtype.UUID,
+	turnID, dealRoomID, linkID pgtype.UUID,
+	visitorEmail, linkName pgtype.Text,
+	actionType string,
+	current map[string]bool,
+) error {
+	if !dealRoomID.Valid {
+		return nil
+	}
+	current[uuid.UUID(turnID.Bytes).String()] = true
+	target := dealRoomAskTargetID(dealRoomID, linkID)
+	return s.upsertOperationalTextTarget(ctx, tenantID, workspaceID, SourceTypeDealRoomLinkQuestion, turnID, target, visitorEmail, linkName, actionType)
+}
+
+func dealRoomAskTargetID(roomID, linkID pgtype.UUID) string {
+	room := uuid.UUID(roomID.Bytes).String()
+	if !linkID.Valid {
+		return room
+	}
+	return room + "/" + uuid.UUID(linkID.Bytes).String()
+}
+
+func (s *Syncer) upsertOperationalTextTarget(
+	ctx context.Context,
+	tenantID, workspaceID pgtype.UUID,
+	sourceType string,
+	sourceID pgtype.UUID,
+	targetID string,
+	actor, target pgtype.Text,
+	actionType string,
+) error {
+	_, err := s.queries.CreateOperationalActionItem(ctx, db.CreateOperationalActionItemParams{
+		TenantID:    tenantID,
+		WorkspaceID: workspaceID,
+		SourceType:  pgtype.Text{String: sourceType, Valid: true},
+		SourceID:    pgtype.Text{String: uuid.UUID(sourceID.Bytes).String(), Valid: sourceID.Valid},
+		TargetID:    pgtype.Text{String: targetID, Valid: targetID != ""},
+		Title:       titleForAction(sourceType, actionType, actor.String, target.String),
+		Impact:      impactFor(sourceType),
+		DueAt:       pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		Status:      "pending",
+		ActionType:  actionType,
+	})
+	return err
+}
+
+func (s *Syncer) closeStaleActionsBySourceID(ctx context.Context, workspaceID pgtype.UUID, sourceType string, current map[string]bool) error {
+	items, err := s.queries.ListPendingActionItemsBySourceType(ctx, db.ListPendingActionItemsBySourceTypeParams{
+		WorkspaceID: workspaceID,
+		SourceType:  pgtype.Text{String: sourceType, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("list pending %s actions: %w", sourceType, err)
+	}
+	for _, item := range items {
+		if item.SourceID.Valid && !current[item.SourceID.String] {
+			_, _ = s.queries.UpdateActionItemStatus(ctx, db.UpdateActionItemStatusParams{
+				Status:      "done",
+				ID:          item.ID,
+				WorkspaceID: workspaceID,
+			})
 		}
 	}
 	return nil
@@ -273,6 +360,16 @@ func (s *Syncer) upsertOperational(
 	return err
 }
 
+func titleForAction(sourceType, actionType, actor, target string) string {
+	if sourceType == SourceTypeDealRoomLinkQuestion && actionType == operationalActionTypeReview {
+		if target != "" {
+			return fmt.Sprintf("Review formal Q&A from %s on %s", actor, target)
+		}
+		return fmt.Sprintf("Review formal Q&A from %s", actor)
+	}
+	return titleFor(sourceType, actor, target)
+}
+
 func titleFor(sourceType, actor, target string) string {
 	switch sourceType {
 	case SourceTypeLinkAccessRequest:
@@ -300,6 +397,11 @@ func titleFor(sourceType, actor, target string) string {
 			return fmt.Sprintf("Answer question from %s on %s", actor, target)
 		}
 		return fmt.Sprintf("Answer question from %s", actor)
+	case SourceTypeDealRoomLinkQuestion:
+		if target != "" {
+			return fmt.Sprintf("Answer visitor Ask from %s on %s", actor, target)
+		}
+		return fmt.Sprintf("Answer visitor Ask from %s", actor)
 	case SourceTypeUploadedFile:
 		if target != "" {
 			return fmt.Sprintf("Review uploaded file %s on %s", actor, target)

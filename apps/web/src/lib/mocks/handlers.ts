@@ -10,11 +10,12 @@ import type {
   DealRoomMember,
   Link,
   OwnerAskTurn,
-  VisitorQuestion,
+  PublicFormalAsk,
   PublicAskTurn,
   WorkspaceMember,
 } from "@/types";
 import { qaEnabledForLinkId } from "@/lib/qaScope";
+import { attachOwnerAskRepeatCounts, matchesOwnerAskInboxFilter, ownerAskTurnCanPinFAQ } from "@/lib/ownerAskInbox";
 import {
   mockAccessLogs,
   mockActionItems,
@@ -90,6 +91,42 @@ function findMockLinkByPublicToken(token: string): MockLinkExt | undefined {
   return mockLinks.find((l) => l.shortUrl.endsWith(token)) as MockLinkExt | undefined;
 }
 
+/** E2E + PATCH overrides survive link array resets within a test run. */
+const mockLinkAskPolicyOverrides = new Map<
+  string,
+  { askAiEnabled?: boolean; askMode?: string }
+>();
+
+function resolveLinkAskAiEnabled(link: MockLinkExt | undefined): boolean {
+  if (!link) return false;
+  const override = mockLinkAskPolicyOverrides.get(link.id);
+  if (override?.askAiEnabled !== undefined) return override.askAiEnabled;
+  return Boolean(link.askAiEnabled);
+}
+
+function resolveLinkAskMode(link: MockLinkExt | undefined): string {
+  if (!link) return "supervised";
+  const override = mockLinkAskPolicyOverrides.get(link.id);
+  if (override?.askMode) return override.askMode;
+  return link.askMode ?? "supervised";
+}
+
+function setLinkAskPolicyOverride(
+  linkId: string,
+  patch: { askAiEnabled?: boolean; askMode?: string },
+) {
+  const prev = mockLinkAskPolicyOverrides.get(linkId) ?? {};
+  const next = { ...prev };
+  if (patch.askAiEnabled !== undefined) next.askAiEnabled = patch.askAiEnabled;
+  if (patch.askMode !== undefined) next.askMode = patch.askMode;
+  mockLinkAskPolicyOverrides.set(linkId, next);
+  const link = mockLinks.find((l) => l.id === linkId);
+  if (link) {
+    if (patch.askAiEnabled !== undefined) link.askAiEnabled = patch.askAiEnabled;
+    if (patch.askMode !== undefined) link.askMode = patch.askMode as MockLinkExt["askMode"];
+  }
+}
+
 // Snapshot of initial state so E2E tests can reset between cases.
 const initialState = {
   workspaces: structuredClone(mockWorkspaces),
@@ -112,11 +149,21 @@ interface MockUser {
   name: string;
 }
 const mockUsers = new Map<string, MockUser>();
-/** Per-link visitor Ask Host questions for public MSW e2e. */
-const mockPublicQuestions = new Map<string, VisitorQuestion[]>();
+/** Per-link visitor Ask turns for public MSW e2e. */
 const mockPublicAskTurns = new Map<string, PublicAskTurn[]>();
-/** Per-link Ask Host questions for owner inbox (room + link). */
-const mockOwnerQuestions = new Map<string, VisitorQuestion[]>();
+/** Per-link AI Ask turns for owner inbox review. */
+const mockOwnerAskAITurns = new Map<string, OwnerAskTurn[]>();
+/** Per-link Formal queue turns for owner inbox (Phase C). */
+const mockOwnerFormalTurns = new Map<string, OwnerAskTurn[]>();
+/** Per-link pinned FAQ overrides for owner inbox (Phase B). */
+const mockOwnerAskPinOverrides = new Map<
+  string,
+  Map<string, { pinned_faq_at: string; pinned_faq_by: string; pinned_faq_sort?: number }>
+>();
+/** Per-link formal Q&A overrides for owner inbox (Phase C). */
+const mockOwnerAskFormalOverrides = new Map<string, Map<string, Partial<OwnerAskTurn>>>();
+/** Per-link published formal Q&A visible to visitors. */
+const mockPublicFormalAsk = new Map<string, PublicFormalAsk[]>();
 /** Thin room security: blocklist + outbound floors. */
 const mockRoomAccessPolicies = new Map<string, DealRoomAccessPolicy>();
 
@@ -498,11 +545,66 @@ function clientRequestKey(roomId: string, clientRequestId: string) {
   return `${roomId}\0${clientRequestId}`;
 }
 
-function resetMockState() {
-  mockUsers.clear();
-  mockPublicQuestions.clear();
+const VISITOR_ASK_CACHE = "msw-e2e-visitor-ask";
+const VISITOR_ASK_STATE_URL = "https://msw.local/visitor-ask-state";
+
+async function hydrateVisitorAskState() {
+  if (typeof caches === "undefined") return;
+  try {
+    const cache = await caches.open(VISITOR_ASK_CACHE);
+    const res = await cache.match(VISITOR_ASK_STATE_URL);
+    if (!res) return;
+    const data = (await res.json()) as {
+      publicAskTurns?: [string, PublicAskTurn[]][];
+      ownerAskAITurns?: [string, OwnerAskTurn[]][];
+    };
+    mockPublicAskTurns.clear();
+    mockOwnerAskAITurns.clear();
+    for (const [token, turns] of data.publicAskTurns ?? []) {
+      mockPublicAskTurns.set(token, turns);
+    }
+    for (const [linkId, rows] of data.ownerAskAITurns ?? []) {
+      mockOwnerAskAITurns.set(linkId, rows);
+    }
+  } catch {
+    /* ignore cache hydrate failures in non-SW contexts */
+  }
+}
+
+async function persistVisitorAskState() {
+  if (typeof caches === "undefined") return;
+  try {
+    const cache = await caches.open(VISITOR_ASK_CACHE);
+    await cache.put(
+      VISITOR_ASK_STATE_URL,
+      new Response(
+        JSON.stringify({
+          publicAskTurns: [...mockPublicAskTurns.entries()],
+          ownerAskAITurns: [...mockOwnerAskAITurns.entries()],
+        }),
+        { headers: { "Content-Type": "application/json" } },
+      ),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+async function resetVisitorAskState() {
   mockPublicAskTurns.clear();
-  mockOwnerQuestions.clear();
+  mockOwnerAskAITurns.clear();
+  if (typeof caches === "undefined") return;
+  try {
+    await caches.delete(VISITOR_ASK_CACHE);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function resetMockState() {
+  mockUsers.clear();
+  mockLinkAskPolicyOverrides.clear();
+  await resetVisitorAskState();
   void resetKnowledgeQAState();
   seedOwnerAskHostQuestions();
   mockWorkspaces.splice(0, mockWorkspaces.length, ...initialState.workspaces);
@@ -825,16 +927,64 @@ async function executeMockKnowledgeSessionQuery(
 }
 
 function seedOwnerAskHostQuestions() {
-  mockOwnerQuestions.clear();
   const now = new Date().toISOString();
-  mockOwnerQuestions.set("link_1", [
+  mockPublicAskTurns.set("RoomShare1", [
     {
       id: "owner_q_pending_1",
-      link_id: "link_1",
-      visitor_id: "visitor_owner_inbox",
-      visitor_email: "lp@example.com",
+      session_id: "sess_host_1",
+      link_id: "link_room_1",
       question: "Can you share the updated financial model?",
-      status: "pending",
+      lane: "host",
+      status: "host_pending",
+      created_at: now,
+      updated_at: now,
+    },
+  ]);
+  mockOwnerAskAITurns.clear();
+  mockOwnerAskAITurns.set("link_room_1", [
+    {
+      id: "owner_ai_1",
+      session_id: "sess_ai_1",
+      link_id: "link_room_1",
+      visitor_id: "visitor_ai",
+      visitor_email: "analyst@example.com",
+      question: "What was revenue growth last year?",
+      lane: "ai",
+      status: "ai_answered",
+      ai_payload: {
+        answer: "Revenue grew 12% year over year.",
+        refused: false,
+        resultStatus: "answered",
+        hits: [
+          {
+            chunkId: "chunk_ai_seed",
+            documentId: "doc_1",
+            text: "Revenue increased 12% YoY in FY2024.",
+            score: 0.9,
+            sourceName: "Financial Summary.pdf",
+            pages: [3],
+            viewerPage: 3,
+          },
+        ],
+      },
+      created_at: now,
+      updated_at: now,
+    },
+  ]);
+  mockOwnerFormalTurns.clear();
+  mockOwnerFormalTurns.set("link_room_1", [
+    {
+      id: "owner_formal_1",
+      session_id: "sess_formal_1",
+      link_id: "link_room_1",
+      visitor_id: "visitor_formal",
+      visitor_email: "compliance@example.com",
+      question: "What is the board-approved revenue guidance?",
+      lane: "host",
+      status: "host_pending",
+      route_reason: "policy_formal",
+      formal_status: "pending_review",
+      formal_anonymize: true,
       created_at: now,
       updated_at: now,
     },
@@ -851,7 +1001,7 @@ function publicTokenFromLink(link: Link): string {
   return parts[parts.length - 1] ?? "";
 }
 
-function syncPublicAskTurnAnswer(linkId: string, questionId: string, answer: string) {
+function syncPublicAskTurnAnswer(linkId: string, turnId: string, answer: string) {
   const link = mockLinks.find((l) => l.id === linkId);
   if (!link) return;
   const token = publicTokenFromLink(link);
@@ -859,9 +1009,10 @@ function syncPublicAskTurnAnswer(linkId: string, questionId: string, answer: str
   const turns = mockPublicAskTurns.get(token) ?? [];
   let changed = false;
   for (let i = 0; i < turns.length; i++) {
-    if (turns[i].host_question_id !== questionId) continue;
+    const row = turns[i]!;
+    if (row.id !== turnId) continue;
     turns[i] = {
-      ...turns[i],
+      ...row,
       status: "host_answered",
       host_answer: answer,
       updated_at: now,
@@ -871,76 +1022,159 @@ function syncPublicAskTurnAnswer(linkId: string, questionId: string, answer: str
   if (changed) {
     mockPublicAskTurns.set(token, turns);
   }
-  const legacyList = mockPublicQuestions.get(token) ?? [];
-  for (let i = 0; i < legacyList.length; i++) {
-    if (legacyList[i].id !== questionId) continue;
-    legacyList[i] = {
-      ...legacyList[i],
-      answer,
-      status: "answered",
-      updated_at: now,
-    };
-  }
-  mockPublicQuestions.set(token, legacyList);
 }
 
-function appendOwnerQuestionFromPublicAsk(link: MockLinkExt, legacy: VisitorQuestion, turnId?: string) {
-  const ownerList = mockOwnerQuestions.get(link.id) ?? [];
-  ownerList.push({
-    ...legacy,
-    link_id: link.id,
-    ask_turn_id: turnId,
-  });
-  mockOwnerQuestions.set(link.id, ownerList);
-}
-
-function mockPublicQuestionsDualRead(token: string): VisitorQuestion[] {
+function syncOwnerAskAITurnFromPublic(token: string, turn: PublicAskTurn) {
   const link = findMockLinkByPublicToken(token);
-  const linkId = link?.id ?? token;
-  const turns = mockPublicAskTurns.get(token) ?? [];
-  const legacy = mockPublicQuestions.get(token) ?? [];
-  const covered = new Set<string>();
-  const merged: VisitorQuestion[] = [];
-  for (const turn of turns) {
-    const id = turn.host_question_id ?? turn.id;
-    if (turn.host_question_id) covered.add(turn.host_question_id);
-    merged.push({
-      id,
-      ask_turn_id: turn.id,
-      link_id: linkId,
-      visitor_id: "visitor_mock",
-      question: turn.question,
-      answer: turn.host_answer,
-      status: turn.status === "host_answered" ? "answered" : "pending",
-      created_at: turn.created_at,
-      updated_at: turn.updated_at,
-    });
+  if (!link || turn.lane !== "ai") return;
+  const row: OwnerAskTurn = {
+    id: turn.id,
+    session_id: turn.session_id,
+    link_id: link.id,
+    visitor_id: "visitor_mock",
+    question: turn.question,
+    lane: "ai",
+    status: turn.status,
+    ai_payload: turn.ai_payload,
+    created_at: turn.created_at,
+    updated_at: turn.updated_at,
+  };
+  const list = mockOwnerAskAITurns.get(link.id) ?? [];
+  const idx = list.findIndex((item) => item.id === turn.id);
+  if (idx >= 0) {
+    list[idx] = row;
+  } else {
+    list.push(row);
   }
-  for (const q of legacy) {
-    if (covered.has(q.id)) continue;
-    merged.push({ ...q, link_id: linkId });
-  }
-  merged.sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
-  return merged;
+  mockOwnerAskAITurns.set(link.id, list);
 }
 
 function mockOwnerAskTurnsForLink(linkId: string): OwnerAskTurn[] {
-  return (mockOwnerQuestions.get(linkId) ?? []).map((q) => ({
-    id: q.ask_turn_id ?? q.id,
-    session_id: "",
-    link_id: linkId,
-    visitor_id: q.visitor_id,
-    visitor_email: q.visitor_email,
-    question: q.question,
-    lane: "host" as const,
-    status: q.status === "answered" ? "host_answered" : "host_pending",
-    host_question_id: q.id,
-    host_answer: q.answer,
-    created_at: q.created_at,
-    updated_at: q.updated_at,
-  }));
+  const link = mockLinks.find((l) => l.id === linkId);
+  const byId = new Map<string, OwnerAskTurn>();
+
+  if (link) {
+    const token = publicTokenFromLink(link);
+    for (const turn of mockPublicAskTurns.get(token) ?? []) {
+      byId.set(turn.id, {
+        id: turn.id,
+        session_id: turn.session_id,
+        link_id: linkId,
+        visitor_id: "visitor_mock",
+        question: turn.question,
+        lane: turn.lane,
+        status: turn.status,
+        host_answer: turn.host_answer,
+        ai_payload: turn.ai_payload,
+        route_reason: turn.route_reason,
+        formal_status: turn.formal_status,
+        formal_publish_at: turn.formal_publish_at,
+        formal_published_at: turn.formal_published_at,
+        formal_anonymize: turn.formal_anonymize,
+        created_at: turn.created_at,
+        updated_at: turn.updated_at,
+      });
+    }
+  }
+
+  for (const ai of mockOwnerAskAITurns.get(linkId) ?? []) {
+    if (!byId.has(ai.id)) {
+      byId.set(ai.id, ai);
+    }
+  }
+
+  for (const formal of mockOwnerFormalTurns.get(linkId) ?? []) {
+    if (!byId.has(formal.id)) {
+      byId.set(formal.id, formal);
+    }
+  }
+
+  const pinOverrides = mockOwnerAskPinOverrides.get(linkId);
+  if (pinOverrides) {
+    for (const [turnId, turn] of byId) {
+      const pinned = pinOverrides.get(turnId);
+      if (pinned) {
+        byId.set(turnId, { ...turn, ...pinned });
+      }
+    }
+  }
+
+  const formalOverrides = mockOwnerAskFormalOverrides.get(linkId);
+  if (formalOverrides) {
+    for (const [turnId, turn] of byId) {
+      const formal = formalOverrides.get(turnId);
+      if (formal) {
+        byId.set(turnId, { ...turn, ...formal });
+      }
+    }
+  }
+
+  return Array.from(byId.values());
+}
+
+function mockMaxLinkPinnedFAQSort(linkId: string): number {
+  let max = -1;
+  for (const turn of mockOwnerAskTurnsForLink(linkId)) {
+    if (turn.pinned_faq_at && turn.pinned_faq_sort != null) {
+      max = Math.max(max, turn.pinned_faq_sort);
+    }
+  }
+  return max;
+}
+
+function mockSortOwnerAskPinnedFAQs(turns: OwnerAskTurn[]): OwnerAskTurn[] {
+  return [...turns].sort((a, b) => {
+    const aSort = a.pinned_faq_sort ?? Number.MAX_SAFE_INTEGER;
+    const bSort = b.pinned_faq_sort ?? Number.MAX_SAFE_INTEGER;
+    if (aSort !== bSort) return aSort - bSort;
+    const aPinned = a.pinned_faq_at ? new Date(a.pinned_faq_at).getTime() : 0;
+    const bPinned = b.pinned_faq_at ? new Date(b.pinned_faq_at).getTime() : 0;
+    return bPinned - aPinned;
+  });
+}
+
+function mockPublicAskFAQsForToken(token: string) {
+  const link = findMockLinkByPublicToken(token);
+  if (!link) return [];
+  const linkIds = link.dealRoomId
+    ? mockLinks.filter((l) => l.dealRoomId === link.dealRoomId).map((l) => l.id)
+    : [link.id];
+  const rows: Array<{
+    id: string;
+    question: string;
+    answer: string;
+    source: PublicAskTurn["lane"];
+    ai_payload?: PublicAskTurn["ai_payload"];
+    pinned_at: string;
+    link_id?: string;
+    link_name?: string;
+  }> = [];
+  for (const linkId of linkIds) {
+    const sourceLink = mockLinks.find((l) => l.id === linkId);
+    for (const turn of mockOwnerAskTurnsForLink(linkId).filter((t) => t.pinned_faq_at)) {
+      const answer = (turn.host_answer ?? turn.ai_payload?.answer ?? "").trim();
+      if (!answer) continue;
+      rows.push({
+        id: turn.id,
+        question: turn.question,
+        answer,
+        source: turn.lane,
+        ai_payload: turn.ai_payload,
+        pinned_at: turn.pinned_faq_at!,
+        link_id: linkId,
+        link_name: sourceLink?.name ?? sourceLink?.documentTitle,
+      });
+    }
+  }
+  rows.sort((a, b) => {
+    const aTurn = mockOwnerAskTurnsForLink(a.link_id!).find((t) => t.id === a.id);
+    const bTurn = mockOwnerAskTurnsForLink(b.link_id!).find((t) => t.id === b.id);
+    const aSort = aTurn?.pinned_faq_sort ?? Number.MAX_SAFE_INTEGER;
+    const bSort = bTurn?.pinned_faq_sort ?? Number.MAX_SAFE_INTEGER;
+    if (aSort !== bSort) return aSort - bSort;
+    return new Date(b.pinned_at).getTime() - new Date(a.pinned_at).getTime();
+  });
+  return rows;
 }
 
 function createTokenResponse(userId: string, email: string) {
@@ -1065,6 +1299,8 @@ export const handlers = [
     type E2EResetBody = {
       action?: string;
       roomId?: string;
+      linkId?: string;
+      askAiEnabled?: boolean;
       status?: string;
       documentStatus?: string;
       jobStatus?: string;
@@ -1112,7 +1348,24 @@ export const handlers = [
       await persistKnowledgeQAState();
       return new HttpResponse(null, { status: 204 });
     }
-    resetMockState();
+    if (body?.action === "link-ask-policy") {
+      const linkId = (body.linkId || "").trim();
+      if (!linkId) {
+        return HttpResponse.json(
+          { code: "invalid_input", message: "linkId is required" },
+          { status: 400 },
+        );
+      }
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) {
+        return HttpResponse.json({ code: "not_found", message: "link not found" }, { status: 404 });
+      }
+      setLinkAskPolicyOverride(linkId, {
+        ...(typeof body.askAiEnabled === "boolean" ? { askAiEnabled: body.askAiEnabled } : {}),
+      });
+      return new HttpResponse(null, { status: 204 });
+    }
+    await resetMockState();
     return new HttpResponse(null, { status: 204 });
   }),
 
@@ -1543,6 +1796,8 @@ export const handlers = [
       download_enabled?: boolean;
       watermark_enabled?: boolean;
       qa_enabled?: boolean;
+      ask_ai_enabled?: boolean;
+      ask_mode?: string;
     };
     // Update the in-memory link to reflect the edited values so subsequent reads
     // (including tests) see the new state.
@@ -1579,7 +1834,24 @@ export const handlers = [
     if (typeof payload.max_access_count === "number") link.maxAccessCount = payload.max_access_count;
     if (typeof payload.download_enabled === "boolean") link.downloadEnabled = payload.download_enabled;
     if (typeof payload.watermark_enabled === "boolean") link.watermarkEnabled = payload.watermark_enabled;
-    link.qaEnabled = qaEnabledForLinkId(link.dealRoomId);
+    if (link.dealRoomId) {
+      link.qaEnabled = true;
+      if (typeof payload.ask_ai_enabled === "boolean") {
+        link.askAiEnabled = payload.ask_ai_enabled;
+      }
+      const payloadAskMode = (payload as { ask_mode?: string }).ask_mode;
+      if (
+        payloadAskMode === "supervised" ||
+        payloadAskMode === "self_serve" ||
+        payloadAskMode === "formal"
+      ) {
+        link.askMode = payloadAskMode;
+      }
+    } else if (typeof payload.qa_enabled === "boolean") {
+      link.qaEnabled = payload.qa_enabled;
+    } else {
+      link.qaEnabled = false;
+    }
     if (payload.contact_ids) link.contactIds = payload.contact_ids;
     const nextAllows = resolveDocumentAllowEmails({
       contactIds: payload.contact_ids ?? link.contactIds,
@@ -1596,7 +1868,34 @@ export const handlers = [
     if (!link) return new HttpResponse(null, { status: 404 });
     const patch = (await request.json()) as Partial<typeof link>;
     Object.assign(link, patch);
-    link.qaEnabled = qaEnabledForLinkId(link.dealRoomId);
+    const patchAskAi = (patch as { askAiEnabled?: boolean }).askAiEnabled;
+    const patchAskAiSnake = (patch as { ask_ai_enabled?: boolean }).ask_ai_enabled;
+    if (link.dealRoomId) {
+      link.qaEnabled = true;
+      if (typeof patchAskAi === "boolean") {
+        link.askAiEnabled = patchAskAi;
+      } else if (typeof patchAskAiSnake === "boolean") {
+        link.askAiEnabled = patchAskAiSnake;
+      }
+      const patchAskMode = (patch as { ask_mode?: string }).ask_mode;
+      if (
+        patchAskMode === "supervised" ||
+        patchAskMode === "self_serve" ||
+        patchAskMode === "formal"
+      ) {
+        link.askMode = patchAskMode;
+      }
+    } else {
+      const patchQa = patch.qaEnabled;
+      const patchSnake = (patch as { qa_enabled?: boolean }).qa_enabled;
+      if (typeof patchQa === "boolean") {
+        link.qaEnabled = patchQa;
+      } else if (typeof patchSnake === "boolean") {
+        link.qaEnabled = patchSnake;
+      } else {
+        link.qaEnabled = false;
+      }
+    }
     return HttpResponse.json(link);
   }),
 
@@ -2705,6 +3004,8 @@ export const handlers = [
     if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
     const body = (await request.json()) as {
       name?: string;
+      ask_ai_enabled?: boolean;
+      ask_mode?: string;
       qa_enabled?: boolean;
       folder_paths?: string[];
       folder_scope_mode?: "full" | "allowlist";
@@ -2748,7 +3049,13 @@ export const handlers = [
       avgDurationSeconds: 0,
       permissionType: "public",
       isBundle: documentIds.length > 1,
-      qaEnabled: qaEnabledForLinkId(roomId),
+      qaEnabled: true,
+      askAiEnabled:
+        typeof body.ask_ai_enabled === "boolean" ? body.ask_ai_enabled : true,
+      askMode:
+        body.ask_mode === "self_serve" || body.ask_mode === "formal"
+          ? body.ask_mode
+          : "supervised",
       dealRoomId: roomId,
       requireEmail: requireEmailVerification ? false : !!body.require_email,
       requireEmailVerification,
@@ -2776,48 +3083,25 @@ export const handlers = [
     return HttpResponse.json(newLink, { status: 201 });
   }),
 
-  http.get(
-    "*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/visitor-questions",
-    ({ params, request }) => {
-      const roomId = params.roomId as string;
-      if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
-      const filterLinkId = new URL(request.url).searchParams.get("link_id");
-      const roomLinkIds = new Set(
-        mockLinks.filter((l) => l.dealRoomId === roomId).map((l) => l.id),
-      );
-      const rows: VisitorQuestion[] = [];
-      for (const [linkId, list] of mockOwnerQuestions) {
-        if (!roomLinkIds.has(linkId)) continue;
-        if (filterLinkId && linkId !== filterLinkId) continue;
-        rows.push(...list);
-      }
-      rows.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      return HttpResponse.json({ data: rows });
-    },
-  ),
-
-  http.get("*/api/workspaces/:workspaceSlug/links/:id/questions", ({ params }) => {
-    const linkId = params.id as string;
-    const link = mockLinks.find((l) => l.id === linkId);
-    if (!link) return new HttpResponse(null, { status: 404 });
-    return HttpResponse.json({ data: mockOwnerQuestions.get(linkId) ?? [] });
-  }),
-
-  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask", ({ params, request }) => {
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask", async ({ params, request }) => {
+    await hydrateVisitorAskState();
     const linkId = params.id as string;
     const link = mockLinks.find((l) => l.id === linkId);
     if (!link) return new HttpResponse(null, { status: 404 });
     const lane = new URL(request.url).searchParams.get("lane");
-    let rows = mockOwnerAskTurnsForLink(linkId);
-    if (lane) rows = rows.filter((r) => r.lane === lane);
+    const status = new URL(request.url).searchParams.get("status");
+    let rows = attachOwnerAskRepeatCounts(mockOwnerAskTurnsForLink(linkId));
+    rows = rows.filter((r) => matchesOwnerAskInboxFilter(r, lane, status));
     return HttpResponse.json({ data: rows });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/ask", ({ params, request }) => {
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/ask", async ({ params, request }) => {
+    await hydrateVisitorAskState();
     const roomId = params.roomId as string;
     if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
     const filterLinkId = new URL(request.url).searchParams.get("link_id");
     const lane = new URL(request.url).searchParams.get("lane");
+    const status = new URL(request.url).searchParams.get("status");
     const roomLinkIds = new Set(
       mockLinks.filter((l) => l.dealRoomId === roomId).map((l) => l.id),
     );
@@ -2826,7 +3110,8 @@ export const handlers = [
       if (filterLinkId && linkId !== filterLinkId) continue;
       rows.push(...mockOwnerAskTurnsForLink(linkId));
     }
-    const filtered = lane ? rows.filter((r) => r.lane === lane) : rows;
+    let filtered = attachOwnerAskRepeatCounts(rows);
+    filtered = filtered.filter((r) => matchesOwnerAskInboxFilter(r, lane, status));
     filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
     return HttpResponse.json({ data: filtered });
   }),
@@ -2834,6 +3119,7 @@ export const handlers = [
   http.patch(
     "*/api/workspaces/:workspaceSlug/links/:id/ask/:turnId/host-answer",
     async ({ params, request }) => {
+      await hydrateVisitorAskState();
       const linkId = params.id as string;
       const turnId = params.turnId as string;
       const link = mockLinks.find((l) => l.id === linkId);
@@ -2848,22 +3134,8 @@ export const handlers = [
       if (!turn) {
         return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
       }
-      const questionId = turn.host_question_id ?? turn.id;
-      const list = mockOwnerQuestions.get(linkId) ?? [];
-      const idx = list.findIndex((q) => q.id === questionId);
-      if (idx < 0) {
-        return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
-      }
-      const updated: VisitorQuestion = {
-        ...list[idx],
-        answer,
-        status: "answered",
-        answered_by: "user_1",
-        updated_at: new Date().toISOString(),
-      };
-      list[idx] = updated;
-      mockOwnerQuestions.set(linkId, list);
-      syncPublicAskTurnAnswer(linkId, questionId, answer);
+      syncPublicAskTurnAnswer(linkId, turnId, answer);
+      await persistVisitorAskState();
       return HttpResponse.json({
         data: {
           ...turn,
@@ -2876,35 +3148,277 @@ export const handlers = [
   ),
 
   http.patch(
-    "*/api/workspaces/:workspaceSlug/links/:id/questions/:questionId/answer",
+    "*/api/workspaces/:workspaceSlug/links/:id/ask/:turnId/formal-publish",
     async ({ params, request }) => {
+      await hydrateVisitorAskState();
       const linkId = params.id as string;
-      const questionId = params.questionId as string;
+      const turnId = params.turnId as string;
       const link = mockLinks.find((l) => l.id === linkId);
       if (!link) return new HttpResponse(null, { status: 404 });
-      const body = (await request.json().catch(() => ({}))) as { answer?: string };
+      const body = (await request.json().catch(() => ({}))) as {
+        answer?: string;
+        publish_at?: string;
+        anonymize?: boolean;
+      };
       const answer = (body.answer ?? "").trim();
       if (!answer) {
         return HttpResponse.json({ code: "invalid_input", message: "answer required" }, { status: 400 });
       }
-      const list = mockOwnerQuestions.get(linkId) ?? [];
-      const idx = list.findIndex((q) => q.id === questionId);
-      if (idx < 0) {
-        return HttpResponse.json({ code: "question_not_found", message: "question not found" }, { status: 404 });
+      const turns = mockOwnerAskTurnsForLink(linkId);
+      const turn = turns.find((t) => t.id === turnId);
+      if (!turn) {
+        return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
       }
-      const updated: VisitorQuestion = {
-        ...list[idx],
-        answer,
-        status: "answered",
-        answered_by: "user_1",
-        updated_at: new Date().toISOString(),
+      const now = new Date().toISOString();
+      const scheduled =
+        Boolean(body.publish_at) && new Date(body.publish_at!).getTime() > Date.now();
+      const formalStatus = scheduled ? "scheduled" : "published";
+      const updated: OwnerAskTurn = {
+        ...turn,
+        host_answer: answer,
+        formal_status: formalStatus,
+        formal_publish_at: body.publish_at ?? now,
+        formal_published_at: scheduled ? undefined : now,
+        formal_anonymize: body.anonymize !== false,
+        status: scheduled ? "host_pending" : "host_answered",
+        updated_at: now,
       };
-      list[idx] = updated;
-      mockOwnerQuestions.set(linkId, list);
-      syncPublicAskTurnAnswer(linkId, questionId, answer);
+      const perLink = mockOwnerAskFormalOverrides.get(linkId) ?? new Map();
+      perLink.set(turnId, {
+        host_answer: updated.host_answer,
+        formal_status: updated.formal_status,
+        formal_publish_at: updated.formal_publish_at,
+        formal_published_at: updated.formal_published_at,
+        formal_anonymize: updated.formal_anonymize,
+        status: updated.status,
+        updated_at: updated.updated_at,
+      });
+      mockOwnerAskFormalOverrides.set(linkId, perLink);
+      if (!scheduled) {
+        const token = publicTokenFromLink(link);
+        const published: PublicFormalAsk = {
+          id: turnId,
+          question: turn.question,
+          answer,
+          published_at: now,
+          link_id: linkId,
+          link_name: link.name,
+        };
+        const existing = mockPublicFormalAsk.get(token) ?? [];
+        mockPublicFormalAsk.set(token, [
+          published,
+          ...existing.filter((entry) => entry.id !== turnId),
+        ]);
+        syncPublicAskTurnAnswer(linkId, turnId, answer);
+      }
+      await persistVisitorAskState();
       return HttpResponse.json({ data: updated });
     },
   ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/links/:id/ask/:turnId/pin-faq",
+    async ({ params }) => {
+      await hydrateVisitorAskState();
+      const linkId = params.id as string;
+      const turnId = params.turnId as string;
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) return new HttpResponse(null, { status: 404 });
+      const turns = mockOwnerAskTurnsForLink(linkId);
+      const turn = turns.find((t) => t.id === turnId);
+      if (!turn) {
+        return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
+      }
+      if (turn.pinned_faq_at) {
+        return HttpResponse.json({ data: turn });
+      }
+      if (!ownerAskTurnCanPinFAQ(turn)) {
+        return HttpResponse.json(
+          { code: "ask_turn_not_pinnable", message: "ask turn cannot be pinned as faq" },
+          { status: 409 },
+        );
+      }
+      const pinned = {
+        pinned_faq_at: new Date().toISOString(),
+        pinned_faq_by: "user_1",
+        pinned_faq_sort: mockMaxLinkPinnedFAQSort(linkId) + 1,
+      };
+      const perLink = mockOwnerAskPinOverrides.get(linkId) ?? new Map();
+      perLink.set(turnId, pinned);
+      mockOwnerAskPinOverrides.set(linkId, perLink);
+      return HttpResponse.json({
+        data: {
+          ...turn,
+          ...pinned,
+          updated_at: pinned.pinned_faq_at,
+        },
+      });
+    },
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask/faq", async ({ params }) => {
+    await hydrateVisitorAskState();
+    const linkId = params.id as string;
+    const link = mockLinks.find((l) => l.id === linkId);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    const rows = mockSortOwnerAskPinnedFAQs(
+      mockOwnerAskTurnsForLink(linkId).filter((t) => t.pinned_faq_at),
+    );
+    return HttpResponse.json({ data: rows });
+  }),
+
+  http.patch(
+    "*/api/workspaces/:workspaceSlug/links/:id/ask/faq/order",
+    async ({ params, request }) => {
+      await hydrateVisitorAskState();
+      const linkId = params.id as string;
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) return new HttpResponse(null, { status: 404 });
+      const body = (await request.json().catch(() => ({}))) as { turn_ids?: string[] };
+      const turnIds = body.turn_ids ?? [];
+      const pinned = mockSortOwnerAskPinnedFAQs(
+        mockOwnerAskTurnsForLink(linkId).filter((t) => t.pinned_faq_at),
+      );
+      if (turnIds.length === 0 || turnIds.length !== pinned.length) {
+        return HttpResponse.json(
+          { code: "ask_faq_reorder_invalid", message: "ask faq reorder invalid" },
+          { status: 409 },
+        );
+      }
+      const pinnedIdSet = new Set(pinned.map((t) => t.id));
+      if (!turnIds.every((id) => pinnedIdSet.has(id))) {
+        return HttpResponse.json(
+          { code: "ask_faq_reorder_invalid", message: "ask faq reorder invalid" },
+          { status: 409 },
+        );
+      }
+      const perLink = mockOwnerAskPinOverrides.get(linkId) ?? new Map();
+      for (let i = 0; i < turnIds.length; i++) {
+        const turnId = turnIds[i];
+        const turn = pinned.find((t) => t.id === turnId)!;
+        const existing = perLink.get(turnId) ?? {
+          pinned_faq_at: turn.pinned_faq_at!,
+          pinned_faq_by: turn.pinned_faq_by ?? "user_1",
+        };
+        perLink.set(turnId, { ...existing, pinned_faq_sort: i });
+      }
+      mockOwnerAskPinOverrides.set(linkId, perLink);
+      const updated = mockSortOwnerAskPinnedFAQs(
+        mockOwnerAskTurnsForLink(linkId).filter((t) => t.pinned_faq_at),
+      );
+      return HttpResponse.json({ data: updated });
+    },
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/deal-rooms/:roomId/ask/faq", async ({ params, request }) => {
+    await hydrateVisitorAskState();
+    const roomId = params.roomId as string;
+    if (!findRoom(roomId)) return new HttpResponse(null, { status: 404 });
+    const filterLinkId = new URL(request.url).searchParams.get("link_id");
+    const roomLinkIds = new Set(
+      mockLinks.filter((l) => l.dealRoomId === roomId).map((l) => l.id),
+    );
+    const rows: OwnerAskTurn[] = [];
+    for (const linkId of roomLinkIds) {
+      if (filterLinkId && linkId !== filterLinkId) continue;
+      rows.push(...mockOwnerAskTurnsForLink(linkId).filter((t) => t.pinned_faq_at));
+    }
+    rows.sort((a, b) => {
+      const aSort = a.pinned_faq_sort ?? Number.MAX_SAFE_INTEGER;
+      const bSort = b.pinned_faq_sort ?? Number.MAX_SAFE_INTEGER;
+      if (aSort !== bSort) return aSort - bSort;
+      return new Date(b.pinned_faq_at!).getTime() - new Date(a.pinned_faq_at!).getTime();
+    });
+    return HttpResponse.json({ data: rows });
+  }),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/links/:id/ask/:turnId/unpin-faq",
+    async ({ params }) => {
+      await hydrateVisitorAskState();
+      const linkId = params.id as string;
+      const turnId = params.turnId as string;
+      const link = mockLinks.find((l) => l.id === linkId);
+      if (!link) return new HttpResponse(null, { status: 404 });
+      const turns = mockOwnerAskTurnsForLink(linkId);
+      const turn = turns.find((t) => t.id === turnId);
+      if (!turn) {
+        return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
+      }
+      if (!turn.pinned_faq_at) {
+        return HttpResponse.json(
+          { code: "ask_turn_not_pinned", message: "ask turn is not pinned as faq" },
+          { status: 409 },
+        );
+      }
+      const perLink = mockOwnerAskPinOverrides.get(linkId) ?? new Map();
+      perLink.delete(turnId);
+      mockOwnerAskPinOverrides.set(linkId, perLink);
+      const { pinned_faq_at: _a, pinned_faq_by: _b, ...rest } = turn;
+      return HttpResponse.json({
+        data: {
+          ...rest,
+          updated_at: new Date().toISOString(),
+        },
+      });
+    },
+  ),
+
+  http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-policy", ({ params }) => {
+    const linkId = params.id as string;
+    const link = mockLinks.find((l) => l.id === linkId);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    const used = 0;
+    const limit = 500;
+    return HttpResponse.json({
+      data: {
+        id: link.id,
+        ask_mode: resolveLinkAskMode(link),
+        ask_ai_enabled: resolveLinkAskAiEnabled(link),
+        ask_ai_monthly_quota: null,
+        ask_ai_monthly_used: used,
+        ask_ai_monthly_limit: limit,
+        ask_ai_quota_exceeded: used >= limit,
+        ask_ai_entitled: Boolean(link.dealRoomId),
+      },
+    });
+  }),
+
+  http.patch("*/api/workspaces/:workspaceSlug/links/:id/ask-policy", async ({ params, request }) => {
+    const linkId = params.id as string;
+    const link = mockLinks.find((l) => l.id === linkId);
+    if (!link) return new HttpResponse(null, { status: 404 });
+    const body = (await request.json().catch(() => ({}))) as {
+      ask_ai_enabled?: boolean;
+      ask_mode?: string;
+      ask_ai_monthly_quota?: number;
+      clear_ai_quota?: boolean;
+    };
+    if (body.ask_ai_enabled === true && !link.dealRoomId) {
+      return HttpResponse.json(
+        { code: "invalid_input", message: "ask_ai_enabled requires a deal-room link" },
+        { status: 400 },
+      );
+    }
+    if (typeof body.ask_ai_enabled === "boolean") {
+      setLinkAskPolicyOverride(linkId, { askAiEnabled: body.ask_ai_enabled });
+    }
+    if (typeof body.ask_mode === "string") {
+      setLinkAskPolicyOverride(linkId, { askMode: body.ask_mode });
+    }
+    return HttpResponse.json({
+      data: {
+        id: link.id,
+        ask_mode: resolveLinkAskMode(link),
+        ask_ai_enabled: resolveLinkAskAiEnabled(link),
+        ask_ai_monthly_quota: null,
+        ask_ai_monthly_used: 0,
+        ask_ai_monthly_limit: 500,
+        ask_ai_quota_exceeded: false,
+        ask_ai_entitled: Boolean(link.dealRoomId),
+      },
+    });
+  }),
 
   http.post("*/api/workspaces/:workspaceSlug/deal-rooms", async ({ request }) => {
     const body = (await request.json()) as {
@@ -3758,7 +4272,9 @@ export const handlers = [
         downloadEnabled: true,
         watermarkEnabled: false,
         qaEnabled: Boolean(extended.qaEnabled),
-        visitorAskUnified: Boolean(extended.qaEnabled),
+        visitorAskUnified: Boolean(extended.qaEnabled && (extended.dealRoomId || extended.visitorAskUnified)),
+        askMode: extended.askMode ?? "supervised",
+        askAiEnabled: Boolean(extended.askAiEnabled),
         fileRequestsEnabled: Boolean(extended.fileRequestsEnabled),
         isBundle: Boolean(extended.isBundle),
         dealRoomId: extended.dealRoomId,
@@ -3774,61 +4290,31 @@ export const handlers = [
     });
   }),
 
-  http.get("*/api/v1/public/links/:token/questions/me", ({ params }) => {
-    const token = params.token as string;
-    return HttpResponse.json({ data: mockPublicQuestionsDualRead(token) });
-  }),
-
-  http.post("*/api/v1/public/links/:token/questions", async ({ params, request }) => {
-    const token = params.token as string;
-    const body = (await request.json().catch(() => ({}))) as { question?: string };
-    const question = (body.question ?? "").trim();
-    if (!question) {
-      return HttpResponse.json({ code: "invalid_request", message: "question required" }, { status: 400 });
-    }
-    const lower = question.toLowerCase();
-    if (lower.includes("__rate_limit__")) {
-      return HttpResponse.json(
-        { code: "rate_limit_exceeded", message: "too many Ask Host requests, please try again later" },
-        { status: 429 },
-      );
-    }
-    if (lower.includes("__limiter_down__")) {
-      return HttpResponse.json(
-        {
-          code: "limiter_unavailable",
-          message: "Ask Host is temporarily unavailable, please try again later",
-        },
-        { status: 503 },
-      );
-    }
-    const row: VisitorQuestion = {
-      id: generateId("q"),
-      link_id: token,
-      visitor_id: "visitor_mock",
-      question,
-      status: "pending",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-    const list = mockPublicQuestions.get(token) ?? [];
-    list.push(row);
-    mockPublicQuestions.set(token, list);
-    const link = findMockLinkByPublicToken(token);
-    if (link) {
-      appendOwnerQuestionFromPublicAsk(link, { ...row, link_id: link.id });
-    }
-    return HttpResponse.json({ data: row }, { status: 201 });
-  }),
-
-  http.get("*/api/v1/public/links/:token/ask/me", ({ params }) => {
+  http.get("*/api/v1/public/links/:token/ask/me", async ({ params }) => {
+    await hydrateVisitorAskState();
     const token = params.token as string;
     return HttpResponse.json({ data: mockPublicAskTurns.get(token) ?? [] });
   }),
 
-  http.post("*/api/v1/public/links/:token/ask", async ({ params, request }) => {
+  http.get("*/api/v1/public/links/:token/ask/faq", async ({ params }) => {
+    await hydrateVisitorAskState();
     const token = params.token as string;
-    const body = (await request.json().catch(() => ({}))) as { question?: string };
+    return HttpResponse.json({ data: mockPublicAskFAQsForToken(token) });
+  }),
+
+  http.get("*/api/v1/public/links/:token/ask/formal", async ({ params }) => {
+    await hydrateVisitorAskState();
+    const token = params.token as string;
+    return HttpResponse.json({ data: mockPublicFormalAsk.get(token) ?? [] });
+  }),
+
+  http.post("*/api/v1/public/links/:token/ask", async ({ params, request }) => {
+    await hydrateVisitorAskState();
+    const token = params.token as string;
+    const body = (await request.json().catch(() => ({}))) as {
+      question?: string;
+      escalate?: boolean;
+    };
     const question = (body.question ?? "").trim();
     if (!question) {
       return HttpResponse.json({ code: "invalid_request", message: "question required" }, { status: 400 });
@@ -3836,7 +4322,7 @@ export const handlers = [
     const lower = question.toLowerCase();
     if (lower.includes("__rate_limit__")) {
       return HttpResponse.json(
-        { code: "rate_limit_exceeded", message: "too many Ask Host requests, please try again later" },
+        { code: "rate_limit_exceeded", message: "too many Ask requests, please try again later" },
         { status: 429 },
       );
     }
@@ -3844,44 +4330,174 @@ export const handlers = [
       return HttpResponse.json(
         {
           code: "limiter_unavailable",
-          message: "Ask Host is temporarily unavailable, please try again later",
+          message: "Ask is temporarily unavailable, please try again later",
         },
         { status: 503 },
       );
     }
     const sessionId = `sess_${token}`;
-    const hostQuestionId = generateId("q");
-    const turn: PublicAskTurn = {
-      id: generateId("turn"),
-      session_id: sessionId,
-      question,
-      lane: "host",
-      status: "host_pending",
-      host_question_id: hostQuestionId,
-      route_reason: "unified_ask",
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
+    const link = findMockLinkByPublicToken(token);
+    const forceAI = lower.includes("__ai__");
+    const askMode = resolveLinkAskMode(link);
+    const isFormal = askMode === "formal" && !forceAI && !body.escalate;
+    const aiEnabled = resolveLinkAskAiEnabled(link);
+    const isAIAsk =
+      forceAI || (aiEnabled && !isFormal && !body.escalate);
+    const isSlowStream = lower.includes("__slow__");
+    const cleanedQuestion =
+      question.replace(/__ai__/gi, "").replace(/__slow__/gi, "").trim() || question;
+    const turn: PublicAskTurn = isAIAsk
+      ? {
+          id: generateId("turn"),
+          session_id: sessionId,
+          question: cleanedQuestion,
+          lane: "ai",
+          status: "ai_streaming",
+          route_reason: isSlowStream ? "slow_e2e" : "ai_lane_pending",
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        }
+      : {
+          id: generateId("turn"),
+          session_id: sessionId,
+          question: forceAI ? cleanedQuestion : question,
+          lane: "host",
+          status: "host_pending",
+          route_reason: isFormal
+            ? "policy_formal"
+            : body.escalate
+              ? "user_escalate"
+              : forceAI
+                ? "ai_lane_pending"
+                : "unified_ask",
+          formal_status: isFormal ? "pending_review" : undefined,
+          formal_anonymize: isFormal ? true : undefined,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
     const list = mockPublicAskTurns.get(token) ?? [];
     list.push(turn);
     mockPublicAskTurns.set(token, list);
-    const legacy: VisitorQuestion = {
-      id: hostQuestionId,
-      link_id: token,
-      visitor_id: "visitor_mock",
-      question,
-      status: "pending",
-      created_at: turn.created_at,
-      updated_at: turn.updated_at,
-    };
-    const legacyList = mockPublicQuestions.get(token) ?? [];
-    legacyList.push(legacy);
-    mockPublicQuestions.set(token, legacyList);
-    const link = findMockLinkByPublicToken(token);
-    if (link) {
-      appendOwnerQuestionFromPublicAsk(link, legacy, turn.id);
-    }
+    await persistVisitorAskState();
     return HttpResponse.json({ data: turn }, { status: 201 });
+  }),
+
+  http.post("*/api/v1/public/links/:token/ask/:turnId/escalate", async ({ params }) => {
+    await hydrateVisitorAskState();
+    const token = params.token as string;
+    const turnId = params.turnId as string;
+    const list = mockPublicAskTurns.get(token) ?? [];
+    const idx = list.findIndex((t) => t.id === turnId);
+    if (idx < 0) {
+      return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
+    }
+    const turn = list[idx]!;
+    if (turn.lane !== "ai" || (turn.status !== "ai_refused" && turn.status !== "ai_answered")) {
+      return HttpResponse.json(
+        { code: "ask_turn_not_escalatable", message: "ask turn cannot be escalated" },
+        { status: 409 },
+      );
+    }
+    if (turn.status === "host_escalated") {
+      return HttpResponse.json({ data: turn });
+    }
+    const updated: PublicAskTurn = {
+      ...turn,
+      lane: "hybrid",
+      status: "host_escalated",
+      route_reason: "user_escalate",
+      updated_at: new Date().toISOString(),
+    };
+    list[idx] = updated;
+    mockPublicAskTurns.set(token, list);
+    await persistVisitorAskState();
+    return HttpResponse.json({ data: updated });
+  }),
+
+  http.get("*/api/v1/public/links/:token/ask/:turnId/stream", async ({ params }) => {
+    await hydrateVisitorAskState();
+    const token = params.token as string;
+    const turnId = params.turnId as string;
+    const turns = mockPublicAskTurns.get(token) ?? [];
+    const turn = turns.find((row) => row.id === turnId);
+    if (!turn || turn.lane !== "ai") {
+      return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
+    }
+    const answer =
+      "Based on the authorized materials, revenue grew 12% year over year [1].";
+    const hits = [
+      {
+        chunkId: "chunk_ai_1",
+        documentId: "doc_1",
+        text: "Revenue increased 12% YoY in FY2024.",
+        score: 0.91,
+        sourceName: "Financial Summary.pdf",
+        pages: [3],
+        viewerPage: 3,
+      },
+    ];
+    const payload = {
+      turn: {
+        id: turn.id,
+        question: turn.question,
+        answer,
+        refused: false,
+        resultStatus: "answered",
+        hits,
+      },
+      query: turn.question,
+      answer,
+      results: hits,
+      refused: false,
+      resultStatus: "answered",
+    };
+    turn.status = "ai_answered";
+    turn.ai_payload = {
+      answer,
+      refused: false,
+      resultStatus: "answered",
+      hits,
+    };
+    turn.updated_at = new Date().toISOString();
+    syncOwnerAskAITurnFromPublic(token, turn);
+    await persistVisitorAskState();
+    const tokenFrames = chunkMockAnswerTokens(answer, 36)
+      .map((text) => `event: token\ndata: ${JSON.stringify({ text })}\n\n`)
+      .join("");
+    const sseHeaders = {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+    };
+    if (turn.route_reason === "slow_e2e") {
+      const stream = new ReadableStream({
+        async start(controller) {
+          const enc = new TextEncoder();
+          const send = (chunk: string) => controller.enqueue(enc.encode(chunk));
+          send(`event: phase\ndata: ${JSON.stringify({ phase: "retrieving" })}\n\n`);
+          await new Promise((resolve) => setTimeout(resolve, 2500));
+          send(`event: phase\ndata: ${JSON.stringify({ phase: "generating" })}\n\n`);
+          send(`event: sources\ndata: ${JSON.stringify({ results: hits, grounded: true })}\n\n`);
+          for (const frame of chunkMockAnswerTokens(answer, 36)) {
+            send(`event: token\ndata: ${JSON.stringify({ text: frame })}\n\n`);
+            await new Promise((resolve) => setTimeout(resolve, 400));
+          }
+          send(`event: done\ndata: ${JSON.stringify(payload)}\n\n`);
+          controller.close();
+        },
+      });
+      return new HttpResponse(stream, { status: 200, headers: sseHeaders });
+    }
+    const frames = [
+      `event: phase\ndata: ${JSON.stringify({ phase: "retrieving" })}\n\n`,
+      `event: phase\ndata: ${JSON.stringify({ phase: "generating" })}\n\n`,
+      `event: sources\ndata: ${JSON.stringify({ results: hits, grounded: true })}\n\n`,
+      tokenFrames,
+      `event: done\ndata: ${JSON.stringify(payload)}\n\n`,
+    ].join("");
+    return new HttpResponse(frames, {
+      status: 200,
+      headers: sseHeaders,
+    });
   }),
 
   http.get("*/api/v1/public/documents/:documentId/pages", ({ params }) => {

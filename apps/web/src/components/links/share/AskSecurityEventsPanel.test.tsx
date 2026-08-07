@@ -25,7 +25,7 @@ vi.mock("@/lib/api", () => ({
 const securityI18n = {
   "askSecurityEvents.title": "Visitor Ask security events",
   "askSecurityEvents.description":
-    "High-risk Ask Host events: blocks, scope violations, and rate limits.",
+    "High-risk Ask events: blocks, scope violations, and rate limits.",
   "askSecurityEvents.roomTitle": "Visitor Ask security events",
   "askSecurityEvents.roomDescription":
     "Room-wide high-risk Ask events. Filter by link.",
@@ -53,7 +53,7 @@ const securityI18n = {
   "askSecurityEvents.eventTypes.blocked_email": "Blocked email",
   "askSecurityEvents.eventTypes.blocked_domain": "Blocked domain",
   "askSecurityEvents.eventTypes.not_in_allow_list": "Removed from allowlist",
-  "askSecurityEvents.reasons.ask_host": "Ask Host",
+  "askSecurityEvents.reasons.ask_host": "Ask",
   "askSecurityEvents.reasons.out_of_scope_evidence": "Out-of-scope evidence",
 };
 

@@ -450,6 +450,12 @@ type Link struct {
 	NdaDocumentID               pgtype.UUID
 	FolderScopeMode             string
 	NdaTemplateID               pgtype.UUID
+	// Visitor Ask routing mode: self_serve | supervised | formal
+	AskMode string
+	// When true, Pro+ links may use AI lane (Phase B); Standard remains host-only
+	AskAiEnabled bool
+	// Optional per-link AI Ask monthly cap; NULL uses workspace/plan default
+	AskAiMonthlyQuota pgtype.Int4
 }
 
 type LinkAccessRequest struct {
@@ -502,22 +508,32 @@ type LinkAskSession struct {
 }
 
 type LinkAskTurn struct {
-	ID             pgtype.UUID
-	SessionID      pgtype.UUID
-	TenantID       pgtype.UUID
-	WorkspaceID    pgtype.UUID
-	LinkID         pgtype.UUID
-	VisitorID      string
-	Question       string
-	Lane           string
-	Status         string
-	AiPayload      []byte
-	HostQuestionID pgtype.UUID
-	HostAnswer     pgtype.Text
-	AnsweredBy     pgtype.UUID
-	RouteReason    pgtype.Text
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
+	ID            pgtype.UUID
+	SessionID     pgtype.UUID
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	LinkID        pgtype.UUID
+	VisitorID     string
+	Question      string
+	Lane          string
+	Status        string
+	AiPayload     []byte
+	HostAnswer    pgtype.Text
+	AnsweredBy    pgtype.UUID
+	RouteReason   pgtype.Text
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	PinnedFaqAt   pgtype.Timestamptz
+	PinnedFaqBy   pgtype.UUID
+	PinnedFaqSort pgtype.Int4
+	// Formal Q&A lifecycle: pending_review | scheduled | published
+	FormalStatus pgtype.Text
+	// When a scheduled formal answer becomes public
+	FormalPublishAt pgtype.Timestamptz
+	// When the formal answer was published to visitors
+	FormalPublishedAt pgtype.Timestamptz
+	// Whether visitor identity is hidden on the public formal board
+	FormalAnonymize bool
 }
 
 type LinkContact struct {
@@ -654,22 +670,6 @@ type LinkUploadedFile struct {
 	ReviewedBy        pgtype.UUID
 	ReviewedAt        pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
-}
-
-type LinkVisitorQuestion struct {
-	ID           pgtype.UUID
-	TenantID     pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	LinkID       pgtype.UUID
-	VisitorID    string
-	VisitorEmail pgtype.Text
-	Question     string
-	Answer       pgtype.Text
-	AnsweredBy   pgtype.UUID
-	Status       string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	IntentTag    string
 }
 
 type NdaTemplate struct {

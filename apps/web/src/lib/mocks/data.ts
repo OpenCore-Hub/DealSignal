@@ -176,6 +176,8 @@ export const mockLinks: Link[] = [
     permissionType: "email",
     isBundle: false,
     qaEnabled: true,
+    askAiEnabled: true,
+    askMode: "supervised",
     dealRoomId: "room_1",
     documents: [],
   },
@@ -194,6 +196,8 @@ export const mockLinks: Link[] = [
     permissionType: "public",
     isBundle: false,
     qaEnabled: true,
+    askAiEnabled: true,
+    askMode: "supervised",
     dealRoomId: "room_1",
     documents: [
       {
@@ -982,6 +986,19 @@ export const mockActionItems: ActionItem[] = [
     actionType: "approve",
     createdAt: "2026-06-20T13:00:00Z",
     updatedAt: "2026-06-20T13:00:00Z",
+  },
+  {
+    id: "act_room_ask_question",
+    sourceType: "deal_room_link_question",
+    sourceId: "owner_q_pending_1",
+    targetId: "room_1/link_room_1",
+    title: "Answer visitor Ask from investor@example.com on Acme Seed Data Room",
+    impact: "medium",
+    dueAt: "2026-06-21T22:00:00Z",
+    status: "pending",
+    actionType: "answer",
+    createdAt: "2026-06-20T14:00:00Z",
+    updatedAt: "2026-06-20T14:00:00Z",
   },
 ];
 

@@ -1,8 +1,14 @@
 import { dealRoomAccessPath } from "@/lib/dealRoomAccessPath";
+import { dealRoomAskPath, parseDealRoomAskTarget } from "@/lib/dealRoomAskPath";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import type { ActionItem } from "@/types";
 
-type NavAction = Pick<ActionItem, "sourceType" | "sourceId" | "targetId">;
+type NavAction = Pick<ActionItem, "sourceType" | "sourceId" | "targetId" | "actionType">;
+
+/** Formal Q&A dashboard todos use actionType review on deal_room_link_question rows. */
+export function isFormalAskReviewAction(action: Pick<ActionItem, "sourceType" | "actionType">): boolean {
+  return action.sourceType === "deal_room_link_question" && action.actionType === "review";
+}
 
 /**
  * Resolve dashboard operational-action deep links.
@@ -10,6 +16,7 @@ type NavAction = Pick<ActionItem, "sourceType" | "sourceId" | "targetId">;
  * Document Library and Deal Room share surfaces must never cross:
  * - link_access_request → Document Library → Share
  * - deal_room_link_access_request → Deal Room → Access (targetId = room)
+ * - deal_room_link_question → Deal Room → Ask Inbox / QA (targetId = room or room/link)
  * - room_* → Deal Room (sourceId = room)
  */
 export function actionNavigatePath(
@@ -37,7 +44,19 @@ export function actionNavigatePath(
     case "expiring_room":
       return `/${workspaceSlug}/deal-rooms/${action.sourceId}`;
 
+    case "deal_room_link_question": {
+      if (!action.targetId) return null;
+      const { roomId, linkId } = parseDealRoomAskTarget(action.targetId);
+      return dealRoomAskPath(workspaceSlug, roomId, {
+        linkId: linkId ? linkId : undefined,
+        formalQueue: isFormalAskReviewAction(action),
+      });
+    }
+
     case "link_question":
+      // Legacy rows pointed at /links/{questionId}; require targetId or refuse.
+      return null;
+
     case "uploaded_file":
     case "expiring_link":
       return `/${workspaceSlug}/links/${action.sourceId}`;

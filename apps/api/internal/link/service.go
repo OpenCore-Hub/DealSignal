@@ -78,10 +78,29 @@ type Service struct {
 	actionSyncer        ActionSyncer
 	ndaSvc              *nda.Service
 	roomListInvalidator RoomListInvalidator
+	visitorAskKnowledge VisitorAskKnowledge
+	askSecurity         AskSecurityRecorder
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
 	accessCodeEpoch sync.Map // map[string]*uint64
+}
+
+// AskSecurityRecorder persists visitor Ask security audit events.
+type AskSecurityRecorder interface {
+	RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error
+}
+
+// WithAskSecurityRecorder wires security event persistence for Ask lane actions.
+func WithAskSecurityRecorder(r AskSecurityRecorder) ServiceOption {
+	return func(s *Service) { s.askSecurity = r }
+}
+
+// SetAskSecurityRecorder attaches a security recorder after service construction.
+func (s *Service) SetAskSecurityRecorder(r AskSecurityRecorder) {
+	if s != nil {
+		s.askSecurity = r
+	}
 }
 
 // ActionSyncer resolves operational action items when link events are handled.
@@ -176,10 +195,10 @@ var (
 	ErrAccessCodeContactNotFound = errors.New("access code contact not found")
 	ErrAccessCodeResendNotNeeded = errors.New("access code already delivered; pass force=true to resend")
 	ErrEmailVerificationDisabled = errors.New("email verification is not enabled for this link")
-	// ErrAccessCodeSendFailed means the access request was approved (allow rule
-	// committed) but the verification-code email could not be delivered. Callers
-	// should surface this so the owner can retry via resend.
-	ErrAccessCodeSendFailed = errors.New("access approved but verification code could not be sent")
+	// ErrAccessCodeSendFailed means an access code was provisioned (or an access
+	// request approval was committed) but the verification-code email could not
+	// be delivered. Callers should surface this so the owner or visitor can retry.
+	ErrAccessCodeSendFailed = errors.New("verification code could not be sent")
 	ErrAccessAlreadyAllowed = errors.New("email already has access")
 )
 
@@ -187,6 +206,30 @@ var (
 // owner remediates UI treats it as stuck (async send likely lost). Shorter
 // windows would encourage duplicate sends while the background job is in flight.
 const ownerResendPendingStale = 2 * time.Minute
+
+func wrapAccessCodeSendErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", ErrAccessCodeSendFailed, err)
+}
+
+func accessCodeSendClientDetail(err error) string {
+	switch {
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		return "verification code could not be sent"
+	case errors.Is(err, ErrEmailCodeRateLimited):
+		return "rate limited"
+	case errors.Is(err, ErrAccessCodeResendNotNeeded):
+		return "resend not needed"
+	case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
+		return "email not allowed"
+	case errors.Is(err, ErrEmailVerificationDisabled):
+		return "verification disabled"
+	default:
+		return "send failed"
+	}
+}
 
 // ResolvePublicLink validates a public token and returns the active link.
 // It checks status, expiry, and max access limits. It is intended for
@@ -308,6 +351,10 @@ type UpdateLinkRequest struct {
 	// Deal-room creates always persist allowlist. Omit on update to leave unchanged
 	// unless FolderPaths is provided (which forces allowlist).
 	FolderScopeMode string
+	// AskAIEnabled patches ask_ai_enabled for deal-room links (nil = unchanged).
+	AskAIEnabled *bool
+	// AskMode patches ask routing mode for deal-room links (nil = unchanged).
+	AskMode *string
 }
 
 // AccessRule represents a single allow/block rule for a link.
@@ -352,6 +399,8 @@ type DealRoomLinkRequest struct {
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
 	QaEnabled                   bool
+	AskAiEnabled                bool
+	AskMode                     string
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
 	ScreenshotProtectionEnabled bool
@@ -563,7 +612,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		MaxAccessCount:              maxAccess,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		QaEnabled:                   QaEnabledForLink(hasDealRoom),
+		QaEnabled:                   ResolveQaEnabled(hasDealRoom, req.QaEnabled),
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -771,7 +820,12 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		QaEnabled:                QaEnabledForLink(isDealRoomLink),
+		QaEnabled:                func() bool {
+			if isDealRoomLink {
+				return true
+			}
+			return ResolveQaEnabled(false, req.QaEnabled)
+		}(),
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
 		LinkType:                 existing.LinkType,
@@ -910,6 +964,11 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		securityVersion = existing.SecurityVersion + 1
 	}
 
+	qaForUpdate := ResolveQaEnabled(isDealRoomLink, req.QaEnabled)
+	if isDealRoomLink {
+		qaForUpdate = true
+	}
+
 	// Update the link record using the sqlc-generated UpdateLinkFull.
 	_, err = qtx.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
 		Name:                        name,
@@ -924,7 +983,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		RequireEmail:                requireEmail,
 		RequireEmailVerification:    requireEmailVerification,
 		RequireNda:                  requireNDA,
-		QaEnabled:                   QaEnabledForLink(isDealRoomLink),
+		QaEnabled:                   qaForUpdate,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -955,6 +1014,20 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		WorkspaceID:   workspaceUUID,
 	}); err != nil {
 		return db.Link{}, fmt.Errorf("set link NDA binding: %w", err)
+	}
+
+	if isDealRoomLink && (req.AskAIEnabled != nil || req.AskMode != nil) {
+		askAIEnabled := existing.AskAiEnabled
+		if req.AskAIEnabled != nil {
+			askAIEnabled = *req.AskAIEnabled
+		}
+		askMode := existing.AskMode
+		if req.AskMode != nil {
+			askMode = *req.AskMode
+		}
+		if err := s.syncDealRoomAskPolicy(ctx, qtx, existing, askAIEnabled, askMode); err != nil {
+			return db.Link{}, err
+		}
 	}
 
 	// Replace all link_documents for document links only.
@@ -1182,7 +1255,7 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		ExpiresAt:                   req.ExpiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		QaEnabled:                   QaEnabledForLink(true),
+		QaEnabled:                   true,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -1199,7 +1272,20 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 	if !hasPolicy || !policyRow.Configured {
 		_ = s.bootstrapRoomAccessPolicyFromLinkRequest(ctx, userID, workspaceID, dealRoomID, req, link.PasswordHash)
 	}
-	return link, nil
+
+	// Deal-room links: apply ask routing policy from create request.
+	askMode := askModeOrDefault(req.AskMode)
+	if err := s.syncDealRoomAskPolicy(ctx, s.queries, link, req.AskAiEnabled, askMode); err != nil {
+		return db.Link{}, fmt.Errorf("set default deal-room ask policy: %w", err)
+	}
+	updated, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
+		ID:          link.ID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if err != nil {
+		return db.Link{}, fmt.Errorf("reload deal-room link ask policy: %w", err)
+	}
+	return updated, nil
 }
 
 // validateDealRoomFolderPaths checks that every provided folder path exists in
@@ -2705,7 +2791,7 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 				logger.Attr("link_id", linkID),
 				logger.Attr("email", reqRow.Email),
 			)
-			return LinkAccessRequest{}, fmt.Errorf("%w: %v", ErrAccessCodeSendFailed, codeErr)
+			return LinkAccessRequest{}, wrapAccessCodeSendErr(codeErr)
 		}
 	}
 
@@ -3414,7 +3500,7 @@ func (s *Service) SendEmailVerificationCode(ctx context.Context, token, email, v
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, lc.AccessCode, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
-		return fmt.Errorf("send email: %w", err)
+		return wrapAccessCodeSendErr(err)
 	}
 	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
@@ -3458,7 +3544,7 @@ func (s *Service) sendDealRoomEmailVerificationCode(ctx context.Context, link db
 	linkURL := publicLinkURL(viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, codes[0].code, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
-		return fmt.Errorf("send email: %w", err)
+		return wrapAccessCodeSendErr(err)
 	}
 	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
@@ -3546,7 +3632,7 @@ func (s *Service) OwnerResendAccessCode(ctx context.Context, linkID, workspaceID
 	linkURL := publicLinkURL(s.viewerBaseURL, link.PublicToken, link.CustomDomain.String)
 	if _, err := s.mailer.SendLinkAccessCodeEmail(ctx, email, code, link.Name.String, linkURL); err != nil {
 		s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "failed", err.Error())
-		return fmt.Errorf("send email: %w", err)
+		return wrapAccessCodeSendErr(err)
 	}
 	s.markAccessCodeSendStatus(ctx, link.PublicToken, email, "sent", "")
 	return nil
@@ -3582,7 +3668,7 @@ func (s *Service) OwnerResendFailedAccessCodes(ctx context.Context, linkID, work
 		summary.Attempted++
 		if err := s.OwnerResendAccessCode(ctx, linkID, workspaceID, row.ContactEmail, false); err != nil {
 			summary.Failed++
-			summary.Errors = append(summary.Errors, row.ContactEmail+": "+err.Error())
+			summary.Errors = append(summary.Errors, row.ContactEmail+": "+accessCodeSendClientDetail(err))
 			continue
 		}
 		summary.Sent++
@@ -3781,6 +3867,7 @@ type PublicLinkMetadata struct {
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
+	DealRoomID                  pgtype.UUID
 }
 
 // GetByPublicToken returns a link by its public token.
@@ -3820,6 +3907,7 @@ func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string)
 		QaEnabled:                   link.QaEnabled,
 		FileRequestsEnabled:         link.FileRequestsEnabled,
 		IndexFileEnabled:            link.IndexFileEnabled,
+		DealRoomID:                  link.DealRoomID,
 	}, nil
 }
 
@@ -4091,6 +4179,7 @@ type LinkAnalytics struct {
 	RecentVisitorsHasMore bool                 `json:"recent_visitors_has_more"`
 	KeyPages              []KeyPage            `json:"key_pages"`
 	QARecords             []QARecord           `json:"qa_records"`
+	AskSummary            *LinkAskSummary      `json:"ask_summary,omitempty"`
 	AccessCodeContacts    []AccessCodeContact  `json:"access_code_contacts"`
 	// AccessCodeContactsHasMore is true when more contacts exist beyond the first page.
 	AccessCodeContactsHasMore bool `json:"access_code_contacts_has_more"`
@@ -4105,7 +4194,6 @@ type AccessCodeContact struct {
 	Email      string     `json:"email"`
 	Name       string     `json:"name,omitempty"`
 	SendStatus string     `json:"send_status"` // pending | sent | failed
-	SendError  string     `json:"send_error,omitempty"`
 	CodeSentAt *time.Time `json:"code_sent_at,omitempty"`
 	UsedAt     *time.Time `json:"used_at,omitempty"`
 	// CanResend is true for failed or stuck-pending contacts. Delivered contacts
@@ -4166,7 +4254,6 @@ func mapAccessCodeContactRows(rows []db.ListLinkAccessCodeContactsByLinkRow, now
 			Email:      c.ContactEmail,
 			Name:       c.ContactName,
 			SendStatus: c.CodeSendStatus,
-			SendError:  c.CodeSendError,
 			CanResend:  accessCodeNeedsRemediation(c.CodeSendStatus, c.CreatedAt.Time, now),
 		}
 		if c.CodeSentAt.Valid {
@@ -4249,7 +4336,7 @@ type QARecord struct {
 const linkAnalyticsCacheTTL = 20 * time.Second
 
 func linkAnalyticsCacheKey(workspaceID, linkID string) string {
-	return fmt.Sprintf("links:analytics:v1:%s:%s", workspaceID, linkID)
+	return fmt.Sprintf("links:analytics:v2:%s:%s", workspaceID, linkID)
 }
 
 // GetLinkAnalytics returns aggregated access metrics for a link.
@@ -4336,24 +4423,31 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 		}
 	}
 
-	questions, err := s.queries.ListVisitorQuestionsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	questions, err := s.queries.ListAskQARecordsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
-		logger.ErrorCtx(ctx, "failed to list visitor questions", err)
+		logger.ErrorCtx(ctx, "failed to list ask qa records", err)
 	} else {
 		analytics.QARecords = make([]QARecord, 0, len(questions))
-		for _, q := range questions {
+		for _, row := range questions {
 			record := QARecord{
-				Question:  q.Question,
-				CreatedAt: q.CreatedAt.Time,
+				Question:  row.Question,
+				CreatedAt: row.CreatedAt.Time,
 			}
-			if q.VisitorEmail.Valid {
-				record.VisitorEmail = q.VisitorEmail.String
+			if row.VisitorEmail.Valid {
+				record.VisitorEmail = row.VisitorEmail.String
 			}
-			if q.Answer.Valid {
-				record.Answer = q.Answer.String
+			if row.HostAnswer.Valid {
+				record.Answer = row.HostAnswer.String
 			}
 			analytics.QARecords = append(analytics.QARecords, record)
 		}
+	}
+
+	if askRow, err := s.queries.GetLinkAskTurnSummary(ctx, pgtype.UUID{Bytes: id, Valid: true}); err != nil {
+		logger.ErrorCtx(ctx, "failed to get link ask summary", err)
+	} else if askRow.TotalTurns > 0 {
+		summary := mapLinkAskSummary(askRow)
+		analytics.AskSummary = &summary
 	}
 
 	codeContacts, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, db.ListLinkAccessCodeContactsByLinkParams{
@@ -5038,127 +5132,6 @@ func constantTimeEmailCompare(a, b string) bool {
 	) == 1
 }
 
-// CreateVisitorQuestion creates a new visitor question on a public link.
-// The qa_enabled flag must be checked by the caller before invoking this method.
-// Also dual-writes link_ask_turns for unified Ask (Phase A).
-func (s *Service) CreateVisitorQuestion(ctx context.Context, link db.Link, visitorID, visitorEmail, question string) (db.LinkVisitorQuestion, error) {
-	_, q, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, "legacy_questions")
-	return q, err
-}
-
-// ListMyVisitorQuestions returns all questions submitted by a specific visitor on a link.
-// Turns are primary; legacy link_visitor_questions without a turn are merged for compat (GET /questions/me).
-func (s *Service) ListMyVisitorQuestions(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]VisitorQuestion, error) {
-	turns, err := s.ListMyAskTurns(ctx, linkID, visitorID)
-	if err != nil {
-		return nil, err
-	}
-	linkIDStr := uuid.UUID(linkID.Bytes).String()
-	out := make([]VisitorQuestion, 0, len(turns))
-	for _, t := range turns {
-		out = append(out, publicAskTurnToVisitorQuestion(linkIDStr, visitorID, t))
-	}
-	return out, nil
-}
-
-// ListLinkVisitorQuestions returns all questions for a link (owner view).
-func (s *Service) ListLinkVisitorQuestions(ctx context.Context, link db.Link, userID string) ([]VisitorQuestion, error) {
-	if err := authorizeAskHostOwnerView(ctx, s.queries, link.WorkspaceID, link.DealRoomID, userID); err != nil {
-		return nil, err
-	}
-	rows, err := s.queries.ListVisitorQuestionsByLink(ctx, link.ID)
-	if err != nil {
-		return nil, err
-	}
-	return mapVisitorQuestions(rows), nil
-}
-
-// ListRoomVisitorQuestions returns Ask Host questions across all links in a deal room.
-// Optional linkID filters to a single link within the room.
-func (s *Service) ListRoomVisitorQuestions(ctx context.Context, workspaceID, roomID, userID, linkID string) ([]VisitorQuestion, error) {
-	roomUUID, err := uuid.Parse(roomID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid deal room id")
-	}
-	wsUUID := pgUUID(workspaceID)
-	if !wsUUID.Valid {
-		return nil, fmt.Errorf("invalid workspace id")
-	}
-
-	room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
-		ID:          pgtype.UUID{Bytes: roomUUID, Valid: true},
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, ErrNotFoundInWorkspace
-		}
-		return nil, fmt.Errorf("get deal room: %w", err)
-	}
-
-	if err := authorizeAskHostOwnerView(ctx, s.queries, room.WorkspaceID, room.ID, userID); err != nil {
-		return nil, err
-	}
-
-	rows, err := s.queries.ListVisitorQuestionsByRoom(ctx, db.ListVisitorQuestionsByRoomParams{
-		DealRoomID:  room.ID,
-		WorkspaceID: wsUUID,
-		Limit:       visitorQuestionsListLimit,
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	var filterLink pgtype.UUID
-	if linkID != "" {
-		filterLink = pgUUID(linkID)
-		if !filterLink.Valid {
-			return nil, ErrNotFoundInWorkspace
-		}
-	}
-
-	out := make([]VisitorQuestion, 0, len(rows))
-	for _, q := range rows {
-		if filterLink.Valid && q.LinkID != filterLink {
-			continue
-		}
-		out = append(out, mapVisitorQuestion(q))
-	}
-	return out, nil
-}
-
-// AnswerVisitorQuestion records an answer to a visitor question on a specific link.
-func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, questionID, userID pgtype.UUID, answer string) (VisitorQuestion, error) {
-	if strings.TrimSpace(answer) == "" {
-		return VisitorQuestion{}, fmt.Errorf("answer is required")
-	}
-	if err := authorizeAskHostOwnerView(ctx, s.queries, link.WorkspaceID, link.DealRoomID, uuid.UUID(userID.Bytes).String()); err != nil {
-		return VisitorQuestion{}, err
-	}
-	q, err := s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
-		Answer:      pgtype.Text{String: strings.TrimSpace(answer), Valid: true},
-		AnsweredBy:  userID,
-		ID:          questionID,
-		WorkspaceID: link.WorkspaceID,
-		LinkID:      link.ID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return VisitorQuestion{}, ErrNotFoundInWorkspace
-		}
-		return VisitorQuestion{}, err
-	}
-	if syncErr := s.syncAskTurnHostAnswer(ctx, link, questionID, answer, userID); syncErr != nil {
-		logger.ErrorCtx(ctx, "failed to sync host answer to ask turn", syncErr,
-			logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
-			logger.Attr("question_id", uuid.UUID(questionID.Bytes).String()),
-		)
-	}
-	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
-	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	return mapVisitorQuestion(q), nil
-}
-
 const maxPendingFileRequestsPerVisitor = 3
 
 // CreateFileRequest allows a visitor to request a missing file from the link owner.
@@ -5635,36 +5608,6 @@ func (s *Service) GetUploadedFileByID(ctx context.Context, id pgtype.UUID) (db.L
 	return s.queries.GetUploadedFileByID(ctx, id)
 }
 
-// ClassifyQuestionIntent runs an LLM-powered intent classification on a visitor
-// question and stores the result. Called asynchronously after question creation.
-func (s *Service) ClassifyQuestionIntent(ctx context.Context, questionID pgtype.UUID, questionText string) {
-	if s.llm == nil || questionText == "" {
-		return
-	}
-
-	systemPrompt := "You are an intent classifier for document sharing Q&A. " +
-		"Analyze the question and respond with exactly ONE label from: " +
-		"pricing, security, timeline, implementation, feature_request, support, objection, general. " +
-		"Output only the label, no explanation."
-
-	label, err := s.llm.ChatCompletion(ctx, systemPrompt, []llmMessage{
-		{Role: "user", Content: questionText},
-	})
-	if err != nil {
-		return
-	}
-
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return
-	}
-
-	_ = s.queries.UpdateQuestionIntentTag(ctx, db.UpdateQuestionIntentTagParams{
-		IntentTag: label,
-		ID:        questionID,
-	})
-}
-
 // ListDormantLinks returns links that were active but went cold, ranked by reactivation potential.
 func (s *Service) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListDormantLinksRow, error) {
 	return s.queries.ListDormantLinks(ctx, workspaceID)
@@ -5709,6 +5652,7 @@ func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {
 		return
 	}
 	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkQuestion, questionID)
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeDealRoomLinkQuestion, questionID)
 }
 
 func (s *Service) resolveExpiringLink(workspaceID, linkID string) {

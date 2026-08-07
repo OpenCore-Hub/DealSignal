@@ -95,4 +95,33 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     });
     await expect(page.getByText(/room not found/i)).toHaveCount(0);
   });
+
+  test("deal-room visitor Ask todo opens Deal Room QA inbox with link filter", async ({
+    page,
+  }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+
+    await page.goto(`/${WORKSPACE_SLUG}/dashboard`);
+    await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
+      timeout: 15000,
+    });
+    const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
+    if (await actionsTab.isVisible().catch(() => false)) {
+      await actionsTab.click();
+    }
+
+    const askTodo = page.getByText(/Answer visitor Ask from investor@example\.com/i);
+    await expect(askTodo).toBeVisible({ timeout: 15000 });
+    await askTodo.click();
+
+    await expect(page).toHaveURL(
+      new RegExp(`/${WORKSPACE_SLUG}/deal-rooms/room_1\\?tab=qa&linkId=link_room_1`),
+    );
+    await expect(page.getByText("Ask inbox", { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
+    await expect(page).not.toHaveURL(/\/documents/);
+    await expect(page).not.toHaveURL(/\/links\//);
+  });
 });

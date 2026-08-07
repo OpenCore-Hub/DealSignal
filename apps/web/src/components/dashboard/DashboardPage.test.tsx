@@ -166,7 +166,7 @@ async function renderPage(waitForLoad = true) {
   if (waitForLoad) {
     await waitFor(() => {
       expect(
-        screen.queryByText("Active deal rooms") || screen.queryByText("Network error")
+        screen.queryByText("Active deal rooms") || screen.queryByText("Failed to load")
       ).toBeInTheDocument();
     });
   }
@@ -215,7 +215,7 @@ describe("DashboardPage", () => {
     mockFns.getDashboardStats.mockRejectedValue(new Error("Network error"));
     await renderPage();
     await waitFor(() => {
-      expect(screen.getByText("Network error")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load")).toBeInTheDocument();
     });
     fireEvent.click(screen.getByRole("button", { name: /Retry/i }));
     await waitFor(() => {
@@ -282,5 +282,34 @@ describe("DashboardPage", () => {
 
     fireEvent.click(screen.getByText(/Approve room access request from member@example.com/i));
     expect(mockFns.navigate).toHaveBeenCalledWith("/acme/deal-rooms/room-9?tab=access");
+  });
+
+  it("routes formal Ask review todos to the QA formal queue tab", async () => {
+    const now = "2026-06-20T18:00:00Z";
+    mockFns.storeActions = [
+      {
+        id: "act-formal",
+        sourceType: "deal_room_link_question",
+        sourceId: "turn-formal-1",
+        targetId: "room-9/link-formal",
+        title: "Review formal Q&A from visitor@example.com on Seed Link",
+        impact: "medium",
+        dueAt: "2026-06-21T18:00:00Z",
+        status: "pending",
+        actionType: "review",
+        createdAt: now,
+        updatedAt: now,
+      },
+    ];
+
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByText(/Review formal Q&A from visitor@example.com/i)).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText(/Review formal Q&A from visitor@example.com/i));
+    expect(mockFns.navigate).toHaveBeenCalledWith(
+      "/acme/deal-rooms/room-9?tab=qa&linkId=link-formal&askInbox=formal_queue",
+    );
   });
 });

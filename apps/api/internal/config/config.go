@@ -119,6 +119,12 @@ type Config struct {
 	// VisitorAskUnifiedEnabled gates the unified visitor Ask UI (Phase A rollout).
 	// Set VISITOR_ASK_UNIFIED=1 to enable; API dual-write remains active regardless.
 	VisitorAskUnifiedEnabled bool
+	// DefaultAskAIMonthlyQuota applies when links.ask_ai_monthly_quota IS NULL (Pro plan default).
+	DefaultAskAIMonthlyQuota int32
+	// VisitorAskAIRPM caps AI lane requests per visitor+link per minute (abuse guard).
+	VisitorAskAIRPM int
+	// VisitorAskAIDailyLimit caps AI lane requests per visitor+link per day.
+	VisitorAskAIDailyLimit int
 
 	SignalRulesPath string
 
@@ -257,6 +263,9 @@ func Load() (*Config, error) {
 		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
 		KnowledgeQAMultiHopEnabled:     strings.ToLower(getEnv("KNOWLEDGE_QA_MULTI_HOP_ENABLED", "true")) == "true",
 		VisitorAskUnifiedEnabled:       visitorAskUnifiedEnabledFromEnv(),
+		DefaultAskAIMonthlyQuota:       int32(getEnvInt("VISITOR_ASK_AI_MONTHLY_QUOTA_DEFAULT", 500)),
+		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", 10),
+		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", 50),
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",

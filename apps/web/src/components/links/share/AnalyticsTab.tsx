@@ -7,6 +7,7 @@ import {
   Calendar,
   ChatCenteredDots,
   EnvelopeSimple,
+  Sparkle,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { StatCard } from "@/components/common/StatCard";
@@ -17,9 +18,10 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
+import { formatAskDeflectionRate, hasAskActivity } from "@/lib/linkAskSummary";
 import { api } from "@/lib/api";
-import { ownerAskTurnsToVisitorQuestions, answerOwnerAskQuestion } from "@/lib/ownerAskTurn";
 import { ApiError } from "@/lib/apiClient";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
 import { AskSecurityEventsPanel } from "./AskSecurityEventsPanel";
@@ -30,7 +32,6 @@ import type {
   LinkAccessCodeContact,
   LinkAnalytics,
   LinkRecentVisitor,
-  VisitorQuestion,
 } from "@/types";
 
 type ActivitySection = "visitors" | "activity" | "delivery" | "engage";
@@ -60,12 +61,12 @@ function codeSendBadgeVariant(
 }
 
 async function fetchManagementData(linkId: string) {
-  const [askRes, fRes] = await Promise.all([
-    api.listLinkAsk(linkId, { lane: "host" }),
+  const [pendingRes, fRes] = await Promise.all([
+    api.listLinkAsk(linkId, { lane: "host", status: "host_pending" }),
     api.listLinkFileRequests(linkId),
   ]);
   return {
-    questions: ownerAskTurnsToVisitorQuestions(askRes.data ?? []),
+    pendingHostCount: pendingRes.data?.length ?? 0,
     fileRequests: fRes.data ?? [],
   };
 }
@@ -74,7 +75,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
   const { t } = useTranslation("linkShare");
   const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
-  const [questions, setQuestions] = useState<VisitorQuestion[]>([]);
+  const [pendingHostCount, setPendingHostCount] = useState(0);
   const [fileRequests, setFileRequests] = useState<FileRequest[]>([]);
   const [managementLoading, setManagementLoading] = useState(true);
   const [resendingEmail, setResendingEmail] = useState<string | null>(null);
@@ -118,10 +119,9 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     analytics?.access_code_remediable_count ??
     deliveryContacts.filter((c) => c.can_resend).length;
   const pendingEngageCount = useMemo(() => {
-    const pendingQuestions = questions.filter((q) => q.status === "pending").length;
     const pendingFiles = fileRequests.filter((r) => r.status === "pending").length;
-    return pendingQuestions + pendingFiles;
-  }, [questions, fileRequests]);
+    return pendingHostCount + pendingFiles;
+  }, [pendingHostCount, fileRequests]);
 
   useEffect(() => {
     if (analyticsLoading || managementLoading || prioritizedSection.current) return;
@@ -408,7 +408,9 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
         return;
       }
     }
-    toast.error(t("analytics.resendFailed"));
+    toast.error(
+      apiErrorMessage(err, { messageKey: "linkShare:analytics.resendFailed" }),
+    );
   };
 
   const handleResendOne = async (email: string) => {
@@ -486,7 +488,7 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     fetchManagementData(link.id)
       .then((data) => {
         if (!cancelled) {
-          setQuestions(data.questions);
+          setPendingHostCount(data.pendingHostCount);
           setFileRequests(data.fileRequests);
         }
       })
@@ -505,23 +507,12 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     setManagementLoading(true);
     try {
       const data = await fetchManagementData(link.id);
-      setQuestions(data.questions);
+      setPendingHostCount(data.pendingHostCount);
       setFileRequests(data.fileRequests);
     } catch {
       toast.error(t("management.loadFailed"));
     } finally {
       setManagementLoading(false);
-    }
-  };
-
-  const handleAnswer = async (question: VisitorQuestion, answer: string) => {
-    try {
-      await answerOwnerAskQuestion(question, answer);
-      toast.success(t("management.answerSuccess"));
-      await refreshManagement();
-    } catch {
-      toast.error(t("management.answerFailed"));
-      throw new Error("answer failed");
     }
   };
 
@@ -834,6 +825,68 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
         ) : null}
 
         <TabsContent value="engage" className="space-y-4">
+          {link.dealRoomId && hasAskActivity(analytics?.ask_summary) ? (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-h3">
+                  <Sparkle size={18} />
+                  {t("analytics.askSummaryTitle")}
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <StatCard
+                    label={t("analytics.askAiAnswered")}
+                    value={String(analytics!.ask_summary!.ai_answered)}
+                    icon={<Sparkle size={18} />}
+                    size="sm"
+                  />
+                  <StatCard
+                    label={t("analytics.askHostPending")}
+                    value={String(analytics!.ask_summary!.host_pending)}
+                    icon={<ChatCenteredDots size={18} />}
+                    size="sm"
+                  />
+                  <StatCard
+                    label={t("analytics.askHostAnswered")}
+                    value={String(analytics!.ask_summary!.host_answered)}
+                    icon={<ChatCenteredDots size={18} />}
+                    size="sm"
+                  />
+                  <StatCard
+                    label={t("analytics.askDeflectionRate")}
+                    value={formatAskDeflectionRate(analytics!.ask_summary!.deflection_rate)}
+                    icon={<Sparkle size={18} />}
+                    size="sm"
+                    subtext={t("analytics.askDeflectionHint")}
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <StatCard
+                    label={t("analytics.askAiRefused")}
+                    value={String(analytics!.ask_summary!.ai_refused)}
+                    icon={<Sparkle size={18} />}
+                    size="sm"
+                  />
+                  <StatCard
+                    label={t("analytics.askRefuseRate")}
+                    value={formatAskDeflectionRate(analytics!.ask_summary!.refuse_rate)}
+                    icon={<Sparkle size={18} />}
+                    size="sm"
+                    subtext={t("analytics.askRefuseHint")}
+                  />
+                  <StatCard
+                    label={t("analytics.askEscalationRate")}
+                    value={formatAskDeflectionRate(analytics!.ask_summary!.escalation_rate)}
+                    icon={<ChatCenteredDots size={18} />}
+                    size="sm"
+                    subtext={t("analytics.askEscalationHint")}
+                  />
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-h3">
@@ -874,10 +927,11 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
           </Card>
 
           <ManagementTab
-            questions={questions}
+            linkId={link.id}
+            dealRoomId={link.dealRoomId}
             fileRequests={fileRequests}
-            onAnswer={handleAnswer}
             onUpdateFileRequest={handleUpdateFileRequest}
+            onPendingHostCountChange={setPendingHostCount}
           />
           {managementLoading && (
             <div className="sr-only" role="status">

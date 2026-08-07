@@ -56,11 +56,13 @@ import type {
   WorkspaceSettings,
   VisitorQuestion,
   PublicAskTurn,
+  PublicAskFAQ,
+  PublicFormalAsk,
   OwnerAskTurn,
   FileRequest,
   AskSecurityEvent,
 } from "@/types";
-import { ApiError, openStream, request } from "@/lib/apiClient";
+import { openStream, request } from "@/lib/apiClient";
 import {
   toBackendIntegrationStatus,
   toCreateDealRoomPayload,
@@ -69,7 +71,7 @@ import {
   type BackendIntegrationStatus,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
-import { createSSEParser } from "@/lib/knowledge/parseSSE";
+import { consumeKnowledgeSSE } from "@/lib/knowledge/consumeKnowledgeSSE";
 import type { KnowledgeStreamEvent } from "@/lib/knowledge/streamEvents";
 import { useUIStore } from "@/stores/uiStore";
 
@@ -228,11 +230,6 @@ function getWorkspaceSlug(): string {
   throw new Error("No workspace selected");
 }
 
-type StreamDonePayload = DealRoomKnowledgeSessionQueryResult & {
-  refused?: boolean;
-  resultStatus?: string;
-};
-
 type KnowledgeSessionAskBody = {
   sessionId?: string;
   query: string;
@@ -261,140 +258,12 @@ async function streamDealRoomKnowledgeSession(
     },
   );
 
-  if (!response.body) {
-    throw new ApiError({
-      status: response.status,
-      code: "stream_incomplete",
-      message: "stream_incomplete",
-      requestId: "",
-    });
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  const parser = createSSEParser();
-  let doneResult: DealRoomKnowledgeSessionQueryResult | null = null;
-
-  const handleFrames = (frames: { event: string; data: string }[]) => {
-    for (const frame of frames) {
-      let payload: unknown;
-      try {
-        payload = JSON.parse(frame.data) as unknown;
-      } catch {
-        continue;
-      }
-      if (frame.event === "phase") {
-        const phasePayload = payload as {
-          phase?: string;
-          retrieveQuery?: string;
-          rewriteApplied?: boolean;
-        };
-        const phase = phasePayload.phase;
-        if (phase === "retrieving" || phase === "generating") {
-          opts.onEvent({
-            type: "phase",
-            phase,
-            retrieveQuery: phasePayload.retrieveQuery,
-            rewriteApplied: phasePayload.rewriteApplied,
-          });
-        }
-        continue;
-      }
-      if (frame.event === "sources") {
-        const src = payload as {
-          results?: DealRoomKnowledgeSessionQueryResult["results"];
-          grounded?: boolean;
-        };
-        opts.onEvent({
-          type: "sources",
-          results: src.results ?? [],
-          grounded: !!src.grounded,
-        });
-        continue;
-      }
-      if (frame.event === "token") {
-        const text = (payload as { text?: string }).text ?? "";
-        if (text) opts.onEvent({ type: "token", text });
-        continue;
-      }
-      if (frame.event === "error") {
-        const err = payload as { code?: string; message?: string };
-        const code = err.code ?? "stream_error";
-        opts.onEvent({ type: "error", message: code });
-        throw new ApiError({
-          status: 0,
-          code,
-          message: code,
-          requestId: "",
-        });
-      }
-      if (frame.event === "done") {
-        const data = payload as StreamDonePayload;
-        opts.onEvent({
-          type: "done",
-          answer: data.answer,
-          results: data.results ?? data.turn?.hits ?? [],
-          refused: data.refused ?? data.turn?.refused,
-          resultStatus: data.resultStatus ?? data.turn?.resultStatus,
-          retrieveQuery: data.turn?.retrieveQuery,
-          rewriteApplied: data.turn?.rewriteApplied,
-          claims: data.turn?.claims,
-          unresolved: data.turn?.unresolved,
-          conflicts: data.turn?.conflicts,
-          multiHop: data.turn?.multiHop,
-          refusal: data.turn?.refusal,
-          judgment: data.turn?.judgment,
-        });
-        doneResult = {
-          sessionId: data.sessionId,
-          turn: data.turn,
-          query: data.query,
-          mode: data.mode,
-          answer: data.answer,
-          results: data.results ?? [],
-          sessionState: data.sessionState,
-        };
-      }
-    }
-  };
-
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      handleFrames(parser.push(decoder.decode(value, { stream: true })));
-    }
-    handleFrames(parser.flush());
-  } catch (err) {
-    if (opts.signal?.aborted || (err instanceof DOMException && err.name === "AbortError")) {
-      throw err;
-    }
-    if (err instanceof ApiError) {
-      throw err;
-    }
-    if (opts.signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-    throw new ApiError({
-      status: 0,
-      code: "stream_incomplete",
-      message: "stream_incomplete",
-      requestId: "",
-    });
-  }
-
-  if (!doneResult) {
-    if (opts.signal?.aborted) {
-      throw new DOMException("Aborted", "AbortError");
-    }
-    throw new ApiError({
-      status: 0,
-      code: "stream_incomplete",
-      message: "stream_incomplete",
-      requestId: "",
-    });
-  }
-  return doneResult;
+  const doneResult = await consumeKnowledgeSSE(response, {
+    signal: opts.signal,
+    onEvent: opts.onEvent,
+    requireDone: true,
+  });
+  return doneResult!;
 }
 
 /** Coalesce concurrent deal-room list fetches per workspace+query (dashboard + list storms). */
@@ -663,28 +532,21 @@ export const api = {
       method: "GET",
     }),
 
-  // Public Visitor Q&A
-  createPublicQuestion: (token: string, question: string, creds?: PublicLinkCredentials) =>
-    request<{ data: VisitorQuestion }>(undefined, `/v1/public/links/${token}/questions`, {
-      method: "POST",
-      skipAuth: true,
-      headers: publicAccessHeaders(creds),
-      body: JSON.stringify({ question }),
-    }),
-  listPublicQuestions: (token: string, creds?: PublicLinkCredentials) =>
-    request<{ data: VisitorQuestion[] }>(undefined, `/v1/public/links/${token}/questions/me`, {
-      method: "GET",
-      skipAuth: true,
-      headers: publicAccessHeaders(creds),
-    }),
-
-  // Unified public Visitor Ask (Phase A)
-  createPublicAsk: (token: string, question: string, creds?: PublicLinkCredentials) =>
+  // Public Visitor Ask (unified)
+  createPublicAsk: (
+    token: string,
+    question: string,
+    creds?: PublicLinkCredentials,
+    opts?: { escalate?: boolean },
+  ) =>
     request<{ data: PublicAskTurn }>(undefined, `/v1/public/links/${token}/ask`, {
       method: "POST",
       skipAuth: true,
       headers: publicAccessHeaders(creds),
-      body: JSON.stringify({ question }),
+      body: JSON.stringify({
+        question,
+        ...(opts?.escalate ? { escalate: true } : {}),
+      }),
     }),
   listPublicAskTurns: (token: string, creds?: PublicLinkCredentials) =>
     request<{ data: PublicAskTurn[] }>(undefined, `/v1/public/links/${token}/ask/me`, {
@@ -692,6 +554,50 @@ export const api = {
       skipAuth: true,
       headers: publicAccessHeaders(creds),
     }),
+  listPublicAskFAQs: (token: string, creds?: PublicLinkCredentials) =>
+    request<{ data: PublicAskFAQ[] }>(undefined, `/v1/public/links/${token}/ask/faq`, {
+      method: "GET",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+    }),
+  listPublicFormalAsk: (token: string, creds?: PublicLinkCredentials) =>
+    request<{ data: PublicFormalAsk[] }>(undefined, `/v1/public/links/${token}/ask/formal`, {
+      method: "GET",
+      skipAuth: true,
+      headers: publicAccessHeaders(creds),
+    }),
+  escalatePublicAskTurn: (token: string, turnId: string, creds?: PublicLinkCredentials) =>
+    request<{ data: PublicAskTurn }>(
+      undefined,
+      `/v1/public/links/${token}/ask/${encodeURIComponent(turnId)}/escalate`,
+      {
+        method: "POST",
+        skipAuth: true,
+        headers: publicAccessHeaders(creds),
+        body: JSON.stringify({}),
+      },
+    ),
+  streamPublicAskTurn: (
+    token: string,
+    turnId: string,
+    opts: {
+      creds?: PublicLinkCredentials;
+      signal?: AbortSignal;
+      onEvent: (event: KnowledgeStreamEvent) => void;
+    },
+  ) =>
+    openStream(undefined, `/v1/public/links/${token}/ask/${encodeURIComponent(turnId)}/stream`, {
+      method: "GET",
+      skipAuth: true,
+      headers: publicAccessHeaders(opts.creds),
+      signal: opts.signal,
+    }).then((response) =>
+      consumeKnowledgeSSE(response, {
+        signal: opts.signal,
+        onEvent: opts.onEvent,
+        requireDone: true,
+      }),
+    ),
 
   // Public File Requests
   createPublicFileRequest: (token: string, message: string, creds?: PublicLinkCredentials) =>
@@ -994,9 +900,7 @@ export const api = {
       { method: "POST" }
     ),
 
-  // Visitor Q&A / Ask Host
-  listLinkQuestions: (linkId: string) =>
-    request<{ data: VisitorQuestion[] }>(getWorkspaceSlug(), `/links/${linkId}/questions`),
+  // Owner Ask inbox (unified turns)
   listLinkAsk: (linkId: string, params: { lane?: string; status?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.lane) search.set("lane", params.lane);
@@ -1007,15 +911,13 @@ export const api = {
       `/links/${linkId}/ask${qs ? `?${qs}` : ""}`,
     );
   },
-  listRoomQuestions: (roomId: string, params: { linkId?: string } = {}) => {
-    const search = new URLSearchParams();
-    if (params.linkId) search.set("link_id", params.linkId);
-    const qs = search.toString();
-    return request<{ data: VisitorQuestion[] }>(
-      getWorkspaceSlug(),
-      `/deal-rooms/${roomId}/visitor-questions${qs ? `?${qs}` : ""}`,
-    );
-  },
+  listLinkAskPinnedFAQ: (linkId: string) =>
+    request<{ data: OwnerAskTurn[] }>(getWorkspaceSlug(), `/links/${linkId}/ask/faq`),
+  reorderLinkAskFAQ: (linkId: string, turnIds: string[]) =>
+    request<{ data: OwnerAskTurn[] }>(getWorkspaceSlug(), `/links/${linkId}/ask/faq/order`, {
+      method: "PATCH",
+      body: JSON.stringify({ turn_ids: turnIds }),
+    }),
   listRoomAsk: (roomId: string, params: { linkId?: string; lane?: string; status?: string } = {}) => {
     const search = new URLSearchParams();
     if (params.linkId) search.set("link_id", params.linkId);
@@ -1027,16 +929,110 @@ export const api = {
       `/deal-rooms/${roomId}/ask${qs ? `?${qs}` : ""}`,
     );
   },
-  answerQuestion: (linkId: string, questionId: string, answer: string) =>
-    request<{ data: VisitorQuestion }>(getWorkspaceSlug(), `/links/${linkId}/questions/${questionId}/answer`, {
-      method: "PATCH",
-      body: JSON.stringify({ answer }),
-    }),
+  listRoomAskPinnedFAQ: (roomId: string, params: { linkId?: string } = {}) => {
+    const search = new URLSearchParams();
+    if (params.linkId) search.set("link_id", params.linkId);
+    const qs = search.toString();
+    return request<{ data: OwnerAskTurn[] }>(
+      getWorkspaceSlug(),
+      `/deal-rooms/${roomId}/ask/faq${qs ? `?${qs}` : ""}`,
+    );
+  },
   answerAskTurn: (linkId: string, turnId: string, answer: string) =>
     request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/host-answer`, {
       method: "PATCH",
       body: JSON.stringify({ answer }),
     }),
+  publishFormalAskTurn: (
+    linkId: string,
+    turnId: string,
+    body: { answer: string; publishAt?: string; anonymize?: boolean },
+  ) =>
+    request<{ data: OwnerAskTurn }>(
+      getWorkspaceSlug(),
+      `/links/${linkId}/ask/${turnId}/formal-publish`,
+      {
+        method: "PATCH",
+        body: JSON.stringify({
+          answer: body.answer,
+          publish_at: body.publishAt,
+          anonymize: body.anonymize,
+        }),
+      },
+    ),
+  pinAskTurnFAQ: (linkId: string, turnId: string) =>
+    request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/pin-faq`, {
+      method: "POST",
+    }),
+  unpinAskTurnFAQ: (linkId: string, turnId: string) =>
+    request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/unpin-faq`, {
+      method: "POST",
+    }),
+  updateLinkAskPolicy: (
+    linkId: string,
+    patch: {
+      askAiEnabled?: boolean;
+      askMode?: string;
+      askAiMonthlyQuota?: number;
+      clearAiQuota?: boolean;
+    },
+  ) =>
+    request<{
+      data: {
+        id: string;
+        ask_mode: string;
+        ask_ai_enabled: boolean;
+        ask_ai_monthly_quota: number | null;
+        ask_ai_monthly_used?: number;
+        ask_ai_monthly_limit?: number;
+        ask_ai_quota_exceeded?: boolean;
+        ask_ai_entitled?: boolean;
+      };
+    }>(getWorkspaceSlug(), `/links/${linkId}/ask-policy`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        ask_ai_enabled: patch.askAiEnabled,
+        ask_mode: patch.askMode,
+        ask_ai_monthly_quota: patch.askAiMonthlyQuota,
+        clear_ai_quota: patch.clearAiQuota,
+      }),
+    }).then((res) => ({
+      data: {
+        id: res.data.id,
+        askMode: res.data.ask_mode,
+        askAiEnabled: res.data.ask_ai_enabled,
+        askAiMonthlyQuota: res.data.ask_ai_monthly_quota,
+        askAiMonthlyUsed: res.data.ask_ai_monthly_used,
+        askAiMonthlyLimit: res.data.ask_ai_monthly_limit,
+        askAiQuotaExceeded: res.data.ask_ai_quota_exceeded,
+        askAiEntitled: res.data.ask_ai_entitled,
+      },
+    })),
+
+  getLinkAskPolicy: (linkId: string) =>
+    request<{
+      data: {
+        id: string;
+        ask_mode: string;
+        ask_ai_enabled: boolean;
+        ask_ai_monthly_quota: number | null;
+        ask_ai_monthly_used: number;
+        ask_ai_monthly_limit: number;
+        ask_ai_quota_exceeded: boolean;
+        ask_ai_entitled?: boolean;
+      };
+    }>(getWorkspaceSlug(), `/links/${linkId}/ask-policy`).then((res) => ({
+      data: {
+        id: res.data.id,
+        askMode: res.data.ask_mode,
+        askAiEnabled: res.data.ask_ai_enabled,
+        askAiMonthlyQuota: res.data.ask_ai_monthly_quota,
+        askAiMonthlyUsed: res.data.ask_ai_monthly_used,
+        askAiMonthlyLimit: res.data.ask_ai_monthly_limit,
+        askAiQuotaExceeded: res.data.ask_ai_quota_exceeded,
+        askAiEntitled: res.data.ask_ai_entitled,
+      },
+    })),
 
   // File Requests
   listLinkFileRequests: (linkId: string) =>

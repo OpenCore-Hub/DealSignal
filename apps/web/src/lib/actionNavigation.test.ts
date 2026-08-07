@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionNavigatePath } from "./actionNavigation";
+import { actionNavigatePath, isFormalAskReviewAction } from "./actionNavigation";
 
 describe("actionNavigatePath", () => {
   it("routes document share access requests to Document Library Share only", () => {
@@ -54,5 +54,62 @@ describe("actionNavigatePath", () => {
     });
     expect(path).toContain("/documents?");
     expect(path).not.toContain("/deal-rooms/");
+  });
+
+  it("routes deal-room visitor Ask todos to QA inbox with link filter", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "deal_room_link_question",
+        sourceId: "question-1",
+        targetId: "room-1/link-room",
+        actionType: "answer",
+      }),
+    ).toBe("/acme/deal-rooms/room-1?tab=qa&linkId=link-room");
+  });
+
+  it("routes formal review todos to the formal queue inbox tab", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "deal_room_link_question",
+        sourceId: "turn-formal-1",
+        targetId: "room-1/link-room",
+        actionType: "review",
+      }),
+    ).toBe("/acme/deal-rooms/room-1?tab=qa&linkId=link-room&askInbox=formal_queue");
+  });
+
+  it("refuses legacy link_question rows without a deal-room target", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "link_question",
+        sourceId: "question-legacy",
+      }),
+    ).toBeNull();
+  });
+
+  it("does not route deal-room Ask todos to document share surfaces", () => {
+    const path = actionNavigatePath("acme", {
+      sourceType: "deal_room_link_question",
+      sourceId: "question-1",
+      targetId: "room-1/link-room",
+      actionType: "answer",
+    });
+    expect(path).toContain("/deal-rooms/room-1?tab=qa");
+    expect(path).not.toContain("/documents");
+    expect(path).not.toMatch(/\/links\//);
+  });
+});
+
+describe("isFormalAskReviewAction", () => {
+  it("matches deal-room formal review todos only", () => {
+    expect(
+      isFormalAskReviewAction({ sourceType: "deal_room_link_question", actionType: "review" }),
+    ).toBe(true);
+    expect(
+      isFormalAskReviewAction({ sourceType: "deal_room_link_question", actionType: "answer" }),
+    ).toBe(false);
+    expect(isFormalAskReviewAction({ sourceType: "link_question", actionType: "review" })).toBe(
+      false,
+    );
   });
 });

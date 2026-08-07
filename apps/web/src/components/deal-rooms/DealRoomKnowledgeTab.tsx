@@ -65,16 +65,16 @@ export function DealRoomKnowledgeTab({ roomId }: DealRoomKnowledgeTabProps) {
     [roomId],
   );
   const { data: roomMetrics } = useAsyncData(async () => {
-    const [analytics, questionsRes, linksRes] = await Promise.all([
+    const [analytics, askRes, linksRes] = await Promise.all([
       api.getDealRoomAnalytics(roomId),
-      api.listRoomQuestions(roomId),
+      api.listRoomAsk(roomId),
       api.getDealRoomLinks(roomId, { page_size: 100 }),
     ]);
-    const questions = questionsRes.data ?? [];
+    const askTurns = askRes.data ?? [];
     const links = linksRes.data ?? [];
     const askKeys = new Set<string>();
-    for (const q of questions) {
-      const key = (q.visitor_id || q.visitor_email || "").trim();
+    for (const turn of askTurns) {
+      const key = (turn.visitor_id || turn.visitor_email || "").trim();
       if (key) askKeys.add(key);
     }
     const visitedLinkIds = new Set(

@@ -2,6 +2,9 @@
 export function visitorAskUnifiedEnabled(link: {
   qaEnabled?: boolean;
   visitorAskUnified?: boolean;
+  dealRoomId?: string;
 }): boolean {
-  return Boolean(link.qaEnabled && link.visitorAskUnified);
+  if (!link.qaEnabled) return false;
+  if (link.visitorAskUnified !== undefined) return link.visitorAskUnified;
+  return Boolean(link.dealRoomId);
 }

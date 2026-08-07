@@ -1,0 +1,1 @@
+-- Intentionally no-op: prior default-off state cannot be restored safely.

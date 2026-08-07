@@ -27,11 +27,14 @@ var (
 )
 
 var askSecurityEventTypes = map[string]struct{}{
-	"rate_limit_exceeded": {},
-	"scope_violation":     {},
-	"blocked_email":       {},
-	"blocked_domain":      {},
-	"not_in_allow_list":   {},
+	"rate_limit_exceeded":   {},
+	"scope_violation":       {},
+	"blocked_email":         {},
+	"blocked_domain":        {},
+	"not_in_allow_list":     {},
+	"ask_ai_rate_limited":   {},
+	"ask_escalated":         {},
+	"ask_formal_submitted":  {},
 }
 
 // AskSecurityEvent is an owner-visible Visitor Ask high-risk security event (US#32).

@@ -63,6 +63,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
+  visitorAskExperience: "host_only" as const,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",

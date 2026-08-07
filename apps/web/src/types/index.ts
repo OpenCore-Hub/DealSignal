@@ -82,6 +82,10 @@ export interface Link {
   watermarkEnabled?: boolean;
   /** Q&A feature toggle (available from v2.7+ backend). */
   qaEnabled?: boolean;
+  /** Visitor Ask routing mode (supervised | ai_first). */
+  askMode?: "supervised" | "self_serve" | "formal";
+  /** Grounded AI answers for deal-room links (Phase B). */
+  askAiEnabled?: boolean;
   /** Unified visitor Ask UI (Phase A; requires VISITOR_ASK_UNIFIED=1 on API). */
   visitorAskUnified?: boolean;
   /** File request feature toggle (available from v2.7+ backend). */
@@ -152,13 +156,58 @@ export interface PublicAskTurn {
     | "ai_answered"
     | "ai_refused"
     | "host_pending"
+    | "host_escalated"
     | "host_answered"
     | "failed";
-  host_question_id?: string;
   host_answer?: string;
   route_reason?: string;
+  pinned_faq_at?: string;
+  pinned_faq_by?: string;
+  pinned_faq_sort?: number;
+  formal_status?: "pending_review" | "scheduled" | "published";
+  formal_publish_at?: string;
+  formal_published_at?: string;
+  formal_anonymize?: boolean;
+  ai_payload?: {
+    answer?: string;
+    refused: boolean;
+    resultStatus: string;
+    hits?: Array<{
+      chunkId: string;
+      documentId?: string;
+      text: string;
+      score: number;
+      sourceName?: string;
+      pages?: number[];
+      sheet?: string;
+      viewerPage?: number;
+    }>;
+  };
   created_at: string;
   updated_at: string;
+}
+
+/** Visitor-visible pinned FAQ on a share link (Phase B). */
+export interface PublicAskFAQ {
+  id: string;
+  question: string;
+  answer: string;
+  source: "ai" | "host" | "hybrid";
+  link_id?: string;
+  link_name?: string;
+  pinned_faq_sort?: number;
+  ai_payload?: PublicAskTurn["ai_payload"];
+  pinned_at: string;
+}
+
+/** Visitor-visible published formal Q&A (Phase C). */
+export interface PublicFormalAsk {
+  id: string;
+  question: string;
+  answer: string;
+  published_at: string;
+  link_id?: string;
+  link_name?: string;
 }
 
 /** Owner-facing unified Ask turn (host inbox). */
@@ -166,6 +215,8 @@ export interface OwnerAskTurn extends PublicAskTurn {
   link_id: string;
   visitor_id: string;
   visitor_email?: string;
+  /** Same normalized question count within link (owner inbox). */
+  repeat_count?: number;
 }
 
 export interface FileRequest {
@@ -374,7 +425,6 @@ export interface LinkAnalytics {
     email: string;
     name?: string;
     send_status: "pending" | "sent" | "failed" | string;
-    send_error?: string;
     code_sent_at?: string;
     used_at?: string;
     can_resend?: boolean;
@@ -382,6 +432,18 @@ export interface LinkAnalytics {
   access_code_contacts_has_more?: boolean;
   access_code_failed_count?: number;
   access_code_remediable_count?: number;
+  ask_summary?: {
+    total_turns: number;
+    ai_answered: number;
+    ai_refused: number;
+    host_pending: number;
+    host_answered: number;
+    user_escalated?: number;
+    auto_escalated?: number;
+    deflection_rate?: number;
+    refuse_rate?: number;
+    escalation_rate?: number;
+  };
 }
 
 export type LinkAccessCodeContact = NonNullable<LinkAnalytics["access_code_contacts"]>[number];
@@ -990,6 +1052,7 @@ export interface ActionItem {
     | "room_access_request"
     | "room_nda"
     | "link_question"
+    | "deal_room_link_question"
     | "uploaded_file"
     | "expiring_link"
     | "expiring_room";

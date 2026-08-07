@@ -484,6 +484,50 @@ export async function visitPublicLink(
   });
 }
 
+/** Open visitor Ask panel on a public link (real backend UI). */
+export async function openRealVisitorAskPanel(page: Page, shortUrl: string) {
+  await visitPublicLink(page, shortUrl);
+
+  const openSidebar = page.getByRole("button", { name: /Open sidebar/i });
+  if (await openSidebar.isVisible().catch(() => false)) {
+    await openSidebar.click();
+  }
+
+  const input = page.getByPlaceholder(/materials you can access|Ask the host/i);
+  if (!(await input.isVisible().catch(() => false))) {
+    const askTab = page.locator("button.rounded-full").filter({ hasText: /^Ask$/ });
+    if (await askTab.isVisible().catch(() => false)) {
+      await askTab.click();
+    }
+  }
+
+  await input.waitFor({ state: "visible", timeout: 15000 });
+  return input;
+}
+
+/** Enable grounded AI on a deal-room link via ask-policy API (used by real-backend e2e). */
+export async function enableGroundedAiForLink(
+  workspaceSlug: string,
+  linkId: string,
+  askMode: "supervised" | "self_serve" = "supervised",
+) {
+  await updateLinkAskPolicy(workspaceSlug, linkId, {
+    askAiEnabled: true,
+    askMode,
+  });
+}
+
+/** Returns false when docling-rag is not configured (optional AI gates skip). */
+export async function probeKnowledgeEnabled(
+  workspaceSlug: string,
+  roomId: string,
+): Promise<boolean> {
+  const corpus = await apiGetJson<{ enabled: boolean }>(
+    `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/knowledge`,
+  );
+  return Boolean(corpus.enabled);
+}
+
 /** Sync deal-room knowledge corpus until ask-ready (or throw). */
 export async function waitForKnowledgeCorpusReady(
   workspaceSlug: string,
@@ -610,6 +654,277 @@ export async function detachDocumentFromRoom(
   return apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/documents/${documentId}`, {
     method: "DELETE",
   });
+}
+
+// ── Visitor Ask (real backend) ────────────────────────────────────
+
+export interface PublicAskTurn {
+  id: string;
+  question: string;
+  lane: string;
+  status: string;
+  route_reason?: string;
+  host_answer?: string;
+}
+
+export interface OwnerAskTurn {
+  id: string;
+  link_id: string;
+  question: string;
+  lane: string;
+  status: string;
+  visitor_email?: string;
+}
+
+export interface DashboardActionItem {
+  id: string;
+  sourceType?: string;
+  sourceId?: string;
+  targetId?: string;
+  title: string;
+  status: string;
+}
+
+export function snapshotCookieJar(): ParsedCookie[] {
+  return [...cookieJar];
+}
+
+export function restoreCookieJar(snapshot: ParsedCookie[]): void {
+  cookieJar = [...snapshot];
+}
+
+export function publicTokenFromShortUrl(shortUrl: string): string {
+  const token = shortUrl.split("/").filter(Boolean).pop();
+  if (!token) throw new Error(`invalid shortUrl: ${shortUrl}`);
+  return token;
+}
+
+export async function seedDealRoomLink(
+  workspaceSlug: string,
+  roomId: string,
+  opts: { name?: string; requireEmail?: boolean } = {},
+): Promise<SeedLink> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/links`, {
+    method: "POST",
+    body: JSON.stringify({
+      name: opts.name ?? `E2E Room Link ${Date.now()}`,
+      require_email: opts.requireEmail ?? false,
+      download_enabled: true,
+    }),
+  });
+  if (!res.ok) throw new Error(`create deal-room link failed: ${res.status} ${await res.text()}`);
+  const link = (await res.json()) as {
+    id: string;
+    shortUrl?: string;
+    short_url?: string;
+    public_token?: string;
+  };
+  const shortUrl = link.shortUrl ?? link.short_url ?? "";
+  const publicToken =
+    link.public_token ?? (shortUrl ? publicTokenFromShortUrl(shortUrl) : "");
+  if (!publicToken) throw new Error("deal-room link missing public token");
+  return { id: link.id, shortUrl, publicToken, permissionType: "public" };
+}
+
+export async function accessPublicLinkApi(
+  publicToken: string,
+  email = `visitor-${Date.now()}@example.com`,
+): Promise<{ visitorId: string; email: string }> {
+  const res = await apiFetch(`/api/v1/public/links/${publicToken}`, {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+  if (!res.ok) throw new Error(`public access failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { visitorId?: string; visitor_id?: string };
+  const visitorId = body.visitorId ?? body.visitor_id ?? "";
+  if (!visitorId) throw new Error("public access missing visitorId");
+  return { visitorId, email };
+}
+
+export async function submitPublicAsk(
+  publicToken: string,
+  question: string,
+): Promise<PublicAskTurn> {
+  const res = await apiFetch(`/api/v1/public/links/${publicToken}/ask`, {
+    method: "POST",
+    body: JSON.stringify({ question }),
+  });
+  if (!res.ok) throw new Error(`public ask failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: PublicAskTurn };
+  return body.data;
+}
+
+/** GET AI stream endpoint — expect 403 ai_not_enabled when ask_ai_enabled is false. */
+export async function streamPublicAskTurn(
+  publicToken: string,
+  turnId: string,
+): Promise<Response> {
+  return apiFetch(`/api/v1/public/links/${publicToken}/ask/${turnId}/stream`, {
+    method: "GET",
+    headers: { Accept: "text/event-stream" },
+  });
+}
+
+export async function updateLinkAskPolicy(
+  workspaceSlug: string,
+  linkId: string,
+  policy: { askAiEnabled?: boolean; askMode?: string; askAiMonthlyQuota?: number; clearAiQuota?: boolean },
+): Promise<void> {
+  const body: Record<string, unknown> = {};
+  if (policy.askAiEnabled !== undefined) body.ask_ai_enabled = policy.askAiEnabled;
+  if (policy.askMode !== undefined) body.ask_mode = policy.askMode;
+  if (policy.askAiMonthlyQuota !== undefined) body.ask_ai_monthly_quota = policy.askAiMonthlyQuota;
+  if (policy.clearAiQuota) body.clear_ai_quota = true;
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${linkId}/ask-policy`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    throw new Error(`update link ask policy failed: ${res.status} ${await res.text()}`);
+  }
+}
+
+export interface OwnerLinkDetail {
+  id: string;
+  askAiEnabled?: boolean;
+  askMode?: string;
+  dealRoomId?: string;
+}
+
+export async function fetchLinkById(
+  workspaceSlug: string,
+  linkId: string,
+): Promise<OwnerLinkDetail> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${linkId}`);
+  if (!res.ok) {
+    throw new Error(`fetch link failed: ${res.status} ${await res.text()}`);
+  }
+  return (await res.json()) as OwnerLinkDetail;
+}
+
+export interface LinkAnalyticsResponse {
+  ask_summary?: {
+    total_turns: number;
+    ai_answered: number;
+    ai_refused: number;
+    host_pending: number;
+    host_answered: number;
+    user_escalated?: number;
+    auto_escalated?: number;
+    deflection_rate?: number;
+    refuse_rate?: number;
+    escalation_rate?: number;
+  };
+}
+
+export async function fetchLinkAnalytics(
+  workspaceSlug: string,
+  linkId: string,
+): Promise<LinkAnalyticsResponse> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/links/${linkId}/analytics`);
+  if (!res.ok) {
+    throw new Error(`fetch link analytics failed: ${res.status} ${await res.text()}`);
+  }
+  return (await res.json()) as LinkAnalyticsResponse;
+}
+
+/** Parse visitor Ask SSE body for a done payload answer snippet. */
+export function parseVisitorAskSSE(raw: string): { answer: string; refused: boolean } {
+  let answer = "";
+  let refused = false;
+  for (const block of raw.split("\n\n")) {
+    const lines = block.split("\n");
+    let event = "";
+    let data = "";
+    for (const line of lines) {
+      if (line.startsWith("event:")) event = line.slice(6).trim();
+      if (line.startsWith("data:")) data += line.slice(5).trim();
+    }
+    if (!data) continue;
+    try {
+      const parsed = JSON.parse(data) as {
+        answer?: string;
+        refused?: boolean;
+        turn?: { answer?: string; refused?: boolean };
+      };
+      if (event === "done" || parsed.answer || parsed.turn?.answer) {
+        answer = parsed.answer ?? parsed.turn?.answer ?? answer;
+        refused = parsed.refused ?? parsed.turn?.refused ?? refused;
+      }
+    } catch {
+      // ignore partial chunks
+    }
+  }
+  return { answer, refused };
+}
+
+export async function listMyPublicAskTurns(publicToken: string): Promise<PublicAskTurn[]> {
+  const res = await apiFetch(`/api/v1/public/links/${publicToken}/ask/me`);
+  if (!res.ok) throw new Error(`public ask/me failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: PublicAskTurn[] };
+  return body.data ?? [];
+}
+
+export async function listOwnerLinkAsk(
+  workspaceSlug: string,
+  linkId: string,
+  query?: { lane?: string; status?: string },
+): Promise<OwnerAskTurn[]> {
+  const params = new URLSearchParams();
+  if (query?.lane) params.set("lane", query.lane);
+  if (query?.status) params.set("status", query.status);
+  const qs = params.toString();
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/links/${linkId}/ask${qs ? `?${qs}` : ""}`,
+  );
+  if (!res.ok) throw new Error(`owner link ask failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: OwnerAskTurn[] };
+  return body.data ?? [];
+}
+
+export async function listOwnerRoomAsk(
+  workspaceSlug: string,
+  roomId: string,
+  query?: { linkId?: string; lane?: string; status?: string },
+): Promise<OwnerAskTurn[]> {
+  const params = new URLSearchParams();
+  if (query?.linkId) params.set("link_id", query.linkId);
+  if (query?.lane) params.set("lane", query.lane);
+  if (query?.status) params.set("status", query.status);
+  const qs = params.toString();
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/deal-rooms/${roomId}/ask${qs ? `?${qs}` : ""}`,
+  );
+  if (!res.ok) throw new Error(`owner room ask failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: OwnerAskTurn[] };
+  return body.data ?? [];
+}
+
+export async function answerOwnerAskTurn(
+  workspaceSlug: string,
+  linkId: string,
+  turnId: string,
+  answer: string,
+): Promise<OwnerAskTurn> {
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/links/${linkId}/ask/${turnId}/host-answer`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({ answer }),
+    },
+  );
+  if (!res.ok) throw new Error(`host answer failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: OwnerAskTurn };
+  return body.data;
+}
+
+export async function fetchDashboardActionItems(
+  workspaceSlug: string,
+): Promise<DashboardActionItem[]> {
+  const res = await apiFetch(`/api/workspaces/${workspaceSlug}/dashboard/stats`);
+  if (!res.ok) throw new Error(`dashboard stats failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { actionItems?: DashboardActionItem[] };
+  return body.actionItems ?? [];
 }
 
 function sleep(ms: number): Promise<void> {

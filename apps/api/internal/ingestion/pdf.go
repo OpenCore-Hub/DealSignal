@@ -413,7 +413,26 @@ func pageDimensions(p pdf.Page) (int, int) {
 // It requires pdftoppm (poppler-utils). On failure the error is returned so
 // the ingestion job can be marked failed instead of silently serving a placeholder.
 func renderPage(p PageInfo, pdfPath string) ([]byte, image.Rectangle, error) {
-	return renderPDFPageWithPdftoppm(pdfPath, p.Number)
+	return renderPDFPageWithPdftoppm(pdfPath, p.Number, dpiForPage(p))
+}
+
+const (
+	defaultRenderDPI   = 200
+	maxRenderPixelEdge = 6000
+)
+
+func dpiForPage(p PageInfo) int {
+	if p.Width <= 0 {
+		return defaultRenderDPI
+	}
+	dpi := float64(maxRenderPixelEdge) * 72 / float64(p.Width)
+	if dpi >= defaultRenderDPI {
+		return defaultRenderDPI
+	}
+	if dpi < 72 {
+		return 72
+	}
+	return int(dpi)
 }
 
 // CheckRenderers verifies that the external PDF rendering binaries required by
@@ -438,17 +457,12 @@ func pngBounds(data []byte) (image.Rectangle, error) {
 }
 
 // renderPDFPageWithPdftoppm renders a single PDF page to PNG using pdftoppm.
-func renderPDFPageWithPdftoppm(pdfPath string, pageNumber int) ([]byte, image.Rectangle, error) {
+func renderPDFPageWithPdftoppm(pdfPath string, pageNumber, dpi int) ([]byte, image.Rectangle, error) {
 	tmpDir, err := os.MkdirTemp("", "pdfrender-*")
 	if err != nil {
 		return nil, image.Rectangle{}, fmt.Errorf("create temp dir: %w", err)
 	}
 	defer os.RemoveAll(tmpDir)
-
-	// Use 200 DPI so that fine text and edge content remain readable after the
-	// frontend fits the page into the viewport. PDF dimensions are in points
-	// (1/72 inch), so 200 DPI gives ~2.78x scale.
-	dpi := 200
 
 	outputPrefix := filepath.Join(tmpDir, "page")
 	cmd := exec.Command("pdftoppm",

@@ -257,6 +257,7 @@ func (s *Server) registerRoutes() error {
 			if s.redisClient != nil {
 				analyticsSvc.WithCache(analytics.NewRedisCache(s.redisClient))
 			}
+			linkSvc.SetAskSecurityRecorder(link.AnalyticsSecurityRecorder{Svc: analyticsSvc})
 			linkHandler := link.NewHandler(linkSvc, analyticsSvc, suggestionSvc, storageClient, s.cfg)
 			expiryReminder := link.NewExpiryReminder(queries, notificationSvc, 6*time.Hour)
 			s.registerWorker(expiryReminder)
@@ -344,6 +345,7 @@ func (s *Server) registerRoutes() error {
 				s.registerWorker(knowledgeWorker)
 				knowledgeWorker.Start(s.shutdownCtx)
 			}
+			linkHandler.SetKnowledgeService(knowledgeSvc)
 
 			dealroomOpts := []dealroom.ServiceOption{
 				dealroom.WithActionSyncer(actionSyncer),

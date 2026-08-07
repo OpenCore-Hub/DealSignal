@@ -1,11 +1,10 @@
 import type { OwnerAskTurn, VisitorQuestion } from "@/types";
 import { api } from "@/lib/api";
 
-/** Map owner inbox turn to legacy VisitorQuestion for answer APIs. */
+/** Map owner inbox turn for reply UI (turn id is canonical). */
 export function ownerAskTurnToVisitorQuestion(turn: OwnerAskTurn): VisitorQuestion {
-  const id = turn.host_question_id?.trim() || turn.id;
   return {
-    id,
+    id: turn.id,
     ask_turn_id: turn.id,
     link_id: turn.link_id,
     visitor_id: turn.visitor_id,
@@ -22,15 +21,12 @@ export function ownerAskTurnsToVisitorQuestions(turns: OwnerAskTurn[]): VisitorQ
   return turns.map(ownerAskTurnToVisitorQuestion);
 }
 
-/** Prefer unified PATCH .../ask/:turnId/host-answer when turn id is known. */
+/** Reply via unified PATCH .../ask/:turnId/host-answer. */
 export async function answerOwnerAskQuestion(
   question: VisitorQuestion,
   answer: string,
 ): Promise<VisitorQuestion> {
-  if (question.ask_turn_id) {
-    const res = await api.answerAskTurn(question.link_id, question.ask_turn_id, answer);
-    return ownerAskTurnToVisitorQuestion(res.data);
-  }
-  const res = await api.answerQuestion(question.link_id, question.id, answer);
-  return res.data;
+  const turnId = question.ask_turn_id?.trim() || question.id;
+  const res = await api.answerAskTurn(question.link_id, turnId, answer);
+  return ownerAskTurnToVisitorQuestion(res.data);
 }

@@ -8,6 +8,7 @@ export interface PublicThumbnailPage {
 interface PublicViewerThumbnailRailProps {
   pages: PublicThumbnailPage[];
   currentPage: number;
+  thumbnailUrls?: Record<number, string>;
   onSelect: (pageNumber: number) => void;
   className?: string;
 }
@@ -15,6 +16,7 @@ interface PublicViewerThumbnailRailProps {
 export function PublicViewerThumbnailRail({
   pages,
   currentPage,
+  thumbnailUrls = {},
   onSelect,
   className,
 }: PublicViewerThumbnailRailProps) {
@@ -24,7 +26,7 @@ export function PublicViewerThumbnailRail({
     <aside
       className={cn(
         "flex h-full min-h-0 w-[4.75rem] shrink-0 flex-col gap-2 overflow-y-auto px-2 py-3 sm:w-[5.5rem]",
-        className
+        className,
       )}
       aria-label={t("viewer.publicPageRail")}
     >
@@ -33,6 +35,8 @@ export function PublicViewerThumbnailRail({
       </p>
       {pages.map((p) => {
         const isActive = currentPage === p.pageNumber;
+        const previewUrl = thumbnailUrls[p.pageNumber];
+        const pageLabel = t("viewer.pageLabelShort", { pageNumber: p.pageNumber });
         return (
           <button
             key={p.pageNumber}
@@ -42,28 +46,40 @@ export function PublicViewerThumbnailRail({
               "group relative flex flex-col items-center gap-1.5 rounded-xl p-1.5 transition-all duration-200",
               isActive
                 ? "bg-background/90 shadow-sm ring-1 ring-emerald-500/30"
-                : "hover:bg-background/60"
+                : "hover:bg-background/60",
             )}
             aria-current={isActive ? "page" : undefined}
+            aria-label={t("viewer.pageLabel", { pageNumber: p.pageNumber })}
           >
             <div
               className={cn(
-                "relative aspect-[3/4] w-full overflow-hidden rounded-lg border bg-gradient-to-br from-white to-neutral-100 shadow-sm transition-transform duration-200 group-active:scale-[0.98]",
-                isActive ? "border-emerald-500/40" : "border-border/70"
+                "relative aspect-[3/4] w-full overflow-hidden rounded-lg border bg-neutral-100 shadow-sm transition-transform duration-200 group-active:scale-[0.98] dark:bg-neutral-900",
+                isActive ? "border-emerald-500/40" : "border-border/70",
               )}
             >
-              <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(15,23,42,0.04),transparent_40%)]" />
-              <span className="absolute inset-x-0 bottom-1 text-center text-[9px] font-semibold tabular-nums text-muted-foreground">
-                {p.pageNumber}
-              </span>
+              {previewUrl ? (
+                <img
+                  src={previewUrl}
+                  alt=""
+                  aria-hidden
+                  loading="eager"
+                  decoding="async"
+                  className="h-full w-full object-cover object-top"
+                />
+              ) : (
+                <div
+                  className="h-full w-full animate-pulse bg-gradient-to-br from-neutral-200/80 to-neutral-100 dark:from-neutral-800 dark:to-neutral-900"
+                  aria-hidden
+                />
+              )}
             </div>
             <span
               className={cn(
                 "text-[10px] font-medium tabular-nums",
-                isActive ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground"
+                isActive ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
               )}
             >
-              {t("viewer.pageLabelShort", { pageNumber: p.pageNumber })}
+              {pageLabel}
             </span>
           </button>
         );

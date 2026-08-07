@@ -1,225 +1,145 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
-import { ChatCenteredDots, PaperPlaneRight, Spinner, User } from "@phosphor-icons/react";
+import { ChatCenteredDots, PaperPlaneRight, Spinner } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
-import { api } from "@/lib/api";
-import { ApiError } from "@/lib/apiClient";
-import type { PublicAskTurn, VisitorQuestion } from "@/types";
+import { useVisitorAskPanel } from "@/hooks/useVisitorAskPanel";
+import { useVisitorPinnedFAQs } from "@/hooks/useVisitorPinnedFAQs";
+import { useVisitorFormalAsk } from "@/hooks/useVisitorFormalAsk";
+import { VisitorAskTurnCard } from "./VisitorAskTurnCard";
+import { VisitorPinnedFAQSection } from "./VisitorPinnedFAQSection";
+import { VisitorFormalQASection } from "./VisitorFormalQASection";
+import type { DealRoomKnowledgeQueryHit } from "@/types";
 
 interface UnifiedQAPanelProps {
   token: string;
   sessionToken?: string;
   qaEnabled?: boolean;
-  /** When false, uses legacy POST/GET /questions (pre-unified rollout). */
-  unifiedAskEnabled?: boolean;
-}
-
-type Source = "owner" | "you";
-
-interface UIMessage {
-  id: string;
-  source: Source;
-  content: string;
-  createdAt: string;
-  pendingReply?: boolean;
-}
-
-const creds = (token?: string) => (token ? { sessionToken: token } : undefined);
-
-function legacyQuestionToTurn(q: VisitorQuestion): PublicAskTurn {
-  return {
-    id: q.id,
-    session_id: "",
-    question: q.question,
-    lane: "host",
-    status: q.status === "answered" ? "host_answered" : "host_pending",
-    host_question_id: q.id,
-    host_answer: q.answer,
-    created_at: q.created_at,
-    updated_at: q.updated_at,
-  };
+  onOpenCitation?: (hit: DealRoomKnowledgeQueryHit) => void;
 }
 
 export function UnifiedQAPanel({
   token,
   sessionToken,
   qaEnabled,
-  unifiedAskEnabled = true,
+  onOpenCitation,
 }: UnifiedQAPanelProps) {
   const { t } = useTranslation("documents");
-  const [turns, setTurns] = useState<PublicAskTurn[]>([]);
-  const [loadingQuestions, setLoadingQuestions] = useState(() => Boolean(qaEnabled));
-  const [questionError, setQuestionError] = useState<string | null>(null);
-  const [refreshKey, setRefreshKey] = useState(0);
-  const [input, setInput] = useState("");
-  const [ownerSubmitting, setOwnerSubmitting] = useState(false);
-  const scrollRef = useRef<HTMLDivElement>(null);
-  const sessionTokenRef = useRef(sessionToken);
-  sessionTokenRef.current = sessionToken;
+  const {
+    turns,
+    loading,
+    error,
+    submitting,
+    escalatingId,
+    stoppedTurnIds,
+    submitQuestion,
+    escalateToHost,
+    resolveKnowledgeTurn,
+    stopStream,
+  } = useVisitorAskPanel({
+    token,
+    sessionToken,
+    qaEnabled,
+  });
+  const { faqs: pinnedFaqs } = useVisitorPinnedFAQs({
+    token,
+    sessionToken,
+    qaEnabled,
+  });
+  const { entries: formalEntries } = useVisitorFormalAsk({
+    token,
+    sessionToken,
+    qaEnabled,
+  });
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!qaEnabled) return;
-    (async () => {
-      setQuestionError(null);
-      setLoadingQuestions(true);
-      try {
-        const res = unifiedAskEnabled
-          ? await api.listPublicAskTurns(token, creds(sessionTokenRef.current))
-          : await api.listPublicQuestions(token, creds(sessionTokenRef.current));
-        const rows = res.data ?? [];
-        if (!cancelled) {
-          setTurns(
-            unifiedAskEnabled
-              ? (rows as PublicAskTurn[])
-              : (rows as VisitorQuestion[]).map(legacyQuestionToTurn),
-          );
-        }
-      } catch {
-        if (!cancelled) setQuestionError(t("viewer.askLoadError"));
-      } finally {
-        if (!cancelled) setLoadingQuestions(false);
-      }
-    })();
-    return () => { cancelled = true; };
-  }, [token, qaEnabled, unifiedAskEnabled, t, refreshKey]);
+  const [input, setInput] = useState("");
+  const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [turns, ownerSubmitting]);
+  }, [turns, submitting]);
 
-  const allMessages = useMemo<UIMessage[]>(() => {
-    const list: UIMessage[] = [];
-    if (qaEnabled) {
-      turns.forEach((turn) => {
-        list.push({
-          id: `q_${turn.id}`,
-          source: "you",
-          content: turn.question,
-          createdAt: turn.created_at,
-          pendingReply: turn.status === "host_pending",
-        });
-        if (turn.host_answer && turn.status === "host_answered") {
-          list.push({
-            id: `a_${turn.id}`,
-            source: "owner",
-            content: turn.host_answer,
-            createdAt: turn.updated_at,
-          });
-        }
-      });
-    }
-    list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
-    return list;
-  }, [qaEnabled, turns]);
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const text = input.trim();
+    if (!text) return;
+    setInput("");
+    await submitQuestion(text);
+  };
 
-  const handleSubmit = useCallback(
-    async (e: React.FormEvent) => {
-      e.preventDefault();
-      const text = input.trim();
-      if (!text) return;
-
-      if (text.length > 500) {
-        setQuestionError(t("viewer.askLengthError"));
-        return;
-      }
-      setOwnerSubmitting(true);
-      setQuestionError(null);
-      setInput("");
-      try {
-        if (unifiedAskEnabled) {
-          await api.createPublicAsk(token, text, creds(sessionTokenRef.current));
-        } else {
-          await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
-        }
-        setRefreshKey((k) => k + 1);
-      } catch (e: unknown) {
-        if (e instanceof ApiError) {
-          if (e.code === "qa_disabled") {
-            setQuestionError(t("viewer.askDisabled"));
-          } else if (e.code === "rate_limit_exceeded") {
-            setQuestionError(t("viewer.askRateLimited"));
-          } else if (e.code === "limiter_unavailable") {
-            setQuestionError(t("viewer.askLimiterUnavailable"));
-          } else {
-            setQuestionError(t("viewer.askError"));
-          }
-        } else {
-          setQuestionError(t("viewer.askError"));
-        }
-      } finally {
-        setOwnerSubmitting(false);
-      }
-    },
-    [input, t, token, unifiedAskEnabled]
-  );
-
-  const busy = ownerSubmitting;
+  const busy = submitting;
 
   return (
-    <div className="flex h-full flex-col bg-transparent">
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
       <div
         ref={scrollRef}
-        className="flex-1 space-y-4 overflow-y-auto p-4"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4"
         aria-live="polite"
         aria-busy={busy}
       >
-        {loadingQuestions ? (
+        {formalEntries.length > 0 ? (
+          <VisitorFormalQASection
+            entries={formalEntries}
+            onSuggestQuestion={(question) => setInput(question)}
+          />
+        ) : null}
+        {pinnedFaqs.length > 0 ? (
+          <VisitorPinnedFAQSection
+            faqs={pinnedFaqs}
+            onSuggestQuestion={(question) => setInput(question)}
+            onOpenCitation={onOpenCitation}
+          />
+        ) : null}
+        {loading ? (
           <div className="flex items-center justify-center py-8">
             <Spinner size={20} className="animate-spin text-muted-foreground" />
           </div>
-        ) : allMessages.length === 0 ? (
+        ) : turns.length === 0 ? (
           <div className="flex flex-col items-center rounded-2xl border border-border/60 bg-background/60 px-6 py-10 text-center text-muted-foreground">
             <ChatCenteredDots size={28} className="mb-3 opacity-30" />
             <p className="text-sm font-medium text-foreground">{t("viewer.askEmptyUnified")}</p>
             <p className="mt-1 max-w-[28ch] text-xs leading-relaxed">{t("viewer.askEmptyHint")}</p>
           </div>
         ) : (
-          allMessages.map((msg) => {
-            const isUser = msg.source === "you";
+          turns.map((turn) => {
+            const aiTurn = resolveKnowledgeTurn(turn);
+            const streaming =
+              aiTurn &&
+              aiTurn.phase !== "done" &&
+              aiTurn.phase !== "refused" &&
+              aiTurn.phase !== "error";
             return (
-              <div key={msg.id} className={`flex ${isUser ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[90%] ${isUser ? "items-end" : "items-start"} flex flex-col gap-1`}>
-                  {!isUser && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                      <User size={10} />
-                      {t("viewer.askSourceOwner")}
-                    </span>
-                  )}
-                  <div
-                    className={`rounded-2xl px-3.5 py-2.5 text-sm shadow-sm ${
-                      isUser
-                        ? "bg-foreground text-background"
-                        : "border border-border/60 bg-background/90 text-foreground"
-                    }`}
-                  >
-                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-                  </div>
-                  {msg.pendingReply && (
-                    <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t("viewer.askPendingReply")}
-                    </span>
-                  )}
-                </div>
-              </div>
+            <VisitorAskTurnCard
+              key={turn.id}
+              turn={turn}
+              aiTurn={aiTurn}
+              escalating={escalatingId === turn.id}
+              stopped={stoppedTurnIds.has(turn.id)}
+              onOpenCitation={onOpenCitation}
+              onStopStream={streaming ? () => stopStream(turn.id) : undefined}
+              onEscalate={
+                turn.lane === "ai" && turn.status === "ai_refused"
+                  ? () => void escalateToHost(turn)
+                  : undefined
+              }
+            />
             );
           })
         )}
       </div>
 
-      {questionError && (
-        <p className="px-4 pt-2 text-center text-xs text-destructive">{questionError}</p>
-      )}
+      {error ? (
+        <p className="px-4 pt-2 text-center text-xs text-destructive">{error}</p>
+      ) : null}
 
       <div className="space-y-2 border-t border-border/60 p-3">
         <form onSubmit={handleSubmit} className="flex gap-2">
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={t("viewer.askOwnerPlaceholder")}
+            placeholder={t("viewer.askUnifiedPlaceholder")}
             maxLength={500}
             rows={2}
             className="min-h-0 flex-1 resize-none rounded-xl border-border/70 bg-background/80 text-sm"

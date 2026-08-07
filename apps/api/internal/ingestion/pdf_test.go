@@ -34,3 +34,21 @@ func TestRenderPage_MissingPDFReturnsError(t *testing.T) {
 		t.Fatal("expected error when rendering missing PDF, got nil")
 	}
 }
+
+func TestDPIPageCap(t *testing.T) {
+	cases := []struct {
+		width int
+		dpi   int
+	}{
+		{0, defaultRenderDPI},
+		{1190, defaultRenderDPI},
+		{3000, 144},
+		{20000, 72},
+	}
+	for _, tc := range cases {
+		got := dpiForPage(PageInfo{Width: tc.width})
+		if got != tc.dpi {
+			t.Fatalf("width=%d dpi=%d want %d", tc.width, got, tc.dpi)
+		}
+	}
+}

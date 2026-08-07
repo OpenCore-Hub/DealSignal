@@ -28,6 +28,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
@@ -45,6 +46,7 @@ type Handler struct {
 	publisher    EventPublisher
 	askLimiter   visitorask.Limiter
 	securitySink SecurityEventSink
+	knowledge    *knowledge.Service
 }
 
 // SecurityEventSink records high-risk visitor security events (Ask Host limits, gates).
@@ -70,6 +72,14 @@ func (h *Handler) SetAskLimiter(lim visitorask.Limiter) {
 // SetSecuritySink attaches an optional security-event recorder (tests / overrides).
 func (h *Handler) SetSecuritySink(s SecurityEventSink) {
 	h.securitySink = s
+}
+
+// SetKnowledgeService wires link-scoped RAG for visitor AI Ask streaming.
+func (h *Handler) SetKnowledgeService(k *knowledge.Service) {
+	h.knowledge = k
+	if h.service != nil && k != nil {
+		h.service.WithVisitorAskKnowledge(k)
+	}
 }
 
 func (h *Handler) visitorAskLimiter() visitorask.Limiter {
@@ -105,14 +115,28 @@ func (h *Handler) writeLinkSecurityEvent(ctx context.Context, link db.Link, even
 	}
 }
 
-// rejectIfAskHostLimited returns true when Ask Host must be denied (response already written).
+// rejectIfVisitorAskLimited returns true when visitor Ask (host lane) must be denied (response already written).
 // Uses the shared Visitor Ask gate (B8): over-limit → 429 + security event; Redis fail → 503, no event.
-func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
+func (h *Handler) rejectIfVisitorAskLimited(c *gin.Context, result AccessResult, linkID string) bool {
 	return h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskHost)
 }
 
+func (h *Handler) rejectIfAskAILimited(c *gin.Context, result AccessResult, linkID string) bool {
+	return h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskAI)
+}
+
+func (h *Handler) visitorAskLimits() visitorask.Limits {
+	if h.cfg == nil {
+		return visitorask.Limits{}
+	}
+	return visitorask.Limits{
+		AskAIRPM:        h.cfg.VisitorAskAIRPM,
+		AskAIDailyLimit: h.cfg.VisitorAskAIDailyLimit,
+	}
+}
+
 func (h *Handler) rejectIfAskLimited(c *gin.Context, result AccessResult, linkID string, ch visitorask.Channel) bool {
-	decision := visitorask.Check(c.Request.Context(), h.visitorAskLimiter(), ch, linkID, result.VisitorID)
+	decision := visitorask.Check(c.Request.Context(), h.visitorAskLimiter(), ch, linkID, result.VisitorID, h.visitorAskLimits())
 	if decision == visitorask.DecisionAllow {
 		return false
 	}
@@ -120,7 +144,7 @@ func (h *Handler) rejectIfAskLimited(c *gin.Context, result AccessResult, linkID
 		h.recordAskSecurityEvent(
 			c.Request.Context(),
 			result.Link,
-			visitorask.EventTypeRateLimited,
+			visitorask.EventTypeForRateLimit(ch),
 			result.VisitorID,
 			result.Email,
 			c.ClientIP(),
@@ -169,10 +193,15 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/renew", h.RenewLink)
 	g.POST("/:id/generate-index", h.GenerateLinkIndex)
 	g.GET("/:id/index-file", h.GetLinkIndexFile)
-	g.GET("/:id/questions", h.ListLinkVisitorQuestions)
 	g.GET("/:id/ask", h.ListLinkAskInbox)
+	g.GET("/:id/ask/faq", h.ListLinkAskPinnedFAQ)
+	g.PATCH("/:id/ask/faq/order", h.ReorderLinkAskFAQ)
 	g.PATCH("/:id/ask/:turnId/host-answer", h.AnswerAskTurnHostAnswer)
-	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion)
+	g.PATCH("/:id/ask/:turnId/formal-publish", h.FormalPublishAskTurn)
+	g.POST("/:id/ask/:turnId/pin-faq", h.PinAskTurnFAQ)
+	g.POST("/:id/ask/:turnId/unpin-faq", h.UnpinAskTurnFAQ)
+	g.GET("/:id/ask-policy", h.GetLinkAskPolicy)
+	g.PATCH("/:id/ask-policy", h.PatchLinkAskPolicy)
 	g.GET("/:id/ask-security-events", h.ListAskSecurityEvents)
 	g.GET("/:id/file-requests", h.ListLinkFileRequests)
 	g.PATCH("/:id/file-requests/:requestId/status", h.UpdateFileRequestStatus)
@@ -189,9 +218,9 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	r.GET("/deal-rooms/:roomId/access-policy", h.GetRoomAccessPolicy)
 	r.PUT("/deal-rooms/:roomId/access-policy", h.UpsertRoomAccessPolicy)
 
-	// Room-wide Ask Host inbox (across all links in the deal room).
-	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
+	// Room-wide Ask inbox (across all links in the deal room).
 	r.GET("/deal-rooms/:roomId/ask", h.ListRoomAskInbox)
+	r.GET("/deal-rooms/:roomId/ask/faq", h.ListRoomAskPinnedFAQ)
 	r.GET("/deal-rooms/:roomId/ask-security-events", h.ListRoomAskSecurityEvents)
 }
 
@@ -210,10 +239,12 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
 	r.GET("/documents/:documentId/download-url", h.PublicDownloadURL)
 	r.GET("/deal-rooms/:slug/redirect", h.PublicDealRoomRedirect)
-	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion)
-	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions)
 	r.POST("/links/:publicToken/ask", h.PublicCreateAsk)
 	r.GET("/links/:publicToken/ask/me", h.PublicListMyAskTurns)
+	r.GET("/links/:publicToken/ask/faq", h.PublicListAskFAQ)
+	r.GET("/links/:publicToken/ask/formal", h.PublicListAskFormal)
+	r.POST("/links/:publicToken/ask/:turnId/escalate", h.PublicEscalateAskTurn)
+	r.GET("/links/:publicToken/ask/:turnId/stream", h.PublicStreamAskTurn)
 	r.POST("/links/:publicToken/file-requests", h.PublicCreateFileRequest)
 	r.GET("/links/:publicToken/file-requests/me", h.PublicListMyFileRequests)
 	r.GET("/links/:publicToken/index-file", h.PublicGetLinkIndexFile)
@@ -340,7 +371,7 @@ type CreateRequest struct {
 	CustomDomain             string   `json:"custom_domain,omitempty"`
 	Tags                     []string `json:"tags,omitempty"`
 	NotifyOnAccess           bool     `json:"notify_on_access,omitempty"`
-	QaEnabled                bool     `json:"qa_enabled,omitempty"`
+	QaEnabled                *bool    `json:"qa_enabled,omitempty"`
 	FileRequestsEnabled      bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled         bool     `json:"index_file_enabled,omitempty"`
 	LinkType                 string   `json:"link_type,omitempty"`
@@ -368,6 +399,8 @@ type UpdateRequest struct {
 	Tags                        []string `json:"tags,omitempty"`
 	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
 	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
+	AskAIEnabled                *bool    `json:"ask_ai_enabled,omitempty"`
+	AskMode                     *string  `json:"ask_mode,omitempty"`
 	FileRequestsEnabled         *bool    `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            *bool    `json:"index_file_enabled,omitempty"`
 	ScreenshotProtectionEnabled *bool    `json:"screenshot_protection_enabled,omitempty"`
@@ -544,7 +577,12 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.WatermarkEnabled != nil {
 		watermarkEnabled = *req.WatermarkEnabled
 	}
-	qaEnabled := QaEnabledForLink(existing.DealRoomID.Valid)
+	qaEnabled := existing.QaEnabled
+	if existing.DealRoomID.Valid {
+		qaEnabled = true
+	} else {
+		qaEnabled = false
+	}
 	fileRequestsEnabled := existing.FileRequestsEnabled
 	if req.FileRequestsEnabled != nil {
 		fileRequestsEnabled = *req.FileRequestsEnabled
@@ -576,6 +614,8 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		DownloadEnabled:             downloadEnabled,
 		WatermarkEnabled:            watermarkEnabled,
 		QaEnabled:                   qaEnabled,
+		AskAIEnabled:                req.AskAIEnabled,
+		AskMode:                     req.AskMode,
 		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
 		ScreenshotProtectionEnabled: screenshotProtectionEnabled,
@@ -970,6 +1010,53 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": ar})
 }
 
+func writeAccessCodeSendFailed(c *gin.Context, err error) {
+	c.JSON(http.StatusBadGateway, gin.H{
+		"code":    "access_code_send_failed",
+		"message": httpx.SafeMessage("access_code_send_failed", err),
+	})
+}
+
+func writeOwnerResendAccessCodeError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrNotFoundInWorkspace):
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+	case errors.Is(err, ErrAccessCodeContactNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
+	case errors.Is(err, ErrEmailVerificationDisabled):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": httpx.SafeMessage("verification_disabled", err)})
+	case errors.Is(err, ErrAccessCodeResendNotNeeded):
+		c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": httpx.SafeMessage("resend_not_needed", err)})
+	case errors.Is(err, ErrEmailCodeRateLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
+	case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		writeAccessCodeSendFailed(c, err)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access code"})
+	}
+}
+
+func writePublicEmailVerificationCodeError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, ErrLinkNotFound):
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
+	case errors.Is(err, ErrRequiresEmail):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": httpx.SafeMessage("email_required", err)})
+	case errors.Is(err, ErrBlockedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": httpx.SafeMessage("blocked_email", err)})
+	case errors.Is(err, ErrNotAllowedEmail):
+		c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
+	case errors.Is(err, ErrEmailCodeRateLimited):
+		c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
+	case errors.Is(err, ErrAccessCodeSendFailed):
+		writeAccessCodeSendFailed(c, err)
+	default:
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
+	}
+}
+
 func writeAccessRequestReviewError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrNotFoundInWorkspace),
@@ -982,8 +1069,7 @@ func writeAccessRequestReviewError(c *gin.Context, err error) {
 	case errors.Is(err, ErrAccessRequestBlocked):
 		c.JSON(http.StatusForbidden, gin.H{"code": "access_request_blocked", "message": httpx.SafeMessage("access_request_blocked", err)})
 	case errors.Is(err, ErrAccessCodeSendFailed):
-		// Approval already committed; owner should resend the access code.
-		c.JSON(http.StatusBadGateway, gin.H{"code": "access_code_send_failed", "message": httpx.SafeMessage("access_code_send_failed", err)})
+		writeAccessCodeSendFailed(c, err)
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_request", "message": httpx.SafeMessage("invalid_request", err)})
 	}
@@ -1004,7 +1090,9 @@ type CreateDealRoomLinkRequest struct {
 	ExpiresAt                   *string  `json:"expires_at,omitempty"`
 	DownloadEnabled             bool     `json:"download_enabled,omitempty"`
 	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
-	QaEnabled                   bool     `json:"qa_enabled,omitempty"`
+	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
+	AskAIEnabled                *bool    `json:"ask_ai_enabled,omitempty"`
+	AskMode                     string   `json:"ask_mode,omitempty"`
 	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
 	ScreenshotProtectionEnabled bool     `json:"screenshot_protection_enabled,omitempty"`
@@ -1035,6 +1123,15 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	roomID := c.Param("roomId")
 
+	askAIEnabled := true
+	if req.AskAIEnabled != nil {
+		askAIEnabled = *req.AskAIEnabled
+	}
+	askMode := AskModeSupervised
+	if strings.TrimSpace(req.AskMode) != "" {
+		askMode = strings.TrimSpace(req.AskMode)
+	}
+
 	link, err := h.service.CreateDealRoomLink(c.Request.Context(), userID, workspaceID, roomID, DealRoomLinkRequest{
 		Name:                        req.Name,
 		RequireEmail:                req.RequireEmail,
@@ -1049,7 +1146,9 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		ExpiresAt:                   expiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		QaEnabled:                   QaEnabledForLink(true),
+		QaEnabled:                   true,
+		AskAiEnabled:                askAIEnabled,
+		AskMode:                     askMode,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -1365,22 +1464,7 @@ func (h *Handler) OwnerResendAccessCode(c *gin.Context) {
 	}
 
 	if err := h.service.OwnerResendAccessCode(c.Request.Context(), c.Param("id"), workspaceID, body.Email, body.Force); err != nil {
-		switch {
-		case errors.Is(err, ErrNotFoundInWorkspace):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-		case errors.Is(err, ErrAccessCodeContactNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "contact_not_found", "message": httpx.SafeMessage("contact_not_found", err)})
-		case errors.Is(err, ErrEmailVerificationDisabled):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "verification_disabled", "message": httpx.SafeMessage("verification_disabled", err)})
-		case errors.Is(err, ErrAccessCodeResendNotNeeded):
-			c.JSON(http.StatusConflict, gin.H{"code": "resend_not_needed", "message": httpx.SafeMessage("resend_not_needed", err)})
-		case errors.Is(err, ErrEmailCodeRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
-		case errors.Is(err, ErrBlockedEmail), errors.Is(err, ErrNotAllowedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to resend access code"})
-		}
+		writeOwnerResendAccessCodeError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -1438,7 +1522,7 @@ func (h *Handler) Create(c *gin.Context) {
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		QaEnabled:                QaEnabledForLink(strings.TrimSpace(req.DealRoomID) != ""),
+		QaEnabled:                ResolveQaEnabledFromOptional(strings.TrimSpace(req.DealRoomID) != "", req.QaEnabled),
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
 		LinkType:                 req.LinkType,
@@ -1497,7 +1581,7 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
 		"custom_domain":                 meta.CustomDomain,
 		"qa_enabled":                    meta.QaEnabled,
-		"visitor_ask_unified":           VisitorAskUnifiedEnabled(db.Link{QaEnabled: meta.QaEnabled}, h.cfg),
+		"visitor_ask_unified":           VisitorAskUnifiedEnabled(db.Link{QaEnabled: meta.QaEnabled, DealRoomID: meta.DealRoomID}, h.cfg),
 		"file_requests_enabled":         meta.FileRequestsEnabled,
 		"index_file_enabled":            meta.IndexFileEnabled,
 	}
@@ -1678,6 +1762,8 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"watermarkText":               h.watermarkTextFor(email, c.ClientIP()),
 		"qaEnabled":                   link.QaEnabled,
 		"visitorAskUnified":           VisitorAskUnifiedEnabled(link, h.cfg),
+		"askMode":                     defaultAskMode(link.AskMode),
+		"askAiEnabled":                link.AskAiEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
 		"isBundle":                    len(documents) > 1,
@@ -1893,20 +1979,7 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 	}
 
 	if err := h.service.SendEmailVerificationCode(c.Request.Context(), token, body.Email, h.cfg.ViewerBaseURL); err != nil {
-		switch {
-		case errors.Is(err, ErrLinkNotFound):
-			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
-		case errors.Is(err, ErrRequiresEmail):
-			c.JSON(http.StatusBadRequest, gin.H{"code": "email_required", "message": httpx.SafeMessage("email_required", err)})
-		case errors.Is(err, ErrBlockedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "blocked_email", "message": httpx.SafeMessage("blocked_email", err)})
-		case errors.Is(err, ErrNotAllowedEmail):
-			c.JSON(http.StatusForbidden, gin.H{"code": "not_allowed", "message": httpx.SafeMessage("not_allowed", err)})
-		case errors.Is(err, ErrEmailCodeRateLimited):
-			c.JSON(http.StatusTooManyRequests, gin.H{"code": "rate_limited", "message": httpx.SafeMessage("rate_limited", err)})
-		default:
-			c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": "failed to send code"})
-		}
+		writePublicEmailVerificationCodeError(c, err)
 		return
 	}
 	c.Status(http.StatusNoContent)
@@ -2504,6 +2577,13 @@ func textOrNil(t pgtype.Text) interface{} {
 	return nil
 }
 
+func defaultAskMode(mode string) string {
+	if mode == "" {
+		return "supervised"
+	}
+	return mode
+}
+
 func timestamptzOrNil(t pgtype.Timestamptz) interface{} {
 	if t.Valid {
 		return t.Time.Format(time.RFC3339)
@@ -2624,6 +2704,8 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		"watermarkEnabled":            link.WatermarkEnabled,
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"qaEnabled":                   link.QaEnabled,
+		"askMode":                     defaultAskMode(link.AskMode),
+		"askAiEnabled":                link.AskAiEnabled,
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
 		"requireEmailVerification":    link.RequireEmailVerification,
@@ -2829,23 +2911,6 @@ func (h *Handler) GetLinkIndexFile(c *gin.Context) {
 	})
 }
 
-// ListLinkVisitorQuestions returns all visitor questions for a link (owner view).
-func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	lID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
-		return
-	}
-	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link, middleware.UserIDFrom(c))
-	if err != nil {
-		writeAskHostError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": questions})
-}
-
 // ListLinkAskInbox returns unified Ask turns for a link (owner inbox, Phase A host lane).
 func (h *Handler) ListLinkAskInbox(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
@@ -2869,23 +2934,6 @@ func (h *Handler) ListLinkAskInbox(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": turns})
 }
 
-// ListRoomVisitorQuestions returns Ask Host questions across a deal room (owner view).
-func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	questions, err := h.service.ListRoomVisitorQuestions(
-		c.Request.Context(),
-		wsID,
-		c.Param("roomId"),
-		middleware.UserIDFrom(c),
-		c.Query("link_id"),
-	)
-	if err != nil {
-		writeAskHostError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": questions})
-}
-
 // ListRoomAskInbox returns unified Ask turns across a deal room (owner inbox).
 func (h *Handler) ListRoomAskInbox(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
@@ -2897,6 +2945,23 @@ func (h *Handler) ListRoomAskInbox(c *gin.Context) {
 		c.Query("link_id"),
 		c.Query("lane"),
 		c.Query("status"),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turns})
+}
+
+// ListRoomAskPinnedFAQ returns pinned FAQ turns across a deal room (owner view).
+func (h *Handler) ListRoomAskPinnedFAQ(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	turns, err := h.service.ListRoomAskPinnedInbox(
+		c.Request.Context(),
+		wsID,
+		c.Param("roomId"),
+		middleware.UserIDFrom(c),
+		c.Query("link_id"),
 	)
 	if err != nil {
 		writeAskHostError(c, err)
@@ -2968,42 +3033,6 @@ func (h *Handler) ListRoomAskSecurityEvents(c *gin.Context) {
 	})
 }
 
-// AnswerVisitorQuestion allows the owner to answer a visitor question.
-func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	lID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
-		return
-	}
-	qUUID, err := uuid.Parse(c.Param("questionId"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid question id"})
-		return
-	}
-	var body struct {
-		Answer string `json:"answer" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
-		return
-	}
-	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
-		return
-	}
-	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
-	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
-	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), link, qID, uID, body.Answer)
-	if err != nil {
-		writeAskHostError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": q})
-}
-
 // AnswerAskTurnHostAnswer allows the owner to answer a unified Ask turn by turn id.
 func (h *Handler) AnswerAskTurnHostAnswer(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
@@ -3048,12 +3077,281 @@ func (h *Handler) AnswerAskTurnHostAnswer(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": turn})
 }
 
+// FormalPublishAskTurn schedules or publishes a formal Q&A answer (Phase C).
+func (h *Handler) FormalPublishAskTurn(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid turn id"})
+		return
+	}
+	var body struct {
+		Answer    string  `json:"answer" binding:"required"`
+		PublishAt *string `json:"publish_at"`
+		Anonymize *bool   `json:"anonymize"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	var publishAt *time.Time
+	if body.PublishAt != nil && strings.TrimSpace(*body.PublishAt) != "" {
+		parsed, parseErr := time.Parse(time.RFC3339, strings.TrimSpace(*body.PublishAt))
+		if parseErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "publish_at must be RFC3339"})
+			return
+		}
+		publishAt = &parsed
+	}
+	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
+		return
+	}
+	turn, err := h.service.PublishFormalAskTurn(
+		c.Request.Context(),
+		link,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		pgtype.UUID{Bytes: uUUID, Valid: true},
+		FormalPublishInput{
+			Answer:    body.Answer,
+			PublishAt: publishAt,
+			Anonymize: body.Anonymize,
+		},
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turn})
+}
+
+// PinAskTurnFAQ pins an answered Ask turn as a link FAQ candidate (Phase B).
+func (h *Handler) PinAskTurnFAQ(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid turn id"})
+		return
+	}
+	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
+		return
+	}
+	turn, err := h.service.PinAskTurnFAQ(
+		c.Request.Context(),
+		link,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		pgtype.UUID{Bytes: uUUID, Valid: true},
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turn})
+}
+
+// UnpinAskTurnFAQ removes a pinned FAQ marker from an Ask turn.
+func (h *Handler) UnpinAskTurnFAQ(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid turn id"})
+		return
+	}
+	turn, err := h.service.UnpinAskTurnFAQ(
+		c.Request.Context(),
+		link,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		middleware.UserIDFrom(c),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turn})
+}
+
+// ListLinkAskPinnedFAQ returns pinned FAQ turns for owner management on a link.
+func (h *Handler) ListLinkAskPinnedFAQ(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turns, err := h.service.ListLinkAskPinnedInbox(
+		c.Request.Context(),
+		link,
+		middleware.UserIDFrom(c),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turns})
+}
+
+type reorderLinkAskFAQRequest struct {
+	TurnIDs []string `json:"turn_ids" binding:"required,min=1"`
+}
+
+// ReorderLinkAskFAQ updates pinned FAQ display order for a link.
+func (h *Handler) ReorderLinkAskFAQ(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	var body reorderLinkAskFAQRequest
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	turns, err := h.service.ReorderLinkAskFAQs(
+		c.Request.Context(),
+		link,
+		middleware.UserIDFrom(c),
+		body.TurnIDs,
+	)
+	if err != nil {
+		if errors.Is(err, ErrAskFAQReorderInvalid) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "ask_faq_reorder_invalid", "message": "invalid pinned faq order"})
+			return
+		}
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turns})
+}
+
+type patchLinkAskPolicyRequest struct {
+	AskMode           *string `json:"ask_mode"`
+	AskAIEnabled      *bool   `json:"ask_ai_enabled"`
+	AskAIMonthlyQuota *int32  `json:"ask_ai_monthly_quota"`
+	ClearAIQuota      bool    `json:"clear_ai_quota"`
+}
+
+func (h *Handler) linkAskPolicyPayload(ctx context.Context, link db.Link) (gin.H, error) {
+	quota, err := h.service.viewAskAIQuota(ctx, link)
+	if err != nil {
+		return nil, err
+	}
+	return gin.H{
+		"id":                    uuid.UUID(link.ID.Bytes).String(),
+		"ask_mode":              link.AskMode,
+		"ask_ai_enabled":        link.AskAiEnabled,
+		"ask_ai_monthly_quota":  nullableInt32(link.AskAiMonthlyQuota),
+		"ask_ai_monthly_used":   quota.Used,
+		"ask_ai_monthly_limit":  quota.Limit,
+		"ask_ai_quota_exceeded": askAIQuotaExceededView(quota),
+		"ask_ai_entitled":       h.service.checkAskAIEntitlement(ctx, link) == nil,
+	}, nil
+}
+
+// GetLinkAskPolicy returns visitor Ask routing policy and monthly AI usage for owners.
+func (h *Handler) GetLinkAskPolicy(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), linkID, workspaceID)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	payload, err := h.linkAskPolicyPayload(c.Request.Context(), link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": payload})
+}
+
+// PatchLinkAskPolicy updates visitor Ask routing policy (mode / AI enable / quota).
+func (h *Handler) PatchLinkAskPolicy(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	linkID := c.Param("id")
+	var req patchLinkAskPolicyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	link, err := h.service.UpdateLinkAskPolicy(c.Request.Context(), linkID, workspaceID, UpdateLinkAskPolicyRequest{
+		AskMode:           req.AskMode,
+		AskAIEnabled:      req.AskAIEnabled,
+		AskAIMonthlyQuota: req.AskAIMonthlyQuota,
+		ClearAIQuota:      req.ClearAIQuota,
+	})
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+			return
+		}
+		if errors.Is(err, ErrInvalidInput) {
+			code := "invalid_input"
+			if errors.Is(err, ErrAskAINotEntitled) {
+				code = "ask_ai_not_entitled"
+			}
+			c.JSON(http.StatusBadRequest, gin.H{"code": code, "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	payload, err := h.linkAskPolicyPayload(c.Request.Context(), link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": payload})
+}
+
+func nullableInt32(v pgtype.Int4) any {
+	if !v.Valid {
+		return nil
+	}
+	return v.Int32
+}
+
 func writeAskHostError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrAskHostForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "ask host inbox forbidden"})
 	case errors.Is(err, ErrAskTurnNotPending):
 		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_pending", "message": "ask turn is not pending"})
+	case errors.Is(err, ErrAskTurnNotPinnable):
+		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_pinnable", "message": "ask turn cannot be pinned as faq"})
+	case errors.Is(err, ErrAskTurnNotPinned):
+		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_pinned", "message": "ask turn is not pinned as faq"})
+	case errors.Is(err, ErrAskTurnNotFormalPending):
+		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_formal_pending", "message": "ask turn is not in formal review queue"})
+	case errors.Is(err, ErrAskTurnFormalAnswerReq):
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "formal answer is required"})
 	case errors.Is(err, ErrNotFoundInWorkspace):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
 	default:
@@ -3236,31 +3534,13 @@ func (h *Handler) PublicDealRoomRedirect(c *gin.Context) {
 	c.Redirect(http.StatusFound, target)
 }
 
-// PublicCreateVisitorQuestion allows a visitor to submit a question.
-func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
-	result, submission, ok := h.gatePublicAskSubmission(c)
-	if !ok {
-		return
-	}
-	q, err := h.service.CreateVisitorQuestion(c.Request.Context(), result.Link, result.VisitorID, result.Email, submission.Question)
-	if err != nil {
-		if writeAskValidationError(c, err) {
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-		return
-	}
-	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, submission.Question)
-	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
-}
-
-// PublicCreateAsk is the unified visitor Ask entry (Phase A host lane).
+// PublicCreateAsk is the unified visitor Ask entry (policy-aware routing).
 func (h *Handler) PublicCreateAsk(c *gin.Context) {
 	result, submission, ok := h.gatePublicAskSubmission(c)
 	if !ok {
 		return
 	}
-	turn, err := h.service.CreateHostAskTurn(
+	turn, err := h.service.SubmitPublicAsk(
 		c.Request.Context(),
 		result.Link,
 		result.VisitorID,
@@ -3275,12 +3555,60 @@ func (h *Handler) PublicCreateAsk(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	if turn.HostQuestionID != "" {
-		if qID, parseErr := uuid.Parse(turn.HostQuestionID); parseErr == nil {
-			go h.service.ClassifyQuestionIntent(context.Background(), pgtype.UUID{Bytes: qID, Valid: true}, submission.Question)
-		}
-	}
 	c.JSON(http.StatusCreated, gin.H{"data": turn})
+}
+
+// PublicEscalateAskTurn upgrades an AI turn to the host queue (same turn, no duplicate question).
+func (h *Handler) PublicEscalateAskTurn(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	linkID := uuid.UUID(result.Link.ID.Bytes).String()
+	if h.rejectIfVisitorAskLimited(c, result, linkID) {
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "invalid turn id"})
+		return
+	}
+	turn, err := h.service.EscalatePublicAskTurn(
+		c.Request.Context(),
+		result.Link,
+		result.VisitorID,
+		result.Email,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+	)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "ask turn not found"})
+			return
+		}
+		if errors.Is(err, ErrAskTurnNotEscalatable) {
+			c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_escalatable", "message": "ask turn cannot be escalated"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	h.recordAskSecurityEvent(
+		c.Request.Context(),
+		result.Link,
+		visitorask.EventTypeAskEscalated,
+		result.VisitorID,
+		result.Email,
+		c.ClientIP(),
+		c.Request.UserAgent(),
+		routeReasonUserEscalate,
+	)
+	c.JSON(http.StatusOK, gin.H{"data": turn})
 }
 
 // PublicListMyAskTurns returns the visitor's unified Ask timeline on this link.
@@ -3303,8 +3631,8 @@ func (h *Handler) PublicListMyAskTurns(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": turns})
 }
 
-// PublicListMyVisitorQuestions returns the visitor's own questions.
-func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
+// PublicListAskFAQ returns pinned FAQ entries for visitors on this link.
+func (h *Handler) PublicListAskFAQ(c *gin.Context) {
 	result, err := h.verifyPublicAccess(c)
 	if err != nil {
 		mapAccessError(c, err)
@@ -3315,12 +3643,83 @@ func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
 		return
 	}
-	questions, err := h.service.ListMyVisitorQuestions(c.Request.Context(), result.Link.ID, result.VisitorID)
+	faqs, err := h.service.ListPublicAskFAQs(c.Request.Context(), result.Link)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": questions})
+	c.JSON(http.StatusOK, gin.H{"data": faqs})
+}
+
+// PublicListAskFormal returns published formal Q&A for visitors on this link.
+func (h *Handler) PublicListAskFormal(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	entries, err := h.service.ListPublicFormalAsk(c.Request.Context(), result.Link)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": entries})
+}
+
+// PublicStreamAskTurn streams AI lane tokens for a turn (Phase B link-scoped RAG).
+func (h *Handler) PublicStreamAskTurn(c *gin.Context) {
+	result, err := h.verifyPublicAccess(c)
+	if err != nil {
+		mapAccessError(c, err)
+		return
+	}
+	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
+	if !loadAskPolicy(result.Link).AIEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "ai_not_enabled", "message": "AI Ask is not enabled for this link"})
+		return
+	}
+	linkID := uuid.UUID(result.Link.ID.Bytes).String()
+	if h.rejectIfAskAILimited(c, result, linkID) {
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "invalid turn id"})
+		return
+	}
+	writeBudget := knowledge.DefaultVisitorAskStreamBudget(h.cfg.DoclingRAG, h.cfg.HTTPWriteTimeout)
+	err = h.service.StreamPublicAskTurn(
+		c.Request.Context(),
+		result.Link,
+		result.VisitorID,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		writeBudget,
+		c,
+	)
+	if err != nil {
+		if errors.Is(err, ErrNotFoundInWorkspace) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "ask turn not found"})
+			return
+		}
+		if errors.Is(err, ErrInvalidInput) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
+		if errors.Is(err, knowledge.ErrUnavailable) {
+			c.JSON(http.StatusServiceUnavailable, gin.H{"code": "ai_unavailable", "message": "AI Ask is temporarily unavailable"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+	}
 }
 
 // PublicCreateFileRequest allows a visitor to request a file.

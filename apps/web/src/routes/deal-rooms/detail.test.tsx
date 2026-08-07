@@ -22,7 +22,7 @@ const {
   createDealRoomFolderMock,
   getDealRoomLinksMock,
   getLinkAnalyticsMock,
-  listRoomQuestionsMock,
+  listRoomAskMock,
   getDealRoomKnowledgeMock,
   getDealRoomAnalyticsMock,
 } = vi.hoisted(() => ({
@@ -35,7 +35,7 @@ const {
   createDealRoomFolderMock: vi.fn(),
   getDealRoomLinksMock: vi.fn(),
   getLinkAnalyticsMock: vi.fn(),
-  listRoomQuestionsMock: vi.fn(),
+  listRoomAskMock: vi.fn(),
   getDealRoomKnowledgeMock: vi.fn(),
   getDealRoomAnalyticsMock: vi.fn(),
 }));
@@ -52,7 +52,7 @@ vi.mock("@/lib/api", () => ({
     createDealRoomFolder: createDealRoomFolderMock,
     getDealRoomLinks: getDealRoomLinksMock,
     getLinkAnalytics: getLinkAnalyticsMock,
-    listRoomQuestions: listRoomQuestionsMock,
+    listRoomAsk: listRoomAskMock,
     getDealRoomKnowledge: getDealRoomKnowledgeMock,
     getDealRoomAnalytics: getDealRoomAnalyticsMock,
     syncDealRoomKnowledge: vi.fn().mockResolvedValue(undefined),
@@ -110,7 +110,6 @@ vi.mock("@/lib/api", () => ({
     }),
     listDealRoomKnowledgeArchives: vi.fn().mockResolvedValue({ items: [] }),
     getDealRoomKnowledgeArchive: vi.fn().mockRejectedValue(new Error("not found")),
-    answerQuestion: vi.fn(),
   },
 }));
 
@@ -272,14 +271,14 @@ describe("DealRoomDetailPage", () => {
     getDocumentByIdMock.mockReset();
     getDealRoomLinksMock.mockReset();
     getLinkAnalyticsMock.mockReset();
-    listRoomQuestionsMock.mockReset();
+    listRoomAskMock.mockReset();
     getDealRoomKnowledgeMock.mockReset();
     getDealRoomAnalyticsMock.mockReset();
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });
     getDocumentsMock.mockResolvedValue({ data: mockWorkspaceDocs });
     getDealRoomLinksMock.mockResolvedValue({ data: [] });
     getLinkAnalyticsMock.mockResolvedValue({ data: { access_code_contacts: [] } });
-    listRoomQuestionsMock.mockResolvedValue({ data: [] });
+    listRoomAskMock.mockResolvedValue({ data: [] });
     getDealRoomKnowledgeMock.mockResolvedValue({
       enabled: true,
       status: "ready",
@@ -374,7 +373,7 @@ describe("DealRoomDetailPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("network error")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load")).toBeInTheDocument();
     });
 
     getDealRoomByIdMock.mockResolvedValue(mockRoom);

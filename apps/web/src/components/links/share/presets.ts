@@ -1,4 +1,5 @@
 import type { LinkPreset } from "./types";
+import type { VisitorAskExperience } from "./visitorAskExperience";
 
 export const PRESET_NAMES: LinkPreset[] = ["public", "standard", "confidential"];
 
@@ -21,6 +22,7 @@ export interface PresetValues {
   enableScreenshotProtection: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
+  visitorAskExperience: VisitorAskExperience;
   expiresAt: string;
 }
 
@@ -37,6 +39,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
+    visitorAskExperience: "host_only",
     expiresAt: "",
   },
   standard: {
@@ -51,6 +54,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
+    visitorAskExperience: "host_only",
     expiresAt: daysFromNow(30),
   },
   confidential: {
@@ -65,6 +69,7 @@ export const PRESETS: Record<Exclude<LinkPreset, "custom">, PresetValues> = {
     enableScreenshotProtection: false,
     enableFileRequests: false,
     enableIndexFileGeneration: false,
+    visitorAskExperience: "host_only",
     expiresAt: daysFromNow(7),
   },
 };

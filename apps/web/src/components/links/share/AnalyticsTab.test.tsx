@@ -4,9 +4,11 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import type { Link, LinkAnalytics } from "@/types";
 import { AnalyticsTab } from "./AnalyticsTab";
 import enLinkShare from "@/i18n/locales/en/linkShare.json";
+import { toast } from "sonner";
 
 const i18nInstance = i18n.createInstance();
 i18nInstance.use(initReactI18next).init({
@@ -51,7 +53,17 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn(), message: vi.fn() },
+}));
+
+vi.mock("./ManagementTab", () => ({
+  ManagementTab: () => <div data-testid="management-tab-stub" />,
+}));
+
+vi.mock("./AskSecurityEventsPanel", () => ({
+  AskSecurityEventsPanel: () => null,
+}));
 
 const baseLink = {
   id: "link-1",
@@ -107,7 +119,6 @@ describe("AnalyticsTab", () => {
           {
             email: "bad@example.com",
             send_status: "failed",
-            send_error: "SMTP timeout",
             can_resend: true,
           },
           {
@@ -137,7 +148,9 @@ describe("AnalyticsTab", () => {
     expect(screen.getAllByText("Sent").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Failed").length).toBeGreaterThanOrEqual(1);
     expect(screen.getAllByText("Pending").length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText("SMTP timeout")).toBeInTheDocument();
+    expect(
+      screen.getByText("Could not deliver the verification code. Try resending."),
+    ).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resend" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Resend undelivered" })).toBeInTheDocument();
   });
@@ -230,6 +243,44 @@ describe("AnalyticsTab", () => {
     });
     await waitFor(() => {
       expect(screen.queryByRole("button", { name: "Resend" })).not.toBeInTheDocument();
+    });
+  });
+
+  it("shows a send-failed toast when resend hits access_code_send_failed", async () => {
+    vi.mocked(api.getLinkAnalytics).mockResolvedValue({
+      data: {
+        ...emptyAnalytics,
+        access_code_remediable_count: 1,
+        access_code_failed_count: 1,
+        access_code_contacts: [
+          {
+            email: "bad@example.com",
+            send_status: "failed",
+            can_resend: true,
+          },
+        ],
+      },
+    });
+    vi.mocked(api.resendLinkAccessCode).mockRejectedValue(
+      new ApiError({
+        status: 502,
+        code: "access_code_send_failed",
+        message: 'could not send verification code',
+        requestId: "req-send-fail",
+      }),
+    );
+
+    render(
+      <Wrapper>
+        <AnalyticsTab link={baseLink} logs={[]} />
+      </Wrapper>,
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Resend" }));
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Could not send the verification code. Please try again.",
+      );
     });
   });
 
@@ -586,5 +637,46 @@ describe("AnalyticsTab", () => {
       });
     });
     expect(await screen.findByText("contact10@example.com")).toBeInTheDocument();
+  });
+
+  it("shows Ask activity summary on Engage tab for deal-room links", async () => {
+    vi.mocked(api.getLinkAnalytics).mockResolvedValue({
+      data: {
+        ...emptyAnalytics,
+        ask_summary: {
+          total_turns: 5,
+          ai_answered: 2,
+          ai_refused: 1,
+          host_pending: 1,
+          host_answered: 1,
+          user_escalated: 1,
+          auto_escalated: 0,
+          deflection_rate: 2 / 3,
+          refuse_rate: 1 / 3,
+          escalation_rate: 1 / 3,
+        },
+      },
+    });
+    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
+
+    render(
+      <Wrapper>
+        <AnalyticsTab
+          link={{ ...baseLink, dealRoomId: "room_1" } as Link}
+          logs={[]}
+        />
+      </Wrapper>,
+    );
+
+    await waitFor(() => {
+      expect(api.getLinkAnalytics).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByRole("tab", { name: /Engage/i }));
+    expect(screen.getAllByText("Ask activity").length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText("AI answered")).toBeInTheDocument();
+    expect(screen.getByText("67%")).toBeInTheDocument();
+    expect(screen.getByText("Refuse rate")).toBeInTheDocument();
+    expect(screen.getByText("Escalation rate")).toBeInTheDocument();
+    expect(screen.getAllByText("33%").length).toBeGreaterThanOrEqual(2);
   });
 });

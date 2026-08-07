@@ -219,7 +219,7 @@ describe("CanvasViewer", () => {
     });
   });
 
-  it("renders in public mode using provided document and token", async () => {
+  it("renders in public mode and loads page rail thumbnails from signed URLs", async () => {
     const i18n = await createViewerI18n();
     render(
       <I18nextProvider i18n={i18n}>
@@ -230,11 +230,15 @@ describe("CanvasViewer", () => {
             publicVisitorId="visitor-1"
           />
         </MemoryRouter>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
 
     expect(await screen.findByText("Q3 Pitch")).toBeInTheDocument();
     expect(apiMock.getPublicDocumentPages).toHaveBeenCalledWith("doc-001", "token-123", undefined, expect.anything());
+
+    await waitFor(() => {
+      expect(apiMock.getPublicPageSignedUrl.mock.calls.length).toBeGreaterThanOrEqual(3);
+    });
   });
 
   it("shows friendly blocked email message without retry in public mode", async () => {

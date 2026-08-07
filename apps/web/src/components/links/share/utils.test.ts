@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildAllowedLists, buildDraft, buildLinkPayload, buildRules, toDateTimeLocal, toRFC3339, validateDraft, isValidCustomDomain, normalizeEmailIdentityGates } from "./utils";
+import { buildAllowedLists, buildDraft, buildDealRoomLinkCreatePayload, buildLinkPayload, buildRules, resolveAskAiEnabledFromDraft, toDateTimeLocal, toRFC3339, validateDraft, isValidCustomDomain, normalizeEmailIdentityGates } from "./utils";
 import type { DraftLink } from "./types";
 import type { AccessRule, Link } from "@/types";
 
@@ -18,6 +18,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
+  visitorAskExperience: "host_only" as const,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -102,6 +103,29 @@ describe("buildLinkPayload", () => {
     expect(payload.expires_at).toBeUndefined();
   });
 
+  it("always sends qa_enabled false for document links", () => {
+    const payload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "host_only" });
+    expect(payload.qa_enabled).toBe(false);
+    expect(payload.ask_ai_enabled).toBeUndefined();
+  });
+
+  it("sends ask policy for deal-room links from visitor ask experience", () => {
+    const existingLink = { id: "link-1", dealRoomId: "room-1" } as unknown as Link;
+    const offPayload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "host_only" }, existingLink);
+    expect(offPayload.qa_enabled).toBe(true);
+    expect(offPayload.ask_ai_enabled).toBe(false);
+    expect(offPayload.ask_mode).toBe("supervised");
+
+    const onPayload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "ai_supervised" }, existingLink);
+    expect(onPayload.qa_enabled).toBe(true);
+    expect(onPayload.ask_ai_enabled).toBe(true);
+    expect(onPayload.ask_mode).toBe("supervised");
+
+    const formalPayload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "formal" }, existingLink);
+    expect(formalPayload.ask_ai_enabled).toBe(false);
+    expect(formalPayload.ask_mode).toBe("formal");
+  });
+
   it("includes contact_ids for document links when verification is enabled", () => {
     const draft: DraftLink = {
       ...baseDraft,
@@ -182,6 +206,30 @@ describe("buildLinkPayload", () => {
     const payload = buildLinkPayload(draft);
     expect(payload.folder_scope_mode).toBe("full");
     expect(payload.folder_paths).toBeUndefined();
+  });
+});
+
+describe("resolveAskAiEnabledFromDraft", () => {
+  it("returns true for AI-backed visitor ask experiences", () => {
+    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, visitorAskExperience: "ai_supervised" })).toBe(true);
+    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, visitorAskExperience: "host_only" })).toBe(false);
+  });
+});
+
+describe("buildDealRoomLinkCreatePayload", () => {
+  it("maps create fields and ask policy from visitor ask experience", () => {
+    const payload = buildDealRoomLinkCreatePayload(
+      { ...baseDraft, name: " Room Link ", visitorAskExperience: "host_only", requirePassword: true, password: "password123" },
+      { allowedEmails: ["a@b.com"], blockedEmails: ["c@d.com"] },
+    );
+    expect(payload.name).toBe("Room Link");
+    expect(payload.ask_ai_enabled).toBe(false);
+    expect(payload.ask_mode).toBe("supervised");
+    expect(JSON.stringify(payload)).toContain('"ask_ai_enabled":false');
+    expect(payload).not.toHaveProperty("qa_enabled");
+    expect(payload.allowed_emails).toEqual(["a@b.com"]);
+    expect(payload.blocked_emails).toEqual(["c@d.com"]);
+    expect(payload.password).toBe("password123");
   });
 });
 

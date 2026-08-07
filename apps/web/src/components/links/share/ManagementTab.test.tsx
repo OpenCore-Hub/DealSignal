@@ -1,45 +1,44 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { I18nextProvider } from "react-i18next";
 import { ManagementTab } from "./ManagementTab";
 import { createTestI18n } from "@/i18n/test-utils";
 import enLinkShare from "@/i18n/locales/en/linkShare.json";
-import type { FileRequest, VisitorQuestion } from "@/types";
+import { api } from "@/lib/api";
+import type { FileRequest, OwnerAskTurn } from "@/types";
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    listLinkAsk: vi.fn(),
+    answerAskTurn: vi.fn(),
+  },
+}));
+
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}));
 
 async function renderTab(props: {
-  questions?: VisitorQuestion[];
   fileRequests?: FileRequest[];
-  onAnswer?: (question: VisitorQuestion, answer: string) => Promise<void>;
   onUpdateFileRequest?: (id: string, status: string) => Promise<void>;
 }) {
   const i18n = await createTestI18n({
     linkShare: enLinkShare as unknown as Record<string, string>,
   });
   return render(
-    <I18nextProvider i18n={i18n}>
-      <ManagementTab
-        questions={props.questions ?? []}
-        fileRequests={props.fileRequests ?? []}
-        onAnswer={props.onAnswer ?? vi.fn()}
-        onUpdateFileRequest={props.onUpdateFileRequest ?? vi.fn()}
-      />
-    </I18nextProvider>
+    <MemoryRouter initialEntries={["/acme-capital/links/link_1"]}>
+      <I18nextProvider i18n={i18n}>
+        <ManagementTab
+          linkId="link_1"
+          dealRoomId="room_1"
+          fileRequests={props.fileRequests ?? []}
+          onUpdateFileRequest={props.onUpdateFileRequest ?? vi.fn()}
+        />
+      </I18nextProvider>
+    </MemoryRouter>,
   );
-}
-
-function makeQuestion(overrides: Partial<VisitorQuestion> = {}): VisitorQuestion {
-  return {
-    id: "q1",
-    link_id: "l1",
-    visitor_id: "v1",
-    visitor_email: "visitor@example.com",
-    question: "What is the pricing?",
-    status: "pending",
-    created_at: "2026-07-11T10:00:00Z",
-    updated_at: "2026-07-11T10:00:00Z",
-    ...overrides,
-  };
 }
 
 function makeFileRequest(overrides: Partial<FileRequest> = {}): FileRequest {
@@ -57,34 +56,76 @@ function makeFileRequest(overrides: Partial<FileRequest> = {}): FileRequest {
 }
 
 describe("ManagementTab", () => {
-  it("labels Ask Host inbox separately from audit and Signal", async () => {
-    await renderTab({ questions: [] });
-    expect(screen.getByText("Ask Host inbox")).toBeInTheDocument();
-    expect(
-      screen.getByText(/not the Signal inbox/i)
-    ).toBeInTheDocument();
-    expect(screen.getByText("No Ask Host questions yet.")).toBeInTheDocument();
+  beforeEach(() => {
+    vi.mocked(api.listLinkAsk).mockReset();
+    vi.mocked(api.answerAskTurn).mockReset();
   });
 
-  it("renders questions and file requests", async () => {
-    await renderTab({
-      questions: [makeQuestion()],
-      fileRequests: [makeFileRequest()],
-    });
-    expect(screen.getByText("What is the pricing?")).toBeInTheDocument();
+  it("labels Ask inbox separately from audit and Signal", async () => {
+    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
+    await renderTab({});
+    expect(screen.queryByText("Grounded AI answers")).not.toBeInTheDocument();
+    expect(screen.getByText("Ask inbox")).toBeInTheDocument();
+    expect(screen.getByText(/not the Signal inbox/i)).toBeInTheDocument();
+    expect(await screen.findByText(/No Ask questions yet/i)).toBeInTheDocument();
+  });
+
+  it("renders ask turns and file requests", async () => {
+    const pending: OwnerAskTurn = {
+      id: "turn-1",
+      session_id: "sess-1",
+      link_id: "link_1",
+      visitor_id: "v1",
+      visitor_email: "visitor@example.com",
+      question: "What is the pricing?",
+      lane: "host",
+      status: "host_pending",
+      created_at: "2026-07-11T10:00:00Z",
+      updated_at: "2026-07-11T10:00:00Z",
+    };
+    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [pending] });
+
+    await renderTab({ fileRequests: [makeFileRequest()] });
+
+    expect(await screen.findByText("What is the pricing?")).toBeInTheDocument();
     expect(screen.getByText("Please send the full report.")).toBeInTheDocument();
   });
 
-  it("submits an answer via the onAnswer callback", async () => {
-    const onAnswer = vi.fn().mockResolvedValue(undefined);
-    await renderTab({ questions: [makeQuestion()], onAnswer });
+  it("submits a host answer via unified ask API", async () => {
+    const pending: OwnerAskTurn = {
+      id: "turn-1",
+      session_id: "sess-1",
+      link_id: "link_1",
+      visitor_id: "v1",
+      visitor_email: "visitor@example.com",
+      question: "What is the pricing?",
+      lane: "host",
+      status: "host_pending",
+      created_at: "2026-07-11T10:00:00Z",
+      updated_at: "2026-07-11T10:00:00Z",
+    };
+    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [pending] });
+    vi.mocked(api.answerAskTurn).mockResolvedValue({
+      data: {
+        ...pending,
+        status: "host_answered",
+        host_answer: "Pricing starts at $99.",
+        updated_at: "2026-07-11T11:00:00Z",
+      },
+    });
 
-    const textarea = screen.getByPlaceholderText("Type your answer...");
+    await renderTab({});
+
+    const textarea = await screen.findByPlaceholderText("Type your answer...");
     fireEvent.change(textarea, { target: { value: "Pricing starts at $99." } });
     fireEvent.click(screen.getByText("Send answer"));
 
     await waitFor(() => {
-      expect(onAnswer).toHaveBeenCalledWith(makeQuestion(), "Pricing starts at $99.");
+      expect(api.answerAskTurn).toHaveBeenCalledWith(
+        "link_1",
+        "turn-1",
+        "Pricing starts at $99.",
+      );
     });
   });
 });

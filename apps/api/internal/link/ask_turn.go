@@ -4,12 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -17,119 +15,51 @@ import (
 )
 
 const (
-	askLaneHost           = "host"
-	askStatusHostPending  = "host_pending"
-	askStatusHostAnswered = "host_answered"
+	askLaneHost            = "host"
+	askLaneHybrid          = "hybrid"
+	askStatusHostPending   = "host_pending"
+	askStatusHostEscalated = "host_escalated"
+	askStatusHostAnswered  = "host_answered"
 )
 
 var (
-	ErrAskQuestionRequired = errors.New("question is required")
-	ErrAskQuestionTooLong  = errors.New("question must not exceed 500 characters")
-	ErrAskTurnNotPending   = errors.New("ask turn is not pending")
+	ErrAskQuestionRequired   = errors.New("question is required")
+	ErrAskQuestionTooLong    = errors.New("question must not exceed 500 characters")
+	ErrAskTurnNotPending     = errors.New("ask turn is not pending")
+	ErrAskTurnNotEscalatable = errors.New("ask turn cannot be escalated")
+	ErrAskTurnNotPinnable    = errors.New("ask turn cannot be pinned as faq")
+	ErrAskTurnNotPinned      = errors.New("ask turn is not pinned as faq")
 )
 
-// PublicAskTurn is the visitor-facing projection of a unified Ask turn (Phase A host lane).
+// PublicAskTurn is the visitor-facing projection of a unified Ask turn.
 type PublicAskTurn struct {
-	ID             string    `json:"id"`
-	SessionID      string    `json:"session_id"`
-	Question       string    `json:"question"`
-	Lane           string    `json:"lane"`
-	Status         string    `json:"status"`
-	HostQuestionID string    `json:"host_question_id,omitempty"`
-	HostAnswer     string    `json:"host_answer,omitempty"`
-	RouteReason    string    `json:"route_reason,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string        `json:"id"`
+	SessionID      string        `json:"session_id"`
+	Question       string        `json:"question"`
+	Lane           string        `json:"lane"`
+	Status         string        `json:"status"`
+	AIPayload      *AskAIPayload `json:"ai_payload,omitempty"`
+	HostAnswer     string        `json:"host_answer,omitempty"`
+	RouteReason    string        `json:"route_reason,omitempty"`
+	PinnedFAQAt       *time.Time `json:"pinned_faq_at,omitempty"`
+	PinnedFAQBy       string     `json:"pinned_faq_by,omitempty"`
+	PinnedFAQSort     *int       `json:"pinned_faq_sort,omitempty"`
+	FormalStatus      string     `json:"formal_status,omitempty"`
+	FormalPublishAt   *time.Time `json:"formal_publish_at,omitempty"`
+	FormalPublishedAt *time.Time `json:"formal_published_at,omitempty"`
+	FormalAnonymize   bool       `json:"formal_anonymize,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 func mapPublicAskTurn(t db.LinkAskTurn) PublicAskTurn {
-	out := PublicAskTurn{
-		ID:        uuid.UUID(t.ID.Bytes).String(),
-		SessionID: uuid.UUID(t.SessionID.Bytes).String(),
-		Question:  t.Question,
-		Lane:      t.Lane,
-		Status:    t.Status,
-		CreatedAt: t.CreatedAt.Time,
-		UpdatedAt: t.UpdatedAt.Time,
-	}
-	if t.HostQuestionID.Valid {
-		out.HostQuestionID = uuid.UUID(t.HostQuestionID.Bytes).String()
-	}
-	if t.HostAnswer.Valid {
-		out.HostAnswer = t.HostAnswer.String
-	}
-	if t.RouteReason.Valid {
-		out.RouteReason = t.RouteReason.String
-	}
-	return out
+	return mapPublicAskTurnWithAI(t)
 }
 
 func mapPublicAskTurns(rows []db.LinkAskTurn) []PublicAskTurn {
 	out := make([]PublicAskTurn, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, mapPublicAskTurn(row))
-	}
-	return out
-}
-
-func mapLegacyQuestionToPublicAskTurn(q db.LinkVisitorQuestion) PublicAskTurn {
-	status := askStatusHostPending
-	if q.Status == "answered" {
-		status = askStatusHostAnswered
-	}
-	out := PublicAskTurn{
-		ID:             uuid.UUID(q.ID.Bytes).String(),
-		Question:       q.Question,
-		Lane:           askLaneHost,
-		Status:         status,
-		HostQuestionID: uuid.UUID(q.ID.Bytes).String(),
-		CreatedAt:      q.CreatedAt.Time,
-		UpdatedAt:      q.UpdatedAt.Time,
-		RouteReason:    "legacy_read",
-	}
-	if q.Answer.Valid {
-		out.HostAnswer = q.Answer.String
-	}
-	return out
-}
-
-func mergeAskTurnTimeline(turns []PublicAskTurn, legacy []db.LinkVisitorQuestion) []PublicAskTurn {
-	hostQuestionIDs := make([]string, 0, len(turns))
-	for _, t := range turns {
-		hostQuestionIDs = append(hostQuestionIDs, t.HostQuestionID)
-	}
-	covered := coveredHostQuestionIDs(hostQuestionIDs)
-	merged := make([]PublicAskTurn, 0, len(turns)+len(legacy))
-	merged = append(merged, turns...)
-	for _, q := range filterLegacyQuestionsNotInTurns(legacy, covered) {
-		merged = append(merged, mapLegacyQuestionToPublicAskTurn(q))
-	}
-	sort.Slice(merged, func(i, j int) bool {
-		return merged[i].CreatedAt.Before(merged[j].CreatedAt)
-	})
-	return merged
-}
-
-func publicAskTurnToVisitorQuestion(linkID, visitorID string, t PublicAskTurn) VisitorQuestion {
-	id := t.HostQuestionID
-	if id == "" {
-		id = t.ID
-	}
-	status := "pending"
-	if t.Status == askStatusHostAnswered {
-		status = "answered"
-	}
-	out := VisitorQuestion{
-		ID:        id,
-		LinkID:    linkID,
-		VisitorID: visitorID,
-		Question:  t.Question,
-		Status:    status,
-		CreatedAt: t.CreatedAt,
-		UpdatedAt: t.UpdatedAt,
-	}
-	if t.HostAnswer != "" {
-		out.Answer = t.HostAnswer
+		out = append(out, mapPublicAskTurnForVisitor(row))
 	}
 	return out
 }
@@ -192,15 +122,15 @@ func (s *Service) getOrCreateAskSession(
 	return db.LinkAskSession{}, err
 }
 
-// createHostAskTurn dual-writes link_visitor_questions and link_ask_turns in one transaction.
+// createHostAskTurn creates a host-lane unified Ask turn.
 func (s *Service) createHostAskTurn(
 	ctx context.Context,
 	link db.Link,
 	visitorID, visitorEmail, question, routeReason string,
-) (db.LinkAskTurn, db.LinkVisitorQuestion, error) {
+) (db.LinkAskTurn, error) {
 	q, err := validateAskQuestion(question)
 	if err != nil {
-		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, err
+		return db.LinkAskTurn{}, err
 	}
 	routeReason = strings.TrimSpace(routeReason)
 	if routeReason == "" {
@@ -209,50 +139,86 @@ func (s *Service) createHostAskTurn(
 
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
-		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, fmt.Errorf("begin transaction: %w", err)
+		return db.LinkAskTurn{}, fmt.Errorf("begin transaction: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.queries.WithTx(tx)
 
 	sess, err := s.getOrCreateAskSession(ctx, qtx, link, visitorID, visitorEmail)
 	if err != nil {
-		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, err
+		return db.LinkAskTurn{}, err
 	}
 
-	legacyQ, err := qtx.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
-		TenantID:     link.TenantID,
-		WorkspaceID:  link.WorkspaceID,
-		LinkID:       link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
-		Question:     q,
-	})
-	if err != nil {
-		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, err
+	createParams := db.CreateLinkAskTurnParams{
+		SessionID:       sess.ID,
+		TenantID:        link.TenantID,
+		WorkspaceID:     link.WorkspaceID,
+		LinkID:          link.ID,
+		VisitorID:       visitorID,
+		Question:        q,
+		Lane:            askLaneHost,
+		Status:          askStatusHostPending,
+		RouteReason:     pgtype.Text{String: routeReason, Valid: true},
+		FormalAnonymize: true,
 	}
-
-	turn, err := qtx.CreateLinkAskTurn(ctx, db.CreateLinkAskTurnParams{
-		SessionID:      sess.ID,
-		TenantID:       link.TenantID,
-		WorkspaceID:    link.WorkspaceID,
-		LinkID:         link.ID,
-		VisitorID:      visitorID,
-		Question:       q,
-		Lane:           askLaneHost,
-		Status:         askStatusHostPending,
-		HostQuestionID: legacyQ.ID,
-		RouteReason:    pgtype.Text{String: routeReason, Valid: true},
-	})
+	if routeReason == routeReasonPolicyFormal {
+		createParams.FormalStatus = pgtype.Text{String: formalStatusPendingReview, Valid: true}
+	}
+	turn, err := qtx.CreateLinkAskTurn(ctx, createParams)
 	if err != nil {
-		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, err
+		return db.LinkAskTurn{}, err
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, fmt.Errorf("commit transaction: %w", err)
+		return db.LinkAskTurn{}, fmt.Errorf("commit transaction: %w", err)
+	}
+
+	if routeReason == routeReasonPolicyFormal {
+		s.recordAskFormalSubmitted(ctx, link, visitorID, visitorEmail)
 	}
 
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	return turn, legacyQ, nil
+	return turn, nil
+}
+
+// SubmitPublicAsk is the unified visitor Ask entry (policy-aware routing; Phase B AI lane).
+func (s *Service) SubmitPublicAsk(
+	ctx context.Context,
+	link db.Link,
+	visitorID, visitorEmail, question string,
+	escalate bool,
+) (PublicAskTurn, error) {
+	routeReason := s.resolvePublicAskRoute(ctx, link, escalate)
+	switch routeReason {
+	case routeReasonUserEscalate, routeReasonPolicyFormal, routeReasonAINotEnabled, routeReasonAIQuotaExceeded:
+		turn, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+		if err != nil {
+			return PublicAskTurn{}, err
+		}
+		return mapPublicAskTurnForVisitor(turn), nil
+	case routeReasonAILanePending:
+		if !link.DealRoomID.Valid {
+			turn, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReasonAINoRoom)
+			if err != nil {
+				return PublicAskTurn{}, err
+			}
+			return mapPublicAskTurnForVisitor(turn), nil
+		}
+		if s.visitorAskKnowledge == nil || !s.visitorAskKnowledge.Enabled() {
+			turn, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReasonAIUnavailable)
+			if err != nil {
+				return PublicAskTurn{}, err
+			}
+			return mapPublicAskTurnForVisitor(turn), nil
+		}
+		return s.createAIAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+	default:
+		turn, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+		if err != nil {
+			return PublicAskTurn{}, err
+		}
+		return mapPublicAskTurnForVisitor(turn), nil
+	}
 }
 
 // CreateHostAskTurn creates a host-lane unified Ask turn (public POST /ask).
@@ -262,15 +228,7 @@ func (s *Service) CreateHostAskTurn(
 	visitorID, visitorEmail, question string,
 	escalate bool,
 ) (PublicAskTurn, error) {
-	routeReason := "unified_ask"
-	if escalate {
-		routeReason = "user_escalate"
-	}
-	turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
-	if err != nil {
-		return PublicAskTurn{}, err
-	}
-	return mapPublicAskTurn(turn), nil
+	return s.SubmitPublicAsk(ctx, link, visitorID, visitorEmail, question, escalate)
 }
 
 // AnswerAskTurnHostAnswer records a host reply on a unified Ask turn (owner PATCH .../ask/:turnId/host-answer).
@@ -299,7 +257,11 @@ func (s *Service) AnswerAskTurnHostAnswer(
 		}
 		return OwnerAskTurn{}, err
 	}
-	if turn.Status != askStatusHostPending {
+	if turn.Status != askStatusHostPending && turn.Status != askStatusHostEscalated {
+		return OwnerAskTurn{}, ErrAskTurnNotPending
+	}
+	if turn.FormalStatus.Valid &&
+		(turn.FormalStatus.String == formalStatusPendingReview || turn.FormalStatus.String == formalStatusScheduled) {
 		return OwnerAskTurn{}, ErrAskTurnNotPending
 	}
 
@@ -324,28 +286,14 @@ func (s *Service) AnswerAskTurnHostAnswer(
 		return OwnerAskTurn{}, ErrNotFoundInWorkspace
 	}
 
-	if turn.HostQuestionID.Valid {
-		if _, err := qtx.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
-			Answer:      pgtype.Text{String: trimmed, Valid: true},
-			AnsweredBy:  userID,
-			ID:          turn.HostQuestionID,
-			WorkspaceID: link.WorkspaceID,
-			LinkID:      link.ID,
-		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return OwnerAskTurn{}, fmt.Errorf("sync legacy question answer: %w", err)
-		}
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return OwnerAskTurn{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if turn.HostQuestionID.Valid {
-		s.resolveLinkQuestion(
-			uuid.UUID(link.WorkspaceID.Bytes).String(),
-			uuid.UUID(turn.HostQuestionID.Bytes).String(),
-		)
-	}
+	s.resolveLinkQuestion(
+		uuid.UUID(link.WorkspaceID.Bytes).String(),
+		uuid.UUID(turnID.Bytes).String(),
+	)
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
 
 	updated, err := s.queries.GetOwnerAskTurnByID(ctx, db.GetOwnerAskTurnByIDParams{
@@ -360,8 +308,11 @@ func (s *Service) AnswerAskTurnHostAnswer(
 }
 
 // ListMyAskTurns returns the visitor's unified Ask timeline on a link.
-// Turns are primary; legacy link_visitor_questions without a turn are merged for compat.
 func (s *Service) ListMyAskTurns(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]PublicAskTurn, error) {
+	link, err := s.queries.GetLinkByID(ctx, linkID)
+	if err == nil {
+		_ = s.publishDueFormalTurns(ctx, link)
+	}
 	rows, err := s.queries.ListLinkAskTurnsByVisitor(ctx, db.ListLinkAskTurnsByVisitorParams{
 		LinkID:    linkID,
 		VisitorID: visitorID,
@@ -369,128 +320,5 @@ func (s *Service) ListMyAskTurns(ctx context.Context, linkID pgtype.UUID, visito
 	if err != nil {
 		return nil, err
 	}
-	legacy, err := s.queries.ListVisitorQuestionsByVisitor(ctx, db.ListVisitorQuestionsByVisitorParams{
-		LinkID:    linkID,
-		VisitorID: visitorID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return mergeAskTurnTimeline(mapPublicAskTurns(rows), legacy), nil
-}
-
-func (s *Service) ensureAskTurnForLegacyQuestion(
-	ctx context.Context,
-	link db.Link,
-	hostQuestionID pgtype.UUID,
-) error {
-	_, err := s.queries.GetLinkAskTurnByHostQuestionID(ctx, db.GetLinkAskTurnByHostQuestionIDParams{
-		HostQuestionID: hostQuestionID,
-		WorkspaceID:    link.WorkspaceID,
-		LinkID:         link.ID,
-	})
-	if err == nil {
-		return nil
-	}
-	if !errors.Is(err, pgx.ErrNoRows) {
-		return err
-	}
-
-	q, err := s.queries.GetVisitorQuestionByID(ctx, db.GetVisitorQuestionByIDParams{
-		ID:          hostQuestionID,
-		WorkspaceID: link.WorkspaceID,
-	})
-	if err != nil {
-		return err
-	}
-
-	tx, err := s.pool.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
-	}
-	defer func() { _ = tx.Rollback(ctx) }()
-	qtx := s.queries.WithTx(tx)
-
-	visitorEmail := ""
-	if q.VisitorEmail.Valid {
-		visitorEmail = q.VisitorEmail.String
-	}
-	sess, err := s.getOrCreateAskSession(ctx, qtx, link, q.VisitorID, visitorEmail)
-	if err != nil {
-		return err
-	}
-
-	status := askStatusHostPending
-	_, err = qtx.CreateLinkAskTurn(ctx, db.CreateLinkAskTurnParams{
-		SessionID:      sess.ID,
-		TenantID:       link.TenantID,
-		WorkspaceID:    link.WorkspaceID,
-		LinkID:         link.ID,
-		VisitorID:      q.VisitorID,
-		Question:       q.Question,
-		Lane:           askLaneHost,
-		Status:         status,
-		HostQuestionID: q.ID,
-		RouteReason:    pgtype.Text{String: "legacy_backfill", Valid: true},
-	})
-	if err != nil {
-		return err
-	}
-	if q.Status == "answered" && q.Answer.Valid {
-		if _, err := qtx.MarkLinkAskTurnHostAnswered(ctx, db.MarkLinkAskTurnHostAnsweredParams{
-			HostAnswer:     q.Answer,
-			AnsweredBy:     q.AnsweredBy,
-			HostQuestionID: q.ID,
-			WorkspaceID:    link.WorkspaceID,
-			LinkID:         link.ID,
-		}); err != nil {
-			return err
-		}
-	}
-	return tx.Commit(ctx)
-}
-
-func (s *Service) syncAskTurnHostAnswer(
-	ctx context.Context,
-	link db.Link,
-	hostQuestionID pgtype.UUID,
-	answer string,
-	answeredBy pgtype.UUID,
-) error {
-	trimmed := strings.TrimSpace(answer)
-	rows, err := s.queries.MarkLinkAskTurnHostAnswered(ctx, db.MarkLinkAskTurnHostAnsweredParams{
-		HostAnswer:     pgtype.Text{String: trimmed, Valid: true},
-		AnsweredBy:     answeredBy,
-		HostQuestionID: hostQuestionID,
-		WorkspaceID:    link.WorkspaceID,
-		LinkID:         link.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("mark ask turn host answered: %w", err)
-	}
-	if rows > 0 {
-		return nil
-	}
-
-	if backfillErr := s.ensureAskTurnForLegacyQuestion(ctx, link, hostQuestionID); backfillErr != nil {
-		return fmt.Errorf("backfill ask turn for legacy question: %w", backfillErr)
-	}
-
-	rows, err = s.queries.MarkLinkAskTurnHostAnswered(ctx, db.MarkLinkAskTurnHostAnsweredParams{
-		HostAnswer:     pgtype.Text{String: trimmed, Valid: true},
-		AnsweredBy:     answeredBy,
-		HostQuestionID: hostQuestionID,
-		WorkspaceID:    link.WorkspaceID,
-		LinkID:         link.ID,
-	})
-	if err != nil {
-		return fmt.Errorf("mark ask turn host answered after backfill: %w", err)
-	}
-	if rows == 0 {
-		logger.InfoCtx(ctx, "ask turn host answer sync matched no rows after backfill",
-			logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
-			logger.Attr("host_question_id", uuid.UUID(hostQuestionID.Bytes).String()),
-		)
-	}
-	return nil
+	return mapPublicAskTurns(rows), nil
 }

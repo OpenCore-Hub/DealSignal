@@ -38,6 +38,7 @@ import {
 import { useDealRoomNavStore } from "@/stores/dealRoomNavStore";
 import { useUIStore } from "@/stores/uiStore";
 import { matchesRecommendedFile } from "@/lib/dealRoomReadiness";
+import { parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
 import {
   UploadCancelledError,
   useDocumentUploadConflict,
@@ -78,6 +79,7 @@ export function DealRoomDetailPage() {
   const location = useLocation();
   const [searchParams] = useSearchParams();
   const deepLinkAccessLinkId = searchParams.get("linkId") ?? undefined;
+  const deepLinkAskInbox = parseOwnerAskInboxView(searchParams.get("askInbox"));
   const fileInputRef = useRef<HTMLInputElement>(null);
   const uploadTargetFolderRef = useRef<string | null>(null);
   const activeIntervalsRef = useRef<Set<ReturnType<typeof setInterval>>>(new Set());
@@ -631,7 +633,13 @@ export function DealRoomDetailPage() {
 
           {tab === "knowledge" && <DealRoomKnowledgeTab roomId={room.id} />}
 
-          {tab === "qa" && <DealRoomQATab roomId={room.id} />}
+          {tab === "qa" && (
+            <DealRoomQATab
+              roomId={room.id}
+              initialLinkId={deepLinkAccessLinkId}
+              initialAskInbox={deepLinkAskInbox}
+            />
+          )}
 
           {tab === "activity" && (
             <DealRoomActivityTab

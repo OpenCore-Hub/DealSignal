@@ -28,7 +28,6 @@ function renderPanel(props: Partial<React.ComponentProps<typeof VisitorWorkspace
     <I18nextProvider i18n={i18nInstance}>
       <VisitorWorkspacePanel
         open
-        onClose={() => undefined}
         documents={[{ id: "doc-1", title: "Deck", pageCount: 12 }]}
         publicToken="tok-room"
         publicSessionToken="sess-room"
@@ -53,14 +52,14 @@ describe("VisitorWorkspacePanel", () => {
         expect.objectContaining({ sessionToken: "sess-room" }),
       );
     });
-    expect(screen.getByPlaceholderText(/Ask the host a question/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Ask about the materials you can access/i)).toBeInTheDocument();
     expect(screen.queryByText("Documents")).not.toBeInTheDocument();
   });
 
   it("does not render Ask Host when qa is disabled (document-only links)", () => {
     renderPanel({ qaEnabled: false, fileRequestsEnabled: false });
     expect(listPublicAskTurnsMock).not.toHaveBeenCalled();
-    expect(screen.queryByPlaceholderText(/Ask the host a question/i)).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/Ask about the materials you can access/i)).not.toBeInTheDocument();
   });
 
   it("shows document and Ask tabs for multi-doc deal-room links", async () => {

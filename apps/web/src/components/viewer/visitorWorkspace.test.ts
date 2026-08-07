@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   defaultVisitorWorkspaceTab,
+  resolveShowVisitorWorkspace,
+  shouldDefaultVisitorWorkspaceOpen,
   shouldShowVisitorWorkspace,
   visitorWorkspaceTabs,
 } from "./visitorWorkspace";
@@ -35,5 +37,49 @@ describe("visitorWorkspace", () => {
     expect(
       visitorWorkspaceTabs({ documentCount: 1, fileRequestsEnabled: false, qaEnabled: true }),
     ).toEqual(["qa"]);
+  });
+
+  it("opens workspace by default for deal-room links when sidebar is available", () => {
+    expect(
+      shouldDefaultVisitorWorkspaceOpen({
+        dealRoomId: "room-1",
+        showWorkspace: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDefaultVisitorWorkspaceOpen({
+        dealRoomId: undefined,
+        showWorkspace: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDefaultVisitorWorkspaceOpen({
+        dealRoomId: "room-1",
+        showWorkspace: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("resolves workspace visibility for unified deal-room links", () => {
+    expect(
+      resolveShowVisitorWorkspace({
+        link: {
+          dealRoomId: "room-1",
+          qaEnabled: true,
+          visitorAskUnified: true,
+          fileRequestsEnabled: false,
+        },
+        documentCount: 1,
+      }),
+    ).toBe(true);
+    expect(
+      resolveShowVisitorWorkspace({
+        link: {
+          qaEnabled: false,
+          fileRequestsEnabled: false,
+        },
+        documentCount: 1,
+      }),
+    ).toBe(false);
   });
 });

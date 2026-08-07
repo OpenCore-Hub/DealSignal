@@ -1,7 +1,30 @@
 import type { AccessRule, Link } from "@/types";
-import type { UpdateLinkPayload } from "@/lib/apiAdapters";
+import type { CreateDealRoomLinkPayload, UpdateLinkPayload } from "@/lib/apiAdapters";
 import { PRESETS, isPresetMatch } from "./presets";
 import type { DraftLink, LinkPreset } from "./types";
+import {
+  DEFAULT_VISITOR_ASK_EXPERIENCE,
+  resolveAskPolicyFromExperience,
+  resolveExperienceFromAskPolicy,
+} from "./visitorAskExperience";
+
+/** Persisted ask policy for deal-room share links. */
+export function resolveAskPolicyFromDraft(draft: DraftLink): {
+  askAiEnabled: boolean;
+  askMode: "supervised" | "self_serve" | "formal";
+} {
+  return resolveAskPolicyFromExperience(
+    draft.visitorAskExperience ?? DEFAULT_VISITOR_ASK_EXPERIENCE,
+  );
+}
+
+/** Persisted ask_ai_enabled for deal-room share links. */
+export function resolveAskAiEnabledFromDraft(draft: DraftLink): boolean {
+  return resolveAskPolicyFromDraft(draft).askAiEnabled;
+}
+
+/** @deprecated Use resolveAskAiEnabledFromDraft — qa_enabled stays true on deal-room links. */
+export const resolveQaEnabledFromDraft = resolveAskAiEnabledFromDraft;
 
 export function getPublicUrl(link: Link | null): string {
   if (!link) return "";
@@ -84,6 +107,10 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
       enableScreenshotProtection: link.screenshotProtectionEnabled ?? false,
       enableFileRequests: link.fileRequestsEnabled ?? false,
       enableIndexFileGeneration: link.indexFileEnabled ?? false,
+      visitorAskExperience: resolveExperienceFromAskPolicy(
+        link.askAiEnabled,
+        link.askMode,
+      ),
       allowedViewers,
       blockedViewers,
       customDomain: link.customDomain ?? "",
@@ -152,6 +179,8 @@ export function buildAllowedLists(draft: DraftLink): {
 
 export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): UpdateLinkPayload {
   const identity = normalizeEmailIdentityGates(draft.requireEmail, draft.requireEmailVerification);
+  const isDealRoomLink = Boolean(existingLink?.dealRoomId);
+  const askPolicy = isDealRoomLink ? resolveAskPolicyFromDraft(draft) : null;
   const permissionType = draft.requireNda
     ? "nda"
     : identity.requireEmailVerification || identity.requireEmail
@@ -177,6 +206,13 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
     expires_at: toRFC3339(draft.expiresAt) || undefined,
     download_enabled: draft.allowDownloading,
     watermark_enabled: draft.watermarkEnabled,
+    ...(askPolicy
+      ? {
+          qa_enabled: true,
+          ask_ai_enabled: askPolicy.askAiEnabled,
+          ask_mode: askPolicy.askMode,
+        }
+      : { qa_enabled: false }),
     file_requests_enabled: draft.enableFileRequests,
     index_file_enabled: draft.enableIndexFileGeneration,
     screenshot_protection_enabled: draft.enableScreenshotProtection,
@@ -186,6 +222,42 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
       identity.requireEmailVerification && !existingLink?.dealRoomId && draft.contactIds.length > 0
         ? draft.contactIds
         : undefined,
+  };
+}
+
+/** POST /deal-rooms/:id/links — shares field mapping with buildLinkPayload. */
+export function buildDealRoomLinkCreatePayload(
+  draft: DraftLink,
+  opts: {
+    allowedEmails?: string[];
+    blockedEmails?: string[];
+  } = {},
+): CreateDealRoomLinkPayload {
+  const base = buildLinkPayload(draft);
+  const identity = normalizeEmailIdentityGates(draft.requireEmail, draft.requireEmailVerification);
+  return {
+    name: base.name,
+    require_email: identity.requireEmail,
+    require_email_verification: identity.requireEmailVerification,
+    require_nda: draft.requireNda,
+    nda_template_id: draft.requireNda ? (draft.ndaTemplateId || undefined) : undefined,
+    nda_document_id: draft.requireNda ? draft.ndaDocumentId : undefined,
+    require_password: draft.requirePassword,
+    password: draft.requirePassword && draft.password ? draft.password : undefined,
+    allowed_emails: opts.allowedEmails?.length ? opts.allowedEmails : undefined,
+    blocked_emails: opts.blockedEmails?.length ? opts.blockedEmails : undefined,
+    expires_at: base.expires_at,
+    download_enabled: draft.allowDownloading,
+    watermark_enabled: draft.watermarkEnabled,
+    ask_ai_enabled: resolveAskPolicyFromDraft(draft).askAiEnabled,
+    ask_mode: resolveAskPolicyFromDraft(draft).askMode,
+    file_requests_enabled: draft.enableFileRequests,
+    index_file_enabled: draft.enableIndexFileGeneration,
+    screenshot_protection_enabled: draft.enableScreenshotProtection,
+    custom_domain: draft.customDomain || undefined,
+    notify_on_access: draft.notifyOnAccess,
+    folder_paths: draft.folderScopeMode === "allowlist" ? draft.folderPaths : undefined,
+    folder_scope_mode: draft.folderScopeMode === "allowlist" ? "allowlist" : "full",
   };
 }
 

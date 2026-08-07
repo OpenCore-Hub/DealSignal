@@ -41,15 +41,31 @@ func NewConverter(baseURL, jwtSecret string, s *storage.Client) *Converter {
 // ConvertToPDF asks OnlyOffice to convert an Office file to PDF.
 // Spreadsheets use spreadsheetLayout so every sheet is included.
 func (c *Converter) ConvertToPDF(ctx context.Context, sourceType, storageKey string) (string, error) {
-	return c.convertToPDF(ctx, sourceType, storageKey, true)
+	return c.convertToPDF(ctx, sourceType, storageKey, true, nil)
 }
 
-// ConvertToPDFActiveSheet converts only the workbook's active sheet (no spreadsheetLayout).
+// ConvertToPDFActiveSheet converts only the workbook's active sheet using the
+// workbook page setup (no spreadsheetLayout).
 func (c *Converter) ConvertToPDFActiveSheet(ctx context.Context, sourceType, storageKey string) (string, error) {
-	return c.convertToPDF(ctx, sourceType, storageKey, false)
+	return c.convertToPDF(ctx, sourceType, storageKey, false, nil)
 }
 
-func (c *Converter) convertToPDF(ctx context.Context, sourceType, storageKey string, allSheets bool) (string, error) {
+// ConvertToPDFActiveSheetWithLayout converts only the active sheet with an
+// explicit OnlyOffice layout, used by per-sheet XLSX previews.
+func (c *Converter) ConvertToPDFActiveSheetWithLayout(
+	ctx context.Context,
+	sourceType, storageKey string,
+	layout sheetPreviewLayout,
+) (string, error) {
+	return c.convertToPDF(ctx, sourceType, storageKey, false, &layout)
+}
+
+func (c *Converter) convertToPDF(
+	ctx context.Context,
+	sourceType, storageKey string,
+	allSheets bool,
+	layout *sheetPreviewLayout,
+) (string, error) {
 	// Use only the document ID as the OnlyOffice cache key (full path with slashes causes error -7).
 	// Append a timestamp so a previously failed conversion does not poison OnlyOffice's cache.
 	parts := strings.Split(storageKey, "/")
@@ -71,27 +87,13 @@ func (c *Converter) convertToPDF(ctx context.Context, sourceType, storageKey str
 
 	// OnlyOffice only converts the active sheet unless spreadsheetLayout is
 	// provided. The layout below triggers all sheets while keeping each sheet
-	// readable: fit to 1 page wide, auto-paginate vertically, A4 landscape.
-	if allSheets && isSpreadsheet(sourceType) {
-		payload["spreadsheetLayout"] = map[string]interface{}{
-			"ignorePrintArea": true,
-			"orientation":     "landscape",
-			"fitToWidth":      1,
-			"fitToHeight":     0,
-			"scale":           100,
-			"headings":        false,
-			"gridLines":       false,
-			"pageSize": map[string]string{
-				"width":  "297mm",
-				"height": "210mm",
-			},
-			"margins": map[string]string{
-				"left":   "10mm",
-				"right":  "10mm",
-				"top":    "10mm",
-				"bottom": "10mm",
-			},
+	// readable: fit to 1 page wide, auto-paginate vertically, landscape.
+	if isSpreadsheet(sourceType) && (allSheets || layout != nil) {
+		l := defaultSheetPreviewLayout()
+		if layout != nil {
+			l = *layout
 		}
+		payload["spreadsheetLayout"] = spreadsheetLayoutPayload(l)
 	}
 	body, _ := json.Marshal(payload)
 
@@ -138,6 +140,28 @@ func isSpreadsheet(sourceType string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func spreadsheetLayoutPayload(layout sheetPreviewLayout) map[string]interface{} {
+	return map[string]interface{}{
+		"ignorePrintArea": true,
+		"orientation":     "landscape",
+		"fitToWidth":      layout.fitToWidth,
+		"fitToHeight":     layout.fitToHeight,
+		"scale":           layout.scale,
+		"headings":        false,
+		"gridLines":       false,
+		"pageSize": map[string]string{
+			"width":  fmt.Sprintf("%.0fmm", layout.pageWidthMM),
+			"height": fmt.Sprintf("%.0fmm", layout.pageHeightMM),
+		},
+		"margins": map[string]string{
+			"left":   "10mm",
+			"right":  "10mm",
+			"top":    "10mm",
+			"bottom": "10mm",
+		},
 	}
 }
 

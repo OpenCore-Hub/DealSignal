@@ -1,9 +1,6 @@
-import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatTeardropText, FileText, Check, X } from "@phosphor-icons/react";
-import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -18,37 +15,28 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-import type { FileRequest, VisitorQuestion } from "@/types";
+import { OwnerAskInboxPanel } from "@/components/ask/OwnerAskInboxPanel";
+import { useOwnerAskCitationNavigation } from "@/lib/ownerAskCitation";
+import type { FileRequest } from "@/types";
 import { formatRelativeTime } from "@/lib/formatters";
 
 interface ManagementTabProps {
-  questions: VisitorQuestion[];
+  linkId: string;
+  dealRoomId?: string;
   fileRequests: FileRequest[];
-  onAnswer: (question: VisitorQuestion, answer: string) => Promise<void>;
   onUpdateFileRequest: (requestId: string, status: FileRequest["status"]) => Promise<void>;
+  onPendingHostCountChange?: (count: number) => void;
 }
 
 export function ManagementTab({
-  questions,
+  linkId,
+  dealRoomId,
   fileRequests,
-  onAnswer,
   onUpdateFileRequest,
+  onPendingHostCountChange,
 }: ManagementTabProps) {
   const { t } = useTranslation("linkShare");
-  const [answerDraft, setAnswerDraft] = useState<Record<string, string>>({});
-  const [answerLoading, setAnswerLoading] = useState<Record<string, boolean>>({});
-
-  const handleAnswer = async (question: VisitorQuestion) => {
-    const text = (answerDraft[question.id] ?? "").trim();
-    if (!text) return;
-    setAnswerLoading((prev) => ({ ...prev, [question.id]: true }));
-    try {
-      await onAnswer(question, text);
-      setAnswerDraft((prev) => ({ ...prev, [question.id]: "" }));
-    } finally {
-      setAnswerLoading((prev) => ({ ...prev, [question.id]: false }));
-    }
-  };
+  const onOpenCitation = useOwnerAskCitationNavigation(dealRoomId);
 
   return (
     <div className="space-y-6 py-2">
@@ -61,54 +49,12 @@ export function ManagementTab({
           <CardDescription>{t("management.questionsDescription")}</CardDescription>
         </CardHeader>
         <CardContent>
-          {questions.length === 0 ? (
-            <p className="py-4 text-center text-sm text-muted-foreground">
-              {t("management.noQuestions")}
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {questions.map((q) => (
-                <div key={q.id} className="rounded-lg border p-3">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0 flex-1 space-y-1">
-                      <p className="text-sm font-medium">{q.visitor_email || t("management.anonymous")}</p>
-                      <p className="text-sm text-muted-foreground">{q.question}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {formatRelativeTime(q.created_at)}
-                      </p>
-                    </div>
-                    <Badge variant={q.status === "answered" ? "default" : "warm"}>
-                      {t(`management.questionStatus.${q.status}`)}
-                    </Badge>
-                  </div>
-                  {q.answer && (
-                    <div className="mt-3 rounded-md bg-muted p-2 text-sm">
-                      <span className="font-medium">{t("management.answerLabel")}</span> {q.answer}
-                    </div>
-                  )}
-                  {q.status !== "answered" && (
-                    <div className="mt-3 space-y-2">
-                      <Textarea
-                        value={answerDraft[q.id] ?? ""}
-                        onChange={(e) =>
-                          setAnswerDraft((prev) => ({ ...prev, [q.id]: e.target.value }))
-                        }
-                        placeholder={t("management.answerPlaceholder")}
-                        rows={2}
-                      />
-                      <Button
-                        size="sm"
-                        onClick={() => handleAnswer(q)}
-                        disabled={answerLoading[q.id] || !(answerDraft[q.id] ?? "").trim()}
-                      >
-                        {answerLoading[q.id] ? t("management.saving") : t("management.sendAnswer")}
-                      </Button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
+          <OwnerAskInboxPanel
+            scope={{ type: "link", linkId }}
+            i18nNs="linkShare"
+            onPendingCountChange={onPendingHostCountChange}
+            onOpenCitation={onOpenCitation}
+          />
         </CardContent>
       </Card>
 
@@ -144,8 +90,8 @@ export function ManagementTab({
                         req.status === "approved" || req.status === "fulfilled"
                           ? "default"
                           : req.status === "rejected"
-                          ? "hot"
-                          : "warm"
+                            ? "hot"
+                            : "warm"
                       }
                     >
                       {t(`management.fileRequestStatus.${req.status}`)}

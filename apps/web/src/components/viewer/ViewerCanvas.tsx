@@ -3,10 +3,12 @@ import { useTranslation } from "react-i18next";
 import { FileText, Warning } from "@phosphor-icons/react";
 import { ThumbnailNav } from "./ThumbnailNav";
 import { PublicViewerThumbnailRail } from "./PublicViewerThumbnailRail";
+import { usePublicPageThumbnailUrls } from "./usePublicPageThumbnailUrls";
 import { HighlightOverlay } from "./HighlightOverlay";
 import { WatermarkOverlay, type WatermarkInfo } from "./WatermarkOverlay";
 import { formatDuration } from "@/lib/formatters";
 import { cn } from "@/lib/utils";
+import type { PublicLinkCredentials } from "@/lib/api";
 import type { Document, Evidence, PageAnalytics } from "@/types";
 
 interface PageInfo {
@@ -31,6 +33,8 @@ interface ViewerCanvasProps {
   sidebar?: React.ReactNode;
   /** Public share-link visitor styling */
   variant?: "default" | "public";
+  publicToken?: string;
+  publicAccessCredentials?: PublicLinkCredentials;
 }
 
 export function ViewerCanvas({
@@ -46,6 +50,8 @@ export function ViewerCanvas({
   onSelectPage,
   sidebar,
   variant = "default",
+  publicToken,
+  publicAccessCredentials,
 }: ViewerCanvasProps) {
   const { t } = useTranslation("documents");
   const isPublic = variant === "public";
@@ -165,12 +171,24 @@ export function ViewerCanvas({
   const activeWatermark = watermark === null ? undefined : watermark ?? DEFAULT_WATERMARK;
   const pageAnalytics = analytics.find((a) => a.pageNumber === page);
 
+  const thumbnailSeedUrls =
+    isPublic && imageUrl ? { [page]: imageUrl } : undefined;
+  const publicThumbnailUrls = usePublicPageThumbnailUrls({
+    documentId: isPublic ? doc.id : undefined,
+    publicToken: isPublic ? publicToken : undefined,
+    pageNumbers: pageList.map((p) => p.pageNumber),
+    currentPage: page,
+    credentials: publicAccessCredentials,
+    seedUrls: thumbnailSeedUrls,
+  });
+
   return (
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {isPublic ? (
         <PublicViewerThumbnailRail
           pages={pageList.map((p) => ({ pageNumber: p.pageNumber }))}
           currentPage={page}
+          thumbnailUrls={publicThumbnailUrls}
           onSelect={onSelectPage}
           className="hidden h-full shrink-0 md:flex"
         />

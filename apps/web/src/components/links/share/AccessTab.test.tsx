@@ -1,11 +1,18 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { AccessTab } from "./AccessTab";
 import type { DraftLink } from "./types";
+import { api } from "@/lib/api";
 import enLinkShare from "@/i18n/locales/en/linkShare.json";
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    getLinkAskPolicy: vi.fn(),
+  },
+}));
 
 const i18nInstance = i18n.createInstance();
 i18nInstance.use(initReactI18next).init({
@@ -32,6 +39,7 @@ function renderAccessTab(
   ndaTemplates: { id: string; name: string; sourceDocumentId: string }[] = [],
   roomSecurityFloors?: { requireEmailVerification?: boolean; requireNda?: boolean },
   roomBlockedEmails?: string[],
+  linkId?: string,
 ) {
   const updateDraft = vi.fn();
   const { rerender } = render(
@@ -46,6 +54,7 @@ function renderAccessTab(
         passwordAlreadySet={passwordAlreadySet}
         roomSecurityFloors={roomSecurityFloors}
         roomBlockedEmails={roomBlockedEmails}
+        linkId={linkId}
       />
     </Wrapper>
   );
@@ -67,6 +76,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
+  visitorAskExperience: "ai_supervised" as const,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -77,6 +87,10 @@ const baseDraft: DraftLink = {
 };
 
 describe("AccessTab", () => {
+  beforeEach(() => {
+    vi.mocked(api.getLinkAskPolicy).mockReset();
+  });
+
   it("toggles require email and clears verification", () => {
     const { updateDraft } = renderAccessTab(baseDraft);
     fireEvent.click(screen.getByRole("switch", { name: /require email to view/i }));
@@ -237,7 +251,7 @@ describe("AccessTab", () => {
   });
 
   it("shows advanced count badge when file requests is enabled", () => {
-    renderAccessTab({ ...baseDraft, enableFileRequests: true });
+    renderAccessTab({ ...baseDraft, enableFileRequests: true, visitorAskExperience: "ai_supervised" }, {}, true);
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
@@ -246,11 +260,17 @@ describe("AccessTab", () => {
       ...baseDraft,
       enableFileRequests: true,
       enableIndexFileGeneration: true,
-    });
+      visitorAskExperience: "ai_supervised",
+    }, {}, true);
     expect(screen.getByText("2 enabled")).toBeInTheDocument();
   });
 
-  it("renders advanced options without Ask Host toggle", () => {
+  it("counts non-default visitor ask experience in advanced badge for deal-room links", () => {
+    renderAccessTab({ ...baseDraft, visitorAskExperience: "formal" }, {}, true);
+    expect(screen.getByText("1 enabled")).toBeInTheDocument();
+  });
+
+  it("renders advanced options without legacy Ask Host toggle", () => {
     renderAccessTab(baseDraft);
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.queryByText(/Enable AI assistant/i)).not.toBeInTheDocument();
@@ -259,18 +279,24 @@ describe("AccessTab", () => {
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
   });
 
-  it("shows Ask Host included notice for deal-room links", () => {
+  it("shows visitor ask experience selector for deal-room links", () => {
     renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByTestId("deal-room-ask-host-included")).toBeInTheDocument();
-    expect(screen.getByText(/Ask Host included/i)).toBeInTheDocument();
-    expect(screen.queryByRole("switch", { name: /Visitor Ask/i })).not.toBeInTheDocument();
+    expect(screen.getByTestId("visitor-ask-experience")).toBeInTheDocument();
+    expect(screen.getByText(/Q&A strategy/i)).toBeInTheDocument();
   });
 
-  it("does not show Ask Host included notice for document-only links", () => {
+  it("does not show visitor ask experience selector for document-only links", () => {
     renderAccessTab(baseDraft, {}, false);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.queryByTestId("deal-room-ask-host-included")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("visitor-ask-experience")).not.toBeInTheDocument();
+  });
+
+  it("selects visitor ask experience via card radio", () => {
+    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
+    fireEvent.click(screen.getByText(/advanced/i));
+    fireEvent.click(screen.getByTestId("visitor-ask-experience-formal"));
+    expect(updateDraft).toHaveBeenCalledWith({ visitorAskExperience: "formal" });
   });
 
   it("renders all advanced options when section is expanded", () => {
@@ -280,12 +306,12 @@ describe("AccessTab", () => {
     expect(screen.getByText(/index file/i)).toBeInTheDocument();
   });
 
-  it("enables functional advanced switches except screenshot protection", () => {
-    renderAccessTab(baseDraft);
+  it("enables functional advanced switches for deal-room links", () => {
+    renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
     expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
-    expect(screen.queryByRole("switch", { name: /Enable AI assistant/i })).not.toBeInTheDocument();
+    expect(screen.getByRole("radiogroup", { name: /Q&A strategy/i })).not.toBeDisabled();
   });
 
   it("displays validation errors", () => {
@@ -454,5 +480,39 @@ describe("AccessTab", () => {
         "extra@example.com",
       ],
     });
+  });
+
+  it("renders AI quota panel when editing an existing deal-room link", async () => {
+    vi.mocked(api.getLinkAskPolicy).mockResolvedValue({
+      data: {
+        id: "link-edit-1",
+        askMode: "supervised",
+        askAiEnabled: true,
+        askAiMonthlyQuota: 100,
+        askAiMonthlyUsed: 3,
+        askAiMonthlyLimit: 100,
+        askAiQuotaExceeded: false,
+        askAiEntitled: true,
+      },
+    });
+
+    renderAccessTab(
+      { ...baseDraft, visitorAskExperience: "ai_supervised" },
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      "link-edit-1",
+    );
+
+    fireEvent.click(screen.getByText(/advanced/i));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("link-ask-policy-quota")).toBeInTheDocument();
+    });
+    expect(api.getLinkAskPolicy).toHaveBeenCalledWith("link-edit-1");
   });
 });

@@ -125,7 +125,8 @@ var serverOnlyCodes = map[string]string{
 	"delete_failed":    "delete failed",
 	"render_error":     "render failed",
 	"ai_unavailable":   "ai service unavailable",
-	"upstream_error":   "upstream service error",
+	"upstream_error":          "upstream service error",
+	"access_code_send_failed": "could not send verification code",
 }
 
 // clientFallbacks are used when an infrastructure error is incorrectly

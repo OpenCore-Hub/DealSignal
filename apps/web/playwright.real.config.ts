@@ -3,7 +3,15 @@ import { defineConfig, devices } from "@playwright/test";
 export default defineConfig({
   testDir: "./e2e",
   testMatch: "**/*.spec.ts",
-  testIgnore: [],  // run ALL specs against real backend
+  // Dedicated gates in ./e2e-visitor-ask-real.sh — skip here to avoid duplicate runs.
+  testIgnore: [
+    "**/visitor-ask-real.spec.ts",
+    "**/visitor-ask-owner-reply-real.spec.ts",
+    "**/visitor-ask-dashboard-nav-real.spec.ts",
+    "**/visitor-ask-ai-stream-real.spec.ts",
+    "**/visitor-ask-ai-ui-real.spec.ts",
+    "**/visitor-ask-engage-policy-real.spec.ts",
+  ],
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

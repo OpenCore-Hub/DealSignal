@@ -101,7 +101,7 @@ describe("useViewerDocument", () => {
     apiMock.getDocumentById.mockRejectedValueOnce(new Error("network error"));
     const { result } = renderHook(() => useViewerDocument(), { wrapper: wrapper() });
 
-    await waitFor(() => expect(result.current.error).toBe("network error"));
+    await waitFor(() => expect(result.current.error).toBe("Failed to load"));
     expect(result.current.doc).toBeNull();
   });
 
