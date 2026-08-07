@@ -92,8 +92,8 @@ export function FileRequestPanel({ token, sessionToken }: FileRequestPanelProps)
   };
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-3">
         {loading ? (
           <div className="flex items-center justify-center py-8">
             <Spinner size={20} className="animate-spin text-muted-foreground" />

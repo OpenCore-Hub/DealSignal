@@ -5,7 +5,6 @@ import {
   ChatCenteredDots,
   FileText,
   Folder,
-  X,
 } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
 import { FileRequestPanel } from "./FileRequestPanel";
@@ -31,7 +30,6 @@ interface DocSummary {
 
 interface VisitorWorkspacePanelProps {
   open: boolean;
-  onClose: () => void;
   documents?: DocSummary[];
   selectedDocIndex?: number;
   onSelectDoc?: (index: number) => void;
@@ -44,7 +42,6 @@ interface VisitorWorkspacePanelProps {
 
 export function VisitorWorkspacePanel({
   open,
-  onClose,
   documents,
   selectedDocIndex = 0,
   onSelectDoc,
@@ -129,41 +126,47 @@ export function VisitorWorkspacePanel({
     icon: typeof FileText;
   }>;
 
-  const renderDocButton = (doc: DocSummary, index: number, indented: boolean) => (
-    <button
-      key={doc.id}
-      type="button"
-      onClick={() => onSelectDoc?.(index)}
-      className={cn(
-        "flex w-full items-start gap-3 rounded-xl py-2.5 text-left transition-colors hover:bg-background/70",
-        indented ? "px-3 pl-7" : "px-3",
-        index === selectedDocIndex
-          ? "bg-emerald-500/8 ring-1 ring-emerald-500/20"
-          : "ring-1 ring-transparent",
-      )}
-    >
-      <FileText
-        size={16}
+  const renderDocButton = (doc: DocSummary, index: number, indented: boolean) => {
+    const isSelected = index === selectedDocIndex;
+    return (
+      <button
+        key={doc.id}
+        type="button"
+        onClick={() => onSelectDoc?.(index)}
         className={cn(
-          "mt-0.5 shrink-0",
-          index === selectedDocIndex ? "text-emerald-700 dark:text-emerald-300" : "text-muted-foreground",
+          "flex w-full items-center gap-3 rounded-xl py-2.5 text-left transition-colors hover:bg-background/70",
+          indented ? "px-3 pl-8" : "px-3",
+          isSelected
+            ? "bg-emerald-500/8 ring-1 ring-emerald-500/20"
+            : "ring-1 ring-transparent",
         )}
-      />
-      <div className="min-w-0 flex-1">
-        <p
+      >
+        <span
           className={cn(
-            "truncate text-sm font-medium",
-            index === selectedDocIndex ? "text-foreground" : "text-foreground/90",
+            "flex h-9 w-9 shrink-0 items-center justify-center rounded-lg transition-colors",
+            isSelected
+              ? "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300"
+              : "bg-muted/50 text-muted-foreground",
           )}
         >
-          {doc.title}
-        </p>
-        <p className="text-xs text-muted-foreground">
-          {t("viewer.pageCountShort", { count: doc.pageCount })}
-        </p>
-      </div>
-    </button>
-  );
+          <FileText size={18} weight={isSelected ? "fill" : "regular"} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p
+            className={cn(
+              "truncate text-sm font-medium leading-snug",
+              isSelected ? "text-foreground" : "text-foreground/90",
+            )}
+          >
+            {doc.title}
+          </p>
+          <p className="mt-0.5 text-xs tabular-nums text-muted-foreground">
+            {t("viewer.pageCountShort", { count: doc.pageCount })}
+          </p>
+        </div>
+      </button>
+    );
+  };
 
   if (tabs.length === 0) {
     return null;
@@ -177,27 +180,19 @@ export function VisitorWorkspacePanel({
           animate={{ width: 380, opacity: 1 }}
           exit={{ width: 0, opacity: 0 }}
           transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-          className="public-viewer-glass mr-3 mb-3 flex h-[calc(100%-0.75rem)] shrink-0 flex-col overflow-hidden rounded-2xl sm:mr-4"
+          className="public-viewer-glass mr-3 mb-3 flex h-[calc(100%-0.75rem)] min-h-0 shrink-0 flex-col overflow-hidden rounded-2xl sm:mr-4"
           style={{ minWidth: open ? 380 : 0 }}
         >
-          <div className="flex items-center justify-between border-b border-border/60 px-4 py-3">
-            <div>
-              <p className="text-sm font-semibold tracking-tight">{t("viewer.workspaceTitle")}</p>
-              <p className="text-xs text-muted-foreground">{t("viewer.workspaceSubtitle")}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex h-8 w-8 items-center justify-center rounded-xl text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground"
-              aria-label={t("viewer.sidebarClose")}
-            >
-              <X size={16} />
-            </button>
+          <div className="border-b border-border/60 px-4 py-3.5">
+            <p className="text-base font-semibold tracking-tight">{t("viewer.workspaceTitle")}</p>
+            <p className="mt-0.5 text-sm leading-snug text-muted-foreground">
+              {t("viewer.workspaceSubtitle")}
+            </p>
           </div>
 
           {tabs.length > 1 ? (
-            <div className="border-b border-border/60 px-3 py-2">
-              <div className="flex gap-1 overflow-x-auto scrollbar-hide">
+            <div className="border-b border-border/60 px-3 py-2.5">
+              <div className="flex gap-1.5 overflow-x-auto scrollbar-hide">
                 {tabs.map((tab) => {
                   const Icon = tab.icon;
                   const isActive = activeTab === tab.id;
@@ -207,13 +202,13 @@ export function VisitorWorkspacePanel({
                       type="button"
                       onClick={() => setActiveTab(tab.id)}
                       className={cn(
-                        "inline-flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-all",
+                        "inline-flex shrink-0 items-center gap-2 rounded-full px-3.5 py-2 text-sm font-medium transition-all",
                         isActive
-                          ? "bg-foreground text-background shadow-sm"
-                          : "bg-background/70 text-muted-foreground hover:text-foreground",
+                          ? "bg-emerald-500/10 text-emerald-800 shadow-sm ring-1 ring-emerald-500/25 dark:text-emerald-200"
+                          : "bg-background/70 text-muted-foreground hover:bg-background hover:text-foreground",
                       )}
                     >
-                      <Icon size={13} weight={isActive ? "fill" : "regular"} />
+                      <Icon size={16} weight={isActive ? "fill" : "duotone"} />
                       {tab.label}
                     </button>
                   );
@@ -222,20 +217,24 @@ export function VisitorWorkspacePanel({
             </div>
           ) : null}
 
-          <div className="min-h-0 flex-1 overflow-hidden">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
             {activeTab === "qa" && showAskTab && publicToken ? (
-              <UnifiedQAPanel
-                token={publicToken}
-                sessionToken={publicSessionToken}
-                qaEnabled={showAskTab}
-                onOpenCitation={onOpenCitation}
-              />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <UnifiedQAPanel
+                  token={publicToken}
+                  sessionToken={publicSessionToken}
+                  qaEnabled={showAskTab}
+                  onOpenCitation={onOpenCitation}
+                />
+              </div>
             ) : null}
             {activeTab === "requests" && showRequestsTab && publicToken ? (
-              <FileRequestPanel token={publicToken} sessionToken={publicSessionToken} />
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <FileRequestPanel token={publicToken} sessionToken={publicSessionToken} />
+              </div>
             ) : null}
             {activeTab === "documents" && showDocumentsTab ? (
-              <div className="h-full overflow-y-auto p-2">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5">
                 {hasFolderStructure ? (
                   folderGroups.map((folder) => {
                     const isOpen = expandedFolders.has(folder.path);
@@ -251,14 +250,25 @@ export function VisitorWorkspacePanel({
                               return next;
                             })
                           }
-                          className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-xs font-semibold text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground"
+                          className="flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-muted-foreground transition-colors hover:bg-background/70 hover:text-foreground"
                           aria-expanded={isOpen}
                         >
-                          <Folder size={14} className="shrink-0" />
+                          <Folder
+                            size={18}
+                            weight={isOpen ? "fill" : "duotone"}
+                            className={cn(
+                              "shrink-0 transition-colors",
+                              isOpen ? "text-foreground/75" : "text-muted-foreground",
+                            )}
+                          />
                           <span className="min-w-0 flex-1 truncate">{folder.name}</span>
                           <CaretRight
-                            size={12}
-                            className={cn("shrink-0 transition-transform", isOpen && "rotate-90")}
+                            size={14}
+                            weight="bold"
+                            className={cn(
+                              "shrink-0 text-muted-foreground/80 transition-transform",
+                              isOpen && "rotate-90",
+                            )}
                           />
                         </button>
                         {isOpen

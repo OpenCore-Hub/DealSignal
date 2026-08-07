@@ -1379,7 +1379,7 @@ describe("PublicViewerPage", () => {
     expect(screen.queryByText("Deck")).not.toBeInTheDocument();
   });
 
-  it("shows workspace toggle for deal-room link with qa enabled after session reuse", async () => {
+  it("defaults deal-room share links into workspace mode on entry", async () => {
     const token = "deal-room-ask-token";
     window.sessionStorage.setItem(`link-session:${token}`, "stored-session");
 
@@ -1408,6 +1408,55 @@ describe("PublicViewerPage", () => {
         expect.objectContaining({ sessionToken: "stored-session" }),
       );
     });
+
+    await waitFor(() => {
+      expect(screen.getByText("viewer.workspaceTitle")).toBeInTheDocument();
+    });
+    expect(screen.getByRole("button", { name: "viewer.sidebarClose" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "viewer.sidebarOpen" })).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(listPublicAskTurnsMock).toHaveBeenCalledWith(
+        token,
+        expect.objectContaining({ sessionToken: "session-after-access" }),
+      );
+    });
+  });
+
+  it("shows workspace toggle for deal-room link with qa enabled after session reuse", async () => {
+    const token = "deal-room-ask-token-manual";
+    window.sessionStorage.setItem(`link-session:${token}`, "stored-session");
+
+    accessPublicLinkMock.mockImplementation(async (_tok: string, opts?: { sessionToken?: string }) => {
+      if (opts?.sessionToken === "stored-session" || opts?.sessionToken === "session-after-access") {
+        return dealRoomAskAccess;
+      }
+      throw new ApiError({
+        status: 403,
+        code: "requires_email_code",
+        message: "email code required",
+        requestId: "req-gate",
+        requiresEmail: false,
+        requiresEmailVerification: true,
+        requiresPassword: false,
+        requiresNda: false,
+        isDealRoom: true,
+      });
+    });
+
+    await renderPage(token);
+
+    await waitFor(() => {
+      expect(accessPublicLinkMock).toHaveBeenCalledWith(
+        token,
+        expect.objectContaining({ sessionToken: "stored-session" }),
+      );
+    });
+
+    const workspaceCloseButton = await screen.findByRole("button", {
+      name: "viewer.sidebarClose",
+    });
+    fireEvent.click(workspaceCloseButton);
 
     const workspaceToggle = await screen.findByRole("button", { name: "viewer.sidebarOpen" });
     expect(workspaceToggle).toBeInTheDocument();

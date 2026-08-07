@@ -72,10 +72,10 @@ export function UnifiedQAPanel({
   const busy = submitting;
 
   return (
-    <div className="flex h-full flex-col bg-transparent">
+    <div className="flex h-full min-h-0 flex-col bg-transparent">
       <div
         ref={scrollRef}
-        className="flex-1 space-y-4 overflow-y-auto p-4"
+        className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4"
         aria-live="polite"
         aria-busy={busy}
       >

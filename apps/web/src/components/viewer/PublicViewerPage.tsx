@@ -20,7 +20,10 @@ import { cn } from "@/lib/utils";
 import { CanvasViewer } from "./CanvasViewer";
 import { VisitorWorkspacePanel } from "./VisitorWorkspacePanel";
 import { RightSidebar } from "./RightSidebar";
-import { shouldShowVisitorWorkspace } from "./visitorWorkspace";
+import {
+  resolveShowVisitorWorkspace,
+  shouldDefaultVisitorWorkspaceOpen,
+} from "./visitorWorkspace";
 import { visitorAskUnifiedEnabled } from "@/lib/visitorAskUnified";
 import { PublicDealRoomLinkViewer } from "./PublicDealRoomLinkViewer";
 import type { DealRoomKnowledgeQueryHit } from "@/types";
@@ -227,6 +230,7 @@ export function PublicViewerPage() {
   const [linkErrorCode, setLinkErrorCode] = useState<string | null>(null);
   const [selectedDocIndex, setSelectedDocIndex] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const workspaceDefaultAppliedRef = useRef(false);
   const [requestedViewerPage, setRequestedViewerPage] = useState<number | null>(null);
   // Monotonic id so in-flight Access responses are ignored after a newer
   // tryAccess starts (token/invite change or double-submit). Replaces a
@@ -990,17 +994,25 @@ export function PublicViewerPage() {
   }, [selectedDoc]);
 
   const unifiedAsk = access ? visitorAskUnifiedEnabled(access.link) : false;
-  const showWorkspace = unifiedAsk
-    ? shouldShowVisitorWorkspace({
-        documentCount: access?.documents.length ?? 0,
-        fileRequestsEnabled: Boolean(access?.link.fileRequestsEnabled),
-        qaEnabled: Boolean(access?.link.qaEnabled),
+  const showWorkspace = access
+    ? resolveShowVisitorWorkspace({
+        link: access.link,
+        documentCount: access.documents.length,
       })
-    : Boolean(
-        access?.link.qaEnabled ||
-          access?.link.fileRequestsEnabled ||
-          (access?.documents.length ?? 0) > 1,
-      );
+    : false;
+
+  useEffect(() => {
+    if (!access || workspaceDefaultAppliedRef.current) return;
+    if (
+      shouldDefaultVisitorWorkspaceOpen({
+        dealRoomId: access.link.dealRoomId,
+        showWorkspace,
+      })
+    ) {
+      setSidebarOpen(true);
+      workspaceDefaultAppliedRef.current = true;
+    }
+  }, [access, showWorkspace]);
 
   const toggleSidebar = useCallback(() => {
     if (!showWorkspace) return;
@@ -1627,7 +1639,6 @@ export function PublicViewerPage() {
             unifiedAsk ? (
               <VisitorWorkspacePanel
                 open={sidebarOpen}
-                onClose={() => setSidebarOpen(false)}
                 documents={access.documents}
                 selectedDocIndex={selectedDocIndex}
                 onSelectDoc={setSelectedDocIndex}
