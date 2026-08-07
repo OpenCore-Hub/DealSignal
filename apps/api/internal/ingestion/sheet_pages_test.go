@@ -20,7 +20,7 @@ func TestMaterializeActiveSheetXLSX(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	out, err := materializeActiveSheetXLSX(src, "Cashflow")
+	out, err := materializeActiveSheetXLSX(src, "Cashflow", defaultSheetPreviewLayout())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,6 +34,72 @@ func TestMaterializeActiveSheetXLSX(t *testing.T) {
 	sheets := got.GetSheetList()
 	if len(sheets) != 1 || sheets[0] != "Cashflow" {
 		t.Fatalf("want only Cashflow, got %v", sheets)
+	}
+
+	layout, err := got.GetPageLayout("Cashflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.Size == nil || *layout.Size != 9 {
+		t.Fatalf("want A4 paper size, got %+v", layout.Size)
+	}
+	if layout.Orientation == nil || *layout.Orientation != "landscape" {
+		t.Fatalf("want landscape orientation, got %+v", layout.Orientation)
+	}
+	if layout.FitToWidth == nil || *layout.FitToWidth != 1 {
+		t.Fatalf("want fit-to-width 1 page, got %+v", layout.FitToWidth)
+	}
+	if layout.FitToHeight == nil || *layout.FitToHeight != 0 {
+		t.Fatalf("want auto vertical pagination, got %+v", layout.FitToHeight)
+	}
+	props, err := got.GetSheetProps("Cashflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if props.FitToPage == nil || !*props.FitToPage {
+		t.Fatalf("want fit-to-page enabled, got %+v", props.FitToPage)
+	}
+	margins, err := got.GetPageMargins("Cashflow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if margins.Left == nil || *margins.Left < 0.39 || *margins.Left > 0.40 {
+		t.Fatalf("want ~10mm left margin, got %+v", margins.Left)
+	}
+	if margins.Right == nil || *margins.Right < 0.39 || *margins.Right > 0.40 {
+		t.Fatalf("want ~10mm right margin, got %+v", margins.Right)
+	}
+}
+
+func TestMaterializeActiveSheetXLSXAdaptiveLayout(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "adaptive.xlsx")
+	f := excelize.NewFile()
+	defer f.Close()
+	_ = f.SetCellValue("Sheet1", "A1", "wide")
+	if err := f.SaveAs(src); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := materializeActiveSheetXLSX(src, "Sheet1", chooseSheetPreviewLayout(500))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(out)
+
+	got, err := excelize.OpenFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer got.Close()
+	layout, err := got.GetPageLayout("Sheet1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if layout.Size == nil || *layout.Size != 8 {
+		t.Fatalf("want A3 paper size, got %+v", layout.Size)
+	}
+	if layout.FitToWidth == nil || *layout.FitToWidth != 1 {
+		t.Fatalf("want fit-to-width 1 page, got %+v", layout.FitToWidth)
 	}
 }
 

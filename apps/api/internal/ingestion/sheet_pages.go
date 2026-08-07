@@ -65,13 +65,24 @@ func (c *Converter) ConvertSpreadsheetWithSheetRanges(
 	}()
 
 	pageCounts := make([]int, 0, len(sheets))
+	widths, widthErr := sheetContentWidthsMM(localPath, sheets)
+	if widthErr != nil {
+		logger.InfoCtx(ctx, "sheet width probe failed; using default layout",
+			logger.Attr("error", widthErr.Error()),
+		)
+	}
 	for _, sheet := range sheets {
-		partKey, err := c.uploadSingleSheetWorkbook(ctx, storageKey, localPath, sheet)
+		layout := defaultSheetPreviewLayout()
+		if widthErr == nil {
+			layout = chooseSheetPreviewLayout(widths[sheet])
+		}
+
+		partKey, err := c.uploadSingleSheetWorkbook(ctx, storageKey, localPath, sheet, layout)
 		if err != nil {
 			return "", nil, fmt.Errorf("materialize sheet %q: %w", sheet, err)
 		}
 		tempKeys = append(tempKeys, partKey)
-		pdfPath, convErr := c.ConvertToPDFActiveSheet(ctx, "xlsx", partKey)
+		pdfPath, convErr := c.ConvertToPDFActiveSheetWithLayout(ctx, "xlsx", partKey, layout)
 		if convErr != nil {
 			return "", nil, fmt.Errorf("convert sheet %q: %w", sheet, convErr)
 		}
@@ -158,8 +169,9 @@ func isWorksheet(f *excelize.File, name string) bool {
 func (c *Converter) uploadSingleSheetWorkbook(
 	ctx context.Context,
 	origKey, localPath, sheet string,
+	layout sheetPreviewLayout,
 ) (string, error) {
-	tmp, err := materializeActiveSheetXLSX(localPath, sheet)
+	tmp, err := materializeActiveSheetXLSX(localPath, sheet, layout)
 	if err != nil {
 		return "", err
 	}
@@ -184,7 +196,7 @@ func (c *Converter) uploadSingleSheetWorkbook(
 	return objectKey, nil
 }
 
-func materializeActiveSheetXLSX(srcPath, sheetName string) (string, error) {
+func materializeActiveSheetXLSX(srcPath, sheetName string, layout sheetPreviewLayout) (string, error) {
 	f, err := excelize.OpenFile(srcPath)
 	if err != nil {
 		return "", err
@@ -210,6 +222,35 @@ func materializeActiveSheetXLSX(srcPath, sheetName string) (string, error) {
 	}
 	f.SetActiveSheet(idx)
 
+	// Mirror the chosen page setup into the workbook as well, so OnlyOffice
+	// versions that prefer workbook settings over spreadsheetLayout still get
+	// a wide landscape page instead of clipping the right-hand columns.
+	paperSize := sheetPaperSize(layout)
+	orientation := "landscape"
+	fitToWidth := layout.fitToWidth
+	fitToHeight := layout.fitToHeight
+	fitToPage := layout.fitToWidth > 0 || layout.fitToHeight > 0
+	margin10mm := 0.3937007874
+	if err := f.SetSheetProps(sheetName, &excelize.SheetPropsOptions{FitToPage: &fitToPage}); err != nil {
+		return "", fmt.Errorf("set sheet %q fit-to-page: %w", sheetName, err)
+	}
+	if err := f.SetPageLayout(sheetName, &excelize.PageLayoutOptions{
+		Size:        &paperSize,
+		Orientation: &orientation,
+		FitToWidth:  &fitToWidth,
+		FitToHeight: &fitToHeight,
+	}); err != nil {
+		return "", fmt.Errorf("set sheet %q page layout: %w", sheetName, err)
+	}
+	if err := f.SetPageMargins(sheetName, &excelize.PageLayoutMarginsOptions{
+		Left:   &margin10mm,
+		Right:  &margin10mm,
+		Top:    &margin10mm,
+		Bottom: &margin10mm,
+	}); err != nil {
+		return "", fmt.Errorf("set sheet %q page margins: %w", sheetName, err)
+	}
+
 	out, err := os.CreateTemp("", "sheet-*.xlsx")
 	if err != nil {
 		return "", err
@@ -221,6 +262,17 @@ func materializeActiveSheetXLSX(srcPath, sheetName string) (string, error) {
 		return "", err
 	}
 	return outPath, nil
+}
+
+func sheetPaperSize(layout sheetPreviewLayout) int {
+	switch {
+	case layout.pageWidthMM > 420:
+		return 66 // A2
+	case layout.pageWidthMM > 297:
+		return 8 // A3
+	default:
+		return 9 // A4
+	}
 }
 
 func sanitizeSheetKey(name string) string {
