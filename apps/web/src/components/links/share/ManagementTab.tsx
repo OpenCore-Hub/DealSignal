@@ -25,6 +25,7 @@ interface ManagementTabProps {
   linkId: string;
   dealRoomId?: string;
   askAiEnabled?: boolean;
+  askMode?: string;
   fileRequests: FileRequest[];
   onUpdateFileRequest: (requestId: string, status: FileRequest["status"]) => Promise<void>;
   onPendingHostCountChange?: (count: number) => void;
@@ -35,6 +36,7 @@ export function ManagementTab({
   linkId,
   dealRoomId,
   askAiEnabled = false,
+  askMode,
   fileRequests,
   onUpdateFileRequest,
   onPendingHostCountChange,
@@ -49,6 +51,7 @@ export function ManagementTab({
         <LinkAskPolicyCard
           linkId={linkId}
           initialAskAiEnabled={askAiEnabled}
+          initialAskMode={askMode}
           onAskAiEnabledChange={onAskAiEnabledChange}
         />
       ) : null}

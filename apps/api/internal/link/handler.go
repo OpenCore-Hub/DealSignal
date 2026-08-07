@@ -405,6 +405,7 @@ type UpdateRequest struct {
 	NotifyOnAccess              bool     `json:"notify_on_access,omitempty"`
 	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
 	AskAIEnabled                *bool    `json:"ask_ai_enabled,omitempty"`
+	AskMode                     *string  `json:"ask_mode,omitempty"`
 	FileRequestsEnabled         *bool    `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            *bool    `json:"index_file_enabled,omitempty"`
 	ScreenshotProtectionEnabled *bool    `json:"screenshot_protection_enabled,omitempty"`
@@ -619,6 +620,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 		WatermarkEnabled:            watermarkEnabled,
 		QaEnabled:                   qaEnabled,
 		AskAIEnabled:                req.AskAIEnabled,
+		AskMode:                     req.AskMode,
 		FileRequestsEnabled:         fileRequestsEnabled,
 		IndexFileEnabled:            indexFileEnabled,
 		ScreenshotProtectionEnabled: screenshotProtectionEnabled,
@@ -1049,6 +1051,7 @@ type CreateDealRoomLinkRequest struct {
 	WatermarkEnabled            bool     `json:"watermark_enabled,omitempty"`
 	QaEnabled                   *bool    `json:"qa_enabled,omitempty"`
 	AskAIEnabled                *bool    `json:"ask_ai_enabled,omitempty"`
+	AskMode                     string   `json:"ask_mode,omitempty"`
 	FileRequestsEnabled         bool     `json:"file_requests_enabled,omitempty"`
 	IndexFileEnabled            bool     `json:"index_file_enabled,omitempty"`
 	ScreenshotProtectionEnabled bool     `json:"screenshot_protection_enabled,omitempty"`
@@ -1083,6 +1086,10 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 	if req.AskAIEnabled != nil {
 		askAIEnabled = *req.AskAIEnabled
 	}
+	askMode := AskModeSupervised
+	if strings.TrimSpace(req.AskMode) != "" {
+		askMode = strings.TrimSpace(req.AskMode)
+	}
 
 	link, err := h.service.CreateDealRoomLink(c.Request.Context(), userID, workspaceID, roomID, DealRoomLinkRequest{
 		Name:                        req.Name,
@@ -1100,6 +1107,7 @@ func (h *Handler) CreateDealRoomLink(c *gin.Context) {
 		WatermarkEnabled:            req.WatermarkEnabled,
 		QaEnabled:                   true,
 		AskAiEnabled:                askAIEnabled,
+		AskMode:                     askMode,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,

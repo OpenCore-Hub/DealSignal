@@ -2,10 +2,25 @@ import type { AccessRule, Link } from "@/types";
 import type { CreateDealRoomLinkPayload, UpdateLinkPayload } from "@/lib/apiAdapters";
 import { PRESETS, isPresetMatch } from "./presets";
 import type { DraftLink, LinkPreset } from "./types";
+import {
+  DEFAULT_VISITOR_ASK_EXPERIENCE,
+  resolveAskPolicyFromExperience,
+  resolveExperienceFromAskPolicy,
+} from "./visitorAskExperience";
 
-/** Persisted ask_ai_enabled for deal-room share links (AI assistant toggle). */
+/** Persisted ask policy for deal-room share links. */
+export function resolveAskPolicyFromDraft(draft: DraftLink): {
+  askAiEnabled: boolean;
+  askMode: "supervised" | "self_serve" | "formal";
+} {
+  return resolveAskPolicyFromExperience(
+    draft.visitorAskExperience ?? DEFAULT_VISITOR_ASK_EXPERIENCE,
+  );
+}
+
+/** Persisted ask_ai_enabled for deal-room share links. */
 export function resolveAskAiEnabledFromDraft(draft: DraftLink): boolean {
-  return draft.enableAiAssistant === true;
+  return resolveAskPolicyFromDraft(draft).askAiEnabled;
 }
 
 /** @deprecated Use resolveAskAiEnabledFromDraft — qa_enabled stays true on deal-room links. */
@@ -92,7 +107,10 @@ export function buildDraft(link?: Link | null, rules?: AccessRule[]): DraftLink 
       enableScreenshotProtection: link.screenshotProtectionEnabled ?? false,
       enableFileRequests: link.fileRequestsEnabled ?? false,
       enableIndexFileGeneration: link.indexFileEnabled ?? false,
-      enableAiAssistant: link.askAiEnabled ?? false,
+      visitorAskExperience: resolveExperienceFromAskPolicy(
+        link.askAiEnabled,
+        link.askMode,
+      ),
       allowedViewers,
       blockedViewers,
       customDomain: link.customDomain ?? "",
@@ -162,6 +180,7 @@ export function buildAllowedLists(draft: DraftLink): {
 export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): UpdateLinkPayload {
   const identity = normalizeEmailIdentityGates(draft.requireEmail, draft.requireEmailVerification);
   const isDealRoomLink = Boolean(existingLink?.dealRoomId);
+  const askPolicy = isDealRoomLink ? resolveAskPolicyFromDraft(draft) : null;
   const permissionType = draft.requireNda
     ? "nda"
     : identity.requireEmailVerification || identity.requireEmail
@@ -187,10 +206,11 @@ export function buildLinkPayload(draft: DraftLink, existingLink?: Link | null): 
     expires_at: toRFC3339(draft.expiresAt) || undefined,
     download_enabled: draft.allowDownloading,
     watermark_enabled: draft.watermarkEnabled,
-    ...(isDealRoomLink
+    ...(askPolicy
       ? {
           qa_enabled: true,
-          ask_ai_enabled: resolveAskAiEnabledFromDraft(draft),
+          ask_ai_enabled: askPolicy.askAiEnabled,
+          ask_mode: askPolicy.askMode,
         }
       : { qa_enabled: false }),
     file_requests_enabled: draft.enableFileRequests,
@@ -229,7 +249,8 @@ export function buildDealRoomLinkCreatePayload(
     expires_at: base.expires_at,
     download_enabled: draft.allowDownloading,
     watermark_enabled: draft.watermarkEnabled,
-    ask_ai_enabled: resolveAskAiEnabledFromDraft(draft),
+    ask_ai_enabled: resolveAskPolicyFromDraft(draft).askAiEnabled,
+    ask_mode: resolveAskPolicyFromDraft(draft).askMode,
     file_requests_enabled: draft.enableFileRequests,
     index_file_enabled: draft.enableIndexFileGeneration,
     screenshot_protection_enabled: draft.enableScreenshotProtection,

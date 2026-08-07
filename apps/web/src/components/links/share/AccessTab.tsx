@@ -33,6 +33,8 @@ import {
   STANDALONE_ADVANCED_KEYS,
   countAdvancedEnabled,
 } from "./shareAdvanced";
+import { VisitorAskExperienceField } from "./VisitorAskExperienceField";
+import type { VisitorAskExperience } from "./visitorAskExperience";
 
 export type AccessTabLayout = "compact" | "sections";
 
@@ -311,7 +313,7 @@ export function AccessTab({
     updateDraft,
   ]);
 
-  const advancedCount = countAdvancedEnabled(draft, { countAiAssistant: isDealRoomLink });
+  const advancedCount = countAdvancedEnabled(draft, { countVisitorAsk: isDealRoomLink });
   /** Document links cannot use email verification; room floor locks it ON. */
   const verificationDisabledForDocuments = !isDealRoomLink;
   const emailSelfReportDisabled = verifyFloor;
@@ -719,13 +721,12 @@ export function AccessTab({
   const advancedBody = (
     <>
       {isDealRoomLink ? (
-        <OptionSwitch
-          label={t("accessRules.advanced.aiAssistant")}
-          description={t("accessRules.advanced.aiAssistantDescription")}
-          checked={draft.enableAiAssistant}
-          onCheckedChange={(checked) => updateDraft({ enableAiAssistant: checked })}
-          highlighted={isHighlighted("enableAiAssistant")}
-          testId="deal-room-ai-assistant-toggle"
+        <VisitorAskExperienceField
+          value={draft.visitorAskExperience}
+          onChange={(visitorAskExperience: VisitorAskExperience) =>
+            updateDraft({ visitorAskExperience })
+          }
+          highlighted={isHighlighted("visitorAskExperience")}
         />
       ) : null}
       {STANDALONE_ADVANCED_KEYS.map((key) => (

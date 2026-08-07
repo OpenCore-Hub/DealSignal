@@ -1,3 +1,5 @@
+import type { VisitorAskExperience } from "./visitorAskExperience";
+
 export type LinkPreset = "public" | "standard" | "confidential" | "custom";
 
 export type FolderScopeMode = "full" | "allowlist";
@@ -15,8 +17,8 @@ export interface AccessConfig {
   enableScreenshotProtection: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
-  /** Deal-room links only: visitor Ask Docs on the public viewer. */
-  enableAiAssistant: boolean;
+  /** Deal-room links only: unified visitor Ask routing (AI + mode). */
+  visitorAskExperience: VisitorAskExperience;
 }
 
 export interface DraftLink extends AccessConfig {

@@ -67,7 +67,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
-  enableAiAssistant: true,
+  visitorAskExperience: "ai_supervised" as const,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -238,7 +238,7 @@ describe("AccessTab", () => {
   });
 
   it("shows advanced count badge when file requests is enabled", () => {
-    renderAccessTab({ ...baseDraft, enableFileRequests: true, enableAiAssistant: false }, {}, true);
+    renderAccessTab({ ...baseDraft, enableFileRequests: true, visitorAskExperience: "ai_supervised" }, {}, true);
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
@@ -247,17 +247,17 @@ describe("AccessTab", () => {
       ...baseDraft,
       enableFileRequests: true,
       enableIndexFileGeneration: true,
-      enableAiAssistant: false,
+      visitorAskExperience: "ai_supervised",
     }, {}, true);
     expect(screen.getByText("2 enabled")).toBeInTheDocument();
   });
 
-  it("counts AI assistant in advanced badge for deal-room links", () => {
-    renderAccessTab({ ...baseDraft, enableAiAssistant: true }, {}, true);
+  it("counts non-default visitor ask experience in advanced badge for deal-room links", () => {
+    renderAccessTab({ ...baseDraft, visitorAskExperience: "formal" }, {}, true);
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("renders advanced options without Ask Host toggle", () => {
+  it("renders advanced options without legacy Ask Host toggle", () => {
     renderAccessTab(baseDraft);
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.queryByText(/Enable AI assistant/i)).not.toBeInTheDocument();
@@ -266,25 +266,24 @@ describe("AccessTab", () => {
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
   });
 
-  it("shows AI assistant toggle for deal-room links", () => {
+  it("shows visitor ask experience selector for deal-room links", () => {
     renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByTestId("deal-room-ai-assistant-toggle")).toBeInTheDocument();
-    expect(screen.getByText(/AI assistant/i)).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: /AI assistant/i })).toBeInTheDocument();
+    expect(screen.getByTestId("visitor-ask-experience")).toBeInTheDocument();
+    expect(screen.getByText(/Q&A strategy/i)).toBeInTheDocument();
   });
 
-  it("toggles AI assistant for deal-room links", () => {
-    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
-    fireEvent.click(screen.getByText(/advanced/i));
-    fireEvent.click(screen.getByRole("switch", { name: /AI assistant/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ enableAiAssistant: false });
-  });
-
-  it("does not show AI assistant toggle for document-only links", () => {
+  it("does not show visitor ask experience selector for document-only links", () => {
     renderAccessTab(baseDraft, {}, false);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.queryByTestId("deal-room-ai-assistant-toggle")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("visitor-ask-experience")).not.toBeInTheDocument();
+  });
+
+  it("selects visitor ask experience via card radio", () => {
+    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
+    fireEvent.click(screen.getByText(/advanced/i));
+    fireEvent.click(screen.getByTestId("visitor-ask-experience-formal"));
+    expect(updateDraft).toHaveBeenCalledWith({ visitorAskExperience: "formal" });
   });
 
   it("renders all advanced options when section is expanded", () => {
@@ -294,12 +293,12 @@ describe("AccessTab", () => {
     expect(screen.getByText(/index file/i)).toBeInTheDocument();
   });
 
-  it("enables functional advanced switches except screenshot protection", () => {
-    renderAccessTab(baseDraft);
+  it("enables functional advanced switches for deal-room links", () => {
+    renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
     expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
-    expect(screen.getByRole("switch", { name: /AI assistant/i })).not.toBeDisabled();
+    expect(screen.getByRole("radiogroup", { name: /Q&A strategy/i })).not.toBeDisabled();
   });
 
   it("displays validation errors", () => {

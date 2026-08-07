@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import { I18nextProvider } from "react-i18next";
 import { LinkAskPolicyCard } from "./LinkAskPolicyCard";
 import { createTestI18n } from "@/i18n/test-utils";
@@ -53,83 +53,14 @@ describe("LinkAskPolicyCard", () => {
     });
   });
 
-  it("renders grounded AI toggle for deal-room links", async () => {
+  it("renders unified Q&A strategy card radios", async () => {
     await renderCard(false);
     expect(screen.getByText("Grounded AI answers")).toBeInTheDocument();
-    expect(screen.getByTestId("link-ask-ai-enabled")).toBeInTheDocument();
-  });
-
-  it("renders ask routing mode selector", async () => {
-    await renderCard(false);
     await waitFor(() => {
-      expect(screen.getByTestId("link-ask-mode")).toBeInTheDocument();
+      expect(screen.getByTestId("link-ask-experience")).toBeInTheDocument();
     });
-    expect(screen.getByText("Ask routing mode")).toBeInTheDocument();
-  });
-
-  it("shows self-serve mode option in routing selector", async () => {
-    await renderCard(false);
-    await waitFor(() => {
-      expect(screen.getByTestId("link-ask-mode")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("link-ask-mode"));
-    expect(await screen.findByRole("option", { name: "Self-serve" })).toBeInTheDocument();
-  });
-
-  it("shows formal mode option in routing selector", async () => {
-    await renderCard(false);
-    await waitFor(() => {
-      expect(screen.getByTestId("link-ask-mode")).toBeInTheDocument();
-    });
-    fireEvent.click(screen.getByTestId("link-ask-mode"));
-    expect(await screen.findByRole("option", { name: "Formal" })).toBeInTheDocument();
-  });
-
-  it("enables grounded AI via ask-policy API", async () => {
-    vi.mocked(api.updateLinkAskPolicy).mockResolvedValue({
-      data: {
-        id: "link_room_1",
-        askMode: "supervised",
-        askAiEnabled: true,
-        askAiMonthlyQuota: null,
-        askAiMonthlyUsed: 12,
-        askAiMonthlyLimit: 500,
-        askAiQuotaExceeded: false,
-      },
-    });
-    await renderCard(false);
-    await waitFor(() => {
-      expect(screen.getByRole("switch")).not.toBeDisabled();
-    });
-    const toggle = screen.getByRole("switch");
-    fireEvent.click(toggle);
-    await waitFor(() => {
-      expect(api.updateLinkAskPolicy).toHaveBeenCalledWith("link_room_1", {
-        askAiEnabled: true,
-      });
-    });
-  });
-
-  it("notifies parent when grounded AI policy changes", async () => {
-    const onAskAiEnabledChange = vi.fn();
-    vi.mocked(api.updateLinkAskPolicy).mockResolvedValue({
-      data: {
-        id: "link_room_1",
-        askMode: "supervised",
-        askAiEnabled: true,
-        askAiMonthlyQuota: null,
-        askAiMonthlyUsed: 12,
-        askAiMonthlyLimit: 500,
-        askAiQuotaExceeded: false,
-      },
-    });
-    await renderCard(false, onAskAiEnabledChange);
-    await waitFor(() => {
-      expect(screen.getByRole("switch")).not.toBeDisabled();
-    });
-    fireEvent.click(screen.getByRole("switch"));
-    await waitFor(() => {
-      expect(onAskAiEnabledChange).toHaveBeenCalledWith(true);
-    });
+    expect(screen.getByText("Q&A strategy")).toBeInTheDocument();
+    expect(screen.getByTestId("link-ask-experience-formal")).toBeInTheDocument();
+    expect(screen.getByTestId("link-ask-experience-ai_supervised")).toBeInTheDocument();
   });
 });

@@ -1891,6 +1891,8 @@ export const handlers = [
       download_enabled?: boolean;
       watermark_enabled?: boolean;
       qa_enabled?: boolean;
+      ask_ai_enabled?: boolean;
+      ask_mode?: string;
     };
     // Update the in-memory link to reflect the edited values so subsequent reads
     // (including tests) see the new state.
@@ -1932,6 +1934,14 @@ export const handlers = [
       if (typeof payload.ask_ai_enabled === "boolean") {
         link.askAiEnabled = payload.ask_ai_enabled;
       }
+      const payloadAskMode = (payload as { ask_mode?: string }).ask_mode;
+      if (
+        payloadAskMode === "supervised" ||
+        payloadAskMode === "self_serve" ||
+        payloadAskMode === "formal"
+      ) {
+        link.askMode = payloadAskMode;
+      }
     } else if (typeof payload.qa_enabled === "boolean") {
       link.qaEnabled = payload.qa_enabled;
     } else {
@@ -1961,6 +1971,14 @@ export const handlers = [
         link.askAiEnabled = patchAskAi;
       } else if (typeof patchAskAiSnake === "boolean") {
         link.askAiEnabled = patchAskAiSnake;
+      }
+      const patchAskMode = (patch as { ask_mode?: string }).ask_mode;
+      if (
+        patchAskMode === "supervised" ||
+        patchAskMode === "self_serve" ||
+        patchAskMode === "formal"
+      ) {
+        link.askMode = patchAskMode;
       }
     } else {
       const patchQa = patch.qaEnabled;
@@ -3082,6 +3100,7 @@ export const handlers = [
     const body = (await request.json()) as {
       name?: string;
       ask_ai_enabled?: boolean;
+      ask_mode?: string;
       qa_enabled?: boolean;
       folder_paths?: string[];
       folder_scope_mode?: "full" | "allowlist";
@@ -3128,6 +3147,10 @@ export const handlers = [
       qaEnabled: true,
       askAiEnabled:
         typeof body.ask_ai_enabled === "boolean" ? body.ask_ai_enabled : true,
+      askMode:
+        body.ask_mode === "self_serve" || body.ask_mode === "formal"
+          ? body.ask_mode
+          : "supervised",
       dealRoomId: roomId,
       requireEmail: requireEmailVerification ? false : !!body.require_email,
       requireEmailVerification,

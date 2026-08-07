@@ -43,7 +43,6 @@ import { useAsyncData } from "@/hooks/useAsyncData";
 import { DealRoomShareDialog } from "./DealRoomShareDialog";
 import { SendVerificationCodeDialog } from "./SendVerificationCodeDialog";
 import { LinkActivityDialog } from "@/components/links/share";
-import { RowActions } from "@/components/common/RowActions";
 import type { Link } from "@/types";
 
 const PAGE_SIZE = 10;
@@ -511,44 +510,67 @@ export function FolderPermissionsSection({
                           />
                         </TableCell>
                         <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                          <RowActions
-                            actions={[
-                              {
-                                label: t("permissions.links.actions.view"),
-                                icon: <ChartLine size={16} />,
-                                onClick: () => setViewLink(link),
-                              },
-                              {
-                                label: t("permissions.links.actions.edit"),
-                                icon: <PencilSimple size={16} />,
-                                onClick: () => setEditLink(link),
-                              },
-                              ...(pendingCount > 0 && onManageAccess
-                                ? [
-                                    {
-                                      label: t("permissions.links.actions.approveRequests"),
-                                      icon: <UserPlus size={16} />,
-                                      onClick: () => onManageAccess(link.id),
-                                    },
-                                  ]
-                                : []),
-                              ...(link.requireEmailVerification
-                                ? [
-                                    {
-                                      label: t("permissions.links.actions.sendCode"),
-                                      icon: <EnvelopeSimple size={16} />,
-                                      onClick: () => setSendCodeLink(link),
-                                    },
-                                  ]
-                                : []),
-                              {
-                                label: t("permissions.links.actions.delete"),
-                                icon: <Trash size={16} />,
-                                destructive: true,
-                                onClick: () => setDeleteLink(link),
-                              },
-                            ]}
-                          />
+                          <div className="flex items-center justify-end gap-0.5">
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              className="shrink-0 text-muted-foreground"
+                              aria-label={t("permissions.links.actions.view")}
+                              title={t("permissions.links.actions.view")}
+                              onClick={() => setViewLink(link)}
+                            >
+                              <ChartLine size={16} />
+                            </Button>
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              className="shrink-0 text-muted-foreground"
+                              aria-label={t("permissions.links.actions.edit")}
+                              title={t("permissions.links.actions.edit")}
+                              onClick={() => setEditLink(link)}
+                            >
+                              <PencilSimple size={16} />
+                            </Button>
+                            {pendingCount > 0 && onManageAccess ? (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="shrink-0 text-muted-foreground"
+                                aria-label={t("permissions.links.actions.approveRequests")}
+                                title={t("permissions.links.actions.approveRequests")}
+                                onClick={() => onManageAccess(link.id)}
+                              >
+                                <UserPlus size={16} />
+                              </Button>
+                            ) : null}
+                            {link.requireEmailVerification ? (
+                              <Button
+                                type="button"
+                                size="icon-sm"
+                                variant="ghost"
+                                className="shrink-0 text-muted-foreground"
+                                aria-label={t("permissions.links.actions.sendCode")}
+                                title={t("permissions.links.actions.sendCode")}
+                                onClick={() => setSendCodeLink(link)}
+                              >
+                                <EnvelopeSimple size={16} />
+                              </Button>
+                            ) : null}
+                            <Button
+                              type="button"
+                              size="icon-sm"
+                              variant="ghost"
+                              className="shrink-0 text-muted-foreground hover:text-destructive"
+                              aria-label={t("permissions.links.actions.delete")}
+                              title={t("permissions.links.actions.delete")}
+                              onClick={() => setDeleteLink(link)}
+                            >
+                              <Trash size={16} />
+                            </Button>
+                          </div>
                         </TableCell>
                       </TableRow>
                     );

@@ -4,15 +4,6 @@ import { Sparkle } from "@phosphor-icons/react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Card,
   CardContent,
@@ -20,12 +11,19 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-type AskRoutingMode = "supervised" | "self_serve" | "formal";
+import { VisitorAskExperienceField } from "./VisitorAskExperienceField";
+import {
+  DEFAULT_VISITOR_ASK_EXPERIENCE,
+  experienceUsesAiLane,
+  resolveAskPolicyFromExperience,
+  resolveExperienceFromAskPolicy,
+  type VisitorAskExperience,
+} from "./visitorAskExperience";
 
 interface LinkAskPolicyCardProps {
   linkId: string;
   initialAskAiEnabled: boolean;
+  initialAskMode?: string;
   onAskAiEnabledChange?: (enabled: boolean) => void;
 }
 
@@ -44,13 +42,14 @@ function askPolicyErrorMessage(
 export function LinkAskPolicyCard({
   linkId,
   initialAskAiEnabled,
+  initialAskMode,
   onAskAiEnabledChange,
 }: LinkAskPolicyCardProps) {
   const { t } = useTranslation("linkShare");
-  const [enabled, setEnabled] = useState(initialAskAiEnabled);
-  const [askMode, setAskMode] = useState<AskRoutingMode>("supervised");
+  const [experience, setExperience] = useState<VisitorAskExperience>(() =>
+    resolveExperienceFromAskPolicy(initialAskAiEnabled, initialAskMode),
+  );
   const [saving, setSaving] = useState(false);
-  const [savingMode, setSavingMode] = useState(false);
   const [loadingQuota, setLoadingQuota] = useState(true);
   const [monthlyUsed, setMonthlyUsed] = useState<number | null>(null);
   const [monthlyLimit, setMonthlyLimit] = useState<number | null>(null);
@@ -58,8 +57,8 @@ export function LinkAskPolicyCard({
   const [entitled, setEntitled] = useState(true);
 
   useEffect(() => {
-    setEnabled(initialAskAiEnabled);
-  }, [initialAskAiEnabled, linkId]);
+    setExperience(resolveExperienceFromAskPolicy(initialAskAiEnabled, initialAskMode));
+  }, [initialAskAiEnabled, initialAskMode, linkId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -72,11 +71,9 @@ export function LinkAskPolicyCard({
         setMonthlyLimit(res.data.askAiMonthlyLimit ?? null);
         setQuotaExceeded(Boolean(res.data.askAiQuotaExceeded));
         setEntitled(res.data.askAiEntitled !== false);
-        setEnabled(res.data.askAiEnabled);
-        const mode = res.data.askMode;
-        if (mode === "self_serve" || mode === "supervised" || mode === "formal") {
-          setAskMode(mode);
-        }
+        setExperience(
+          resolveExperienceFromAskPolicy(res.data.askAiEnabled, res.data.askMode),
+        );
       })
       .catch(() => {
         if (!cancelled) {
@@ -92,75 +89,38 @@ export function LinkAskPolicyCard({
     };
   }, [linkId]);
 
-  const applyPolicyResponse = (data: {
-    askAiEnabled: boolean;
-    askMode?: string;
-    askAiMonthlyUsed?: number;
-    askAiMonthlyLimit?: number;
-    askAiQuotaExceeded?: boolean;
-    askAiEntitled?: boolean;
-  }) => {
-    setEnabled(data.askAiEnabled);
-    if (data.askMode === "self_serve" || data.askMode === "supervised" || data.askMode === "formal") {
-      setAskMode(data.askMode);
-    }
-    if (data.askAiMonthlyUsed != null) setMonthlyUsed(data.askAiMonthlyUsed);
-    if (data.askAiMonthlyLimit != null) setMonthlyLimit(data.askAiMonthlyLimit);
-    if (data.askAiQuotaExceeded != null) setQuotaExceeded(data.askAiQuotaExceeded);
-    if (data.askAiEntitled != null) setEntitled(data.askAiEntitled);
-  };
-
-  const onToggle = async (checked: boolean) => {
-    const previous = enabled;
-    setEnabled(checked);
+  const onExperienceChange = async (next: VisitorAskExperience) => {
+    const previous = experience;
+    setExperience(next);
     setSaving(true);
+    const policy = resolveAskPolicyFromExperience(next);
     try {
-      const res = await api.updateLinkAskPolicy(linkId, { askAiEnabled: checked });
-      applyPolicyResponse(res.data);
-      onAskAiEnabledChange?.(res.data.askAiEnabled);
-      toast.success(
-        checked
-          ? t("management.askPolicyEnabledSuccess")
-          : t("management.askPolicyDisabledSuccess"),
+      const res = await api.updateLinkAskPolicy(linkId, {
+        askAiEnabled: policy.askAiEnabled,
+        askMode: policy.askMode,
+      });
+      setExperience(
+        resolveExperienceFromAskPolicy(res.data.askAiEnabled, res.data.askMode),
       );
+      if (res.data.askAiMonthlyUsed != null) setMonthlyUsed(res.data.askAiMonthlyUsed);
+      if (res.data.askAiMonthlyLimit != null) setMonthlyLimit(res.data.askAiMonthlyLimit);
+      if (res.data.askAiQuotaExceeded != null) setQuotaExceeded(res.data.askAiQuotaExceeded);
+      if (res.data.askAiEntitled != null) setEntitled(res.data.askAiEntitled);
+      onAskAiEnabledChange?.(res.data.askAiEnabled);
+      toast.success(t("management.askPolicyExperienceUpdated"));
     } catch (err) {
-      setEnabled(previous);
+      setExperience(previous);
       toast.error(askPolicyErrorMessage(err, t));
     } finally {
       setSaving(false);
     }
   };
 
-  const onModeChange = async (value: AskRoutingMode) => {
-    const previous = askMode;
-    setAskMode(value);
-    setSavingMode(true);
-    try {
-      const res = await api.updateLinkAskPolicy(linkId, { askMode: value });
-      applyPolicyResponse(res.data);
-    } catch (err) {
-      setAskMode(previous);
-      toast.error(
-        err instanceof ApiError && err.code === "invalid_input"
-          ? t("management.askPolicyInvalidInput")
-          : t("management.askPolicyModeUpdateFailed"),
-      );
-    } finally {
-      setSavingMode(false);
-    }
-  };
-
   const showQuota =
-    enabled && monthlyUsed != null && monthlyLimit != null && monthlyLimit > 0;
-
-  const modeHintKey =
-    askMode === "self_serve"
-      ? "management.askPolicyModeSelfServeHint"
-      : askMode === "formal"
-        ? "management.askPolicyModeFormalHint"
-        : "management.askPolicyModeSupervisedHint";
-
-  const aiToggleDisabled = saving || loadingQuota || (!entitled && !enabled) || askMode === "formal";
+    experienceUsesAiLane(experience) &&
+    monthlyUsed != null &&
+    monthlyLimit != null &&
+    monthlyLimit > 0;
 
   return (
     <Card>
@@ -172,47 +132,17 @@ export function LinkAskPolicyCard({
         <CardDescription>{t("management.askPolicyDescription")}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        <div className="space-y-2">
-          <Label className="text-sm font-medium">{t("management.askPolicyModeLabel")}</Label>
-          <Select
-            value={askMode}
-            disabled={loadingQuota || savingMode}
-            onValueChange={(value) => void onModeChange(value as AskRoutingMode)}
-          >
-            <SelectTrigger data-testid="link-ask-mode">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="supervised">
-                {t("management.askPolicyModeSupervised")}
-              </SelectItem>
-              <SelectItem value="self_serve">
-                {t("management.askPolicyModeSelfServe")}
-              </SelectItem>
-              <SelectItem value="formal">
-                {t("management.askPolicyModeFormal")}
-              </SelectItem>
-            </SelectContent>
-          </Select>
-          <p className="text-xs text-muted-foreground">{t(modeHintKey)}</p>
-        </div>
+        <VisitorAskExperienceField
+          value={experience || DEFAULT_VISITOR_ASK_EXPERIENCE}
+          onChange={(next) => {
+            void onExperienceChange(next);
+          }}
+          disabled={saving || loadingQuota}
+          labelKey="management.askPolicyExperienceLabel"
+          testId="link-ask-experience"
+        />
 
-        <div
-          className="flex items-center justify-between gap-4 rounded-md p-1"
-          data-testid="link-ask-ai-enabled"
-        >
-          <Label className="leading-none font-normal text-foreground">
-            {t("management.askPolicyToggleLabel")}
-          </Label>
-          <Switch
-            checked={enabled}
-            disabled={aiToggleDisabled}
-            onCheckedChange={onToggle}
-            aria-label={t("management.askPolicyToggleLabel")}
-          />
-        </div>
-
-        {!entitled ? (
+        {!entitled && experienceUsesAiLane(experience) ? (
           <p className="text-xs text-muted-foreground">{t("management.askPolicyNotEntitled")}</p>
         ) : null}
 

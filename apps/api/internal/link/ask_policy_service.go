@@ -34,18 +34,35 @@ func (s *Service) syncDealRoomAskAiWithQaEnabled(
 	link db.Link,
 	askAIEnabled bool,
 ) error {
-	if !link.DealRoomID.Valid || link.AskAiEnabled == askAIEnabled {
+	return s.syncDealRoomAskPolicy(ctx, qtx, link, askAIEnabled, askModeOrDefault(link.AskMode))
+}
+
+func (s *Service) syncDealRoomAskPolicy(
+	ctx context.Context,
+	qtx *db.Queries,
+	link db.Link,
+	askAIEnabled bool,
+	askMode string,
+) error {
+	if !link.DealRoomID.Valid {
+		return nil
+	}
+	mode := askModeOrDefault(askMode)
+	if err := validateAskMode(mode); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidInput, err)
+	}
+	if link.AskAiEnabled == askAIEnabled && askModeOrDefault(link.AskMode) == mode {
 		return nil
 	}
 	_, err := qtx.UpdateLinkAskPolicy(ctx, db.UpdateLinkAskPolicyParams{
 		ID:                link.ID,
 		WorkspaceID:       link.WorkspaceID,
-		AskMode:           askModeOrDefault(link.AskMode),
+		AskMode:           mode,
 		AskAiEnabled:      askAIEnabled,
 		AskAiMonthlyQuota: link.AskAiMonthlyQuota,
 	})
 	if err != nil {
-		return fmt.Errorf("set ask_ai_enabled: %w", err)
+		return fmt.Errorf("set ask policy: %w", err)
 	}
 	return nil
 }

@@ -111,29 +111,6 @@ describe("ManagementTab", () => {
     expect(screen.getByText("Please send the full report.")).toBeInTheDocument();
   });
 
-  it("forwards grounded AI policy changes to parent", async () => {
-    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
-    vi.mocked(api.updateLinkAskPolicy).mockResolvedValue({
-      data: {
-        id: "link_1",
-        askMode: "supervised",
-        askAiEnabled: true,
-        askAiMonthlyUsed: 0,
-        askAiMonthlyLimit: 500,
-        askAiQuotaExceeded: false,
-      },
-    });
-    const onAskAiEnabledChange = vi.fn();
-    await renderTab({ onAskAiEnabledChange });
-    await waitFor(() => {
-      expect(screen.getByRole("switch")).not.toBeDisabled();
-    });
-    fireEvent.click(screen.getByRole("switch"));
-    await waitFor(() => {
-      expect(onAskAiEnabledChange).toHaveBeenCalledWith(true);
-    });
-  });
-
   it("submits a host answer via unified ask API", async () => {
     const pending: OwnerAskTurn = {
       id: "turn-1",

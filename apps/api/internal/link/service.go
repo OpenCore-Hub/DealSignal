@@ -329,6 +329,8 @@ type UpdateLinkRequest struct {
 	FolderScopeMode string
 	// AskAIEnabled patches ask_ai_enabled for deal-room links (nil = unchanged).
 	AskAIEnabled *bool
+	// AskMode patches ask routing mode for deal-room links (nil = unchanged).
+	AskMode *string
 }
 
 // AccessRule represents a single allow/block rule for a link.
@@ -374,6 +376,7 @@ type DealRoomLinkRequest struct {
 	WatermarkEnabled            bool
 	QaEnabled                   bool
 	AskAiEnabled                bool
+	AskMode                     string
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
 	ScreenshotProtectionEnabled bool
@@ -989,8 +992,16 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		return db.Link{}, fmt.Errorf("set link NDA binding: %w", err)
 	}
 
-	if isDealRoomLink && req.AskAIEnabled != nil {
-		if err := s.syncDealRoomAskAiWithQaEnabled(ctx, qtx, existing, *req.AskAIEnabled); err != nil {
+	if isDealRoomLink && (req.AskAIEnabled != nil || req.AskMode != nil) {
+		askAIEnabled := existing.AskAiEnabled
+		if req.AskAIEnabled != nil {
+			askAIEnabled = *req.AskAIEnabled
+		}
+		askMode := existing.AskMode
+		if req.AskMode != nil {
+			askMode = *req.AskMode
+		}
+		if err := s.syncDealRoomAskPolicy(ctx, qtx, existing, askAIEnabled, askMode); err != nil {
 			return db.Link{}, err
 		}
 	}
@@ -1238,8 +1249,9 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		_ = s.bootstrapRoomAccessPolicyFromLinkRequest(ctx, userID, workspaceID, dealRoomID, req, link.PasswordHash)
 	}
 
-	// Deal-room links default to supervised Ask mode; AI lane follows ask_ai_enabled.
-	if err := s.syncDealRoomAskAiWithQaEnabled(ctx, s.queries, link, req.AskAiEnabled); err != nil {
+	// Deal-room links: apply ask routing policy from create request.
+	askMode := askModeOrDefault(req.AskMode)
+	if err := s.syncDealRoomAskPolicy(ctx, s.queries, link, req.AskAiEnabled, askMode); err != nil {
 		return db.Link{}, fmt.Errorf("set default deal-room ask policy: %w", err)
 	}
 	updated, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
@@ -1248,19 +1260,6 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 	})
 	if err != nil {
 		return db.Link{}, fmt.Errorf("reload deal-room link ask policy: %w", err)
-	}
-	// Ensure supervised mode even when ask_ai was already aligned.
-	if updated.AskMode != AskModeSupervised {
-		updated, err = s.queries.UpdateLinkAskPolicy(ctx, db.UpdateLinkAskPolicyParams{
-			ID:                link.ID,
-			WorkspaceID:       link.WorkspaceID,
-			AskMode:           AskModeSupervised,
-			AskAiEnabled:      updated.AskAiEnabled,
-			AskAiMonthlyQuota: updated.AskAiMonthlyQuota,
-		})
-		if err != nil {
-			return db.Link{}, fmt.Errorf("set deal-room ask mode: %w", err)
-		}
 	}
 	return updated, nil
 }

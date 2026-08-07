@@ -83,7 +83,7 @@ export interface Link {
   /** Q&A feature toggle (available from v2.7+ backend). */
   qaEnabled?: boolean;
   /** Visitor Ask routing mode (supervised | ai_first). */
-  askMode?: "supervised" | "ai_first";
+  askMode?: "supervised" | "self_serve" | "formal";
   /** Grounded AI answers for deal-room links (Phase B). */
   askAiEnabled?: boolean;
   /** Unified visitor Ask UI (Phase A; requires VISITOR_ASK_UNIFIED=1 on API). */

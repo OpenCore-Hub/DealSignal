@@ -21,6 +21,7 @@ export interface CreateLinkPayload {
   watermark_enabled?: boolean;
   qa_enabled?: boolean;
   ask_ai_enabled?: boolean;
+  ask_mode?: "supervised" | "self_serve" | "formal";
   file_requests_enabled?: boolean;
   index_file_enabled?: boolean;
   screenshot_protection_enabled?: boolean;
@@ -49,6 +50,7 @@ export interface CreateDealRoomLinkPayload {
   watermark_enabled?: boolean;
   qa_enabled?: boolean;
   ask_ai_enabled?: boolean;
+  ask_mode?: "supervised" | "self_serve" | "formal";
   file_requests_enabled?: boolean;
   index_file_enabled?: boolean;
   screenshot_protection_enabled?: boolean;

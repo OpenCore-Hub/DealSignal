@@ -928,6 +928,7 @@ export function AnalyticsTab({ link, logs, onLinkUpdate }: AnalyticsTabProps) {
             linkId={link.id}
             dealRoomId={link.dealRoomId}
             askAiEnabled={link.askAiEnabled ?? false}
+            askMode={link.askMode}
             fileRequests={fileRequests}
             onUpdateFileRequest={handleUpdateFileRequest}
             onPendingHostCountChange={setPendingHostCount}

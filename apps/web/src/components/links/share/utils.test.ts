@@ -18,7 +18,7 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
-  enableAiAssistant: false,
+  visitorAskExperience: "host_only" as const,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -104,20 +104,26 @@ describe("buildLinkPayload", () => {
   });
 
   it("always sends qa_enabled false for document links", () => {
-    const payload = buildLinkPayload({ ...baseDraft, enableAiAssistant: false });
+    const payload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "host_only" });
     expect(payload.qa_enabled).toBe(false);
     expect(payload.ask_ai_enabled).toBeUndefined();
   });
 
-  it("sends qa_enabled true and ask_ai_enabled from toggle for deal-room links", () => {
+  it("sends ask policy for deal-room links from visitor ask experience", () => {
     const existingLink = { id: "link-1", dealRoomId: "room-1" } as unknown as Link;
-    const offPayload = buildLinkPayload({ ...baseDraft, enableAiAssistant: false }, existingLink);
+    const offPayload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "host_only" }, existingLink);
     expect(offPayload.qa_enabled).toBe(true);
     expect(offPayload.ask_ai_enabled).toBe(false);
+    expect(offPayload.ask_mode).toBe("supervised");
 
-    const onPayload = buildLinkPayload({ ...baseDraft, enableAiAssistant: true }, existingLink);
+    const onPayload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "ai_supervised" }, existingLink);
     expect(onPayload.qa_enabled).toBe(true);
     expect(onPayload.ask_ai_enabled).toBe(true);
+    expect(onPayload.ask_mode).toBe("supervised");
+
+    const formalPayload = buildLinkPayload({ ...baseDraft, visitorAskExperience: "formal" }, existingLink);
+    expect(formalPayload.ask_ai_enabled).toBe(false);
+    expect(formalPayload.ask_mode).toBe("formal");
   });
 
   it("includes contact_ids for document links when verification is enabled", () => {
@@ -204,20 +210,21 @@ describe("buildLinkPayload", () => {
 });
 
 describe("resolveAskAiEnabledFromDraft", () => {
-  it("returns true only when enableAiAssistant is explicitly true", () => {
-    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, enableAiAssistant: true })).toBe(true);
-    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, enableAiAssistant: false })).toBe(false);
+  it("returns true for AI-backed visitor ask experiences", () => {
+    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, visitorAskExperience: "ai_supervised" })).toBe(true);
+    expect(resolveAskAiEnabledFromDraft({ ...baseDraft, visitorAskExperience: "host_only" })).toBe(false);
   });
 });
 
 describe("buildDealRoomLinkCreatePayload", () => {
-  it("maps create fields and ask_ai_enabled from the AI assistant toggle", () => {
+  it("maps create fields and ask policy from visitor ask experience", () => {
     const payload = buildDealRoomLinkCreatePayload(
-      { ...baseDraft, name: " Room Link ", enableAiAssistant: false, requirePassword: true, password: "password123" },
+      { ...baseDraft, name: " Room Link ", visitorAskExperience: "host_only", requirePassword: true, password: "password123" },
       { allowedEmails: ["a@b.com"], blockedEmails: ["c@d.com"] },
     );
     expect(payload.name).toBe("Room Link");
     expect(payload.ask_ai_enabled).toBe(false);
+    expect(payload.ask_mode).toBe("supervised");
     expect(JSON.stringify(payload)).toContain('"ask_ai_enabled":false');
     expect(payload).not.toHaveProperty("qa_enabled");
     expect(payload.allowed_emails).toEqual(["a@b.com"]);
