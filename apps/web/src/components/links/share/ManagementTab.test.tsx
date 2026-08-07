@@ -13,8 +13,6 @@ vi.mock("@/lib/api", () => ({
   api: {
     listLinkAsk: vi.fn(),
     answerAskTurn: vi.fn(),
-    updateLinkAskPolicy: vi.fn(),
-    getLinkAskPolicy: vi.fn(),
   },
 }));
 
@@ -25,7 +23,6 @@ vi.mock("sonner", () => ({
 async function renderTab(props: {
   fileRequests?: FileRequest[];
   onUpdateFileRequest?: (id: string, status: string) => Promise<void>;
-  onAskAiEnabledChange?: (enabled: boolean) => void;
 }) {
   const i18n = await createTestI18n({
     linkShare: enLinkShare as unknown as Record<string, string>,
@@ -36,10 +33,8 @@ async function renderTab(props: {
         <ManagementTab
           linkId="link_1"
           dealRoomId="room_1"
-          askAiEnabled={false}
           fileRequests={props.fileRequests ?? []}
           onUpdateFileRequest={props.onUpdateFileRequest ?? vi.fn()}
-          onAskAiEnabledChange={props.onAskAiEnabledChange}
         />
       </I18nextProvider>
     </MemoryRouter>,
@@ -64,25 +59,12 @@ describe("ManagementTab", () => {
   beforeEach(() => {
     vi.mocked(api.listLinkAsk).mockReset();
     vi.mocked(api.answerAskTurn).mockReset();
-    vi.mocked(api.getLinkAskPolicy).mockReset();
-    vi.mocked(api.getLinkAskPolicy).mockResolvedValue({
-      data: {
-        id: "link_1",
-        askMode: "supervised",
-        askAiEnabled: false,
-        askAiMonthlyQuota: null,
-        askAiMonthlyUsed: 0,
-        askAiMonthlyLimit: 500,
-        askAiQuotaExceeded: false,
-        askAiEntitled: true,
-      },
-    });
   });
 
   it("labels Ask inbox separately from audit and Signal", async () => {
     vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
     await renderTab({});
-    expect(screen.getByText("Grounded AI answers")).toBeInTheDocument();
+    expect(screen.queryByText("Grounded AI answers")).not.toBeInTheDocument();
     expect(screen.getByText("Ask inbox")).toBeInTheDocument();
     expect(screen.getByText(/not the Signal inbox/i)).toBeInTheDocument();
     expect(await screen.findByText(/No Ask questions yet/i)).toBeInTheDocument();

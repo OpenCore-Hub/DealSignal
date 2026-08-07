@@ -16,7 +16,6 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { OwnerAskInboxPanel } from "@/components/ask/OwnerAskInboxPanel";
-import { LinkAskPolicyCard } from "./LinkAskPolicyCard";
 import { useOwnerAskCitationNavigation } from "@/lib/ownerAskCitation";
 import type { FileRequest } from "@/types";
 import { formatRelativeTime } from "@/lib/formatters";
@@ -24,38 +23,23 @@ import { formatRelativeTime } from "@/lib/formatters";
 interface ManagementTabProps {
   linkId: string;
   dealRoomId?: string;
-  askAiEnabled?: boolean;
-  askMode?: string;
   fileRequests: FileRequest[];
   onUpdateFileRequest: (requestId: string, status: FileRequest["status"]) => Promise<void>;
   onPendingHostCountChange?: (count: number) => void;
-  onAskAiEnabledChange?: (enabled: boolean) => void;
 }
 
 export function ManagementTab({
   linkId,
   dealRoomId,
-  askAiEnabled = false,
-  askMode,
   fileRequests,
   onUpdateFileRequest,
   onPendingHostCountChange,
-  onAskAiEnabledChange,
 }: ManagementTabProps) {
   const { t } = useTranslation("linkShare");
   const onOpenCitation = useOwnerAskCitationNavigation(dealRoomId);
 
   return (
     <div className="space-y-6 py-2">
-      {dealRoomId ? (
-        <LinkAskPolicyCard
-          linkId={linkId}
-          initialAskAiEnabled={askAiEnabled}
-          initialAskMode={askMode}
-          onAskAiEnabledChange={onAskAiEnabledChange}
-        />
-      ) : null}
-
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-h3">

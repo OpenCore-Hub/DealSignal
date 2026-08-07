@@ -23,7 +23,6 @@ interface LinkActivityDialogProps {
   children?: React.ReactElement;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
-  onLinkUpdate?: (patch: Partial<Link>) => void;
 }
 
 /** Window size steps for the activity dialog (not fullscreen). */
@@ -47,7 +46,6 @@ export function LinkActivityDialog({
   children,
   open: openProp,
   onOpenChange,
-  onLinkUpdate,
 }: LinkActivityDialogProps) {
   const { t } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
@@ -155,7 +153,7 @@ export function LinkActivityDialog({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
           {open ? (
-            <AnalyticsTab link={link} logs={[]} onLinkUpdate={onLinkUpdate} />
+            <AnalyticsTab link={link} logs={[]} />
           ) : null}
         </div>
       </DialogContent>

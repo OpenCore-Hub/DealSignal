@@ -39,7 +39,6 @@ type ActivitySection = "visitors" | "activity" | "delivery" | "engage";
 interface AnalyticsTabProps {
   link: Link;
   logs: AccessLog[];
-  onLinkUpdate?: (patch: Partial<Link>) => void;
 }
 
 const RECENT_VISITORS_PAGE_SIZE = 10;
@@ -72,7 +71,7 @@ async function fetchManagementData(linkId: string) {
   };
 }
 
-export function AnalyticsTab({ link, logs, onLinkUpdate }: AnalyticsTabProps) {
+export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
   const { t } = useTranslation("linkShare");
   const [analytics, setAnalytics] = useState<LinkAnalytics | null>(null);
   const [analyticsLoading, setAnalyticsLoading] = useState(true);
@@ -930,14 +929,9 @@ export function AnalyticsTab({ link, logs, onLinkUpdate }: AnalyticsTabProps) {
           <ManagementTab
             linkId={link.id}
             dealRoomId={link.dealRoomId}
-            askAiEnabled={link.askAiEnabled ?? false}
-            askMode={link.askMode}
             fileRequests={fileRequests}
             onUpdateFileRequest={handleUpdateFileRequest}
             onPendingHostCountChange={setPendingHostCount}
-            onAskAiEnabledChange={(enabled) =>
-              onLinkUpdate?.({ askAiEnabled: enabled })
-            }
           />
           {managementLoading && (
             <div className="sr-only" role="status">
