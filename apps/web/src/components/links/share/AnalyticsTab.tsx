@@ -21,6 +21,7 @@ import { calculateUniqueVisitors } from "@/lib/calculations";
 import { formatAskDeflectionRate, hasAskActivity } from "@/lib/linkAskSummary";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
+import { apiErrorMessage } from "@/lib/apiErrors";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
 import { AskSecurityEventsPanel } from "./AskSecurityEventsPanel";
@@ -408,7 +409,9 @@ export function AnalyticsTab({ link, logs, onLinkUpdate }: AnalyticsTabProps) {
         return;
       }
     }
-    toast.error(t("analytics.resendFailed"));
+    toast.error(
+      apiErrorMessage(err, { messageKey: "linkShare:analytics.resendFailed" }),
+    );
   };
 
   const handleResendOne = async (email: string) => {

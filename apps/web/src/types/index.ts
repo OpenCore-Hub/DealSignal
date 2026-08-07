@@ -425,7 +425,6 @@ export interface LinkAnalytics {
     email: string;
     name?: string;
     send_status: "pending" | "sent" | "failed" | string;
-    send_error?: string;
     code_sent_at?: string;
     used_at?: string;
     can_resend?: boolean;

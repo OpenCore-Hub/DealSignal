@@ -4,8 +4,11 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import type { AccessRule, Contact, Link } from "@/types";
 import enDealRooms from "@/i18n/locales/en/dealRooms.json";
+import enCommon from "@/i18n/locales/en/common.json";
+import { toast } from "sonner";
 import {
   SendVerificationCodeDialog,
   buildAllowedVisitors,
@@ -20,6 +23,7 @@ i18nInstance.use(initReactI18next).init({
       common: {
         cancel: "Cancel",
         loading: "Loading...",
+        error: enCommon.error,
       },
     },
   },
@@ -217,5 +221,43 @@ describe("SendVerificationCodeDialog", () => {
 
     expect(screen.getByText("杨生")).toBeInTheDocument();
     expect(screen.queryByText("bob@example.com")).not.toBeInTheDocument();
+  });
+
+  it("shows a send-failed toast when resend hits access_code_send_failed", async () => {
+    vi.mocked(api.getLinkAccessRules).mockResolvedValue({
+      data: [{ ruleType: "email", value: "alice@example.com", action: "allow" }],
+    });
+    vi.mocked(api.getContactById).mockResolvedValue({
+      id: "c1",
+      email: "alice@example.com",
+      name: "Alice",
+      heatLevel: "cold",
+      score: 0,
+      scoreHistory: [],
+      totalVisits: 0,
+      totalDurationSeconds: 0,
+      viewedDocuments: [],
+    });
+    vi.mocked(api.resendLinkAccessCode).mockRejectedValue(
+      new ApiError({
+        status: 502,
+        code: "access_code_send_failed",
+        message: "could not send verification code",
+        requestId: "req-send-fail",
+      }),
+    );
+
+    renderDialog();
+
+    await waitFor(() => {
+      expect(screen.getByText("alice@example.com")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send code" }));
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "Could not send the verification code. Please try again.",
+      );
+    });
   });
 });

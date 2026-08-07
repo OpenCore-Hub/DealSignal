@@ -5,6 +5,8 @@ const translations: Record<string, string> = {
   "common:error.loadFailed": "Failed to load",
   "common:error.saveFailed": "Failed to save",
   "common:error.codes.internal_error": "Something went wrong.",
+  "common:error.codes.access_code_send_failed":
+    "Could not send the verification code. Please try again.",
   "common:error.codes.blocked_email": "Email blocked",
   "common:error.codes.folder_exists": "Folder exists",
   "common:error.duplicateSlug": "Slug taken",
@@ -79,6 +81,16 @@ describe("apiErrorMessage", () => {
         new ApiError({ status: 500, code: "internal_error", message: "SQLSTATE", requestId: "r" }),
       ),
     ).toBe("Something went wrong.");
+    expect(
+      apiErrorMessage(
+        new ApiError({
+          status: 502,
+          code: "access_code_send_failed",
+          message: 'smtp close data: 550 "Queueing failed"',
+          requestId: "r",
+        }),
+      ),
+    ).toBe("Could not send the verification code. Please try again.");
   });
 
   it("maps viewer gate inline messages", () => {
