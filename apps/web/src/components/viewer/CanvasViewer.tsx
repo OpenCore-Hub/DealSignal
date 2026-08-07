@@ -349,6 +349,8 @@ export function CanvasViewer({
         onSelectPage={setPage}
         sidebar={effectiveSidebar}
         variant={publicToken ? "public" : "default"}
+        publicToken={publicToken}
+        publicAccessCredentials={publicAccessCredentials}
       />
     </div>
   );
