@@ -938,12 +938,6 @@ export const api = {
       `/deal-rooms/${roomId}/ask/faq${qs ? `?${qs}` : ""}`,
     );
   },
-  /** Legacy host-answer path for turns without ask_turn_id (pre-unified rows). */
-  answerQuestion: (linkId: string, questionId: string, answer: string) =>
-    request<{ data: VisitorQuestion }>(getWorkspaceSlug(), `/links/${linkId}/questions/${questionId}/answer`, {
-      method: "PATCH",
-      body: JSON.stringify({ answer }),
-    }),
   answerAskTurn: (linkId: string, turnId: string, answer: string) =>
     request<{ data: OwnerAskTurn }>(getWorkspaceSlug(), `/links/${linkId}/ask/${turnId}/host-answer`, {
       method: "PATCH",

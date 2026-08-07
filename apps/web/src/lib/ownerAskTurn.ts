@@ -22,15 +22,12 @@ export function ownerAskTurnsToVisitorQuestions(turns: OwnerAskTurn[]): VisitorQ
   return turns.map(ownerAskTurnToVisitorQuestion);
 }
 
-/** Prefer unified PATCH .../ask/:turnId/host-answer when turn id is known. */
+/** Reply via unified PATCH .../ask/:turnId/host-answer. */
 export async function answerOwnerAskQuestion(
   question: VisitorQuestion,
   answer: string,
 ): Promise<VisitorQuestion> {
-  if (question.ask_turn_id) {
-    const res = await api.answerAskTurn(question.link_id, question.ask_turn_id, answer);
-    return ownerAskTurnToVisitorQuestion(res.data);
-  }
-  const res = await api.answerQuestion(question.link_id, question.id, answer);
-  return res.data;
+  const turnId = question.ask_turn_id?.trim() || question.id;
+  const res = await api.answerAskTurn(question.link_id, turnId, answer);
+  return ownerAskTurnToVisitorQuestion(res.data);
 }

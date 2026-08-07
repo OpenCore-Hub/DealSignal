@@ -169,7 +169,7 @@ func TestListLinkAskInbox_LegacyDualRead_Integration(t *testing.T) {
 	}
 }
 
-func TestListMyVisitorQuestions_DualRead_Integration(t *testing.T) {
+func TestListMyAskTurns_LegacyMerge_Integration(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()
 	enableLinkQA(t, f)
@@ -181,24 +181,24 @@ func TestListMyVisitorQuestions_DualRead_Integration(t *testing.T) {
 		LinkID:       f.link.ID,
 		VisitorID:    visitorID,
 		VisitorEmail: pgtype.Text{String: "visitor@example.com", Valid: true},
-		Question:     "Legacy-only for questions/me",
+		Question:     "Legacy-only for ask/me",
 	})
 	if err != nil {
 		t.Fatalf("CreateVisitorQuestion direct: %v", err)
 	}
 
-	got, err := f.svc.ListMyVisitorQuestions(f.ctx, f.link.ID, visitorID)
+	got, err := f.svc.ListMyAskTurns(f.ctx, f.link.ID, visitorID)
 	if err != nil {
-		t.Fatalf("ListMyVisitorQuestions: %v", err)
+		t.Fatalf("ListMyAskTurns: %v", err)
 	}
 	if len(got) != 1 {
-		t.Fatalf("expected 1 merged question, got %d", len(got))
+		t.Fatalf("expected 1 merged turn, got %d", len(got))
 	}
-	if got[0].Question != "Legacy-only for questions/me" {
+	if got[0].Question != "Legacy-only for ask/me" {
 		t.Fatalf("question = %q", got[0].Question)
 	}
-	if got[0].ID != uuid.UUID(legacyQ.ID.Bytes).String() {
-		t.Fatalf("id = %q", got[0].ID)
+	if got[0].HostQuestionID != uuid.UUID(legacyQ.ID.Bytes).String() {
+		t.Fatalf("host_question_id = %q", got[0].HostQuestionID)
 	}
 }
 

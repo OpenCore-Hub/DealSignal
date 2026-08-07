@@ -193,7 +193,6 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/renew", h.RenewLink)
 	g.POST("/:id/generate-index", h.GenerateLinkIndex)
 	g.GET("/:id/index-file", h.GetLinkIndexFile)
-	g.GET("/:id/questions", h.ListLinkVisitorQuestions) // deprecated: use GET /:id/ask
 	g.GET("/:id/ask", h.ListLinkAskInbox)
 	g.GET("/:id/ask/faq", h.ListLinkAskPinnedFAQ)
 	g.PATCH("/:id/ask/faq/order", h.ReorderLinkAskFAQ)
@@ -203,7 +202,6 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/ask/:turnId/unpin-faq", h.UnpinAskTurnFAQ)
 	g.GET("/:id/ask-policy", h.GetLinkAskPolicy)
 	g.PATCH("/:id/ask-policy", h.PatchLinkAskPolicy)
-	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion) // deprecated: use PATCH /:id/ask/:turnId/host-answer
 	g.GET("/:id/ask-security-events", h.ListAskSecurityEvents)
 	g.GET("/:id/file-requests", h.ListLinkFileRequests)
 	g.PATCH("/:id/file-requests/:requestId/status", h.UpdateFileRequestStatus)
@@ -221,7 +219,6 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	r.PUT("/deal-rooms/:roomId/access-policy", h.UpsertRoomAccessPolicy)
 
 	// Room-wide Ask inbox (across all links in the deal room).
-	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions) // deprecated: use GET /deal-rooms/:roomId/ask
 	r.GET("/deal-rooms/:roomId/ask", h.ListRoomAskInbox)
 	r.GET("/deal-rooms/:roomId/ask/faq", h.ListRoomAskPinnedFAQ)
 	r.GET("/deal-rooms/:roomId/ask-security-events", h.ListRoomAskSecurityEvents)
@@ -242,8 +239,6 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/documents/:documentId/pages/signed-url", h.PublicSignedURL)
 	r.GET("/documents/:documentId/download-url", h.PublicDownloadURL)
 	r.GET("/deal-rooms/:slug/redirect", h.PublicDealRoomRedirect)
-	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion) // deprecated: use POST /links/:publicToken/ask
-	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions) // deprecated: use GET /links/:publicToken/ask/me
 	r.POST("/links/:publicToken/ask", h.PublicCreateAsk)
 	r.GET("/links/:publicToken/ask/me", h.PublicListMyAskTurns)
 	r.GET("/links/:publicToken/ask/faq", h.PublicListAskFAQ)
@@ -2898,23 +2893,6 @@ func (h *Handler) GetLinkIndexFile(c *gin.Context) {
 	})
 }
 
-// ListLinkVisitorQuestions returns all visitor questions for a link (owner view).
-func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	lID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
-		return
-	}
-	questions, err := h.service.ListLinkVisitorQuestions(c.Request.Context(), link, middleware.UserIDFrom(c))
-	if err != nil {
-		writeAskHostError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": questions})
-}
-
 // ListLinkAskInbox returns unified Ask turns for a link (owner inbox, Phase A host lane).
 func (h *Handler) ListLinkAskInbox(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
@@ -2936,23 +2914,6 @@ func (h *Handler) ListLinkAskInbox(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": turns})
-}
-
-// ListRoomVisitorQuestions returns Ask Host questions across a deal room (owner view).
-func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	questions, err := h.service.ListRoomVisitorQuestions(
-		c.Request.Context(),
-		wsID,
-		c.Param("roomId"),
-		middleware.UserIDFrom(c),
-		c.Query("link_id"),
-	)
-	if err != nil {
-		writeAskHostError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": questions})
 }
 
 // ListRoomAskInbox returns unified Ask turns across a deal room (owner inbox).
@@ -3052,42 +3013,6 @@ func (h *Handler) ListRoomAskSecurityEvents(c *gin.Context) {
 		"data":     page.Items,
 		"has_more": page.HasMore,
 	})
-}
-
-// AnswerVisitorQuestion allows the owner to answer a visitor question.
-func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
-	wsID := middleware.WorkspaceIDFrom(c)
-	lID := c.Param("id")
-	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
-		return
-	}
-	qUUID, err := uuid.Parse(c.Param("questionId"))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid question id"})
-		return
-	}
-	var body struct {
-		Answer string `json:"answer" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
-		return
-	}
-	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
-	if err != nil {
-		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
-		return
-	}
-	qID := pgtype.UUID{Bytes: qUUID, Valid: true}
-	uID := pgtype.UUID{Bytes: uUUID, Valid: true}
-	q, err := h.service.AnswerVisitorQuestion(c.Request.Context(), link, qID, uID, body.Answer)
-	if err != nil {
-		writeAskHostError(c, err)
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": q})
 }
 
 // AnswerAskTurnHostAnswer allows the owner to answer a unified Ask turn by turn id.
@@ -3591,24 +3516,6 @@ func (h *Handler) PublicDealRoomRedirect(c *gin.Context) {
 	c.Redirect(http.StatusFound, target)
 }
 
-// PublicCreateVisitorQuestion allows a visitor to submit a question.
-func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
-	result, submission, ok := h.gatePublicAskSubmission(c)
-	if !ok {
-		return
-	}
-	q, err := h.service.CreateVisitorQuestion(c.Request.Context(), result.Link, result.VisitorID, result.Email, submission.Question)
-	if err != nil {
-		if writeAskValidationError(c, err) {
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-		return
-	}
-	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, submission.Question)
-	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
-}
-
 // PublicCreateAsk is the unified visitor Ask entry (policy-aware routing).
 func (h *Handler) PublicCreateAsk(c *gin.Context) {
 	result, submission, ok := h.gatePublicAskSubmission(c)
@@ -3800,26 +3707,6 @@ func (h *Handler) PublicStreamAskTurn(c *gin.Context) {
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 	}
-}
-
-// PublicListMyVisitorQuestions returns the visitor's own questions.
-func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
-	result, err := h.verifyPublicAccess(c)
-	if err != nil {
-		mapAccessError(c, err)
-		return
-	}
-	h.writeSessionRefreshHeader(c, result)
-	if !result.Link.QaEnabled {
-		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
-		return
-	}
-	questions, err := h.service.ListMyVisitorQuestions(c.Request.Context(), result.Link.ID, result.VisitorID)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
-		return
-	}
-	c.JSON(http.StatusOK, gin.H{"data": questions})
 }
 
 // PublicCreateFileRequest allows a visitor to request a file.

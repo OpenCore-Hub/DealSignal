@@ -3474,39 +3474,6 @@ export const handlers = [
     },
   ),
 
-  http.patch(
-    "*/api/workspaces/:workspaceSlug/links/:id/questions/:questionId/answer",
-    async ({ params, request }) => {
-      await hydrateVisitorAskState();
-      const linkId = params.id as string;
-      const questionId = params.questionId as string;
-      const link = mockLinks.find((l) => l.id === linkId);
-      if (!link) return new HttpResponse(null, { status: 404 });
-      const body = (await request.json().catch(() => ({}))) as { answer?: string };
-      const answer = (body.answer ?? "").trim();
-      if (!answer) {
-        return HttpResponse.json({ code: "invalid_input", message: "answer required" }, { status: 400 });
-      }
-      const list = mockOwnerQuestions.get(linkId) ?? [];
-      const idx = list.findIndex((q) => q.id === questionId);
-      if (idx < 0) {
-        return HttpResponse.json({ code: "question_not_found", message: "question not found" }, { status: 404 });
-      }
-      const updated: VisitorQuestion = {
-        ...list[idx],
-        answer,
-        status: "answered",
-        answered_by: "user_1",
-        updated_at: new Date().toISOString(),
-      };
-      list[idx] = updated;
-      mockOwnerQuestions.set(linkId, list);
-      syncPublicAskTurnAnswer(linkId, questionId, answer, updated.ask_turn_id);
-      await persistVisitorAskState();
-      return HttpResponse.json({ data: updated });
-    },
-  ),
-
   http.get("*/api/workspaces/:workspaceSlug/links/:id/ask-policy", ({ params }) => {
     const linkId = params.id as string;
     const link = mockLinks.find((l) => l.id === linkId);
