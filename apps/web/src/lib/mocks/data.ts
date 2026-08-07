@@ -193,7 +193,7 @@ export const mockLinks: Link[] = [
     avgDurationSeconds: 0,
     permissionType: "public",
     isBundle: false,
-    qaEnabled: true,
+    qaEnabled: false,
     documents: [
       {
         id: "doc_1",

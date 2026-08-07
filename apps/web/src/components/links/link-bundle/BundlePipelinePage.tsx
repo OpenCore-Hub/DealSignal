@@ -130,7 +130,6 @@ function BundlePipelineInner() {
           ndaTemplateId: link.ndaTemplateId ?? "",
           allowDownload: link.downloadEnabled ?? true,
           watermarkEnabled: link.watermarkEnabled ?? true,
-          qaEnabled: link.qaEnabled ?? false,
           fileRequestsEnabled: link.fileRequestsEnabled ?? false,
           indexFileEnabled: link.indexFileEnabled ?? false,
           expiryDays,

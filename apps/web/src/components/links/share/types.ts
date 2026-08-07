@@ -15,7 +15,6 @@ export interface AccessConfig {
   enableScreenshotProtection: boolean;
   enableFileRequests: boolean;
   enableIndexFileGeneration: boolean;
-  enableQaConversations: boolean;
 }
 
 export interface DraftLink extends AccessConfig {

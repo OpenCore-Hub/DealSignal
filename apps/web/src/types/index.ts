@@ -243,7 +243,6 @@ export interface PermissionFields {
   ndaTemplateId?: string;
   allowDownload: boolean;
   watermarkEnabled: boolean;
-  qaEnabled: boolean;
   fileRequestsEnabled: boolean;
   indexFileEnabled: boolean;
   screenshotProtectionEnabled?: boolean;

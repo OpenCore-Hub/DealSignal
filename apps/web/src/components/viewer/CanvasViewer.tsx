@@ -8,6 +8,7 @@ import { api, type PublicLinkCredentials } from "@/lib/api";
 import { isViewerAccessErrorKind, viewerPolicyBlockI18nKeys } from "@/lib/viewerAccessErrors";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { ViewerToolbar } from "./ViewerToolbar";
+import { PublicViewerToolbar } from "./PublicViewerToolbar";
 import { ViewerCanvas } from "./ViewerCanvas";
 import { ViewerKnowledgeRail } from "./ViewerKnowledgeRail";
 import { useViewerDocument } from "./useViewerDocument";
@@ -20,6 +21,7 @@ interface CanvasViewerProps {
   publicToken?: string;
   publicLink?: {
     id: string;
+    name?: string;
     downloadEnabled: boolean;
     watermarkEnabled: boolean;
     screenshotProtectionEnabled?: boolean;
@@ -205,14 +207,17 @@ export function CanvasViewer({
   const error = loadError || actionError;
 
   if (loading) {
+    const shellClass = publicToken
+      ? "public-viewer-shell flex min-h-0 flex-1 flex-col"
+      : "flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background";
     return (
-      <div className="flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background">
-        <header className="flex h-14 items-center border-b border-border bg-background px-4">
-          <Skeleton className="h-8 w-64" />
+      <div className={shellClass}>
+        <header className="public-viewer-glass mx-3 mt-3 flex h-14 items-center rounded-2xl px-4 sm:mx-4">
+          <Skeleton className="h-8 w-64 rounded-xl" />
         </header>
-        <div className="flex flex-1">
-          <Skeleton className="m-8 h-full w-48" />
-          <Skeleton className="m-8 h-full flex-1" />
+        <div className="flex flex-1 gap-3 p-4">
+          <Skeleton className="hidden h-full w-16 rounded-2xl md:block" />
+          <Skeleton className="h-full flex-1 rounded-2xl" />
         </div>
       </div>
     );
@@ -274,30 +279,53 @@ export function CanvasViewer({
     );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background">
-      <ViewerToolbar
-        doc={doc}
-        page={page}
-        totalPages={totalPages}
-        zoom={zoom}
-        onZoomOut={zoomOut}
-        onZoomIn={zoomIn}
-        onPreviousPage={goToPreviousPage}
-        onNextPage={goToNextPage}
-        onDownload={handleDownload}
-        sidebarOpen={effectiveSidebarOpen}
-        onToggleSidebar={effectiveToggleSidebar}
-        sidebarOpenLabel={
-          ownerKnowledgeRoomId
-            ? t("documents:viewer.knowledgeRailOpen")
-            : undefined
-        }
-        sidebarCloseLabel={
-          ownerKnowledgeRoomId
-            ? t("documents:viewer.knowledgeRailClose")
-            : undefined
-        }
-      />
+    <div
+      className={
+        publicToken
+          ? "public-viewer-shell flex min-h-0 flex-1 flex-col overflow-hidden"
+          : "flex min-h-0 flex-1 flex-col bg-neutral-50 dark:bg-background"
+      }
+    >
+      {publicToken ? (
+        <PublicViewerToolbar
+          doc={doc}
+          page={page}
+          totalPages={totalPages}
+          zoom={zoom}
+          onZoomOut={zoomOut}
+          onZoomIn={zoomIn}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          onDownload={handleDownload}
+          sidebarOpen={effectiveSidebarOpen}
+          onToggleSidebar={effectiveToggleSidebar}
+          linkName={publicLink?.name}
+        />
+      ) : (
+        <ViewerToolbar
+          doc={doc}
+          page={page}
+          totalPages={totalPages}
+          zoom={zoom}
+          onZoomOut={zoomOut}
+          onZoomIn={zoomIn}
+          onPreviousPage={goToPreviousPage}
+          onNextPage={goToNextPage}
+          onDownload={handleDownload}
+          sidebarOpen={effectiveSidebarOpen}
+          onToggleSidebar={effectiveToggleSidebar}
+          sidebarOpenLabel={
+            ownerKnowledgeRoomId
+              ? t("documents:viewer.knowledgeRailOpen")
+              : undefined
+          }
+          sidebarCloseLabel={
+            ownerKnowledgeRoomId
+              ? t("documents:viewer.knowledgeRailClose")
+              : undefined
+          }
+        />
+      )}
       <ViewerCanvas
         doc={doc}
         page={page}
@@ -310,6 +338,7 @@ export function CanvasViewer({
         screenshotProtectionEnabled={publicLink?.screenshotProtectionEnabled}
         onSelectPage={setPage}
         sidebar={effectiveSidebar}
+        variant={publicToken ? "public" : "default"}
       />
     </div>
   );

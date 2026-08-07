@@ -1,11 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useNavigate, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Button } from "@/components/ui/button";
-import { Prohibit, WarningCircle } from "@phosphor-icons/react";
+import { WarningCircle } from "@phosphor-icons/react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
@@ -14,12 +12,30 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
+import { useShareLinkLocaleSync } from "@/i18n/useShareLinkLocaleSync";
 import { api, type PublicLinkCredentials } from "@/lib/api";
 import { ApiError, setLinkSessionRefreshHandler } from "@/lib/apiClient";
 import { apiErrorMessage } from "@/lib/apiErrors";
+import { cn } from "@/lib/utils";
 import { CanvasViewer } from "./CanvasViewer";
-import { RightSidebar } from "./RightSidebar";
+import { VisitorWorkspacePanel } from "./VisitorWorkspacePanel";
+import { shouldShowVisitorWorkspace } from "./visitorWorkspace";
 import { PublicDealRoomLinkViewer } from "./PublicDealRoomLinkViewer";
+import {
+  PublicGateCard,
+  PublicGateCardBody,
+  PublicGateCardHeader,
+  PublicGateFatalErrorScreen,
+  PublicGateInviteBanner,
+  PublicGateLoadingScreen,
+  PublicGateNdaFrame,
+  PublicGatePageShell,
+  PublicGatePrimaryButton,
+  PublicGateSecondaryButton,
+  PublicLinkErrorScreen,
+  publicGateInputClassName,
+  publicGateTextareaClassName,
+} from "./publicAccessGateUi";
 import type { Document } from "@/types";
 
 interface PublicDocumentSummary {
@@ -157,6 +173,7 @@ function clearAccessRequestPending(token: string) {
 }
 
 export function PublicViewerPage() {
+  useShareLinkLocaleSync();
   const { token } = useParams<{ token: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -520,13 +537,6 @@ export function PublicViewerPage() {
     }
   }, [token, t, sessionKey, signerName, ndaDeliveryEmail, showFloatingGateTip, applyNdaPreview]);
   tryAccessRef.current = tryAccess;
-
-  // Deal-room visitors need the document sidebar visible so folder structure
-  // is discoverable without hunting for the toolbar toggle.
-  useEffect(() => {
-    if (!access?.link.dealRoomId || access.documents.length === 0) return;
-    setSidebarOpen(true);
-  }, [access?.link.dealRoomId, access?.link.id, access?.documents.length]);
 
   useEffect(() => {
     if (!token) return;
@@ -975,42 +985,32 @@ export function PublicViewerPage() {
     };
   }, [selectedDoc]);
 
-  const toggleSidebar = useCallback(() => setSidebarOpen((v) => !v), []);
+  const showWorkspace = shouldShowVisitorWorkspace({
+    documentCount: access?.documents.length ?? 0,
+    fileRequestsEnabled: Boolean(access?.link.fileRequestsEnabled),
+    qaEnabled: Boolean(access?.link.qaEnabled),
+  });
+
+  const toggleSidebar = useCallback(() => {
+    if (!showWorkspace) return;
+    setSidebarOpen((v) => !v);
+  }, [showWorkspace]);
 
   if (loading) {
-    return (
-      <div className="flex min-h-screen items-center justify-center">
-        <p className="text-muted-foreground">{t("viewer.loading")}</p>
-      </div>
-    );
+    return <PublicGateLoadingScreen />;
   }
 
   if (error) {
-    return (
-      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-6">
-        <p className="text-destructive">{error}</p>
-      </div>
-    );
+    return <PublicGateFatalErrorScreen message={error} />;
   }
 
   if (linkErrorCode) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-muted/30 p-6">
-        <Card className="w-full max-w-md">
-          <CardHeader className="items-center space-y-3">
-            <div className="flex h-12 w-12 items-center justify-center rounded-full bg-muted">
-              <Prohibit size={24} className="text-muted-foreground" />
-            </div>
-            <CardTitle className="text-center">{t(`viewer.${linkErrorCode}Title`)}</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 text-center">
-            <p className="text-muted-foreground">{t(`viewer.${linkErrorCode}Description`)}</p>
-            <Button variant="outline" className="w-full" onClick={() => navigate("/")}>
-              {t("common:backToHome")}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
+      <PublicLinkErrorScreen
+        title={t(`viewer.${linkErrorCode}Title`)}
+        description={t(`viewer.${linkErrorCode}Description`)}
+        onBackHome={() => navigate("/")}
+      />
     );
   }
 
@@ -1054,9 +1054,28 @@ export function PublicViewerPage() {
 
     const floatingTipSecondsLeft = Math.max(1, Math.ceil(floatingTipProgress * 10));
     const countdownRing = 2 * Math.PI * 18; // r=18 for 40x40 viewBox
+    const gateHeaderTitle = accessRequestSubmitted
+      ? t("viewer.accessRequestSubmittedTitle")
+      : showAccessRequest
+        ? t("viewer.accessRequestTitle")
+        : inNdaReview
+          ? t("viewer.ndaReviewTitle")
+          : inNdaSign
+            ? t("viewer.ndaSignTitle")
+            : t("viewer.gateTitle");
+    const gateHeaderSubtitle = accessRequestSubmitted
+      ? t("viewer.accessRequestRefreshHint")
+      : showAccessRequest
+        ? t("viewer.accessRequestHint")
+        : inNdaReview
+          ? t("viewer.ndaReviewSubtitle")
+          : inNdaSign
+            ? t("viewer.ndaSignSubtitle")
+            : t("viewer.gateSubtitle");
+    const gateHeaderIcon = inNdaSign || inNdaReview || showAccessRequest ? "shield" as const : "sparkle" as const;
 
     return (
-      <div className="relative flex min-h-dvh items-center justify-center bg-muted/30 p-6">
+      <PublicGatePageShell>
         {floatingTip && (
           <>
             {/* Soft blur veil over the NDA sign page; clicks pass through to bottom actions. */}
@@ -1140,37 +1159,25 @@ export function PublicViewerPage() {
             </div>
           </>
         )}
-        <Card
-          className={[
-            useNdaSquareWindow ? "flex flex-col overflow-hidden" : "w-full max-w-md",
-            floatingTip
-              ? "scale-[0.985] opacity-70 blur-[2px] transition-[filter,opacity,transform] duration-300"
-              : "transition-[filter,opacity,transform] duration-300",
-          ].join(" ")}
+        <PublicGateCard
+          dimmed={Boolean(floatingTip)}
+          className={useNdaSquareWindow ? "flex flex-col overflow-hidden" : "w-full max-w-lg"}
           style={
             useNdaSquareWindow
               ? { width: ndaSquareSize, height: ndaSquareSize, maxWidth: "100%" }
               : undefined
           }
         >
-          <CardHeader className="shrink-0">
-            <CardTitle>
-              {accessRequestSubmitted
-                ? t("viewer.accessRequestSubmittedTitle")
-                : showAccessRequest
-                  ? t("viewer.accessRequestTitle")
-                  : inNdaReview
-                    ? t("viewer.ndaReviewTitle")
-                    : inNdaSign
-                      ? t("viewer.ndaSignTitle")
-                      : t("viewer.gateTitle")}
-            </CardTitle>
-          </CardHeader>
-          <CardContent
+          <PublicGateCardHeader
+            title={gateHeaderTitle}
+            subtitle={gateHeaderSubtitle}
+            icon={gateHeaderIcon}
+          />
+          <PublicGateCardBody
             className={
               useNdaSquareWindow
-                ? "flex min-h-0 flex-1 flex-col space-y-4 overflow-hidden"
-                : "space-y-4"
+                ? "flex min-h-0 flex-1 flex-col overflow-hidden"
+                : undefined
             }
           >
             {accessRequestSubmitted ? (
@@ -1187,18 +1194,17 @@ export function PublicViewerPage() {
                   <p className="text-sm text-destructive" role="alert">{gateError}</p>
                 )}
                 <div className="flex items-center justify-center">
-                  <Button
+                  <PublicGatePrimaryButton
                     className="min-w-[6.5rem] px-5"
                     disabled={accessRequestSubmitting}
                     onClick={() => { void continueAfterAccessRequestApproval(); }}
                   >
                     {t("viewer.accessRequestContinueAfterApproval")}
-                  </Button>
+                  </PublicGatePrimaryButton>
                 </div>
               </div>
             ) : showAccessRequest ? (
               <div className="space-y-4">
-                <p className="text-sm text-muted-foreground">{t("viewer.accessRequestHint")}</p>
                 <div className="space-y-2">
                   <Label htmlFor="access-request-email">
                     {security.nda ? t("viewer.ndaDeliveryEmailLabel") : t("viewer.emailLabel")}
@@ -1208,7 +1214,7 @@ export function PublicViewerPage() {
                     type="email"
                     value={security.nda ? ndaDeliveryEmail : (email || ndaDeliveryEmail)}
                     readOnly
-                    className="bg-muted/50"
+                    className={cn(publicGateInputClassName, "bg-muted/40")}
                   />
                 </div>
                 {security.nda && (
@@ -1219,6 +1225,7 @@ export function PublicViewerPage() {
                     value={signerName}
                     onChange={(e) => setSignerName(e.target.value)}
                     placeholder={t("viewer.signerNamePlaceholder")}
+                    className={publicGateInputClassName}
                   />
                 </div>
                 )}
@@ -1230,21 +1237,21 @@ export function PublicViewerPage() {
                     onChange={(e) => setAccessRequestReason(e.target.value)}
                     placeholder={t("viewer.accessRequestReasonPlaceholder")}
                     rows={3}
+                    className={publicGateTextareaClassName}
                   />
                 </div>
                 {gateError && (
                   <p className="text-sm text-destructive" role="alert">{gateError}</p>
                 )}
-                <div className="flex shrink-0 items-center justify-center gap-4">
-                  <Button
+                <div className="flex shrink-0 items-center justify-center gap-3">
+                  <PublicGatePrimaryButton
                     className="min-w-[6.5rem] px-5"
                     disabled={accessRequestSubmitting || !accessRequestReason.trim()}
                     onClick={() => { void submitAccessRequest(); }}
                   >
                     {t("viewer.accessRequestSubmit")}
-                  </Button>
-                  <Button
-                    variant="outline"
+                  </PublicGatePrimaryButton>
+                  <PublicGateSecondaryButton
                     className="min-w-[6.5rem] px-5"
                     disabled={accessRequestSubmitting}
                     onClick={() => {
@@ -1253,27 +1260,27 @@ export function PublicViewerPage() {
                     }}
                   >
                     {t("common:back")}
-                  </Button>
+                  </PublicGateSecondaryButton>
                 </div>
               </div>
             ) : (
               <>
             {hasGates && gateError && !inNdaReview && !showMismatchActions && (
-              <p className="text-sm text-destructive" role="alert">
+              <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">
                 {gateError}
               </p>
             )}
             {inviteToken && showCredentialGates && (
-              <div className="rounded-md border border-border bg-muted/50 p-3 text-sm">
+              <PublicGateInviteBanner>
                 {prefilledEmail
                   ? t("viewer.inviteVerificationFor", { email: prefilledEmail })
                   : t("viewer.inviteVerification")}
-              </div>
+              </PublicGateInviteBanner>
             )}
 
             {inNdaReview && (
               <div className="flex min-h-0 flex-1 flex-col space-y-3">
-                <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-white">
+                <PublicGateNdaFrame className="min-h-0 flex-1">
                   <div className="h-full overflow-y-auto overscroll-contain">
                     {ndaPreviewPageUrls.length > 0 ? (
                       ndaPreviewPageUrls.map((url, index) => (
@@ -1317,13 +1324,13 @@ export function PublicViewerPage() {
                       )}
                     </div>
                   </div>
-                </div>
+                </PublicGateNdaFrame>
                 <p className="shrink-0 text-center text-sm text-muted-foreground" aria-live="polite">
                   {t("viewer.ndaReviewCountdown", { seconds: ndaCountdown })}
                 </p>
-                <div className="h-1.5 shrink-0 overflow-hidden rounded-full bg-muted">
+                <div className="h-1.5 shrink-0 overflow-hidden rounded-full bg-muted/80">
                   <div
-                    className="h-full bg-primary transition-[width] duration-300 ease-linear"
+                    className="h-full rounded-full bg-gradient-to-r from-emerald-600 to-emerald-400 transition-[width] duration-300 ease-linear"
                     style={{ width: `${((30 - ndaCountdown) / 30) * 100}%` }}
                   />
                 </div>
@@ -1340,6 +1347,7 @@ export function PublicViewerPage() {
                   value={emailCode}
                   onChange={(e) => setEmailCode(e.target.value)}
                   placeholder={t("viewer.codePlaceholder")}
+                  className={publicGateInputClassName}
                 />
               </div>
             )}
@@ -1352,6 +1360,7 @@ export function PublicViewerPage() {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder={t("viewer.emailPlaceholder")}
+                  className={publicGateInputClassName}
                 />
               </div>
             )}
@@ -1364,28 +1373,29 @@ export function PublicViewerPage() {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder={t("viewer.passwordPlaceholder")}
+                  className={publicGateInputClassName}
                 />
               </div>
             )}
 
             {inNdaSign && (
               <div className="flex min-h-0 flex-1 flex-col space-y-3">
-                <div className="min-h-0 flex-1 overflow-hidden rounded-md border bg-muted/30">
+                <PublicGateNdaFrame
+                  interactive={ndaPreviewPageUrls.length > 0}
+                  onClick={() => ndaPreviewPageUrls.length > 0 && setNdaPreviewZoomed(true)}
+                  title={ndaPreviewPageUrls.length > 0 ? t("viewer.ndaPreviewZoomHint") : undefined}
+                  aria-label={ndaPreviewPageUrls.length > 0 ? t("viewer.ndaPreviewZoomHint") : undefined}
+                  onKeyDown={(e) => {
+                    if (ndaPreviewPageUrls.length === 0) return;
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setNdaPreviewZoomed(true);
+                    }
+                  }}
+                  className="min-h-0 flex-1"
+                >
                   {ndaPreviewPageUrls.length > 0 ? (
-                    <div
-                      className="h-full cursor-zoom-in overflow-y-auto overscroll-contain bg-white"
-                      onClick={() => setNdaPreviewZoomed(true)}
-                      title={t("viewer.ndaPreviewZoomHint")}
-                      role="button"
-                      tabIndex={0}
-                      aria-label={t("viewer.ndaPreviewZoomHint")}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" || e.key === " ") {
-                          e.preventDefault();
-                          setNdaPreviewZoomed(true);
-                        }
-                      }}
-                    >
+                    <div className="h-full overflow-y-auto overscroll-contain bg-white">
                       {ndaPreviewPageUrls.map((url, index) => (
                         <img
                           key={`${url}-${index}`}
@@ -1409,7 +1419,7 @@ export function PublicViewerPage() {
                         : t("viewer.ndaPreviewUnavailable")}
                     </div>
                   )}
-                </div>
+                </PublicGateNdaFrame>
                 <Dialog open={ndaPreviewZoomed} onOpenChange={setNdaPreviewZoomed}>
                   <DialogContent className="max-h-[90vh] gap-0 overflow-hidden p-0 sm:max-w-3xl">
                     <DialogHeader className="border-b px-4 py-3">
@@ -1442,6 +1452,7 @@ export function PublicViewerPage() {
                     placeholder={t("viewer.ndaDeliveryEmailPlaceholder")}
                     autoComplete="email"
                     readOnly={Boolean(inviteToken && prefilledEmail)}
+                    className={publicGateInputClassName}
                   />
                   <p className="text-xs text-muted-foreground">
                     {security.emailVerification
@@ -1458,31 +1469,32 @@ export function PublicViewerPage() {
                     onChange={(e) => setSignerName(e.target.value)}
                     placeholder={t("viewer.signerNamePlaceholder")}
                     autoComplete="name"
+                    className={publicGateInputClassName}
                   />
                 </div>
-                <div className="flex shrink-0 items-center gap-2">
+                <div className="flex shrink-0 items-start gap-3 rounded-2xl border border-border/60 bg-background/60 px-4 py-3">
                   <Checkbox
                     id="nda"
                     checked={ndaAgreed}
                     onCheckedChange={(checked) => setNdaAgreed(checked === true)}
+                    className="mt-0.5"
                   />
-                  <Label htmlFor="nda">{t("viewer.ndaLabel")}</Label>
+                  <Label htmlFor="nda" className="text-sm leading-relaxed">{t("viewer.ndaLabel")}</Label>
                 </div>
               </div>
             )}
 
             {showMismatchActions ? (
-              <div className="flex shrink-0 items-center justify-center gap-4">
-                <Button
+              <div className="flex shrink-0 items-center justify-center gap-3">
+                <PublicGatePrimaryButton
                   className="min-w-[6.5rem] px-5"
                   disabled={ndaEmailChecking}
                   onClick={clearMismatchAndRetry}
                 >
                   {t("common:retry")}
-                </Button>
+                </PublicGatePrimaryButton>
                 {canRequestAccess && (
-                  <Button
-                    variant="outline"
+                  <PublicGateSecondaryButton
                     className="min-w-[6.5rem] px-5"
                     disabled={ndaEmailChecking || accessRequestSubmitting}
                     onClick={() => {
@@ -1499,12 +1511,12 @@ export function PublicViewerPage() {
                     }}
                   >
                     {t("viewer.requestAuthorization")}
-                  </Button>
+                  </PublicGateSecondaryButton>
                 )}
               </div>
             ) : (
               !inNdaReview && (
-              <Button
+              <PublicGatePrimaryButton
                 className="w-full shrink-0"
                 disabled={continueDisabled}
                 onClick={() => {
@@ -1553,19 +1565,19 @@ export function PublicViewerPage() {
                 }}
               >
                 {gateErrorCode === "not_allowed" ? t("common:retry") : t("viewer.continue")}
-              </Button>
+              </PublicGatePrimaryButton>
               )
             )}
             {!hasGates && (
-              <p className="text-sm text-muted-foreground">
+              <p className="rounded-xl border border-destructive/20 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">
                 {gateError ?? t("common:error.loadFailed")}
               </p>
             )}
               </>
             )}
-          </CardContent>
-        </Card>
-      </div>
+          </PublicGateCardBody>
+        </PublicGateCard>
+      </PublicGatePageShell>
     );
   }
 
@@ -1578,21 +1590,22 @@ export function PublicViewerPage() {
         publicVisitorId={access.visitorId}
         publicAccessCredentials={accessCredentials}
         watermark={access.link.watermarkEnabled ? { watermarkText: access.link.watermarkText } : null}
-        sidebarOpen={sidebarOpen}
-        onToggleSidebar={toggleSidebar}
+        sidebarOpen={showWorkspace && sidebarOpen}
+        onToggleSidebar={showWorkspace ? toggleSidebar : undefined}
         sidebar={
-          <RightSidebar
-            open={sidebarOpen}
-            onClose={() => setSidebarOpen(false)}
-            documents={access.documents}
-            selectedDocIndex={selectedDocIndex}
-            onSelectDoc={setSelectedDocIndex}
-            activeDocumentId={selectedDoc?.id}
-            qaEnabled={access.link.qaEnabled}
-            fileRequestsEnabled={access.link.fileRequestsEnabled}
-            publicToken={token}
-            publicSessionToken={accessCredentials.sessionToken}
-          />
+          showWorkspace ? (
+            <VisitorWorkspacePanel
+              open={sidebarOpen}
+              onClose={() => setSidebarOpen(false)}
+              documents={access.documents}
+              selectedDocIndex={selectedDocIndex}
+              onSelectDoc={setSelectedDocIndex}
+              qaEnabled={access.link.qaEnabled}
+              fileRequestsEnabled={access.link.fileRequestsEnabled}
+              publicToken={token}
+              publicSessionToken={accessCredentials.sessionToken}
+            />
+          ) : undefined
         }
       />
     </div>

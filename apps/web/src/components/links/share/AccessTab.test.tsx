@@ -67,7 +67,6 @@ const baseDraft: DraftLink = {
   enableScreenshotProtection: false,
   enableFileRequests: false,
   enableIndexFileGeneration: false,
-  enableQaConversations: false,
   allowedViewers: [],
   blockedViewers: [],
   customDomain: "",
@@ -237,50 +236,46 @@ describe("AccessTab", () => {
     expect(screen.queryByTitle(/reduce leak risk/i)).not.toBeInTheDocument();
   });
 
-  it("shows advanced count badge when Enable AI assistant is enabled", () => {
-    renderAccessTab({ ...baseDraft, enableQaConversations: true });
+  it("shows advanced count badge when file requests is enabled", () => {
+    renderAccessTab({ ...baseDraft, enableFileRequests: true });
     expect(screen.getByText("1 enabled")).toBeInTheDocument();
   });
 
-  it("counts Enable AI assistant and file requests separately in advanced badge", () => {
+  it("counts file requests and index file separately in advanced badge", () => {
     renderAccessTab({
       ...baseDraft,
       enableFileRequests: true,
-      enableQaConversations: true,
+      enableIndexFileGeneration: true,
     });
     expect(screen.getByText("2 enabled")).toBeInTheDocument();
   });
 
-  it("renders Enable AI assistant master toggle without Ask Docs sub-channels", () => {
-    renderAccessTab({ ...baseDraft, enableQaConversations: true });
+  it("renders advanced options without Ask Host toggle", () => {
+    renderAccessTab(baseDraft);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByText(/Enable AI assistant/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Enable AI assistant/i)).not.toBeInTheDocument();
     expect(screen.queryByRole("switch", { name: /Ask Docs/i })).not.toBeInTheDocument();
     expect(screen.queryByText(/AI Agents/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Q&A conversations/i)).not.toBeInTheDocument();
   });
 
-  it("enabling Enable AI assistant sets enableQaConversations", () => {
-    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
+  it("shows Ask Host included notice for deal-room links", () => {
+    renderAccessTab(baseDraft, {}, true);
     fireEvent.click(screen.getByText(/advanced/i));
-    fireEvent.click(screen.getByRole("switch", { name: /Enable AI assistant/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ enableQaConversations: true });
+    expect(screen.getByTestId("deal-room-ask-host-included")).toBeInTheDocument();
+    expect(screen.getByText(/Ask Host included/i)).toBeInTheDocument();
+    expect(screen.queryByRole("switch", { name: /Visitor Ask/i })).not.toBeInTheDocument();
   });
 
-  it("turning off Enable AI assistant clears enableQaConversations", () => {
-    const { updateDraft } = renderAccessTab({
-      ...baseDraft,
-      enableQaConversations: true,
-    });
+  it("does not show Ask Host included notice for document-only links", () => {
+    renderAccessTab(baseDraft, {}, false);
     fireEvent.click(screen.getByText(/advanced/i));
-    fireEvent.click(screen.getByRole("switch", { name: /Enable AI assistant/i }));
-    expect(updateDraft).toHaveBeenCalledWith({ enableQaConversations: false });
+    expect(screen.queryByTestId("deal-room-ask-host-included")).not.toBeInTheDocument();
   });
 
   it("renders all advanced options when section is expanded", () => {
-    renderAccessTab({ ...baseDraft, enableQaConversations: true });
+    renderAccessTab(baseDraft);
     fireEvent.click(screen.getByText(/advanced/i));
-    expect(screen.getByText(/Enable AI assistant/i)).toBeInTheDocument();
     expect(screen.getByText(/file requests/i)).toBeInTheDocument();
     expect(screen.getByText(/index file/i)).toBeInTheDocument();
   });
@@ -290,7 +285,7 @@ describe("AccessTab", () => {
     fireEvent.click(screen.getByText(/advanced/i));
     expect(screen.getByRole("switch", { name: /file requests/i })).not.toBeDisabled();
     expect(screen.getByRole("switch", { name: /index file/i })).not.toBeDisabled();
-    expect(screen.getByRole("switch", { name: /Enable AI assistant/i })).not.toBeDisabled();
+    expect(screen.queryByRole("switch", { name: /Enable AI assistant/i })).not.toBeInTheDocument();
   });
 
   it("displays validation errors", () => {

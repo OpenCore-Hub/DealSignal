@@ -7,11 +7,24 @@ import { PublicViewerPage } from "./PublicViewerPage";
 import { createTestI18n } from "@/i18n/test-utils";
 import { ApiError } from "@/lib/apiClient";
 
-const { accessPublicLinkMock, getPublicNDAPreviewMock, requestPublicLinkAccessMock, checkPublicLinkEmailMock } = vi.hoisted(() => ({
+const {
+  accessPublicLinkMock,
+  getPublicNDAPreviewMock,
+  requestPublicLinkAccessMock,
+  checkPublicLinkEmailMock,
+  getPublicDocumentPagesMock,
+  getPublicPageSignedUrlMock,
+  recordPublicEventMock,
+  listPublicQuestionsMock,
+} = vi.hoisted(() => ({
   accessPublicLinkMock: vi.fn(),
   getPublicNDAPreviewMock: vi.fn(),
   requestPublicLinkAccessMock: vi.fn(),
   checkPublicLinkEmailMock: vi.fn(),
+  getPublicDocumentPagesMock: vi.fn(),
+  getPublicPageSignedUrlMock: vi.fn(),
+  recordPublicEventMock: vi.fn(),
+  listPublicQuestionsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -20,6 +33,10 @@ vi.mock("@/lib/api", () => ({
     getPublicNDAPreview: getPublicNDAPreviewMock,
     requestPublicLinkAccess: requestPublicLinkAccessMock,
     checkPublicLinkEmail: checkPublicLinkEmailMock,
+    getPublicDocumentPages: getPublicDocumentPagesMock,
+    getPublicPageSignedUrl: getPublicPageSignedUrlMock,
+    recordPublicEvent: recordPublicEventMock,
+    listPublicQuestions: listPublicQuestionsMock,
   },
 }));
 
@@ -66,6 +83,27 @@ const successAccess = {
   sessionToken: "session-after-access",
 };
 
+const dealRoomAskAccess = {
+  link: {
+    id: "link-room-1",
+    name: "Series B Data Room",
+    permissionType: "email",
+    downloadEnabled: false,
+    watermarkEnabled: false,
+    qaEnabled: true,
+    fileRequestsEnabled: false,
+    isBundle: false,
+    dealRoomId: "room-1",
+  },
+  documents: [{ id: "doc-1", title: "Deck", pageCount: 12, sourceType: "pdf" }],
+  visitorId: "v1",
+  requiresEmail: false,
+  requiresEmailVerification: false,
+  requiresPassword: false,
+  requiresNda: false,
+  sessionToken: "session-after-access",
+};
+
 async function renderPage(token: string, i18n?: Awaited<ReturnType<typeof createTestI18n>>) {
   const i18nInstance = i18n ?? (await createTestI18n());
   const view = render(
@@ -90,6 +128,24 @@ describe("PublicViewerPage", () => {
     getPublicNDAPreviewMock.mockReset();
     requestPublicLinkAccessMock.mockReset();
     checkPublicLinkEmailMock.mockReset();
+    getPublicDocumentPagesMock.mockReset();
+    getPublicPageSignedUrlMock.mockReset();
+    recordPublicEventMock.mockReset();
+    listPublicQuestionsMock.mockReset();
+    getPublicDocumentPagesMock.mockResolvedValue({
+      documentId: "doc-1",
+      pages: [{ pageNumber: 1, width: 612, height: 792 }],
+      total: 1,
+    });
+    getPublicPageSignedUrlMock.mockResolvedValue({
+      page_number: 1,
+      image_url: "https://example.test/page-1.png",
+      expires_at: "2099-01-01T00:00:00Z",
+      width: 612,
+      height: 792,
+    });
+    recordPublicEventMock.mockResolvedValue(undefined);
+    listPublicQuestionsMock.mockResolvedValue({ data: [] });
     getPublicNDAPreviewMock.mockResolvedValue({
       ndaTemplate: {
         id: "tpl-1",
@@ -122,7 +178,7 @@ describe("PublicViewerPage", () => {
     await renderPage("internal-token");
 
     await waitFor(() => {
-      expect(screen.getByText("server exploded")).toBeInTheDocument();
+      expect(screen.getByRole("alert")).toHaveTextContent(/Something went wrong|common:error\.loadFailed/);
     });
     expect(screen.getByText("viewer.gateTitle")).toBeInTheDocument();
     expect(screen.queryByText("common:error.loadFailed")).not.toBeInTheDocument();
@@ -1318,5 +1374,71 @@ describe("PublicViewerPage", () => {
     // Stale token-a success must not overwrite the newer token-b gate.
     expect(document.getElementById("email-code")).toBeInTheDocument();
     expect(screen.queryByText("Deck")).not.toBeInTheDocument();
+  });
+
+  it("shows workspace toggle for deal-room link with qa enabled after session reuse", async () => {
+    const token = "deal-room-ask-token";
+    window.sessionStorage.setItem(`link-session:${token}`, "stored-session");
+
+    accessPublicLinkMock.mockImplementation(async (_tok: string, opts?: { sessionToken?: string }) => {
+      if (opts?.sessionToken === "stored-session" || opts?.sessionToken === "session-after-access") {
+        return dealRoomAskAccess;
+      }
+      throw new ApiError({
+        status: 403,
+        code: "requires_email_code",
+        message: "email code required",
+        requestId: "req-gate",
+        requiresEmail: false,
+        requiresEmailVerification: true,
+        requiresPassword: false,
+        requiresNda: false,
+        isDealRoom: true,
+      });
+    });
+
+    await renderPage(token);
+
+    await waitFor(() => {
+      expect(accessPublicLinkMock).toHaveBeenCalledWith(
+        token,
+        expect.objectContaining({ sessionToken: "stored-session" }),
+      );
+    });
+
+    const workspaceToggle = await screen.findByRole("button", { name: "viewer.sidebarOpen" });
+    expect(workspaceToggle).toBeInTheDocument();
+
+    fireEvent.click(workspaceToggle);
+
+    await waitFor(() => {
+      expect(listPublicQuestionsMock).toHaveBeenCalledWith(
+        token,
+        expect.objectContaining({ sessionToken: "session-after-access" }),
+      );
+    });
+    expect(screen.getByText("viewer.workspaceTitle")).toBeInTheDocument();
+  });
+
+  it("hides workspace toggle for document-only link without qa or multi-doc", async () => {
+    const token = "doc-only-token";
+    window.sessionStorage.setItem(`link-session:${token}`, "stored-session");
+    accessPublicLinkMock.mockResolvedValue(successAccess);
+
+    await renderPage(token);
+
+    await waitFor(() => {
+      expect(accessPublicLinkMock).toHaveBeenCalledWith(
+        token,
+        expect.objectContaining({ sessionToken: "stored-session" }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(getPublicDocumentPagesMock).toHaveBeenCalled();
+    });
+
+    expect(screen.queryByRole("button", { name: "viewer.sidebarOpen" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "viewer.sidebarClose" })).not.toBeInTheDocument();
   });
 });

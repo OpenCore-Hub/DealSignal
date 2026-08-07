@@ -538,3 +538,38 @@
 .animate-shimmer {
   animation: shimmer 2.5s linear infinite;
 }
+
+/* Public share-link viewer — premium stage layout */
+.public-viewer-shell {
+  background:
+    radial-gradient(1200px 600px at 12% -8%, rgba(16, 185, 129, 0.07), transparent 55%),
+    radial-gradient(900px 500px at 88% 108%, rgba(15, 23, 42, 0.06), transparent 50%),
+    linear-gradient(180deg, #f8f7f4 0%, #f1f0ec 48%, #ebeae6 100%);
+}
+
+.dark .public-viewer-shell {
+  background:
+    radial-gradient(1200px 600px at 12% -8%, rgba(16, 185, 129, 0.12), transparent 55%),
+    radial-gradient(900px 500px at 88% 108%, rgba(255, 255, 255, 0.04), transparent 50%),
+    linear-gradient(180deg, #0b0f14 0%, #0f1419 48%, #121820 100%);
+}
+
+.public-viewer-glass {
+  background: color-mix(in oklab, var(--background) 78%, transparent);
+  backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid color-mix(in oklab, var(--foreground) 8%, transparent);
+  box-shadow:
+    0 1px 0 color-mix(in oklab, white 60%, transparent) inset,
+    0 8px 32px rgba(15, 23, 42, 0.08);
+}
+
+.public-viewer-stage {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.8) inset,
+    0 24px 64px rgba(15, 23, 42, 0.14),
+    0 4px 16px rgba(15, 23, 42, 0.06);
+}
+
+.public-viewer-accent-ring {
+  background: linear-gradient(135deg, rgba(16, 185, 129, 0.18), rgba(15, 23, 42, 0.04));
+}

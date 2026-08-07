@@ -295,7 +295,6 @@ function DealRoomShareDialogContent({
           expires_at: toRFC3339(payloadDraft.expiresAt) || undefined,
           download_enabled: payloadDraft.allowDownloading,
           watermark_enabled: payloadDraft.watermarkEnabled,
-          qa_enabled: payloadDraft.enableQaConversations,
           file_requests_enabled: payloadDraft.enableFileRequests,
           index_file_enabled: payloadDraft.enableIndexFileGeneration,
           screenshot_protection_enabled: payloadDraft.enableScreenshotProtection,

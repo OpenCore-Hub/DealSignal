@@ -4,7 +4,7 @@
 > 流式对话是载体；出处、范围、语料完整性才是产品。
 
 状态：设计定稿（实现可分阶段）  
-范围：数据室 Knowledge Tab → 未来可复用到 Viewer 侧栏 / Visitor Ask（组件白名单一致）
+范围：数据室 Knowledge Tab → 访客统一 Ask 见 [Visitor Ask 理想终态](./visitor-ask-unified-product.md)（组件白名单一致）
 
 ---
 

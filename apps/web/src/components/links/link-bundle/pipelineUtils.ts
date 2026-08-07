@@ -72,7 +72,6 @@ export function buildConfigFromPreset(
     ndaTemplateId: "",
     allowDownload: template.allowDownload,
     watermarkEnabled: template.watermarkEnabled,
-    qaEnabled: template.qaEnabled ?? false,
     fileRequestsEnabled: template.fileRequestsEnabled ?? false,
     indexFileEnabled: template.indexFileEnabled ?? false,
     expiryDays: template.expiryDays,
