@@ -2,6 +2,7 @@ package httpx
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -63,6 +64,10 @@ func TestSafeMessage(t *testing.T) {
 	}
 	if got := SafeMessage("storage_error", errors.New("minio: NoSuchKey")); got != "storage operation failed" {
 		t.Fatalf("storage_error = %q", got)
+	}
+	smtpErr := fmt.Errorf("%w: smtp close data: 550 \"Queueing failed\"", errors.New("verification code could not be sent"))
+	if got := SafeMessage("access_code_send_failed", smtpErr); got != "could not send verification code" {
+		t.Fatalf("access_code_send_failed = %q", got)
 	}
 }
 
