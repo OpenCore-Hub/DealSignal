@@ -53,7 +53,6 @@ describe("DealRoomQATab", () => {
       question: "Can you share the updated financial model?",
       lane: "host",
       status: "host_pending",
-      host_question_id: "q1",
       created_at: "2026-07-20T10:00:00.000Z",
       updated_at: "2026-07-20T10:00:00.000Z",
     };

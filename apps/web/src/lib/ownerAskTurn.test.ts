@@ -14,7 +14,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("ownerAskTurnToVisitorQuestion", () => {
-  it("uses host_question_id for answer API and maps answered status", () => {
+  it("uses turn id and maps answered status", () => {
     const turn: OwnerAskTurn = {
       id: "turn-1",
       session_id: "sess-1",
@@ -23,13 +23,12 @@ describe("ownerAskTurnToVisitorQuestion", () => {
       question: "Timeline?",
       lane: "host",
       status: "host_answered",
-      host_question_id: "legacy-q-1",
       host_answer: "Next week",
       created_at: "2026-01-01T00:00:00Z",
       updated_at: "2026-01-02T00:00:00Z",
     };
     const q = ownerAskTurnToVisitorQuestion(turn);
-    expect(q.id).toBe("legacy-q-1");
+    expect(q.id).toBe("turn-1");
     expect(q.ask_turn_id).toBe("turn-1");
     expect(q.status).toBe("answered");
     expect(q.answer).toBe("Next week");
@@ -47,7 +46,6 @@ describe("ownerAskTurnsToVisitorQuestions", () => {
         question: "Hello",
         lane: "host",
         status: "host_pending",
-        host_question_id: "q-1",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-01T00:00:00Z",
       },
@@ -64,7 +62,7 @@ describe("answerOwnerAskQuestion", () => {
 
   it("uses answerAskTurn with ask_turn_id", async () => {
     const question: VisitorQuestion = {
-      id: "q-1",
+      id: "turn-1",
       ask_turn_id: "turn-1",
       link_id: "link-1",
       visitor_id: "visitor-1",
@@ -82,7 +80,6 @@ describe("answerOwnerAskQuestion", () => {
         question: "Hello",
         lane: "host",
         status: "host_answered",
-        host_question_id: "q-1",
         host_answer: "Reply",
         created_at: "2026-01-01T00:00:00Z",
         updated_at: "2026-01-02T00:00:00Z",

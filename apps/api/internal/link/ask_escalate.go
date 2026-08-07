@@ -42,7 +42,7 @@ func (s *Service) EscalatePublicAskTurn(
 	if turn.Lane != askLaneAI || (turn.Status != askStatusAIRefused && turn.Status != askStatusAIAnswered) {
 		return PublicAskTurn{}, fmt.Errorf("%w: turn is not escalatable", ErrAskTurnNotEscalatable)
 	}
-	if turn.HostQuestionID.Valid {
+	if turn.Status == askStatusHostEscalated {
 		return mapPublicAskTurnWithAI(turn), nil
 	}
 
@@ -64,7 +64,7 @@ func (s *Service) maybeAutoEscalateSupervisedRefuse(
 	if policy.Mode != AskModeSupervised {
 		return
 	}
-	if turn.Status != askStatusAIRefused || turn.HostQuestionID.Valid {
+	if turn.Status != askStatusAIRefused {
 		return
 	}
 	if _, err := s.attachHostQueueToAITurn(ctx, link, visitorID, "", turn, routeReasonLowConfidence); err != nil {
@@ -104,7 +104,7 @@ func (s *Service) attachHostQueueToAITurn(
 	turn db.LinkAskTurn,
 	routeReason string,
 ) (db.LinkAskTurn, error) {
-	if turn.HostQuestionID.Valid {
+	if turn.Status == askStatusHostEscalated {
 		return turn, nil
 	}
 	if visitorEmail == "" {
@@ -122,25 +122,12 @@ func (s *Service) attachHostQueueToAITurn(
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.queries.WithTx(tx)
 
-	legacyQ, err := qtx.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
-		TenantID:     link.TenantID,
-		WorkspaceID:  link.WorkspaceID,
-		LinkID:       link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
-		Question:     turn.Question,
-	})
-	if err != nil {
-		return db.LinkAskTurn{}, err
-	}
-
 	rows, err := qtx.EscalateLinkAskTurnToHost(ctx, db.EscalateLinkAskTurnToHostParams{
-		HostQuestionID: legacyQ.ID,
-		RouteReason:    pgtype.Text{String: routeReason, Valid: true},
-		ID:             turn.ID,
-		LinkID:         link.ID,
-		WorkspaceID:    link.WorkspaceID,
-		VisitorID:      visitorID,
+		RouteReason: pgtype.Text{String: routeReason, Valid: true},
+		ID:          turn.ID,
+		LinkID:      link.ID,
+		WorkspaceID: link.WorkspaceID,
+		VisitorID:   visitorID,
 	})
 	if err != nil {
 		return db.LinkAskTurn{}, err

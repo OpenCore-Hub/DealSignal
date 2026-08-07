@@ -4401,21 +4401,21 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 		}
 	}
 
-	questions, err := s.queries.ListVisitorQuestionsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
+	questions, err := s.queries.ListAskQARecordsByLink(ctx, pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
-		logger.ErrorCtx(ctx, "failed to list visitor questions", err)
+		logger.ErrorCtx(ctx, "failed to list ask qa records", err)
 	} else {
 		analytics.QARecords = make([]QARecord, 0, len(questions))
-		for _, q := range questions {
+		for _, row := range questions {
 			record := QARecord{
-				Question:  q.Question,
-				CreatedAt: q.CreatedAt.Time,
+				Question:  row.Question,
+				CreatedAt: row.CreatedAt.Time,
 			}
-			if q.VisitorEmail.Valid {
-				record.VisitorEmail = q.VisitorEmail.String
+			if row.VisitorEmail.Valid {
+				record.VisitorEmail = row.VisitorEmail.String
 			}
-			if q.Answer.Valid {
-				record.Answer = q.Answer.String
+			if row.HostAnswer.Valid {
+				record.Answer = row.HostAnswer.String
 			}
 			analytics.QARecords = append(analytics.QARecords, record)
 		}
@@ -5110,35 +5110,6 @@ func constantTimeEmailCompare(a, b string) bool {
 	) == 1
 }
 
-// AnswerVisitorQuestion records an answer to a visitor question on a specific link.
-func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, questionID, userID pgtype.UUID, answer string) (VisitorQuestion, error) {
-	if strings.TrimSpace(answer) == "" {
-		return VisitorQuestion{}, fmt.Errorf("answer is required")
-	}
-	if err := authorizeAskHostOwnerView(ctx, s.queries, link.WorkspaceID, link.DealRoomID, uuid.UUID(userID.Bytes).String()); err != nil {
-		return VisitorQuestion{}, err
-	}
-	q, err := s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
-		Answer:      pgtype.Text{String: strings.TrimSpace(answer), Valid: true},
-		AnsweredBy:  userID,
-		ID:          questionID,
-		WorkspaceID: link.WorkspaceID,
-		LinkID:      link.ID,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return VisitorQuestion{}, ErrNotFoundInWorkspace
-		}
-		return VisitorQuestion{}, err
-	}
-	if syncErr := s.syncAskTurnHostAnswer(ctx, link, questionID, answer, userID); syncErr != nil {
-		return VisitorQuestion{}, fmt.Errorf("sync host answer to ask turn: %w", syncErr)
-	}
-	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
-	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	return mapVisitorQuestion(q), nil
-}
-
 const maxPendingFileRequestsPerVisitor = 3
 
 // CreateFileRequest allows a visitor to request a missing file from the link owner.
@@ -5613,36 +5584,6 @@ func mimeToSourceType(mime string) string {
 // GetUploadedFileByID returns a single uploaded file record.
 func (s *Service) GetUploadedFileByID(ctx context.Context, id pgtype.UUID) (db.LinkUploadedFile, error) {
 	return s.queries.GetUploadedFileByID(ctx, id)
-}
-
-// ClassifyQuestionIntent runs an LLM-powered intent classification on a visitor
-// question and stores the result. Called asynchronously after question creation.
-func (s *Service) ClassifyQuestionIntent(ctx context.Context, questionID pgtype.UUID, questionText string) {
-	if s.llm == nil || questionText == "" {
-		return
-	}
-
-	systemPrompt := "You are an intent classifier for document sharing Q&A. " +
-		"Analyze the question and respond with exactly ONE label from: " +
-		"pricing, security, timeline, implementation, feature_request, support, objection, general. " +
-		"Output only the label, no explanation."
-
-	label, err := s.llm.ChatCompletion(ctx, systemPrompt, []llmMessage{
-		{Role: "user", Content: questionText},
-	})
-	if err != nil {
-		return
-	}
-
-	label = strings.TrimSpace(label)
-	if label == "" {
-		return
-	}
-
-	_ = s.queries.UpdateQuestionIntentTag(ctx, db.UpdateQuestionIntentTagParams{
-		IntentTag: label,
-		ID:        questionID,
-	})
 }
 
 // ListDormantLinks returns links that were active but went cold, ranked by reactivation potential.

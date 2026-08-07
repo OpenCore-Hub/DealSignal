@@ -1004,7 +1004,6 @@ function seedOwnerAskHostQuestions() {
       route_reason: "policy_formal",
       formal_status: "pending_review",
       formal_anonymize: true,
-      host_question_id: "owner_formal_q_1",
       created_at: now,
       updated_at: now,
     },
@@ -1021,7 +1020,7 @@ function publicTokenFromLink(link: Link): string {
   return parts[parts.length - 1] ?? "";
 }
 
-function syncPublicAskTurnAnswer(linkId: string, questionId: string, answer: string, turnId?: string) {
+function syncPublicAskTurnAnswer(linkId: string, turnId: string, answer: string) {
   const link = mockLinks.find((l) => l.id === linkId);
   if (!link) return;
   const token = publicTokenFromLink(link);
@@ -1030,9 +1029,7 @@ function syncPublicAskTurnAnswer(linkId: string, questionId: string, answer: str
   let changed = false;
   for (let i = 0; i < turns.length; i++) {
     const row = turns[i]!;
-    const matchesQuestion = row.host_question_id === questionId;
-    const matchesTurn = turnId ? row.id === turnId : false;
-    if (!matchesQuestion && !matchesTurn) continue;
+    if (row.id !== turnId) continue;
     turns[i] = {
       ...row,
       status: "host_answered",
@@ -1044,17 +1041,6 @@ function syncPublicAskTurnAnswer(linkId: string, questionId: string, answer: str
   if (changed) {
     mockPublicAskTurns.set(token, turns);
   }
-  const legacyList = mockPublicQuestions.get(token) ?? [];
-  for (let i = 0; i < legacyList.length; i++) {
-    if (legacyList[i].id !== questionId) continue;
-    legacyList[i] = {
-      ...legacyList[i],
-      answer,
-      status: "answered",
-      updated_at: now,
-    };
-  }
-  mockPublicQuestions.set(token, legacyList);
 }
 
 function appendOwnerQuestionFromPublicAsk(link: MockLinkExt, legacy: VisitorQuestion, turnId?: string) {
@@ -1096,14 +1082,9 @@ function mockPublicQuestionsDualRead(token: string): VisitorQuestion[] {
   const link = findMockLinkByPublicToken(token);
   const linkId = link?.id ?? token;
   const turns = mockPublicAskTurns.get(token) ?? [];
-  const legacy = mockPublicQuestions.get(token) ?? [];
-  const covered = new Set<string>();
-  const merged: VisitorQuestion[] = [];
-  for (const turn of turns) {
-    const id = turn.host_question_id ?? turn.id;
-    if (turn.host_question_id) covered.add(turn.host_question_id);
-    merged.push({
-      id,
+  return turns
+    .map((turn) => ({
+      id: turn.id,
       ask_turn_id: turn.id,
       link_id: linkId,
       visitor_id: "visitor_mock",
@@ -1112,16 +1093,10 @@ function mockPublicQuestionsDualRead(token: string): VisitorQuestion[] {
       status: turn.status === "host_answered" ? "answered" : "pending",
       created_at: turn.created_at,
       updated_at: turn.updated_at,
-    });
-  }
-  for (const q of legacy) {
-    if (covered.has(q.id)) continue;
-    merged.push({ ...q, link_id: linkId });
-  }
-  merged.sort(
-    (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
-  );
-  return merged;
+    }))
+    .sort(
+      (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    );
 }
 
 function mockOwnerAskTurnsForLink(linkId: string): OwnerAskTurn[] {
@@ -1139,7 +1114,6 @@ function mockOwnerAskTurnsForLink(linkId: string): OwnerAskTurn[] {
         question: turn.question,
         lane: turn.lane,
         status: turn.status,
-        host_question_id: turn.host_question_id,
         host_answer: turn.host_answer,
         ai_payload: turn.ai_payload,
         route_reason: turn.route_reason,
@@ -1165,7 +1139,6 @@ function mockOwnerAskTurnsForLink(linkId: string): OwnerAskTurn[] {
       question: q.question,
       lane: "host",
       status: q.status === "answered" ? "host_answered" : "host_pending",
-      host_question_id: q.id,
       host_answer: q.answer,
       created_at: q.created_at,
       updated_at: q.updated_at,
@@ -3229,22 +3202,7 @@ export const handlers = [
       if (!turn) {
         return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
       }
-      const questionId = turn.host_question_id ?? turn.id;
-      const list = mockOwnerQuestions.get(linkId) ?? [];
-      const idx = list.findIndex((q) => q.id === questionId);
-      if (idx < 0) {
-        return HttpResponse.json({ code: "not_found", message: "ask turn not found" }, { status: 404 });
-      }
-      const updated: VisitorQuestion = {
-        ...list[idx],
-        answer,
-        status: "answered",
-        answered_by: "user_1",
-        updated_at: new Date().toISOString(),
-      };
-      list[idx] = updated;
-      mockOwnerQuestions.set(linkId, list);
-      syncPublicAskTurnAnswer(linkId, questionId, answer, turnId);
+      syncPublicAskTurnAnswer(linkId, turnId, answer);
       await persistVisitorAskState();
       return HttpResponse.json({
         data: {
@@ -3319,7 +3277,7 @@ export const handlers = [
           published,
           ...existing.filter((entry) => entry.id !== turnId),
         ]);
-        syncPublicAskTurnAnswer(linkId, turn.host_question_id ?? turnId, answer, turnId);
+        syncPublicAskTurnAnswer(linkId, turnId, answer);
       }
       await persistVisitorAskState();
       return HttpResponse.json({ data: updated });
@@ -4446,7 +4404,6 @@ export const handlers = [
       );
     }
     const sessionId = `sess_${token}`;
-    const hostQuestionId = generateId("q");
     const link = findMockLinkByPublicToken(token);
     const forceAI = lower.includes("__ai__");
     const askMode = resolveLinkAskMode(link);
@@ -4474,7 +4431,6 @@ export const handlers = [
           question: forceAI ? cleanedQuestion : question,
           lane: "host",
           status: "host_pending",
-          host_question_id: hostQuestionId,
           route_reason: isFormal
             ? "policy_formal"
             : body.escalate
@@ -4490,22 +4446,17 @@ export const handlers = [
     const list = mockPublicAskTurns.get(token) ?? [];
     list.push(turn);
     mockPublicAskTurns.set(token, list);
-    if (!isAIAsk) {
-      const legacy: VisitorQuestion = {
-        id: hostQuestionId,
-        link_id: token,
+    if (!isAIAsk && link) {
+      appendOwnerQuestionFromPublicAsk(link, {
+        id: turn.id,
+        link_id: link.id,
         visitor_id: "visitor_mock",
         question: forceAI ? cleanedQuestion : question,
         status: "pending",
         created_at: turn.created_at,
         updated_at: turn.updated_at,
-      };
-      const legacyList = mockPublicQuestions.get(token) ?? [];
-      legacyList.push(legacy);
-      mockPublicQuestions.set(token, legacyList);
-      if (link) {
-        appendOwnerQuestionFromPublicAsk(link, legacy, turn.id);
-      }
+        ask_turn_id: turn.id,
+      }, turn.id);
     }
     await persistVisitorAskState();
     return HttpResponse.json({ data: turn }, { status: 201 });
@@ -4527,35 +4478,30 @@ export const handlers = [
         { status: 409 },
       );
     }
-    if (turn.host_question_id) {
+    if (turn.status === "host_escalated") {
       return HttpResponse.json({ data: turn });
     }
-    const hostQuestionId = generateId("q");
     const updated: PublicAskTurn = {
       ...turn,
       lane: "hybrid",
       status: "host_escalated",
-      host_question_id: hostQuestionId,
       route_reason: "user_escalate",
       updated_at: new Date().toISOString(),
     };
     list[idx] = updated;
     mockPublicAskTurns.set(token, list);
     const link = findMockLinkByPublicToken(token);
-    const legacy: VisitorQuestion = {
-      id: hostQuestionId,
-      link_id: token,
-      visitor_id: "visitor_mock",
-      question: turn.question,
-      status: "pending",
-      created_at: updated.updated_at,
-      updated_at: updated.updated_at,
-    };
-    const legacyList = mockPublicQuestions.get(token) ?? [];
-    legacyList.push(legacy);
-    mockPublicQuestions.set(token, legacyList);
     if (link) {
-      appendOwnerQuestionFromPublicAsk(link, legacy, updated.id);
+      appendOwnerQuestionFromPublicAsk(link, {
+        id: updated.id,
+        link_id: link.id,
+        visitor_id: "visitor_mock",
+        question: turn.question,
+        status: "pending",
+        created_at: updated.updated_at,
+        updated_at: updated.updated_at,
+        ask_turn_id: updated.id,
+      }, updated.id);
     }
     await persistVisitorAskState();
     return HttpResponse.json({ data: updated });

@@ -159,7 +159,6 @@ export interface PublicAskTurn {
     | "host_escalated"
     | "host_answered"
     | "failed";
-  host_question_id?: string;
   host_answer?: string;
   route_reason?: string;
   pinned_faq_at?: string;

@@ -99,7 +99,6 @@ describe("ManagementTab", () => {
       question: "What is the pricing?",
       lane: "host",
       status: "host_pending",
-      host_question_id: "q1",
       created_at: "2026-07-11T10:00:00Z",
       updated_at: "2026-07-11T10:00:00Z",
     };
@@ -121,7 +120,6 @@ describe("ManagementTab", () => {
       question: "What is the pricing?",
       lane: "host",
       status: "host_pending",
-      host_question_id: "q1",
       created_at: "2026-07-11T10:00:00Z",
       updated_at: "2026-07-11T10:00:00Z",
     };

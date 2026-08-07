@@ -1189,9 +1189,13 @@ visitor_stats AS (
 question_counts AS (
     SELECT
         rl.room_id,
-        COUNT(DISTINCT q.id) FILTER (WHERE q.status = 'pending')::bigint AS pending_question_count
+        COUNT(DISTINCT t.id) FILTER (
+            WHERE t.lane IN ('host', 'hybrid')
+              AND t.status IN ('host_pending', 'host_escalated')
+              AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
+        )::bigint AS pending_question_count
     FROM room_links rl
-    JOIN link_visitor_questions q ON q.link_id = rl.link_id
+    JOIN link_ask_turns t ON t.link_id = rl.link_id
     GROUP BY rl.room_id
 )
 SELECT
@@ -1486,9 +1490,13 @@ visitor_stats AS (
 question_counts AS (
     SELECT
         rl.room_id,
-        COUNT(DISTINCT q.id) FILTER (WHERE q.status = 'pending')::bigint AS pending_question_count
+        COUNT(DISTINCT t.id) FILTER (
+            WHERE t.lane IN ('host', 'hybrid')
+              AND t.status IN ('host_pending', 'host_escalated')
+              AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
+        )::bigint AS pending_question_count
     FROM room_links rl
-    JOIN link_visitor_questions q ON q.link_id = rl.link_id
+    JOIN link_ask_turns t ON t.link_id = rl.link_id
     GROUP BY rl.room_id
 )
 SELECT
@@ -2136,12 +2144,16 @@ JOIN deal_rooms dr ON dr.id = m.room_id
 WHERE m.workspace_id = $1 AND m.nda_status = 'pending'
 ORDER BY m.created_at DESC;
 
--- name: ListPendingLinkQuestionsByWorkspace :many
-SELECT q.id, q.visitor_email, q.question, q.link_id, l.name AS link_name, l.deal_room_id
-FROM link_visitor_questions q
-JOIN links l ON l.id = q.link_id
-WHERE q.workspace_id = $1 AND q.status = 'pending'
-ORDER BY q.created_at DESC;
+-- name: ListPendingAskTurnsByWorkspace :many
+SELECT t.id, s.visitor_email, t.question, t.link_id, l.name AS link_name, l.deal_room_id
+FROM link_ask_turns t
+JOIN link_ask_sessions s ON s.id = t.session_id
+JOIN links l ON l.id = t.link_id
+WHERE t.workspace_id = $1
+  AND t.lane IN ('host', 'hybrid')
+  AND t.status IN ('host_pending', 'host_escalated')
+  AND (t.formal_status IS NULL OR t.formal_status NOT IN ('pending_review', 'scheduled'))
+ORDER BY t.created_at DESC;
 
 -- name: ListPendingUploadedFilesByWorkspace :many
 SELECT f.id, f.original_filename, f.link_id, l.name AS link_name
@@ -2149,6 +2161,15 @@ FROM link_uploaded_files f
 JOIN links l ON l.id = f.link_id
 WHERE f.workspace_id = $1 AND f.status = 'pending_review'
 ORDER BY f.created_at DESC;
+
+-- name: ListAskQARecordsByLink :many
+SELECT t.question, t.host_answer, s.visitor_email, t.created_at
+FROM link_ask_turns t
+JOIN link_ask_sessions s ON s.id = t.session_id
+WHERE t.link_id = $1
+  AND t.host_answer IS NOT NULL
+  AND btrim(t.host_answer) <> ''
+ORDER BY t.created_at DESC;
 
 -- name: ListExpiringLinksByWorkspace :many
 SELECT l.id, l.name
@@ -2179,8 +2200,11 @@ WHERE workspace_id = $1
 
 -- name: CountPendingQuestionsByWorkspace :one
 SELECT COUNT(*) AS pending_count
-FROM link_visitor_questions
-WHERE workspace_id = $1 AND status = 'pending';
+FROM link_ask_turns
+WHERE workspace_id = $1
+  AND lane IN ('host', 'hybrid')
+  AND status IN ('host_pending', 'host_escalated')
+  AND (formal_status IS NULL OR formal_status NOT IN ('pending_review', 'scheduled'));
 
 -- name: ListRecentActivitiesByWorkspace :many
 -- Bound each leg before UNION so access_logs/questions/uploads cannot unbounded-scan.
@@ -2219,20 +2243,22 @@ FROM (
 
     (
         SELECT
-            q.id::text AS id,
+            t.id::text AS id,
             'question' AS event_type,
-            COALESCE(NULLIF(q.visitor_email, ''), q.visitor_id, 'Unknown') AS actor,
+            COALESCE(NULLIF(s.visitor_email, ''), t.visitor_id, 'Unknown') AS actor,
             CASE WHEN l.deal_room_id IS NOT NULL THEN 'room' ELSE 'document' END AS object_type,
             COALESCE(dr.name, d.title, 'Shared link') AS object_name,
             COALESCE(dr.id, d.id, l.id)::text AS object_id,
-            q.created_at
-        FROM link_visitor_questions q
-        JOIN links l ON l.id = q.link_id
+            t.created_at
+        FROM link_ask_turns t
+        JOIN link_ask_sessions s ON s.id = t.session_id
+        JOIN links l ON l.id = t.link_id
         LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id
         LEFT JOIN documents d ON d.id = l.document_id
-        WHERE q.workspace_id = $1
-          AND q.created_at >= now() - interval '30 days'
-        ORDER BY q.created_at DESC
+        WHERE t.workspace_id = $1
+          AND t.lane IN ('host', 'hybrid')
+          AND t.created_at >= now() - interval '30 days'
+        ORDER BY t.created_at DESC
         LIMIT $2
     )
 
@@ -3124,42 +3150,6 @@ WHERE link_id = $1
   AND status = 'approved'
 RETURNING *;
 
--- name: CreateVisitorQuestion :one
-INSERT INTO link_visitor_questions (
-    tenant_id, workspace_id, link_id, visitor_id, visitor_email, question
-) VALUES ($1, $2, $3, $4, $5, $6)
-RETURNING *;
-
--- name: ListVisitorQuestionsByLink :many
-SELECT * FROM link_visitor_questions
-WHERE link_id = $1
-ORDER BY created_at DESC;
-
--- name: ListVisitorQuestionsByRoom :many
-SELECT q.*
-FROM link_visitor_questions q
-INNER JOIN links l ON l.id = q.link_id AND l.deal_room_id = $1
-WHERE q.workspace_id = $2
-ORDER BY q.created_at DESC
-LIMIT $3;
-
--- name: ListVisitorQuestionsByVisitor :many
-SELECT * FROM link_visitor_questions
-WHERE link_id = $1 AND visitor_id = $2
-ORDER BY created_at DESC;
-
--- name: AnswerVisitorQuestion :one
-UPDATE link_visitor_questions
-SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
-WHERE id = $3 AND workspace_id = $4 AND link_id = $5
-RETURNING *;
-
--- name: GetVisitorQuestionByID :one
-SELECT *
-FROM link_visitor_questions
-WHERE id = $1 AND workspace_id = $2
-LIMIT 1;
-
 -- name: GetLinkAskSessionByLinkVisitor :one
 SELECT *
 FROM link_ask_sessions
@@ -3194,11 +3184,10 @@ INSERT INTO link_ask_turns (
     question,
     lane,
     status,
-    host_question_id,
     route_reason,
     formal_status,
     formal_anonymize
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
 -- name: ListLinkAskTurnsByVisitor :many
@@ -3206,17 +3195,6 @@ SELECT *
 FROM link_ask_turns
 WHERE link_id = $1 AND visitor_id = $2
 ORDER BY created_at ASC;
-
--- name: MarkLinkAskTurnHostAnswered :execrows
-UPDATE link_ask_turns
-SET status = 'host_answered',
-    host_answer = $1,
-    answered_by = $2,
-    updated_at = now()
-WHERE host_question_id = $3
-  AND workspace_id = $4
-  AND link_id = $5
-  AND status IN ('host_pending', 'host_escalated');
 
 -- name: MarkLinkAskTurnHostAnsweredByID :execrows
 UPDATE link_ask_turns
@@ -3269,15 +3247,13 @@ WHERE link_id = $1;
 UPDATE link_ask_turns
 SET lane = 'hybrid',
     status = 'host_escalated',
-    host_question_id = $1,
-    route_reason = $2,
+    route_reason = $1,
     updated_at = now()
-WHERE id = $3
-  AND link_id = $4
-  AND workspace_id = $5
-  AND visitor_id = $6
-  AND status IN ('ai_refused', 'ai_answered')
-  AND host_question_id IS NULL;
+WHERE id = $2
+  AND link_id = $3
+  AND workspace_id = $4
+  AND visitor_id = $5
+  AND status IN ('ai_refused', 'ai_answered');
 
 -- name: UpdateLinkAskTurnAIResult :execrows
 UPDATE link_ask_turns
@@ -3302,7 +3278,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3315,21 +3290,12 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+    s.visitor_email::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
-LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
 WHERE t.id = $1
   AND t.workspace_id = $2
   AND t.link_id = $3
-LIMIT 1;
-
--- name: GetLinkAskTurnByHostQuestionID :one
-SELECT *
-FROM link_ask_turns
-WHERE host_question_id = $1
-  AND workspace_id = $2
-  AND link_id = $3
 LIMIT 1;
 
 -- name: ListLinkAskTurnsByLink :many
@@ -3344,7 +3310,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3357,10 +3322,9 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+    s.visitor_email::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
-LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
 WHERE t.link_id = $1
   AND t.workspace_id = $2
 ORDER BY t.created_at DESC;
@@ -3377,7 +3341,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3390,11 +3353,10 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+    s.visitor_email::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
-LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
 WHERE t.workspace_id = $2
 ORDER BY t.created_at DESC
 LIMIT $3;
@@ -3458,7 +3420,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3487,7 +3448,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3500,10 +3460,9 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+    s.visitor_email::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
-LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
 WHERE t.link_id = $1
   AND t.workspace_id = $2
   AND t.pinned_faq_at IS NOT NULL
@@ -3522,7 +3481,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3535,11 +3493,10 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    COALESCE(s.visitor_email, q.visitor_email)::text AS visitor_email
+    s.visitor_email::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
-LEFT JOIN link_visitor_questions q ON q.id = t.host_question_id
 WHERE t.workspace_id = $2
   AND t.pinned_faq_at IS NOT NULL
 ORDER BY t.pinned_faq_sort ASC NULLS LAST, t.pinned_faq_at DESC
@@ -3556,7 +3513,7 @@ WHERE link_id = $1
   AND formal_status = 'scheduled'
   AND formal_publish_at IS NOT NULL
   AND formal_publish_at <= now()
-RETURNING id, link_id, host_question_id, host_answer, answered_by;
+RETURNING id, link_id, host_answer, answered_by;
 
 -- name: PublishDueFormalAskTurnsByRoom :many
 UPDATE link_ask_turns t
@@ -3571,7 +3528,7 @@ WHERE l.id = t.link_id
   AND t.formal_status = 'scheduled'
   AND t.formal_publish_at IS NOT NULL
   AND t.formal_publish_at <= now()
-RETURNING t.id, t.link_id, t.host_question_id, t.host_answer, t.answered_by;
+RETURNING t.id, t.link_id, t.host_answer, t.answered_by;
 
 -- name: ScheduleFormalAskTurn :execrows
 UPDATE link_ask_turns
@@ -3609,7 +3566,6 @@ SELECT
     t.lane,
     t.status,
     t.ai_payload,
-    t.host_question_id,
     t.host_answer,
     t.answered_by,
     t.route_reason,
@@ -3630,11 +3586,6 @@ WHERE t.workspace_id = $2
 ORDER BY t.formal_published_at DESC NULLS LAST, t.created_at DESC
 LIMIT $3;
 
-
--- name: UpdateVisitorQuestionAnswer :exec
-UPDATE link_visitor_questions
-SET answer = $1, answered_by = $2, status = 'answered', updated_at = now()
-WHERE id = $3;
 
 -- name: CreateFileRequest :one
 INSERT INTO link_file_requests (
@@ -3780,11 +3731,6 @@ WHERE created_at < $1;
 -- name: DeleteSecurityEventsBefore :execrows
 DELETE FROM security_events
 WHERE created_at < $1;
-
--- name: UpdateQuestionIntentTag :exec
-UPDATE link_visitor_questions
-SET intent_tag = $1
-WHERE id = $2;
 
 -- name: UpsertCrmSyncState :exec
 INSERT INTO crm_sync_state (workspace_id, event_min, event_max, contact_email, link_id, event_types, summary, pushed_at)

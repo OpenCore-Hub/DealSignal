@@ -613,7 +613,7 @@ func TestRejectIfAskHostLimitedReturns429(t *testing.T) {
 		VisitorID: "v1",
 		Email:     "v@example.com",
 	}
-	if !h.rejectIfAskHostLimited(c, result, "link-1") {
+	if !h.rejectIfVisitorAskLimited(c, result, "link-1") {
 		t.Fatal("expected Ask Host rate limit rejection")
 	}
 	if w.Code != http.StatusTooManyRequests {
@@ -643,7 +643,7 @@ func TestRejectIfAskHostLimitedUnavailableReturns503(t *testing.T) {
 		VisitorID: "v-infra",
 		Email:     "infra@example.com",
 	}
-	if !h.rejectIfAskHostLimited(c, result, "link-infra") {
+	if !h.rejectIfVisitorAskLimited(c, result, "link-infra") {
 		t.Fatal("expected Ask Host limiter unavailable rejection")
 	}
 	if w.Code != http.StatusServiceUnavailable {
@@ -695,7 +695,7 @@ func TestRejectIfAskHostLimitedWritesSecurityEvent(t *testing.T) {
 		VisitorID: "v-host",
 		Email:     "host@example.com",
 	}
-	if !h.rejectIfAskHostLimited(c, result, "link-host") {
+	if !h.rejectIfVisitorAskLimited(c, result, "link-host") {
 		t.Fatal("expected Ask Host rate limit rejection")
 	}
 	if w.Code != http.StatusTooManyRequests {

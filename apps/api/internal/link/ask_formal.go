@@ -134,7 +134,6 @@ func mapPublicFormalAskFromRoomRow(row db.ListRoomPublishedFormalAskRow) (Public
 		Lane:              row.Lane,
 		Status:            row.Status,
 		AiPayload:         row.AiPayload,
-		HostQuestionID:    row.HostQuestionID,
 		HostAnswer:        row.HostAnswer,
 		AnsweredBy:        row.AnsweredBy,
 		RouteReason:       row.RouteReason,
@@ -191,29 +190,17 @@ func (s *Service) publishDueFormalTurns(ctx context.Context, link db.Link) error
 			return err
 		}
 	}
-	return s.syncLegacyQuestionsForPublishedFormalTurns(ctx, link.WorkspaceID, rows)
+	return s.resolvePublishedFormalTurnActions(ctx, link.WorkspaceID, rows)
 }
 
-func (s *Service) syncLegacyQuestionsForPublishedFormalTurns(
+func (s *Service) resolvePublishedFormalTurnActions(
 	ctx context.Context,
 	workspaceID pgtype.UUID,
 	rows []db.PublishDueFormalAskTurnsRow,
 ) error {
 	wsID := uuid.UUID(workspaceID.Bytes).String()
 	for _, row := range rows {
-		if !row.HostQuestionID.Valid || !row.HostAnswer.Valid {
-			continue
-		}
-		if _, err := s.queries.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
-			Answer:      row.HostAnswer,
-			AnsweredBy:  row.AnsweredBy,
-			ID:          row.HostQuestionID,
-			WorkspaceID: workspaceID,
-			LinkID:      row.LinkID,
-		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return fmt.Errorf("sync legacy formal publish: %w", err)
-		}
-		s.resolveLinkQuestion(wsID, uuid.UUID(row.HostQuestionID.Bytes).String())
+		s.resolveLinkQuestion(wsID, uuid.UUID(row.ID.Bytes).String())
 	}
 	if len(rows) > 0 {
 		s.softInvalidateRoomList(ctx, workspaceID)
@@ -337,26 +324,14 @@ func (s *Service) PublishFormalAskTurn(
 		return OwnerAskTurn{}, ErrAskTurnNotFormalPending
 	}
 
-	if formalStatus == formalStatusPublished && turn.HostQuestionID.Valid {
-		if _, err := qtx.AnswerVisitorQuestion(ctx, db.AnswerVisitorQuestionParams{
-			Answer:      pgtype.Text{String: answer, Valid: true},
-			AnsweredBy:  userID,
-			ID:          turn.HostQuestionID,
-			WorkspaceID: link.WorkspaceID,
-			LinkID:      link.ID,
-		}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return OwnerAskTurn{}, fmt.Errorf("sync legacy question answer: %w", err)
-		}
-	}
-
 	if err := tx.Commit(ctx); err != nil {
 		return OwnerAskTurn{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
-	if formalStatus == formalStatusPublished && turn.HostQuestionID.Valid {
+	if formalStatus == formalStatusPublished {
 		s.resolveLinkQuestion(
 			uuid.UUID(link.WorkspaceID.Bytes).String(),
-			uuid.UUID(turn.HostQuestionID.Bytes).String(),
+			uuid.UUID(turnID.Bytes).String(),
 		)
 	}
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)

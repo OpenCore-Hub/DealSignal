@@ -44,7 +44,7 @@ run_e2e_visitor_ask() {
   echo "ok"
 
   echo -n "[create deal-room link] "
-  local dr_link link_id public_token question answer turn_id host_q_id
+  local dr_link link_id public_token question answer turn_id
   dr_link=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
     -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/deal-rooms/$room_id/links" \
     -H "Content-Type: application/json" \
@@ -77,7 +77,6 @@ run_e2e_visitor_ask() {
     return 1
   fi
   turn_id=$(jq -r '.data.id' "$ask_body")
-  host_q_id=$(jq -r '.data.host_question_id // .data.hostQuestionId // empty' "$ask_body")
   local lane status
   lane=$(jq -r '.data.lane' "$ask_body")
   status=$(jq -r '.data.status' "$ask_body")
@@ -194,7 +193,7 @@ run_e2e_visitor_ask() {
   echo "ok"
 
   echo -n "[dashboard deal_room_link_question action] "
-  local action_source_id="${host_q_id:-$turn_id}"
+  local action_source_id="$turn_id"
   local stats todo_count target_id
   stats=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
     "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/dashboard/stats")

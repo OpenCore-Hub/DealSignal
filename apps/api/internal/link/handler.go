@@ -115,9 +115,9 @@ func (h *Handler) writeLinkSecurityEvent(ctx context.Context, link db.Link, even
 	}
 }
 
-// rejectIfAskHostLimited returns true when Ask Host must be denied (response already written).
+// rejectIfVisitorAskLimited returns true when visitor Ask (host lane) must be denied (response already written).
 // Uses the shared Visitor Ask gate (B8): over-limit → 429 + security event; Redis fail → 503, no event.
-func (h *Handler) rejectIfAskHostLimited(c *gin.Context, result AccessResult, linkID string) bool {
+func (h *Handler) rejectIfVisitorAskLimited(c *gin.Context, result AccessResult, linkID string) bool {
 	return h.rejectIfAskLimited(c, result, linkID, visitorask.ChannelAskHost)
 }
 
@@ -3537,11 +3537,6 @@ func (h *Handler) PublicCreateAsk(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	if turn.HostQuestionID != "" {
-		if qID, parseErr := uuid.Parse(turn.HostQuestionID); parseErr == nil {
-			go h.service.ClassifyQuestionIntent(context.Background(), pgtype.UUID{Bytes: qID, Valid: true}, submission.Question)
-		}
-	}
 	c.JSON(http.StatusCreated, gin.H{"data": turn})
 }
 
@@ -3558,7 +3553,7 @@ func (h *Handler) PublicEscalateAskTurn(c *gin.Context) {
 		return
 	}
 	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	if h.rejectIfAskHostLimited(c, result, linkID) {
+	if h.rejectIfVisitorAskLimited(c, result, linkID) {
 		return
 	}
 	turnUUID, err := uuid.Parse(c.Param("turnId"))

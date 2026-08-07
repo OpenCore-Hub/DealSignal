@@ -286,7 +286,7 @@ test.describe("Visitor Ask (real backend API)", () => {
     restoreCookieJar(authCookies);
 
     const actions = await fetchDashboardActionItems(workspaceSlug);
-    const actionSourceId = created.host_question_id ?? created.id;
+    const actionSourceId = created.id;
     const todo = actions.find(
       (a) =>
         a.sourceType === "deal_room_link_question" &&

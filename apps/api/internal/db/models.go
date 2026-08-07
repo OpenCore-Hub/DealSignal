@@ -508,25 +508,24 @@ type LinkAskSession struct {
 }
 
 type LinkAskTurn struct {
-	ID             pgtype.UUID
-	SessionID      pgtype.UUID
-	TenantID       pgtype.UUID
-	WorkspaceID    pgtype.UUID
-	LinkID         pgtype.UUID
-	VisitorID      string
-	Question       string
-	Lane           string
-	Status         string
-	AiPayload      []byte
-	HostQuestionID pgtype.UUID
-	HostAnswer     pgtype.Text
-	AnsweredBy     pgtype.UUID
-	RouteReason    pgtype.Text
-	CreatedAt      pgtype.Timestamptz
-	UpdatedAt      pgtype.Timestamptz
-	PinnedFaqAt    pgtype.Timestamptz
-	PinnedFaqBy    pgtype.UUID
-	PinnedFaqSort  pgtype.Int4
+	ID            pgtype.UUID
+	SessionID     pgtype.UUID
+	TenantID      pgtype.UUID
+	WorkspaceID   pgtype.UUID
+	LinkID        pgtype.UUID
+	VisitorID     string
+	Question      string
+	Lane          string
+	Status        string
+	AiPayload     []byte
+	HostAnswer    pgtype.Text
+	AnsweredBy    pgtype.UUID
+	RouteReason   pgtype.Text
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+	PinnedFaqAt   pgtype.Timestamptz
+	PinnedFaqBy   pgtype.UUID
+	PinnedFaqSort pgtype.Int4
 	// Formal Q&A lifecycle: pending_review | scheduled | published
 	FormalStatus pgtype.Text
 	// When a scheduled formal answer becomes public
@@ -671,22 +670,6 @@ type LinkUploadedFile struct {
 	ReviewedBy        pgtype.UUID
 	ReviewedAt        pgtype.Timestamptz
 	CreatedAt         pgtype.Timestamptz
-}
-
-type LinkVisitorQuestion struct {
-	ID           pgtype.UUID
-	TenantID     pgtype.UUID
-	WorkspaceID  pgtype.UUID
-	LinkID       pgtype.UUID
-	VisitorID    string
-	VisitorEmail pgtype.Text
-	Question     string
-	Answer       pgtype.Text
-	AnsweredBy   pgtype.UUID
-	Status       string
-	CreatedAt    pgtype.Timestamptz
-	UpdatedAt    pgtype.Timestamptz
-	IntentTag    string
 }
 
 type NdaTemplate struct {

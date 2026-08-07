@@ -143,9 +143,6 @@ func mapPublicAskTurnWithAI(t db.LinkAskTurn) PublicAskTurn {
 		CreatedAt: t.CreatedAt.Time,
 		UpdatedAt: t.UpdatedAt.Time,
 	}
-	if t.HostQuestionID.Valid {
-		out.HostQuestionID = uuid.UUID(t.HostQuestionID.Bytes).String()
-	}
 	if t.HostAnswer.Valid {
 		out.HostAnswer = t.HostAnswer.String
 	}

@@ -65,7 +65,7 @@ func (s *Syncer) SyncWorkspace(ctx context.Context, workspaceID string) error {
 	if err := s.syncRoomNDAs(ctx, ws.TenantID, wsUUID); err != nil {
 		return err
 	}
-	if err := s.syncLinkQuestions(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncPendingAskTurns(ctx, ws.TenantID, wsUUID); err != nil {
 		return err
 	}
 	if err := s.syncUploadedFiles(ctx, ws.TenantID, wsUUID); err != nil {
@@ -173,18 +173,18 @@ func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.
 	return s.closeStaleActions(ctx, workspaceID, SourceTypeRoomNDA, current)
 }
 
-func (s *Syncer) syncLinkQuestions(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
-	rows, err := s.queries.ListPendingLinkQuestionsByWorkspace(ctx, workspaceID)
+func (s *Syncer) syncPendingAskTurns(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+	rows, err := s.queries.ListPendingAskTurnsByWorkspace(ctx, workspaceID)
 	if err != nil {
-		return fmt.Errorf("list pending link questions: %w", err)
+		return fmt.Errorf("list pending ask turns: %w", err)
 	}
 	currentDealRoom := make(map[string]bool, len(rows))
 	for _, r := range rows {
 		if !r.DealRoomID.Valid {
 			continue
 		}
-		qID := uuid.UUID(r.ID.Bytes).String()
-		currentDealRoom[qID] = true
+		turnID := uuid.UUID(r.ID.Bytes).String()
+		currentDealRoom[turnID] = true
 		target := dealRoomAskTargetID(r.DealRoomID, r.LinkID)
 		if err := s.upsertOperationalTextTarget(ctx, tenantID, workspaceID, SourceTypeDealRoomLinkQuestion, r.ID, target, r.VisitorEmail, r.LinkName, "answer"); err != nil {
 			return err

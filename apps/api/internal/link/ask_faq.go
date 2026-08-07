@@ -147,7 +147,6 @@ func mapPublicAskFAQFromRoomPublicRow(row db.ListRoomPublicAskFAQsRow) (PublicAs
 		Lane:           row.Lane,
 		Status:         row.Status,
 		AiPayload:      row.AiPayload,
-		HostQuestionID: row.HostQuestionID,
 		HostAnswer:     row.HostAnswer,
 		AnsweredBy:     row.AnsweredBy,
 		RouteReason:    row.RouteReason,

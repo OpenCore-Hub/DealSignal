@@ -508,6 +508,17 @@ jobs:
           docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
             "SELECT 1 FROM schema_migrations WHERE version = '134_heal_link_question_action_surfaces.up.sql';" | grep -q 1
 
+      - name: Verify legacy question table dropped (migration 141)
+        working-directory: apps/api
+        run: |
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT 1 FROM schema_migrations WHERE version = '141_drop_link_visitor_questions.up.sql';" | grep -q 1
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT to_regclass('public.link_visitor_questions');" | grep -qx ''
+          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
+            "SELECT column_name FROM information_schema.columns WHERE table_name = 'link_ask_turns' AND column_name = 'host_question_id';" \
+            | grep -qx ''
+
       - name: Run backend E2E
         run: PDF=../web/e2e/fixtures/sample.pdf ./e2e-test.sh
 

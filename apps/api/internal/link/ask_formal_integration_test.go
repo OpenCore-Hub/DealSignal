@@ -137,17 +137,7 @@ func TestPublishFormalAskTurn_ScheduledThenDue_Integration(t *testing.T) {
 	if legacy.Status != askStatusHostAnswered {
 		t.Fatalf("status after due publish = %q", legacy.Status)
 	}
-	if !legacy.HostQuestionID.Valid {
-		t.Fatal("expected host_question_id")
-	}
-	legacyQ, err := f.q.GetVisitorQuestionByID(f.ctx, db.GetVisitorQuestionByIDParams{
-		ID:          legacy.HostQuestionID,
-		WorkspaceID: f.link.WorkspaceID,
-	})
-	if err != nil {
-		t.Fatalf("GetVisitorQuestionByID: %v", err)
-	}
-	if !legacyQ.Answer.Valid || legacyQ.Answer.String != "Scheduled answer." {
-		t.Fatalf("legacy answer = %+v", legacyQ.Answer)
+	if !legacy.HostAnswer.Valid || legacy.HostAnswer.String != "Scheduled answer." {
+		t.Fatalf("host answer = %+v", legacy.HostAnswer)
 	}
 }

@@ -26,7 +26,7 @@ func (h *Handler) gatePublicAskSubmission(c *gin.Context) (AccessResult, publicA
 		return AccessResult{}, publicAskSubmission{}, false
 	}
 	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	if h.rejectIfAskHostLimited(c, result, linkID) {
+	if h.rejectIfVisitorAskLimited(c, result, linkID) {
 		return AccessResult{}, publicAskSubmission{}, false
 	}
 	var body struct {

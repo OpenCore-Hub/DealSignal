@@ -4,7 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sort"
+	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/google/uuid"
@@ -23,6 +23,20 @@ type OwnerAskTurn struct {
 	RepeatCount  int    `json:"repeat_count,omitempty"`
 }
 
+// VisitorQuestion is a slim adapter for owner reply UI (maps to turn-based APIs).
+type VisitorQuestion struct {
+	ID           string    `json:"id"`
+	AskTurnID    string    `json:"ask_turn_id,omitempty"`
+	LinkID       string    `json:"link_id"`
+	VisitorID    string    `json:"visitor_id"`
+	VisitorEmail string    `json:"visitor_email,omitempty"`
+	Question     string    `json:"question"`
+	Answer       string    `json:"answer,omitempty"`
+	Status       string    `json:"status"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+}
+
 func mapOwnerAskTurnFromRow(row db.ListLinkAskTurnsByLinkRow) OwnerAskTurn {
 	return mapOwnerAskTurn(db.LinkAskTurn{
 		ID:                row.ID,
@@ -35,7 +49,6 @@ func mapOwnerAskTurnFromRow(row db.ListLinkAskTurnsByLinkRow) OwnerAskTurn {
 		Lane:              row.Lane,
 		Status:            row.Status,
 		AiPayload:         row.AiPayload,
-		HostQuestionID:    row.HostQuestionID,
 		HostAnswer:        row.HostAnswer,
 		AnsweredBy:        row.AnsweredBy,
 		RouteReason:       row.RouteReason,
@@ -67,7 +80,6 @@ func mapOwnerAskTurnFromRoomRow(row db.ListRoomAskTurnsRow) OwnerAskTurn {
 		Lane:              row.Lane,
 		Status:            row.Status,
 		AiPayload:         row.AiPayload,
-		HostQuestionID:    row.HostQuestionID,
 		HostAnswer:        row.HostAnswer,
 		AnsweredBy:        row.AnsweredBy,
 		RouteReason:       row.RouteReason,
@@ -89,20 +101,6 @@ func mapOwnerAskTurn(t db.LinkAskTurn, visitorEmail string) OwnerAskTurn {
 		LinkID:        uuid.UUID(t.LinkID.Bytes).String(),
 		VisitorID:     t.VisitorID,
 		VisitorEmail:  visitorEmail,
-	}
-}
-
-func mapLegacyQuestionToOwnerAskTurn(q db.LinkVisitorQuestion) OwnerAskTurn {
-	pub := mapLegacyQuestionToPublicAskTurn(q)
-	email := ""
-	if q.VisitorEmail.Valid {
-		email = q.VisitorEmail.String
-	}
-	return OwnerAskTurn{
-		PublicAskTurn: pub,
-		LinkID:        uuid.UUID(q.LinkID.Bytes).String(),
-		VisitorID:     q.VisitorID,
-		VisitorEmail:  email,
 	}
 }
 
@@ -147,23 +145,6 @@ func isOwnerAskNeedsHostStatus(status string) bool {
 	return status == askStatusHostPending || status == askStatusHostEscalated
 }
 
-func mergeOwnerAskInbox(turns []OwnerAskTurn, legacy []db.LinkVisitorQuestion) []OwnerAskTurn {
-	hostQuestionIDs := make([]string, 0, len(turns))
-	for _, t := range turns {
-		hostQuestionIDs = append(hostQuestionIDs, t.HostQuestionID)
-	}
-	covered := coveredHostQuestionIDs(hostQuestionIDs)
-	merged := make([]OwnerAskTurn, 0, len(turns)+len(legacy))
-	merged = append(merged, turns...)
-	for _, q := range filterLegacyQuestionsNotInTurns(legacy, covered) {
-		merged = append(merged, mapLegacyQuestionToOwnerAskTurn(q))
-	}
-	sort.Slice(merged, func(i, j int) bool {
-		return merged[i].CreatedAt.After(merged[j].CreatedAt)
-	})
-	return merged
-}
-
 // ListLinkAskInbox returns host-lane Ask turns for a link (primary owner inbox view).
 func (s *Service) ListLinkAskInbox(
 	ctx context.Context,
@@ -184,11 +165,7 @@ func (s *Service) ListLinkAskInbox(
 	for _, row := range rows {
 		turns = append(turns, mapOwnerAskTurnFromRow(row))
 	}
-	legacy, err := s.queries.ListVisitorQuestionsByLink(ctx, link.ID)
-	if err != nil {
-		return nil, err
-	}
-	merged := attachOwnerAskRepeatCounts(mergeOwnerAskInbox(turns, legacy))
+	merged := attachOwnerAskRepeatCounts(turns)
 	return filterOwnerAskTurns(merged, lane, status), nil
 }
 
@@ -233,16 +210,13 @@ func (s *Service) ListRoomAskInbox(
 		turns = append(turns, mapOwnerAskTurnFromRoomRow(row))
 	}
 
-	var filterLink pgtype.UUID
 	if linkID != "" {
-		filterLink = pgUUID(linkID)
+		filterLink := pgUUID(linkID)
 		if !filterLink.Valid {
 			return nil, ErrNotFoundInWorkspace
 		}
-	}
-	if filterLink.Valid {
-		filtered := make([]OwnerAskTurn, 0, len(turns))
 		want := uuid.UUID(filterLink.Bytes).String()
+		filtered := make([]OwnerAskTurn, 0, len(turns))
 		for _, t := range turns {
 			if t.LinkID == want {
 				filtered = append(filtered, t)
@@ -251,41 +225,19 @@ func (s *Service) ListRoomAskInbox(
 		turns = filtered
 	}
 
-	legacyRows, err := s.queries.ListVisitorQuestionsByRoom(ctx, db.ListVisitorQuestionsByRoomParams{
-		DealRoomID:  room.ID,
-		WorkspaceID: wsUUID,
-		Limit:       visitorQuestionsListLimit,
-	})
-	if err != nil {
-		return nil, err
-	}
-	if filterLink.Valid {
-		filteredLegacy := make([]db.LinkVisitorQuestion, 0, len(legacyRows))
-		for _, q := range legacyRows {
-			if q.LinkID == filterLink {
-				filteredLegacy = append(filteredLegacy, q)
-			}
-		}
-		legacyRows = filteredLegacy
-	}
-
-	merged := attachOwnerAskRepeatCounts(mergeOwnerAskInbox(turns, legacyRows))
+	merged := attachOwnerAskRepeatCounts(turns)
 	return filterOwnerAskTurns(merged, lane, status), nil
 }
 
-// OwnerAskTurnToVisitorQuestion maps an owner turn to legacy VisitorQuestion shape
-// so existing answer APIs (host_question_id) keep working.
+// OwnerAskTurnToVisitorQuestion maps an owner turn for reply UI.
 func OwnerAskTurnToVisitorQuestion(t OwnerAskTurn) VisitorQuestion {
-	id := t.HostQuestionID
-	if id == "" {
-		id = t.ID
-	}
 	status := "pending"
 	if t.Status == askStatusHostAnswered {
 		status = "answered"
 	}
 	out := VisitorQuestion{
-		ID:        id,
+		ID:        t.ID,
+		AskTurnID: t.ID,
 		LinkID:    t.LinkID,
 		VisitorID: t.VisitorID,
 		Question:  t.Question,

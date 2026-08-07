@@ -1,11 +1,10 @@
 import type { OwnerAskTurn, VisitorQuestion } from "@/types";
 import { api } from "@/lib/api";
 
-/** Map owner inbox turn to legacy VisitorQuestion for answer APIs. */
+/** Map owner inbox turn for reply UI (turn id is canonical). */
 export function ownerAskTurnToVisitorQuestion(turn: OwnerAskTurn): VisitorQuestion {
-  const id = turn.host_question_id?.trim() || turn.id;
   return {
-    id,
+    id: turn.id,
     ask_turn_id: turn.id,
     link_id: turn.link_id,
     visitor_id: turn.visitor_id,

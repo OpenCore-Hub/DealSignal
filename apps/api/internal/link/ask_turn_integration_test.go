@@ -18,7 +18,7 @@ func enableLinkQA(t *testing.T, f *testFixture) {
 	f.link.QaEnabled = true
 }
 
-func TestCreateHostAskTurn_DualWrite_Integration(t *testing.T) {
+func TestCreateHostAskTurn_TurnsOnly_Integration(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()
 	enableLinkQA(t, f)
@@ -30,23 +30,6 @@ func TestCreateHostAskTurn_DualWrite_Integration(t *testing.T) {
 	}
 	if turn.Question != "What is the timeline?" {
 		t.Fatalf("turn question = %q", turn.Question)
-	}
-	if turn.HostQuestionID == "" {
-		t.Fatal("expected host_question_id on turn")
-	}
-
-	legacy, err := f.q.ListVisitorQuestionsByVisitor(f.ctx, db.ListVisitorQuestionsByVisitorParams{
-		LinkID:    f.link.ID,
-		VisitorID: visitorID,
-	})
-	if err != nil {
-		t.Fatalf("ListVisitorQuestionsByVisitor: %v", err)
-	}
-	if len(legacy) != 1 {
-		t.Fatalf("expected 1 legacy question, got %d", len(legacy))
-	}
-	if legacy[0].Question != "What is the timeline?" {
-		t.Fatalf("legacy question = %q", legacy[0].Question)
 	}
 
 	turns, err := f.q.ListLinkAskTurnsByVisitor(f.ctx, db.ListLinkAskTurnsByVisitorParams{
@@ -61,40 +44,7 @@ func TestCreateHostAskTurn_DualWrite_Integration(t *testing.T) {
 	}
 }
 
-func TestListMyAskTurns_LegacyDualRead_Integration(t *testing.T) {
-	f := newFixture(t)
-	defer f.cleanup()
-	enableLinkQA(t, f)
-
-	visitorID := "visitor-" + uuid.NewString()
-	legacyQ, err := f.q.CreateVisitorQuestion(f.ctx, db.CreateVisitorQuestionParams{
-		TenantID:     f.link.TenantID,
-		WorkspaceID:  f.link.WorkspaceID,
-		LinkID:       f.link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: "visitor@example.com", Valid: true},
-		Question:     "Legacy-only question",
-	})
-	if err != nil {
-		t.Fatalf("CreateVisitorQuestion direct: %v", err)
-	}
-
-	got, err := f.svc.ListMyAskTurns(f.ctx, f.link.ID, visitorID)
-	if err != nil {
-		t.Fatalf("ListMyAskTurns: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 merged turn, got %d", len(got))
-	}
-	if got[0].Question != "Legacy-only question" {
-		t.Fatalf("question = %q", got[0].Question)
-	}
-	if got[0].HostQuestionID != uuid.UUID(legacyQ.ID.Bytes).String() {
-		t.Fatalf("host_question_id = %q", got[0].HostQuestionID)
-	}
-}
-
-func TestAnswerVisitorQuestion_SyncsAskTurn_Integration(t *testing.T) {
+func TestAnswerAskTurnHostAnswer_FromCreateHostAskTurn_Integration(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()
 	enableLinkQA(t, f)
@@ -104,20 +54,20 @@ func TestAnswerVisitorQuestion_SyncsAskTurn_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateHostAskTurn: %v", err)
 	}
-	hostQID, err := uuid.Parse(turn.HostQuestionID)
+	turnUUID, err := uuid.Parse(turn.ID)
 	if err != nil {
-		t.Fatalf("parse host question id: %v", err)
+		t.Fatalf("parse turn id: %v", err)
 	}
 
-	_, err = f.svc.AnswerVisitorQuestion(
+	_, err = f.svc.AnswerAskTurnHostAnswer(
 		f.ctx,
 		f.link,
-		pgtype.UUID{Bytes: hostQID, Valid: true},
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
 		f.user.ID,
 		"We will follow up next week.",
 	)
 	if err != nil {
-		t.Fatalf("AnswerVisitorQuestion: %v", err)
+		t.Fatalf("AnswerAskTurnHostAnswer: %v", err)
 	}
 
 	turns, err := f.svc.ListMyAskTurns(f.ctx, f.link.ID, visitorID)
@@ -132,73 +82,6 @@ func TestAnswerVisitorQuestion_SyncsAskTurn_Integration(t *testing.T) {
 	}
 	if turns[0].HostAnswer != "We will follow up next week." {
 		t.Fatalf("host_answer = %q", turns[0].HostAnswer)
-	}
-}
-
-func TestListLinkAskInbox_LegacyDualRead_Integration(t *testing.T) {
-	f := newFixture(t)
-	defer f.cleanup()
-	enableLinkQA(t, f)
-
-	visitorID := "visitor-" + uuid.NewString()
-	legacyQ, err := f.q.CreateVisitorQuestion(f.ctx, db.CreateVisitorQuestionParams{
-		TenantID:     f.link.TenantID,
-		WorkspaceID:  f.link.WorkspaceID,
-		LinkID:       f.link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: "visitor@example.com", Valid: true},
-		Question:     "Legacy inbox question",
-	})
-	if err != nil {
-		t.Fatalf("CreateVisitorQuestion direct: %v", err)
-	}
-
-	userID := uuid.UUID(f.user.ID.Bytes).String()
-	inbox, err := f.svc.ListLinkAskInbox(f.ctx, f.link, userID, askLaneHost, "")
-	if err != nil {
-		t.Fatalf("ListLinkAskInbox: %v", err)
-	}
-	if len(inbox) != 1 {
-		t.Fatalf("expected 1 inbox item, got %d", len(inbox))
-	}
-	if inbox[0].Question != "Legacy inbox question" {
-		t.Fatalf("question = %q", inbox[0].Question)
-	}
-	if inbox[0].HostQuestionID != uuid.UUID(legacyQ.ID.Bytes).String() {
-		t.Fatalf("host_question_id = %q", inbox[0].HostQuestionID)
-	}
-}
-
-func TestListMyAskTurns_LegacyMerge_Integration(t *testing.T) {
-	f := newFixture(t)
-	defer f.cleanup()
-	enableLinkQA(t, f)
-
-	visitorID := "visitor-" + uuid.NewString()
-	legacyQ, err := f.q.CreateVisitorQuestion(f.ctx, db.CreateVisitorQuestionParams{
-		TenantID:     f.link.TenantID,
-		WorkspaceID:  f.link.WorkspaceID,
-		LinkID:       f.link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: "visitor@example.com", Valid: true},
-		Question:     "Legacy-only for ask/me",
-	})
-	if err != nil {
-		t.Fatalf("CreateVisitorQuestion direct: %v", err)
-	}
-
-	got, err := f.svc.ListMyAskTurns(f.ctx, f.link.ID, visitorID)
-	if err != nil {
-		t.Fatalf("ListMyAskTurns: %v", err)
-	}
-	if len(got) != 1 {
-		t.Fatalf("expected 1 merged turn, got %d", len(got))
-	}
-	if got[0].Question != "Legacy-only for ask/me" {
-		t.Fatalf("question = %q", got[0].Question)
-	}
-	if got[0].HostQuestionID != uuid.UUID(legacyQ.ID.Bytes).String() {
-		t.Fatalf("host_question_id = %q", got[0].HostQuestionID)
 	}
 }
 

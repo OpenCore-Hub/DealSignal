@@ -678,7 +678,6 @@ export interface PublicAskTurn {
   lane: string;
   status: string;
   route_reason?: string;
-  host_question_id?: string;
   host_answer?: string;
 }
 

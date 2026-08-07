@@ -132,7 +132,7 @@ func (s *Service) AnonymizeVisitorData(ctx context.Context, workspaceID pgtype.U
 		anon, email, workspaceID)
 
 	summary["questions"], _ = s.exec(ctx,
-		"UPDATE link_visitor_questions SET visitor_email = $1 WHERE workspace_id = $2 AND visitor_email ILIKE $3",
+		"UPDATE link_ask_sessions SET visitor_email = $1 WHERE workspace_id = $2 AND visitor_email ILIKE $3",
 		anon, workspaceID, email)
 
 	summary["file_requests"], _ = s.exec(ctx,
@@ -185,7 +185,7 @@ func (s *Service) DeleteVisitorData(ctx context.Context, workspaceID pgtype.UUID
 		email, workspaceID)
 
 	summary["questions"], _ = s.exec(ctx,
-		"DELETE FROM link_visitor_questions WHERE workspace_id = $1 AND visitor_email ILIKE $2",
+		"DELETE FROM link_ask_sessions WHERE workspace_id = $1 AND visitor_email ILIKE $2",
 		workspaceID, email)
 
 	summary["file_requests"], _ = s.exec(ctx,
@@ -289,8 +289,13 @@ func (s *Service) queryRoomNDAAgreements(ctx context.Context, workspaceID pgtype
 }
 
 func (s *Service) queryVisitorQuestions(ctx context.Context, workspaceID pgtype.UUID, email string) ([]map[string]any, error) {
-	return s.queryRows(ctx,
-		"SELECT id, link_id, visitor_id, visitor_email, question, answer, status, created_at, updated_at FROM link_visitor_questions WHERE workspace_id = $1 AND visitor_email ILIKE $2 ORDER BY created_at DESC",
+	return s.queryRows(ctx, `
+		SELECT t.id, t.link_id, t.visitor_id, s.visitor_email, t.question, t.host_answer AS answer, t.status, t.created_at, t.updated_at
+		FROM link_ask_turns t
+		JOIN link_ask_sessions s ON s.id = t.session_id
+		WHERE t.workspace_id = $1 AND s.visitor_email ILIKE $2
+		  AND t.lane IN ('host', 'hybrid')
+		ORDER BY t.created_at DESC`,
 		workspaceID, email)
 }
 
