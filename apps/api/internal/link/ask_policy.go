@@ -1,6 +1,13 @@
 package link
 
-import "github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+import (
+	"errors"
+	"fmt"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+)
+
+var ErrAskAINotEntitled = errors.New("ask ai not entitled")
 
 const (
 	AskModeSelfServe  = "self_serve"
@@ -15,6 +22,7 @@ const (
 	routeReasonAINotEnabled    = "ai_not_enabled"
 	routeReasonAIQuotaExceeded = "ai_quota_exceeded"
 	routeReasonAILanePending   = "ai_lane_pending"
+	routeReasonLowConfidence   = "low_confidence"
 )
 
 // AskPolicy is the link-level visitor Ask routing policy (Phase B AI gating).
@@ -41,6 +49,15 @@ func loadAskPolicy(link db.Link) AskPolicy {
 	}
 }
 
+func validateAskMode(mode string) error {
+	switch mode {
+	case AskModeSelfServe, AskModeSupervised, AskModeFormal:
+		return nil
+	default:
+		return fmt.Errorf("invalid ask_mode %q", mode)
+	}
+}
+
 func resolveAskRouteReason(policy AskPolicy, escalate bool) string {
 	if escalate {
 		return routeReasonUserEscalate
@@ -52,6 +69,13 @@ func resolveAskRouteReason(policy AskPolicy, escalate bool) string {
 	if !policy.AIEnabled {
 		return routeReasonAINotEnabled
 	}
-	// Phase B: quota check + AI retrieval/SSE branch here.
 	return routeReasonAILanePending
+}
+
+// effectiveAskAIQuota resolves the monthly AI cap: per-link override or workspace default.
+func effectiveAskAIQuota(link db.Link, defaultQuota int32) int32 {
+	if link.AskAiMonthlyQuota.Valid {
+		return link.AskAiMonthlyQuota.Int32
+	}
+	return defaultQuota
 }

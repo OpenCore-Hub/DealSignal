@@ -78,10 +78,29 @@ type Service struct {
 	actionSyncer        ActionSyncer
 	ndaSvc              *nda.Service
 	roomListInvalidator RoomListInvalidator
+	visitorAskKnowledge VisitorAskKnowledge
+	askSecurity         AskSecurityRecorder
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
 	accessCodeEpoch sync.Map // map[string]*uint64
+}
+
+// AskSecurityRecorder persists visitor Ask security audit events.
+type AskSecurityRecorder interface {
+	RecordSecurityEvent(ctx context.Context, link db.Link, eventType, visitorID, email, ip, ua, reason string) error
+}
+
+// WithAskSecurityRecorder wires security event persistence for Ask lane actions.
+func WithAskSecurityRecorder(r AskSecurityRecorder) ServiceOption {
+	return func(s *Service) { s.askSecurity = r }
+}
+
+// SetAskSecurityRecorder attaches a security recorder after service construction.
+func (s *Service) SetAskSecurityRecorder(r AskSecurityRecorder) {
+	if s != nil {
+		s.askSecurity = r
+	}
 }
 
 // ActionSyncer resolves operational action items when link events are handled.
@@ -308,6 +327,8 @@ type UpdateLinkRequest struct {
 	// Deal-room creates always persist allowlist. Omit on update to leave unchanged
 	// unless FolderPaths is provided (which forces allowlist).
 	FolderScopeMode string
+	// AskAIEnabled patches ask_ai_enabled for deal-room links (nil = unchanged).
+	AskAIEnabled *bool
 }
 
 // AccessRule represents a single allow/block rule for a link.
@@ -352,6 +373,7 @@ type DealRoomLinkRequest struct {
 	DownloadEnabled             bool
 	WatermarkEnabled            bool
 	QaEnabled                   bool
+	AskAiEnabled                bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
 	ScreenshotProtectionEnabled bool
@@ -563,7 +585,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 		MaxAccessCount:              maxAccess,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		QaEnabled:                   QaEnabledForLink(hasDealRoom),
+		QaEnabled:                   ResolveQaEnabled(hasDealRoom, req.QaEnabled),
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -771,7 +793,12 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		QaEnabled:                QaEnabledForLink(isDealRoomLink),
+		QaEnabled:                func() bool {
+			if isDealRoomLink {
+				return true
+			}
+			return ResolveQaEnabled(false, req.QaEnabled)
+		}(),
 		FileRequestsEnabled:      req.FileRequestsEnabled,
 		IndexFileEnabled:         req.IndexFileEnabled,
 		LinkType:                 existing.LinkType,
@@ -910,6 +937,11 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		securityVersion = existing.SecurityVersion + 1
 	}
 
+	qaForUpdate := ResolveQaEnabled(isDealRoomLink, req.QaEnabled)
+	if isDealRoomLink {
+		qaForUpdate = true
+	}
+
 	// Update the link record using the sqlc-generated UpdateLinkFull.
 	_, err = qtx.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
 		Name:                        name,
@@ -924,7 +956,7 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		RequireEmail:                requireEmail,
 		RequireEmailVerification:    requireEmailVerification,
 		RequireNda:                  requireNDA,
-		QaEnabled:                   QaEnabledForLink(isDealRoomLink),
+		QaEnabled:                   qaForUpdate,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -955,6 +987,12 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		WorkspaceID:   workspaceUUID,
 	}); err != nil {
 		return db.Link{}, fmt.Errorf("set link NDA binding: %w", err)
+	}
+
+	if isDealRoomLink && req.AskAIEnabled != nil {
+		if err := s.syncDealRoomAskAiWithQaEnabled(ctx, qtx, existing, *req.AskAIEnabled); err != nil {
+			return db.Link{}, err
+		}
 	}
 
 	// Replace all link_documents for document links only.
@@ -1182,7 +1220,7 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 		ExpiresAt:                   req.ExpiresAt,
 		DownloadEnabled:             req.DownloadEnabled,
 		WatermarkEnabled:            req.WatermarkEnabled,
-		QaEnabled:                   QaEnabledForLink(true),
+		QaEnabled:                   true,
 		FileRequestsEnabled:         req.FileRequestsEnabled,
 		IndexFileEnabled:            req.IndexFileEnabled,
 		ScreenshotProtectionEnabled: req.ScreenshotProtectionEnabled,
@@ -1199,7 +1237,32 @@ func (s *Service) CreateDealRoomLink(ctx context.Context, userID, workspaceID, d
 	if !hasPolicy || !policyRow.Configured {
 		_ = s.bootstrapRoomAccessPolicyFromLinkRequest(ctx, userID, workspaceID, dealRoomID, req, link.PasswordHash)
 	}
-	return link, nil
+
+	// Deal-room links default to supervised Ask mode; AI lane follows ask_ai_enabled.
+	if err := s.syncDealRoomAskAiWithQaEnabled(ctx, s.queries, link, req.AskAiEnabled); err != nil {
+		return db.Link{}, fmt.Errorf("set default deal-room ask policy: %w", err)
+	}
+	updated, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
+		ID:          link.ID,
+		WorkspaceID: link.WorkspaceID,
+	})
+	if err != nil {
+		return db.Link{}, fmt.Errorf("reload deal-room link ask policy: %w", err)
+	}
+	// Ensure supervised mode even when ask_ai was already aligned.
+	if updated.AskMode != AskModeSupervised {
+		updated, err = s.queries.UpdateLinkAskPolicy(ctx, db.UpdateLinkAskPolicyParams{
+			ID:                link.ID,
+			WorkspaceID:       link.WorkspaceID,
+			AskMode:           AskModeSupervised,
+			AskAiEnabled:      updated.AskAiEnabled,
+			AskAiMonthlyQuota: updated.AskAiMonthlyQuota,
+		})
+		if err != nil {
+			return db.Link{}, fmt.Errorf("set deal-room ask mode: %w", err)
+		}
+	}
+	return updated, nil
 }
 
 // validateDealRoomFolderPaths checks that every provided folder path exists in
@@ -3781,6 +3844,7 @@ type PublicLinkMetadata struct {
 	QaEnabled                   bool
 	FileRequestsEnabled         bool
 	IndexFileEnabled            bool
+	DealRoomID                  pgtype.UUID
 }
 
 // GetByPublicToken returns a link by its public token.
@@ -3820,6 +3884,7 @@ func (s *Service) GetPublicLinkMetadata(ctx context.Context, publicToken string)
 		QaEnabled:                   link.QaEnabled,
 		FileRequestsEnabled:         link.FileRequestsEnabled,
 		IndexFileEnabled:            link.IndexFileEnabled,
+		DealRoomID:                  link.DealRoomID,
 	}, nil
 }
 
@@ -4091,6 +4156,7 @@ type LinkAnalytics struct {
 	RecentVisitorsHasMore bool                 `json:"recent_visitors_has_more"`
 	KeyPages              []KeyPage            `json:"key_pages"`
 	QARecords             []QARecord           `json:"qa_records"`
+	AskSummary            *LinkAskSummary      `json:"ask_summary,omitempty"`
 	AccessCodeContacts    []AccessCodeContact  `json:"access_code_contacts"`
 	// AccessCodeContactsHasMore is true when more contacts exist beyond the first page.
 	AccessCodeContactsHasMore bool `json:"access_code_contacts_has_more"`
@@ -4249,7 +4315,7 @@ type QARecord struct {
 const linkAnalyticsCacheTTL = 20 * time.Second
 
 func linkAnalyticsCacheKey(workspaceID, linkID string) string {
-	return fmt.Sprintf("links:analytics:v1:%s:%s", workspaceID, linkID)
+	return fmt.Sprintf("links:analytics:v2:%s:%s", workspaceID, linkID)
 }
 
 // GetLinkAnalytics returns aggregated access metrics for a link.
@@ -4354,6 +4420,13 @@ func (s *Service) GetLinkAnalytics(ctx context.Context, linkID, workspaceID stri
 			}
 			analytics.QARecords = append(analytics.QARecords, record)
 		}
+	}
+
+	if askRow, err := s.queries.GetLinkAskTurnSummary(ctx, pgtype.UUID{Bytes: id, Valid: true}); err != nil {
+		logger.ErrorCtx(ctx, "failed to get link ask summary", err)
+	} else if askRow.TotalTurns > 0 {
+		summary := mapLinkAskSummary(askRow)
+		analytics.AskSummary = &summary
 	}
 
 	codeContacts, err := s.queries.ListLinkAccessCodeContactsByLink(ctx, db.ListLinkAccessCodeContactsByLinkParams{
@@ -5149,10 +5222,7 @@ func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, quest
 		return VisitorQuestion{}, err
 	}
 	if syncErr := s.syncAskTurnHostAnswer(ctx, link, questionID, answer, userID); syncErr != nil {
-		logger.ErrorCtx(ctx, "failed to sync host answer to ask turn", syncErr,
-			logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
-			logger.Attr("question_id", uuid.UUID(questionID.Bytes).String()),
-		)
+		return VisitorQuestion{}, fmt.Errorf("sync host answer to ask turn: %w", syncErr)
 	}
 	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
@@ -5709,6 +5779,7 @@ func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {
 		return
 	}
 	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkQuestion, questionID)
+	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeDealRoomLinkQuestion, questionID)
 }
 
 func (s *Service) resolveExpiringLink(workspaceID, linkID string) {

@@ -28,6 +28,17 @@ func TestResolveAskRouteReason(t *testing.T) {
 	}
 }
 
+func TestValidateAskMode(t *testing.T) {
+	for _, mode := range []string{AskModeSelfServe, AskModeSupervised, AskModeFormal} {
+		if err := validateAskMode(mode); err != nil {
+			t.Fatalf("mode %q: %v", mode, err)
+		}
+	}
+	if err := validateAskMode("invalid"); err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
 func TestLoadAskPolicyDefaults(t *testing.T) {
 	p := loadAskPolicy(db.Link{AskMode: AskModeSupervised})
 	if p.Mode != AskModeSupervised || p.AIEnabled {
@@ -41,5 +52,16 @@ func TestLoadAskPolicyDefaults(t *testing.T) {
 	})
 	if !p.AIEnabled || p.AIMonthlyQuota == nil || *p.AIMonthlyQuota != 100 {
 		t.Fatalf("unexpected loaded policy: %+v", p)
+	}
+}
+
+func TestEffectiveAskAIQuota(t *testing.T) {
+	link := db.Link{}
+	if got := effectiveAskAIQuota(link, 500); got != 500 {
+		t.Fatalf("default = %d", got)
+	}
+	link.AskAiMonthlyQuota = pgtype.Int4{Int32: 42, Valid: true}
+	if got := effectiveAskAIQuota(link, 500); got != 42 {
+		t.Fatalf("override = %d", got)
 	}
 }

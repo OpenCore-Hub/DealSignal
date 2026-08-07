@@ -1,6 +1,11 @@
 package knowledge
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
+)
 
 func TestCorpusAskReady(t *testing.T) {
 	t.Parallel()
@@ -70,6 +75,14 @@ func TestCorpusAskReady(t *testing.T) {
 				t.Fatalf("corpusAskReady=%v want %v", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestRoomCorpusAskReady_NilService(t *testing.T) {
+	t.Parallel()
+	var s *Service
+	if s.RoomCorpusAskReady(context.Background(), pgtype.UUID{Valid: true}, pgtype.UUID{Valid: true}) {
+		t.Fatal("expected false for nil service")
 	}
 }
 

@@ -7,6 +7,10 @@ PDF="${PDF:-e2e-test.pdf}"
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 # shellcheck source=scripts/e2e-category-tristate.sh
 source "$SCRIPT_DIR/scripts/e2e-category-tristate.sh"
+# shellcheck source=scripts/e2e-visitor-ask.sh
+source "$SCRIPT_DIR/scripts/e2e-visitor-ask.sh"
+# shellcheck source=scripts/e2e-visitor-ask-ai.sh
+source "$SCRIPT_DIR/scripts/e2e-visitor-ask-ai.sh"
 
 echo "=== DealSignal E2E P0 verification ==="
 echo "BASE_URL=$BASE_URL"
@@ -138,5 +142,16 @@ SCORE=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
 echo "$SCORE" | jq -c '{score: .score, level: .level, trend: .trend}'
 
 run_e2e_category_tristate
+run_e2e_visitor_ask
+
+set +e
+run_e2e_visitor_ask_ai
+visitor_ask_ai_rc=$?
+set -e
+if [[ "$visitor_ask_ai_rc" -eq 2 ]]; then
+  echo "SKIP: Visitor Ask AI lane (docling-rag not configured)"
+elif [[ "$visitor_ask_ai_rc" -ne 0 ]]; then
+  exit "$visitor_ask_ai_rc"
+fi
 
 echo "=== E2E P0 verification complete ==="

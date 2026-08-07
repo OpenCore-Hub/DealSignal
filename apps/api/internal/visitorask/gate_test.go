@@ -8,7 +8,7 @@ import (
 )
 
 func TestCheckAskHostRateLimited(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{allow: false}, ChannelAskHost, "link-1", "v1")
+	d := Check(context.Background(), &mockLimiter{allow: false}, ChannelAskHost, "link-1", "v1", Limits{})
 	if d != DecisionRateLimited {
 		t.Fatalf("got %v, want RateLimited", d)
 	}
@@ -21,7 +21,7 @@ func TestCheckAskHostRateLimited(t *testing.T) {
 }
 
 func TestCheckAskHostLimiterUnavailable(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{err: errors.New("redis down")}, ChannelAskHost, "link-1", "v1")
+	d := Check(context.Background(), &mockLimiter{err: errors.New("redis down")}, ChannelAskHost, "link-1", "v1", Limits{})
 	if d != DecisionLimiterUnavailable {
 		t.Fatalf("got %v, want LimiterUnavailable", d)
 	}
@@ -34,21 +34,21 @@ func TestCheckAskHostLimiterUnavailable(t *testing.T) {
 }
 
 func TestCheckAllow(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskHost, "link-1", "v1")
+	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskHost, "link-1", "v1", Limits{})
 	if d != DecisionAllow {
 		t.Fatalf("got %v, want Allow", d)
 	}
 }
 
 func TestCheckAskAIAllow(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskAI, "link-1", "v1")
+	d := Check(context.Background(), &mockLimiter{allow: true}, ChannelAskAI, "link-1", "v1", Limits{})
 	if d != DecisionAllow {
 		t.Fatalf("got %v, want Allow", d)
 	}
 }
 
 func TestCheckUnknownChannelFailsClosed(t *testing.T) {
-	d := Check(context.Background(), &mockLimiter{allow: true}, Channel("unknown"), "link-1", "v1")
+	d := Check(context.Background(), &mockLimiter{allow: true}, Channel("unknown"), "link-1", "v1", Limits{})
 	if d != DecisionLimiterUnavailable {
 		t.Fatalf("got %v, want LimiterUnavailable", d)
 	}
@@ -61,5 +61,15 @@ func TestDenyMessageAskHost(t *testing.T) {
 	}
 	if EventReason(ChannelAskHost) != "ask_host" {
 		t.Fatal("unexpected event reason")
+	}
+}
+
+func TestDenyMessageAskAI(t *testing.T) {
+	msg := DenyMessage(ChannelAskAI, DecisionRateLimited)
+	if msg == "" || msg == DenyMessage(ChannelAskHost, DecisionRateLimited) {
+		t.Fatalf("expected distinct AI message, got %q", msg)
+	}
+	if EventTypeForRateLimit(ChannelAskAI) != EventTypeAskAIRateLimited {
+		t.Fatal("unexpected AI rate limit event type")
 	}
 }

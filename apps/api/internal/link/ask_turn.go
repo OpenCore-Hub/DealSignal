@@ -17,57 +17,52 @@ import (
 )
 
 const (
-	askLaneHost           = "host"
-	askStatusHostPending  = "host_pending"
-	askStatusHostAnswered = "host_answered"
+	askLaneHost            = "host"
+	askLaneHybrid          = "hybrid"
+	askStatusHostPending   = "host_pending"
+	askStatusHostEscalated = "host_escalated"
+	askStatusHostAnswered  = "host_answered"
 )
 
 var (
-	ErrAskQuestionRequired = errors.New("question is required")
-	ErrAskQuestionTooLong  = errors.New("question must not exceed 500 characters")
-	ErrAskTurnNotPending   = errors.New("ask turn is not pending")
+	ErrAskQuestionRequired   = errors.New("question is required")
+	ErrAskQuestionTooLong    = errors.New("question must not exceed 500 characters")
+	ErrAskTurnNotPending     = errors.New("ask turn is not pending")
+	ErrAskTurnNotEscalatable = errors.New("ask turn cannot be escalated")
+	ErrAskTurnNotPinnable    = errors.New("ask turn cannot be pinned as faq")
+	ErrAskTurnNotPinned      = errors.New("ask turn is not pinned as faq")
 )
 
 // PublicAskTurn is the visitor-facing projection of a unified Ask turn (Phase A host lane).
 type PublicAskTurn struct {
-	ID             string    `json:"id"`
-	SessionID      string    `json:"session_id"`
-	Question       string    `json:"question"`
-	Lane           string    `json:"lane"`
-	Status         string    `json:"status"`
-	HostQuestionID string    `json:"host_question_id,omitempty"`
-	HostAnswer     string    `json:"host_answer,omitempty"`
-	RouteReason    string    `json:"route_reason,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID             string        `json:"id"`
+	SessionID      string        `json:"session_id"`
+	Question       string        `json:"question"`
+	Lane           string        `json:"lane"`
+	Status         string        `json:"status"`
+	AIPayload      *AskAIPayload `json:"ai_payload,omitempty"`
+	HostQuestionID string        `json:"host_question_id,omitempty"`
+	HostAnswer     string        `json:"host_answer,omitempty"`
+	RouteReason    string        `json:"route_reason,omitempty"`
+	PinnedFAQAt       *time.Time `json:"pinned_faq_at,omitempty"`
+	PinnedFAQBy       string     `json:"pinned_faq_by,omitempty"`
+	PinnedFAQSort     *int       `json:"pinned_faq_sort,omitempty"`
+	FormalStatus      string     `json:"formal_status,omitempty"`
+	FormalPublishAt   *time.Time `json:"formal_publish_at,omitempty"`
+	FormalPublishedAt *time.Time `json:"formal_published_at,omitempty"`
+	FormalAnonymize   bool       `json:"formal_anonymize,omitempty"`
+	CreatedAt         time.Time  `json:"created_at"`
+	UpdatedAt      time.Time     `json:"updated_at"`
 }
 
 func mapPublicAskTurn(t db.LinkAskTurn) PublicAskTurn {
-	out := PublicAskTurn{
-		ID:        uuid.UUID(t.ID.Bytes).String(),
-		SessionID: uuid.UUID(t.SessionID.Bytes).String(),
-		Question:  t.Question,
-		Lane:      t.Lane,
-		Status:    t.Status,
-		CreatedAt: t.CreatedAt.Time,
-		UpdatedAt: t.UpdatedAt.Time,
-	}
-	if t.HostQuestionID.Valid {
-		out.HostQuestionID = uuid.UUID(t.HostQuestionID.Bytes).String()
-	}
-	if t.HostAnswer.Valid {
-		out.HostAnswer = t.HostAnswer.String
-	}
-	if t.RouteReason.Valid {
-		out.RouteReason = t.RouteReason.String
-	}
-	return out
+	return mapPublicAskTurnWithAI(t)
 }
 
 func mapPublicAskTurns(rows []db.LinkAskTurn) []PublicAskTurn {
 	out := make([]PublicAskTurn, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, mapPublicAskTurn(row))
+		out = append(out, mapPublicAskTurnForVisitor(row))
 	}
 	return out
 }
@@ -231,18 +226,23 @@ func (s *Service) createHostAskTurn(
 		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, err
 	}
 
-	turn, err := qtx.CreateLinkAskTurn(ctx, db.CreateLinkAskTurnParams{
-		SessionID:      sess.ID,
-		TenantID:       link.TenantID,
-		WorkspaceID:    link.WorkspaceID,
-		LinkID:         link.ID,
-		VisitorID:      visitorID,
-		Question:       q,
-		Lane:           askLaneHost,
-		Status:         askStatusHostPending,
-		HostQuestionID: legacyQ.ID,
-		RouteReason:    pgtype.Text{String: routeReason, Valid: true},
-	})
+	createParams := db.CreateLinkAskTurnParams{
+		SessionID:       sess.ID,
+		TenantID:        link.TenantID,
+		WorkspaceID:     link.WorkspaceID,
+		LinkID:          link.ID,
+		VisitorID:       visitorID,
+		Question:        q,
+		Lane:            askLaneHost,
+		Status:          askStatusHostPending,
+		HostQuestionID:  legacyQ.ID,
+		RouteReason:     pgtype.Text{String: routeReason, Valid: true},
+		FormalAnonymize: true,
+	}
+	if routeReason == routeReasonPolicyFormal {
+		createParams.FormalStatus = pgtype.Text{String: formalStatusPendingReview, Valid: true}
+	}
+	turn, err := qtx.CreateLinkAskTurn(ctx, createParams)
 	if err != nil {
 		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, err
 	}
@@ -251,24 +251,52 @@ func (s *Service) createHostAskTurn(
 		return db.LinkAskTurn{}, db.LinkVisitorQuestion{}, fmt.Errorf("commit transaction: %w", err)
 	}
 
+	if routeReason == routeReasonPolicyFormal {
+		s.recordAskFormalSubmitted(ctx, link, visitorID, visitorEmail)
+	}
+
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
 	return turn, legacyQ, nil
 }
 
-// SubmitPublicAsk is the unified visitor Ask entry (policy-aware routing; Phase B AI lane hooks here).
+// SubmitPublicAsk is the unified visitor Ask entry (policy-aware routing; Phase B AI lane).
 func (s *Service) SubmitPublicAsk(
 	ctx context.Context,
 	link db.Link,
 	visitorID, visitorEmail, question string,
 	escalate bool,
 ) (PublicAskTurn, error) {
-	policy := loadAskPolicy(link)
-	routeReason := resolveAskRouteReason(policy, escalate)
-	turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
-	if err != nil {
-		return PublicAskTurn{}, err
+	routeReason := s.resolvePublicAskRoute(ctx, link, escalate)
+	switch routeReason {
+	case routeReasonUserEscalate, routeReasonPolicyFormal, routeReasonAINotEnabled, routeReasonAIQuotaExceeded:
+		turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+		if err != nil {
+			return PublicAskTurn{}, err
+		}
+		return mapPublicAskTurnForVisitor(turn), nil
+	case routeReasonAILanePending:
+		if !link.DealRoomID.Valid {
+			turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReasonAINoRoom)
+			if err != nil {
+				return PublicAskTurn{}, err
+			}
+			return mapPublicAskTurnForVisitor(turn), nil
+		}
+		if s.visitorAskKnowledge == nil || !s.visitorAskKnowledge.Enabled() {
+			turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReasonAIUnavailable)
+			if err != nil {
+				return PublicAskTurn{}, err
+			}
+			return mapPublicAskTurnForVisitor(turn), nil
+		}
+		return s.createAIAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+	default:
+		turn, _, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)
+		if err != nil {
+			return PublicAskTurn{}, err
+		}
+		return mapPublicAskTurnForVisitor(turn), nil
 	}
-	return mapPublicAskTurn(turn), nil
 }
 
 // CreateHostAskTurn creates a host-lane unified Ask turn (public POST /ask).
@@ -307,7 +335,11 @@ func (s *Service) AnswerAskTurnHostAnswer(
 		}
 		return OwnerAskTurn{}, err
 	}
-	if turn.Status != askStatusHostPending {
+	if turn.Status != askStatusHostPending && turn.Status != askStatusHostEscalated {
+		return OwnerAskTurn{}, ErrAskTurnNotPending
+	}
+	if turn.FormalStatus.Valid &&
+		(turn.FormalStatus.String == formalStatusPendingReview || turn.FormalStatus.String == formalStatusScheduled) {
 		return OwnerAskTurn{}, ErrAskTurnNotPending
 	}
 
@@ -370,6 +402,10 @@ func (s *Service) AnswerAskTurnHostAnswer(
 // ListMyAskTurns returns the visitor's unified Ask timeline on a link.
 // Turns are primary; legacy link_visitor_questions without a turn are merged for compat.
 func (s *Service) ListMyAskTurns(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]PublicAskTurn, error) {
+	link, err := s.queries.GetLinkByID(ctx, linkID)
+	if err == nil {
+		_ = s.publishDueFormalTurns(ctx, link)
+	}
 	rows, err := s.queries.ListLinkAskTurnsByVisitor(ctx, db.ListLinkAskTurnsByVisitorParams{
 		LinkID:    linkID,
 		VisitorID: visitorID,
@@ -439,7 +475,8 @@ func (s *Service) ensureAskTurnForLegacyQuestion(
 		Lane:           askLaneHost,
 		Status:         status,
 		HostQuestionID: q.ID,
-		RouteReason:    pgtype.Text{String: "legacy_backfill", Valid: true},
+		RouteReason:     pgtype.Text{String: "legacy_backfill", Valid: true},
+		FormalAnonymize: true,
 	})
 	if err != nil {
 		return err

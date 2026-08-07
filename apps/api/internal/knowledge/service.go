@@ -269,87 +269,13 @@ func (s *Service) GetCorpus(ctx context.Context, roomID, workspaceID, userID str
 	if err := s.access.RequireActiveRoomMember(ctx, roomID, workspaceID, userID); err != nil {
 		return CorpusStatus{}, err
 	}
-	out := CorpusStatus{Enabled: true, Status: "none", Documents: []DocumentSyncItem{}}
-	corpus, err := s.queries.GetDealRoomRagCorpus(ctx, pgUUID(roomID))
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	out, err := s.loadRoomCorpusSnapshot(ctx, pgUUID(workspaceID), pgUUID(roomID), true)
+	if err != nil {
 		return CorpusStatus{}, err
 	}
-	if err == nil {
-		out.Status = corpus.Status
-		out.ErrorMessage = textOrEmpty(corpus.ErrorMessage)
-		if corpus.LastSyncedAt.Valid {
-			t := corpus.LastSyncedAt.Time.UTC()
-			out.LastSyncedAt = &t
-		}
-	}
-
-	titleByDoc := map[string]string{}
-	excludedDocs := map[string]bool{}
 	room, roomErr := s.access.GetRoom(ctx, roomID, workspaceID)
 	if roomErr != nil {
 		return CorpusStatus{}, roomErr
-	}
-	lockedFolders := lockedFolderPathSet(room.Settings)
-	roomDocs, err := s.queries.ListDealRoomDocumentsWithMeta(ctx, pgUUID(roomID))
-	if err != nil {
-		return CorpusStatus{}, err
-	}
-	for _, d := range roomDocs {
-		docID := uuid.UUID(d.DocumentID.Bytes).String()
-		titleByDoc[docID] = d.DocumentTitle
-		if knowledgeExcluded(d.Locked, d.FolderPath, lockedFolders) {
-			excludedDocs[docID] = true
-		}
-	}
-
-	rows, err := s.queries.ListDealRoomRagDocuments(ctx, pgUUID(roomID))
-	if err != nil {
-		return CorpusStatus{}, err
-	}
-	for _, row := range rows {
-		if row.Status == "deleted" {
-			continue
-		}
-		docID := uuid.UUID(row.DocumentID.Bytes).String()
-		// Locked / folder-locked documents are excluded from the searchable corpus.
-		if excludedDocs[docID] {
-			continue
-		}
-		out.Documents = append(out.Documents, DocumentSyncItem{
-			DocumentID: docID,
-			Title:      titleByDoc[docID],
-			Status:     row.Status,
-			ChunkCount: row.ChunkCount,
-			LastError:  textOrEmpty(row.LastError),
-		})
-		out.Progress.Total++
-		switch row.Status {
-		case "pending":
-			out.Progress.Pending++
-		case "syncing":
-			out.Progress.Syncing++
-		case "synced":
-			out.Progress.Synced++
-		case "failed":
-			out.Progress.Failed++
-		}
-	}
-	if job, jerr := s.queries.GetLatestKnowledgeSyncJobForRoom(ctx, pgUUID(roomID)); jerr == nil {
-		out.Progress.JobStatus = job.Status
-		// Surface a terminal job failure even if corpus row was left mid-flight historically.
-		if job.Status == "failed" && (out.Status == "syncing" || out.Status == "provisioning") {
-			out.Status = "failed"
-		}
-	}
-	// Heal stuck provisioning/syncing when every non-deleted doc already settled.
-	// ingest_doc jobs historically left the corpus row at "provisioning".
-	if healed := reconcileCorpusStatus(out.Status, out.Progress); healed != out.Status {
-		out.Status = healed
-		_, _ = s.queries.UpdateDealRoomRagCorpusStatus(ctx, db.UpdateDealRoomRagCorpusStatusParams{
-			RoomID:       pgUUID(roomID),
-			Status:       healed,
-			ErrorMessage: pgtype.Text{},
-		})
 	}
 	out.Quota = s.loadCorpusQuota(ctx, room.WorkspaceID, out.Progress)
 	return out, nil

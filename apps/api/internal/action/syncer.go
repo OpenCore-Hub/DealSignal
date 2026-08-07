@@ -24,6 +24,7 @@ const (
 	SourceTypeRoomAccessRequest         = "room_access_request"
 	SourceTypeRoomNDA                   = "room_nda"
 	SourceTypeLinkQuestion              = "link_question"
+	SourceTypeDealRoomLinkQuestion      = "deal_room_link_question"
 	SourceTypeUploadedFile              = "uploaded_file"
 	SourceTypeExpiringLink              = "expiring_link"
 	SourceTypeExpiringRoom              = "expiring_room"
@@ -177,9 +178,71 @@ func (s *Syncer) syncLinkQuestions(ctx context.Context, tenantID, workspaceID pg
 	if err != nil {
 		return fmt.Errorf("list pending link questions: %w", err)
 	}
+	currentDealRoom := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeLinkQuestion, r.ID, pgtype.UUID{}, r.VisitorEmail, r.LinkName, "answer"); err != nil {
+		if !r.DealRoomID.Valid {
+			continue
+		}
+		qID := uuid.UUID(r.ID.Bytes).String()
+		currentDealRoom[qID] = true
+		target := dealRoomAskTargetID(r.DealRoomID, r.LinkID)
+		if err := s.upsertOperationalTextTarget(ctx, tenantID, workspaceID, SourceTypeDealRoomLinkQuestion, r.ID, target, r.VisitorEmail, r.LinkName, "answer"); err != nil {
 			return err
+		}
+	}
+	if err := s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeDealRoomLinkQuestion, currentDealRoom); err != nil {
+		return err
+	}
+	return s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeLinkQuestion, map[string]bool{})
+}
+
+func dealRoomAskTargetID(roomID, linkID pgtype.UUID) string {
+	room := uuid.UUID(roomID.Bytes).String()
+	if !linkID.Valid {
+		return room
+	}
+	return room + "/" + uuid.UUID(linkID.Bytes).String()
+}
+
+func (s *Syncer) upsertOperationalTextTarget(
+	ctx context.Context,
+	tenantID, workspaceID pgtype.UUID,
+	sourceType string,
+	sourceID pgtype.UUID,
+	targetID string,
+	actor, target pgtype.Text,
+	actionType string,
+) error {
+	_, err := s.queries.CreateOperationalActionItem(ctx, db.CreateOperationalActionItemParams{
+		TenantID:    tenantID,
+		WorkspaceID: workspaceID,
+		SourceType:  pgtype.Text{String: sourceType, Valid: true},
+		SourceID:    pgtype.Text{String: uuid.UUID(sourceID.Bytes).String(), Valid: sourceID.Valid},
+		TargetID:    pgtype.Text{String: targetID, Valid: targetID != ""},
+		Title:       titleFor(sourceType, actor.String, target.String),
+		Impact:      impactFor(sourceType),
+		DueAt:       pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		Status:      "pending",
+		ActionType:  actionType,
+	})
+	return err
+}
+
+func (s *Syncer) closeStaleActionsBySourceID(ctx context.Context, workspaceID pgtype.UUID, sourceType string, current map[string]bool) error {
+	items, err := s.queries.ListPendingActionItemsBySourceType(ctx, db.ListPendingActionItemsBySourceTypeParams{
+		WorkspaceID: workspaceID,
+		SourceType:  pgtype.Text{String: sourceType, Valid: true},
+	})
+	if err != nil {
+		return fmt.Errorf("list pending %s actions: %w", sourceType, err)
+	}
+	for _, item := range items {
+		if item.SourceID.Valid && !current[item.SourceID.String] {
+			_, _ = s.queries.UpdateActionItemStatus(ctx, db.UpdateActionItemStatusParams{
+				Status:      "done",
+				ID:          item.ID,
+				WorkspaceID: workspaceID,
+			})
 		}
 	}
 	return nil
@@ -300,6 +363,11 @@ func titleFor(sourceType, actor, target string) string {
 			return fmt.Sprintf("Answer question from %s on %s", actor, target)
 		}
 		return fmt.Sprintf("Answer question from %s", actor)
+	case SourceTypeDealRoomLinkQuestion:
+		if target != "" {
+			return fmt.Sprintf("Answer visitor Ask from %s on %s", actor, target)
+		}
+		return fmt.Sprintf("Answer visitor Ask from %s", actor)
 	case SourceTypeUploadedFile:
 		if target != "" {
 			return fmt.Sprintf("Review uploaded file %s on %s", actor, target)

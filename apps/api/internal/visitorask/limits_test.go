@@ -61,13 +61,27 @@ func TestAllowAskHostNilLimiterAllows(t *testing.T) {
 	}
 }
 
-func TestAllowAskAIUsesSeparateKey(t *testing.T) {
+func TestAllowAskAIUsesRPMThenDailyKeys(t *testing.T) {
 	lim := &mockLimiter{allow: true}
-	ok, err := AllowAskAI(context.Background(), lim, "link-1", "v1")
+	ok, err := AllowAskAI(context.Background(), lim, "link-1", "v1", Limits{})
 	if err != nil || !ok {
 		t.Fatalf("expected AI allowed, ok=%v err=%v", ok, err)
 	}
-	if len(lim.keys) != 1 || lim.keys[0] != "ask_ai_day:link-1:v1" {
+	if len(lim.keys) != 2 {
+		t.Fatalf("expected rpm+day keys, got %v", lim.keys)
+	}
+	if lim.keys[0] != "ask_ai_rpm:link-1:v1" || lim.keys[1] != "ask_ai_day:link-1:v1" {
+		t.Fatalf("unexpected keys: %v", lim.keys)
+	}
+}
+
+func TestAllowAskAIDeniesWhenRPMLimited(t *testing.T) {
+	lim := &mockLimiter{allow: false}
+	ok, err := AllowAskAI(context.Background(), lim, "link-1", "v1", Limits{})
+	if err != nil || ok {
+		t.Fatalf("expected deny on rpm, ok=%v err=%v", ok, err)
+	}
+	if len(lim.keys) != 1 || lim.keys[0] != "ask_ai_rpm:link-1:v1" {
 		t.Fatalf("unexpected keys: %v", lim.keys)
 	}
 }

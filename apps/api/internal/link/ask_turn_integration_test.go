@@ -218,6 +218,65 @@ func TestCreateHostAskTurn_EscalateRouteReason_Integration(t *testing.T) {
 }
 
 func TestSubmitPublicAsk_AILanePending_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	enableLinkQA(t, drf.f)
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name: "AI Ask Link",
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if _, err := drf.f.tx.Exec(drf.ctx(), `UPDATE links SET ask_ai_enabled = true WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("enable ask ai: %v", err)
+	}
+	link.AskAiEnabled = true
+	drf.f.svc.WithVisitorAskKnowledge(stubVisitorAskKnowledge{enabled: true})
+
+	visitorID := "visitor-" + uuid.NewString()
+	turn, err := drf.f.svc.SubmitPublicAsk(drf.ctx(), link, visitorID, "visitor@example.com", "AI route?", false)
+	if err != nil {
+		t.Fatalf("SubmitPublicAsk: %v", err)
+	}
+	if turn.RouteReason != routeReasonAILanePending {
+		t.Fatalf("route_reason = %q", turn.RouteReason)
+	}
+	if turn.Lane != askLaneAI || turn.Status != askStatusAIStreaming {
+		t.Fatalf("lane=%q status=%q", turn.Lane, turn.Status)
+	}
+}
+
+func TestSubmitPublicAsk_CorpusNotReady_FallsBackHost_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	enableLinkQA(t, drf.f)
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name: "Corpus Not Ready Link",
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if _, err := drf.f.tx.Exec(drf.ctx(), `UPDATE links SET ask_ai_enabled = true WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("enable ask ai: %v", err)
+	}
+	link.AskAiEnabled = true
+	corpusNotReady := false
+	drf.f.svc.WithVisitorAskKnowledge(stubVisitorAskKnowledge{enabled: true, corpusReady: &corpusNotReady})
+
+	visitorID := "visitor-" + uuid.NewString()
+	turn, err := drf.f.svc.SubmitPublicAsk(drf.ctx(), link, visitorID, "visitor@example.com", "Corpus gate?", false)
+	if err != nil {
+		t.Fatalf("SubmitPublicAsk: %v", err)
+	}
+	if turn.RouteReason != routeReasonAIUnavailable {
+		t.Fatalf("route_reason = %q", turn.RouteReason)
+	}
+	if turn.Lane != askLaneHost {
+		t.Fatalf("lane=%q", turn.Lane)
+	}
+}
+
+func TestSubmitPublicAsk_AINoKnowledge_FallsBackHost_Integration(t *testing.T) {
 	f := newFixture(t)
 	defer f.cleanup()
 	enableLinkQA(t, f)
@@ -227,12 +286,44 @@ func TestSubmitPublicAsk_AILanePending_Integration(t *testing.T) {
 	f.link.AskAiEnabled = true
 
 	visitorID := "visitor-" + uuid.NewString()
-	turn, err := f.svc.SubmitPublicAsk(f.ctx, f.link, visitorID, "visitor@example.com", "AI route?", false)
+	turn, err := f.svc.SubmitPublicAsk(f.ctx, f.link, visitorID, "visitor@example.com", "Host fallback?", false)
 	if err != nil {
 		t.Fatalf("SubmitPublicAsk: %v", err)
 	}
-	if turn.RouteReason != routeReasonAILanePending {
+	if turn.RouteReason != routeReasonAIUnavailable {
 		t.Fatalf("route_reason = %q", turn.RouteReason)
+	}
+	if turn.Lane != askLaneHost {
+		t.Fatalf("lane=%q", turn.Lane)
+	}
+}
+
+func TestSubmitPublicAsk_AIQuotaExceeded_FallsBackHost_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	enableLinkQA(t, drf.f)
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name: "Quota Link",
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if _, err := drf.f.tx.Exec(drf.ctx(), `UPDATE links SET ask_ai_enabled = true, ask_ai_monthly_quota = 0 WHERE id = $1`, link.ID); err != nil {
+		t.Fatalf("set ai quota: %v", err)
+	}
+	link.AskAiEnabled = true
+	drf.f.svc.WithVisitorAskKnowledge(stubVisitorAskKnowledge{enabled: true})
+
+	visitorID := "visitor-" + uuid.NewString()
+	turn, err := drf.f.svc.SubmitPublicAsk(drf.ctx(), link, visitorID, "visitor@example.com", "Quota exceeded?", false)
+	if err != nil {
+		t.Fatalf("SubmitPublicAsk: %v", err)
+	}
+	if turn.RouteReason != routeReasonAIQuotaExceeded {
+		t.Fatalf("route_reason = %q", turn.RouteReason)
+	}
+	if turn.Lane != askLaneHost || turn.Status != askStatusHostPending {
+		t.Fatalf("lane=%q status=%q", turn.Lane, turn.Status)
 	}
 }
 
@@ -289,5 +380,189 @@ func TestAnswerAskTurnHostAnswer_Integration(t *testing.T) {
 	}
 	if len(turns) != 1 || turns[0].HostAnswer != "Answer via turn API" {
 		t.Fatalf("visitor timeline not updated: %+v", turns)
+	}
+}
+
+func TestGetLinkAnalytics_AskSummary_Integration(t *testing.T) {
+	f := newFixture(t)
+	defer f.cleanup()
+	enableLinkQA(t, f)
+
+	wsID := uuid.UUID(f.workspace.ID.Bytes).String()
+	linkID := uuid.UUID(f.link.ID.Bytes).String()
+	visitorID := "visitor-" + uuid.NewString()
+
+	turn, err := f.svc.CreateHostAskTurn(f.ctx, f.link, visitorID, "visitor@example.com", "Analytics summary?", false)
+	if err != nil {
+		t.Fatalf("CreateHostAskTurn: %v", err)
+	}
+
+	pendingAnalytics, err := f.svc.GetLinkAnalytics(f.ctx, linkID, wsID)
+	if err != nil {
+		t.Fatalf("GetLinkAnalytics pending: %v", err)
+	}
+	if pendingAnalytics.AskSummary == nil {
+		t.Fatal("expected ask_summary")
+	}
+	if pendingAnalytics.AskSummary.HostPending != 1 || pendingAnalytics.AskSummary.HostAnswered != 0 {
+		t.Fatalf("pending summary = %+v", pendingAnalytics.AskSummary)
+	}
+	if pendingAnalytics.AskSummary.DeflectionRate != nil {
+		t.Fatalf("expected nil deflection with no AI answers, got %v", *pendingAnalytics.AskSummary.DeflectionRate)
+	}
+
+	turnUUID, err := uuid.Parse(turn.ID)
+	if err != nil {
+		t.Fatalf("parse turn id: %v", err)
+	}
+	if _, err := f.svc.AnswerAskTurnHostAnswer(
+		f.ctx,
+		f.link,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		f.user.ID,
+		"Summary answer",
+	); err != nil {
+		t.Fatalf("AnswerAskTurnHostAnswer: %v", err)
+	}
+
+	answeredAnalytics, err := f.svc.GetLinkAnalytics(f.ctx, linkID, wsID)
+	if err != nil {
+		t.Fatalf("GetLinkAnalytics answered: %v", err)
+	}
+	if answeredAnalytics.AskSummary == nil {
+		t.Fatal("expected ask_summary after answer")
+	}
+	if answeredAnalytics.AskSummary.HostAnswered != 1 || answeredAnalytics.AskSummary.HostPending != 0 {
+		t.Fatalf("answered summary = %+v", answeredAnalytics.AskSummary)
+	}
+}
+
+func TestCreateDealRoomLink_DefaultAskAIEnabled_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name:         "Default AI Link",
+		AskAiEnabled: true,
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if !link.QaEnabled {
+		t.Fatal("expected qa_enabled true for new deal-room link")
+	}
+	if !link.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled true for new deal-room link")
+	}
+	if link.AskMode != AskModeSupervised {
+		t.Fatalf("ask_mode = %q", link.AskMode)
+	}
+}
+
+func TestCreateDealRoomLink_AskAiEnabledFalse_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name:         "No AI Link",
+		AskAiEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if !link.QaEnabled {
+		t.Fatal("expected qa_enabled true (Ask Host baseline)")
+	}
+	if link.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled false when AI assistant is disabled")
+	}
+}
+
+func TestUpdateLink_AskAiEnabledFalse_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name: "Toggle AI Off",
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if !link.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled true on create")
+	}
+
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	askOff := false
+	updated, err := drf.f.svc.UpdateLink(drf.ctx(), linkID, drf.wsID, UpdateLinkRequest{
+		Name:         link.Name.String,
+		AskAIEnabled: &askOff,
+	})
+	if err != nil {
+		t.Fatalf("UpdateLink: %v", err)
+	}
+	if !updated.QaEnabled {
+		t.Fatal("expected qa_enabled true after update (Ask Host baseline)")
+	}
+	if updated.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled false when AI assistant is disabled")
+	}
+}
+
+func TestUpdateLink_AskAiEnabledTrue_WithoutCorpus_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name:         "Toggle AI On",
+		AskAiEnabled: false,
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	if link.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled false on create")
+	}
+
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	askOn := true
+	updated, err := drf.f.svc.UpdateLink(drf.ctx(), linkID, drf.wsID, UpdateLinkRequest{
+		Name:         link.Name.String,
+		AskAIEnabled: &askOn,
+	})
+	if err != nil {
+		t.Fatalf("UpdateLink enable AI without corpus: %v", err)
+	}
+	if !updated.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled true after update")
+	}
+}
+
+func TestUpdateLinkAskPolicy_Integration(t *testing.T) {
+	drf := newDealRoomFixture(t)
+	defer drf.f.cleanup()
+	link, err := drf.f.svc.CreateDealRoomLink(drf.ctx(), drf.userID, drf.wsID, drf.roomID, DealRoomLinkRequest{
+		Name: "Policy Link",
+	})
+	if err != nil {
+		t.Fatalf("CreateDealRoomLink: %v", err)
+	}
+	wsID := uuid.UUID(drf.f.workspace.ID.Bytes).String()
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	drf.f.svc.WithVisitorAskKnowledge(stubVisitorAskKnowledge{enabled: true})
+
+	enabled := true
+	updated, err := drf.f.svc.UpdateLinkAskPolicy(drf.ctx(), linkID, wsID, UpdateLinkAskPolicyRequest{
+		AskAIEnabled: &enabled,
+	})
+	if err != nil {
+		t.Fatalf("UpdateLinkAskPolicy enable: %v", err)
+	}
+	if !updated.AskAiEnabled {
+		t.Fatal("expected ask_ai_enabled true")
+	}
+
+	docLinkID := uuid.UUID(drf.f.link.ID.Bytes).String()
+	_, err = drf.f.svc.UpdateLinkAskPolicy(drf.ctx(), docLinkID, wsID, UpdateLinkAskPolicyRequest{
+		AskAIEnabled: &enabled,
+	})
+	if err == nil {
+		t.Fatal("expected error enabling AI on document-only link")
 	}
 }

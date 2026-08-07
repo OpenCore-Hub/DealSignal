@@ -20,26 +20,34 @@ type OwnerAskTurn struct {
 	LinkID       string `json:"link_id"`
 	VisitorID    string `json:"visitor_id"`
 	VisitorEmail string `json:"visitor_email,omitempty"`
+	RepeatCount  int    `json:"repeat_count,omitempty"`
 }
 
 func mapOwnerAskTurnFromRow(row db.ListLinkAskTurnsByLinkRow) OwnerAskTurn {
 	return mapOwnerAskTurn(db.LinkAskTurn{
-		ID:             row.ID,
-		SessionID:      row.SessionID,
-		TenantID:       row.TenantID,
-		WorkspaceID:    row.WorkspaceID,
-		LinkID:         row.LinkID,
-		VisitorID:      row.VisitorID,
-		Question:       row.Question,
-		Lane:           row.Lane,
-		Status:         row.Status,
-		AiPayload:      row.AiPayload,
-		HostQuestionID: row.HostQuestionID,
-		HostAnswer:     row.HostAnswer,
-		AnsweredBy:     row.AnsweredBy,
-		RouteReason:    row.RouteReason,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
+		ID:                row.ID,
+		SessionID:         row.SessionID,
+		TenantID:          row.TenantID,
+		WorkspaceID:       row.WorkspaceID,
+		LinkID:            row.LinkID,
+		VisitorID:         row.VisitorID,
+		Question:          row.Question,
+		Lane:              row.Lane,
+		Status:            row.Status,
+		AiPayload:         row.AiPayload,
+		HostQuestionID:    row.HostQuestionID,
+		HostAnswer:        row.HostAnswer,
+		AnsweredBy:        row.AnsweredBy,
+		RouteReason:       row.RouteReason,
+		PinnedFaqAt:       row.PinnedFaqAt,
+		PinnedFaqBy:       row.PinnedFaqBy,
+		PinnedFaqSort:     row.PinnedFaqSort,
+		FormalStatus:      row.FormalStatus,
+		FormalPublishAt:   row.FormalPublishAt,
+		FormalPublishedAt: row.FormalPublishedAt,
+		FormalAnonymize:   row.FormalAnonymize,
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
 	}, row.VisitorEmail)
 }
 
@@ -49,28 +57,35 @@ func mapOwnerAskTurnFromOwnerIDRow(row db.GetOwnerAskTurnByIDRow) OwnerAskTurn {
 
 func mapOwnerAskTurnFromRoomRow(row db.ListRoomAskTurnsRow) OwnerAskTurn {
 	return mapOwnerAskTurn(db.LinkAskTurn{
-		ID:             row.ID,
-		SessionID:      row.SessionID,
-		TenantID:       row.TenantID,
-		WorkspaceID:    row.WorkspaceID,
-		LinkID:         row.LinkID,
-		VisitorID:      row.VisitorID,
-		Question:       row.Question,
-		Lane:           row.Lane,
-		Status:         row.Status,
-		AiPayload:      row.AiPayload,
-		HostQuestionID: row.HostQuestionID,
-		HostAnswer:     row.HostAnswer,
-		AnsweredBy:     row.AnsweredBy,
-		RouteReason:    row.RouteReason,
-		CreatedAt:      row.CreatedAt,
-		UpdatedAt:      row.UpdatedAt,
+		ID:                row.ID,
+		SessionID:         row.SessionID,
+		TenantID:          row.TenantID,
+		WorkspaceID:       row.WorkspaceID,
+		LinkID:            row.LinkID,
+		VisitorID:         row.VisitorID,
+		Question:          row.Question,
+		Lane:              row.Lane,
+		Status:            row.Status,
+		AiPayload:         row.AiPayload,
+		HostQuestionID:    row.HostQuestionID,
+		HostAnswer:        row.HostAnswer,
+		AnsweredBy:        row.AnsweredBy,
+		RouteReason:       row.RouteReason,
+		PinnedFaqAt:       row.PinnedFaqAt,
+		PinnedFaqBy:       row.PinnedFaqBy,
+		PinnedFaqSort:     row.PinnedFaqSort,
+		FormalStatus:      row.FormalStatus,
+		FormalPublishAt:   row.FormalPublishAt,
+		FormalPublishedAt: row.FormalPublishedAt,
+		FormalAnonymize:   row.FormalAnonymize,
+		CreatedAt:         row.CreatedAt,
+		UpdatedAt:         row.UpdatedAt,
 	}, row.VisitorEmail)
 }
 
 func mapOwnerAskTurn(t db.LinkAskTurn, visitorEmail string) OwnerAskTurn {
 	return OwnerAskTurn{
-		PublicAskTurn: mapPublicAskTurn(t),
+		PublicAskTurn: mapPublicAskTurnWithAI(t),
 		LinkID:        uuid.UUID(t.LinkID.Bytes).String(),
 		VisitorID:     t.VisitorID,
 		VisitorEmail:  visitorEmail,
@@ -97,15 +112,39 @@ func filterOwnerAskTurns(turns []OwnerAskTurn, lane, status string) []OwnerAskTu
 	}
 	out := make([]OwnerAskTurn, 0, len(turns))
 	for _, t := range turns {
-		if lane != "" && t.Lane != lane {
-			continue
+		if matchesOwnerAskInboxFilter(t, lane, status) {
+			out = append(out, t)
 		}
-		if status != "" && t.Status != status {
-			continue
-		}
-		out = append(out, t)
 	}
 	return out
+}
+
+func matchesOwnerAskInboxFilter(t OwnerAskTurn, lane, status string) bool {
+	if status == ownerAskInboxFormalQueue {
+		return isFormalQueueActive(t)
+	}
+	// needs_host tab: host_pending or host_escalated on host or hybrid lanes (exclude formal queue).
+	if status == askStatusHostPending && lane == askLaneHost {
+		if isFormalQueueTurn(t) {
+			return false
+		}
+		return isOwnerAskNeedsHostStatus(t.Status) && (t.Lane == askLaneHost || t.Lane == askLaneHybrid)
+	}
+	// ai_handled tab: pure AI answered turns for owner review.
+	if status == askStatusAIAnswered && lane == askLaneAI {
+		return t.Lane == askLaneAI && t.Status == askStatusAIAnswered
+	}
+	if lane != "" && t.Lane != lane {
+		return false
+	}
+	if status != "" && t.Status != status {
+		return false
+	}
+	return true
+}
+
+func isOwnerAskNeedsHostStatus(status string) bool {
+	return status == askStatusHostPending || status == askStatusHostEscalated
 }
 
 func mergeOwnerAskInbox(turns []OwnerAskTurn, legacy []db.LinkVisitorQuestion) []OwnerAskTurn {
@@ -149,7 +188,8 @@ func (s *Service) ListLinkAskInbox(
 	if err != nil {
 		return nil, err
 	}
-	return filterOwnerAskTurns(mergeOwnerAskInbox(turns, legacy), lane, status), nil
+	merged := attachOwnerAskRepeatCounts(mergeOwnerAskInbox(turns, legacy))
+	return filterOwnerAskTurns(merged, lane, status), nil
 }
 
 // ListRoomAskInbox returns host-lane Ask turns across all links in a deal room.
@@ -229,7 +269,8 @@ func (s *Service) ListRoomAskInbox(
 		legacyRows = filteredLegacy
 	}
 
-	return filterOwnerAskTurns(mergeOwnerAskInbox(turns, legacyRows), lane, status), nil
+	merged := attachOwnerAskRepeatCounts(mergeOwnerAskInbox(turns, legacyRows))
+	return filterOwnerAskTurns(merged, lane, status), nil
 }
 
 // OwnerAskTurnToVisitorQuestion maps an owner turn to legacy VisitorQuestion shape

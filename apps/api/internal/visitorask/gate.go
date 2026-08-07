@@ -18,6 +18,9 @@ const (
 	CodeRateLimitExceeded  = "rate_limit_exceeded"
 	CodeLimiterUnavailable = "limiter_unavailable"
 	EventTypeRateLimited   = "rate_limit_exceeded"
+	EventTypeAskAIRateLimited = "ask_ai_rate_limited"
+	EventTypeAskEscalated     = "ask_escalated"
+	EventTypeAskFormalSubmitted = "ask_formal_submitted"
 )
 
 // Decision is the outcome of a Visitor Ask rate-limit check.
@@ -33,14 +36,14 @@ const (
 )
 
 // Check enforces the channel limiter and returns a shared decision for Ask Host handlers.
-func Check(ctx context.Context, lim Limiter, ch Channel, linkID, visitorID string) Decision {
+func Check(ctx context.Context, lim Limiter, ch Channel, linkID, visitorID string, limits Limits) Decision {
 	var ok bool
 	var err error
 	switch ch {
 	case ChannelAskHost:
 		ok, err = AllowAskHost(ctx, lim, linkID, visitorID)
 	case ChannelAskAI:
-		ok, err = AllowAskAI(ctx, lim, linkID, visitorID)
+		ok, err = AllowAskAI(ctx, lim, linkID, visitorID, limits)
 	default:
 		return DecisionLimiterUnavailable
 	}
@@ -61,6 +64,14 @@ func ShouldRecordRateLimitEvent(d Decision) bool {
 // EventReason is the security_events.reason value for a channel.
 func EventReason(ch Channel) string {
 	return string(ch)
+}
+
+// EventTypeForRateLimit maps a channel to the persisted security_events.event_type.
+func EventTypeForRateLimit(ch Channel) string {
+	if ch == ChannelAskAI {
+		return EventTypeAskAIRateLimited
+	}
+	return EventTypeRateLimited
 }
 
 // DenyHTTPStatus maps a deny decision to an HTTP status.
@@ -91,9 +102,15 @@ func DenyCode(d Decision) string {
 func DenyMessage(ch Channel, d Decision) string {
 	switch d {
 	case DecisionLimiterUnavailable:
-		return "Ask Host is temporarily unavailable, please try again later"
+		if ch == ChannelAskAI {
+			return "AI Ask is temporarily unavailable, please try again later"
+		}
+		return "Ask is temporarily unavailable, please try again later"
 	case DecisionRateLimited:
-		return "too many Ask Host requests, please try again later"
+		if ch == ChannelAskAI {
+			return "too many AI Ask requests, please try again later"
+		}
+		return "too many Ask requests, please try again later"
 	default:
 		return ""
 	}

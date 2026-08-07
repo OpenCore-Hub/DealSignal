@@ -13,6 +13,14 @@ const (
 	AskHostDailyWindow = 24 * time.Hour
 )
 
+// Default Ask AI abuse caps (per visitor + link). Monthly billing quota is link-level.
+const (
+	DefaultAskAIRPM        = 10
+	DefaultAskAIDailyLimit = 50
+	AskAIRPMWindow         = time.Minute
+	AskAIDailyWindow       = 24 * time.Hour
+)
+
 // ErrLimiterUnavailable is returned when Redis/limiter fails (fail-closed deny).
 // Callers must not treat this as a visitor rate_limit_exceeded abuse signal.
 var ErrLimiterUnavailable = errors.New("ask limiter unavailable")
@@ -22,19 +30,41 @@ type Limiter interface {
 	RateLimitAllow(ctx context.Context, key string, limit int, window time.Duration) (bool, int, error)
 }
 
-// Ask AI hard limits (per visitor + link). Phase B stream path uses this channel.
-const (
-	AskAIDailyLimit  = 50
-	AskAIDailyWindow = 24 * time.Hour
-)
+// Limits configures visitor Ask rate limits. Zero values fall back to package defaults.
+type Limits struct {
+	AskAIRPM        int
+	AskAIDailyLimit int
+}
 
-// AllowAskAI enforces the AI lane daily cap (separate from Ask Host).
-func AllowAskAI(ctx context.Context, lim Limiter, linkID, visitorID string) (bool, error) {
+func (l Limits) askAIRPM() int {
+	if l.AskAIRPM > 0 {
+		return l.AskAIRPM
+	}
+	return DefaultAskAIRPM
+}
+
+func (l Limits) askAIDaily() int {
+	if l.AskAIDailyLimit > 0 {
+		return l.AskAIDailyLimit
+	}
+	return DefaultAskAIDailyLimit
+}
+
+// AllowAskAI enforces RPM then daily caps for the AI lane stream path.
+func AllowAskAI(ctx context.Context, lim Limiter, linkID, visitorID string, limits Limits) (bool, error) {
 	if lim == nil {
 		return true, nil
 	}
-	key := fmt.Sprintf("ask_ai_day:%s:%s", linkID, visitorID)
-	ok, _, err := lim.RateLimitAllow(ctx, key, AskAIDailyLimit, AskAIDailyWindow)
+	rpmKey := fmt.Sprintf("ask_ai_rpm:%s:%s", linkID, visitorID)
+	ok, _, err := lim.RateLimitAllow(ctx, rpmKey, limits.askAIRPM(), AskAIRPMWindow)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
+	}
+	if !ok {
+		return false, nil
+	}
+	dayKey := fmt.Sprintf("ask_ai_day:%s:%s", linkID, visitorID)
+	ok, _, err = lim.RateLimitAllow(ctx, dayKey, limits.askAIDaily(), AskAIDailyWindow)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
 	}
@@ -42,9 +72,6 @@ func AllowAskAI(ctx context.Context, lim Limiter, linkID, visitorID string) (boo
 }
 
 // AllowAskHost enforces 30/day.
-// Returns (true, nil) when allowed; (false, nil) when the visitor exceeded the limit;
-// (false, ErrLimiterUnavailable) when Redis/limiter errors (fail closed).
-// A nil limiter skips enforcement (unset wiring / tests).
 func AllowAskHost(ctx context.Context, lim Limiter, linkID, visitorID string) (bool, error) {
 	if lim == nil {
 		return true, nil
