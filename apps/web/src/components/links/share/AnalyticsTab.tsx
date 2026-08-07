@@ -18,6 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
 import { api } from "@/lib/api";
+import { ownerAskTurnsToVisitorQuestions, answerOwnerAskQuestion } from "@/lib/ownerAskTurn";
 import { ApiError } from "@/lib/apiClient";
 import { LinkAccessLog } from "../LinkAccessLog";
 import { ManagementTab } from "./ManagementTab";
@@ -59,11 +60,14 @@ function codeSendBadgeVariant(
 }
 
 async function fetchManagementData(linkId: string) {
-  const [qRes, fRes] = await Promise.all([
-    api.listLinkQuestions(linkId),
+  const [askRes, fRes] = await Promise.all([
+    api.listLinkAsk(linkId, { lane: "host" }),
     api.listLinkFileRequests(linkId),
   ]);
-  return { questions: qRes.data ?? [], fileRequests: fRes.data ?? [] };
+  return {
+    questions: ownerAskTurnsToVisitorQuestions(askRes.data ?? []),
+    fileRequests: fRes.data ?? [],
+  };
 }
 
 export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
@@ -510,9 +514,9 @@ export function AnalyticsTab({ link, logs }: AnalyticsTabProps) {
     }
   };
 
-  const handleAnswer = async (questionId: string, answer: string) => {
+  const handleAnswer = async (question: VisitorQuestion, answer: string) => {
     try {
-      await api.answerQuestion(link.id, questionId, answer);
+      await answerOwnerAskQuestion(question, answer);
       toast.success(t("management.answerSuccess"));
       await refreshManagement();
     } catch {

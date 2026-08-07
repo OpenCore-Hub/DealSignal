@@ -5040,35 +5040,25 @@ func constantTimeEmailCompare(a, b string) bool {
 
 // CreateVisitorQuestion creates a new visitor question on a public link.
 // The qa_enabled flag must be checked by the caller before invoking this method.
+// Also dual-writes link_ask_turns for unified Ask (Phase A).
 func (s *Service) CreateVisitorQuestion(ctx context.Context, link db.Link, visitorID, visitorEmail, question string) (db.LinkVisitorQuestion, error) {
-	if strings.TrimSpace(question) == "" {
-		return db.LinkVisitorQuestion{}, fmt.Errorf("question is required")
-	}
-	if len(question) > 500 {
-		return db.LinkVisitorQuestion{}, fmt.Errorf("question must not exceed 500 characters")
-	}
-
-	q, err := s.queries.CreateVisitorQuestion(ctx, db.CreateVisitorQuestionParams{
-		TenantID:     link.TenantID,
-		WorkspaceID:  link.WorkspaceID,
-		LinkID:       link.ID,
-		VisitorID:    visitorID,
-		VisitorEmail: pgtype.Text{String: visitorEmail, Valid: visitorEmail != ""},
-		Question:     strings.TrimSpace(question),
-	})
-	if err != nil {
-		return db.LinkVisitorQuestion{}, err
-	}
-	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	return q, nil
+	_, q, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, "legacy_questions")
+	return q, err
 }
 
 // ListMyVisitorQuestions returns all questions submitted by a specific visitor on a link.
-func (s *Service) ListMyVisitorQuestions(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]db.LinkVisitorQuestion, error) {
-	return s.queries.ListVisitorQuestionsByVisitor(ctx, db.ListVisitorQuestionsByVisitorParams{
-		LinkID:    linkID,
-		VisitorID: visitorID,
-	})
+// Turns are primary; legacy link_visitor_questions without a turn are merged for compat (GET /questions/me).
+func (s *Service) ListMyVisitorQuestions(ctx context.Context, linkID pgtype.UUID, visitorID string) ([]VisitorQuestion, error) {
+	turns, err := s.ListMyAskTurns(ctx, linkID, visitorID)
+	if err != nil {
+		return nil, err
+	}
+	linkIDStr := uuid.UUID(linkID.Bytes).String()
+	out := make([]VisitorQuestion, 0, len(turns))
+	for _, t := range turns {
+		out = append(out, publicAskTurnToVisitorQuestion(linkIDStr, visitorID, t))
+	}
+	return out, nil
 }
 
 // ListLinkVisitorQuestions returns all questions for a link (owner view).
@@ -5157,6 +5147,12 @@ func (s *Service) AnswerVisitorQuestion(ctx context.Context, link db.Link, quest
 			return VisitorQuestion{}, ErrNotFoundInWorkspace
 		}
 		return VisitorQuestion{}, err
+	}
+	if syncErr := s.syncAskTurnHostAnswer(ctx, link, questionID, answer, userID); syncErr != nil {
+		logger.ErrorCtx(ctx, "failed to sync host answer to ask turn", syncErr,
+			logger.Attr("link_id", uuid.UUID(link.ID.Bytes).String()),
+			logger.Attr("question_id", uuid.UUID(questionID.Bytes).String()),
+		)
 	}
 	s.resolveLinkQuestion(uuid.UUID(link.WorkspaceID.Bytes).String(), uuid.UUID(questionID.Bytes).String())
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)

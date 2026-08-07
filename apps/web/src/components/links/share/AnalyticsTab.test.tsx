@@ -42,7 +42,7 @@ vi.mock("@/lib/api", () => ({
     getAccessLogs: vi.fn(),
     listLinkRecentVisitors: vi.fn(),
     listLinkAccessCodeContacts: vi.fn(),
-    listLinkQuestions: vi.fn(() => Promise.resolve({ data: [] })),
+    listLinkAsk: vi.fn(() => Promise.resolve({ data: [] })),
     listLinkFileRequests: vi.fn(() => Promise.resolve({ data: [] })),
     resendLinkAccessCode: vi.fn(() => Promise.resolve(undefined)),
     resendFailedLinkAccessCodes: vi.fn(() =>
@@ -77,7 +77,7 @@ const emptyAnalytics: LinkAnalytics = {
 describe("AnalyticsTab", () => {
   beforeEach(() => {
     vi.resetAllMocks();
-    vi.mocked(api.listLinkQuestions).mockResolvedValue({ data: [] });
+    vi.mocked(api.listLinkAsk).mockResolvedValue({ data: [] });
     vi.mocked(api.listLinkFileRequests).mockResolvedValue({ data: [] });
     vi.mocked(api.listLinkRecentVisitors).mockResolvedValue({
       data: [],

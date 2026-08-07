@@ -5,12 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
-import type { VisitorQuestion } from "@/types";
+import type { PublicAskTurn, VisitorQuestion } from "@/types";
 
 interface UnifiedQAPanelProps {
   token: string;
   sessionToken?: string;
   qaEnabled?: boolean;
+  /** When false, uses legacy POST/GET /questions (pre-unified rollout). */
+  unifiedAskEnabled?: boolean;
 }
 
 type Source = "owner" | "you";
@@ -25,13 +27,28 @@ interface UIMessage {
 
 const creds = (token?: string) => (token ? { sessionToken: token } : undefined);
 
+function legacyQuestionToTurn(q: VisitorQuestion): PublicAskTurn {
+  return {
+    id: q.id,
+    session_id: "",
+    question: q.question,
+    lane: "host",
+    status: q.status === "answered" ? "host_answered" : "host_pending",
+    host_question_id: q.id,
+    host_answer: q.answer,
+    created_at: q.created_at,
+    updated_at: q.updated_at,
+  };
+}
+
 export function UnifiedQAPanel({
   token,
   sessionToken,
   qaEnabled,
+  unifiedAskEnabled = true,
 }: UnifiedQAPanelProps) {
   const { t } = useTranslation("documents");
-  const [questions, setQuestions] = useState<VisitorQuestion[]>([]);
+  const [turns, setTurns] = useState<PublicAskTurn[]>([]);
   const [loadingQuestions, setLoadingQuestions] = useState(() => Boolean(qaEnabled));
   const [questionError, setQuestionError] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
@@ -48,47 +65,56 @@ export function UnifiedQAPanel({
       setQuestionError(null);
       setLoadingQuestions(true);
       try {
-        const res = await api.listPublicQuestions(token, creds(sessionTokenRef.current));
-        if (!cancelled) setQuestions(res.data ?? []);
+        const res = unifiedAskEnabled
+          ? await api.listPublicAskTurns(token, creds(sessionTokenRef.current))
+          : await api.listPublicQuestions(token, creds(sessionTokenRef.current));
+        const rows = res.data ?? [];
+        if (!cancelled) {
+          setTurns(
+            unifiedAskEnabled
+              ? (rows as PublicAskTurn[])
+              : (rows as VisitorQuestion[]).map(legacyQuestionToTurn),
+          );
+        }
       } catch {
-        if (!cancelled) setQuestionError(t("viewer.qaLoadError"));
+        if (!cancelled) setQuestionError(t("viewer.askLoadError"));
       } finally {
         if (!cancelled) setLoadingQuestions(false);
       }
     })();
     return () => { cancelled = true; };
-  }, [token, qaEnabled, t, refreshKey]);
+  }, [token, qaEnabled, unifiedAskEnabled, t, refreshKey]);
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [questions, ownerSubmitting]);
+  }, [turns, ownerSubmitting]);
 
   const allMessages = useMemo<UIMessage[]>(() => {
     const list: UIMessage[] = [];
     if (qaEnabled) {
-      questions.forEach((q) => {
+      turns.forEach((turn) => {
         list.push({
-          id: `q_${q.id}`,
+          id: `q_${turn.id}`,
           source: "you",
-          content: q.question,
-          createdAt: q.created_at,
-          pendingReply: q.status === "pending",
+          content: turn.question,
+          createdAt: turn.created_at,
+          pendingReply: turn.status === "host_pending",
         });
-        if (q.answer && q.status === "answered") {
+        if (turn.host_answer && turn.status === "host_answered") {
           list.push({
-            id: `a_${q.id}`,
+            id: `a_${turn.id}`,
             source: "owner",
-            content: q.answer,
-            createdAt: q.updated_at,
+            content: turn.host_answer,
+            createdAt: turn.updated_at,
           });
         }
       });
     }
     list.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
     return list;
-  }, [qaEnabled, questions]);
+  }, [qaEnabled, turns]);
 
   const handleSubmit = useCallback(
     async (e: React.FormEvent) => {
@@ -97,34 +123,38 @@ export function UnifiedQAPanel({
       if (!text) return;
 
       if (text.length > 500) {
-        setQuestionError(t("viewer.qaLengthError"));
+        setQuestionError(t("viewer.askLengthError"));
         return;
       }
       setOwnerSubmitting(true);
       setQuestionError(null);
       setInput("");
       try {
-        await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
+        if (unifiedAskEnabled) {
+          await api.createPublicAsk(token, text, creds(sessionTokenRef.current));
+        } else {
+          await api.createPublicQuestion(token, text, creds(sessionTokenRef.current));
+        }
         setRefreshKey((k) => k + 1);
       } catch (e: unknown) {
         if (e instanceof ApiError) {
           if (e.code === "qa_disabled") {
-            setQuestionError(t("viewer.qaDisabled"));
+            setQuestionError(t("viewer.askDisabled"));
           } else if (e.code === "rate_limit_exceeded") {
-            setQuestionError(t("viewer.qaRateLimited"));
+            setQuestionError(t("viewer.askRateLimited"));
           } else if (e.code === "limiter_unavailable") {
-            setQuestionError(t("viewer.qaLimiterUnavailable"));
+            setQuestionError(t("viewer.askLimiterUnavailable"));
           } else {
-            setQuestionError(t("viewer.qaError"));
+            setQuestionError(t("viewer.askError"));
           }
         } else {
-          setQuestionError(t("viewer.qaError"));
+          setQuestionError(t("viewer.askError"));
         }
       } finally {
         setOwnerSubmitting(false);
       }
     },
-    [input, t, token]
+    [input, t, token, unifiedAskEnabled]
   );
 
   const busy = ownerSubmitting;
@@ -144,8 +174,8 @@ export function UnifiedQAPanel({
         ) : allMessages.length === 0 ? (
           <div className="flex flex-col items-center rounded-2xl border border-border/60 bg-background/60 px-6 py-10 text-center text-muted-foreground">
             <ChatCenteredDots size={28} className="mb-3 opacity-30" />
-            <p className="text-sm font-medium text-foreground">{t("viewer.qaEmptyUnified")}</p>
-            <p className="mt-1 max-w-[28ch] text-xs leading-relaxed">{t("viewer.qaEmptyHint")}</p>
+            <p className="text-sm font-medium text-foreground">{t("viewer.askEmptyUnified")}</p>
+            <p className="mt-1 max-w-[28ch] text-xs leading-relaxed">{t("viewer.askEmptyHint")}</p>
           </div>
         ) : (
           allMessages.map((msg) => {
@@ -156,7 +186,7 @@ export function UnifiedQAPanel({
                   {!isUser && (
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
                       <User size={10} />
-                      {t("viewer.qaSourceOwner")}
+                      {t("viewer.askSourceOwner")}
                     </span>
                   )}
                   <div
@@ -170,7 +200,7 @@ export function UnifiedQAPanel({
                   </div>
                   {msg.pendingReply && (
                     <span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                      {t("viewer.qaPendingReply")}
+                      {t("viewer.askPendingReply")}
                     </span>
                   )}
                 </div>
@@ -189,7 +219,7 @@ export function UnifiedQAPanel({
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            placeholder={t("viewer.qaOwnerPlaceholder")}
+            placeholder={t("viewer.askOwnerPlaceholder")}
             maxLength={500}
             rows={2}
             className="min-h-0 flex-1 resize-none rounded-xl border-border/70 bg-background/80 text-sm"
@@ -200,7 +230,7 @@ export function UnifiedQAPanel({
             size="icon"
             className="h-auto shrink-0 rounded-xl"
             disabled={busy || !input.trim()}
-            aria-label={t("viewer.qaSubmit")}
+            aria-label={t("viewer.askSubmit")}
           >
             <PaperPlaneRight size={16} />
           </Button>

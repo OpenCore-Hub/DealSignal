@@ -6,15 +6,15 @@ import i18n from "i18next";
 import { UnifiedQAPanel } from "./UnifiedQAPanel";
 import enDocuments from "@/i18n/locales/en/documents.json";
 
-const { listPublicQuestionsMock, createPublicQuestionMock } = vi.hoisted(() => ({
-  listPublicQuestionsMock: vi.fn(),
-  createPublicQuestionMock: vi.fn(),
+const { listPublicAskTurnsMock, createPublicAskMock } = vi.hoisted(() => ({
+  listPublicAskTurnsMock: vi.fn(),
+  createPublicAskMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
-    listPublicQuestions: listPublicQuestionsMock,
-    createPublicQuestion: createPublicQuestionMock,
+    listPublicAskTurns: listPublicAskTurnsMock,
+    createPublicAsk: createPublicAskMock,
   },
 }));
 
@@ -32,16 +32,26 @@ async function renderPanel(props: Partial<React.ComponentProps<typeof UnifiedQAP
     </I18nextProvider>
   );
   await waitFor(() => {
-    expect(listPublicQuestionsMock).toHaveBeenCalled();
+    expect(listPublicAskTurnsMock).toHaveBeenCalled();
   });
 }
 
-describe("UnifiedQAPanel (Ask Host only)", () => {
+describe("UnifiedQAPanel (unified Ask host lane)", () => {
   beforeEach(() => {
-    listPublicQuestionsMock.mockReset();
-    createPublicQuestionMock.mockReset();
-    listPublicQuestionsMock.mockResolvedValue({ data: [] });
-    createPublicQuestionMock.mockResolvedValue({ data: { id: "q1" } });
+    listPublicAskTurnsMock.mockReset();
+    createPublicAskMock.mockReset();
+    listPublicAskTurnsMock.mockResolvedValue({ data: [] });
+    createPublicAskMock.mockResolvedValue({
+      data: {
+        id: "turn1",
+        session_id: "sess1",
+        question: "test",
+        lane: "host",
+        status: "host_pending",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      },
+    });
   });
 
   it("loads and shows empty state", async () => {
@@ -50,14 +60,14 @@ describe("UnifiedQAPanel (Ask Host only)", () => {
     expect(screen.getByPlaceholderText(/Ask the host a question/i)).toBeInTheDocument();
   });
 
-  it("submits Ask Host question", async () => {
+  it("submits unified Ask turn", async () => {
     await renderPanel();
     fireEvent.change(screen.getByPlaceholderText(/Ask the host a question/i), {
       target: { value: "Can you share the model?" },
     });
     fireEvent.click(screen.getByRole("button", { name: /Ask/i }));
     await waitFor(() => {
-      expect(createPublicQuestionMock).toHaveBeenCalledWith(
+      expect(createPublicAskMock).toHaveBeenCalledWith(
         "tok123",
         "Can you share the model?",
         { sessionToken: "sess456" }
@@ -67,7 +77,7 @@ describe("UnifiedQAPanel (Ask Host only)", () => {
 
   it("shows rate limit error", async () => {
     const { ApiError } = await import("@/lib/apiClient");
-    createPublicQuestionMock.mockRejectedValue(
+    createPublicAskMock.mockRejectedValue(
       new ApiError({ status: 429, code: "rate_limit_exceeded", message: "rate limited", requestId: "r1" })
     );
     await renderPanel();
@@ -80,14 +90,16 @@ describe("UnifiedQAPanel (Ask Host only)", () => {
     });
   });
 
-  it("renders answered questions", async () => {
-    listPublicQuestionsMock.mockResolvedValue({
+  it("renders answered host turns", async () => {
+    listPublicAskTurnsMock.mockResolvedValue({
       data: [
         {
-          id: "q1",
+          id: "turn1",
+          session_id: "sess1",
           question: "Where is the cap table?",
-          answer: "In the Legal folder.",
-          status: "answered",
+          host_answer: "In the Legal folder.",
+          lane: "host",
+          status: "host_answered",
           created_at: "2026-01-01T00:00:00Z",
           updated_at: "2026-01-02T00:00:00Z",
         },

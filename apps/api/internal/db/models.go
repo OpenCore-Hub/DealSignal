@@ -490,6 +490,36 @@ type LinkAccessRuleRevision struct {
 	CreatedAt     pgtype.Timestamptz
 }
 
+type LinkAskSession struct {
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	LinkID       pgtype.UUID
+	VisitorID    string
+	VisitorEmail pgtype.Text
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+}
+
+type LinkAskTurn struct {
+	ID             pgtype.UUID
+	SessionID      pgtype.UUID
+	TenantID       pgtype.UUID
+	WorkspaceID    pgtype.UUID
+	LinkID         pgtype.UUID
+	VisitorID      string
+	Question       string
+	Lane           string
+	Status         string
+	AiPayload      []byte
+	HostQuestionID pgtype.UUID
+	HostAnswer     pgtype.Text
+	AnsweredBy     pgtype.UUID
+	RouteReason    pgtype.Text
+	CreatedAt      pgtype.Timestamptz
+	UpdatedAt      pgtype.Timestamptz
+}
+
 type LinkContact struct {
 	ID             pgtype.UUID
 	LinkID         pgtype.UUID

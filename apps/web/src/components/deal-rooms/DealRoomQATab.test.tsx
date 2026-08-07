@@ -6,13 +6,14 @@ import { DealRoomQATab } from "./DealRoomQATab";
 import { createTestI18n } from "@/i18n/test-utils";
 import enDealRooms from "@/i18n/locales/en/dealRooms.json";
 import { api } from "@/lib/api";
-import type { Link, VisitorQuestion } from "@/types";
+import type { Link, OwnerAskTurn } from "@/types";
 
 vi.mock("@/lib/api", () => ({
   api: {
-    listRoomQuestions: vi.fn(),
+    listRoomAsk: vi.fn(),
     getDealRoomLinks: vi.fn(),
     answerQuestion: vi.fn(),
+    answerAskTurn: vi.fn(),
   },
 }));
 
@@ -33,19 +34,23 @@ async function renderTab() {
 
 describe("DealRoomQATab", () => {
   beforeEach(() => {
-    vi.mocked(api.listRoomQuestions).mockReset();
+    vi.mocked(api.listRoomAsk).mockReset();
     vi.mocked(api.getDealRoomLinks).mockReset();
     vi.mocked(api.answerQuestion).mockReset();
+    vi.mocked(api.answerAskTurn).mockReset();
   });
 
   it("loads room Ask Host questions and answers without fake seed data", async () => {
-    const pending: VisitorQuestion = {
-      id: "q1",
+    const pending: OwnerAskTurn = {
+      id: "turn-1",
+      session_id: "sess-1",
       link_id: "link_1",
       visitor_id: "v1",
       visitor_email: "lp@example.com",
       question: "Can you share the updated financial model?",
-      status: "pending",
+      lane: "host",
+      status: "host_pending",
+      host_question_id: "q1",
       created_at: "2026-07-20T10:00:00.000Z",
       updated_at: "2026-07-20T10:00:00.000Z",
     };
@@ -65,13 +70,13 @@ describe("DealRoomQATab", () => {
       dealRoomId: "room_1",
     };
 
-    vi.mocked(api.listRoomQuestions).mockResolvedValue({ data: [pending] });
+    vi.mocked(api.listRoomAsk).mockResolvedValue({ data: [pending] });
     vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [link] });
-    vi.mocked(api.answerQuestion).mockResolvedValue({
+    vi.mocked(api.answerAskTurn).mockResolvedValue({
       data: {
         ...pending,
-        answer: "Attached in the data room.",
-        status: "answered",
+        status: "host_answered",
+        host_answer: "Attached in the data room.",
         updated_at: "2026-07-20T11:00:00.000Z",
       },
     });
@@ -89,9 +94,9 @@ describe("DealRoomQATab", () => {
     fireEvent.click(screen.getByRole("button", { name: /Send answer/i }));
 
     await waitFor(() => {
-      expect(api.answerQuestion).toHaveBeenCalledWith(
+      expect(api.answerAskTurn).toHaveBeenCalledWith(
         "link_1",
-        "q1",
+        "turn-1",
         "Attached in the data room.",
       );
     });
@@ -99,7 +104,7 @@ describe("DealRoomQATab", () => {
   });
 
   it("shows empty state when there are no questions", async () => {
-    vi.mocked(api.listRoomQuestions).mockResolvedValue({ data: [] });
+    vi.mocked(api.listRoomAsk).mockResolvedValue({ data: [] });
     vi.mocked(api.getDealRoomLinks).mockResolvedValue({ data: [] });
 
     await renderTab();

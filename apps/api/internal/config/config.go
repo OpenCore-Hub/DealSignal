@@ -116,6 +116,10 @@ type Config struct {
 	// KnowledgeQAMultiHopEnabled runs deterministic second-hop retrieve on the session path (default on).
 	KnowledgeQAMultiHopEnabled bool
 
+	// VisitorAskUnifiedEnabled gates the unified visitor Ask UI (Phase A rollout).
+	// Set VISITOR_ASK_UNIFIED=1 to enable; API dual-write remains active regardless.
+	VisitorAskUnifiedEnabled bool
+
 	SignalRulesPath string
 
 	FeatureWorkerEnabled  bool
@@ -252,6 +256,7 @@ func Load() (*Config, error) {
 		KnowledgeQARewriteCacheEnabled: strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_CACHE_ENABLED", "true")) == "true",
 		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
 		KnowledgeQAMultiHopEnabled:     strings.ToLower(getEnv("KNOWLEDGE_QA_MULTI_HOP_ENABLED", "true")) == "true",
+		VisitorAskUnifiedEnabled:       visitorAskUnifiedEnabledFromEnv(),
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",
@@ -392,4 +397,9 @@ func getEnvInt(key string, fallback int) int {
 		return fallback
 	}
 	return n
+}
+
+func visitorAskUnifiedEnabledFromEnv() bool {
+	v := strings.TrimSpace(os.Getenv("VISITOR_ASK_UNIFIED"))
+	return v == "1" || strings.EqualFold(v, "true")
 }

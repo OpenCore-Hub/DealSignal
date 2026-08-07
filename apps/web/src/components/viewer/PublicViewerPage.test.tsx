@@ -16,6 +16,7 @@ const {
   getPublicPageSignedUrlMock,
   recordPublicEventMock,
   listPublicQuestionsMock,
+  listPublicAskTurnsMock,
 } = vi.hoisted(() => ({
   accessPublicLinkMock: vi.fn(),
   getPublicNDAPreviewMock: vi.fn(),
@@ -25,6 +26,7 @@ const {
   getPublicPageSignedUrlMock: vi.fn(),
   recordPublicEventMock: vi.fn(),
   listPublicQuestionsMock: vi.fn(),
+  listPublicAskTurnsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -37,6 +39,7 @@ vi.mock("@/lib/api", () => ({
     getPublicPageSignedUrl: getPublicPageSignedUrlMock,
     recordPublicEvent: recordPublicEventMock,
     listPublicQuestions: listPublicQuestionsMock,
+    listPublicAskTurns: listPublicAskTurnsMock,
   },
 }));
 
@@ -91,6 +94,7 @@ const dealRoomAskAccess = {
     downloadEnabled: false,
     watermarkEnabled: false,
     qaEnabled: true,
+    visitorAskUnified: true,
     fileRequestsEnabled: false,
     isBundle: false,
     dealRoomId: "room-1",
@@ -132,6 +136,7 @@ describe("PublicViewerPage", () => {
     getPublicPageSignedUrlMock.mockReset();
     recordPublicEventMock.mockReset();
     listPublicQuestionsMock.mockReset();
+    listPublicAskTurnsMock.mockReset();
     getPublicDocumentPagesMock.mockResolvedValue({
       documentId: "doc-1",
       pages: [{ pageNumber: 1, width: 612, height: 792 }],
@@ -146,6 +151,7 @@ describe("PublicViewerPage", () => {
     });
     recordPublicEventMock.mockResolvedValue(undefined);
     listPublicQuestionsMock.mockResolvedValue({ data: [] });
+    listPublicAskTurnsMock.mockResolvedValue({ data: [] });
     getPublicNDAPreviewMock.mockResolvedValue({
       ndaTemplate: {
         id: "tpl-1",
@@ -1412,7 +1418,7 @@ describe("PublicViewerPage", () => {
     fireEvent.click(workspaceToggle);
 
     await waitFor(() => {
-      expect(listPublicQuestionsMock).toHaveBeenCalledWith(
+      expect(listPublicAskTurnsMock).toHaveBeenCalledWith(
         token,
         expect.objectContaining({ sessionToken: "session-after-access" }),
       );

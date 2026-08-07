@@ -170,6 +170,8 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 	g.POST("/:id/generate-index", h.GenerateLinkIndex)
 	g.GET("/:id/index-file", h.GetLinkIndexFile)
 	g.GET("/:id/questions", h.ListLinkVisitorQuestions)
+	g.GET("/:id/ask", h.ListLinkAskInbox)
+	g.PATCH("/:id/ask/:turnId/host-answer", h.AnswerAskTurnHostAnswer)
 	g.PATCH("/:id/questions/:questionId/answer", h.AnswerVisitorQuestion)
 	g.GET("/:id/ask-security-events", h.ListAskSecurityEvents)
 	g.GET("/:id/file-requests", h.ListLinkFileRequests)
@@ -189,6 +191,7 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 	// Room-wide Ask Host inbox (across all links in the deal room).
 	r.GET("/deal-rooms/:roomId/visitor-questions", h.ListRoomVisitorQuestions)
+	r.GET("/deal-rooms/:roomId/ask", h.ListRoomAskInbox)
 	r.GET("/deal-rooms/:roomId/ask-security-events", h.ListRoomAskSecurityEvents)
 }
 
@@ -209,6 +212,8 @@ func (h *Handler) RegisterPublicRoutes(r *gin.RouterGroup) {
 	r.GET("/deal-rooms/:slug/redirect", h.PublicDealRoomRedirect)
 	r.POST("/links/:publicToken/questions", h.PublicCreateVisitorQuestion)
 	r.GET("/links/:publicToken/questions/me", h.PublicListMyVisitorQuestions)
+	r.POST("/links/:publicToken/ask", h.PublicCreateAsk)
+	r.GET("/links/:publicToken/ask/me", h.PublicListMyAskTurns)
 	r.POST("/links/:publicToken/file-requests", h.PublicCreateFileRequest)
 	r.GET("/links/:publicToken/file-requests/me", h.PublicListMyFileRequests)
 	r.GET("/links/:publicToken/index-file", h.PublicGetLinkIndexFile)
@@ -1492,6 +1497,7 @@ func (h *Handler) PublicLinkMetadata(c *gin.Context) {
 		"screenshot_protection_enabled": meta.ScreenshotProtectionEnabled,
 		"custom_domain":                 meta.CustomDomain,
 		"qa_enabled":                    meta.QaEnabled,
+		"visitor_ask_unified":           VisitorAskUnifiedEnabled(db.Link{QaEnabled: meta.QaEnabled}, h.cfg),
 		"file_requests_enabled":         meta.FileRequestsEnabled,
 		"index_file_enabled":            meta.IndexFileEnabled,
 	}
@@ -1671,6 +1677,7 @@ func (h *Handler) respondAccessSuccess(c *gin.Context, link db.Link, token, emai
 		"screenshotProtectionEnabled": link.ScreenshotProtectionEnabled,
 		"watermarkText":               h.watermarkTextFor(email, c.ClientIP()),
 		"qaEnabled":                   link.QaEnabled,
+		"visitorAskUnified":           VisitorAskUnifiedEnabled(link, h.cfg),
 		"fileRequestsEnabled":         link.FileRequestsEnabled,
 		"indexFileEnabled":            link.IndexFileEnabled,
 		"isBundle":                    len(documents) > 1,
@@ -2839,6 +2846,29 @@ func (h *Handler) ListLinkVisitorQuestions(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": questions})
 }
 
+// ListLinkAskInbox returns unified Ask turns for a link (owner inbox, Phase A host lane).
+func (h *Handler) ListLinkAskInbox(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turns, err := h.service.ListLinkAskInbox(
+		c.Request.Context(),
+		link,
+		middleware.UserIDFrom(c),
+		c.Query("lane"),
+		c.Query("status"),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turns})
+}
+
 // ListRoomVisitorQuestions returns Ask Host questions across a deal room (owner view).
 func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
 	wsID := middleware.WorkspaceIDFrom(c)
@@ -2854,6 +2884,25 @@ func (h *Handler) ListRoomVisitorQuestions(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": questions})
+}
+
+// ListRoomAskInbox returns unified Ask turns across a deal room (owner inbox).
+func (h *Handler) ListRoomAskInbox(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	turns, err := h.service.ListRoomAskInbox(
+		c.Request.Context(),
+		wsID,
+		c.Param("roomId"),
+		middleware.UserIDFrom(c),
+		c.Query("link_id"),
+		c.Query("lane"),
+		c.Query("status"),
+	)
+	if err != nil {
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turns})
 }
 
 // ListAskSecurityEvents returns Visitor Ask high-risk security events for a link.
@@ -2955,10 +3004,56 @@ func (h *Handler) AnswerVisitorQuestion(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"data": q})
 }
 
+// AnswerAskTurnHostAnswer allows the owner to answer a unified Ask turn by turn id.
+func (h *Handler) AnswerAskTurnHostAnswer(c *gin.Context) {
+	wsID := middleware.WorkspaceIDFrom(c)
+	lID := c.Param("id")
+	link, err := h.service.GetByID(c.Request.Context(), lID, wsID)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
+		return
+	}
+	turnUUID, err := uuid.Parse(c.Param("turnId"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_id", "message": "invalid turn id"})
+		return
+	}
+	var body struct {
+		Answer string `json:"answer" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&body); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	uUUID, err := uuid.Parse(middleware.UserIDFrom(c))
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid user"})
+		return
+	}
+	turn, err := h.service.AnswerAskTurnHostAnswer(
+		c.Request.Context(),
+		link,
+		pgtype.UUID{Bytes: turnUUID, Valid: true},
+		pgtype.UUID{Bytes: uUUID, Valid: true},
+		body.Answer,
+	)
+	if err != nil {
+		if err.Error() == "answer is required" {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "answer is required"})
+			return
+		}
+		writeAskHostError(c, err)
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"data": turn})
+}
+
 func writeAskHostError(c *gin.Context, err error) {
 	switch {
 	case errors.Is(err, ErrAskHostForbidden):
 		c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "ask host inbox forbidden"})
+	case errors.Is(err, ErrAskTurnNotPending):
+		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_pending", "message": "ask turn is not pending"})
 	case errors.Is(err, ErrNotFoundInWorkspace):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
 	default:
@@ -3143,6 +3238,53 @@ func (h *Handler) PublicDealRoomRedirect(c *gin.Context) {
 
 // PublicCreateVisitorQuestion allows a visitor to submit a question.
 func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
+	result, submission, ok := h.gatePublicAskSubmission(c)
+	if !ok {
+		return
+	}
+	q, err := h.service.CreateVisitorQuestion(c.Request.Context(), result.Link, result.VisitorID, result.Email, submission.Question)
+	if err != nil {
+		if writeAskValidationError(c, err) {
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, submission.Question)
+	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
+}
+
+// PublicCreateAsk is the unified visitor Ask entry (Phase A host lane).
+func (h *Handler) PublicCreateAsk(c *gin.Context) {
+	result, submission, ok := h.gatePublicAskSubmission(c)
+	if !ok {
+		return
+	}
+	turn, err := h.service.CreateHostAskTurn(
+		c.Request.Context(),
+		result.Link,
+		result.VisitorID,
+		result.Email,
+		submission.Question,
+		submission.Escalate,
+	)
+	if err != nil {
+		if writeAskValidationError(c, err) {
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	if turn.HostQuestionID != "" {
+		if qID, parseErr := uuid.Parse(turn.HostQuestionID); parseErr == nil {
+			go h.service.ClassifyQuestionIntent(context.Background(), pgtype.UUID{Bytes: qID, Valid: true}, submission.Question)
+		}
+	}
+	c.JSON(http.StatusCreated, gin.H{"data": turn})
+}
+
+// PublicListMyAskTurns returns the visitor's unified Ask timeline on this link.
+func (h *Handler) PublicListMyAskTurns(c *gin.Context) {
 	result, err := h.verifyPublicAccess(c)
 	if err != nil {
 		mapAccessError(c, err)
@@ -3153,24 +3295,12 @@ func (h *Handler) PublicCreateVisitorQuestion(c *gin.Context) {
 		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
 		return
 	}
-	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	if h.rejectIfAskHostLimited(c, result, linkID) {
-		return
-	}
-	var body struct {
-		Question string `json:"question" binding:"required"`
-	}
-	if err := c.ShouldBindJSON(&body); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
-		return
-	}
-	q, err := h.service.CreateVisitorQuestion(c.Request.Context(), result.Link, result.VisitorID, result.Email, body.Question)
+	turns, err := h.service.ListMyAskTurns(c.Request.Context(), result.Link.ID, result.VisitorID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	go h.service.ClassifyQuestionIntent(context.Background(), q.ID, body.Question)
-	c.JSON(http.StatusCreated, gin.H{"data": mapVisitorQuestion(q)})
+	c.JSON(http.StatusOK, gin.H{"data": turns})
 }
 
 // PublicListMyVisitorQuestions returns the visitor's own questions.
@@ -3181,12 +3311,16 @@ func (h *Handler) PublicListMyVisitorQuestions(c *gin.Context) {
 		return
 	}
 	h.writeSessionRefreshHeader(c, result)
+	if !result.Link.QaEnabled {
+		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
+		return
+	}
 	questions, err := h.service.ListMyVisitorQuestions(c.Request.Context(), result.Link.ID, result.VisitorID)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": mapVisitorQuestions(questions)})
+	c.JSON(http.StatusOK, gin.H{"data": questions})
 }
 
 // PublicCreateFileRequest allows a visitor to request a file.
