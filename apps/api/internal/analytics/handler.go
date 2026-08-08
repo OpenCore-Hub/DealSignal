@@ -4,8 +4,11 @@ package analytics
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -13,10 +16,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 )
@@ -39,8 +42,15 @@ func (h *Handler) RegisterWorkspaceRoutes(r *gin.RouterGroup) {
 
 	r.GET("/dashboard/stats", h.GetDashboardStats)
 	r.GET("/insights/overview", h.GetInsightsOverview)
+	r.GET("/insights/overview/export", h.ExportInsightsOverview)
+	r.GET("/insights/access-audit", h.GetAccessAudit)
+	r.GET("/insights/key-pages", h.GetKeyPageCompliance)
+	r.GET("/insights/key-page-settings", h.GetKeyPageSettings)
+	r.PUT("/insights/key-page-settings", h.PutKeyPageSettings)
 	r.GET("/insights/pages/:documentId", h.GetPageAnalytics)
 	r.GET("/insights/documents/:documentId/visitors", h.GetDocumentVisitors)
+	r.GET("/insights/documents/:documentId/funnel", h.GetDocumentReadingFunnel)
+	r.GET("/insights/documents/:documentId/sessions", h.GetDocumentReadingSessions)
 	r.POST("/events", h.RecordViewerEvent)
 }
 
@@ -49,7 +59,7 @@ func (h *Handler) GetScore(c *gin.Context) {
 	linkID := c.Param("linkId")
 	workspaceID := middleware.WorkspaceIDFrom(c)
 
-	score, err := h.service.GetScore(c.Request.Context(), pgUUID(linkID), pgUUID(workspaceID), circleFromQuery(c))
+	score, err := h.service.GetScore(c.Request.Context(), pgUUID(linkID), pgUUID(workspaceID), circleOverrideFromQuery(c))
 	if err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": httpx.SafeMessage("link_not_found", err)})
 		return
@@ -94,24 +104,491 @@ func (h *Handler) GetDashboardStats(c *gin.Context) {
 // GetInsightsOverview returns discovery analytics.
 func (h *Handler) GetInsightsOverview(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	overview, err := h.service.InsightsOverview(c.Request.Context(), workspaceID)
+	overview, err := h.service.InsightsOverviewQuery(c.Request.Context(), workspaceID, insightsRangeFromQuery(c))
 	if err != nil {
+		if errors.Is(err, errInsightsRangeInvalid) || errors.Is(err, errInsightsRangeTooLong) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
 
 	c.JSON(http.StatusOK, gin.H{
-		"tierCounts":   overview.TierCounts,
+		// tierCounts are link-level heat.Compute buckets (founder circle).
+		"tierEntity":                      "link",
+		"tierCounts":                      overview.TierCounts,
+		"activeLinkCount":                 overview.ActiveLinkCount,
+		"rangeDays":                       overview.RangeDays,
+		"rangeFrom":                       overview.RangeFrom,
+		"rangeTo":                         overview.RangeTo,
+		"rangeCustom":                     overview.RangeCustom,
+		"generatedAt":                     overview.GeneratedAt.UTC().Format(time.RFC3339),
+		"eventRetentionDays":              overview.EventRetentionDays,
+		"pageViewRetentionDays":           overview.PageViewRetentionDays,
+		"periodOpens":                     overview.PeriodOpens,
+		"previousPeriodOpens":             overview.PreviousPeriodOpens,
+		"periodUniqueVisitors":            overview.PeriodUniqueVisitors,
+		"previousPeriodUniqueVisitors":    overview.PreviousPeriodUniqueVisitors,
+		"periodMedianDurationSeconds":         overview.PeriodMedianDurationSeconds,
+		"previousPeriodMedianDurationSeconds": overview.PreviousPeriodMedianDurationSeconds,
+		"periodAvgDurationSeconds":            overview.PeriodAvgDurationSeconds,
+		"periodPageViewCount":                 overview.PeriodPageViewCount,
+		"periodSessionCount":                  overview.PeriodSessionCount,
+		"periodMeasurableSessions":            overview.PeriodMeasurableSessions,
+		"periodCompletedSessions":             overview.PeriodCompletedSessions,
+		"periodCompletionRate":                overview.PeriodCompletionRate,
+		"previousPeriodSessionCount":          overview.PreviousPeriodSessionCount,
+		"previousPeriodCompletedSessions":     overview.PreviousPeriodCompletedSessions,
+		"previousPeriodCompletionRate":        overview.PreviousPeriodCompletionRate,
+		"openSignalCount":                     overview.OpenSignalCount,
+		"dailyVisits":                         dailyVisitList(overview.DailyVisits),
+		// top* rankings use lifetime heat — not filtered by rangeDays.
+		// topContacts feeds Deal Radar recent-visitors; Insights Overview CTA uses openSignalCount.
 		"topDocuments": documentScoreList(overview.TopDocuments),
 		"topLinks":     linkScoreList(c, h.cfg, overview.TopLinks),
 		"topContacts":  contactScoreList(overview.TopContacts),
 	})
 }
 
+// ExportInsightsOverview downloads the selected-range daily series as CSV.
+func (h *Handler) ExportInsightsOverview(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	overview, err := h.service.InsightsOverviewQuery(c.Request.Context(), workspaceID, insightsRangeFromQuery(c))
+	if err != nil {
+		if errors.Is(err, errInsightsRangeInvalid) || errors.Is(err, errInsightsRangeTooLong) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+
+	filename := fmt.Sprintf("insights-daily-%s_%s.csv", overview.RangeFrom, overview.RangeTo)
+	c.Header("Content-Type", "text/csv; charset=utf-8")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, filename))
+	c.Status(http.StatusOK)
+	_, _ = c.Writer.WriteString("date,opens,unique_visitors\n")
+	for _, d := range overview.DailyVisits {
+		day := d.Date
+		if t, err := time.Parse(time.RFC3339, d.Date); err == nil {
+			day = t.UTC().Format("2006-01-02")
+		}
+		_, _ = fmt.Fprintf(c.Writer, "%s,%d,%d\n", day, d.Opens, d.UniqueVisitors)
+	}
+}
+
+func insightsDaysFromQuery(c *gin.Context) int {
+	raw := c.Query("days")
+	if raw == "" {
+		return insightsTrendDaysDefault
+	}
+	n, err := strconv.Atoi(raw)
+	if err != nil {
+		return insightsTrendDaysDefault
+	}
+	return normalizeInsightsDays(n)
+}
+
+func insightsRangeFromQuery(c *gin.Context) InsightsRangeQuery {
+	return InsightsRangeQuery{
+		Days: insightsDaysFromQuery(c),
+		From: strings.TrimSpace(c.Query("from")),
+		To:   strings.TrimSpace(c.Query("to")),
+	}
+}
+
+// insightsOptionalRangeFromQuery returns a range query only when the client
+// explicitly sent days and/or from/to. Empty params mean lifetime aggregates
+// (used by document viewer / legacy callers).
+func insightsOptionalRangeFromQuery(c *gin.Context) (InsightsRangeQuery, bool) {
+	from := strings.TrimSpace(c.Query("from"))
+	to := strings.TrimSpace(c.Query("to"))
+	daysRaw := strings.TrimSpace(c.Query("days"))
+	if from == "" && to == "" && daysRaw == "" {
+		return InsightsRangeQuery{}, false
+	}
+	return insightsRangeFromQuery(c), true
+}
+
+func resolveOptionalInsightsRange(c *gin.Context) (*InsightsRange, error) {
+	q, ok := insightsOptionalRangeFromQuery(c)
+	if !ok {
+		return nil, nil
+	}
+	rng, err := resolveInsightsRange(q, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	return &rng, nil
+}
+
+// GetKeyPageCompliance returns who viewed heat key (sensitive) pages.
+func (h *Handler) GetKeyPageCompliance(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	rq := insightsRangeFromQuery(c)
+	q := KeyPageComplianceQuery{
+		Days:   rq.Days,
+		From:   rq.From,
+		To:     rq.To,
+		Circle: circleFromQuery(c),
+	}
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			q.Limit = n
+		}
+	}
+	if raw := c.Query("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			q.Offset = n
+		}
+	}
+	report, err := h.service.KeyPageCompliance(c.Request.Context(), workspaceID, q)
+	if err != nil {
+		if errors.Is(err, errInsightsRangeInvalid) || errors.Is(err, errInsightsRangeTooLong) || strings.Contains(err.Error(), "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+
+	matchRules := make([]gin.H, 0, len(report.MatchRules))
+	for _, rule := range report.MatchRules {
+		kws := rule.Keywords
+		if kws == nil {
+			kws = []string{}
+		}
+		matchRules = append(matchRules, gin.H{"category": rule.Category, "keywords": kws})
+	}
+	byCategory := make([]gin.H, 0, len(report.ByCategory))
+	for _, cat := range report.ByCategory {
+		byCategory = append(byCategory, gin.H{"category": cat.Category, "count": cat.Count})
+	}
+	pages := make([]gin.H, 0, len(report.Pages))
+	for _, p := range report.Pages {
+		item := gin.H{
+			"documentId":         p.DocumentID,
+			"documentTitle":      p.DocumentTitle,
+			"pageNumber":         p.PageNumber,
+			"pageTitle":          p.PageTitle,
+			"category":           p.Category,
+			"views":              p.Views,
+			"uniqueVisitors":     p.UniqueVisitors,
+			"avgDurationSeconds": p.AvgDurationSeconds,
+		}
+		if !p.LastViewedAt.IsZero() {
+			item["lastViewedAt"] = p.LastViewedAt.UTC().Format(time.RFC3339)
+		}
+		pages = append(pages, item)
+	}
+	events := make([]gin.H, 0, len(report.Events))
+	for _, e := range report.Events {
+		item := gin.H{
+			"id":              e.ID,
+			"pageNumber":      e.PageNumber,
+			"pageTitle":       e.PageTitle,
+			"category":        e.Category,
+			"documentTitle":   e.DocumentTitle,
+			"durationSeconds": e.DurationSeconds,
+			"createdAt":       e.CreatedAt.UTC().Format(time.RFC3339),
+			"dealRoomName":    e.DealRoomName,
+		}
+		if e.LinkID != "" {
+			item["linkId"] = e.LinkID
+		}
+		if e.DocumentID != "" {
+			item["documentId"] = e.DocumentID
+		}
+		if e.VisitorID != "" {
+			item["visitorId"] = e.VisitorID
+		}
+		if e.VisitorEmail != "" {
+			item["visitorEmail"] = e.VisitorEmail
+		}
+		if e.DealRoomID != "" {
+			item["dealRoomId"] = e.DealRoomID
+		}
+		events = append(events, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"rangeDays":      report.RangeDays,
+		"rangeFrom":      report.RangeFrom,
+		"rangeTo":        report.RangeTo,
+		"rangeCustom":    report.RangeCustom,
+		"circle":         report.Circle,
+		"generatedAt":    report.GeneratedAt.UTC().Format(time.RFC3339),
+		"totalViews":     report.TotalViews,
+		"engagedViews":   report.EngagedViews,
+		"uniqueVisitors": report.UniqueVisitors,
+		"distinctPages":  report.DistinctPages,
+		"matchRules":     matchRules,
+		"byCategory":     byCategory,
+		"pages":          pages,
+		"events":         events,
+		"hasMore":        report.HasMore,
+		"limit":          report.Limit,
+		"offset":         report.Offset,
+	})
+}
+
+// GetKeyPageSettings returns workspace default circle + additive keywords + effective rules.
+func (h *Handler) GetKeyPageSettings(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	userID := middleware.UserIDFrom(c)
+	settings, err := h.service.GetKeyPageSettings(c.Request.Context(), workspaceID, userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, keyPageSettingsJSON(settings))
+}
+
+func keyPageSettingsJSON(settings KeyPageSettings) gin.H {
+	matchRules := make([]gin.H, 0, len(settings.MatchRules))
+	for _, rule := range settings.MatchRules {
+		kws := rule.Keywords
+		if kws == nil {
+			kws = []string{}
+		}
+		matchRules = append(matchRules, gin.H{"category": rule.Category, "keywords": kws})
+	}
+	builtinRules := make([]gin.H, 0, len(settings.BuiltinRules))
+	for _, rule := range settings.BuiltinRules {
+		kws := rule.Keywords
+		if kws == nil {
+			kws = []string{}
+		}
+		builtinRules = append(builtinRules, gin.H{"category": rule.Category, "keywords": kws})
+	}
+	extras := settings.ExtraKeywords
+	if extras == nil {
+		extras = map[string][]string{}
+	}
+	out := gin.H{
+		"defaultCircle": settings.DefaultCircle,
+		"extraKeywords": extras,
+		"builtinRules":  builtinRules,
+		"matchRules":    matchRules,
+		"canEdit":       settings.CanEdit,
+	}
+	if !settings.UpdatedAt.IsZero() {
+		out["updatedAt"] = settings.UpdatedAt.UTC().Format(time.RFC3339)
+	}
+	return out
+}
+
+type putKeyPageSettingsRequest struct {
+	DefaultCircle string              `json:"defaultCircle"`
+	ExtraKeywords map[string][]string `json:"extraKeywords"`
+}
+
+// PutKeyPageSettings upserts workspace key-page settings (owner/admin).
+func (h *Handler) PutKeyPageSettings(c *gin.Context) {
+	var req putKeyPageSettingsRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	userID := middleware.UserIDFrom(c)
+	settings, err := h.service.SaveKeyPageSettings(c.Request.Context(), workspaceID, userID, KeyPageSettingsUpdate{
+		DefaultCircle: req.DefaultCircle,
+		ExtraKeywords: req.ExtraKeywords,
+	})
+	if err != nil {
+		if errors.Is(err, errKeyPageSettingsForbidden) {
+			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can update key page settings"})
+			return
+		}
+		if errors.Is(err, errKeyPageSettingsInvalid) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, keyPageSettingsJSON(settings))
+}
+
+// GetAccessAudit returns workspace permission/gate failure analytics.
+func (h *Handler) GetAccessAudit(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	rq := insightsRangeFromQuery(c)
+	q := AccessAuditQuery{
+		Days:       rq.Days,
+		From:       rq.From,
+		To:         rq.To,
+		EventType:  c.Query("eventType"),
+		DealRoomID: c.Query("dealRoomId"),
+		MemberID:   c.Query("memberId"),
+		FolderPath: c.Query("folderPath"),
+	}
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			q.Limit = n
+		}
+	}
+	if raw := c.Query("offset"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			q.Offset = n
+		}
+	}
+	audit, err := h.service.AccessAudit(c.Request.Context(), workspaceID, q)
+	if err != nil {
+		if errors.Is(err, errInsightsRangeInvalid) || errors.Is(err, errInsightsRangeTooLong) || strings.Contains(err.Error(), "invalid") {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+
+	byType := make([]gin.H, 0, len(audit.ByType))
+	for _, t := range audit.ByType {
+		byType = append(byType, gin.H{"eventType": t.EventType, "count": t.Count})
+	}
+	byRoom := make([]gin.H, 0, len(audit.ByDealRoom))
+	for _, r := range audit.ByDealRoom {
+		item := gin.H{"count": r.Count, "dealRoomName": r.DealRoomName}
+		if r.DealRoomID != "" {
+			item["dealRoomId"] = r.DealRoomID
+		} else {
+			item["dealRoomId"] = nil
+			item["dealRoomName"] = ""
+			item["scope"] = "library"
+		}
+		byRoom = append(byRoom, item)
+	}
+	byMember := make([]gin.H, 0, len(audit.ByMember))
+	for _, m := range audit.ByMember {
+		item := gin.H{"count": m.Count, "memberEmail": m.MemberEmail}
+		if m.MemberID != "" {
+			item["memberId"] = m.MemberID
+		} else {
+			item["memberId"] = nil
+			item["scope"] = "unknown"
+		}
+		byMember = append(byMember, item)
+	}
+	byFolder := make([]gin.H, 0, len(audit.ByFolder))
+	for _, f := range audit.ByFolder {
+		item := gin.H{
+			"folderPath":   f.FolderPath,
+			"dealRoomName": f.DealRoomName,
+			"count":        f.Count,
+		}
+		if f.DealRoomID != "" {
+			item["dealRoomId"] = f.DealRoomID
+		} else {
+			item["dealRoomId"] = nil
+		}
+		if f.FolderPath == "" {
+			item["scope"] = "root"
+		}
+		byFolder = append(byFolder, item)
+	}
+	events := make([]gin.H, 0, len(audit.Events))
+	for _, e := range audit.Events {
+		item := gin.H{
+			"id":            e.ID,
+			"eventType":     e.EventType,
+			"createdAt":     e.CreatedAt.UTC().Format(time.RFC3339),
+			"documentTitle": e.DocumentTitle,
+			"dealRoomName":  e.DealRoomName,
+			"folderPath":    e.FolderPath,
+			"memberEmail":   e.MemberEmail,
+		}
+		if e.LinkID != "" {
+			item["linkId"] = e.LinkID
+		}
+		if e.Email != "" {
+			item["email"] = e.Email
+		}
+		if e.VisitorID != "" {
+			item["visitorId"] = e.VisitorID
+		}
+		if e.Reason != "" {
+			item["reason"] = e.Reason
+		}
+		if e.DealRoomID != "" {
+			item["dealRoomId"] = e.DealRoomID
+		}
+		if e.MemberID != "" {
+			item["memberId"] = e.MemberID
+		}
+		events = append(events, item)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"rangeDays":   audit.RangeDays,
+		"rangeFrom":   audit.RangeFrom,
+		"rangeTo":     audit.RangeTo,
+		"rangeCustom": audit.RangeCustom,
+		"generatedAt": audit.GeneratedAt.UTC().Format(time.RFC3339),
+		"totalEvents": audit.TotalEvents,
+		"byType":      byType,
+		"byDealRoom":  byRoom,
+		"byMember":    byMember,
+		"byFolder":    byFolder,
+		"events":      events,
+		"hasMore":     audit.HasMore,
+		"limit":       audit.Limit,
+		"offset":      audit.Offset,
+	})
+}
+
+// GetDocumentReadingFunnel returns session completion and page reach drop-off.
+// Optional days/from/to filters by reading_sessions.last_activity_at; omit for lifetime.
+func (h *Handler) GetDocumentReadingFunnel(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	rng, err := resolveOptionalInsightsRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	funnel, err := h.service.DocumentReadingFunnelRange(c.Request.Context(), c.Param("documentId"), workspaceID, rng)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, funnel)
+}
+
+// GetDocumentReadingSessions returns the idle-gap reading session timeline for a document.
+// Optional days/from/to filters by last_activity_at; omit for lifetime.
+func (h *Handler) GetDocumentReadingSessions(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	rng, err := resolveOptionalInsightsRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	limit := 0
+	if raw := c.Query("limit"); raw != "" {
+		if n, err := strconv.Atoi(raw); err == nil {
+			limit = n
+		}
+	}
+	payload, err := h.service.DocumentReadingSessionsRange(c.Request.Context(), c.Param("documentId"), workspaceID, limit, rng)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, payload)
+}
+
 // GetDocumentVisitors returns per-visitor engagement for a document.
+// Optional days/from/to filters page_views by created_at; omit for lifetime.
 func (h *Handler) GetDocumentVisitors(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	visitors, err := h.service.DocumentVisitors(c.Request.Context(), c.Param("documentId"), workspaceID)
+	rng, err := resolveOptionalInsightsRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	visitors, err := h.service.DocumentVisitorsRange(c.Request.Context(), c.Param("documentId"), workspaceID, rng)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
@@ -127,13 +604,30 @@ func (h *Handler) GetDocumentVisitors(c *gin.Context) {
 			"lastSeenAt":         v.LastSeenAt.Format(time.RFC3339),
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	resp := gin.H{"data": out}
+	if rng == nil {
+		resp["lifetime"] = true
+	} else {
+		resp["rangeDays"] = rng.Days
+		resp["rangeFrom"] = rng.From
+		resp["rangeTo"] = rng.To
+		if rng.Custom {
+			resp["rangeCustom"] = true
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 // GetPageAnalytics returns per-page metrics for a document.
+// Optional days/from/to filters page_views by created_at; omit for lifetime.
 func (h *Handler) GetPageAnalytics(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	rows, err := h.service.PageAnalytics(c.Request.Context(), c.Param("documentId"), workspaceID)
+	rng, err := resolveOptionalInsightsRange(c)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	rows, err := h.service.PageAnalyticsRange(c.Request.Context(), c.Param("documentId"), workspaceID, rng)
 	if err != nil {
 		slog.Error("GetPageAnalytics failed", "document_id", c.Param("documentId"), "workspace_id", workspaceID, "error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
@@ -150,7 +644,18 @@ func (h *Handler) GetPageAnalytics(c *gin.Context) {
 			"title":              r.Title,
 		}
 	}
-	c.JSON(http.StatusOK, gin.H{"data": out})
+	resp := gin.H{"data": out}
+	if rng == nil {
+		resp["lifetime"] = true
+	} else {
+		resp["rangeDays"] = rng.Days
+		resp["rangeFrom"] = rng.From
+		resp["rangeTo"] = rng.To
+		if rng.Custom {
+			resp["rangeCustom"] = true
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }
 
 type viewerEventRequest struct {
@@ -193,6 +698,22 @@ func circleFromQuery(c *gin.Context) heat.Circle {
 		return heat.CircleDefault
 	}
 	return circle
+}
+
+// circleOverrideFromQuery returns nil when circle is omitted so the workspace
+// default_circle applies; otherwise forces the requested circle (+ shared extras).
+func circleOverrideFromQuery(c *gin.Context) *heat.Circle {
+	raw := c.Query("circle")
+	if raw == "" {
+		return nil
+	}
+	circle := heat.Circle(raw)
+	switch circle {
+	case heat.CircleFounder, heat.CircleInvestor, heat.CircleSales:
+		return &circle
+	default:
+		return nil
+	}
 }
 
 func pgUUID(id string) pgtype.UUID {
@@ -276,12 +797,19 @@ func linkOverviewItem(c *gin.Context, cfg *config.Config, l LinkOverview) gin.H 
 func linkScoreList(c *gin.Context, cfg *config.Config, links []LinkScore) []gin.H {
 	out := make([]gin.H, len(links))
 	for i, l := range links {
-		out[i] = gin.H{
+		title := strings.TrimSpace(l.DocumentTitle)
+		item := gin.H{
 			"id":        uuidToString(l.Link.ID),
+			"title":     title,
 			"shortUrl":  publicURL(c, cfg, l.Link.PublicToken),
 			"views":     l.Link.AccessCount,
+			"score":     l.Score,
 			"heatLevel": l.Level,
 		}
+		if l.Link.DocumentID.Valid {
+			item["documentId"] = uuidToString(l.Link.DocumentID)
+		}
+		out[i] = item
 	}
 	return out
 }
@@ -289,11 +817,28 @@ func linkScoreList(c *gin.Context, cfg *config.Config, links []LinkScore) []gin.
 func documentScoreList(docs []DocumentScore) []gin.H {
 	out := make([]gin.H, len(docs))
 	for i, d := range docs {
-		out[i] = gin.H{
+		item := gin.H{
 			"id":        uuidToString(d.ID),
 			"title":     d.Title,
 			"views":     d.Views,
+			"score":     d.Score,
 			"heatLevel": d.Level,
+		}
+		if d.PrimaryLinkID.Valid {
+			item["primaryLinkId"] = uuidToString(d.PrimaryLinkID)
+		}
+		out[i] = item
+	}
+	return out
+}
+
+func dailyVisitList(points []DailyVisitPoint) []gin.H {
+	out := make([]gin.H, len(points))
+	for i, p := range points {
+		out[i] = gin.H{
+			"date":           p.Date,
+			"opens":          p.Opens,
+			"uniqueVisitors": p.UniqueVisitors,
 		}
 	}
 	return out
@@ -419,22 +964,24 @@ func riskAlertList(signals []db.Signal) []gin.H {
 }
 
 func publicURL(c *gin.Context, cfg *config.Config, token string) string {
-	base := cfg.ViewerBaseURL
+	path := "/l/" + token
+	base := strings.TrimSpace(cfg.ViewerBaseURL)
 	if base == "" {
-		base = c.Request.Header.Get("Origin")
+		base = strings.TrimSpace(c.Request.Header.Get("Origin"))
 	}
 	if base == "" {
-		scheme := "http"
-		if c.Request.TLS != nil || c.Request.Header.Get("X-Forwarded-Proto") == "https" {
-			scheme = "https"
-		}
-		host := c.Request.Host
-		if host == "" {
-			host = "localhost"
-		}
-		base = scheme + "://" + host
+		// Prefer relative viewer paths over inventing localhost hosts.
+		return path
 	}
-	return strings.TrimSuffix(base, "/") + "/l/" + token
+	u, err := url.Parse(base)
+	if err != nil || u.Hostname() == "" {
+		return path
+	}
+	host := strings.ToLower(u.Hostname())
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		return path
+	}
+	return strings.TrimSuffix(base, "/") + path
 }
 
 func mapPermissionType(t string) string {

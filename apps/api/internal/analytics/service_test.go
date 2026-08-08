@@ -9,6 +9,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -21,6 +22,7 @@ type mockAnalyticsQuerier struct {
 	recordLinkOpenedErr    error
 	recordLinkOpenedCalled bool
 	createPageViewCalled   bool
+	createAccessLogParams  []db.CreateAccessLogParams
 	metrics                db.GetLinkAccessMetricsRow
 	lastAccess             pgtype.Timestamptz
 	lastAccessCalled       bool
@@ -31,6 +33,34 @@ type mockAnalyticsQuerier struct {
 	securityEventErr       error
 	securityEventCount     int64
 	securityEventCountErr  error
+	dailyLinkOpens         []db.GetWorkspaceDailyLinkOpensRow
+	visitorFirstAccess     pgtype.Timestamptz
+	visitorLastAccess      pgtype.Timestamptz
+	otherVisitors          int64
+	visitorReach           []db.GetDocumentVisitorReachRow
+	sessionReach           []db.GetDocumentReadingSessionReachRow
+	documentSessions       []db.ListDocumentReadingSessionsRow
+	sessionPages           []db.ListReadingSessionPagesBySessionIDsRow
+	document               db.GetDocumentByIDRow
+	accessAuditByType      []db.CountWorkspaceAccessAuditByTypeRow
+	accessAuditByRoom      []db.CountWorkspaceAccessAuditByDealRoomRow
+	accessAuditByMember    []db.CountWorkspaceAccessAuditByMemberRow
+	accessAuditByFolder    []db.CountWorkspaceAccessAuditByFolderRow
+	accessAuditEvents      []db.ListWorkspaceAccessAuditEventsRow
+	keyPageSummary         db.GetWorkspaceKeyPageComplianceSummaryRow
+	keyPageByPage          []db.ListWorkspaceKeyPageComplianceByPageRow
+	keyPageEvents          []db.ListWorkspaceKeyPageComplianceEventsRow
+	openReadingSession     db.ReadingSession
+	openReadingSessionErr  error
+	createdReadingSession  db.ReadingSession
+	createPageViewParams   []db.CreatePageViewParams
+	pageTitleByNumber      string
+	pageTitleErr           error
+	visitorKeyPageCount    int64
+	visitorKeyPageCountErr error
+	keyPageSettings        db.WorkspaceKeyPageSetting
+	keyPageSettingsErr     error
+	keyPageSettingsHasRow  bool
 }
 
 func (m *mockAnalyticsQuerier) RecordLinkOpened(_ context.Context, _ db.RecordLinkOpenedParams) (int64, error) {
@@ -38,12 +68,14 @@ func (m *mockAnalyticsQuerier) RecordLinkOpened(_ context.Context, _ db.RecordLi
 	return m.recordLinkOpenedRows, m.recordLinkOpenedErr
 }
 
-func (m *mockAnalyticsQuerier) CreateAccessLog(_ context.Context, _ db.CreateAccessLogParams) error {
+func (m *mockAnalyticsQuerier) CreateAccessLog(_ context.Context, arg db.CreateAccessLogParams) error {
+	m.createAccessLogParams = append(m.createAccessLogParams, arg)
 	return nil
 }
 
-func (m *mockAnalyticsQuerier) CreatePageView(_ context.Context, _ db.CreatePageViewParams) error {
+func (m *mockAnalyticsQuerier) CreatePageView(_ context.Context, arg db.CreatePageViewParams) error {
 	m.createPageViewCalled = true
+	m.createPageViewParams = append(m.createPageViewParams, arg)
 	return nil
 }
 
@@ -104,11 +136,52 @@ func (m *mockAnalyticsQuerier) GetPageAnalyticsByDocument(_ context.Context, _ d
 	return nil, nil
 }
 
+func (m *mockAnalyticsQuerier) GetPageAnalyticsByDocumentInRange(_ context.Context, _ db.GetPageAnalyticsByDocumentInRangeParams) ([]db.GetPageAnalyticsByDocumentInRangeRow, error) {
+	return nil, nil
+}
+
 func (m *mockAnalyticsQuerier) GetPageTitlesByDocument(_ context.Context, _ db.GetPageTitlesByDocumentParams) ([]db.GetPageTitlesByDocumentRow, error) {
 	return nil, nil
 }
 
+func (m *mockAnalyticsQuerier) GetPageTitleByDocumentAndNumber(_ context.Context, _ db.GetPageTitleByDocumentAndNumberParams) (string, error) {
+	if m.pageTitleErr != nil {
+		return "", m.pageTitleErr
+	}
+	return m.pageTitleByNumber, nil
+}
+
+func (m *mockAnalyticsQuerier) CountVisitorEngagedKeyPageViews(_ context.Context, _ db.CountVisitorEngagedKeyPageViewsParams) (int64, error) {
+	return m.visitorKeyPageCount, m.visitorKeyPageCountErr
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceKeyPageSettings(_ context.Context, _ pgtype.UUID) (db.WorkspaceKeyPageSetting, error) {
+	if m.keyPageSettingsErr != nil {
+		return db.WorkspaceKeyPageSetting{}, m.keyPageSettingsErr
+	}
+	if m.keyPageSettingsHasRow || len(m.keyPageSettings.ExtraKeywords) > 0 || m.keyPageSettings.DefaultCircle != "" {
+		return m.keyPageSettings, nil
+	}
+	return db.WorkspaceKeyPageSetting{}, pgx.ErrNoRows
+}
+
+func (m *mockAnalyticsQuerier) UpsertWorkspaceKeyPageSettings(_ context.Context, _ db.UpsertWorkspaceKeyPageSettingsParams) (db.WorkspaceKeyPageSetting, error) {
+	return db.WorkspaceKeyPageSetting{}, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceByID(_ context.Context, id pgtype.UUID) (db.Workspace, error) {
+	return db.Workspace{ID: id, TenantID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}}, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceMember(_ context.Context, _ db.GetWorkspaceMemberParams) (db.WorkspaceMember, error) {
+	return db.WorkspaceMember{Role: "owner"}, nil
+}
+
 func (m *mockAnalyticsQuerier) GetPageExitCountsByDocument(_ context.Context, _ pgtype.UUID) ([]db.GetPageExitCountsByDocumentRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetPageExitCountsByDocumentInRange(_ context.Context, _ db.GetPageExitCountsByDocumentInRangeParams) ([]db.GetPageExitCountsByDocumentInRangeRow, error) {
 	return nil, nil
 }
 
@@ -116,8 +189,109 @@ func (m *mockAnalyticsQuerier) GetVisitorSummariesByDocument(_ context.Context, 
 	return nil, nil
 }
 
+func (m *mockAnalyticsQuerier) GetVisitorSummariesByDocumentInRange(_ context.Context, _ db.GetVisitorSummariesByDocumentInRangeParams) ([]db.GetVisitorSummariesByDocumentInRangeRow, error) {
+	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentVisitorReach(_ context.Context, _ db.GetDocumentVisitorReachParams) ([]db.GetDocumentVisitorReachRow, error) {
+	return m.visitorReach, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentReadingSessionReach(_ context.Context, _ db.GetDocumentReadingSessionReachParams) ([]db.GetDocumentReadingSessionReachRow, error) {
+	return m.sessionReach, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDocumentReadingSessionReachInRange(_ context.Context, _ db.GetDocumentReadingSessionReachInRangeParams) ([]db.GetDocumentReadingSessionReachInRangeRow, error) {
+	out := make([]db.GetDocumentReadingSessionReachInRangeRow, len(m.sessionReach))
+	for i, r := range m.sessionReach {
+		out[i] = db.GetDocumentReadingSessionReachInRangeRow{
+			ID:                   r.ID,
+			MaxPage:              r.MaxPage,
+			DistinctPages:        r.DistinctPages,
+			TotalDurationSeconds: r.TotalDurationSeconds,
+		}
+	}
+	return out, nil
+}
+
+func (m *mockAnalyticsQuerier) ListDocumentReadingSessions(_ context.Context, _ db.ListDocumentReadingSessionsParams) ([]db.ListDocumentReadingSessionsRow, error) {
+	return m.documentSessions, nil
+}
+
+func (m *mockAnalyticsQuerier) ListDocumentReadingSessionsInRange(_ context.Context, _ db.ListDocumentReadingSessionsInRangeParams) ([]db.ListDocumentReadingSessionsInRangeRow, error) {
+	out := make([]db.ListDocumentReadingSessionsInRangeRow, len(m.documentSessions))
+	for i, r := range m.documentSessions {
+		out[i] = db.ListDocumentReadingSessionsInRangeRow{
+			ID:                   r.ID,
+			LinkID:               r.LinkID,
+			VisitorID:            r.VisitorID,
+			VisitorEmail:         r.VisitorEmail,
+			StartedAt:            r.StartedAt,
+			LastActivityAt:       r.LastActivityAt,
+			EndedAt:              r.EndedAt,
+			MaxPage:              r.MaxPage,
+			DistinctPageCount:    r.DistinctPageCount,
+			TotalDurationSeconds: r.TotalDurationSeconds,
+		}
+	}
+	return out, nil
+}
+
+func (m *mockAnalyticsQuerier) ListReadingSessionPagesBySessionIDs(_ context.Context, _ []pgtype.UUID) ([]db.ListReadingSessionPagesBySessionIDsRow, error) {
+	return m.sessionPages, nil
+}
+
+func (m *mockAnalyticsQuerier) GetOpenReadingSession(_ context.Context, _ db.GetOpenReadingSessionParams) (db.ReadingSession, error) {
+	if m.openReadingSessionErr != nil {
+		return db.ReadingSession{}, m.openReadingSessionErr
+	}
+	if m.openReadingSession.ID.Valid {
+		return m.openReadingSession, nil
+	}
+	return db.ReadingSession{}, pgx.ErrNoRows
+}
+
+func (m *mockAnalyticsQuerier) CloseReadingSession(_ context.Context, _ pgtype.UUID) error {
+	m.openReadingSession = db.ReadingSession{}
+	return nil
+}
+
+func (m *mockAnalyticsQuerier) CreateReadingSession(_ context.Context, arg db.CreateReadingSessionParams) (db.ReadingSession, error) {
+	id := pgtype.UUID{Bytes: [16]byte{9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9, 9}, Valid: true}
+	m.createdReadingSession = db.ReadingSession{
+		ID:             id,
+		TenantID:       arg.TenantID,
+		WorkspaceID:    arg.WorkspaceID,
+		LinkID:         arg.LinkID,
+		DocumentID:     arg.DocumentID,
+		VisitorID:      arg.VisitorID,
+		MaxPage:        arg.MaxPage,
+		LastActivityAt: pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true},
+	}
+	m.openReadingSession = m.createdReadingSession
+	return m.createdReadingSession, nil
+}
+
+func (m *mockAnalyticsQuerier) UpsertReadingSessionPage(_ context.Context, _ db.UpsertReadingSessionPageParams) error {
+	return nil
+}
+
+func (m *mockAnalyticsQuerier) RefreshReadingSessionStats(_ context.Context, arg db.RefreshReadingSessionStatsParams) (db.ReadingSession, error) {
+	sess := m.openReadingSession
+	if !sess.ID.Valid {
+		sess.ID = arg.ID
+	}
+	if arg.PageNumber > sess.MaxPage {
+		sess.MaxPage = arg.PageNumber
+	}
+	sess.TotalDurationSeconds += arg.DurationSeconds
+	sess.LastActivityAt = pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	m.openReadingSession = sess
+	return sess, nil
+}
+
 func (m *mockAnalyticsQuerier) GetDocumentByID(_ context.Context, _ db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error) {
-	return db.GetDocumentByIDRow{}, nil
+	return m.document, nil
 }
 
 func (m *mockAnalyticsQuerier) GetDocumentsByIDs(_ context.Context, _ db.GetDocumentsByIDsParams) ([]db.GetDocumentsByIDsRow, error) {
@@ -164,7 +338,15 @@ func (m *mockAnalyticsQuerier) CountSecurityEventsByIPAndWindow(_ context.Contex
 }
 
 func (m *mockAnalyticsQuerier) GetVisitorFirstAccess(_ context.Context, _ db.GetVisitorFirstAccessParams) (pgtype.Timestamptz, error) {
-	return pgtype.Timestamptz{}, nil
+	return m.visitorFirstAccess, nil
+}
+
+func (m *mockAnalyticsQuerier) GetVisitorLastAccess(_ context.Context, _ db.GetVisitorLastAccessParams) (pgtype.Timestamptz, error) {
+	return m.visitorLastAccess, nil
+}
+
+func (m *mockAnalyticsQuerier) CountOtherLinkVisitors(_ context.Context, _ db.CountOtherLinkVisitorsParams) (int64, error) {
+	return m.otherVisitors, nil
 }
 
 func (m *mockAnalyticsQuerier) CountVisitorAccesses(_ context.Context, _ db.CountVisitorAccessesParams) (int32, error) {
@@ -173,6 +355,66 @@ func (m *mockAnalyticsQuerier) CountVisitorAccesses(_ context.Context, _ db.Coun
 
 func (m *mockAnalyticsQuerier) CountWeeklyVisitorsByWorkspace(_ context.Context, _ pgtype.UUID) (int64, error) {
 	return 0, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceDailyLinkOpens(_ context.Context, _ db.GetWorkspaceDailyLinkOpensParams) ([]db.GetWorkspaceDailyLinkOpensRow, error) {
+	return m.dailyLinkOpens, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceDailyLinkOpensInRange(_ context.Context, _ db.GetWorkspaceDailyLinkOpensInRangeParams) ([]db.GetWorkspaceDailyLinkOpensInRangeRow, error) {
+	out := make([]db.GetWorkspaceDailyLinkOpensInRangeRow, len(m.dailyLinkOpens))
+	for i, r := range m.dailyLinkOpens {
+		out[i] = db.GetWorkspaceDailyLinkOpensInRangeRow{
+			Day:            r.Day,
+			Opens:          r.Opens,
+			UniqueVisitors: r.UniqueVisitors,
+		}
+	}
+	return out, nil
+}
+
+func (m *mockAnalyticsQuerier) CountWorkspaceLinkOpenVisitorsInRange(_ context.Context, _ db.CountWorkspaceLinkOpenVisitorsInRangeParams) (int64, error) {
+	return 0, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspacePageViewEngagementInRange(_ context.Context, _ db.GetWorkspacePageViewEngagementInRangeParams) (db.GetWorkspacePageViewEngagementInRangeRow, error) {
+	return db.GetWorkspacePageViewEngagementInRangeRow{}, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceReadingSessionStatsInRange(_ context.Context, _ db.GetWorkspaceReadingSessionStatsInRangeParams) (db.GetWorkspaceReadingSessionStatsInRangeRow, error) {
+	return db.GetWorkspaceReadingSessionStatsInRangeRow{}, nil
+}
+
+func (m *mockAnalyticsQuerier) CountWorkspaceAccessAuditByType(_ context.Context, _ db.CountWorkspaceAccessAuditByTypeParams) ([]db.CountWorkspaceAccessAuditByTypeRow, error) {
+	return m.accessAuditByType, nil
+}
+
+func (m *mockAnalyticsQuerier) CountWorkspaceAccessAuditByDealRoom(_ context.Context, _ db.CountWorkspaceAccessAuditByDealRoomParams) ([]db.CountWorkspaceAccessAuditByDealRoomRow, error) {
+	return m.accessAuditByRoom, nil
+}
+
+func (m *mockAnalyticsQuerier) CountWorkspaceAccessAuditByMember(_ context.Context, _ db.CountWorkspaceAccessAuditByMemberParams) ([]db.CountWorkspaceAccessAuditByMemberRow, error) {
+	return m.accessAuditByMember, nil
+}
+
+func (m *mockAnalyticsQuerier) CountWorkspaceAccessAuditByFolder(_ context.Context, _ db.CountWorkspaceAccessAuditByFolderParams) ([]db.CountWorkspaceAccessAuditByFolderRow, error) {
+	return m.accessAuditByFolder, nil
+}
+
+func (m *mockAnalyticsQuerier) ListWorkspaceAccessAuditEvents(_ context.Context, _ db.ListWorkspaceAccessAuditEventsParams) ([]db.ListWorkspaceAccessAuditEventsRow, error) {
+	return m.accessAuditEvents, nil
+}
+
+func (m *mockAnalyticsQuerier) GetWorkspaceKeyPageComplianceSummary(_ context.Context, _ db.GetWorkspaceKeyPageComplianceSummaryParams) (db.GetWorkspaceKeyPageComplianceSummaryRow, error) {
+	return m.keyPageSummary, nil
+}
+
+func (m *mockAnalyticsQuerier) ListWorkspaceKeyPageComplianceByPage(_ context.Context, _ db.ListWorkspaceKeyPageComplianceByPageParams) ([]db.ListWorkspaceKeyPageComplianceByPageRow, error) {
+	return m.keyPageByPage, nil
+}
+
+func (m *mockAnalyticsQuerier) ListWorkspaceKeyPageComplianceEvents(_ context.Context, _ db.ListWorkspaceKeyPageComplianceEventsParams) ([]db.ListWorkspaceKeyPageComplianceEventsRow, error) {
+	return m.keyPageEvents, nil
 }
 
 func (m *mockAnalyticsQuerier) CountPendingQuestionsByWorkspace(_ context.Context, _ pgtype.UUID) (int64, error) {
@@ -194,7 +436,7 @@ func (m *mockDedupChecker) MarkOpen(_ context.Context, _, _ string) (bool, error
 	return m.openOk, m.openErr
 }
 
-func (m *mockDedupChecker) MarkPageView(_ context.Context, _, _ string, _ int32) (bool, error) {
+func (m *mockDedupChecker) MarkPageView(_ context.Context, _, _, _ string, _ int32) (bool, error) {
 	return m.pageViewOk, m.pageViewErr
 }
 
@@ -242,7 +484,8 @@ func TestGetScoreReturnsSevenFactors(t *testing.T) {
 		link:   db.Link{ID: pgtype.UUID{Bytes: [16]byte{3}, Valid: true}},
 	}
 	svc := NewService(q, nil, testCfg())
-	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, heat.CircleFounder)
+	founder := heat.CircleFounder
+	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, &founder)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -307,11 +550,98 @@ func TestRecordPageViewSkippedWhenDuplicate(t *testing.T) {
 	q := &mockAnalyticsQuerier{}
 	svc := NewService(q, &mockDedupChecker{pageViewOk: false}, testCfg())
 	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{6}, Valid: true}}
-	if err := svc.RecordPageView(context.Background(), link, "v1", 1, 5, 0.5); err != nil {
+	recorded, err := svc.RecordPageView(context.Background(), link, "v1", 1, 5, 0.5, "")
+	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if recorded {
+		t.Fatal("expected recorded=false on duplicate")
 	}
 	if q.createPageViewCalled {
 		t.Fatal("expected CreatePageView query to be skipped on duplicate")
+	}
+}
+
+func TestFillDailyVisitSeriesDenseUTC(t *testing.T) {
+	now := time.Date(2026, 8, 8, 15, 0, 0, 0, time.UTC)
+	rows := []db.GetWorkspaceDailyLinkOpensRow{
+		{Day: "2026-08-08", Opens: 3, UniqueVisitors: 2},
+	}
+	got := fillDailyVisitSeries(rows, 7, now)
+	if len(got) != 7 {
+		t.Fatalf("expected 7 days, got %d", len(got))
+	}
+	if got[0].Date != "2026-08-02T00:00:00Z" {
+		t.Fatalf("expected series to start 2026-08-02, got %s", got[0].Date)
+	}
+	if got[6].Opens != 3 || got[6].UniqueVisitors != 2 {
+		t.Fatalf("expected today opens=3 uv=2, got opens=%d uv=%d", got[6].Opens, got[6].UniqueVisitors)
+	}
+	var total int64
+	for _, p := range got[:6] {
+		total += p.Opens
+	}
+	if total != 0 {
+		t.Fatalf("expected zero opens on empty days, got %d", total)
+	}
+}
+
+func TestNormalizeInsightsDays(t *testing.T) {
+	cases := []struct {
+		in, want int
+	}{
+		{0, 7},
+		{7, 7},
+		{14, 7},
+		{30, 30},
+		{90, 90},
+		{120, 7},
+	}
+	for _, tc := range cases {
+		if got := normalizeInsightsDays(tc.in); got != tc.want {
+			t.Fatalf("normalizeInsightsDays(%d)=%d want %d", tc.in, got, tc.want)
+		}
+	}
+}
+
+func TestSplitComparedDailySeries(t *testing.T) {
+	now := time.Date(2026, 8, 8, 15, 0, 0, 0, time.UTC)
+	rows := []db.GetWorkspaceDailyLinkOpensRow{
+		{Day: "2026-08-01", Opens: 10, UniqueVisitors: 4}, // previous window
+		{Day: "2026-08-08", Opens: 3, UniqueVisitors: 2},  // current window
+	}
+	current, previous := splitComparedDailySeries(rows, 7, now)
+	if len(current) != 7 || len(previous) != 7 {
+		t.Fatalf("expected 7+7 days, got %d+%d", len(current), len(previous))
+	}
+	if previous[0].Date != "2026-07-26T00:00:00Z" {
+		t.Fatalf("previous should start 2026-07-26, got %s", previous[0].Date)
+	}
+	if current[0].Date != "2026-08-02T00:00:00Z" {
+		t.Fatalf("current should start 2026-08-02, got %s", current[0].Date)
+	}
+	if sumDailyOpens(previous) != 10 {
+		t.Fatalf("previous opens want 10, got %d", sumDailyOpens(previous))
+	}
+	if sumDailyOpens(current) != 3 {
+		t.Fatalf("current opens want 3, got %d", sumDailyOpens(current))
+	}
+}
+
+func TestInsightsCompareWindows(t *testing.T) {
+	now := time.Date(2026, 8, 8, 15, 30, 0, 0, time.UTC)
+	curStart, curEnd, prevStart, prevEnd := insightsCompareWindows(7, now)
+	if curStart.Format(time.RFC3339) != "2026-08-02T00:00:00Z" {
+		t.Fatalf("currentStart=%s", curStart)
+	}
+	if curEnd.Format(time.RFC3339) != "2026-08-09T00:00:00Z" {
+		t.Fatalf("currentEnd=%s", curEnd)
+	}
+	if prevStart.Format(time.RFC3339) != "2026-07-26T00:00:00Z" {
+		t.Fatalf("previousStart=%s", prevStart)
+	}
+	if prevEnd.Format(time.RFC3339) != "2026-08-02T00:00:00Z" {
+		t.Fatalf("previousEnd=%s", prevEnd)
 	}
 }
 
@@ -329,7 +659,8 @@ func TestGetScoreUsesLastAccessForDecay(t *testing.T) {
 		link:       db.Link{ID: pgtype.UUID{Bytes: [16]byte{7}, Valid: true}, CreatedAt: pgtype.Timestamptz{Time: time.Now().Add(-365 * 24 * time.Hour), Valid: true}},
 	}
 	svc := NewService(q, nil, testCfg())
-	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, heat.CircleFounder)
+	founder := heat.CircleFounder
+	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, &founder)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -338,5 +669,286 @@ func TestGetScoreUsesLastAccessForDecay(t *testing.T) {
 	}
 	if res.Score < 0 || res.Score > 100 {
 		t.Fatalf("score out of range: %d", res.Score)
+	}
+}
+
+func TestGetScoreForwardSignalsUsesMarkers(t *testing.T) {
+	q := &mockAnalyticsQuerier{
+		metrics: db.GetLinkAccessMetricsRow{
+			Opens: 5, UniqueVisitors: 3, ForwardSignals: 2, Downloads: 0,
+		},
+		pageViews: db.GetLinkPageViewMetricsRow{
+			AvgDurationSeconds: 60,
+			TotalPageViews:     2,
+		},
+		link: db.Link{ID: pgtype.UUID{Bytes: [16]byte{8}, Valid: true}},
+	}
+	svc := NewService(q, nil, testCfg())
+	founder := heat.CircleFounder
+	res, err := svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, &founder)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Founder weight for forwardSignals is 15 → 2 markers * 15 = 30 (not UV).
+	if res.Breakdown["forwardSignals"] != 30 {
+		t.Fatalf("expected forwardSignals breakdown 30, got %v", res.Breakdown["forwardSignals"])
+	}
+
+	// UV alone must not invent forwards when markers are zero.
+	q.metrics.ForwardSignals = 0
+	res, err = svc.GetScore(context.Background(), q.link.ID, pgtype.UUID{Valid: true}, &founder)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if res.Breakdown["forwardSignals"] != 0 {
+		t.Fatalf("expected forwardSignals breakdown 0 without markers, got %v", res.Breakdown["forwardSignals"])
+	}
+}
+
+func TestDetectForwardOrReturnClassifiesOpens(t *testing.T) {
+	linkID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+
+	t.Run("first opener", func(t *testing.T) {
+		q := &mockAnalyticsQuerier{otherVisitors: 0}
+		svc := NewService(q, nil, testCfg())
+		if got := svc.DetectForwardOrReturn(context.Background(), linkID, "v-new"); got != OpenKindFirstOpen {
+			t.Fatalf("got %q want %q", got, OpenKindFirstOpen)
+		}
+	})
+
+	t.Run("forward after others", func(t *testing.T) {
+		q := &mockAnalyticsQuerier{otherVisitors: 2}
+		svc := NewService(q, nil, testCfg())
+		if got := svc.DetectForwardOrReturn(context.Background(), linkID, "v-new"); got != OpenKindForwardSignal {
+			t.Fatalf("got %q want %q", got, OpenKindForwardSignal)
+		}
+	})
+
+	t.Run("return visit after 30m", func(t *testing.T) {
+		q := &mockAnalyticsQuerier{
+			visitorFirstAccess: pgtype.Timestamptz{Time: time.Now().Add(-2 * time.Hour), Valid: true},
+			visitorLastAccess:  pgtype.Timestamptz{Time: time.Now().Add(-45 * time.Minute), Valid: true},
+		}
+		svc := NewService(q, nil, testCfg())
+		if got := svc.DetectForwardOrReturn(context.Background(), linkID, "v-old"); got != OpenKindReturnVisit {
+			t.Fatalf("got %q want %q", got, OpenKindReturnVisit)
+		}
+	})
+
+	t.Run("within return window", func(t *testing.T) {
+		q := &mockAnalyticsQuerier{
+			visitorFirstAccess: pgtype.Timestamptz{Time: time.Now().Add(-10 * time.Minute), Valid: true},
+			visitorLastAccess:  pgtype.Timestamptz{Time: time.Now().Add(-5 * time.Minute), Valid: true},
+		}
+		svc := NewService(q, nil, testCfg())
+		if got := svc.DetectForwardOrReturn(context.Background(), linkID, "v-old"); got != "" {
+			t.Fatalf("got %q want empty", got)
+		}
+	})
+
+	t.Run("empty visitor", func(t *testing.T) {
+		svc := NewService(&mockAnalyticsQuerier{}, nil, testCfg())
+		if got := svc.DetectForwardOrReturn(context.Background(), linkID, ""); got != "" {
+			t.Fatalf("got %q want empty", got)
+		}
+	})
+}
+
+func TestRecordClassifiedOpenFirstOpen(t *testing.T) {
+	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1, otherVisitors: 0}
+	svc := NewService(q, nil, testCfg())
+	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{11}, Valid: true}}
+	notify, err := svc.RecordClassifiedOpen(context.Background(), link, "v-new", "a@example.test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notify != OpenKindFirstOpen {
+		t.Fatalf("notify=%q want %q", notify, OpenKindFirstOpen)
+	}
+	if len(q.createAccessLogParams) != 0 {
+		t.Fatalf("first_open should not write marker rows, got %+v", q.createAccessLogParams)
+	}
+}
+
+func TestRecordClassifiedOpenForwardPersistsMarker(t *testing.T) {
+	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1, otherVisitors: 2}
+	svc := NewService(q, nil, testCfg())
+	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{12}, Valid: true}}
+	notify, err := svc.RecordClassifiedOpen(context.Background(), link, "v-new", "b@example.test", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notify != OpenKindForwardSignal {
+		t.Fatalf("notify=%q", notify)
+	}
+	if len(q.createAccessLogParams) != 1 || q.createAccessLogParams[0].EventType != OpenKindForwardSignal {
+		t.Fatalf("marker=%+v", q.createAccessLogParams)
+	}
+}
+
+func TestRecordClassifiedOpenDedupSkipsNotify(t *testing.T) {
+	q := &mockAnalyticsQuerier{recordLinkOpenedRows: 1, otherVisitors: 2}
+	svc := NewService(q, &mockDedupChecker{openOk: false}, testCfg())
+	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{13}, Valid: true}}
+	notify, err := svc.RecordClassifiedOpen(context.Background(), link, "v-new", "", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if notify != "" {
+		t.Fatalf("deduped open must not notify, got %q", notify)
+	}
+	if q.recordLinkOpenedCalled {
+		t.Fatal("expected RecordLinkOpened skipped")
+	}
+}
+
+func TestDocumentReadingFunnelService(t *testing.T) {
+	docID := [16]byte{10}
+	q := &mockAnalyticsQuerier{
+		document: db.GetDocumentByIDRow{
+			ID:        pgtype.UUID{Bytes: docID, Valid: true},
+			PageCount: pgtype.Int4{Int32: 3, Valid: true},
+		},
+		sessionReach: []db.GetDocumentReadingSessionReachRow{
+			{MaxPage: 3, DistinctPages: 3, TotalDurationSeconds: 90},
+			{MaxPage: 1, DistinctPages: 1, TotalDurationSeconds: 10},
+		},
+	}
+	svc := NewService(q, nil, testCfg())
+	got, err := svc.DocumentReadingFunnel(
+		context.Background(),
+		uuidToString(pgtype.UUID{Bytes: docID, Valid: true}),
+		uuidToString(pgtype.UUID{Bytes: [16]byte{1}, Valid: true}),
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got.SessionCount != 2 || got.CompletedSessions != 1 {
+		t.Fatalf("got sessions=%d completed=%d", got.SessionCount, got.CompletedSessions)
+	}
+	if got.SessionModel != "reading_session" {
+		t.Fatalf("sessionModel=%q", got.SessionModel)
+	}
+	if !got.Lifetime {
+		t.Fatal("expected lifetime=true when no range")
+	}
+	if len(got.Steps) != 3 || got.Steps[0].VisitorsReached != 2 {
+		t.Fatalf("unexpected steps: %+v", got.Steps)
+	}
+
+	rng := &InsightsRange{
+		Days:  14,
+		From:  "2026-07-01",
+		To:    "2026-07-14",
+		Start: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		End:   time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC),
+	}
+	ranged, err := svc.DocumentReadingFunnelRange(
+		context.Background(),
+		uuidToString(pgtype.UUID{Bytes: docID, Valid: true}),
+		uuidToString(pgtype.UUID{Bytes: [16]byte{1}, Valid: true}),
+		rng,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ranged.Lifetime || ranged.RangeDays != 14 || ranged.RangeCustom {
+		t.Fatalf("range meta=%+v", ranged)
+	}
+	if ranged.SessionCount != 2 {
+		t.Fatalf("ranged sessions=%d", ranged.SessionCount)
+	}
+}
+
+func TestRecordPageViewAttachesReadingSession(t *testing.T) {
+	q := &mockAnalyticsQuerier{}
+	svc := NewService(q, nil, testCfg())
+	link := db.Link{
+		ID:          pgtype.UUID{Bytes: [16]byte{4}, Valid: true},
+		TenantID:    pgtype.UUID{Bytes: [16]byte{1}, Valid: true},
+		WorkspaceID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true},
+		DocumentID:  pgtype.UUID{Bytes: [16]byte{3}, Valid: true},
+	}
+	recorded, err := svc.RecordPageView(context.Background(), link, "v1", 2, 12, 0.5, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recorded {
+		t.Fatal("expected recorded=true")
+	}
+	if !q.createPageViewCalled || len(q.createPageViewParams) != 1 {
+		t.Fatal("expected CreatePageView")
+	}
+	if !q.createPageViewParams[0].ReadingSessionID.Valid {
+		t.Fatal("expected reading_session_id on page view")
+	}
+	if q.createPageViewParams[0].DocumentID != link.DocumentID {
+		t.Fatalf("document_id=%v want %v", q.createPageViewParams[0].DocumentID, link.DocumentID)
+	}
+	if !q.createdReadingSession.ID.Valid {
+		t.Fatal("expected CreateReadingSession")
+	}
+	if q.createdReadingSession.DocumentID != link.DocumentID {
+		t.Fatalf("session document_id=%v want %v", q.createdReadingSession.DocumentID, link.DocumentID)
+	}
+}
+
+func TestRecordPageViewReusesOpenSessionWithinIdle(t *testing.T) {
+	openID := pgtype.UUID{Bytes: [16]byte{8}, Valid: true}
+	q := &mockAnalyticsQuerier{
+		openReadingSession: db.ReadingSession{
+			ID:             openID,
+			MaxPage:        1,
+			LastActivityAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(-5 * time.Minute), Valid: true},
+		},
+	}
+	svc := NewService(q, nil, testCfg())
+	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{4}, Valid: true}}
+	recorded, err := svc.RecordPageView(context.Background(), link, "v1", 3, 8, 0.2, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recorded {
+		t.Fatal("expected recorded=true")
+	}
+	if q.createPageViewParams[0].ReadingSessionID != openID {
+		t.Fatalf("session=%v want %v", q.createPageViewParams[0].ReadingSessionID, openID)
+	}
+	if q.createdReadingSession.ID.Valid {
+		t.Fatal("should reuse open session, not create")
+	}
+}
+
+func TestRecordPageViewClosesSessionOnDocumentSwitch(t *testing.T) {
+	openID := pgtype.UUID{Bytes: [16]byte{8}, Valid: true}
+	docA := pgtype.UUID{Bytes: [16]byte{10}, Valid: true}
+	docB := "0b000000-0000-0000-0000-000000000000"
+	docBUUID := pgtype.UUID{Bytes: [16]byte{11}, Valid: true}
+	docB = uuidToString(docBUUID)
+	q := &mockAnalyticsQuerier{
+		openReadingSession: db.ReadingSession{
+			ID:             openID,
+			DocumentID:     docA,
+			MaxPage:        1,
+			LastActivityAt: pgtype.Timestamptz{Time: time.Now().UTC().Add(-5 * time.Minute), Valid: true},
+		},
+	}
+	svc := NewService(q, nil, testCfg())
+	link := db.Link{ID: pgtype.UUID{Bytes: [16]byte{4}, Valid: true}}
+	recorded, err := svc.RecordPageView(context.Background(), link, "v1", 1, 10, 0.5, docB)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !recorded {
+		t.Fatal("expected recorded=true")
+	}
+	if !q.createdReadingSession.ID.Valid {
+		t.Fatal("expected new session after document switch")
+	}
+	if q.createdReadingSession.DocumentID != docBUUID {
+		t.Fatalf("session document=%v want %v", q.createdReadingSession.DocumentID, docBUUID)
+	}
+	if q.createPageViewParams[0].DocumentID != docBUUID {
+		t.Fatalf("page view document=%v want %v", q.createPageViewParams[0].DocumentID, docBUUID)
 	}
 }

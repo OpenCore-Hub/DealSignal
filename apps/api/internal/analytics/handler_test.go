@@ -1,10 +1,13 @@
 package analytics
 
 import (
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/gin-gonic/gin"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -79,5 +82,23 @@ func TestRiskAlertList(t *testing.T) {
 	alerts = riskAlertList([]db.Signal{anomaly})
 	if len(alerts) != 1 || alerts[0]["type"] != "anomaly" {
 		t.Errorf("expected anomaly type, got %v", alerts[0]["type"])
+	}
+}
+
+func TestPublicURLOmitsLocalhost(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest("GET", "/insights/overview", nil)
+	c.Request.Header.Set("Origin", "http://localhost:5173")
+
+	got := publicURL(c, &config.Config{}, "tok123")
+	if got != "/l/tok123" {
+		t.Fatalf("expected relative /l/tok123 for localhost origin, got %q", got)
+	}
+
+	got = publicURL(c, &config.Config{ViewerBaseURL: "https://view.dealsignal.app"}, "tok123")
+	if got != "https://view.dealsignal.app/l/tok123" {
+		t.Fatalf("expected production viewer URL, got %q", got)
 	}
 }
