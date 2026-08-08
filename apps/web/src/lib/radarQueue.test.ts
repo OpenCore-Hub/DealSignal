@@ -11,6 +11,9 @@ import {
   outcomesForProduct,
   parseRadarCircle,
   parseRadarFilter,
+  radarHeadlineKey,
+  radarWhyNowFallbackKey,
+  radarWhyNowKey,
   withMailtoHrefs,
   type RadarStrand,
   type RadarWorkItem,
@@ -114,6 +117,54 @@ describe("radarQueue", () => {
       "acted",
       "false_positive",
     ]);
+  });
+
+  it("builds scenario-specific whyNow and headline i18n keys", () => {
+    expect(
+      radarWhyNowKey({
+        scenario: "sales-dataroom",
+        whyNowCode: "buying_window",
+      }),
+    ).toBe("radar.scenario.sales-dataroom.whyNow.buying_window");
+    expect(
+      radarWhyNowKey({
+        scenario: "startup-fundraising",
+        whyNowCode: "diligence_gate",
+      }),
+    ).toBe("radar.scenario.startup-fundraising.whyNow.diligence_gate");
+    expect(radarWhyNowFallbackKey({ whyNowCode: "buying_window" })).toBe(
+      "radar.whyNow.buying_window",
+    );
+    expect(radarWhyNowKey({ whyNowCode: "buying_window" })).toBe(
+      "radar.whyNow.buying_window",
+    );
+    expect(
+      radarHeadlineKey({
+        scenario: "sales-dataroom",
+        headlineCode: "follow_warm_buyer",
+      }),
+    ).toBe("radar.scenario.sales-dataroom.headline.follow_warm_buyer");
+    expect(
+      radarHeadlineKey({
+        scenario: "startup-fundraising",
+        headlineCode: "unlock_investor_gate",
+      }),
+    ).toBe("radar.scenario.startup-fundraising.headline.unlock_investor_gate");
+    expect(
+      radarHeadlineKey({
+        scenario: "real-estate-transaction",
+        headlineCode: "unlock_counterparty_gate",
+      }),
+    ).toBe(
+      "radar.scenario.real-estate-transaction.headline.unlock_counterparty_gate",
+    );
+    expect(
+      radarHeadlineKey({
+        scenario: "project-management",
+        headlineCode: "answer_project_ask",
+      }),
+    ).toBe("radar.scenario.project-management.headline.answer_project_ask");
+    expect(radarHeadlineKey({ headlineCode: "x" })).toBe("");
   });
 
   it("detects editable keyboard targets for shortcut gating", () => {

@@ -56,8 +56,9 @@ export function RadarQueue({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseRadarFilter(searchParams.get("filter"));
+  const circleQuery = searchParams.get("circle");
   const circle = parseRadarCircle(
-    searchParams.get("circle") ?? feed.lens ?? "founder",
+    circleQuery ?? feed.lens ?? feed.defaultLens ?? "founder",
   );
   const counts = useMemo(
     () => countRadarFilters(feed.items, feed.counts),
@@ -115,8 +116,9 @@ export function RadarQueue({
 
   const setCircle = (next: ReturnType<typeof parseRadarCircle>) => {
     const params = new URLSearchParams(searchParams);
-    if (next === "founder") params.delete("circle");
-    else params.set("circle", next);
+    // Always set ?circle= so the server treats the chip as an explicit lens override
+    // (including founder when Scenario Pack inferred sales / investor_ir).
+    params.set("circle", next);
     setSearchParams(params, { replace: true });
   };
 

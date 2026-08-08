@@ -32,14 +32,20 @@ type DigestQuerier interface {
 
 // DigestOverview is the Insights ranking slice included in digests.
 type DigestOverview struct {
-	PeriodOpens                  int64
-	PreviousPeriodOpens          int64
-	PeriodUniqueVisitors         int64
-	PeriodMedianDurationSeconds  float64
-	HotLinks                     int
-	WarmLinks                    int
-	TopDocuments                 []string
-	TopContacts                  []string
+	PeriodOpens                 int64
+	PreviousPeriodOpens         int64
+	PeriodUniqueVisitors        int64
+	PeriodMedianDurationSeconds float64
+	HotLinks                    int
+	WarmLinks                   int
+	TopDocuments                []string
+	TopContacts                 []string
+	Scenario                    string
+	ScenarioDepth               string
+	ScenarioRoomCount           int
+	ScenarioLabel               string
+	ScenarioLead                string
+	ScenarioKPIs                []DigestScenarioKPI
 }
 
 // DigestOverviewSource loads trailing-window Insights rankings.
@@ -169,6 +175,12 @@ func (r *DigestRunner) runWorkspace(
 			metrics.WarmLinks = ov.WarmLinks
 			metrics.TopDocuments = ov.TopDocuments
 			metrics.TopContacts = ov.TopContacts
+			metrics.Scenario = ov.Scenario
+			metrics.ScenarioDepth = ov.ScenarioDepth
+			metrics.ScenarioRoomCount = ov.ScenarioRoomCount
+			metrics.ScenarioLabel = ov.ScenarioLabel
+			metrics.ScenarioLead = ov.ScenarioLead
+			metrics.ScenarioKPIs = ov.ScenarioKPIs
 		}
 	}
 	// Prefer precise trailing window opens when overview missing.

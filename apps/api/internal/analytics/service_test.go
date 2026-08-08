@@ -61,6 +61,11 @@ type mockAnalyticsQuerier struct {
 	keyPageSettings        db.WorkspaceKeyPageSetting
 	keyPageSettingsErr     error
 	keyPageSettingsHasRow  bool
+	dealRooms              []db.DealRoom
+	dealRoomByID           db.DealRoom
+	pendingLinkAccess      []db.ListPendingDealRoomLinkAccessRequestsByWorkspaceRow
+	pendingRoomAccess      []db.ListPendingRoomAccessRequestsByWorkspaceRow
+	forwardSignalsByLink   []db.CountWorkspaceForwardSignalsByLinkInRangeRow
 }
 
 func (m *mockAnalyticsQuerier) RecordLinkOpened(_ context.Context, _ db.RecordLinkOpenedParams) (int64, error) {
@@ -377,6 +382,10 @@ func (m *mockAnalyticsQuerier) CountWorkspaceLinkOpenVisitorsInRange(_ context.C
 	return 0, nil
 }
 
+func (m *mockAnalyticsQuerier) CountWorkspaceForwardSignalsByLinkInRange(_ context.Context, _ db.CountWorkspaceForwardSignalsByLinkInRangeParams) ([]db.CountWorkspaceForwardSignalsByLinkInRangeRow, error) {
+	return m.forwardSignalsByLink, nil
+}
+
 func (m *mockAnalyticsQuerier) GetWorkspacePageViewEngagementInRange(_ context.Context, _ db.GetWorkspacePageViewEngagementInRangeParams) (db.GetWorkspacePageViewEngagementInRangeRow, error) {
 	return db.GetWorkspacePageViewEngagementInRangeRow{}, nil
 }
@@ -423,6 +432,25 @@ func (m *mockAnalyticsQuerier) CountPendingQuestionsByWorkspace(_ context.Contex
 
 func (m *mockAnalyticsQuerier) ListRecentActivitiesByWorkspace(_ context.Context, _ db.ListRecentActivitiesByWorkspaceParams) ([]db.ListRecentActivitiesByWorkspaceRow, error) {
 	return nil, nil
+}
+
+func (m *mockAnalyticsQuerier) ListDealRoomsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.DealRoom, error) {
+	return m.dealRooms, nil
+}
+
+func (m *mockAnalyticsQuerier) GetDealRoomByID(_ context.Context, _ db.GetDealRoomByIDParams) (db.DealRoom, error) {
+	if m.dealRoomByID.ID.Valid {
+		return m.dealRoomByID, nil
+	}
+	return db.DealRoom{}, pgx.ErrNoRows
+}
+
+func (m *mockAnalyticsQuerier) ListPendingDealRoomLinkAccessRequestsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListPendingDealRoomLinkAccessRequestsByWorkspaceRow, error) {
+	return m.pendingLinkAccess, nil
+}
+
+func (m *mockAnalyticsQuerier) ListPendingRoomAccessRequestsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListPendingRoomAccessRequestsByWorkspaceRow, error) {
+	return m.pendingRoomAccess, nil
 }
 
 type mockDedupChecker struct {

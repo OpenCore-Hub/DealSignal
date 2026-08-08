@@ -6,6 +6,12 @@ import (
 	"time"
 )
 
+// DigestScenarioKPI is one Scenario Pack strip metric for digest narrative.
+type DigestScenarioKPI struct {
+	ID    string
+	Value float64
+}
+
 // DigestMetrics is the Insights-backed payload for a daily digest.
 type DigestMetrics struct {
 	WorkspaceName            string
@@ -27,6 +33,14 @@ type DigestMetrics struct {
 	WarmLinks                int
 	TopDocuments             []string
 	TopContacts              []string
+	// Dominant room Scenario Pack skeleton (empty = generic digest).
+	// Label/Lead come from radar.Pack (wired via Insights overview) — not local switches.
+	Scenario          string
+	ScenarioDepth     string
+	ScenarioRoomCount int
+	ScenarioLabel     string
+	ScenarioLead      string
+	ScenarioKPIs      []DigestScenarioKPI
 }
 
 // DigestWindows returns UTC [start,end) for yesterday and the trailing 7d window
@@ -55,6 +69,10 @@ func FormatDigestBody(m DigestMetrics) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "DealSignal Insights digest for %s (UTC day %s)\n",
 		emptyFallback(m.WorkspaceName, "your workspace"), m.DigestDay)
+	if m.Scenario != "" {
+		b.WriteString("\n")
+		b.WriteString(formatScenarioSkeleton(m))
+	}
 	b.WriteString("\nYesterday\n")
 	fmt.Fprintf(&b, "- Link opens: %d\n", m.YesterdayOpens)
 	fmt.Fprintf(&b, "- Unique visitors: %d\n", m.YesterdayUniqueVisitors)
@@ -97,7 +115,65 @@ func FormatDigestBody(m DigestMetrics) string {
 	}
 
 	b.WriteString("\nOpen Insights in DealSignal for session timelines, funnels, heat breakdown, and CSV export.\n")
+	b.WriteString("Follow-ups live on Deal Radar — clear the next action there.\n")
 	return b.String()
+}
+
+// formatScenarioSkeleton leads the digest with the dominant Scenario Pack narrative.
+func formatScenarioSkeleton(m DigestMetrics) string {
+	label := strings.TrimSpace(m.ScenarioLabel)
+	if label == "" {
+		label = m.Scenario
+	}
+	lead := strings.TrimSpace(m.ScenarioLead)
+	if lead == "" {
+		lead = "This week’s focus: clear the highest-urgency Deal Radar items for your active rooms."
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "Scenario focus · %s", label)
+	if m.ScenarioRoomCount > 0 {
+		fmt.Fprintf(&b, " (%d room", m.ScenarioRoomCount)
+		if m.ScenarioRoomCount != 1 {
+			b.WriteString("s")
+		}
+		b.WriteString(")")
+	}
+	if m.ScenarioDepth != "" {
+		fmt.Fprintf(&b, " [%s]", m.ScenarioDepth)
+	}
+	b.WriteString("\n")
+	b.WriteString(lead)
+	b.WriteString("\n")
+	for _, kpi := range m.ScenarioKPIs {
+		fmt.Fprintf(&b, "- %s: %s\n", scenarioKPILabel(kpi.ID), formatKPIValue(kpi.Value))
+	}
+	return b.String()
+}
+
+func scenarioKPILabel(id string) string {
+	switch id {
+	case "active_rooms":
+		return "Active rooms"
+	case "gate_pending":
+		return "Pending gates"
+	case "key_page_views":
+		return "Key-page views"
+	case "open_signals":
+		return "Open signals"
+	case "hot_links":
+		return "Hot links"
+	case "forward_pressure":
+		return "Forward signals"
+	default:
+		return id
+	}
+}
+
+func formatKPIValue(v float64) string {
+	if v == float64(int64(v)) {
+		return fmt.Sprintf("%d", int64(v))
+	}
+	return fmt.Sprintf("%.1f", v)
 }
 
 func formatDelta(current, previous int64) string {

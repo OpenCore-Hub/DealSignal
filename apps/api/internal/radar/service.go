@@ -35,7 +35,8 @@ func NewService(q *db.Queries, signals SignalFeed) *Service {
 }
 
 // Get compiles the workspace radar feed for the viewer.
-func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug string, circle heat.Circle) (Feed, error) {
+// circleExplicit is true when the client passed ?circle= (role lens override).
+func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug string, circle heat.Circle, circleExplicit bool) (Feed, error) {
 	raw, err := s.signals.GetFeed(ctx, workspaceID, userID)
 	if err != nil {
 		return Feed{}, err
@@ -51,7 +52,7 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		return Feed{}, err
 	}
 
-	demote, noiseHints, err := s.loadOutcomeLearning(ctx, workspaceID)
+	demote, demoteByScenario, noiseHints, err := s.loadOutcomeLearning(ctx, workspaceID)
 	if err != nil {
 		return Feed{}, err
 	}
@@ -61,27 +62,29 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 	}
 
 	return Compile(CompileInput{
-		WorkspaceSlug: workspaceSlug,
-		Now:           s.now(),
-		Circle:        circle,
-		Actions:       raw.Actions,
-		Signals:       raw.Signals,
-		Links:         links,
-		Rooms:         rooms,
-		Metrics:       metrics,
-		OutcomeDemote: demote,
-		NoiseHints:    noiseHints,
+		WorkspaceSlug:           workspaceSlug,
+		Now:                     s.now(),
+		Circle:                  circle,
+		CircleExplicit:          circleExplicit,
+		Actions:                 raw.Actions,
+		Signals:                 raw.Signals,
+		Links:                   links,
+		Rooms:                   rooms,
+		Metrics:                 metrics,
+		OutcomeDemote:           demote,
+		OutcomeDemoteByScenario: demoteByScenario,
+		NoiseHints:              noiseHints,
 	}), nil
 }
 
-func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (map[Product]int, []NoiseHint, error) {
+func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (map[Product]int, map[Scenario]map[Product]int, []NoiseHint, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	rows, err := s.queries.CountRecentActionOutcomesByWorkspace(ctx, wsUUID)
+	rows, err := s.queries.CountRecentActionOutcomesByWorkspaceScenario(ctx, wsUUID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("action outcomes: %w", err)
+		return nil, nil, nil, fmt.Errorf("action outcomes: %w", err)
 	}
 	input := make([]OutcomeRow, 0, len(rows))
 	for _, r := range rows {
@@ -90,13 +93,14 @@ func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (
 			outcome = r.Outcome.String
 		}
 		input = append(input, OutcomeRow{
-			Kind:    r.Kind,
-			Outcome: outcome,
-			Count:   int(r.Count),
+			Scenario: r.TemplateType,
+			Kind:     r.Kind,
+			Outcome:  outcome,
+			Count:    int(r.Count),
 		})
 	}
-	demote, hints := LearnFromOutcomes(input)
-	return demote, hints, nil
+	global, byScenario, hints := LearnFromOutcomes(input)
+	return global, byScenario, hints, nil
 }
 
 // UpdateItem updates the underlying action status for a radar work item.
@@ -166,7 +170,7 @@ func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta
 	return out, nil
 }
 
-func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw signal.Feed) (map[string]LinkMeta, map[string]string, error) {
+func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw signal.Feed) (map[string]LinkMeta, map[string]RoomMeta, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return nil, nil, err
@@ -248,7 +252,7 @@ func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw s
 		links[id] = meta
 	}
 
-	rooms := make(map[string]string, len(roomIDs))
+	rooms := make(map[string]RoomMeta, len(roomIDs))
 	for id := range roomIDs {
 		roomUUID, err := pgUUID(id)
 		if err != nil {
@@ -261,7 +265,14 @@ func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw s
 		if err != nil {
 			continue
 		}
-		rooms[id] = room.Name
+		tmpl := ""
+		if room.TemplateType.Valid {
+			tmpl = room.TemplateType.String
+		}
+		rooms[id] = RoomMeta{
+			Name:     room.Name,
+			Scenario: NormalizeScenario(tmpl),
+		}
 	}
 
 	return links, rooms, nil

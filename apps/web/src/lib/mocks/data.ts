@@ -1233,6 +1233,8 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
     clearedToday: mockActionItems.filter((a) => a.status === "done").length,
     counts,
     lens: "founder",
+    defaultLens: "founder",
+    lensSource: "default",
   };
 }
 

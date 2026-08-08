@@ -3,6 +3,7 @@ package radar
 import (
 	"errors"
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -34,8 +35,10 @@ func (h *Handler) Get(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	userID := middleware.UserIDFrom(c)
 	slug := c.Param("workspaceSlug")
-	circle := ParseCircle(c.Query("circle"))
-	feed, err := h.service.Get(c.Request.Context(), workspaceID, userID, slug, circle)
+	rawCircle := strings.TrimSpace(c.Query("circle"))
+	circleExplicit := rawCircle != ""
+	circle := ParseCircle(rawCircle)
+	feed, err := h.service.Get(c.Request.Context(), workspaceID, userID, slug, circle, circleExplicit)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
