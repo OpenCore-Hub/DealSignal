@@ -65,6 +65,9 @@ function makeFeed(items: RadarWorkItem[] = []): RadarFeed {
       access_decay: 0,
       abuse_guard: 0,
     },
+    lens: "founder",
+    defaultLens: "founder",
+    lensSource: "default",
   };
 }
 

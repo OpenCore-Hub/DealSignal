@@ -4,7 +4,12 @@ import { useTranslation } from "react-i18next";
 import { ArrowRight, SpinnerGap } from "@phosphor-icons/react";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
-import type { RadarEvidencePack, RadarWorkItem } from "@/lib/radarQueue";
+import {
+  radarWhyNowFallbackKey,
+  radarWhyNowKey,
+  type RadarEvidencePack,
+  type RadarWorkItem,
+} from "@/lib/radarQueue";
 
 interface RadarEvidenceRailProps {
   item: RadarWorkItem | null;
@@ -71,18 +76,27 @@ export function RadarEvidenceRail({
         <div className="mt-4 space-y-4">
           {data.whyNowCode || item.whyNowCode ? (
             <p className="text-sm text-muted-foreground" data-testid="radar-evidence-why-now">
-              {t(`radar.whyNow.${data.whyNowCode || item.whyNowCode}`, {
-                hours: data.whyNowHours ?? item.whyNowHours ?? 1,
-                count:
+              {(() => {
+                const why = {
+                  scenario: item.scenario,
+                  whyNowCode: data.whyNowCode || item.whyNowCode,
+                };
+                const hours = data.whyNowHours ?? item.whyNowHours ?? 1;
+                const count =
                   data.whyNowHours ??
                   item.whyNowHours ??
                   item.coalescedFrom?.length ??
-                  1,
-                defaultValue: data.whyNow || item.subtitle,
-              })}
+                  1;
+                return t(radarWhyNowKey(why), {
+                  hours,
+                  count,
+                  defaultValue: t(radarWhyNowFallbackKey(why), {
+                    hours,
+                    count,
+                  }),
+                });
+              })()}
             </p>
-          ) : data.whyNow ? (
-            <p className="text-sm text-muted-foreground">{data.whyNow}</p>
           ) : null}
 
           {data.metrics ? (

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent, act } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, act, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
@@ -84,6 +84,19 @@ const mockOverview: InsightsOverview = {
       heatLevel: "warm",
     },
   ],
+  scenarioPack: {
+    scenario: "startup-fundraising",
+    defaultCircle: "founder",
+    depth: "p0",
+    roomCount: 2,
+    keyPageCategories: ["cap_table", "use_of_funds"],
+    kpis: [
+      { id: "active_rooms", value: 2 },
+      { id: "gate_pending", value: 1 },
+      { id: "key_page_views", value: 12 },
+      { id: "open_signals", value: 3 },
+    ],
+  },
 };
 
 async function initI18n() {
@@ -94,12 +107,17 @@ async function initI18n() {
   const commonJson = JSON.parse(
     readFileSync(resolve(__dirname, "../../i18n/locales/en/common.json"), "utf-8"),
   );
+  const dashboardJson = JSON.parse(
+    readFileSync(resolve(__dirname, "../../i18n/locales/en/dashboard.json"), "utf-8"),
+  );
   await instance.use(initReactI18next).init({
     lng: "en",
     fallbackLng: "en",
-    ns: ["insights", "common"],
+    ns: ["insights", "common", "dashboard"],
     defaultNS: "insights",
-    resources: { en: { insights: insightsJson, common: commonJson } },
+    resources: {
+      en: { insights: insightsJson, common: commonJson, dashboard: dashboardJson },
+    },
     interpolation: { escapeValue: false },
   });
   return instance;
@@ -136,6 +154,13 @@ describe("InsightsOverviewPage", () => {
       expect(screen.getByText(/4 opens · 2 unique visitors in 7d/i)).toBeInTheDocument();
     });
 
+    expect(screen.getByTestId("insights-scenario-pack")).toHaveAttribute(
+      "data-scenario",
+      "startup-fundraising",
+    );
+    expect(screen.getByTestId("insights-scenario-kpi-gate_pending")).toHaveTextContent("1");
+    expect(screen.getByText(/Startup fundraising/i)).toBeInTheDocument();
+
     expect(getInsightsOverviewMock).toHaveBeenCalledTimes(1);
     expect(getInsightsOverviewMock).toHaveBeenCalledWith({ days: 7 });
     expect(screen.getByText("4")).toBeInTheDocument();
@@ -159,6 +184,51 @@ describe("InsightsOverviewPage", () => {
     expect(screen.getByText(/lifetime heat/i)).toBeInTheDocument();
     expect(screen.getByText(/Opens & visitors/i)).toBeInTheDocument();
     expect(screen.getByText(/Updated /i)).toBeInTheDocument();
+  });
+
+  it("renders lite scenario pack depth, rules, and translated key-page categories", async () => {
+    getInsightsOverviewMock.mockResolvedValue({
+      ...mockOverview,
+      scenarioPack: {
+        scenario: "real-estate-transaction",
+        label: "Real estate transaction",
+        digestLead:
+          "This week’s focus: unlock counterparty diligence, renew decaying access, and protect property materials.",
+        defaultCircle: "founder",
+        depth: "lite",
+        roomCount: 1,
+        keyPageCategories: ["title", "leases"],
+        keyPageRules: [
+          { category: "title", keywords: ["title report", "ownership"] },
+          { category: "leases", keywords: ["rent roll", "lease"] },
+        ],
+        kpis: [
+          { id: "active_rooms", value: 1 },
+          { id: "gate_pending", value: 2 },
+          { id: "key_page_views", value: 4 },
+          { id: "open_signals", value: 1 },
+        ],
+      },
+    });
+    await renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId("insights-scenario-pack")).toHaveAttribute(
+        "data-scenario",
+        "real-estate-transaction",
+      );
+    });
+    const pack = screen.getByTestId("insights-scenario-pack");
+    expect(pack).toHaveAttribute("data-pack-depth", "lite");
+    expect(pack).toHaveTextContent(/Lite pack/i);
+    expect(pack).toHaveTextContent(/Title & ownership/i);
+    expect(pack).toHaveTextContent(/Leases & tenancies/i);
+    expect(screen.getByTestId("insights-scenario-kpi-gate_pending")).toHaveTextContent(
+      "2",
+    );
+    expect(screen.getByTestId("insights-scenario-key-page-rules")).toHaveTextContent(
+      /Why these pages count as key pages/i,
+    );
+    expect(screen.getByTestId("insights-scenario-open-radar")).toBeInTheDocument();
   });
 
   it("refetches when trend range changes", async () => {
@@ -280,8 +350,11 @@ describe("InsightsOverviewPage", () => {
 
     await waitFor(() => {
       expect(screen.getByTestId("deal-radar-cta")).toBeInTheDocument();
-      expect(screen.getByRole("button", { name: /open deal radar/i })).toBeInTheDocument();
     });
+    const cta = screen.getByTestId("deal-radar-cta");
+    expect(
+      within(cta).getByRole("button", { name: /open deal radar/i }),
+    ).toBeInTheDocument();
     expect(screen.getByText(/Follow-ups live on Deal Radar/i)).toBeInTheDocument();
     expect(screen.getByText(/4 open signals on Deal Radar/i)).toBeInTheDocument();
     // No duplicated contact rows on Insights — action feed stays on Deal Radar.

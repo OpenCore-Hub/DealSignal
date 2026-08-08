@@ -27,6 +27,21 @@ export type RadarConfidence = "low" | "medium" | "high";
 
 export type RadarCircle = "founder" | "investor_ir" | "sales";
 
+/** Deal-room template business scenario (not a role lens). */
+export type RadarScenario =
+  | "startup-fundraising"
+  | "raising-first-fund"
+  | "ma-acquisition"
+  | "series-a-plus"
+  | "real-estate-transaction"
+  | "fund-management"
+  | "portfolio-management"
+  | "project-management"
+  | "sales-dataroom"
+  | "custom";
+
+export type RadarLensSource = "query" | "inferred" | "default";
+
 export type RadarOutcome =
   | "acted"
   | "false_positive"
@@ -95,7 +110,10 @@ export interface RadarWorkItem {
   whyNowCode?: RadarWhyNowCode | string;
   whyNowHours?: number;
   evidence?: RadarEvidenceChip[];
+  /** Scenario Pack narrative id; prefer i18n over raw headline. */
+  headlineCode?: string;
   state?: "open" | "snoozed" | "done" | "dismissed" | string;
+  scenario?: RadarScenario | string;
   /** Populated client-side for mailto CTAs. */
   mailtoHref?: string | null;
 }
@@ -104,14 +122,24 @@ export interface RadarStrand {
   dealKey: string;
   dealName: string;
   dealRoomId?: string;
+  scenario?: RadarScenario | string;
   items: RadarWorkItem[];
 }
 
 export interface RadarNoiseHint {
+  scenario?: string;
   product: RadarProduct;
   falsePositiveRate: number;
   sample: number;
   demoteBoost: number;
+}
+
+export interface RadarScenarioPackMeta {
+  scenario: string;
+  defaultCircle: RadarCircle | string;
+  depth: "base" | "p0" | string;
+  keyPageCategories?: string[];
+  insightsKpi?: string[];
 }
 
 export interface RadarFeed {
@@ -121,6 +149,10 @@ export interface RadarFeed {
   clearedToday: number;
   counts: Record<string, number>;
   lens?: RadarCircle;
+  defaultLens?: RadarCircle;
+  lensSource?: RadarLensSource | string;
+  scenarios?: string[];
+  scenarioPack?: RadarScenarioPackMeta | null;
   noiseHints?: RadarNoiseHint[];
 }
 
@@ -131,6 +163,31 @@ export function parseRadarCircle(
     return raw;
   }
   return "founder";
+}
+
+/** i18n key for why-now copy; scenario pack narrative when present. */
+export function radarWhyNowKey(item: Pick<RadarWorkItem, "scenario" | "whyNowCode">): string {
+  if (!item.whyNowCode) return "";
+  if (item.scenario) {
+    return `radar.scenario.${item.scenario}.whyNow.${item.whyNowCode}`;
+  }
+  return `radar.whyNow.${item.whyNowCode}`;
+}
+
+/** Generic why-now key used as fallback when a scenario key is missing. */
+export function radarWhyNowFallbackKey(
+  item: Pick<RadarWorkItem, "whyNowCode">,
+): string {
+  if (!item.whyNowCode) return "";
+  return `radar.whyNow.${item.whyNowCode}`;
+}
+
+/** Scenario Pack headline i18n key (empty when no headlineCode). */
+export function radarHeadlineKey(
+  item: Pick<RadarWorkItem, "scenario" | "headlineCode">,
+): string {
+  if (!item.headlineCode || !item.scenario) return "";
+  return `radar.scenario.${item.scenario}.headline.${item.headlineCode}`;
 }
 
 /** True when a keydown target is editable (skip radar day-clear shortcuts). */
@@ -284,6 +341,7 @@ export function groupIntoStrands(items: RadarWorkItem[]): RadarStrand[] {
         dealKey: item.dealKey,
         dealName: item.dealName,
         dealRoomId: item.dealRoomId,
+        scenario: item.scenario,
         items: [item],
       });
       continue;

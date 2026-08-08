@@ -77,7 +77,32 @@
     "openDealRadar": "打开交易雷达",
     "untitledLink": "分享链接",
     "views_one": "{{count}} 次访问",
-    "views_other": "{{count}} 次访问"
+    "views_other": "{{count}} 次访问",
+    "scenarioPack": {
+      "title": "场景焦点",
+      "rooms_one": "该场景 {{count}} 个房间",
+      "rooms_other": "该场景 {{count}} 个房间",
+      "depthP0": "P0 场景包",
+      "depthP1": "IR 场景包",
+      "depthLite": "轻量场景包",
+      "depthBase": "基础场景包",
+      "keyPages": "关键页类别",
+      "unknownScenario": "场景包",
+      "unknownCategory": "类别",
+      "unknownKpi": "指标",
+      "rulesTitle": "为何这些页算关键页",
+      "rulesHint": "与该场景包在热度评分中使用的标题子串规则一致。",
+      "rulesKeywords_one": "{{count}} 个匹配词",
+      "rulesKeywords_other": "{{count}} 个匹配词",
+      "kpi": {
+        "active_rooms": "活跃房间",
+        "gate_pending": "待批闸门",
+        "key_page_views": "关键页浏览",
+        "open_signals": "未清信号",
+        "hot_links": "高热链接",
+        "forward_pressure": "转发信号"
+      }
+    }
   },
   "pages": {
     "title": "页面参与度",
@@ -225,6 +250,20 @@
       "security": "安全合规",
       "case_studies": "案例",
       "implementation": "落地实施",
+      "competitive": "竞争",
+      "cap_table": "股权结构",
+      "use_of_funds": "资金用途",
+      "board": "董事会",
+      "diligence": "尽调",
+      "legal": "法律",
+      "title": "产权与权属",
+      "leases": "租约与租户",
+      "environmental": "环境评估",
+      "inspections": "验房与勘察",
+      "requirements": "需求规格",
+      "planning": "计划排期",
+      "risk": "风险与问题",
+      "status": "进度与交付",
       "custom": "自定义"
     }
   },

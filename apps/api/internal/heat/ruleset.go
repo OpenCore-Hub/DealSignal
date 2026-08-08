@@ -33,6 +33,34 @@ func (r RuleSet) WithLang(lang KeywordLang) RuleSet {
 	return r
 }
 
+// WithExtra returns a copy with additive extras merged (never replaces defaults).
+func (r RuleSet) WithExtra(extra map[string][]string) RuleSet {
+	add := normalizeExtra(extra)
+	if len(add) == 0 {
+		return r
+	}
+	merged := make(map[string][]string, len(r.Extra)+len(add))
+	for cat, kws := range r.Extra {
+		merged[cat] = append([]string(nil), kws...)
+	}
+	for cat, kws := range add {
+		seen := make(map[string]struct{}, len(merged[cat]))
+		for _, kw := range merged[cat] {
+			seen[strings.ToLower(kw)] = struct{}{}
+		}
+		for _, kw := range kws {
+			key := strings.ToLower(kw)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged[cat] = append(merged[cat], kw)
+		}
+	}
+	r.Extra = merged
+	return r
+}
+
 func normalizeExtra(extra map[string][]string) map[string][]string {
 	if len(extra) == 0 {
 		return nil

@@ -13,6 +13,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/radar"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -76,6 +77,7 @@ type Querier interface {
 	GetWorkspaceDailyLinkOpens(ctx context.Context, arg db.GetWorkspaceDailyLinkOpensParams) ([]db.GetWorkspaceDailyLinkOpensRow, error)
 	GetWorkspaceDailyLinkOpensInRange(ctx context.Context, arg db.GetWorkspaceDailyLinkOpensInRangeParams) ([]db.GetWorkspaceDailyLinkOpensInRangeRow, error)
 	CountWorkspaceLinkOpenVisitorsInRange(ctx context.Context, arg db.CountWorkspaceLinkOpenVisitorsInRangeParams) (int64, error)
+	CountWorkspaceForwardSignalsByLinkInRange(ctx context.Context, arg db.CountWorkspaceForwardSignalsByLinkInRangeParams) ([]db.CountWorkspaceForwardSignalsByLinkInRangeRow, error)
 	GetWorkspacePageViewEngagementInRange(ctx context.Context, arg db.GetWorkspacePageViewEngagementInRangeParams) (db.GetWorkspacePageViewEngagementInRangeRow, error)
 	GetWorkspaceReadingSessionStatsInRange(ctx context.Context, arg db.GetWorkspaceReadingSessionStatsInRangeParams) (db.GetWorkspaceReadingSessionStatsInRangeRow, error)
 	CountWorkspaceAccessAuditByType(ctx context.Context, arg db.CountWorkspaceAccessAuditByTypeParams) ([]db.CountWorkspaceAccessAuditByTypeRow, error)
@@ -92,6 +94,10 @@ type Querier interface {
 	GetWorkspaceMember(ctx context.Context, arg db.GetWorkspaceMemberParams) (db.WorkspaceMember, error)
 	CountPendingQuestionsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error)
 	ListRecentActivitiesByWorkspace(ctx context.Context, arg db.ListRecentActivitiesByWorkspaceParams) ([]db.ListRecentActivitiesByWorkspaceRow, error)
+	ListDealRoomsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.DealRoom, error)
+	GetDealRoomByID(ctx context.Context, arg db.GetDealRoomByIDParams) (db.DealRoom, error)
+	ListPendingDealRoomLinkAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPendingDealRoomLinkAccessRequestsByWorkspaceRow, error)
+	ListPendingRoomAccessRequestsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListPendingRoomAccessRequestsByWorkspaceRow, error)
 }
 
 // SignalFeed is the synced signal/action pair used by the dashboard.
@@ -522,10 +528,12 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circleOverr
 	}
 
 	keyPageViews := 0
-	rs, rsErr := s.loadWorkspaceRuleSet(ctx, workspaceIDFromLink(link), circleOverride)
+	wsID := workspaceIDFromLink(link)
+	rs, rsErr := s.loadWorkspaceRuleSet(ctx, wsID, circleOverride)
 	if rsErr != nil {
 		return heat.Result{}, rsErr
 	}
+	rs = s.enrichRuleSetForLink(ctx, wsID, link, rs)
 	patterns := rs.Patterns()
 	if len(patterns) > 0 {
 		keyMetrics, err := s.queries.GetLinkKeyPageViewMetrics(ctx, db.GetLinkKeyPageViewMetricsParams{
@@ -878,6 +886,7 @@ type InsightsOverview struct {
 	TopDocuments                         []DocumentScore
 	TopLinks                             []LinkScore
 	TopContacts                          []ContactScore // digest enrichment only; not surfaced as radar CTA
+	ScenarioPack                         *ScenarioPackInsights
 }
 
 const insightsTrendDaysDefault = 7
@@ -937,6 +946,12 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 
 	keyPageViewsByLink := make(map[string]int64)
 	overviewRuleSet, _ := s.loadWorkspaceRuleSet(ctx, workspaceID, nil)
+	// Additive Scenario Pack key-page extras for all rooms in the workspace.
+	if scenarios, _, scErr := s.workspaceScenarios(ctx, wsUUID); scErr == nil {
+		if extras := radar.MergeKeyPageExtras(scenarios); len(extras) > 0 {
+			overviewRuleSet = overviewRuleSet.WithExtra(extras)
+		}
+	}
 	if len(linkIDs) > 0 {
 		patterns := overviewRuleSet.Patterns()
 		if len(patterns) > 0 {
@@ -1208,6 +1223,35 @@ func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string,
 		return overview, fmt.Errorf("open signals: %w", sigErr)
 	}
 	overview.OpenSignalCount = len(signals)
+
+	forwardSignalsByLink := make(map[string]int64)
+	if fwdRows, fwdErr := s.queries.CountWorkspaceForwardSignalsByLinkInRange(ctx, db.CountWorkspaceForwardSignalsByLinkInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: currentStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: currentEnd, Valid: true},
+	}); fwdErr == nil {
+		for _, row := range fwdRows {
+			if !row.LinkID.Valid {
+				continue
+			}
+			forwardSignalsByLink[uuid.UUID(row.LinkID.Bytes).String()] = row.Count
+		}
+	}
+
+	linkHeatLevel := make(map[string]string, len(overview.TopLinks))
+	for _, ls := range overview.TopLinks {
+		if !ls.Link.ID.Valid {
+			continue
+		}
+		linkHeatLevel[uuid.UUID(ls.Link.ID.Bytes).String()] = ls.Level
+	}
+	overview.ScenarioPack = s.buildScenarioPackInsights(ctx, wsUUID, overviewRuleSet, scenarioPackKPIInput{
+		Links:                links,
+		KeyPageViewsByLink:   keyPageViewsByLink,
+		LinkHeatLevel:        linkHeatLevel,
+		Signals:              signals,
+		ForwardSignalsByLink: forwardSignalsByLink,
+	})
 
 	return overview, nil
 }

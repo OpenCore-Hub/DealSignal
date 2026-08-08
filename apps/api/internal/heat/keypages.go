@@ -22,8 +22,8 @@ func KeyPageCategories(circle Circle) []string {
 
 // KeyPageRule is one category and its title-substring keywords for a circle.
 type KeyPageRule struct {
-	Category string
-	Keywords []string
+	Category string   `json:"category"`
+	Keywords []string `json:"keywords"`
 }
 
 // KeyPageRules returns category→keyword rules for the circle (stable sorted

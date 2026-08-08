@@ -148,6 +148,7 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 		"topDocuments": documentScoreList(overview.TopDocuments),
 		"topLinks":     linkScoreList(c, h.cfg, overview.TopLinks),
 		"topContacts":  contactScoreList(overview.TopContacts),
+		"scenarioPack": overview.ScenarioPack,
 	})
 }
 

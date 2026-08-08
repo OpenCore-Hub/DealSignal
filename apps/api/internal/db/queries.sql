@@ -2437,6 +2437,61 @@ WHERE a.workspace_id = $1
   AND a.updated_at > now() - interval '30 days'
 GROUP BY 1, 2;
 
+-- name: CountRecentActionOutcomesByWorkspaceScenario :many
+-- Phase C: same closed-loop learning, bucketed by deal-room template_type (scenario).
+SELECT
+    COALESCE(
+        NULLIF(dr_link.template_type, ''),
+        NULLIF(dr_src.template_type, ''),
+        NULLIF(dr_tgt.template_type, ''),
+        ''
+    )::text AS template_type,
+    COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
+    a.outcome,
+    COUNT(*)::bigint AS count
+FROM action_items a
+LEFT JOIN signals s
+    ON s.id = a.signal_id
+   AND s.workspace_id = a.workspace_id
+LEFT JOIN links l
+    ON l.workspace_id = a.workspace_id
+   AND (
+        (
+            a.source_type IN (
+                'link_access_request',
+                'deal_room_link_access_request',
+                'expiring_link',
+                'uploaded_file'
+            )
+            AND a.source_id ~ '^[0-9a-fA-F-]{36}$'
+            AND l.id = a.source_id::uuid
+        )
+        OR (
+            a.source_type = 'link_question'
+            AND a.target_id ~ '^[0-9a-fA-F-]{36}$'
+            AND l.id = a.target_id::uuid
+        )
+        OR (s.link_id IS NOT NULL AND l.id = s.link_id)
+   )
+LEFT JOIN deal_rooms dr_link
+    ON dr_link.id = l.deal_room_id
+   AND dr_link.workspace_id = a.workspace_id
+LEFT JOIN deal_rooms dr_src
+    ON a.source_type IN ('room_access_request', 'room_nda', 'expiring_room')
+   AND a.source_id ~ '^[0-9a-fA-F-]{36}$'
+   AND dr_src.id = a.source_id::uuid
+   AND dr_src.workspace_id = a.workspace_id
+LEFT JOIN deal_rooms dr_tgt
+    ON a.source_type = 'deal_room_link_access_request'
+   AND a.target_id ~ '^[0-9a-fA-F-]{36}$'
+   AND dr_tgt.id = a.target_id::uuid
+   AND dr_tgt.workspace_id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND a.status = 'done'
+  AND a.outcome IS NOT NULL
+  AND a.updated_at > now() - interval '30 days'
+GROUP BY 1, 2, 3;
+
 -- name: ListPendingDocumentLinkAccessRequestsByWorkspace :many
 -- Dashboard sync: document-library share applications only.
 SELECT r.id, r.email, r.link_id, l.name AS link_name
@@ -2687,6 +2742,20 @@ WHERE al.workspace_id = sqlc.arg(workspace_id)
   AND al.event_type = 'link_opened'
   AND al.created_at >= sqlc.arg(range_start)
   AND al.created_at < sqlc.arg(range_end);
+
+-- name: CountWorkspaceForwardSignalsByLinkInRange :many
+-- Persisted forward_signal markers on access_logs (not security_events audit).
+-- Half-open window [range_start, range_end); callers scope to dominant-room links in Go.
+SELECT
+    al.link_id,
+    COUNT(*)::bigint AS count
+FROM access_logs al
+WHERE al.workspace_id = sqlc.arg(workspace_id)
+  AND al.event_type = 'forward_signal'
+  AND al.created_at >= sqlc.arg(range_start)
+  AND al.created_at < sqlc.arg(range_end)
+  AND al.link_id IS NOT NULL
+GROUP BY al.link_id;
 
 -- name: ListEnabledDailyDigestRules :many
 SELECT id, tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes, created_at, updated_at

@@ -1172,6 +1172,94 @@ func (q *Queries) CountRecentActionOutcomesByWorkspace(ctx context.Context, work
 	return items, nil
 }
 
+const countRecentActionOutcomesByWorkspaceScenario = `-- name: CountRecentActionOutcomesByWorkspaceScenario :many
+SELECT
+    COALESCE(
+        NULLIF(dr_link.template_type, ''),
+        NULLIF(dr_src.template_type, ''),
+        NULLIF(dr_tgt.template_type, ''),
+        ''
+    )::text AS template_type,
+    COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
+    a.outcome,
+    COUNT(*)::bigint AS count
+FROM action_items a
+LEFT JOIN signals s
+    ON s.id = a.signal_id
+   AND s.workspace_id = a.workspace_id
+LEFT JOIN links l
+    ON l.workspace_id = a.workspace_id
+   AND (
+        (
+            a.source_type IN (
+                'link_access_request',
+                'deal_room_link_access_request',
+                'expiring_link',
+                'uploaded_file'
+            )
+            AND a.source_id ~ '^[0-9a-fA-F-]{36}$'
+            AND l.id = a.source_id::uuid
+        )
+        OR (
+            a.source_type = 'link_question'
+            AND a.target_id ~ '^[0-9a-fA-F-]{36}$'
+            AND l.id = a.target_id::uuid
+        )
+        OR (s.link_id IS NOT NULL AND l.id = s.link_id)
+   )
+LEFT JOIN deal_rooms dr_link
+    ON dr_link.id = l.deal_room_id
+   AND dr_link.workspace_id = a.workspace_id
+LEFT JOIN deal_rooms dr_src
+    ON a.source_type IN ('room_access_request', 'room_nda', 'expiring_room')
+   AND a.source_id ~ '^[0-9a-fA-F-]{36}$'
+   AND dr_src.id = a.source_id::uuid
+   AND dr_src.workspace_id = a.workspace_id
+LEFT JOIN deal_rooms dr_tgt
+    ON a.source_type = 'deal_room_link_access_request'
+   AND a.target_id ~ '^[0-9a-fA-F-]{36}$'
+   AND dr_tgt.id = a.target_id::uuid
+   AND dr_tgt.workspace_id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND a.status = 'done'
+  AND a.outcome IS NOT NULL
+  AND a.updated_at > now() - interval '30 days'
+GROUP BY 1, 2, 3
+`
+
+type CountRecentActionOutcomesByWorkspaceScenarioRow struct {
+	TemplateType string
+	Kind         string
+	Outcome      pgtype.Text
+	Count        int64
+}
+
+// Phase C: same closed-loop learning, bucketed by deal-room template_type (scenario).
+func (q *Queries) CountRecentActionOutcomesByWorkspaceScenario(ctx context.Context, workspaceID pgtype.UUID) ([]CountRecentActionOutcomesByWorkspaceScenarioRow, error) {
+	rows, err := q.db.Query(ctx, countRecentActionOutcomesByWorkspaceScenario, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountRecentActionOutcomesByWorkspaceScenarioRow
+	for rows.Next() {
+		var i CountRecentActionOutcomesByWorkspaceScenarioRow
+		if err := rows.Scan(
+			&i.TemplateType,
+			&i.Kind,
+			&i.Outcome,
+			&i.Count,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const countRecentDistinctIPsByLink = `-- name: CountRecentDistinctIPsByLink :one
 SELECT COUNT(DISTINCT ip)::bigint AS distinct_ips
 FROM access_logs
@@ -1678,6 +1766,52 @@ func (q *Queries) CountWorkspaceAccessAuditByType(ctx context.Context, arg Count
 	for rows.Next() {
 		var i CountWorkspaceAccessAuditByTypeRow
 		if err := rows.Scan(&i.EventType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countWorkspaceForwardSignalsByLinkInRange = `-- name: CountWorkspaceForwardSignalsByLinkInRange :many
+SELECT
+    al.link_id,
+    COUNT(*)::bigint AS count
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.event_type = 'forward_signal'
+  AND al.created_at >= $2
+  AND al.created_at < $3
+  AND al.link_id IS NOT NULL
+GROUP BY al.link_id
+`
+
+type CountWorkspaceForwardSignalsByLinkInRangeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+type CountWorkspaceForwardSignalsByLinkInRangeRow struct {
+	LinkID pgtype.UUID
+	Count  int64
+}
+
+// Persisted forward_signal markers on access_logs (not security_events audit).
+// Half-open window [range_start, range_end); callers scope to dominant-room links in Go.
+func (q *Queries) CountWorkspaceForwardSignalsByLinkInRange(ctx context.Context, arg CountWorkspaceForwardSignalsByLinkInRangeParams) ([]CountWorkspaceForwardSignalsByLinkInRangeRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspaceForwardSignalsByLinkInRange, arg.WorkspaceID, arg.RangeStart, arg.RangeEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountWorkspaceForwardSignalsByLinkInRangeRow
+	for rows.Next() {
+		var i CountWorkspaceForwardSignalsByLinkInRangeRow
+		if err := rows.Scan(&i.LinkID, &i.Count); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
