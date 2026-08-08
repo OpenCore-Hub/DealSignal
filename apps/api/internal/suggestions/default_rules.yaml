@@ -24,6 +24,20 @@ expression_rules:
         score: '{{.heat.score}}'
         level: '{{.heat.level}}'
 
+  - id: key_page_read
+    condition: 'keyPageViews24h >= 1'
+    enabled: true
+    bucket_percent: 100
+    bucket_key: link_id
+    output:
+      type: hot_signal
+      subtype: key_page
+      priority: high
+      reason_template: '{{.keyPageViews24h}} sensitive key-page view(s) in the last 24 hours (same keywords as Insights → Key pages)'
+      action_template: 'Open Insights → Key pages, then follow up on Deal Radar'
+      metadata:
+        key_page_views_24h: '{{.keyPageViews24h}}'
+
   - id: follow_up_download
     condition: 'downloads24h > 0'
     output:

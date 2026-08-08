@@ -34,10 +34,16 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.GET("/suggestions", h.List)
 	g.POST("/suggestions", h.Generate)
 	g.POST("/suggestions/:id/dismiss", h.Dismiss)
+	g.POST("/suggestions/:id/snooze", h.Snooze)
 
 	ig := r.Group("/insights")
 	ig.GET("/suggestions", h.ListWorkspace)
+	ig.POST("/suggestions/:id/snooze", h.Snooze)
 	ig.GET("/signals/rules/performance", h.ListRulePerformance)
+}
+
+type snoozeRequest struct {
+	Hours int `json:"hours"`
 }
 
 func (h *Handler) List(c *gin.Context) {
@@ -75,6 +81,28 @@ func (h *Handler) Dismiss(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusNoContent, nil)
+}
+
+func (h *Handler) Snooze(c *gin.Context) {
+	workspaceID := middleware.WorkspaceIDFrom(c)
+	var req snoozeRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Hours == 0 {
+		req.Hours = 24
+	}
+	item, err := h.service.Snooze(c.Request.Context(), workspaceID, c.Param("id"), req.Hours)
+	if err != nil {
+		if errors.Is(err, ErrInvalidSnoozeDuration) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "hours must be 24, 72, or 168"})
+			return
+		}
+		if errors.Is(err, ErrSuggestionNotFound) {
+			c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": httpx.SafeMessage("not_found", err)})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, item)
 }
 
 func (h *Handler) ListWorkspace(c *gin.Context) {

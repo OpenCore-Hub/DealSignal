@@ -23,13 +23,15 @@ import (
 
 // Settings is the public view of notification/integration settings.
 type Settings struct {
-	WorkspaceID         string `json:"workspace_id"`
-	EmailEnabled        bool   `json:"email_enabled"`
-	SlackWebhookURL     string `json:"slack_webhook_url,omitempty"`
-	SlackConnected      bool   `json:"slack_connected"`
-	HubSpotConnected    bool   `json:"hubspot_connected"`
-	SalesforceConnected bool   `json:"salesforce_connected"`
-	UpdatedAt           string `json:"updated_at"`
+	WorkspaceID           string `json:"workspace_id"`
+	EmailEnabled          bool   `json:"email_enabled"`
+	DailyDigestEnabled    bool   `json:"daily_digest_enabled"`
+	KeyPageSlackEnabled   bool   `json:"key_page_slack_enabled"`
+	SlackWebhookURL       string `json:"slack_webhook_url,omitempty"`
+	SlackConnected        bool   `json:"slack_connected"`
+	HubSpotConnected      bool   `json:"hubspot_connected"`
+	SalesforceConnected   bool   `json:"salesforce_connected"`
+	UpdatedAt             string `json:"updated_at"`
 }
 
 // Service manages integrations and notification settings.
@@ -61,7 +63,13 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 	row, err := s.queries.GetNotificationSettings(ctx, wsUUID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
-			return Settings{WorkspaceID: workspaceID, EmailEnabled: true}, nil
+			settings := Settings{WorkspaceID: workspaceID, EmailEnabled: true}
+			digest, keyPageSlack := s.ruleFlags(ctx, wsUUID)
+			settings.DailyDigestEnabled = digest
+			settings.KeyPageSlackEnabled = keyPageSlack
+			settings.SlackConnected = s.hasToken(ctx, wsUUID, "slack")
+			settings.HubSpotConnected = s.hasToken(ctx, wsUUID, "hubspot")
+			return settings, nil
 		}
 		return Settings{}, err
 	}
@@ -69,7 +77,44 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 	// Treat an existing integration token as connected, regardless of the legacy flag.
 	settings.SlackConnected = settings.SlackConnected || s.hasToken(ctx, wsUUID, "slack")
 	settings.HubSpotConnected = settings.HubSpotConnected || s.hasToken(ctx, wsUUID, "hubspot")
+	digest, keyPageSlack := s.ruleFlags(ctx, wsUUID)
+	settings.DailyDigestEnabled = digest
+	settings.KeyPageSlackEnabled = keyPageSlack
 	return settings, nil
+}
+
+func (s *Service) dailyDigestEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	digest, _ := s.ruleFlags(ctx, workspaceID)
+	return digest
+}
+
+func (s *Service) ruleFlags(ctx context.Context, workspaceID pgtype.UUID) (digestEnabled, keyPageSlack bool) {
+	rules, err := s.queries.ListNotificationRulesByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return false, false
+	}
+	for _, r := range rules {
+		switch r.RuleType {
+		case "daily_digest":
+			if r.Enabled {
+				digestEnabled = true
+			}
+		case "key_page", "repeat_key_page":
+			if r.Enabled && channelIncludes(r.Channels, "slack") {
+				keyPageSlack = true
+			}
+		}
+	}
+	return digestEnabled, keyPageSlack
+}
+
+func channelIncludes(channels []string, want string) bool {
+	for _, c := range channels {
+		if c == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Service) hasToken(ctx context.Context, workspaceID pgtype.UUID, provider string) bool {
@@ -82,8 +127,10 @@ func (s *Service) hasToken(ctx context.Context, workspaceID pgtype.UUID, provide
 
 // SaveSettingsRequest contains user-editable notification settings.
 type SaveSettingsRequest struct {
-	EmailEnabled    bool
-	SlackWebhookURL string
+	EmailEnabled        bool
+	DailyDigestEnabled  bool
+	KeyPageSlackEnabled bool
+	SlackWebhookURL     string
 }
 
 // SaveSettings upserts workspace settings. Integration connected flags are managed by OAuth callbacks only.
@@ -98,10 +145,16 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID string, req Save
 		return Settings{}, err
 	}
 
+	webhook := pgtype.Text{String: req.SlackWebhookURL, Valid: req.SlackWebhookURL != ""}
+	if !webhook.Valid && existing.SlackWebhookUrl.Valid {
+		// Preserve OAuth-captured webhook when the client omits the field.
+		webhook = existing.SlackWebhookUrl
+	}
+
 	_, err = s.queries.UpsertNotificationSettings(ctx, db.UpsertNotificationSettingsParams{
 		WorkspaceID:         wsUUID,
 		EmailEnabled:        req.EmailEnabled,
-		SlackWebhookUrl:     pgtype.Text{String: req.SlackWebhookURL, Valid: req.SlackWebhookURL != ""},
+		SlackWebhookUrl:     webhook,
 		SlackConnected:      existing.SlackConnected,
 		HubspotConnected:    existing.HubspotConnected,
 		SalesforceConnected: existing.SalesforceConnected,
@@ -109,7 +162,66 @@ func (s *Service) SaveSettings(ctx context.Context, workspaceID string, req Save
 	if err != nil {
 		return Settings{}, err
 	}
+	if err := s.upsertDailyDigestRule(ctx, wsUUID, req.DailyDigestEnabled); err != nil {
+		return Settings{}, err
+	}
+	if err := s.upsertKeyPageSlackRules(ctx, wsUUID, req.KeyPageSlackEnabled); err != nil {
+		return Settings{}, err
+	}
 	return s.GetSettings(ctx, workspaceID)
+}
+
+func (s *Service) slackChannels(ctx context.Context, workspaceID pgtype.UUID, includeSlack bool) []string {
+	channels := []string{"email"}
+	if !includeSlack {
+		return channels
+	}
+	settings, serr := s.queries.GetNotificationSettings(ctx, workspaceID)
+	if serr == nil && (settings.SlackConnected || s.hasToken(ctx, workspaceID, "slack")) {
+		channels = append(channels, "slack")
+	}
+	return channels
+}
+
+func (s *Service) upsertDailyDigestRule(ctx context.Context, workspaceID pgtype.UUID, enabled bool) error {
+	ws, err := s.queries.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("workspace for digest rule: %w", err)
+	}
+	_, err = s.queries.UpsertNotificationRule(ctx, db.UpsertNotificationRuleParams{
+		TenantID:           ws.TenantID,
+		WorkspaceID:        workspaceID,
+		RuleType:           "daily_digest",
+		Channels:           s.slackChannels(ctx, workspaceID, true),
+		Enabled:            enabled,
+		Unsubscribable:     true,
+		MergeWindowMinutes: 0,
+	})
+	return err
+}
+
+// upsertKeyPageSlackRules persists key_page + repeat_key_page channel preference.
+// Email stays on; Slack is additive when enabled and Slack is connected.
+func (s *Service) upsertKeyPageSlackRules(ctx context.Context, workspaceID pgtype.UUID, slackEnabled bool) error {
+	ws, err := s.queries.GetWorkspaceByID(ctx, workspaceID)
+	if err != nil {
+		return fmt.Errorf("workspace for key-page rules: %w", err)
+	}
+	channels := s.slackChannels(ctx, workspaceID, slackEnabled)
+	for _, ruleType := range []string{"key_page", "repeat_key_page"} {
+		if _, err := s.queries.UpsertNotificationRule(ctx, db.UpsertNotificationRuleParams{
+			TenantID:           ws.TenantID,
+			WorkspaceID:        workspaceID,
+			RuleType:           ruleType,
+			Channels:           channels,
+			Enabled:            true,
+			Unsubscribable:     false,
+			MergeWindowMinutes: 10,
+		}); err != nil {
+			return fmt.Errorf("upsert %s: %w", ruleType, err)
+		}
+	}
+	return nil
 }
 
 // OAuthURL returns an OAuth authorization URL and stores the state.
@@ -165,9 +277,10 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, state, code strin
 	}
 
 	var token db.UpsertIntegrationTokenParams
+	var slackWebhook string
 	switch provider {
 	case "slack":
-		token, err = s.exchangeSlack(ctx, code)
+		token, slackWebhook, err = s.exchangeSlack(ctx, code)
 	case "hubspot":
 		token, err = s.exchangeHubSpot(ctx, code)
 	}
@@ -184,8 +297,42 @@ func (s *Service) OAuthCallback(ctx context.Context, provider, state, code strin
 	if err := s.setConnectedFlag(ctx, row.WorkspaceID, provider, true); err != nil {
 		return "", err
 	}
+	if provider == "slack" && slackWebhook != "" {
+		if err := s.persistSlackWebhook(ctx, row.WorkspaceID, slackWebhook); err != nil {
+			return "", err
+		}
+		// Refresh rule channels so enabled Slack preferences take effect immediately.
+		_, keyPageSlack := s.ruleFlags(ctx, row.WorkspaceID)
+		if err := s.upsertKeyPageSlackRules(ctx, row.WorkspaceID, keyPageSlack); err != nil {
+			return "", err
+		}
+		if digest, _ := s.ruleFlags(ctx, row.WorkspaceID); digest {
+			if err := s.upsertDailyDigestRule(ctx, row.WorkspaceID, true); err != nil {
+				return "", err
+			}
+		}
+	}
 
 	return ws.Slug, nil
+}
+
+func (s *Service) persistSlackWebhook(ctx context.Context, workspaceID pgtype.UUID, webhookURL string) error {
+	settings, err := s.queries.GetNotificationSettings(ctx, workspaceID)
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			return err
+		}
+		settings = db.NotificationSetting{WorkspaceID: workspaceID, EmailEnabled: true, SlackConnected: true}
+	}
+	_, err = s.queries.UpsertNotificationSettings(ctx, db.UpsertNotificationSettingsParams{
+		WorkspaceID:         workspaceID,
+		EmailEnabled:        settings.EmailEnabled,
+		SlackWebhookUrl:     pgtype.Text{String: webhookURL, Valid: true},
+		SlackConnected:      true,
+		HubspotConnected:    settings.HubspotConnected,
+		SalesforceConnected: settings.SalesforceConnected,
+	})
+	return err
 }
 
 // Disconnect removes the stored token and clears the connected flag.
@@ -545,10 +692,14 @@ type slackOAuthResponse struct {
 	Team        struct {
 		ID string `json:"id"`
 	} `json:"team"`
+	IncomingWebhook struct {
+		URL     string `json:"url"`
+		Channel string `json:"channel"`
+	} `json:"incoming_webhook"`
 	Error string `json:"error"`
 }
 
-func (s *Service) exchangeSlack(ctx context.Context, code string) (db.UpsertIntegrationTokenParams, error) {
+func (s *Service) exchangeSlack(ctx context.Context, code string) (db.UpsertIntegrationTokenParams, string, error) {
 	form := url.Values{}
 	form.Set("client_id", s.cfg.SlackClientID)
 	form.Set("client_secret", s.cfg.SlackClientSecret)
@@ -557,37 +708,37 @@ func (s *Service) exchangeSlack(ctx context.Context, code string) (db.UpsertInte
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, s.slackTokenURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return db.UpsertIntegrationTokenParams{}, err
+		return db.UpsertIntegrationTokenParams{}, "", err
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := s.httpClient.Do(req)
 	if err != nil {
-		return db.UpsertIntegrationTokenParams{}, err
+		return db.UpsertIntegrationTokenParams{}, "", err
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return db.UpsertIntegrationTokenParams{}, err
+		return db.UpsertIntegrationTokenParams{}, "", err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return db.UpsertIntegrationTokenParams{}, fmt.Errorf("slack returned %d: %s", resp.StatusCode, truncateBody(body, 512))
+		return db.UpsertIntegrationTokenParams{}, "", fmt.Errorf("slack returned %d: %s", resp.StatusCode, truncateBody(body, 512))
 	}
 
 	var parsed slackOAuthResponse
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return db.UpsertIntegrationTokenParams{}, err
+		return db.UpsertIntegrationTokenParams{}, "", err
 	}
 	if !parsed.OK {
-		return db.UpsertIntegrationTokenParams{}, fmt.Errorf("slack error: %s", parsed.Error)
+		return db.UpsertIntegrationTokenParams{}, "", fmt.Errorf("slack error: %s", parsed.Error)
 	}
 
 	return db.UpsertIntegrationTokenParams{
 		AccessToken: parsed.AccessToken,
 		Scope:       pgtype.Text{String: parsed.Scope, Valid: parsed.Scope != ""},
 		ExternalID:  pgtype.Text{String: parsed.Team.ID, Valid: parsed.Team.ID != ""},
-	}, nil
+	}, strings.TrimSpace(parsed.IncomingWebhook.URL), nil
 }
 
 type hubSpotOAuthResponse struct {

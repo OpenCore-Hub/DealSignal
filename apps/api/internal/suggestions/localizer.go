@@ -17,6 +17,8 @@ type localizedStrings struct {
 	riskAction          string
 	questionReasonTmpl  string
 	questionAction      string
+	formalAskReasonTmpl string
+	formalAskAction     string
 
 	subtypeTitles map[string]string
 }
@@ -37,11 +39,14 @@ func newLocalizedStrings(lang string) *localizedStrings {
 			riskAction:          "优化材料首屏或换一种触达方式",
 			questionReasonTmpl:  "%s 提问：%s",
 			questionAction:      "在 AI 助手内回复并视情况跟进邮件",
+			formalAskReasonTmpl: "%s 提交了正式问答：%s",
+			formalAskAction:     "在 Formal Q&A 收件箱审核并发布正式答复",
 			subtypeTitles: map[string]string{
 				SubtypeHot:             "高意向信号",
 				SubtypeRevisit:         "重复访问",
 				SubtypeDownload:        "下载意向",
 				SubtypeQuestion:        "访客提问",
+				SubtypeFormalAsk:       "正式问答待审",
 				SubtypeBounce:          "跳出风险",
 				SubtypeExpired:         "过期链接访问",
 				SubtypeAccessExhausted: "访问次数耗尽",
@@ -66,11 +71,14 @@ func newLocalizedStrings(lang string) *localizedStrings {
 		riskAction:          "Optimize the first screen of the material or try another outreach method",
 		questionReasonTmpl:  "%s asked: %s",
 		questionAction:      "Reply in the AI assistant and follow up by email if appropriate",
+		formalAskReasonTmpl: "%s submitted a formal Q&A: %s",
+		formalAskAction:     "Review and publish a formal answer in the Formal Q&A inbox",
 		subtypeTitles: map[string]string{
 			SubtypeHot:             "High-intent signal",
 			SubtypeRevisit:         "Repeat visit",
 			SubtypeDownload:        "Download intent",
 			SubtypeQuestion:        "Visitor question",
+			SubtypeFormalAsk:       "Formal Q&A pending review",
 			SubtypeBounce:          "Bounce risk",
 			SubtypeExpired:         "Expired link accessed",
 			SubtypeAccessExhausted: "Access limit reached",

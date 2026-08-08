@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heatkw"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
@@ -21,21 +23,22 @@ var (
 
 // Suggestion is the public view of a generated suggestion.
 type Suggestion struct {
-	ID          string `json:"id"`
-	TenantID    string `json:"tenant_id"`
-	WorkspaceID string `json:"workspace_id"`
-	ContactID   string `json:"contact_id,omitempty"`
-	LinkID      string `json:"link_id"`
-	DocumentID  string `json:"document_id,omitempty"`
-	Type        string `json:"type"`
-	Subtype     string `json:"subtype,omitempty"`
-	Priority    string `json:"priority"`
-	Title       string `json:"title"`
-	Reason      string `json:"reason"`
-	Action      string `json:"action"`
-	Dismissed   bool   `json:"dismissed"`
-	CreatedAt   string `json:"created_at"`
-	UpdatedAt   string `json:"updated_at"`
+	ID           string `json:"id"`
+	TenantID     string `json:"tenant_id"`
+	WorkspaceID  string `json:"workspace_id"`
+	ContactID    string `json:"contact_id,omitempty"`
+	LinkID       string `json:"link_id"`
+	DocumentID   string `json:"document_id,omitempty"`
+	Type         string `json:"type"`
+	Subtype      string `json:"subtype,omitempty"`
+	Priority     string `json:"priority"`
+	Title        string `json:"title"`
+	Reason       string `json:"reason"`
+	Action       string `json:"action"`
+	Dismissed    bool   `json:"dismissed"`
+	SnoozedUntil string `json:"snoozed_until,omitempty"`
+	CreatedAt    string `json:"created_at"`
+	UpdatedAt    string `json:"updated_at"`
 }
 
 // Notifier enqueues notifications for high-intent signals.
@@ -175,7 +178,8 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 	} else if link.CreatedAt.Valid {
 		decayDays = time.Since(link.CreatedAt.Time).Hours() / 24
 	}
-	result = heat.Compute(heat.CircleDefault, metrics.heatInput(decayDays))
+	rs, _ := heatkw.LoadForWorkspaceUUID(ctx, s.queries, link.WorkspaceID, nil)
+	result = heat.Compute(rs.Circle, metrics.heatInput(decayDays))
 
 	contactIDs, err := s.queries.ListLinkContactsByLinkID(ctx, linkUUID)
 	if err != nil {
@@ -202,7 +206,7 @@ func (s *Service) Generate(ctx context.Context, workspaceID, linkID, lang string
 
 	keyPages, _ := s.queries.GetLinkKeyPageViewDetails(ctx, db.GetLinkKeyPageViewDetailsParams{
 		LinkID:   linkUUID,
-		Patterns: heat.KeyPagePatterns(heat.CircleDefault),
+		Patterns: rs.Patterns(),
 	})
 	keyPageTitles := make([]string, 0, len(keyPages))
 	for _, kp := range keyPages {
@@ -401,10 +405,12 @@ type WorkspaceSuggestion struct {
 	ContactEmail   string `json:"contactEmail"`
 	DocumentTitle  string `json:"documentTitle"`
 	LinkID         string `json:"linkId"`
+	DealRoomID     string `json:"dealRoomId,omitempty"`
 	HeatLevel      string `json:"heatLevel"`
 	Score          int    `json:"score"`
 	Reason         string `json:"reason"`
 	Action         string `json:"action"`
+	Kind           string `json:"kind,omitempty"` // e.g. formal_ask
 	LastActivityAt string `json:"lastActivityAt"`
 }
 
@@ -439,6 +445,9 @@ func (s *Service) ListWorkspace(ctx context.Context, workspaceID, lang string) (
 			Action:         r.Action,
 			LastActivityAt: r.UpdatedAt.Time.Format(time.RFC3339),
 		}
+		if r.Subtype.Valid && r.Subtype.String == SubtypeFormalAsk {
+			su.Kind = SubtypeFormalAsk
+		}
 		if su.ContactID != "" {
 			su.ContactEmail = contactEmailByID[su.ContactID]
 		}
@@ -454,6 +463,12 @@ func (s *Service) ListWorkspace(ctx context.Context, workspaceID, lang string) (
 		}
 
 		if r.LinkID.Valid {
+			if link, lerr := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
+				ID:          r.LinkID,
+				WorkspaceID: wsUUID,
+			}); lerr == nil && link.DealRoomID.Valid {
+				su.DealRoomID = uuidToString(link.DealRoomID)
+			}
 			res := s.linkHeatResult(ctx, r.LinkID)
 			su.Score = res.Score
 			su.HeatLevel = res.Level
@@ -484,7 +499,8 @@ func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.R
 	if revisits < 0 {
 		revisits = 0
 	}
-	keyPageViews, err := countKeyPageViews(ctx, s.queries, linkID, heat.CircleDefault)
+	patterns, circle := s.keyPagePatternsForLink(ctx, linkID)
+	keyPageViews, err := countKeyPageViews(ctx, s.queries, linkID, patterns)
 	if err != nil {
 		return heat.Result{Level: "cold"}
 	}
@@ -493,12 +509,12 @@ func (s *Service) linkHeatResult(ctx context.Context, linkID pgtype.UUID) heat.R
 	if lastAccess.Valid {
 		decayDays = time.Since(lastAccess.Time).Hours() / 24
 	}
-	return heat.Compute(heat.CircleDefault, heat.Input{
+	return heat.Compute(circle, heat.Input{
 		Opens:              int(access.Opens),
 		Revisits:           revisits,
 		AvgDurationMinutes: pageViews.AvgDurationSeconds / 60.0,
 		KeyPageViews:       keyPageViews,
-		ForwardSignals:     int(access.UniqueVisitors),
+		ForwardSignals:     int(access.ForwardSignals),
 		Downloads:          int(access.Downloads),
 		BouncePenalty:      int(bounce),
 		DecayDays:          decayDays,
@@ -523,12 +539,73 @@ func (s *Service) Dismiss(ctx context.Context, workspaceID, suggestionID string)
 		return derr
 	}
 	_, _ = s.queries.CreateSuggestionFeedback(ctx, db.CreateSuggestionFeedbackParams{
-		TenantID:      suggestion.TenantID,
-		WorkspaceID:   suggestion.WorkspaceID,
-		SuggestionID:  suggestion.ID,
-		FeedbackType:  "dismissed",
+		TenantID:     suggestion.TenantID,
+		WorkspaceID:  suggestion.WorkspaceID,
+		SuggestionID: suggestion.ID,
+		FeedbackType: "dismissed",
 	})
 	return nil
+}
+
+// AllowedSnoozeHours are the supported snooze durations (1d / 3d / 7d).
+var AllowedSnoozeHours = map[int]struct{}{24: {}, 72: {}, 168: {}}
+
+var ErrInvalidSnoozeDuration = errors.New("invalid snooze duration")
+
+// Snooze hides a suggestion until now+hours and mirrors snooze onto the linked radar action when present.
+func (s *Service) Snooze(ctx context.Context, workspaceID, suggestionID string, hours int) (Suggestion, error) {
+	if _, ok := AllowedSnoozeHours[hours]; !ok {
+		return Suggestion{}, ErrInvalidSnoozeDuration
+	}
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return Suggestion{}, err
+	}
+	id, err := pgUUID(suggestionID)
+	if err != nil {
+		return Suggestion{}, err
+	}
+	until := time.Now().UTC().Add(time.Duration(hours) * time.Hour)
+	row, err := s.queries.SnoozeSuggestion(ctx, db.SnoozeSuggestionParams{
+		ID:           id,
+		WorkspaceID:  wsUUID,
+		SnoozedUntil: pgtype.Timestamptz{Time: until, Valid: true},
+	})
+	if err != nil {
+		return Suggestion{}, ErrSuggestionNotFound
+	}
+	_, _ = s.queries.CreateSuggestionFeedback(ctx, db.CreateSuggestionFeedbackParams{
+		TenantID:     row.TenantID,
+		WorkspaceID:  row.WorkspaceID,
+		SuggestionID: row.ID,
+		FeedbackType: "snoozed",
+	})
+	s.mirrorSnoozeRadarActions(ctx, wsUUID, id, row.Metadata)
+	return suggestionFromRow(row, ""), nil
+}
+
+// mirrorSnoozeRadarActions snoozes suggestion-linked signal actions and Formal Ask operational todos (by turn_id).
+func (s *Service) mirrorSnoozeRadarActions(ctx context.Context, wsUUID, suggestionID pgtype.UUID, metadata []byte) {
+	if sig, err := s.queries.GetSignalBySuggestion(ctx, db.GetSignalBySuggestionParams{
+		SuggestionID: suggestionID,
+		WorkspaceID:  wsUUID,
+	}); err == nil {
+		_ = s.queries.SnoozeActionItemsBySignal(ctx, db.SnoozeActionItemsBySignalParams{
+			SignalID:    sig.ID,
+			WorkspaceID: wsUUID,
+		})
+	}
+	turnID := metadataString(metadata, "turn_id")
+	if turnID == "" {
+		return
+	}
+	for _, sourceType := range []string{"link_question", "deal_room_link_question"} {
+		_ = s.queries.SnoozeActionItemBySource(ctx, db.SnoozeActionItemBySourceParams{
+			WorkspaceID: wsUUID,
+			SourceType:  pgtype.Text{String: sourceType, Valid: true},
+			SourceID:    pgtype.Text{String: turnID, Valid: true},
+		})
+	}
 }
 
 // RulePerformance aggregates per-rule precision/recall signals for a workspace.
@@ -580,8 +657,15 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *Feature
 	var m suggestionMetrics
 
 	// Lifetime metrics: use a fresh feature snapshot if available.
+	// Always overlay live forward_signals so heat stays truthful when
+	// link_features.forward_signals is still 0 (pre-migration-150 / stale cache).
 	if snap != nil && snap.Found {
 		m = snap.toSuggestionMetrics()
+		access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
+		if err != nil {
+			return m, err
+		}
+		m.forwardSignals = int(access.ForwardSignals)
 	} else {
 		access, err := s.queries.GetLinkAccessMetrics(ctx, linkID)
 		if err != nil {
@@ -589,6 +673,7 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *Feature
 		}
 		m.opens = int(access.Opens)
 		m.uniqueVisitors = int(access.UniqueVisitors)
+		m.forwardSignals = int(access.ForwardSignals)
 		m.downloads = int(access.Downloads)
 
 		pv, err := s.queries.GetLinkPageViewMetrics(ctx, linkID)
@@ -596,7 +681,8 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *Feature
 			return m, err
 		}
 		m.avgDurationMinutes = pv.AvgDurationSeconds / 60.0
-		keyViews, err := countKeyPageViews(ctx, s.queries, linkID, heat.CircleDefault)
+		patterns, _ := s.keyPagePatternsForLink(ctx, linkID)
+		keyViews, err := countKeyPageViews(ctx, s.queries, linkID, patterns)
 		if err != nil {
 			return m, fmt.Errorf("key page view metrics: %w", err)
 		}
@@ -634,7 +720,8 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *Feature
 	m.avgDurationMinutes24h = pv24h.AvgDurationSeconds / 60.0
 	m.totalPageViews24h = int(pv24h.TotalPageViews)
 
-	keyViews24h, err := countKeyPageViews24h(ctx, s.queries, linkID, heat.CircleDefault)
+	patterns24h, _ := s.keyPagePatternsForLink(ctx, linkID)
+	keyViews24h, err := countKeyPageViews24h(ctx, s.queries, linkID, patterns24h)
 	if err != nil {
 		return m, fmt.Errorf("key page view metrics 24h: %w", err)
 	}
@@ -658,6 +745,7 @@ type suggestionMetrics struct {
 	totalPageViews     int
 	downloads          int
 	bounces            int
+	forwardSignals     int
 	// 24h rolling window fields used by expression rules.
 	opens24h              int
 	uniqueVisitors24h     int
@@ -699,7 +787,7 @@ func (m suggestionMetrics) heatInput(decayDays float64) heat.Input {
 		Revisits:           m.revisits,
 		AvgDurationMinutes: m.avgDurationMinutes,
 		KeyPageViews:       m.keyPageViews,
-		ForwardSignals:     m.uniqueVisitors,
+		ForwardSignals:     m.forwardSignals,
 		Downloads:          m.downloads,
 		BouncePenalty:      m.bounces,
 		DecayDays:          decayDays,
@@ -734,6 +822,9 @@ func suggestionFromRow(r db.Suggestion, lang string) Suggestion {
 	if r.ContactID.Valid {
 		s.ContactID = uuidToString(r.ContactID)
 	}
+	if r.SnoozedUntil.Valid {
+		s.SnoozedUntil = r.SnoozedUntil.Time.UTC().Format(time.RFC3339)
+	}
 	s.Priority = priorityForType(r.Type)
 	s.Title = titleForSubtype(r.Subtype.String, r.Type, lang)
 	return s
@@ -762,9 +853,8 @@ func titleForType(typ, lang string) string {
 	}
 }
 
-// countKeyPageViews counts page views whose page title matches the circle's key-page keywords.
-func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.UUID, circle heat.Circle) (int, error) {
-	patterns := heat.KeyPagePatterns(circle)
+// countKeyPageViews counts page views whose page title matches the given patterns.
+func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.UUID, patterns []string) (int, error) {
 	if len(patterns) == 0 {
 		return 0, nil
 	}
@@ -778,9 +868,8 @@ func countKeyPageViews(ctx context.Context, queries *db.Queries, linkID pgtype.U
 	return int(metrics.TotalKeyPageViews), nil
 }
 
-// countKeyPageViews24h counts 24-hour key-page views for the circle.
-func countKeyPageViews24h(ctx context.Context, queries *db.Queries, linkID pgtype.UUID, circle heat.Circle) (int, error) {
-	patterns := heat.KeyPagePatterns(circle)
+// countKeyPageViews24h counts 24-hour key-page views for the given patterns.
+func countKeyPageViews24h(ctx context.Context, queries *db.Queries, linkID pgtype.UUID, patterns []string) (int, error) {
 	if len(patterns) == 0 {
 		return 0, nil
 	}
@@ -794,11 +883,20 @@ func countKeyPageViews24h(ctx context.Context, queries *db.Queries, linkID pgtyp
 	return int(metrics.TotalKeyPageViews), nil
 }
 
+func (s *Service) keyPagePatternsForLink(ctx context.Context, linkID pgtype.UUID) ([]string, heat.Circle) {
+	link, err := s.queries.GetLinkByID(ctx, linkID)
+	if err != nil {
+		rs := heat.NewRuleSet(heat.CircleDefault, nil)
+		return rs.Patterns(), rs.Circle
+	}
+	rs, _ := heatkw.LoadForWorkspaceUUID(ctx, s.queries, link.WorkspaceID, nil)
+	return rs.Patterns(), rs.Circle
+}
+
 // TitleForType returns the localized title for a suggestion/signal type.
 func TitleForType(typ, lang string) string {
 	return titleForType(typ, lang)
 }
-
 
 func shouldEnrich(typ, subtype string) bool {
 	if typ == "hot_signal" {
@@ -813,6 +911,17 @@ func metadataToBytes(m map[string]string) []byte {
 	}
 	b, _ := json.Marshal(m)
 	return b
+}
+
+func metadataString(raw []byte, key string) string {
+	if len(raw) == 0 || key == "" {
+		return ""
+	}
+	var m map[string]string
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(m[key])
 }
 
 // suggestionFocusPages holds real page anchors for deep links.

@@ -25,7 +25,7 @@ func TestExchangeSlack(t *testing.T) {
 			t.Fatalf("unexpected code: %s", r.FormValue("code"))
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"ok":true,"access_token":"xoxb-token","scope":"chat:write","team":{"id":"T123"}}`))
+		_, _ = w.Write([]byte(`{"ok":true,"access_token":"xoxb-token","scope":"chat:write,incoming-webhook","team":{"id":"T123"},"incoming_webhook":{"url":"https://hooks.slack.com/services/T/B/X","channel":"#deals"}}`))
 	}))
 	defer server.Close()
 
@@ -34,18 +34,21 @@ func TestExchangeSlack(t *testing.T) {
 	svc.httpClient = server.Client()
 	svc.slackTokenURL = server.URL + "/api/oauth.v2.access"
 
-	token, err := svc.exchangeSlack(context.Background(), "auth-code")
+	token, webhook, err := svc.exchangeSlack(context.Background(), "auth-code")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if token.AccessToken != "xoxb-token" {
 		t.Fatalf("expected access token xoxb-token, got %s", token.AccessToken)
 	}
-	if token.Scope.String != "chat:write" {
-		t.Fatalf("expected scope chat:write, got %s", token.Scope.String)
+	if token.Scope.String != "chat:write,incoming-webhook" {
+		t.Fatalf("expected scope with incoming-webhook, got %s", token.Scope.String)
 	}
 	if token.ExternalID.String != "T123" {
 		t.Fatalf("expected team id T123, got %s", token.ExternalID.String)
+	}
+	if webhook != "https://hooks.slack.com/services/T/B/X" {
+		t.Fatalf("webhook=%s", webhook)
 	}
 }
 
@@ -61,7 +64,7 @@ func TestExchangeSlack_Error(t *testing.T) {
 	svc.httpClient = server.Client()
 	svc.slackTokenURL = server.URL + "/api/oauth.v2.access"
 
-	_, err := svc.exchangeSlack(context.Background(), "bad-code")
+	_, _, err := svc.exchangeSlack(context.Background(), "bad-code")
 	if err == nil || !strings.Contains(err.Error(), "invalid_code") {
 		t.Fatalf("expected slack error, got %v", err)
 	}

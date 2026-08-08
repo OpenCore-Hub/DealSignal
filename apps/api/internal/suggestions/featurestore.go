@@ -7,6 +7,7 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heatkw"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -22,6 +23,7 @@ type FeatureSnapshot struct {
 	KeyPageViews       int
 	Downloads          int
 	Bounces            int
+	ForwardSignals     int
 	DistinctIPs1h      int64
 	DistinctEmails24h  int64
 	UnknownEmails24h   int64
@@ -64,6 +66,7 @@ func (f *FeatureStore) ComputeAndStore(ctx context.Context, linkID pgtype.UUID) 
 		KeyPageViews:        int32(snapshot.KeyPageViews),
 		Downloads:           int32(snapshot.Downloads),
 		Bounces:             int32(snapshot.Bounces),
+		ForwardSignals:      int32(snapshot.ForwardSignals),
 		DistinctIps1h:       snapshot.DistinctIPs1h,
 		DistinctEmails24h:   snapshot.DistinctEmails24h,
 		UnknownEmails24h:    snapshot.UnknownEmails24h,
@@ -96,6 +99,7 @@ func (f *FeatureStore) GetForLink(ctx context.Context, linkID pgtype.UUID) (Feat
 		KeyPageViews:       int(row.KeyPageViews),
 		Downloads:          int(row.Downloads),
 		Bounces:            int(row.Bounces),
+		ForwardSignals:     int(row.ForwardSignals),
 		DistinctIPs1h:      row.DistinctIps1h,
 		DistinctEmails24h:  row.DistinctEmails24h,
 		UnknownEmails24h:   row.UnknownEmails24h,
@@ -113,6 +117,7 @@ func (fs FeatureSnapshot) toSuggestionMetrics() suggestionMetrics {
 		totalPageViews:     fs.TotalPageViews,
 		downloads:          fs.Downloads,
 		bounces:            fs.Bounces,
+		forwardSignals:     fs.ForwardSignals,
 	}
 }
 
@@ -135,6 +140,7 @@ func (f *FeatureStore) compute(ctx context.Context, linkID pgtype.UUID) (Feature
 	out.Opens = int(access.Opens)
 	out.UniqueVisitors = int(access.UniqueVisitors)
 	out.Downloads = int(access.Downloads)
+	out.ForwardSignals = int(access.ForwardSignals)
 	out.Revisits = out.Opens - out.UniqueVisitors
 	if out.Revisits < 0 {
 		out.Revisits = 0
@@ -154,7 +160,13 @@ func (f *FeatureStore) compute(ctx context.Context, linkID pgtype.UUID) (Feature
 	}
 	out.Bounces = int(bounces)
 
-	keyViews, err := countKeyPageViews(ctx, f.queries, linkID, heat.CircleDefault)
+	patterns := heat.NewRuleSet(heat.CircleDefault, nil).Patterns()
+	if link, lerr := f.queries.GetLinkByID(ctx, linkID); lerr == nil {
+		if rs, rerr := heatkw.LoadForWorkspaceUUID(ctx, f.queries, link.WorkspaceID, nil); rerr == nil {
+			patterns = rs.Patterns()
+		}
+	}
+	keyViews, err := countKeyPageViews(ctx, f.queries, linkID, patterns)
 	if err != nil {
 		return out, fmt.Errorf("key page views: %w", err)
 	}

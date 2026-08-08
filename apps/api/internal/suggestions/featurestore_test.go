@@ -16,6 +16,7 @@ func TestFeatureSnapshotConversions(t *testing.T) {
 		KeyPageViews:       3,
 		Downloads:          2,
 		Bounces:            1,
+		ForwardSignals:     2,
 		DistinctIPs1h:      4,
 		DistinctEmails24h:  3,
 		UnknownEmails24h:   1,
@@ -24,7 +25,8 @@ func TestFeatureSnapshotConversions(t *testing.T) {
 
 	m := fs.toSuggestionMetrics()
 	if m.opens != 10 || m.uniqueVisitors != 5 || m.revisits != 5 || m.avgDurationMinutes != 2.0 ||
-		m.totalPageViews != 15 || m.keyPageViews != 3 || m.downloads != 2 || m.bounces != 1 {
+		m.totalPageViews != 15 || m.keyPageViews != 3 || m.downloads != 2 || m.bounces != 1 ||
+		m.forwardSignals != 2 {
 		t.Fatalf("unexpected suggestionMetrics: %+v", m)
 	}
 

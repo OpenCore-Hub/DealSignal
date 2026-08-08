@@ -70,6 +70,7 @@ type Querier interface {
 	MarkNotificationFailed(ctx context.Context, arg db.MarkNotificationFailedParams) error
 	MarkNotificationSent(ctx context.Context, arg db.MarkNotificationSentParams) error
 	GetNotificationSettings(ctx context.Context, workspaceID pgtype.UUID) (db.NotificationSetting, error)
+	GetWorkspaceOutboundWebhook(ctx context.Context, workspaceID pgtype.UUID) (db.WorkspaceOutboundWebhook, error)
 	GetUserByID(ctx context.Context, id pgtype.UUID) (db.User, error)
 }
 
@@ -230,6 +231,8 @@ func (s *Service) sendOne(ctx context.Context, n db.Notification) (string, error
 		return s.sendEmail(ctx, n)
 	case "slack":
 		return "", s.sendSlack(ctx, n)
+	case "webhook":
+		return "", s.sendWebhook(ctx, n)
 	default:
 		return "", fmt.Errorf("unsupported channel: %s", n.Channel)
 	}
