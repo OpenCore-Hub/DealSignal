@@ -2503,7 +2503,7 @@ WHERE al.workspace_id = $1
   AND al.visitor_email <> ''
   AND NOT EXISTS (
       SELECT 1 FROM contacts c
-      WHERE c.workspace_id = al.workspace_id AND c.email = al.visitor_email
+      WHERE c.workspace_id = al.workspace_id AND LOWER(c.email) = LOWER(al.visitor_email)
   );
 
 -- name: GetContactAggregateByEmail :one
@@ -2515,7 +2515,7 @@ WITH email_logs AS (
         al.event_type,
         al.created_at
     FROM access_logs al
-    WHERE al.workspace_id = $1 AND al.visitor_email ILIKE $2
+    WHERE al.workspace_id = $1 AND LOWER(al.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
 ),
 log_stats AS (
     SELECT
@@ -2553,7 +2553,7 @@ WITH visitor_ids AS (
     SELECT DISTINCT al.visitor_id
     FROM access_logs al
     WHERE al.workspace_id = $1
-      AND al.visitor_email ILIKE $2
+      AND LOWER(al.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
       AND al.visitor_id IS NOT NULL
       AND al.visitor_id <> ''
 )
@@ -2576,7 +2576,7 @@ FROM (
         created_at,
         visitor_id
     FROM access_logs al2
-    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    WHERE al2.workspace_id = $1 AND LOWER(al2.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
     UNION ALL
     SELECT
         id,
@@ -2592,27 +2592,52 @@ FROM (
 JOIN links l ON l.id = e.link_id
 LEFT JOIN documents d ON d.id = l.document_id
 ORDER BY e.created_at DESC
-LIMIT $3;
+LIMIT sqlc.arg(row_limit);
 
 -- name: ListContactViewedDocumentIDs :many
 WITH visitor_ids AS (
     SELECT DISTINCT al.visitor_id
     FROM access_logs al
     WHERE al.workspace_id = $1
-      AND al.visitor_email ILIKE $2
+      AND LOWER(al.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
       AND al.visitor_id IS NOT NULL
       AND al.visitor_id <> ''
 )
 SELECT DISTINCT l.document_id::text AS document_id
 FROM (
     SELECT link_id FROM access_logs al2
-    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    WHERE al2.workspace_id = $1 AND LOWER(al2.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
     UNION
     SELECT link_id FROM page_views pv2
     WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
 ) e
 JOIN links l ON l.id = e.link_id
 WHERE l.document_id IS NOT NULL;
+
+-- name: ListContactViewedDocuments :many
+-- Viewed documents with titles for contact detail "Documents" tab.
+WITH visitor_ids AS (
+    SELECT DISTINCT al.visitor_id
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND LOWER(al.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_id <> ''
+)
+SELECT DISTINCT
+    l.document_id::text AS document_id,
+    COALESCE(d.title, '')::text AS title
+FROM (
+    SELECT link_id FROM access_logs al2
+    WHERE al2.workspace_id = $1 AND LOWER(al2.visitor_email) = LOWER(sqlc.arg(visitor_email)::text)
+    UNION
+    SELECT link_id FROM page_views pv2
+    WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+) e
+JOIN links l ON l.id = e.link_id
+LEFT JOIN documents d ON d.id = l.document_id
+WHERE l.document_id IS NOT NULL
+ORDER BY title ASC;
 
 -- name: ListContactViewedDocumentIDsByWorkspace :many
 -- One-shot batch of viewed documents for all visitor emails in a workspace.
@@ -3186,6 +3211,14 @@ SET updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: SetLinkAskSessionVisitorEmailIfEmpty :one
+UPDATE link_ask_sessions
+SET visitor_email = $2,
+    updated_at = now()
+WHERE id = $1
+  AND (visitor_email IS NULL OR visitor_email = '')
+RETURNING *;
+
 -- name: CreateLinkAskTurn :one
 INSERT INTO link_ask_turns (
     session_id,
@@ -3302,7 +3335,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.id = $1
@@ -3334,7 +3367,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.link_id = $1
@@ -3365,7 +3398,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
@@ -3472,7 +3505,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.link_id = $1
@@ -3505,7 +3538,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
@@ -3542,6 +3575,25 @@ WHERE l.id = t.link_id
   AND t.formal_publish_at <= now()
 RETURNING t.id, t.link_id, t.host_answer, t.answered_by;
 
+-- name: PublishDueFormalAskTurnsGlobal :many
+-- Background worker batch: claim due scheduled formal turns without blocking readers.
+UPDATE link_ask_turns
+SET formal_status = 'published',
+    formal_published_at = now(),
+    status = 'host_answered',
+    updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM link_ask_turns
+    WHERE formal_status = 'scheduled'
+      AND formal_publish_at IS NOT NULL
+      AND formal_publish_at <= now()
+    ORDER BY formal_publish_at ASC
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, workspace_id, link_id, host_answer, answered_by;
+
 -- name: ScheduleFormalAskTurn :execrows
 UPDATE link_ask_turns
 SET host_answer = $1,
@@ -3558,12 +3610,36 @@ WHERE id = $8
   AND formal_status IN ('pending_review', 'scheduled');
 
 -- name: ListLinkPublishedFormalAsk :many
-SELECT *
-FROM link_ask_turns
-WHERE link_id = $1
-  AND workspace_id = $2
-  AND formal_status = 'published'
-ORDER BY formal_published_at DESC NULLS LAST, created_at DESC
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
+FROM link_ask_turns t
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+WHERE t.link_id = $1
+  AND t.workspace_id = $2
+  AND t.formal_status = 'published'
+ORDER BY t.formal_published_at DESC NULLS LAST, t.created_at DESC
 LIMIT $3;
 
 -- name: ListRoomPublishedFormalAsk :many
@@ -3590,9 +3666,11 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    l.name AS link_name
+    l.name AS link_name,
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.workspace_id = $2
   AND t.formal_status = 'published'
 ORDER BY t.formal_published_at DESC NULLS LAST, t.created_at DESC

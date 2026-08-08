@@ -10,6 +10,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestMeUnauthorizedWithoutToken(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	h := &Handler{cfg: &config.Config{AppEnv: "development"}, service: NewService(nil, NewMemoryTokenStore())}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodGet, "/auth/me", nil)
+	h.Me(c)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", w.Code)
+	}
+}
+
 func TestSetAuthCookiesDevelopment(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	w := httptest.NewRecorder()

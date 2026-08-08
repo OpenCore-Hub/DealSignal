@@ -6,11 +6,39 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/pdfcpu/pdfcpu/pkg/api"
 )
+
+func TestWatermarkTextForUsesWorldUTC(t *testing.T) {
+	h := &Handler{cfg: &config.Config{IPHashKey: "test-ip-hash-key"}}
+	got := h.watermarkTextFor("visitor@example.com", "203.0.113.10")
+	if !strings.HasPrefix(got, "visitor@example.com | ") {
+		t.Fatalf("prefix = %q", got)
+	}
+	if !strings.Contains(got, " UTC | IP:") {
+		t.Fatalf("expected world-unified UTC stamp, got %q", got)
+	}
+	// Must not use RFC3339 "T…Z" form in the visible stamp.
+	parts := strings.Split(got, " | ")
+	if len(parts) != 3 {
+		t.Fatalf("expected 3 segments, got %q", got)
+	}
+	stamp := parts[1]
+	if strings.Contains(stamp, "T") && strings.Contains(stamp, "Z") {
+		t.Fatalf("unexpected RFC3339 stamp %q", stamp)
+	}
+	if !strings.HasSuffix(stamp, " UTC") {
+		t.Fatalf("timestamp segment = %q", stamp)
+	}
+	if _, err := time.Parse(watermarkUTCLayout, stamp); err != nil {
+		t.Fatalf("parse stamp %q: %v", stamp, err)
+	}
+}
 
 func TestSignDownloadResource(t *testing.T) {
 	secret := "test-secret"

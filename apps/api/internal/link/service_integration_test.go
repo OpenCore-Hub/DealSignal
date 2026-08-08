@@ -220,7 +220,8 @@ func newFixture(t *testing.T) *testFixture {
 			URLSigningSecret:   "test-url-signing-secret",
 			InviteTokenHashKey: "test-invite-token-hash-key",
 		},
-		emailSem: make(chan struct{}, 8),
+		emailSem:             make(chan struct{}, 8),
+		formalAskEntitlement: allowAllFormalAskEntitlement{},
 	}
 	q := db.New(tx)
 
@@ -537,10 +538,10 @@ func TestUpdateLink_CombinationCases(t *testing.T) {
 		docID := uuid.UUID(f.link.DocumentID.Bytes).String()
 
 		updated, err := f.svc.UpdateLink(f.ctx, uuid.UUID(f.link.ID.Bytes).String(), wsID, UpdateLinkRequest{
-			DocumentIDs:  []string{docID},
-			Name:         "NDA Link",
-			RequireNDA:   true,
-			NDADocumentID: docID,
+			DocumentIDs:    []string{docID},
+			Name:           "NDA Link",
+			RequireNDA:     true,
+			NDADocumentID:  docID,
 			PermissionType: "public",
 		})
 		if err != nil {
@@ -1525,7 +1526,7 @@ func TestCreateLinkAccessRules_Integration(t *testing.T) {
 		defer f.cleanup()
 
 		link, err := f.svc.CreateLink(f.ctx, uuid.UUID(f.user.ID.Bytes).String(), uuid.UUID(f.workspace.ID.Bytes).String(), CreateLinkRequest{
-			DocumentID:    uuid.UUID(f.link.DocumentID.Bytes).String(),
+			DocumentID:     uuid.UUID(f.link.DocumentID.Bytes).String(),
 			Name:           "Blocked Viewers Link",
 			PermissionType: "public",
 			RequireEmail:   false,

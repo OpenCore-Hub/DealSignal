@@ -53,6 +53,7 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/refresh", h.Refresh)
 	g.POST("/logout", h.Logout)
 	g.GET("/verify-email/:token", h.VerifyEmail)
+	g.GET("/me", h.Me)
 }
 
 func isRequestSecure(c *gin.Context) bool {
@@ -153,6 +154,26 @@ func (h *Handler) Login(c *gin.Context) {
 
 	h.setAuthCookies(c, pair)
 	c.JSON(http.StatusOK, gin.H{"user": user, "expires_in": pair.ExpiresIn})
+}
+
+// Me returns the authenticated user's public profile (login email for owner watermark, etc.).
+func (h *Handler) Me(c *gin.Context) {
+	token := accessTokenFromRequest(c)
+	if token == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "missing authorization"})
+		return
+	}
+	claims, err := h.service.ValidateAccessToken(c.Request.Context(), token)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "invalid or expired token"})
+		return
+	}
+	user, err := h.service.GetUser(c.Request.Context(), claims.Subject)
+	if err != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"code": "unauthorized", "message": "user not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"user": user})
 }
 
 // Refresh issues a new token pair from the refresh cookie.

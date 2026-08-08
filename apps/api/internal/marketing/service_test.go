@@ -2,14 +2,19 @@ package marketing
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/mailer"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const testWorkspaceID = "11111111-1111-1111-1111-111111111111"
+const otherWorkspaceID = "22222222-2222-2222-2222-222222222222"
 
 type mockMailer struct {
 	calls []mailer.EmailJob
@@ -33,9 +38,13 @@ func (m *mockMailer) SendLinkAccessCodeEmail(ctx context.Context, to, code, link
 }
 
 type stubQuerier struct {
-	logs    []db.EmailLog
-	updates []db.UpdateEmailLogStatusParams
-	nextID  int
+	logs          []db.EmailLog
+	updates       []db.UpdateEmailLogStatusParams
+	// contactEmailsByWorkspace maps workspace UUID string → contact emails.
+	// Legacy field contactEmails seeds testWorkspaceID when the map is empty.
+	contactEmails             []string
+	contactEmailsByWorkspace  map[string][]string
+	nextID                    int
 }
 
 func (q *stubQuerier) CreateEmailLog(ctx context.Context, arg db.CreateEmailLogParams) (db.EmailLog, error) {
@@ -57,9 +66,29 @@ func (q *stubQuerier) UpdateEmailLogStatus(ctx context.Context, arg db.UpdateEma
 	return nil
 }
 
+func (q *stubQuerier) ListContactsByWorkspace(_ context.Context, workspaceID pgtype.UUID) ([]db.Contact, error) {
+	if !workspaceID.Valid {
+		return nil, nil
+	}
+	key := uuid.UUID(workspaceID.Bytes).String()
+	emails := q.contactEmailsByWorkspace[key]
+	if emails == nil && key == testWorkspaceID {
+		emails = q.contactEmails
+	}
+	out := make([]db.Contact, 0, len(emails))
+	for _, email := range emails {
+		out = append(out, db.Contact{
+			ID:          pgtype.UUID{Bytes: uuid.New(), Valid: true},
+			WorkspaceID: workspaceID,
+			Email:       pgtype.Text{String: email, Valid: true},
+		})
+	}
+	return out, nil
+}
+
 func TestSendBatchRequiresRecipients(t *testing.T) {
 	svc := NewService(&stubQuerier{}, &mockMailer{}, "log")
-	_, err := svc.SendBatch(context.Background(), "ws-1", SendBatchRequest{
+	_, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
 		Recipients: []string{},
 		Subject:    "Test",
 	})
@@ -67,19 +96,61 @@ func TestSendBatchRequiresRecipients(t *testing.T) {
 }
 
 func TestSendBatchRequiresSubject(t *testing.T) {
-	svc := NewService(&stubQuerier{}, &mockMailer{}, "log")
-	_, err := svc.SendBatch(context.Background(), "ws-1", SendBatchRequest{
+	svc := NewService(&stubQuerier{contactEmails: []string{"a@example.com"}}, &mockMailer{}, "log")
+	_, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
 		Recipients: []string{"a@example.com"},
 	})
 	require.ErrorIs(t, err, ErrSubjectRequired)
 }
 
+func TestSendBatchRejectsUnknownRecipients(t *testing.T) {
+	svc := NewService(&stubQuerier{contactEmails: []string{"a@example.com"}}, &mockMailer{}, "log")
+	_, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
+		Recipients: []string{"a@example.com", "outsider@evil.test"},
+		Subject:    "Hi",
+	})
+	var unknown *ErrRecipientsNotInWorkspace
+	require.ErrorAs(t, err, &unknown)
+	assert.Equal(t, []string{"outsider@evil.test"}, unknown.Unknown)
+}
+
+func TestSendBatchRejectsOtherWorkspaceContacts(t *testing.T) {
+	// Email exists only in another workspace — must not be sendable here.
+	q := &stubQuerier{
+		contactEmailsByWorkspace: map[string][]string{
+			testWorkspaceID:  {"local@example.com"},
+			otherWorkspaceID: {"partner@other-ws.test"},
+		},
+	}
+	svc := NewService(q, &mockMailer{}, "log")
+	_, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
+		Recipients: []string{"partner@other-ws.test"},
+		Subject:    "Hi",
+	})
+	var unknown *ErrRecipientsNotInWorkspace
+	require.ErrorAs(t, err, &unknown)
+	assert.Equal(t, []string{"partner@other-ws.test"}, unknown.Unknown)
+}
+
+func TestSendBatchRejectsTooManyRecipients(t *testing.T) {
+	emails := make([]string, MaxBatchRecipients+1)
+	for i := range emails {
+		emails[i] = fmt.Sprintf("user%d@example.com", i)
+	}
+	svc := NewService(&stubQuerier{contactEmails: emails}, &mockMailer{}, "log")
+	_, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
+		Recipients: emails,
+		Subject:    "Hi",
+	})
+	require.ErrorIs(t, err, ErrTooManyRecipients)
+}
+
 func TestSendBatchUsesBatchSender(t *testing.T) {
-	queries := &stubQuerier{}
+	queries := &stubQuerier{contactEmails: []string{"a@example.com", "bad@example.com", "b@example.com"}}
 	mm := &mockBatchMailer{fail: map[string]bool{"bad@example.com": true}}
 	svc := NewService(queries, mm, "log")
 
-	result, err := svc.SendBatch(context.Background(), "ws-1", SendBatchRequest{
+	result, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
 		Recipients:  []string{"a@example.com", "bad@example.com", "b@example.com"},
 		Subject:     "Newsletter",
 		Body:        "Hello",
@@ -157,11 +228,11 @@ func (m *mockBatchMailer) SendBatch(ctx context.Context, jobs []mailer.EmailJob)
 }
 
 func TestSendBatchFallsBackToIndividual(t *testing.T) {
-	queries := &stubQuerier{}
+	queries := &stubQuerier{contactEmails: []string{"a@example.com", "bad@example.com", "b@example.com"}}
 	mm := &mockMailer{fail: map[string]bool{"bad@example.com": true}}
 	svc := NewService(queries, mm, "log")
 
-	result, err := svc.SendBatch(context.Background(), "ws-1", SendBatchRequest{
+	result, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
 		Recipients:  []string{"a@example.com", "bad@example.com", "b@example.com"},
 		Subject:     "Newsletter",
 		Body:        "Hello",
@@ -200,4 +271,19 @@ func TestSendBatchFallsBackToIndividual(t *testing.T) {
 	}
 	assert.Equal(t, 2, statuses["sent"])
 	assert.Equal(t, 1, statuses["failed"])
+}
+
+func TestSendBatchDeduplicatesRecipients(t *testing.T) {
+	queries := &stubQuerier{contactEmails: []string{"a@example.com"}}
+	mm := &mockMailer{}
+	svc := NewService(queries, mm, "log")
+
+	result, err := svc.SendBatch(context.Background(), testWorkspaceID, SendBatchRequest{
+		Recipients: []string{"A@example.com", "a@example.com", " a@example.com "},
+		Subject:    "Hi",
+	})
+	require.NoError(t, err)
+	assert.Equal(t, 1, result.Sent)
+	require.Len(t, mm.calls, 1)
+	assert.Equal(t, "a@example.com", mm.calls[0].Recipient)
 }

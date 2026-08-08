@@ -85,3 +85,22 @@ func TestAllowAskAIDeniesWhenRPMLimited(t *testing.T) {
 		t.Fatalf("unexpected keys: %v", lim.keys)
 	}
 }
+
+func TestAllowAskFormalUsesDailyKey(t *testing.T) {
+	lim := &mockLimiter{allow: true}
+	ok, err := AllowAskFormal(context.Background(), lim, "link-1", "v1", Limits{})
+	if err != nil || !ok {
+		t.Fatalf("expected Formal allowed, ok=%v err=%v", ok, err)
+	}
+	if len(lim.keys) != 1 || lim.keys[0] != "ask_formal_day:link-1:v1" {
+		t.Fatalf("unexpected keys: %v", lim.keys)
+	}
+}
+
+func TestAllowAskFormalDeniesWhenOverLimit(t *testing.T) {
+	lim := &mockLimiter{allow: false}
+	ok, err := AllowAskFormal(context.Background(), lim, "link-1", "v1", Limits{AskFormalDailyLimit: 5})
+	if err != nil || ok {
+		t.Fatalf("expected Formal deny, ok=%v err=%v", ok, err)
+	}
+}

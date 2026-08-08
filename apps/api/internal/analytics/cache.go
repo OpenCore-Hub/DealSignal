@@ -42,3 +42,11 @@ func (c *RedisCache) Set(ctx context.Context, key string, value interface{}, ttl
 	}
 	return c.client.RDB().Set(ctx, key, data, ttl).Err()
 }
+
+// Delete removes a cached key (best-effort; missing keys are not an error).
+func (c *RedisCache) Delete(ctx context.Context, key string) error {
+	if c == nil || c.client == nil {
+		return errors.New("redis cache not available")
+	}
+	return c.client.Del(ctx, key)
+}

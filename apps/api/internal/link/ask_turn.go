@@ -33,23 +33,23 @@ var (
 
 // PublicAskTurn is the visitor-facing projection of a unified Ask turn.
 type PublicAskTurn struct {
-	ID             string        `json:"id"`
-	SessionID      string        `json:"session_id"`
-	Question       string        `json:"question"`
-	Lane           string        `json:"lane"`
-	Status         string        `json:"status"`
-	AIPayload      *AskAIPayload `json:"ai_payload,omitempty"`
-	HostAnswer     string        `json:"host_answer,omitempty"`
-	RouteReason    string        `json:"route_reason,omitempty"`
-	PinnedFAQAt       *time.Time `json:"pinned_faq_at,omitempty"`
-	PinnedFAQBy       string     `json:"pinned_faq_by,omitempty"`
-	PinnedFAQSort     *int       `json:"pinned_faq_sort,omitempty"`
-	FormalStatus      string     `json:"formal_status,omitempty"`
-	FormalPublishAt   *time.Time `json:"formal_publish_at,omitempty"`
-	FormalPublishedAt *time.Time `json:"formal_published_at,omitempty"`
-	FormalAnonymize   bool       `json:"formal_anonymize,omitempty"`
-	CreatedAt         time.Time  `json:"created_at"`
-	UpdatedAt      time.Time     `json:"updated_at"`
+	ID                string        `json:"id"`
+	SessionID         string        `json:"session_id"`
+	Question          string        `json:"question"`
+	Lane              string        `json:"lane"`
+	Status            string        `json:"status"`
+	AIPayload         *AskAIPayload `json:"ai_payload,omitempty"`
+	HostAnswer        string        `json:"host_answer,omitempty"`
+	RouteReason       string        `json:"route_reason,omitempty"`
+	PinnedFAQAt       *time.Time    `json:"pinned_faq_at,omitempty"`
+	PinnedFAQBy       string        `json:"pinned_faq_by,omitempty"`
+	PinnedFAQSort     *int          `json:"pinned_faq_sort,omitempty"`
+	FormalStatus      string        `json:"formal_status,omitempty"`
+	FormalPublishAt   *time.Time    `json:"formal_publish_at,omitempty"`
+	FormalPublishedAt *time.Time    `json:"formal_published_at,omitempty"`
+	FormalAnonymize   bool          `json:"formal_anonymize,omitempty"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 func mapPublicAskTurn(t db.LinkAskTurn) PublicAskTurn {
@@ -90,6 +90,19 @@ func (s *Service) getOrCreateAskSession(
 		VisitorID: visitorID,
 	})
 	if err == nil {
+		email := strings.TrimSpace(visitorEmail)
+		if email != "" && (!sess.VisitorEmail.Valid || strings.TrimSpace(sess.VisitorEmail.String) == "") {
+			updated, setErr := qtx.SetLinkAskSessionVisitorEmailIfEmpty(ctx, db.SetLinkAskSessionVisitorEmailIfEmptyParams{
+				ID:           sess.ID,
+				VisitorEmail: pgtype.Text{String: email, Valid: true},
+			})
+			if setErr == nil {
+				return updated, nil
+			}
+			if !errors.Is(setErr, pgx.ErrNoRows) {
+				return db.LinkAskSession{}, setErr
+			}
+		}
 		_, touchErr := qtx.TouchLinkAskSession(ctx, sess.ID)
 		if touchErr != nil {
 			return db.LinkAskSession{}, touchErr
@@ -189,6 +202,10 @@ func (s *Service) SubmitPublicAsk(
 	escalate bool,
 ) (PublicAskTurn, error) {
 	routeReason := s.resolvePublicAskRoute(ctx, link, escalate)
+	// Fail closed: Formal mode without entitlement must not silently become a host turn.
+	if routeReason == routeReasonPolicyFormal && !s.isFormalAskEntitled(ctx, link) {
+		return PublicAskTurn{}, ErrAskFormalNotEntitled
+	}
 	switch routeReason {
 	case routeReasonUserEscalate, routeReasonPolicyFormal, routeReasonAINotEnabled, routeReasonAIQuotaExceeded:
 		turn, err := s.createHostAskTurn(ctx, link, visitorID, visitorEmail, question, routeReason)

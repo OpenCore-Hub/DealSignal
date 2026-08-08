@@ -3943,7 +3943,7 @@ WHERE al.workspace_id = $1
   AND al.visitor_email <> ''
   AND NOT EXISTS (
       SELECT 1 FROM contacts c
-      WHERE c.workspace_id = al.workspace_id AND c.email = al.visitor_email
+      WHERE c.workspace_id = al.workspace_id AND LOWER(c.email) = LOWER(al.visitor_email)
   )
 `
 
@@ -4132,7 +4132,7 @@ WITH email_logs AS (
         al.event_type,
         al.created_at
     FROM access_logs al
-    WHERE al.workspace_id = $1 AND al.visitor_email ILIKE $2
+    WHERE al.workspace_id = $1 AND LOWER(al.visitor_email) = LOWER($2::text)
 ),
 log_stats AS (
     SELECT
@@ -4168,7 +4168,7 @@ SELECT
 
 type GetContactAggregateByEmailParams struct {
 	WorkspaceID  pgtype.UUID
-	VisitorEmail pgtype.Text
+	VisitorEmail string
 }
 
 type GetContactAggregateByEmailRow struct {
@@ -7446,7 +7446,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.id = $1
@@ -9408,7 +9408,7 @@ WITH visitor_ids AS (
     SELECT DISTINCT al.visitor_id
     FROM access_logs al
     WHERE al.workspace_id = $1
-      AND al.visitor_email ILIKE $2
+      AND LOWER(al.visitor_email) = LOWER($2::text)
       AND al.visitor_id IS NOT NULL
       AND al.visitor_id <> ''
 )
@@ -9431,7 +9431,7 @@ FROM (
         created_at,
         visitor_id
     FROM access_logs al2
-    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    WHERE al2.workspace_id = $1 AND LOWER(al2.visitor_email) = LOWER($2::text)
     UNION ALL
     SELECT
         id,
@@ -9452,8 +9452,8 @@ LIMIT $3
 
 type ListContactActivitiesByEmailParams struct {
 	WorkspaceID  pgtype.UUID
-	VisitorEmail pgtype.Text
-	Limit        int32
+	VisitorEmail string
+	RowLimit     int32
 }
 
 type ListContactActivitiesByEmailRow struct {
@@ -9468,7 +9468,7 @@ type ListContactActivitiesByEmailRow struct {
 }
 
 func (q *Queries) ListContactActivitiesByEmail(ctx context.Context, arg ListContactActivitiesByEmailParams) ([]ListContactActivitiesByEmailRow, error) {
-	rows, err := q.db.Query(ctx, listContactActivitiesByEmail, arg.WorkspaceID, arg.VisitorEmail, arg.Limit)
+	rows, err := q.db.Query(ctx, listContactActivitiesByEmail, arg.WorkspaceID, arg.VisitorEmail, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -9501,14 +9501,14 @@ WITH visitor_ids AS (
     SELECT DISTINCT al.visitor_id
     FROM access_logs al
     WHERE al.workspace_id = $1
-      AND al.visitor_email ILIKE $2
+      AND LOWER(al.visitor_email) = LOWER($2::text)
       AND al.visitor_id IS NOT NULL
       AND al.visitor_id <> ''
 )
 SELECT DISTINCT l.document_id::text AS document_id
 FROM (
     SELECT link_id FROM access_logs al2
-    WHERE al2.workspace_id = $1 AND al2.visitor_email ILIKE $2
+    WHERE al2.workspace_id = $1 AND LOWER(al2.visitor_email) = LOWER($2::text)
     UNION
     SELECT link_id FROM page_views pv2
     WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
@@ -9519,7 +9519,7 @@ WHERE l.document_id IS NOT NULL
 
 type ListContactViewedDocumentIDsParams struct {
 	WorkspaceID  pgtype.UUID
-	VisitorEmail pgtype.Text
+	VisitorEmail string
 }
 
 func (q *Queries) ListContactViewedDocumentIDs(ctx context.Context, arg ListContactViewedDocumentIDsParams) ([]string, error) {
@@ -9582,6 +9582,62 @@ func (q *Queries) ListContactViewedDocumentIDsByWorkspace(ctx context.Context, w
 	for rows.Next() {
 		var i ListContactViewedDocumentIDsByWorkspaceRow
 		if err := rows.Scan(&i.Email, &i.DocumentID); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listContactViewedDocuments = `-- name: ListContactViewedDocuments :many
+WITH visitor_ids AS (
+    SELECT DISTINCT al.visitor_id
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND LOWER(al.visitor_email) = LOWER($2::text)
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_id <> ''
+)
+SELECT DISTINCT
+    l.document_id::text AS document_id,
+    COALESCE(d.title, '')::text AS title
+FROM (
+    SELECT link_id FROM access_logs al2
+    WHERE al2.workspace_id = $1 AND LOWER(al2.visitor_email) = LOWER($2::text)
+    UNION
+    SELECT link_id FROM page_views pv2
+    WHERE pv2.workspace_id = $1 AND pv2.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+) e
+JOIN links l ON l.id = e.link_id
+LEFT JOIN documents d ON d.id = l.document_id
+WHERE l.document_id IS NOT NULL
+ORDER BY title ASC
+`
+
+type ListContactViewedDocumentsParams struct {
+	WorkspaceID  pgtype.UUID
+	VisitorEmail string
+}
+
+type ListContactViewedDocumentsRow struct {
+	DocumentID string
+	Title      string
+}
+
+// Viewed documents with titles for contact detail "Documents" tab.
+func (q *Queries) ListContactViewedDocuments(ctx context.Context, arg ListContactViewedDocumentsParams) ([]ListContactViewedDocumentsRow, error) {
+	rows, err := q.db.Query(ctx, listContactViewedDocuments, arg.WorkspaceID, arg.VisitorEmail)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListContactViewedDocumentsRow
+	for rows.Next() {
+		var i ListContactViewedDocumentsRow
+		if err := rows.Scan(&i.DocumentID, &i.Title); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -11005,7 +11061,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.link_id = $1
@@ -11570,7 +11626,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.link_id = $1
@@ -11657,12 +11713,36 @@ func (q *Queries) ListLinkPinnedAskTurnsByLink(ctx context.Context, arg ListLink
 }
 
 const listLinkPublishedFormalAsk = `-- name: ListLinkPublishedFormalAsk :many
-SELECT id, session_id, tenant_id, workspace_id, link_id, visitor_id, question, lane, status, ai_payload, host_answer, answered_by, route_reason, created_at, updated_at, pinned_faq_at, pinned_faq_by, pinned_faq_sort, formal_status, formal_publish_at, formal_published_at, formal_anonymize
-FROM link_ask_turns
-WHERE link_id = $1
-  AND workspace_id = $2
-  AND formal_status = 'published'
-ORDER BY formal_published_at DESC NULLS LAST, created_at DESC
+SELECT
+    t.id,
+    t.session_id,
+    t.tenant_id,
+    t.workspace_id,
+    t.link_id,
+    t.visitor_id,
+    t.question,
+    t.lane,
+    t.status,
+    t.ai_payload,
+    t.host_answer,
+    t.answered_by,
+    t.route_reason,
+    t.pinned_faq_at,
+    t.pinned_faq_by,
+    t.pinned_faq_sort,
+    t.formal_status,
+    t.formal_publish_at,
+    t.formal_published_at,
+    t.formal_anonymize,
+    t.created_at,
+    t.updated_at,
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
+FROM link_ask_turns t
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
+WHERE t.link_id = $1
+  AND t.workspace_id = $2
+  AND t.formal_status = 'published'
+ORDER BY t.formal_published_at DESC NULLS LAST, t.created_at DESC
 LIMIT $3
 `
 
@@ -11672,15 +11752,41 @@ type ListLinkPublishedFormalAskParams struct {
 	Limit       int32
 }
 
-func (q *Queries) ListLinkPublishedFormalAsk(ctx context.Context, arg ListLinkPublishedFormalAskParams) ([]LinkAskTurn, error) {
+type ListLinkPublishedFormalAskRow struct {
+	ID                pgtype.UUID
+	SessionID         pgtype.UUID
+	TenantID          pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	LinkID            pgtype.UUID
+	VisitorID         string
+	Question          string
+	Lane              string
+	Status            string
+	AiPayload         []byte
+	HostAnswer        pgtype.Text
+	AnsweredBy        pgtype.UUID
+	RouteReason       pgtype.Text
+	PinnedFaqAt       pgtype.Timestamptz
+	PinnedFaqBy       pgtype.UUID
+	PinnedFaqSort     pgtype.Int4
+	FormalStatus      pgtype.Text
+	FormalPublishAt   pgtype.Timestamptz
+	FormalPublishedAt pgtype.Timestamptz
+	FormalAnonymize   bool
+	CreatedAt         pgtype.Timestamptz
+	UpdatedAt         pgtype.Timestamptz
+	VisitorEmail      string
+}
+
+func (q *Queries) ListLinkPublishedFormalAsk(ctx context.Context, arg ListLinkPublishedFormalAskParams) ([]ListLinkPublishedFormalAskRow, error) {
 	rows, err := q.db.Query(ctx, listLinkPublishedFormalAsk, arg.LinkID, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []LinkAskTurn
+	var items []ListLinkPublishedFormalAskRow
 	for rows.Next() {
-		var i LinkAskTurn
+		var i ListLinkPublishedFormalAskRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.SessionID,
@@ -11695,8 +11801,6 @@ func (q *Queries) ListLinkPublishedFormalAsk(ctx context.Context, arg ListLinkPu
 			&i.HostAnswer,
 			&i.AnsweredBy,
 			&i.RouteReason,
-			&i.CreatedAt,
-			&i.UpdatedAt,
 			&i.PinnedFaqAt,
 			&i.PinnedFaqBy,
 			&i.PinnedFaqSort,
@@ -11704,6 +11808,9 @@ func (q *Queries) ListLinkPublishedFormalAsk(ctx context.Context, arg ListLinkPu
 			&i.FormalPublishAt,
 			&i.FormalPublishedAt,
 			&i.FormalAnonymize,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.VisitorEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -13686,7 +13793,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
@@ -13906,7 +14013,7 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    s.visitor_email::text AS visitor_email
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
 LEFT JOIN link_ask_sessions s ON s.id = t.session_id
@@ -14113,9 +14220,11 @@ SELECT
     t.formal_anonymize,
     t.created_at,
     t.updated_at,
-    l.name AS link_name
+    l.name AS link_name,
+    COALESCE(s.visitor_email::text, '')::text AS visitor_email
 FROM link_ask_turns t
 INNER JOIN links l ON l.id = t.link_id AND l.deal_room_id = $1
+LEFT JOIN link_ask_sessions s ON s.id = t.session_id
 WHERE t.workspace_id = $2
   AND t.formal_status = 'published'
 ORDER BY t.formal_published_at DESC NULLS LAST, t.created_at DESC
@@ -14152,6 +14261,7 @@ type ListRoomPublishedFormalAskRow struct {
 	CreatedAt         pgtype.Timestamptz
 	UpdatedAt         pgtype.Timestamptz
 	LinkName          pgtype.Text
+	VisitorEmail      string
 }
 
 func (q *Queries) ListRoomPublishedFormalAsk(ctx context.Context, arg ListRoomPublishedFormalAskParams) ([]ListRoomPublishedFormalAskRow, error) {
@@ -14187,6 +14297,7 @@ func (q *Queries) ListRoomPublishedFormalAsk(ctx context.Context, arg ListRoomPu
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.LinkName,
+			&i.VisitorEmail,
 		); err != nil {
 			return nil, err
 		}
@@ -15534,6 +15645,60 @@ func (q *Queries) PublishDueFormalAskTurnsByRoom(ctx context.Context, arg Publis
 	return items, nil
 }
 
+const publishDueFormalAskTurnsGlobal = `-- name: PublishDueFormalAskTurnsGlobal :many
+UPDATE link_ask_turns
+SET formal_status = 'published',
+    formal_published_at = now(),
+    status = 'host_answered',
+    updated_at = now()
+WHERE id IN (
+    SELECT id
+    FROM link_ask_turns
+    WHERE formal_status = 'scheduled'
+      AND formal_publish_at IS NOT NULL
+      AND formal_publish_at <= now()
+    ORDER BY formal_publish_at ASC
+    LIMIT $1
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING id, workspace_id, link_id, host_answer, answered_by
+`
+
+type PublishDueFormalAskTurnsGlobalRow struct {
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	HostAnswer  pgtype.Text
+	AnsweredBy  pgtype.UUID
+}
+
+// Background worker batch: claim due scheduled formal turns without blocking readers.
+func (q *Queries) PublishDueFormalAskTurnsGlobal(ctx context.Context, limit int32) ([]PublishDueFormalAskTurnsGlobalRow, error) {
+	rows, err := q.db.Query(ctx, publishDueFormalAskTurnsGlobal, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PublishDueFormalAskTurnsGlobalRow
+	for rows.Next() {
+		var i PublishDueFormalAskTurnsGlobalRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.LinkID,
+			&i.HostAnswer,
+			&i.AnsweredBy,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const recordLinkOpened = `-- name: RecordLinkOpened :execrows
 WITH inc AS (
     UPDATE links
@@ -16023,6 +16188,36 @@ func (q *Queries) SetFolderPermission(ctx context.Context, arg SetFolderPermissi
 		&i.Email,
 		&i.FolderPath,
 		&i.Permission,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const setLinkAskSessionVisitorEmailIfEmpty = `-- name: SetLinkAskSessionVisitorEmailIfEmpty :one
+UPDATE link_ask_sessions
+SET visitor_email = $2,
+    updated_at = now()
+WHERE id = $1
+  AND (visitor_email IS NULL OR visitor_email = '')
+RETURNING id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, created_at, updated_at
+`
+
+type SetLinkAskSessionVisitorEmailIfEmptyParams struct {
+	ID           pgtype.UUID
+	VisitorEmail pgtype.Text
+}
+
+func (q *Queries) SetLinkAskSessionVisitorEmailIfEmpty(ctx context.Context, arg SetLinkAskSessionVisitorEmailIfEmptyParams) (LinkAskSession, error) {
+	row := q.db.QueryRow(ctx, setLinkAskSessionVisitorEmailIfEmpty, arg.ID, arg.VisitorEmail)
+	var i LinkAskSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.VisitorID,
+		&i.VisitorEmail,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

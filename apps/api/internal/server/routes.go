@@ -18,10 +18,10 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/crm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/domain"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/events"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/ingestion"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/docling"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/integration"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/link"
@@ -275,6 +275,14 @@ func (s *Server) registerRoutes() error {
 			s.registerWorker(heatScoreWorker)
 			heatScoreWorker.Start(s.shutdownCtx)
 
+			formalPublishWorker := link.NewFormalPublishWorker(
+				linkSvc,
+				s.cfg.FormalPublishInterval,
+				int32(s.cfg.FormalPublishBatchSize),
+			)
+			s.registerWorker(formalPublishWorker)
+			formalPublishWorker.Start(s.shutdownCtx)
+
 			// SSE realtime push
 			sseHub := sse.NewHub(s.redisClient.GoRedis())
 			sseHandler := sse.NewHandler(sseHub)
@@ -296,6 +304,10 @@ func (s *Server) registerRoutes() error {
 				s.cfg.DoclingRAG.PlatformAdminKey,
 				s.cfg.DoclingRAG.HTTPTimeout,
 			)
+			linkSvc.SetFormalAskEntitlement(doclingFormalAskEntitlement{
+				client:    doclingClient,
+				planCodes: formalPlanCodeSet(s.cfg.FormalAskEntitledPlanCodes),
+			})
 			knowledgeSvc := knowledge.NewService(
 				queries,
 				s.cfg.DoclingRAG,
@@ -531,4 +543,29 @@ func checkSMTP(ctx context.Context, cfg *config.Config) error {
 		return err
 	}
 	return conn.Close()
+}
+
+type doclingFormalAskEntitlement struct {
+	client    *docling.Client
+	planCodes map[string]struct{}
+}
+
+func (e doclingFormalAskEntitlement) IsFormalAskEntitled(ctx context.Context, tenantSlug string) (bool, error) {
+	ent, err := e.client.GetEntitlements(ctx, tenantSlug)
+	if err != nil {
+		return false, err
+	}
+	_, ok := e.planCodes[strings.ToLower(strings.TrimSpace(ent.PlanCode))]
+	return ok, nil
+}
+
+func formalPlanCodeSet(codes []string) map[string]struct{} {
+	out := make(map[string]struct{}, len(codes))
+	for _, code := range codes {
+		code = strings.ToLower(strings.TrimSpace(code))
+		if code != "" {
+			out[code] = struct{}{}
+		}
+	}
+	return out
 }

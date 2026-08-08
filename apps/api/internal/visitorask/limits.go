@@ -21,6 +21,12 @@ const (
 	AskAIDailyWindow       = 24 * time.Hour
 )
 
+// Formal Q&A abuse caps (per visitor + link). Stricter than host lane (Phase C).
+const (
+	DefaultAskFormalDailyLimit = 20
+	AskFormalDailyWindow       = 24 * time.Hour
+)
+
 // ErrLimiterUnavailable is returned when Redis/limiter fails (fail-closed deny).
 // Callers must not treat this as a visitor rate_limit_exceeded abuse signal.
 var ErrLimiterUnavailable = errors.New("ask limiter unavailable")
@@ -32,8 +38,9 @@ type Limiter interface {
 
 // Limits configures visitor Ask rate limits. Zero values fall back to package defaults.
 type Limits struct {
-	AskAIRPM        int
-	AskAIDailyLimit int
+	AskAIRPM            int
+	AskAIDailyLimit     int
+	AskFormalDailyLimit int
 }
 
 func (l Limits) askAIRPM() int {
@@ -48,6 +55,13 @@ func (l Limits) askAIDaily() int {
 		return l.AskAIDailyLimit
 	}
 	return DefaultAskAIDailyLimit
+}
+
+func (l Limits) askFormalDaily() int {
+	if l.AskFormalDailyLimit > 0 {
+		return l.AskFormalDailyLimit
+	}
+	return DefaultAskFormalDailyLimit
 }
 
 // AllowAskAI enforces RPM then daily caps for the AI lane stream path.
@@ -78,6 +92,19 @@ func AllowAskHost(ctx context.Context, lim Limiter, linkID, visitorID string) (b
 	}
 	key := fmt.Sprintf("ask_host_day:%s:%s", linkID, visitorID)
 	ok, _, err := lim.RateLimitAllow(ctx, key, AskHostDailyLimit, AskHostDailyWindow)
+	if err != nil {
+		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
+	}
+	return ok, nil
+}
+
+// AllowAskFormal enforces Formal-mode daily caps (stricter than host).
+func AllowAskFormal(ctx context.Context, lim Limiter, linkID, visitorID string, limits Limits) (bool, error) {
+	if lim == nil {
+		return true, nil
+	}
+	key := fmt.Sprintf("ask_formal_day:%s:%s", linkID, visitorID)
+	ok, _, err := lim.RateLimitAllow(ctx, key, limits.askFormalDaily(), AskFormalDailyWindow)
 	if err != nil {
 		return false, fmt.Errorf("%w: %v", ErrLimiterUnavailable, err)
 	}

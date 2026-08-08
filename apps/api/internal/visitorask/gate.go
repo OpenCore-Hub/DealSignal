@@ -9,8 +9,9 @@ import (
 type Channel string
 
 const (
-	ChannelAskHost Channel = "ask_host"
-	ChannelAskAI   Channel = "ask_ai"
+	ChannelAskHost   Channel = "ask_host"
+	ChannelAskAI     Channel = "ask_ai"
+	ChannelAskFormal Channel = "ask_formal"
 )
 
 // Shared API / security-event codes for Visitor Ask gates.
@@ -44,6 +45,8 @@ func Check(ctx context.Context, lim Limiter, ch Channel, linkID, visitorID strin
 		ok, err = AllowAskHost(ctx, lim, linkID, visitorID)
 	case ChannelAskAI:
 		ok, err = AllowAskAI(ctx, lim, linkID, visitorID, limits)
+	case ChannelAskFormal:
+		ok, err = AllowAskFormal(ctx, lim, linkID, visitorID, limits)
 	default:
 		return DecisionLimiterUnavailable
 	}
@@ -102,15 +105,23 @@ func DenyCode(d Decision) string {
 func DenyMessage(ch Channel, d Decision) string {
 	switch d {
 	case DecisionLimiterUnavailable:
-		if ch == ChannelAskAI {
+		switch ch {
+		case ChannelAskAI:
 			return "AI Ask is temporarily unavailable, please try again later"
+		case ChannelAskFormal:
+			return "Formal Q&A is temporarily unavailable, please try again later"
+		default:
+			return "Ask is temporarily unavailable, please try again later"
 		}
-		return "Ask is temporarily unavailable, please try again later"
 	case DecisionRateLimited:
-		if ch == ChannelAskAI {
+		switch ch {
+		case ChannelAskAI:
 			return "too many AI Ask requests, please try again later"
+		case ChannelAskFormal:
+			return "too many Formal Q&A requests, please try again later"
+		default:
+			return "too many Ask requests, please try again later"
 		}
-		return "too many Ask requests, please try again later"
 	default:
 		return ""
 	}
