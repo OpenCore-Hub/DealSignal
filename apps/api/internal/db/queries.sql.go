@@ -454,6 +454,18 @@ func (q *Queries) CloseKnowledgeQASession(ctx context.Context, arg CloseKnowledg
 	return i, err
 }
 
+const closeReadingSession = `-- name: CloseReadingSession :exec
+UPDATE reading_sessions
+SET ended_at = last_activity_at
+WHERE id = $1
+  AND ended_at IS NULL
+`
+
+func (q *Queries) CloseReadingSession(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, closeReadingSession, id)
+	return err
+}
+
 const consumeLinkInvitation = `-- name: ConsumeLinkInvitation :one
 UPDATE link_invitations
 SET status = 'used',
@@ -502,6 +514,26 @@ func (q *Queries) ConsumeLinkInvitation(ctx context.Context, id pgtype.UUID) (Co
 	return i, err
 }
 
+const countActiveSuggestionsByMetadata = `-- name: CountActiveSuggestionsByMetadata :one
+SELECT COUNT(*) AS count
+FROM suggestions
+WHERE workspace_id = $1
+  AND dismissed = false
+  AND metadata @> $2::jsonb
+`
+
+type CountActiveSuggestionsByMetadataParams struct {
+	WorkspaceID   pgtype.UUID
+	MatchMetadata []byte
+}
+
+func (q *Queries) CountActiveSuggestionsByMetadata(ctx context.Context, arg CountActiveSuggestionsByMetadataParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveSuggestionsByMetadata, arg.WorkspaceID, arg.MatchMetadata)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countDealRoomMembershipsByDocument = `-- name: CountDealRoomMembershipsByDocument :one
 SELECT COUNT(*)::bigint AS count
 FROM deal_room_documents
@@ -537,6 +569,29 @@ func (q *Queries) CountDealRoomsByWorkspace(ctx context.Context, arg CountDealRo
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countDigestNotificationsForDay = `-- name: CountDigestNotificationsForDay :one
+SELECT COUNT(*)::bigint
+FROM notifications n
+WHERE n.workspace_id = $1
+  AND n.channel = $2
+  AND n.metadata->>'rule_type' = 'daily_digest'
+  AND n.metadata->>'digest_day' = $3::text
+  AND n.status IN ('pending', 'processing', 'sent', 'failed')
+`
+
+type CountDigestNotificationsForDayParams struct {
+	WorkspaceID pgtype.UUID
+	Channel     string
+	DigestDay   string
+}
+
+func (q *Queries) CountDigestNotificationsForDay(ctx context.Context, arg CountDigestNotificationsForDayParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDigestNotificationsForDay, arg.WorkspaceID, arg.Channel, arg.DigestDay)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const countDocumentChunks = `-- name: CountDocumentChunks :one
@@ -931,6 +986,30 @@ func (q *Queries) CountNDATemplateResponses(ctx context.Context, ndaTemplateID p
 	return column_1, err
 }
 
+const countOtherLinkVisitors = `-- name: CountOtherLinkVisitors :one
+SELECT COUNT(DISTINCT visitor_id)::bigint
+FROM access_logs
+WHERE link_id = $1
+  AND event_type = 'link_opened'
+  AND visitor_id IS NOT NULL
+  AND visitor_id <> ''
+  AND visitor_id <> $2
+`
+
+type CountOtherLinkVisitorsParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+// Distinct visitors on a link excluding one visitor (call before recording
+// that visitor's open to detect forward/virality).
+func (q *Queries) CountOtherLinkVisitors(ctx context.Context, arg CountOtherLinkVisitorsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOtherLinkVisitors, arg.LinkID, arg.VisitorID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countPendingFileRequests = `-- name: CountPendingFileRequests :one
 SELECT COUNT(*) AS count
 FROM link_file_requests
@@ -1135,6 +1214,32 @@ func (q *Queries) CountVisitorAccesses(ctx context.Context, arg CountVisitorAcce
 	return column_1, err
 }
 
+const countVisitorEngagedKeyPageViews = `-- name: CountVisitorEngagedKeyPageViews :one
+SELECT COUNT(*)::bigint AS count
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND pv.visitor_id = $2
+  AND pv.duration_seconds >= 3
+  AND p.title IS NOT NULL AND p.title <> ''
+  AND lower(p.title) LIKE ANY ($3::text[])
+`
+
+type CountVisitorEngagedKeyPageViewsParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+	Patterns  []string
+}
+
+// Engaged (≥3s) key-page views for one visitor on a link (heat keyword patterns).
+func (q *Queries) CountVisitorEngagedKeyPageViews(ctx context.Context, arg CountVisitorEngagedKeyPageViewsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countVisitorEngagedKeyPageViews, arg.LinkID, arg.VisitorID, arg.Patterns)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countWeeklyVisitorsByWorkspace = `-- name: CountWeeklyVisitorsByWorkspace :one
 SELECT COUNT(DISTINCT COALESCE(visitor_id, visitor_email)) AS visitor_count
 FROM access_logs
@@ -1147,6 +1252,398 @@ func (q *Queries) CountWeeklyVisitorsByWorkspace(ctx context.Context, workspaceI
 	var visitor_count int64
 	err := row.Scan(&visitor_count)
 	return visitor_count, err
+}
+
+const countWorkspaceAccessAuditByDealRoom = `-- name: CountWorkspaceAccessAuditByDealRoom :many
+SELECT
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name,
+    COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = se.workspace_id
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = $1
+  AND se.created_at >= $2
+  AND se.created_at < $3
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND ($4::text IS NULL OR se.event_type = $4)
+  AND ($5::uuid IS NULL OR l.created_by = $5)
+  AND (
+    $6::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = $6
+  )
+GROUP BY l.deal_room_id, dr.name
+ORDER BY count DESC
+LIMIT 20
+`
+
+type CountWorkspaceAccessAuditByDealRoomParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	EventType   pgtype.Text
+	MemberID    pgtype.UUID
+	FolderPath  pgtype.Text
+}
+
+type CountWorkspaceAccessAuditByDealRoomRow struct {
+	DealRoomID   pgtype.UUID
+	DealRoomName string
+	Count        int64
+}
+
+func (q *Queries) CountWorkspaceAccessAuditByDealRoom(ctx context.Context, arg CountWorkspaceAccessAuditByDealRoomParams) ([]CountWorkspaceAccessAuditByDealRoomRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspaceAccessAuditByDealRoom,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.EventType,
+		arg.MemberID,
+		arg.FolderPath,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountWorkspaceAccessAuditByDealRoomRow
+	for rows.Next() {
+		var i CountWorkspaceAccessAuditByDealRoomRow
+		if err := rows.Scan(&i.DealRoomID, &i.DealRoomName, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countWorkspaceAccessAuditByFolder = `-- name: CountWorkspaceAccessAuditByFolder :many
+SELECT
+    COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '')::text AS folder_path,
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name,
+    COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = se.workspace_id
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = $1
+  AND se.created_at >= $2
+  AND se.created_at < $3
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND ($4::text IS NULL OR se.event_type = $4)
+  AND ($5::uuid IS NULL OR l.deal_room_id = $5)
+  AND ($6::uuid IS NULL OR l.created_by = $6)
+GROUP BY
+    COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), ''),
+    l.deal_room_id,
+    dr.name
+ORDER BY count DESC
+LIMIT 20
+`
+
+type CountWorkspaceAccessAuditByFolderParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	EventType   pgtype.Text
+	DealRoomID  pgtype.UUID
+	MemberID    pgtype.UUID
+}
+
+type CountWorkspaceAccessAuditByFolderRow struct {
+	FolderPath   string
+	DealRoomID   pgtype.UUID
+	DealRoomName string
+	Count        int64
+}
+
+func (q *Queries) CountWorkspaceAccessAuditByFolder(ctx context.Context, arg CountWorkspaceAccessAuditByFolderParams) ([]CountWorkspaceAccessAuditByFolderRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspaceAccessAuditByFolder,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.EventType,
+		arg.DealRoomID,
+		arg.MemberID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountWorkspaceAccessAuditByFolderRow
+	for rows.Next() {
+		var i CountWorkspaceAccessAuditByFolderRow
+		if err := rows.Scan(
+			&i.FolderPath,
+			&i.DealRoomID,
+			&i.DealRoomName,
+			&i.Count,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countWorkspaceAccessAuditByMember = `-- name: CountWorkspaceAccessAuditByMember :many
+SELECT
+    l.created_by AS member_id,
+    COALESCE(u.email, '')::text AS member_email,
+    COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN users u ON u.id = l.created_by
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = $1
+  AND se.created_at >= $2
+  AND se.created_at < $3
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND ($4::text IS NULL OR se.event_type = $4)
+  AND ($5::uuid IS NULL OR l.deal_room_id = $5)
+  AND (
+    $6::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = $6
+  )
+GROUP BY l.created_by, u.email
+ORDER BY count DESC
+LIMIT 20
+`
+
+type CountWorkspaceAccessAuditByMemberParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	EventType   pgtype.Text
+	DealRoomID  pgtype.UUID
+	FolderPath  pgtype.Text
+}
+
+type CountWorkspaceAccessAuditByMemberRow struct {
+	MemberID    pgtype.UUID
+	MemberEmail string
+	Count       int64
+}
+
+func (q *Queries) CountWorkspaceAccessAuditByMember(ctx context.Context, arg CountWorkspaceAccessAuditByMemberParams) ([]CountWorkspaceAccessAuditByMemberRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspaceAccessAuditByMember,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.EventType,
+		arg.DealRoomID,
+		arg.FolderPath,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountWorkspaceAccessAuditByMemberRow
+	for rows.Next() {
+		var i CountWorkspaceAccessAuditByMemberRow
+		if err := rows.Scan(&i.MemberID, &i.MemberEmail, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countWorkspaceAccessAuditByType = `-- name: CountWorkspaceAccessAuditByType :many
+SELECT se.event_type, COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = $1
+  AND se.created_at >= $2
+  AND se.created_at < $3
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND ($4::text IS NULL OR se.event_type = $4)
+  AND ($5::uuid IS NULL OR l.deal_room_id = $5)
+  AND ($6::uuid IS NULL OR l.created_by = $6)
+  AND (
+    $7::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = $7
+  )
+GROUP BY se.event_type
+ORDER BY count DESC, se.event_type ASC
+`
+
+type CountWorkspaceAccessAuditByTypeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	EventType   pgtype.Text
+	DealRoomID  pgtype.UUID
+	MemberID    pgtype.UUID
+	FolderPath  pgtype.Text
+}
+
+type CountWorkspaceAccessAuditByTypeRow struct {
+	EventType string
+	Count     int64
+}
+
+// Insights access-audit: permission / gate failures across the workspace.
+// Folder grain: document placement path, else link target_folder_path (deal-room shares).
+func (q *Queries) CountWorkspaceAccessAuditByType(ctx context.Context, arg CountWorkspaceAccessAuditByTypeParams) ([]CountWorkspaceAccessAuditByTypeRow, error) {
+	rows, err := q.db.Query(ctx, countWorkspaceAccessAuditByType,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.EventType,
+		arg.DealRoomID,
+		arg.MemberID,
+		arg.FolderPath,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountWorkspaceAccessAuditByTypeRow
+	for rows.Next() {
+		var i CountWorkspaceAccessAuditByTypeRow
+		if err := rows.Scan(&i.EventType, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countWorkspaceLinkOpenVisitorsInRange = `-- name: CountWorkspaceLinkOpenVisitorsInRange :one
+SELECT COUNT(
+  DISTINCT COALESCE(
+    NULLIF(al.visitor_id, ''),
+    LOWER(NULLIF(al.visitor_email, ''))
+  )
+)::bigint AS unique_visitors
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= $2
+  AND al.created_at < $3
+`
+
+type CountWorkspaceLinkOpenVisitorsInRangeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+// Distinct visitors with ≥1 link_opened in [range_start, range_end) (UTC).
+func (q *Queries) CountWorkspaceLinkOpenVisitorsInRange(ctx context.Context, arg CountWorkspaceLinkOpenVisitorsInRangeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countWorkspaceLinkOpenVisitorsInRange, arg.WorkspaceID, arg.RangeStart, arg.RangeEnd)
+	var unique_visitors int64
+	err := row.Scan(&unique_visitors)
+	return unique_visitors, err
+}
+
+const countWorkspaceLinkOpensInRange = `-- name: CountWorkspaceLinkOpensInRange :one
+SELECT COUNT(*)::bigint AS opens
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= $2
+  AND al.created_at < $3
+`
+
+type CountWorkspaceLinkOpensInRangeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+func (q *Queries) CountWorkspaceLinkOpensInRange(ctx context.Context, arg CountWorkspaceLinkOpensInRangeParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countWorkspaceLinkOpensInRange, arg.WorkspaceID, arg.RangeStart, arg.RangeEnd)
+	var opens int64
+	err := row.Scan(&opens)
+	return opens, err
 }
 
 const createAccessLog = `-- name: CreateAccessLog :exec
@@ -2831,18 +3328,22 @@ func (q *Queries) CreatePage(ctx context.Context, arg CreatePageParams) (CreateP
 }
 
 const createPageView = `-- name: CreatePageView :exec
-INSERT INTO page_views (tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth)
-VALUES ($1, $2, $3, $4, $5, $6, $7::numeric)
+INSERT INTO page_views (
+    tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth, reading_session_id, document_id
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, $8, $9)
 `
 
 type CreatePageViewParams struct {
-	TenantID        pgtype.UUID
-	WorkspaceID     pgtype.UUID
-	LinkID          pgtype.UUID
-	VisitorID       pgtype.Text
-	PageNumber      int32
-	DurationSeconds int32
-	Column7         pgtype.Numeric
+	TenantID         pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        pgtype.Text
+	PageNumber       int32
+	DurationSeconds  int32
+	Column7          pgtype.Numeric
+	ReadingSessionID pgtype.UUID
+	DocumentID       pgtype.UUID
 }
 
 func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) error {
@@ -2854,8 +3355,64 @@ func (q *Queries) CreatePageView(ctx context.Context, arg CreatePageViewParams) 
 		arg.PageNumber,
 		arg.DurationSeconds,
 		arg.Column7,
+		arg.ReadingSessionID,
+		arg.DocumentID,
 	)
 	return err
+}
+
+const createReadingSession = `-- name: CreateReadingSession :one
+INSERT INTO reading_sessions (
+    tenant_id,
+    workspace_id,
+    link_id,
+    document_id,
+    visitor_id,
+    started_at,
+    last_activity_at,
+    max_page,
+    distinct_page_count,
+    total_duration_seconds
+) VALUES (
+    $1, $2, $3, $4, $5, now(), now(), $6, 0, 0
+)
+RETURNING id, tenant_id, workspace_id, link_id, document_id, visitor_id, started_at, last_activity_at, ended_at, max_page, distinct_page_count, total_duration_seconds
+`
+
+type CreateReadingSessionParams struct {
+	TenantID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+	LinkID      pgtype.UUID
+	DocumentID  pgtype.UUID
+	VisitorID   string
+	MaxPage     int32
+}
+
+func (q *Queries) CreateReadingSession(ctx context.Context, arg CreateReadingSessionParams) (ReadingSession, error) {
+	row := q.db.QueryRow(ctx, createReadingSession,
+		arg.TenantID,
+		arg.WorkspaceID,
+		arg.LinkID,
+		arg.DocumentID,
+		arg.VisitorID,
+		arg.MaxPage,
+	)
+	var i ReadingSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.VisitorID,
+		&i.StartedAt,
+		&i.LastActivityAt,
+		&i.EndedAt,
+		&i.MaxPage,
+		&i.DistinctPageCount,
+		&i.TotalDurationSeconds,
+	)
+	return i, err
 }
 
 const createSecurityEvent = `-- name: CreateSecurityEvent :exec
@@ -3027,7 +3584,7 @@ func (q *Queries) CreateSignalRuleRun(ctx context.Context, arg CreateSignalRuleR
 const createSuggestion = `-- name: CreateSuggestion :one
 INSERT INTO suggestions (tenant_id, workspace_id, contact_id, link_id, document_id, type, subtype, reason, action, metadata, context, rule_id)
 VALUES ($1, $2, $3, $4, $5, $6, $9, $7, $8, $10::jsonb, $11::jsonb, $12)
-RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id, snoozed_until
 `
 
 type CreateSuggestionParams struct {
@@ -3079,6 +3636,7 @@ func (q *Queries) CreateSuggestion(ctx context.Context, arg CreateSuggestionPara
 		&i.Context,
 		&i.SyncedAt,
 		&i.RuleID,
+		&i.SnoozedUntil,
 	)
 	return i, err
 }
@@ -3727,9 +4285,19 @@ func (q *Queries) DeleteTenantDomain(ctx context.Context, arg DeleteTenantDomain
 	return err
 }
 
+const deleteWorkspaceOutboundWebhook = `-- name: DeleteWorkspaceOutboundWebhook :exec
+DELETE FROM workspace_outbound_webhooks
+WHERE workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceOutboundWebhook(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceOutboundWebhook, workspaceID)
+	return err
+}
+
 const dismissSuggestion = `-- name: DismissSuggestion :exec
 UPDATE suggestions
-SET dismissed = true, updated_at = now()
+SET dismissed = true, snoozed_until = NULL, updated_at = now()
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -3740,6 +4308,24 @@ type DismissSuggestionParams struct {
 
 func (q *Queries) DismissSuggestion(ctx context.Context, arg DismissSuggestionParams) error {
 	_, err := q.db.Exec(ctx, dismissSuggestion, arg.ID, arg.WorkspaceID)
+	return err
+}
+
+const dismissSuggestionsByMetadata = `-- name: DismissSuggestionsByMetadata :exec
+UPDATE suggestions
+SET dismissed = true, snoozed_until = NULL, updated_at = now()
+WHERE workspace_id = $1
+  AND dismissed = false
+  AND metadata @> $2::jsonb
+`
+
+type DismissSuggestionsByMetadataParams struct {
+	WorkspaceID   pgtype.UUID
+	MatchMetadata []byte
+}
+
+func (q *Queries) DismissSuggestionsByMetadata(ctx context.Context, arg DismissSuggestionsByMetadataParams) error {
+	_, err := q.db.Exec(ctx, dismissSuggestionsByMetadata, arg.WorkspaceID, arg.MatchMetadata)
 	return err
 }
 
@@ -4140,8 +4726,22 @@ log_stats AS (
         COUNT(DISTINCT link_id)::bigint AS unique_links,
         COUNT(DISTINCT visitor_id) FILTER (WHERE visitor_id IS NOT NULL AND visitor_id <> '')::bigint AS unique_visitors,
         COUNT(DISTINCT id) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
         MAX(created_at)::timestamptz AS last_seen_at
     FROM email_logs
+),
+bounce_stats AS (
+    SELECT COUNT(DISTINCT el.id)::bigint AS bounces
+    FROM email_logs el
+    WHERE el.event_type = 'link_opened'
+      AND el.visitor_id IS NOT NULL
+      AND el.visitor_id <> ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM page_views p
+          WHERE p.link_id = el.link_id
+            AND p.visitor_id = el.visitor_id
+      )
 ),
 visitor_ids AS (
     SELECT DISTINCT visitor_id
@@ -4155,6 +4755,16 @@ pv_stats AS (
     FROM page_views pv
     WHERE pv.workspace_id = $1
       AND pv.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+),
+key_page_stats AS (
+    SELECT COUNT(pv.id)::bigint AS key_page_views
+    FROM page_views pv
+    JOIN links l ON l.id = pv.link_id AND l.workspace_id = $1 AND l.status != 'deleted'
+    JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+    WHERE pv.workspace_id = $1
+      AND pv.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+      AND p.title IS NOT NULL AND p.title <> ''
+      AND lower(p.title) LIKE ANY ($3::text[])
 )
 SELECT
     COALESCE((SELECT opens FROM log_stats), 0)::bigint AS opens,
@@ -4162,13 +4772,17 @@ SELECT
     COALESCE((SELECT unique_visitors FROM log_stats), 0)::bigint AS unique_visitors,
     COALESCE((SELECT total_duration_seconds FROM pv_stats), 0)::bigint AS total_duration_seconds,
     COALESCE((SELECT total_page_views FROM pv_stats), 0)::bigint AS total_page_views,
+    COALESCE((SELECT key_page_views FROM key_page_stats), 0)::bigint AS key_page_views,
+    COALESCE((SELECT forward_signals FROM log_stats), 0)::bigint AS forward_signals,
     COALESCE((SELECT downloads FROM log_stats), 0)::bigint AS downloads,
+    COALESCE((SELECT bounces FROM bounce_stats), 0)::bigint AS bounces,
     (SELECT last_seen_at FROM log_stats) AS last_seen_at
 `
 
 type GetContactAggregateByEmailParams struct {
 	WorkspaceID  pgtype.UUID
 	VisitorEmail string
+	Patterns     []string
 }
 
 type GetContactAggregateByEmailRow struct {
@@ -4177,12 +4791,15 @@ type GetContactAggregateByEmailRow struct {
 	UniqueVisitors       int64
 	TotalDurationSeconds int64
 	TotalPageViews       int64
+	KeyPageViews         int64
+	ForwardSignals       int64
 	Downloads            int64
+	Bounces              int64
 	LastSeenAt           pgtype.Timestamptz
 }
 
 func (q *Queries) GetContactAggregateByEmail(ctx context.Context, arg GetContactAggregateByEmailParams) (GetContactAggregateByEmailRow, error) {
-	row := q.db.QueryRow(ctx, getContactAggregateByEmail, arg.WorkspaceID, arg.VisitorEmail)
+	row := q.db.QueryRow(ctx, getContactAggregateByEmail, arg.WorkspaceID, arg.VisitorEmail, arg.Patterns)
 	var i GetContactAggregateByEmailRow
 	err := row.Scan(
 		&i.Opens,
@@ -4190,7 +4807,10 @@ func (q *Queries) GetContactAggregateByEmail(ctx context.Context, arg GetContact
 		&i.UniqueVisitors,
 		&i.TotalDurationSeconds,
 		&i.TotalPageViews,
+		&i.KeyPageViews,
+		&i.ForwardSignals,
 		&i.Downloads,
+		&i.Bounces,
 		&i.LastSeenAt,
 	)
 	return i, err
@@ -4217,9 +4837,26 @@ log_stats AS (
         COUNT(DISTINCT link_id)::bigint AS unique_links,
         COUNT(DISTINCT visitor_id) FILTER (WHERE visitor_id IS NOT NULL AND visitor_id <> '')::bigint AS unique_visitors,
         COUNT(DISTINCT id) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
         MAX(created_at)::timestamptz AS last_seen_at
     FROM email_logs
     GROUP BY email
+),
+bounce_stats AS (
+    SELECT
+        el.email,
+        COUNT(DISTINCT el.id)::bigint AS bounces
+    FROM email_logs el
+    WHERE el.event_type = 'link_opened'
+      AND el.visitor_id IS NOT NULL
+      AND el.visitor_id <> ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM page_views p
+          WHERE p.link_id = el.link_id
+            AND p.visitor_id = el.visitor_id
+      )
+    GROUP BY el.email
 ),
 visitor_emails AS (
     SELECT DISTINCT email, visitor_id
@@ -4234,6 +4871,18 @@ pv_stats AS (
     FROM visitor_emails ve
     JOIN page_views pv ON pv.workspace_id = $1 AND pv.visitor_id = ve.visitor_id
     GROUP BY ve.email
+),
+key_page_stats AS (
+    SELECT
+        ve.email,
+        COUNT(pv.id)::bigint AS key_page_views
+    FROM visitor_emails ve
+    JOIN page_views pv ON pv.workspace_id = $1 AND pv.visitor_id = ve.visitor_id
+    JOIN links l ON l.id = pv.link_id AND l.workspace_id = $1 AND l.status != 'deleted'
+    JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+    WHERE p.title IS NOT NULL AND p.title <> ''
+      AND lower(p.title) LIKE ANY ($3::text[])
+    GROUP BY ve.email
 )
 SELECT
     c.id AS contact_id,
@@ -4243,11 +4892,16 @@ SELECT
     ls.unique_visitors,
     COALESCE(ps.total_duration_seconds, 0)::bigint AS total_duration_seconds,
     COALESCE(ps.total_page_views, 0)::bigint AS total_page_views,
+    COALESCE(kps.key_page_views, 0)::bigint AS key_page_views,
+    ls.forward_signals,
     ls.downloads,
+    COALESCE(bs.bounces, 0)::bigint AS bounces,
     ls.last_seen_at
 FROM log_stats ls
 LEFT JOIN contacts c ON c.workspace_id = $1 AND LOWER(c.email) = ls.email
 LEFT JOIN pv_stats ps ON ps.email = ls.email
+LEFT JOIN key_page_stats kps ON kps.email = ls.email
+LEFT JOIN bounce_stats bs ON bs.email = ls.email
 ORDER BY ls.opens DESC
 LIMIT $2
 `
@@ -4255,6 +4909,7 @@ LIMIT $2
 type GetContactAggregatesByWorkspaceParams struct {
 	WorkspaceID pgtype.UUID
 	Limit       int32
+	Patterns    []string
 }
 
 type GetContactAggregatesByWorkspaceRow struct {
@@ -4265,13 +4920,19 @@ type GetContactAggregatesByWorkspaceRow struct {
 	UniqueVisitors       int64
 	TotalDurationSeconds int64
 	TotalPageViews       int64
+	KeyPageViews         int64
+	ForwardSignals       int64
 	Downloads            int64
+	Bounces              int64
 	LastSeenAt           pgtype.Timestamptz
 }
 
 // Split log stats and page-view stats to avoid access_logs ⨯ page_views row explosion.
+// key_page_views uses the same title LIKE patterns as link heat (heat.KeyPagePatterns).
+// forward_signals counts persisted access_logs.event_type='forward_signal' markers.
+// bounces matches GetLinkBounceCount: link_opened with visitor_id and no page_views on that link.
 func (q *Queries) GetContactAggregatesByWorkspace(ctx context.Context, arg GetContactAggregatesByWorkspaceParams) ([]GetContactAggregatesByWorkspaceRow, error) {
-	rows, err := q.db.Query(ctx, getContactAggregatesByWorkspace, arg.WorkspaceID, arg.Limit)
+	rows, err := q.db.Query(ctx, getContactAggregatesByWorkspace, arg.WorkspaceID, arg.Limit, arg.Patterns)
 	if err != nil {
 		return nil, err
 	}
@@ -4287,7 +4948,10 @@ func (q *Queries) GetContactAggregatesByWorkspace(ctx context.Context, arg GetCo
 			&i.UniqueVisitors,
 			&i.TotalDurationSeconds,
 			&i.TotalPageViews,
+			&i.KeyPageViews,
+			&i.ForwardSignals,
 			&i.Downloads,
+			&i.Bounces,
 			&i.LastSeenAt,
 		); err != nil {
 			return nil, err
@@ -5188,6 +5852,128 @@ func (q *Queries) GetDocumentDeleteImpact(ctx context.Context, arg GetDocumentDe
 	return i, err
 }
 
+const getDocumentReadingSessionReach = `-- name: GetDocumentReadingSessionReach :many
+SELECT
+    rs.id,
+    rs.max_page,
+    rs.distinct_page_count::bigint AS distinct_pages,
+    rs.total_duration_seconds::bigint AS total_duration_seconds
+FROM reading_sessions rs
+WHERE rs.document_id = $1
+  AND rs.workspace_id = $2
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = $1
+        AND l.workspace_id = $2
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC
+`
+
+type GetDocumentReadingSessionReachParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetDocumentReadingSessionReachRow struct {
+	ID                   pgtype.UUID
+	MaxPage              int32
+	DistinctPages        int64
+	TotalDurationSeconds int64
+}
+
+// Formal idle-gap reading sessions for document funnel.
+func (q *Queries) GetDocumentReadingSessionReach(ctx context.Context, arg GetDocumentReadingSessionReachParams) ([]GetDocumentReadingSessionReachRow, error) {
+	rows, err := q.db.Query(ctx, getDocumentReadingSessionReach, arg.DocumentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDocumentReadingSessionReachRow
+	for rows.Next() {
+		var i GetDocumentReadingSessionReachRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MaxPage,
+			&i.DistinctPages,
+			&i.TotalDurationSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDocumentReadingSessionReachInRange = `-- name: GetDocumentReadingSessionReachInRange :many
+SELECT
+    rs.id,
+    rs.max_page,
+    rs.distinct_page_count::bigint AS distinct_pages,
+    rs.total_duration_seconds::bigint AS total_duration_seconds
+FROM reading_sessions rs
+WHERE rs.document_id = $1
+  AND rs.workspace_id = $2
+  AND rs.last_activity_at >= $3
+  AND rs.last_activity_at < $4
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = $1
+        AND l.workspace_id = $2
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC
+`
+
+type GetDocumentReadingSessionReachInRangeParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+type GetDocumentReadingSessionReachInRangeRow struct {
+	ID                   pgtype.UUID
+	MaxPage              int32
+	DistinctPages        int64
+	TotalDurationSeconds int64
+}
+
+func (q *Queries) GetDocumentReadingSessionReachInRange(ctx context.Context, arg GetDocumentReadingSessionReachInRangeParams) ([]GetDocumentReadingSessionReachInRangeRow, error) {
+	rows, err := q.db.Query(ctx, getDocumentReadingSessionReachInRange,
+		arg.DocumentID,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDocumentReadingSessionReachInRangeRow
+	for rows.Next() {
+		var i GetDocumentReadingSessionReachInRangeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MaxPage,
+			&i.DistinctPages,
+			&i.TotalDurationSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getDocumentViewMetrics = `-- name: GetDocumentViewMetrics :many
 SELECT
     d.id,
@@ -5222,6 +6008,64 @@ func (q *Queries) GetDocumentViewMetrics(ctx context.Context, arg GetDocumentVie
 	for rows.Next() {
 		var i GetDocumentViewMetricsRow
 		if err := rows.Scan(&i.ID, &i.Title, &i.Views); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getDocumentVisitorReach = `-- name: GetDocumentVisitorReach :many
+SELECT
+    pv.visitor_id,
+    MAX(pv.page_number)::int AS max_page,
+    COUNT(DISTINCT pv.page_number)::bigint AS distinct_pages,
+    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds
+FROM page_views pv
+WHERE pv.link_id IN (
+    SELECT l.id FROM links l
+    WHERE l.document_id = $1
+      AND l.workspace_id = $2
+      AND l.status != 'deleted'
+)
+  AND pv.workspace_id = $2
+  AND pv.visitor_id IS NOT NULL
+  AND pv.visitor_id <> ''
+GROUP BY pv.visitor_id
+ORDER BY MAX(pv.created_at) DESC
+`
+
+type GetDocumentVisitorReachParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetDocumentVisitorReachRow struct {
+	VisitorID            pgtype.Text
+	MaxPage              int32
+	DistinctPages        int64
+	TotalDurationSeconds int64
+}
+
+// Legacy per-visitor reach (kept for tests / fallback). Prefer GetDocumentReadingSessionReach.
+func (q *Queries) GetDocumentVisitorReach(ctx context.Context, arg GetDocumentVisitorReachParams) ([]GetDocumentVisitorReachRow, error) {
+	rows, err := q.db.Query(ctx, getDocumentVisitorReach, arg.DocumentID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetDocumentVisitorReachRow
+	for rows.Next() {
+		var i GetDocumentVisitorReachRow
+		if err := rows.Scan(
+			&i.VisitorID,
+			&i.MaxPage,
+			&i.DistinctPages,
+			&i.TotalDurationSeconds,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -5871,6 +6715,7 @@ FROM page_views
 WHERE link_id = $1
   AND visitor_id = $2
   AND page_number = $3
+  AND document_id IS NOT DISTINCT FROM $4::uuid
 ORDER BY created_at DESC
 LIMIT 1
 `
@@ -5879,10 +6724,16 @@ type GetLastPageViewByVisitorPageParams struct {
 	LinkID     pgtype.UUID
 	VisitorID  pgtype.Text
 	PageNumber int32
+	DocumentID pgtype.UUID
 }
 
 func (q *Queries) GetLastPageViewByVisitorPage(ctx context.Context, arg GetLastPageViewByVisitorPageParams) (pgtype.Timestamptz, error) {
-	row := q.db.QueryRow(ctx, getLastPageViewByVisitorPage, arg.LinkID, arg.VisitorID, arg.PageNumber)
+	row := q.db.QueryRow(ctx, getLastPageViewByVisitorPage,
+		arg.LinkID,
+		arg.VisitorID,
+		arg.PageNumber,
+		arg.DocumentID,
+	)
 	var created_at pgtype.Timestamptz
 	err := row.Scan(&created_at)
 	return created_at, err
@@ -5918,6 +6769,7 @@ const getLinkAccessMetrics = `-- name: GetLinkAccessMetrics :one
 SELECT
     COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
     COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal') AS forward_signals,
     COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
 FROM access_logs
 WHERE link_id = $1
@@ -5926,13 +6778,19 @@ WHERE link_id = $1
 type GetLinkAccessMetricsRow struct {
 	Opens          int64
 	UniqueVisitors int64
+	ForwardSignals int64
 	Downloads      int64
 }
 
 func (q *Queries) GetLinkAccessMetrics(ctx context.Context, linkID pgtype.UUID) (GetLinkAccessMetricsRow, error) {
 	row := q.db.QueryRow(ctx, getLinkAccessMetrics, linkID)
 	var i GetLinkAccessMetricsRow
-	err := row.Scan(&i.Opens, &i.UniqueVisitors, &i.Downloads)
+	err := row.Scan(
+		&i.Opens,
+		&i.UniqueVisitors,
+		&i.ForwardSignals,
+		&i.Downloads,
+	)
 	return i, err
 }
 
@@ -5940,6 +6798,7 @@ const getLinkAccessMetrics24h = `-- name: GetLinkAccessMetrics24h :one
 SELECT
     COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
     COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal') AS forward_signals,
     COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
 FROM access_logs
 WHERE link_id = $1
@@ -5949,6 +6808,7 @@ WHERE link_id = $1
 type GetLinkAccessMetrics24hRow struct {
 	Opens          int64
 	UniqueVisitors int64
+	ForwardSignals int64
 	Downloads      int64
 }
 
@@ -5956,7 +6816,12 @@ type GetLinkAccessMetrics24hRow struct {
 func (q *Queries) GetLinkAccessMetrics24h(ctx context.Context, linkID pgtype.UUID) (GetLinkAccessMetrics24hRow, error) {
 	row := q.db.QueryRow(ctx, getLinkAccessMetrics24h, linkID)
 	var i GetLinkAccessMetrics24hRow
-	err := row.Scan(&i.Opens, &i.UniqueVisitors, &i.Downloads)
+	err := row.Scan(
+		&i.Opens,
+		&i.UniqueVisitors,
+		&i.ForwardSignals,
+		&i.Downloads,
+	)
 	return i, err
 }
 
@@ -5965,6 +6830,7 @@ SELECT
     link_id,
     COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
     COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
     COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
 FROM access_logs
 WHERE link_id = ANY($1::uuid[])
@@ -5975,6 +6841,7 @@ type GetLinkAccessMetricsBatchRow struct {
 	LinkID         pgtype.UUID
 	Opens          int64
 	UniqueVisitors int64
+	ForwardSignals int64
 	Downloads      int64
 }
 
@@ -5991,6 +6858,7 @@ func (q *Queries) GetLinkAccessMetricsBatch(ctx context.Context, dollar_1 []pgty
 			&i.LinkID,
 			&i.Opens,
 			&i.UniqueVisitors,
+			&i.ForwardSignals,
 			&i.Downloads,
 		); err != nil {
 			return nil, err
@@ -6746,7 +7614,7 @@ func (q *Queries) GetLinkContactsByPublicToken(ctx context.Context, publicToken 
 }
 
 const getLinkFeature = `-- name: GetLinkFeature :one
-SELECT id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at
+SELECT id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at, forward_signals
 FROM link_features
 WHERE link_id = $1
 ORDER BY window_start DESC
@@ -6775,6 +7643,7 @@ func (q *Queries) GetLinkFeature(ctx context.Context, linkID pgtype.UUID) (LinkF
 		&i.UnknownEmails24h,
 		&i.Downloads24h,
 		&i.UpdatedAt,
+		&i.ForwardSignals,
 	)
 	return i, err
 }
@@ -6943,7 +7812,7 @@ SELECT
     COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY ($2::text[])
@@ -6996,7 +7865,7 @@ SELECT
     COUNT(*) AS total_key_page_views
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY ($2::text[])
@@ -7027,7 +7896,7 @@ SELECT
     COUNT(*) AS total_key_page_views
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND pv.created_at > now() - interval '24 hours'
@@ -7059,7 +7928,7 @@ SELECT
     COUNT(*) AS total_key_page_views
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = ANY($1::uuid[])
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY ($2::text[])
@@ -7422,6 +8291,40 @@ func (q *Queries) GetOAuthState(ctx context.Context, arg GetOAuthStateParams) (O
 	return i, err
 }
 
+const getOpenReadingSession = `-- name: GetOpenReadingSession :one
+SELECT id, tenant_id, workspace_id, link_id, document_id, visitor_id, started_at, last_activity_at, ended_at, max_page, distinct_page_count, total_duration_seconds
+FROM reading_sessions
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND ended_at IS NULL
+LIMIT 1
+`
+
+type GetOpenReadingSessionParams struct {
+	LinkID    pgtype.UUID
+	VisitorID string
+}
+
+func (q *Queries) GetOpenReadingSession(ctx context.Context, arg GetOpenReadingSessionParams) (ReadingSession, error) {
+	row := q.db.QueryRow(ctx, getOpenReadingSession, arg.LinkID, arg.VisitorID)
+	var i ReadingSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.VisitorID,
+		&i.StartedAt,
+		&i.LastActivityAt,
+		&i.EndedAt,
+		&i.MaxPage,
+		&i.DistinctPageCount,
+		&i.TotalDurationSeconds,
+	)
+	return i, err
+}
+
 const getOwnerAskTurnByID = `-- name: GetOwnerAskTurnByID :one
 SELECT
     t.id,
@@ -7569,6 +8472,68 @@ func (q *Queries) GetPageAnalyticsByDocument(ctx context.Context, arg GetPageAna
 	return items, nil
 }
 
+const getPageAnalyticsByDocumentInRange = `-- name: GetPageAnalyticsByDocumentInRange :many
+SELECT
+    p.page_number,
+    COUNT(pv.id) AS view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COALESCE(MAX(pv.created_at), p.created_at) AS last_viewed_at
+FROM pages p
+LEFT JOIN links l ON l.document_id = p.document_id AND l.status != 'deleted'
+LEFT JOIN page_views pv
+  ON pv.link_id = l.id
+ AND pv.page_number = p.page_number
+ AND pv.created_at >= $1
+ AND pv.created_at < $2
+WHERE p.document_id = $3 AND p.workspace_id = $4
+GROUP BY p.page_number, p.created_at
+ORDER BY p.page_number
+`
+
+type GetPageAnalyticsByDocumentInRangeParams struct {
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+type GetPageAnalyticsByDocumentInRangeRow struct {
+	PageNumber         int32
+	ViewCount          int64
+	AvgDurationSeconds float64
+	LastViewedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) GetPageAnalyticsByDocumentInRange(ctx context.Context, arg GetPageAnalyticsByDocumentInRangeParams) ([]GetPageAnalyticsByDocumentInRangeRow, error) {
+	rows, err := q.db.Query(ctx, getPageAnalyticsByDocumentInRange,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.DocumentID,
+		arg.WorkspaceID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPageAnalyticsByDocumentInRangeRow
+	for rows.Next() {
+		var i GetPageAnalyticsByDocumentInRangeRow
+		if err := rows.Scan(
+			&i.PageNumber,
+			&i.ViewCount,
+			&i.AvgDurationSeconds,
+			&i.LastViewedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const getPageByDocumentAndNumber = `-- name: GetPageByDocumentAndNumber :one
 SELECT id, tenant_id, workspace_id, document_id, page_number, image_object_key, width, height, created_at
 FROM pages
@@ -7616,7 +8581,7 @@ FROM (
     SELECT DISTINCT ON (link_id, visitor_id) link_id, visitor_id, page_number
     FROM page_views
     WHERE link_id IN (
-        SELECT id FROM links WHERE document_id = $1 AND status != 'deleted'
+        SELECT id FROM links WHERE links.document_id = $1 AND status != 'deleted'
     )
     ORDER BY link_id, visitor_id, created_at DESC
 ) last_views
@@ -7646,6 +8611,73 @@ func (q *Queries) GetPageExitCountsByDocument(ctx context.Context, documentID pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const getPageExitCountsByDocumentInRange = `-- name: GetPageExitCountsByDocumentInRange :many
+SELECT page_number, COUNT(*) AS exit_count
+FROM (
+    SELECT DISTINCT ON (pv.link_id, pv.visitor_id) pv.link_id, pv.visitor_id, pv.page_number
+    FROM page_views pv
+    WHERE pv.link_id IN (
+        SELECT id FROM links
+        WHERE links.document_id = $1 AND status != 'deleted'
+    )
+      AND pv.created_at >= $2
+      AND pv.created_at < $3
+    ORDER BY pv.link_id, pv.visitor_id, pv.created_at DESC
+) last_views
+GROUP BY page_number
+`
+
+type GetPageExitCountsByDocumentInRangeParams struct {
+	DocumentID pgtype.UUID
+	RangeStart pgtype.Timestamptz
+	RangeEnd   pgtype.Timestamptz
+}
+
+type GetPageExitCountsByDocumentInRangeRow struct {
+	PageNumber int32
+	ExitCount  int64
+}
+
+func (q *Queries) GetPageExitCountsByDocumentInRange(ctx context.Context, arg GetPageExitCountsByDocumentInRangeParams) ([]GetPageExitCountsByDocumentInRangeRow, error) {
+	rows, err := q.db.Query(ctx, getPageExitCountsByDocumentInRange, arg.DocumentID, arg.RangeStart, arg.RangeEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetPageExitCountsByDocumentInRangeRow
+	for rows.Next() {
+		var i GetPageExitCountsByDocumentInRangeRow
+		if err := rows.Scan(&i.PageNumber, &i.ExitCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getPageTitleByDocumentAndNumber = `-- name: GetPageTitleByDocumentAndNumber :one
+SELECT COALESCE(NULLIF(TRIM(title), ''), '')::text AS title
+FROM pages
+WHERE document_id = $1 AND page_number = $2
+LIMIT 1
+`
+
+type GetPageTitleByDocumentAndNumberParams struct {
+	DocumentID pgtype.UUID
+	PageNumber int32
+}
+
+// Title used for heat / key-page matching (empty when missing).
+func (q *Queries) GetPageTitleByDocumentAndNumber(ctx context.Context, arg GetPageTitleByDocumentAndNumberParams) (string, error) {
+	row := q.db.QueryRow(ctx, getPageTitleByDocumentAndNumber, arg.DocumentID, arg.PageNumber)
+	var title string
+	err := row.Scan(&title)
+	return title, err
 }
 
 const getPageTitlesByDocument = `-- name: GetPageTitlesByDocument :many
@@ -8184,6 +9216,24 @@ func (q *Queries) GetVisitorFirstAccess(ctx context.Context, arg GetVisitorFirst
 	return first_accessed_at, err
 }
 
+const getVisitorLastAccess = `-- name: GetVisitorLastAccess :one
+SELECT MAX(created_at)::timestamptz AS last_accessed_at
+FROM access_logs
+WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened'
+`
+
+type GetVisitorLastAccessParams struct {
+	LinkID    pgtype.UUID
+	VisitorID pgtype.Text
+}
+
+func (q *Queries) GetVisitorLastAccess(ctx context.Context, arg GetVisitorLastAccessParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, getVisitorLastAccess, arg.LinkID, arg.VisitorID)
+	var last_accessed_at pgtype.Timestamptz
+	err := row.Scan(&last_accessed_at)
+	return last_accessed_at, err
+}
+
 const getVisitorSummariesByDocument = `-- name: GetVisitorSummariesByDocument :many
 WITH visitor_emails AS (
     SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
@@ -8231,6 +9281,90 @@ func (q *Queries) GetVisitorSummariesByDocument(ctx context.Context, arg GetVisi
 	var items []GetVisitorSummariesByDocumentRow
 	for rows.Next() {
 		var i GetVisitorSummariesByDocumentRow
+		if err := rows.Scan(
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.PageViewCount,
+			&i.AvgDurationSeconds,
+			&i.LastSeenAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getVisitorSummariesByDocumentInRange = `-- name: GetVisitorSummariesByDocumentInRange :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.link_id IN (
+        SELECT l.id FROM links l
+        WHERE l.document_id = $1
+          AND l.workspace_id = $2
+          AND l.status != 'deleted'
+    )
+      AND al.workspace_id = $2
+      AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    pv.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    COUNT(*)::bigint AS page_view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    MAX(pv.created_at)::timestamptz AS last_seen_at
+FROM page_views pv
+LEFT JOIN visitor_emails ve ON ve.visitor_id = pv.visitor_id
+WHERE pv.link_id IN (
+    SELECT l.id FROM links l
+    WHERE l.document_id = $1
+      AND l.workspace_id = $2
+      AND l.status != 'deleted'
+)
+  AND pv.workspace_id = $2
+  AND pv.created_at >= $3
+  AND pv.created_at < $4
+GROUP BY pv.visitor_id, ve.visitor_email
+ORDER BY last_seen_at DESC
+LIMIT $5
+`
+
+type GetVisitorSummariesByDocumentInRangeParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	PageLimit   int32
+}
+
+type GetVisitorSummariesByDocumentInRangeRow struct {
+	VisitorID          pgtype.Text
+	VisitorEmail       string
+	PageViewCount      int64
+	AvgDurationSeconds float64
+	LastSeenAt         pgtype.Timestamptz
+}
+
+func (q *Queries) GetVisitorSummariesByDocumentInRange(ctx context.Context, arg GetVisitorSummariesByDocumentInRangeParams) ([]GetVisitorSummariesByDocumentInRangeRow, error) {
+	rows, err := q.db.Query(ctx, getVisitorSummariesByDocumentInRange,
+		arg.DocumentID,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetVisitorSummariesByDocumentInRangeRow
+	for rows.Next() {
+		var i GetVisitorSummariesByDocumentInRangeRow
 		if err := rows.Scan(
 			&i.VisitorID,
 			&i.VisitorEmail,
@@ -8350,6 +9484,178 @@ func (q *Queries) GetWorkspaceByTenantAndSlug(ctx context.Context, arg GetWorksp
 	return i, err
 }
 
+const getWorkspaceDailyLinkOpens = `-- name: GetWorkspaceDailyLinkOpens :many
+SELECT
+    ((al.created_at AT TIME ZONE 'UTC')::date)::text AS day,
+    COUNT(*)::bigint AS opens,
+    COUNT(
+      DISTINCT COALESCE(
+        NULLIF(al.visitor_id, ''),
+        LOWER(NULLIF(al.visitor_email, ''))
+      )
+    )::bigint AS unique_visitors
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= (timezone('utc', now()) - ($2::int * interval '1 day'))
+GROUP BY 1
+ORDER BY 1
+`
+
+type GetWorkspaceDailyLinkOpensParams struct {
+	WorkspaceID pgtype.UUID
+	DayCount    int32
+}
+
+type GetWorkspaceDailyLinkOpensRow struct {
+	Day            string
+	Opens          int64
+	UniqueVisitors int64
+}
+
+// UTC calendar-day series of link opens for Insights overview trend.
+func (q *Queries) GetWorkspaceDailyLinkOpens(ctx context.Context, arg GetWorkspaceDailyLinkOpensParams) ([]GetWorkspaceDailyLinkOpensRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceDailyLinkOpens, arg.WorkspaceID, arg.DayCount)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetWorkspaceDailyLinkOpensRow
+	for rows.Next() {
+		var i GetWorkspaceDailyLinkOpensRow
+		if err := rows.Scan(&i.Day, &i.Opens, &i.UniqueVisitors); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWorkspaceDailyLinkOpensInRange = `-- name: GetWorkspaceDailyLinkOpensInRange :many
+SELECT
+    ((al.created_at AT TIME ZONE 'UTC')::date)::text AS day,
+    COUNT(*)::bigint AS opens,
+    COUNT(
+      DISTINCT COALESCE(
+        NULLIF(al.visitor_id, ''),
+        LOWER(NULLIF(al.visitor_email, ''))
+      )
+    )::bigint AS unique_visitors
+FROM access_logs al
+WHERE al.workspace_id = $1
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= $2
+  AND al.created_at < $3
+GROUP BY 1
+ORDER BY 1
+`
+
+type GetWorkspaceDailyLinkOpensInRangeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+type GetWorkspaceDailyLinkOpensInRangeRow struct {
+	Day            string
+	Opens          int64
+	UniqueVisitors int64
+}
+
+// Dense-capable daily opens for an arbitrary UTC half-open window [start, end).
+func (q *Queries) GetWorkspaceDailyLinkOpensInRange(ctx context.Context, arg GetWorkspaceDailyLinkOpensInRangeParams) ([]GetWorkspaceDailyLinkOpensInRangeRow, error) {
+	rows, err := q.db.Query(ctx, getWorkspaceDailyLinkOpensInRange, arg.WorkspaceID, arg.RangeStart, arg.RangeEnd)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetWorkspaceDailyLinkOpensInRangeRow
+	for rows.Next() {
+		var i GetWorkspaceDailyLinkOpensInRangeRow
+		if err := rows.Scan(&i.Day, &i.Opens, &i.UniqueVisitors); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const getWorkspaceKeyPageComplianceSummary = `-- name: GetWorkspaceKeyPageComplianceSummary :one
+SELECT
+    COUNT(*)::bigint AS total_views,
+    COUNT(*) FILTER (WHERE pv.duration_seconds >= 3)::bigint AS engaged_views,
+    COUNT(DISTINCT pv.visitor_id) FILTER (
+        WHERE pv.visitor_id IS NOT NULL AND btrim(pv.visitor_id) <> ''
+    )::bigint AS unique_visitors,
+    COUNT(DISTINCT (COALESCE(pv.document_id, l.document_id), pv.page_number))::bigint AS distinct_pages
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+WHERE pv.workspace_id = $1
+  AND pv.created_at >= $2
+  AND pv.created_at < $3
+  AND p.title IS NOT NULL AND btrim(p.title) <> ''
+  AND lower(p.title) LIKE ANY ($4::text[])
+`
+
+type GetWorkspaceKeyPageComplianceSummaryParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	Patterns    []string
+}
+
+type GetWorkspaceKeyPageComplianceSummaryRow struct {
+	TotalViews     int64
+	EngagedViews   int64
+	UniqueVisitors int64
+	DistinctPages  int64
+}
+
+// Insights key-page compliance: views whose page title matches heat key-page keywords.
+func (q *Queries) GetWorkspaceKeyPageComplianceSummary(ctx context.Context, arg GetWorkspaceKeyPageComplianceSummaryParams) (GetWorkspaceKeyPageComplianceSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceKeyPageComplianceSummary,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.Patterns,
+	)
+	var i GetWorkspaceKeyPageComplianceSummaryRow
+	err := row.Scan(
+		&i.TotalViews,
+		&i.EngagedViews,
+		&i.UniqueVisitors,
+		&i.DistinctPages,
+	)
+	return i, err
+}
+
+const getWorkspaceKeyPageSettings = `-- name: GetWorkspaceKeyPageSettings :one
+SELECT workspace_id, tenant_id, default_circle, extra_keywords, created_at, updated_at
+FROM workspace_key_page_settings
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetWorkspaceKeyPageSettings(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceKeyPageSetting, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceKeyPageSettings, workspaceID)
+	var i WorkspaceKeyPageSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.TenantID,
+		&i.DefaultCircle,
+		&i.ExtraKeywords,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getWorkspaceMember = `-- name: GetWorkspaceMember :one
 SELECT workspace_id, user_id, role, joined_at
 FROM workspace_members
@@ -8373,6 +9679,62 @@ func (q *Queries) GetWorkspaceMember(ctx context.Context, arg GetWorkspaceMember
 	return i, err
 }
 
+const getWorkspaceOutboundWebhook = `-- name: GetWorkspaceOutboundWebhook :one
+SELECT workspace_id, tenant_id, url, secret, enabled, event_types, created_at, updated_at
+FROM workspace_outbound_webhooks
+WHERE workspace_id = $1
+`
+
+func (q *Queries) GetWorkspaceOutboundWebhook(ctx context.Context, workspaceID pgtype.UUID) (WorkspaceOutboundWebhook, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceOutboundWebhook, workspaceID)
+	var i WorkspaceOutboundWebhook
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.TenantID,
+		&i.Url,
+		&i.Secret,
+		&i.Enabled,
+		&i.EventTypes,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getWorkspacePageViewEngagementInRange = `-- name: GetWorkspacePageViewEngagementInRange :one
+SELECT
+    COUNT(*)::bigint AS page_view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COALESCE(
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pv.duration_seconds),
+      0
+    )::float8 AS median_duration_seconds
+FROM page_views pv
+WHERE pv.workspace_id = $1
+  AND pv.created_at >= $2
+  AND pv.created_at < $3
+`
+
+type GetWorkspacePageViewEngagementInRangeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+type GetWorkspacePageViewEngagementInRangeRow struct {
+	PageViewCount         int64
+	AvgDurationSeconds    float64
+	MedianDurationSeconds float64
+}
+
+// Page-view engagement for Insights overview KPI strip.
+func (q *Queries) GetWorkspacePageViewEngagementInRange(ctx context.Context, arg GetWorkspacePageViewEngagementInRangeParams) (GetWorkspacePageViewEngagementInRangeRow, error) {
+	row := q.db.QueryRow(ctx, getWorkspacePageViewEngagementInRange, arg.WorkspaceID, arg.RangeStart, arg.RangeEnd)
+	var i GetWorkspacePageViewEngagementInRangeRow
+	err := row.Scan(&i.PageViewCount, &i.AvgDurationSeconds, &i.MedianDurationSeconds)
+	return i, err
+}
+
 const getWorkspaceRagTenant = `-- name: GetWorkspaceRagTenant :one
 
 SELECT workspace_id, external_tenant_slug, tenant_api_key, created_at, updated_at
@@ -8393,6 +9755,47 @@ func (q *Queries) GetWorkspaceRagTenant(ctx context.Context, workspaceID pgtype.
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
+	return i, err
+}
+
+const getWorkspaceReadingSessionStatsInRange = `-- name: GetWorkspaceReadingSessionStatsInRange :one
+SELECT
+    COUNT(*)::bigint AS session_count,
+    COUNT(*) FILTER (
+        WHERE d.page_count IS NOT NULL AND d.page_count > 0
+    )::bigint AS measurable_sessions,
+    COUNT(*) FILTER (
+        WHERE d.page_count IS NOT NULL
+          AND d.page_count > 0
+          AND rs.max_page >= d.page_count
+    )::bigint AS completed_sessions
+FROM reading_sessions rs
+JOIN documents d ON d.id = rs.document_id AND d.workspace_id = rs.workspace_id
+WHERE rs.workspace_id = $1
+  AND rs.document_id IS NOT NULL
+  AND rs.last_activity_at >= $2
+  AND rs.last_activity_at < $3
+`
+
+type GetWorkspaceReadingSessionStatsInRangeParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+}
+
+type GetWorkspaceReadingSessionStatsInRangeRow struct {
+	SessionCount       int64
+	MeasurableSessions int64
+	CompletedSessions  int64
+}
+
+// Workspace reading-session completion for Insights command-center KPI.
+// Measurable = sessions whose document has a known page_count > 0.
+// Completed = max_page >= document.page_count (same rule as document funnel).
+func (q *Queries) GetWorkspaceReadingSessionStatsInRange(ctx context.Context, arg GetWorkspaceReadingSessionStatsInRangeParams) (GetWorkspaceReadingSessionStatsInRangeRow, error) {
+	row := q.db.QueryRow(ctx, getWorkspaceReadingSessionStatsInRange, arg.WorkspaceID, arg.RangeStart, arg.RangeEnd)
+	var i GetWorkspaceReadingSessionStatsInRangeRow
+	err := row.Scan(&i.SessionCount, &i.MeasurableSessions, &i.CompletedSessions)
 	return i, err
 }
 
@@ -10126,6 +11529,199 @@ func (q *Queries) ListDocumentLinksByWorkspace(ctx context.Context, workspaceID 
 	return items, nil
 }
 
+const listDocumentReadingSessions = `-- name: ListDocumentReadingSessions :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.workspace_id = $2
+      AND al.link_id IN (
+          SELECT l.id FROM links l
+          WHERE l.document_id = $1
+            AND l.workspace_id = $2
+            AND l.status != 'deleted'
+      )
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    rs.id,
+    rs.link_id,
+    rs.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    rs.started_at,
+    rs.last_activity_at,
+    rs.ended_at,
+    rs.max_page,
+    rs.distinct_page_count,
+    rs.total_duration_seconds
+FROM reading_sessions rs
+LEFT JOIN visitor_emails ve ON ve.visitor_id = rs.visitor_id
+WHERE rs.document_id = $1
+  AND rs.workspace_id = $2
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = $1
+        AND l.workspace_id = $2
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC
+LIMIT $3
+`
+
+type ListDocumentReadingSessionsParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	PageLimit   int32
+}
+
+type ListDocumentReadingSessionsRow struct {
+	ID                   pgtype.UUID
+	LinkID               pgtype.UUID
+	VisitorID            string
+	VisitorEmail         string
+	StartedAt            pgtype.Timestamptz
+	LastActivityAt       pgtype.Timestamptz
+	EndedAt              pgtype.Timestamptz
+	MaxPage              int32
+	DistinctPageCount    int32
+	TotalDurationSeconds int32
+}
+
+// Insights session timeline: who / when / deepest page.
+func (q *Queries) ListDocumentReadingSessions(ctx context.Context, arg ListDocumentReadingSessionsParams) ([]ListDocumentReadingSessionsRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentReadingSessions, arg.DocumentID, arg.WorkspaceID, arg.PageLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentReadingSessionsRow
+	for rows.Next() {
+		var i ListDocumentReadingSessionsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.StartedAt,
+			&i.LastActivityAt,
+			&i.EndedAt,
+			&i.MaxPage,
+			&i.DistinctPageCount,
+			&i.TotalDurationSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDocumentReadingSessionsInRange = `-- name: ListDocumentReadingSessionsInRange :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.workspace_id = $2
+      AND al.link_id IN (
+          SELECT l.id FROM links l
+          WHERE l.document_id = $1
+            AND l.workspace_id = $2
+            AND l.status != 'deleted'
+      )
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    rs.id,
+    rs.link_id,
+    rs.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    rs.started_at,
+    rs.last_activity_at,
+    rs.ended_at,
+    rs.max_page,
+    rs.distinct_page_count,
+    rs.total_duration_seconds
+FROM reading_sessions rs
+LEFT JOIN visitor_emails ve ON ve.visitor_id = rs.visitor_id
+WHERE rs.document_id = $1
+  AND rs.workspace_id = $2
+  AND rs.last_activity_at >= $3
+  AND rs.last_activity_at < $4
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = $1
+        AND l.workspace_id = $2
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC
+LIMIT $5
+`
+
+type ListDocumentReadingSessionsInRangeParams struct {
+	DocumentID  pgtype.UUID
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	PageLimit   int32
+}
+
+type ListDocumentReadingSessionsInRangeRow struct {
+	ID                   pgtype.UUID
+	LinkID               pgtype.UUID
+	VisitorID            string
+	VisitorEmail         string
+	StartedAt            pgtype.Timestamptz
+	LastActivityAt       pgtype.Timestamptz
+	EndedAt              pgtype.Timestamptz
+	MaxPage              int32
+	DistinctPageCount    int32
+	TotalDurationSeconds int32
+}
+
+func (q *Queries) ListDocumentReadingSessionsInRange(ctx context.Context, arg ListDocumentReadingSessionsInRangeParams) ([]ListDocumentReadingSessionsInRangeRow, error) {
+	rows, err := q.db.Query(ctx, listDocumentReadingSessionsInRange,
+		arg.DocumentID,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListDocumentReadingSessionsInRangeRow
+	for rows.Next() {
+		var i ListDocumentReadingSessionsInRangeRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.StartedAt,
+			&i.LastActivityAt,
+			&i.EndedAt,
+			&i.MaxPage,
+			&i.DistinctPageCount,
+			&i.TotalDurationSeconds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDocumentsByCategory = `-- name: ListDocumentsByCategory :many
 SELECT id, tenant_id, workspace_id, created_by, COALESCE(title, ''::text) as title, source_type, status, storage_key, COALESCE(file_size, 0::bigint) as file_size, category, page_count, created_at, updated_at, deleted_at
 FROM documents
@@ -10256,8 +11852,12 @@ WITH link_activity AS (
         MAX(al.created_at) AS last_active_at,
         COUNT(*) FILTER (WHERE al.created_at > NOW() - INTERVAL '30 days')::bigint AS recent_events,
         MAX(daily.cnt)::bigint AS peak_daily_events,
-        bool_or(al.event_type = 'forward_visited') AS was_forwarded,
-        bool_or(al.event_type = 'file_downloaded') AS had_downloads
+        (COUNT(DISTINCT al.visitor_id) FILTER (
+            WHERE al.event_type = 'link_opened'
+              AND al.visitor_id IS NOT NULL
+              AND al.visitor_id <> ''
+        ) > 1) AS was_forwarded,
+        bool_or(al.event_type = 'download_attempted') AS had_downloads
     FROM links l
     JOIN access_logs al ON al.link_id = l.id
     JOIN (
@@ -10309,6 +11909,45 @@ func (q *Queries) ListDormantLinks(ctx context.Context, workspaceID pgtype.UUID)
 			&i.PeakDailyEvents,
 			&i.WasForwarded,
 			&i.HadDownloads,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listEnabledDailyDigestRules = `-- name: ListEnabledDailyDigestRules :many
+SELECT id, tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes, created_at, updated_at
+FROM notification_rules
+WHERE rule_type = 'daily_digest'
+  AND enabled = true
+ORDER BY workspace_id
+`
+
+func (q *Queries) ListEnabledDailyDigestRules(ctx context.Context) ([]NotificationRule, error) {
+	rows, err := q.db.Query(ctx, listEnabledDailyDigestRules)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []NotificationRule
+	for rows.Next() {
+		var i NotificationRule
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.WorkspaceID,
+			&i.RuleType,
+			&i.Channels,
+			&i.Enabled,
+			&i.Unsubscribable,
+			&i.MergeWindowMinutes,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -11347,6 +12986,7 @@ SELECT
     created_at,
     opens,
     unique_visitors,
+    forward_signals,
     downloads,
     avg_duration_seconds,
     total_page_views,
@@ -11373,6 +13013,7 @@ func (q *Queries) ListLinkHeatScoresByWorkspace(ctx context.Context, workspaceID
 			&i.CreatedAt,
 			&i.Opens,
 			&i.UniqueVisitors,
+			&i.ForwardSignals,
 			&i.Downloads,
 			&i.AvgDurationSeconds,
 			&i.TotalPageViews,
@@ -12374,15 +14015,27 @@ type ListPageViewsByWorkspaceParams struct {
 	Limit       int32
 }
 
-func (q *Queries) ListPageViewsByWorkspace(ctx context.Context, arg ListPageViewsByWorkspaceParams) ([]PageView, error) {
+type ListPageViewsByWorkspaceRow struct {
+	ID              pgtype.UUID
+	TenantID        pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       pgtype.Text
+	PageNumber      int32
+	DurationSeconds int32
+	ScrollDepth     pgtype.Numeric
+	CreatedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) ListPageViewsByWorkspace(ctx context.Context, arg ListPageViewsByWorkspaceParams) ([]ListPageViewsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPageViewsByWorkspace, arg.WorkspaceID, arg.Limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []PageView
+	var items []ListPageViewsByWorkspaceRow
 	for rows.Next() {
-		var i PageView
+		var i ListPageViewsByWorkspaceRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -13227,6 +14880,39 @@ func (q *Queries) ListPopularDocumentsByWorkspace(ctx context.Context, workspace
 			&i.DeletedAt,
 			&i.TotalViews,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listReadingSessionPagesBySessionIDs = `-- name: ListReadingSessionPagesBySessionIDs :many
+SELECT session_id, page_number, duration_seconds
+FROM reading_session_pages
+WHERE session_id = ANY($1::uuid[])
+ORDER BY session_id, page_number ASC
+`
+
+type ListReadingSessionPagesBySessionIDsRow struct {
+	SessionID       pgtype.UUID
+	PageNumber      int32
+	DurationSeconds int32
+}
+
+func (q *Queries) ListReadingSessionPagesBySessionIDs(ctx context.Context, sessionIds []pgtype.UUID) ([]ListReadingSessionPagesBySessionIDsRow, error) {
+	rows, err := q.db.Query(ctx, listReadingSessionPagesBySessionIDs, sessionIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListReadingSessionPagesBySessionIDsRow
+	for rows.Next() {
+		var i ListReadingSessionPagesBySessionIDsRow
+		if err := rows.Scan(&i.SessionID, &i.PageNumber, &i.DurationSeconds); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -14582,7 +16268,7 @@ func (q *Queries) ListSignalsByWorkspace(ctx context.Context, workspaceID pgtype
 }
 
 const listStaleLinkFeatures = `-- name: ListStaleLinkFeatures :many
-SELECT id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at
+SELECT id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at, forward_signals
 FROM link_features
 WHERE updated_at < $1
 ORDER BY updated_at ASC
@@ -14622,6 +16308,7 @@ func (q *Queries) ListStaleLinkFeatures(ctx context.Context, arg ListStaleLinkFe
 			&i.UnknownEmails24h,
 			&i.Downloads24h,
 			&i.UpdatedAt,
+			&i.ForwardSignals,
 		); err != nil {
 			return nil, err
 		}
@@ -14634,9 +16321,12 @@ func (q *Queries) ListStaleLinkFeatures(ctx context.Context, arg ListStaleLinkFe
 }
 
 const listSuggestionsByLink = `-- name: ListSuggestionsByLink :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id, snoozed_until
 FROM suggestions
-WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
+WHERE link_id = $1
+  AND workspace_id = $2
+  AND dismissed = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now())
 ORDER BY created_at DESC
 `
 
@@ -14672,6 +16362,7 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 			&i.Context,
 			&i.SyncedAt,
 			&i.RuleID,
+			&i.SnoozedUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -14684,9 +16375,11 @@ func (q *Queries) ListSuggestionsByLink(ctx context.Context, arg ListSuggestions
 }
 
 const listSuggestionsByWorkspace = `-- name: ListSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id, snoozed_until
 FROM suggestions
-WHERE workspace_id = $1 AND dismissed = false
+WHERE workspace_id = $1
+  AND dismissed = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now())
 ORDER BY created_at DESC
 `
 
@@ -14717,6 +16410,7 @@ func (q *Queries) ListSuggestionsByWorkspace(ctx context.Context, workspaceID pg
 			&i.Context,
 			&i.SyncedAt,
 			&i.RuleID,
+			&i.SnoozedUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -14942,7 +16636,7 @@ func (q *Queries) ListUnsharedDocumentsByWorkspace(ctx context.Context, workspac
 }
 
 const listUnsyncedSuggestionsByWorkspace = `-- name: ListUnsyncedSuggestionsByWorkspace :many
-SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id
+SELECT id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id, snoozed_until
 FROM suggestions
 WHERE workspace_id = $1
   AND (synced_at IS NULL OR updated_at > synced_at)
@@ -14976,6 +16670,7 @@ func (q *Queries) ListUnsyncedSuggestionsByWorkspace(ctx context.Context, worksp
 			&i.Context,
 			&i.SyncedAt,
 			&i.RuleID,
+			&i.SnoozedUntil,
 		); err != nil {
 			return nil, err
 		}
@@ -15031,6 +16726,317 @@ func (q *Queries) ListUploadedFilesByLink(ctx context.Context, linkID pgtype.UUI
 	return items, nil
 }
 
+const listWorkspaceAccessAuditEvents = `-- name: ListWorkspaceAccessAuditEvents :many
+SELECT
+    se.id,
+    se.link_id,
+    se.event_type,
+    se.visitor_id,
+    se.email,
+    se.reason,
+    se.created_at,
+    COALESCE(
+        NULLIF(d.title, ''),
+        NULLIF(dr.name, ''),
+        NULLIF(l.name, ''),
+        ''
+    )::text AS document_title,
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name,
+    l.created_by AS member_id,
+    COALESCE(u.email, '')::text AS member_email,
+    COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '')::text AS folder_path
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN documents d ON d.id = l.document_id
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = se.workspace_id
+LEFT JOIN users u ON u.id = l.created_by
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = $1
+  AND se.created_at >= $2
+  AND se.created_at < $3
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND ($4::text IS NULL OR se.event_type = $4)
+  AND ($5::uuid IS NULL OR l.deal_room_id = $5)
+  AND ($6::uuid IS NULL OR l.created_by = $6)
+  AND (
+    $7::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = $7
+  )
+ORDER BY se.created_at DESC
+LIMIT $9 OFFSET $8
+`
+
+type ListWorkspaceAccessAuditEventsParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	EventType   pgtype.Text
+	DealRoomID  pgtype.UUID
+	MemberID    pgtype.UUID
+	FolderPath  pgtype.Text
+	PageOffset  int32
+	PageLimit   int32
+}
+
+type ListWorkspaceAccessAuditEventsRow struct {
+	ID            pgtype.UUID
+	LinkID        pgtype.UUID
+	EventType     string
+	VisitorID     pgtype.Text
+	Email         pgtype.Text
+	Reason        pgtype.Text
+	CreatedAt     pgtype.Timestamptz
+	DocumentTitle string
+	DealRoomID    pgtype.UUID
+	DealRoomName  string
+	MemberID      pgtype.UUID
+	MemberEmail   string
+	FolderPath    string
+}
+
+func (q *Queries) ListWorkspaceAccessAuditEvents(ctx context.Context, arg ListWorkspaceAccessAuditEventsParams) ([]ListWorkspaceAccessAuditEventsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceAccessAuditEvents,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.EventType,
+		arg.DealRoomID,
+		arg.MemberID,
+		arg.FolderPath,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkspaceAccessAuditEventsRow
+	for rows.Next() {
+		var i ListWorkspaceAccessAuditEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.EventType,
+			&i.VisitorID,
+			&i.Email,
+			&i.Reason,
+			&i.CreatedAt,
+			&i.DocumentTitle,
+			&i.DealRoomID,
+			&i.DealRoomName,
+			&i.MemberID,
+			&i.MemberEmail,
+			&i.FolderPath,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceKeyPageComplianceByPage = `-- name: ListWorkspaceKeyPageComplianceByPage :many
+SELECT
+    COALESCE(pv.document_id, l.document_id) AS document_id,
+    COALESCE(d.title, '')::text AS document_title,
+    pv.page_number,
+    COALESCE(NULLIF(TRIM(p.title), ''), 'Page ' || pv.page_number)::text AS page_title,
+    COUNT(*)::bigint AS views,
+    COUNT(DISTINCT pv.visitor_id) FILTER (
+        WHERE pv.visitor_id IS NOT NULL AND btrim(pv.visitor_id) <> ''
+    )::bigint AS unique_visitors,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    MAX(pv.created_at)::timestamptz AS last_viewed_at
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN documents d ON d.id = COALESCE(pv.document_id, l.document_id)
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+WHERE pv.workspace_id = $1
+  AND pv.created_at >= $2
+  AND pv.created_at < $3
+  AND p.title IS NOT NULL AND btrim(p.title) <> ''
+  AND lower(p.title) LIKE ANY ($4::text[])
+GROUP BY COALESCE(pv.document_id, l.document_id), d.title, pv.page_number, p.title
+ORDER BY views DESC, last_viewed_at DESC NULLS LAST
+LIMIT 50
+`
+
+type ListWorkspaceKeyPageComplianceByPageParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	Patterns    []string
+}
+
+type ListWorkspaceKeyPageComplianceByPageRow struct {
+	DocumentID         pgtype.UUID
+	DocumentTitle      string
+	PageNumber         int32
+	PageTitle          string
+	Views              int64
+	UniqueVisitors     int64
+	AvgDurationSeconds float64
+	LastViewedAt       pgtype.Timestamptz
+}
+
+func (q *Queries) ListWorkspaceKeyPageComplianceByPage(ctx context.Context, arg ListWorkspaceKeyPageComplianceByPageParams) ([]ListWorkspaceKeyPageComplianceByPageRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceKeyPageComplianceByPage,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.Patterns,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkspaceKeyPageComplianceByPageRow
+	for rows.Next() {
+		var i ListWorkspaceKeyPageComplianceByPageRow
+		if err := rows.Scan(
+			&i.DocumentID,
+			&i.DocumentTitle,
+			&i.PageNumber,
+			&i.PageTitle,
+			&i.Views,
+			&i.UniqueVisitors,
+			&i.AvgDurationSeconds,
+			&i.LastViewedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceKeyPageComplianceEvents = `-- name: ListWorkspaceKeyPageComplianceEvents :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.workspace_id = $1
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    pv.id,
+    pv.link_id,
+    COALESCE(pv.visitor_id, '')::text AS visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    COALESCE(pv.document_id, l.document_id) AS document_id,
+    COALESCE(d.title, '')::text AS document_title,
+    pv.page_number,
+    COALESCE(NULLIF(TRIM(p.title), ''), 'Page ' || pv.page_number)::text AS page_title,
+    pv.duration_seconds,
+    pv.created_at,
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+LEFT JOIN documents d ON d.id = COALESCE(pv.document_id, l.document_id)
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = pv.workspace_id
+LEFT JOIN visitor_emails ve ON ve.visitor_id = pv.visitor_id
+WHERE pv.workspace_id = $1
+  AND pv.created_at >= $2
+  AND pv.created_at < $3
+  AND p.title IS NOT NULL AND btrim(p.title) <> ''
+  AND lower(p.title) LIKE ANY ($4::text[])
+ORDER BY pv.created_at DESC, pv.id DESC
+LIMIT $6 OFFSET $5
+`
+
+type ListWorkspaceKeyPageComplianceEventsParams struct {
+	WorkspaceID pgtype.UUID
+	RangeStart  pgtype.Timestamptz
+	RangeEnd    pgtype.Timestamptz
+	Patterns    []string
+	PageOffset  int32
+	PageLimit   int32
+}
+
+type ListWorkspaceKeyPageComplianceEventsRow struct {
+	ID              pgtype.UUID
+	LinkID          pgtype.UUID
+	VisitorID       string
+	VisitorEmail    string
+	DocumentID      pgtype.UUID
+	DocumentTitle   string
+	PageNumber      int32
+	PageTitle       string
+	DurationSeconds int32
+	CreatedAt       pgtype.Timestamptz
+	DealRoomID      pgtype.UUID
+	DealRoomName    string
+}
+
+func (q *Queries) ListWorkspaceKeyPageComplianceEvents(ctx context.Context, arg ListWorkspaceKeyPageComplianceEventsParams) ([]ListWorkspaceKeyPageComplianceEventsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceKeyPageComplianceEvents,
+		arg.WorkspaceID,
+		arg.RangeStart,
+		arg.RangeEnd,
+		arg.Patterns,
+		arg.PageOffset,
+		arg.PageLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListWorkspaceKeyPageComplianceEventsRow
+	for rows.Next() {
+		var i ListWorkspaceKeyPageComplianceEventsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.LinkID,
+			&i.VisitorID,
+			&i.VisitorEmail,
+			&i.DocumentID,
+			&i.DocumentTitle,
+			&i.PageNumber,
+			&i.PageTitle,
+			&i.DurationSeconds,
+			&i.CreatedAt,
+			&i.DealRoomID,
+			&i.DealRoomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listWorkspaceMembers = `-- name: ListWorkspaceMembers :many
 SELECT
     wm.workspace_id,
@@ -15071,6 +17077,34 @@ func (q *Queries) ListWorkspaceMembers(ctx context.Context, workspaceID pgtype.U
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkspaceOwnerAdminIDs = `-- name: ListWorkspaceOwnerAdminIDs :many
+SELECT user_id
+FROM workspace_members
+WHERE workspace_id = $1
+  AND role IN ('owner', 'admin')
+ORDER BY joined_at ASC
+`
+
+func (q *Queries) ListWorkspaceOwnerAdminIDs(ctx context.Context, workspaceID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceOwnerAdminIDs, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []pgtype.UUID
+	for rows.Next() {
+		var user_id pgtype.UUID
+		if err := rows.Scan(&user_id); err != nil {
+			return nil, err
+		}
+		items = append(items, user_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -15741,6 +17775,45 @@ func (q *Queries) RecordLinkOpened(ctx context.Context, arg RecordLinkOpenedPara
 	return result.RowsAffected(), nil
 }
 
+const refreshReadingSessionStats = `-- name: RefreshReadingSessionStats :one
+UPDATE reading_sessions rs
+SET
+    last_activity_at = now(),
+    max_page = GREATEST(rs.max_page, $1),
+    total_duration_seconds = rs.total_duration_seconds + $2,
+    distinct_page_count = (
+        SELECT COUNT(*)::int FROM reading_session_pages p WHERE p.session_id = rs.id
+    )
+WHERE rs.id = $3
+RETURNING id, tenant_id, workspace_id, link_id, document_id, visitor_id, started_at, last_activity_at, ended_at, max_page, distinct_page_count, total_duration_seconds
+`
+
+type RefreshReadingSessionStatsParams struct {
+	PageNumber      int32
+	DurationSeconds int32
+	ID              pgtype.UUID
+}
+
+func (q *Queries) RefreshReadingSessionStats(ctx context.Context, arg RefreshReadingSessionStatsParams) (ReadingSession, error) {
+	row := q.db.QueryRow(ctx, refreshReadingSessionStats, arg.PageNumber, arg.DurationSeconds, arg.ID)
+	var i ReadingSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.VisitorID,
+		&i.StartedAt,
+		&i.LastActivityAt,
+		&i.EndedAt,
+		&i.MaxPage,
+		&i.DistinctPageCount,
+		&i.TotalDurationSeconds,
+	)
+	return i, err
+}
+
 const rejectApprovedLinkAccessRequestByEmail = `-- name: RejectApprovedLinkAccessRequestByEmail :one
 UPDATE link_access_requests
 SET status = 'rejected',
@@ -16274,6 +18347,81 @@ func (q *Queries) SetLinkNDABinding(ctx context.Context, arg SetLinkNDABindingPa
 		arg.WorkspaceID,
 	)
 	return err
+}
+
+const snoozeActionItemBySource = `-- name: SnoozeActionItemBySource :exec
+UPDATE action_items
+SET status = 'snoozed', updated_at = now()
+WHERE workspace_id = $1
+  AND source_type = $2
+  AND source_id = $3
+  AND status = 'pending'
+`
+
+type SnoozeActionItemBySourceParams struct {
+	WorkspaceID pgtype.UUID
+	SourceType  pgtype.Text
+	SourceID    pgtype.Text
+}
+
+func (q *Queries) SnoozeActionItemBySource(ctx context.Context, arg SnoozeActionItemBySourceParams) error {
+	_, err := q.db.Exec(ctx, snoozeActionItemBySource, arg.WorkspaceID, arg.SourceType, arg.SourceID)
+	return err
+}
+
+const snoozeActionItemsBySignal = `-- name: SnoozeActionItemsBySignal :exec
+UPDATE action_items
+SET status = 'snoozed', updated_at = now()
+WHERE signal_id = $1 AND workspace_id = $2 AND status = 'pending'
+`
+
+type SnoozeActionItemsBySignalParams struct {
+	SignalID    pgtype.UUID
+	WorkspaceID pgtype.UUID
+}
+
+func (q *Queries) SnoozeActionItemsBySignal(ctx context.Context, arg SnoozeActionItemsBySignalParams) error {
+	_, err := q.db.Exec(ctx, snoozeActionItemsBySignal, arg.SignalID, arg.WorkspaceID)
+	return err
+}
+
+const snoozeSuggestion = `-- name: SnoozeSuggestion :one
+UPDATE suggestions
+SET snoozed_until = $3, updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND dismissed = false
+RETURNING id, tenant_id, workspace_id, contact_id, link_id, document_id, type, reason, action, dismissed, created_at, updated_at, subtype, metadata, context, synced_at, rule_id, snoozed_until
+`
+
+type SnoozeSuggestionParams struct {
+	ID           pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	SnoozedUntil pgtype.Timestamptz
+}
+
+func (q *Queries) SnoozeSuggestion(ctx context.Context, arg SnoozeSuggestionParams) (Suggestion, error) {
+	row := q.db.QueryRow(ctx, snoozeSuggestion, arg.ID, arg.WorkspaceID, arg.SnoozedUntil)
+	var i Suggestion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkspaceID,
+		&i.ContactID,
+		&i.LinkID,
+		&i.DocumentID,
+		&i.Type,
+		&i.Reason,
+		&i.Action,
+		&i.Dismissed,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Subtype,
+		&i.Metadata,
+		&i.Context,
+		&i.SyncedAt,
+		&i.RuleID,
+		&i.SnoozedUntil,
+	)
+	return i, err
 }
 
 const softDeleteDocument = `-- name: SoftDeleteDocument :exec
@@ -18170,11 +20318,12 @@ INSERT INTO link_features (
     key_page_views,
     downloads,
     bounces,
+    forward_signals,
     distinct_ips_1h,
     distinct_emails_24h,
     unknown_emails_24h,
     downloads_24h
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 ON CONFLICT (link_id, window_start) DO UPDATE SET
     opens = EXCLUDED.opens,
     unique_visitors = EXCLUDED.unique_visitors,
@@ -18184,12 +20333,13 @@ ON CONFLICT (link_id, window_start) DO UPDATE SET
     key_page_views = EXCLUDED.key_page_views,
     downloads = EXCLUDED.downloads,
     bounces = EXCLUDED.bounces,
+    forward_signals = EXCLUDED.forward_signals,
     distinct_ips_1h = EXCLUDED.distinct_ips_1h,
     distinct_emails_24h = EXCLUDED.distinct_emails_24h,
     unknown_emails_24h = EXCLUDED.unknown_emails_24h,
     downloads_24h = EXCLUDED.downloads_24h,
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at
+RETURNING id, tenant_id, workspace_id, link_id, window_start, opens, unique_visitors, revisits, avg_duration_seconds, total_page_views, key_page_views, downloads, bounces, distinct_ips_1h, distinct_emails_24h, unknown_emails_24h, downloads_24h, updated_at, forward_signals
 `
 
 type UpsertLinkFeatureParams struct {
@@ -18205,6 +20355,7 @@ type UpsertLinkFeatureParams struct {
 	KeyPageViews       int32
 	Downloads          int32
 	Bounces            int32
+	ForwardSignals     int32
 	DistinctIps1h      int64
 	DistinctEmails24h  int64
 	UnknownEmails24h   int64
@@ -18225,6 +20376,7 @@ func (q *Queries) UpsertLinkFeature(ctx context.Context, arg UpsertLinkFeaturePa
 		arg.KeyPageViews,
 		arg.Downloads,
 		arg.Bounces,
+		arg.ForwardSignals,
 		arg.DistinctIps1h,
 		arg.DistinctEmails24h,
 		arg.UnknownEmails24h,
@@ -18250,6 +20402,7 @@ func (q *Queries) UpsertLinkFeature(ctx context.Context, arg UpsertLinkFeaturePa
 		&i.UnknownEmails24h,
 		&i.Downloads24h,
 		&i.UpdatedAt,
+		&i.ForwardSignals,
 	)
 	return i, err
 }
@@ -18377,6 +20530,108 @@ func (q *Queries) UpsertNotificationSettings(ctx context.Context, arg UpsertNoti
 		&i.SlackConnected,
 		&i.HubspotConnected,
 		&i.SalesforceConnected,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertReadingSessionPage = `-- name: UpsertReadingSessionPage :exec
+INSERT INTO reading_session_pages (session_id, page_number, first_seen_at, duration_seconds)
+VALUES ($1, $2, now(), $3)
+ON CONFLICT (session_id, page_number) DO UPDATE
+SET duration_seconds = reading_session_pages.duration_seconds + EXCLUDED.duration_seconds
+`
+
+type UpsertReadingSessionPageParams struct {
+	SessionID       pgtype.UUID
+	PageNumber      int32
+	DurationSeconds int32
+}
+
+func (q *Queries) UpsertReadingSessionPage(ctx context.Context, arg UpsertReadingSessionPageParams) error {
+	_, err := q.db.Exec(ctx, upsertReadingSessionPage, arg.SessionID, arg.PageNumber, arg.DurationSeconds)
+	return err
+}
+
+const upsertWorkspaceKeyPageSettings = `-- name: UpsertWorkspaceKeyPageSettings :one
+INSERT INTO workspace_key_page_settings (
+    workspace_id, tenant_id, default_circle, extra_keywords
+) VALUES ($1, $2, $3, $4)
+ON CONFLICT (workspace_id)
+DO UPDATE SET
+    default_circle = EXCLUDED.default_circle,
+    extra_keywords = EXCLUDED.extra_keywords,
+    updated_at = now()
+RETURNING workspace_id, tenant_id, default_circle, extra_keywords, created_at, updated_at
+`
+
+type UpsertWorkspaceKeyPageSettingsParams struct {
+	WorkspaceID   pgtype.UUID
+	TenantID      pgtype.UUID
+	DefaultCircle string
+	ExtraKeywords []byte
+}
+
+func (q *Queries) UpsertWorkspaceKeyPageSettings(ctx context.Context, arg UpsertWorkspaceKeyPageSettingsParams) (WorkspaceKeyPageSetting, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceKeyPageSettings,
+		arg.WorkspaceID,
+		arg.TenantID,
+		arg.DefaultCircle,
+		arg.ExtraKeywords,
+	)
+	var i WorkspaceKeyPageSetting
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.TenantID,
+		&i.DefaultCircle,
+		&i.ExtraKeywords,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertWorkspaceOutboundWebhook = `-- name: UpsertWorkspaceOutboundWebhook :one
+INSERT INTO workspace_outbound_webhooks (
+    workspace_id, tenant_id, url, secret, enabled, event_types
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id)
+DO UPDATE SET
+    url = EXCLUDED.url,
+    secret = EXCLUDED.secret,
+    enabled = EXCLUDED.enabled,
+    event_types = EXCLUDED.event_types,
+    updated_at = now()
+RETURNING workspace_id, tenant_id, url, secret, enabled, event_types, created_at, updated_at
+`
+
+type UpsertWorkspaceOutboundWebhookParams struct {
+	WorkspaceID pgtype.UUID
+	TenantID    pgtype.UUID
+	Url         string
+	Secret      string
+	Enabled     bool
+	EventTypes  []string
+}
+
+func (q *Queries) UpsertWorkspaceOutboundWebhook(ctx context.Context, arg UpsertWorkspaceOutboundWebhookParams) (WorkspaceOutboundWebhook, error) {
+	row := q.db.QueryRow(ctx, upsertWorkspaceOutboundWebhook,
+		arg.WorkspaceID,
+		arg.TenantID,
+		arg.Url,
+		arg.Secret,
+		arg.Enabled,
+		arg.EventTypes,
+	)
+	var i WorkspaceOutboundWebhook
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.TenantID,
+		&i.Url,
+		&i.Secret,
+		&i.Enabled,
+		&i.EventTypes,
+		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err

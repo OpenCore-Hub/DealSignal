@@ -575,6 +575,7 @@ type LinkFeature struct {
 	UnknownEmails24h   int64
 	Downloads24h       int64
 	UpdatedAt          pgtype.Timestamptz
+	ForwardSignals     int32
 }
 
 type LinkFileRequest struct {
@@ -596,6 +597,7 @@ type LinkHeatScore struct {
 	CreatedAt          pgtype.Timestamptz
 	Opens              int64
 	UniqueVisitors     int64
+	ForwardSignals     int64
 	Downloads          int64
 	AvgDurationSeconds float64
 	TotalPageViews     int64
@@ -750,15 +752,39 @@ type Page struct {
 }
 
 type PageView struct {
-	ID              pgtype.UUID
-	TenantID        pgtype.UUID
-	WorkspaceID     pgtype.UUID
-	LinkID          pgtype.UUID
-	VisitorID       pgtype.Text
+	ID               pgtype.UUID
+	TenantID         pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	LinkID           pgtype.UUID
+	VisitorID        pgtype.Text
+	PageNumber       int32
+	DurationSeconds  int32
+	ScrollDepth      pgtype.Numeric
+	CreatedAt        pgtype.Timestamptz
+	ReadingSessionID pgtype.UUID
+	DocumentID       pgtype.UUID
+}
+
+type ReadingSession struct {
+	ID                   pgtype.UUID
+	TenantID             pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	LinkID               pgtype.UUID
+	DocumentID           pgtype.UUID
+	VisitorID            string
+	StartedAt            pgtype.Timestamptz
+	LastActivityAt       pgtype.Timestamptz
+	EndedAt              pgtype.Timestamptz
+	MaxPage              int32
+	DistinctPageCount    int32
+	TotalDurationSeconds int32
+}
+
+type ReadingSessionPage struct {
+	SessionID       pgtype.UUID
 	PageNumber      int32
+	FirstSeenAt     pgtype.Timestamptz
 	DurationSeconds int32
-	ScrollDepth     pgtype.Numeric
-	CreatedAt       pgtype.Timestamptz
 }
 
 type RoomAccessRequest struct {
@@ -863,23 +889,24 @@ type SignalRuleRun struct {
 }
 
 type Suggestion struct {
-	ID          pgtype.UUID
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	ContactID   pgtype.UUID
-	LinkID      pgtype.UUID
-	DocumentID  pgtype.UUID
-	Type        string
-	Reason      string
-	Action      string
-	Dismissed   bool
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-	Subtype     pgtype.Text
-	Metadata    []byte
-	Context     []byte
-	SyncedAt    pgtype.Timestamptz
-	RuleID      pgtype.Text
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	ContactID    pgtype.UUID
+	LinkID       pgtype.UUID
+	DocumentID   pgtype.UUID
+	Type         string
+	Reason       string
+	Action       string
+	Dismissed    bool
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	Subtype      pgtype.Text
+	Metadata     []byte
+	Context      []byte
+	SyncedAt     pgtype.Timestamptz
+	RuleID       pgtype.Text
+	SnoozedUntil pgtype.Timestamptz
 }
 
 type SuggestionFeedback struct {
@@ -923,6 +950,48 @@ type TenantDomain struct {
 	UpdatedAt    pgtype.Timestamptz
 }
 
+type TmpReadingSessionCluster struct {
+	SessionID            pgtype.UUID
+	TenantID             pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	LinkID               pgtype.UUID
+	DocumentID           pgtype.UUID
+	VisitorID            pgtype.Text
+	SessionOrd           int64
+	StartedAt            interface{}
+	LastActivityAt       interface{}
+	MaxPage              int32
+	DistinctPageCount    int32
+	TotalDurationSeconds int32
+}
+
+type TmpReadingSessionEvent struct {
+	PageViewID      pgtype.UUID
+	TenantID        pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	LinkID          pgtype.UUID
+	DocumentID      pgtype.UUID
+	VisitorID       pgtype.Text
+	PageNumber      int32
+	DurationSeconds int32
+	CreatedAt       pgtype.Timestamptz
+	IsNewSession    int32
+}
+
+type TmpReadingSessionNumbered struct {
+	PageViewID      pgtype.UUID
+	TenantID        pgtype.UUID
+	WorkspaceID     pgtype.UUID
+	LinkID          pgtype.UUID
+	DocumentID      pgtype.UUID
+	VisitorID       pgtype.Text
+	PageNumber      int32
+	DurationSeconds int32
+	CreatedAt       pgtype.Timestamptz
+	IsNewSession    int32
+	SessionOrd      int64
+}
+
 type User struct {
 	ID            pgtype.UUID
 	Email         string
@@ -955,11 +1024,31 @@ type WorkspaceInvitation struct {
 	CreatedAt   pgtype.Timestamptz
 }
 
+type WorkspaceKeyPageSetting struct {
+	WorkspaceID   pgtype.UUID
+	TenantID      pgtype.UUID
+	DefaultCircle string
+	ExtraKeywords []byte
+	CreatedAt     pgtype.Timestamptz
+	UpdatedAt     pgtype.Timestamptz
+}
+
 type WorkspaceMember struct {
 	WorkspaceID pgtype.UUID
 	UserID      pgtype.UUID
 	Role        string
 	JoinedAt    pgtype.Timestamptz
+}
+
+type WorkspaceOutboundWebhook struct {
+	WorkspaceID pgtype.UUID
+	TenantID    pgtype.UUID
+	Url         string
+	Secret      string
+	Enabled     bool
+	EventTypes  []string
+	CreatedAt   pgtype.Timestamptz
+	UpdatedAt   pgtype.Timestamptz
 }
 
 type WorkspaceRagTenant struct {
