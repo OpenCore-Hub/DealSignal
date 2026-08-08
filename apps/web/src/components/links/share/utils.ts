@@ -270,6 +270,7 @@ export function validateDraft(
   existingNames?: string[]
 ): Record<string, string> {
   const errors: Record<string, string> = {};
+  const dealRoomLink = isDealRoomLink ?? !!selectedLink?.dealRoomId;
   const trimmedName = draft.name.trim();
   if (!trimmedName) {
     errors.name = t("share.linkNameRequired");
@@ -294,10 +295,13 @@ export function validateDraft(
   if (draft.allowedViewers.length > 0 && !draft.requireEmail && !draft.requireEmailVerification) {
     errors.allowedViewers = t("accessRules.errors.allowRequiresEmail");
   }
-  if ((draft.requireEmail || draft.requireEmailVerification) && draft.allowedViewers.length === 0) {
+  if (
+    !dealRoomLink &&
+    (draft.requireEmail || draft.requireEmailVerification) &&
+    draft.allowedViewers.length === 0
+  ) {
     errors.allowedViewers = t("accessRules.errors.allowedViewersRequired");
   }
-  const dealRoomLink = isDealRoomLink ?? !!selectedLink?.dealRoomId;
   if (draft.requireEmailVerification && !dealRoomLink && draft.contactIds.length === 0) {
     errors.requireVerificationContacts = t("accessRules.errors.requireVerificationContacts");
   }

@@ -10,10 +10,12 @@ import { Label } from "@/components/ui/label";
 import { AnswerMarkdown } from "@/components/deal-rooms/knowledge/AnswerMarkdown";
 import { formatHitLocusLabel } from "@/lib/knowledge/citations";
 import { api } from "@/lib/api";
+import { ApiError } from "@/lib/apiClient";
 import {
   ownerAskTurnCanPinFAQ,
   ownerAskTurnCanUnpinFAQ,
   ownerAskTurnHasAIPreview,
+  ownerAskTurnIsFormalDegraded,
   ownerAskTurnNeedsFormalPublish,
   ownerAskTurnNeedsHostReply,
   ownerAskTurnStatusBadgeVariant,
@@ -140,8 +142,12 @@ export function OwnerAskInboxCard({
           ? t(`${prefix}.formalScheduleSuccess`)
           : t(`${prefix}.formalPublishSuccess`),
       );
-    } catch {
-      toast.error(t(`${prefix}.formalPublishFailed`));
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "formal_not_entitled") {
+        toast.error(t(`${prefix}.formalNotEntitled`));
+      } else {
+        toast.error(t(`${prefix}.formalPublishFailed`));
+      }
     } finally {
       setFormalSubmitting(false);
     }
@@ -256,12 +262,24 @@ export function OwnerAskInboxCard({
                 {t(`${prefix}.formalQueueBadge`)}
               </span>
             ) : null}
+            {ownerAskTurnIsFormalDegraded(turn) ? (
+              <span className="inline-flex items-center gap-1 rounded-full bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-800 dark:text-amber-200">
+                <Scales size={10} weight="fill" />
+                {t(`${prefix}.formalDegradedBadge`)}
+              </span>
+            ) : null}
           </div>
         </div>
         <Badge variant={ownerAskTurnStatusBadgeVariant(turn)}>
           {t(statusLabelKey(turn, prefix))}
         </Badge>
       </div>
+
+      {ownerAskTurnIsFormalDegraded(turn) ? (
+        <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">
+          {t(`${prefix}.formalDegradedHint`)}
+        </p>
+      ) : null}
 
       {turn.host_answer ? (
         <div className="mt-3 rounded-md bg-muted p-2 text-sm">

@@ -60,6 +60,11 @@ export function VisitorFormalQASection({
                         {t("viewer.askFormalFromLink", { link: entry.link_name })}
                       </span>
                     ) : null}
+                    {entry.visitor_email ? (
+                      <span className="mt-0.5 block text-[11px] font-normal text-muted-foreground">
+                        {t("viewer.askFormalAskedBy", { email: entry.visitor_email })}
+                      </span>
+                    ) : null}
                   </span>
                 </button>
                 {onSuggestQuestion ? (

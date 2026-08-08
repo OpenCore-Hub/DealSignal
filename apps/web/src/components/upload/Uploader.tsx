@@ -23,12 +23,18 @@ interface UploadFile {
 interface UploaderProps {
   onUploadComplete?: () => void;
   category?: string;
+  /** Notify host surfaces (e.g. UploadDialog) while the replace prompt is open. */
+  onAwaitingConflictChange?: (awaiting: boolean) => void;
 }
 
-export function Uploader({ onUploadComplete, category }: UploaderProps) {
+export function Uploader({
+  onUploadComplete,
+  category,
+  onAwaitingConflictChange,
+}: UploaderProps) {
   const { t } = useTranslation("documents");
   const { uploadDocument, conflictDialog, isAwaitingConflict } =
-    useDocumentUploadConflict();
+    useDocumentUploadConflict({ onAwaitingConflictChange });
   const [isDragging, setIsDragging] = useState(false);
   const [files, setFiles] = useState<UploadFile[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);

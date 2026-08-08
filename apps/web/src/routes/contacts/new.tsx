@@ -34,7 +34,7 @@ export function NewContactPage() {
     }
     setCreating(true);
     try {
-      const contact = await api.createContact({ email, name });
+      const contact = await api.createContact({ email, name }, workspaceSlug);
       toast.success(t("new.created"));
       if (fromLinkCreator) {
         navigate(`/${workspaceSlug}/links/new`, {

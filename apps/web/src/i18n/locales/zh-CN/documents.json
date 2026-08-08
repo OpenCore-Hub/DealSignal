@@ -17,10 +17,10 @@
     "uploading": "上传中...",
     "pending": "等待上传",
     "replaceTitle": "文件已存在",
-    "replaceDescription": "「{{name}}」已在文档库中。是否替换为本次上传的文件？",
-    "replaceConfirm": "替换",
-    "replaceCancel": "取消",
-    "replaceCancelled": "已取消上传",
+    "replaceDescription": "「{{name}}」已在文档库中。覆盖为本次上传的文件，还是放弃本次上传？",
+    "replaceConfirm": "覆盖",
+    "replaceCancel": "放弃",
+    "replaceCancelled": "已放弃上传",
     "blockedFilesSkipped": "已跳过隐藏、空文件或临时文件。请先关闭已打开的工作簿后再试。"
   },
   "category": {
@@ -345,6 +345,7 @@
     "askFaqLoadError": "无法加载常见问题。",
     "askFormalSectionTitle": "已发布 Q&A",
     "askFormalSectionHint": "Deal 团队审核后公开发布的问答；访客身份可能已匿名。",
+    "askFormalAskedBy": "提问者 {{email}}",
     "askFormalFromLink": "来自链接：{{link}}",
     "askFormalAskSimilar": "问这个",
     "askFormalLoadError": "无法加载已发布 Q&A。",
@@ -379,6 +380,8 @@
     "inactiveBlurWarning": "窗口未聚焦，内容已模糊",
     "inactiveBlurHint": "用于降低泄露风险；截图仍可通过水印追溯。",
     "watermarkFallback": "保密",
+    "watermarkPreviewIp": "preview",
+    "askFormalNotEntitled": "当前套餐不支持 Formal Q&A。",
     "pageCountShort": "{{count}} 页"
   }
 }

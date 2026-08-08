@@ -418,6 +418,16 @@ describe("validateDraft", () => {
     expect(errors.allowedViewers).toBe("accessRules.errors.allowedViewersRequired");
   });
 
+  it("allows empty allowed viewers for deal room links with email verification", () => {
+    const draft: DraftLink = {
+      ...baseDraft,
+      allowedViewers: [],
+      requireEmailVerification: true,
+    };
+    const errors = validateDraft(draft, null, t, Date.now(), true);
+    expect(errors.allowedViewers).toBeUndefined();
+  });
+
   it("errors when email verification is enabled but no allowed viewers are set", () => {
     const draft: DraftLink = {
       ...baseDraft,

@@ -19,6 +19,9 @@ interface VisitorAskExperienceFieldProps {
   value: VisitorAskExperience;
   onChange: (value: VisitorAskExperience) => void;
   disabled?: boolean;
+  /** Experience values that cannot be selected (e.g. Formal when plan is not entitled). */
+  disabledValues?: VisitorAskExperience[];
+  disabledHint?: string;
   highlighted?: boolean;
   testId?: string;
   labelKey?: string;
@@ -49,12 +52,15 @@ export function VisitorAskExperienceField({
   value,
   onChange,
   disabled,
+  disabledValues = [],
+  disabledHint,
   highlighted,
   testId = "visitor-ask-experience",
   labelKey = "accessRules.advanced.visitorAskExperience.label",
 }: VisitorAskExperienceFieldProps) {
   const { t } = useTranslation("linkShare");
   const effectiveValue = value || DEFAULT_VISITOR_ASK_EXPERIENCE;
+  const blocked = new Set(disabledValues);
 
   return (
     <div
@@ -76,13 +82,14 @@ export function VisitorAskExperienceField({
       >
         {VISITOR_ASK_EXPERIENCE_OPTIONS.map((opt, index) => {
           const selected = effectiveValue === opt.value;
+          const optionDisabled = disabled || blocked.has(opt.value);
           return (
             <button
               key={opt.value}
               type="button"
               role="radio"
               aria-checked={selected}
-              disabled={disabled}
+              disabled={optionDisabled}
               data-testid={`${testId}-${opt.value}`}
               onClick={() => onChange(opt.value)}
               className={cn(
@@ -91,8 +98,8 @@ export function VisitorAskExperienceField({
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40 focus-visible:ring-inset",
                 index > 0 && "border-t border-border/45",
                 selected ? "text-foreground" : "text-muted-foreground",
-                !disabled && !selected && "hover:bg-muted/25 hover:text-foreground",
-                disabled && "cursor-not-allowed",
+                !optionDisabled && !selected && "hover:bg-muted/25 hover:text-foreground",
+                optionDisabled && "cursor-not-allowed opacity-60",
               )}
             >
               {selected ? (
@@ -117,6 +124,11 @@ export function VisitorAskExperienceField({
           );
         })}
       </div>
+      {disabledHint && disabledValues.length > 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid={`${testId}-disabled-hint`}>
+          {disabledHint}
+        </p>
+      ) : null}
     </div>
   );
 }

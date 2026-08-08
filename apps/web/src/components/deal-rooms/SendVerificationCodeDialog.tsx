@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react";
 import { useTranslation } from "react-i18next";
+import { useParams } from "react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -84,11 +85,16 @@ export function buildAllowedVisitors(
 }
 
 /** Resolve display names only for contacts already attached to this link. */
-async function loadLinkScopedContacts(link: Link): Promise<Contact[]> {
+async function loadLinkScopedContacts(
+  link: Link,
+  workspaceSlug?: string,
+): Promise<Contact[]> {
   const ids = link.contactIds ?? [];
   if (ids.length === 0) return [];
 
-  const results = await Promise.allSettled(ids.map((id) => api.getContactById(id)));
+  const results = await Promise.allSettled(
+    ids.map((id) => api.getContactById(id, workspaceSlug)),
+  );
   return results.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
 }
 
@@ -104,6 +110,7 @@ export function SendVerificationCodeDialog({
   onOpenChange,
 }: SendVerificationCodeDialogProps) {
   const { t } = useTranslation("dealRooms");
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [visitors, setVisitors] = useState<AllowedVisitor[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [query, setQuery] = useState("");
@@ -126,7 +133,10 @@ export function SendVerificationCodeDialog({
 
     // Scope: only this link's access rules (+ optional link.contactIds for names).
     // Never load the workspace-wide contact directory.
-    Promise.all([api.getLinkAccessRules(link.id), loadLinkScopedContacts(link)])
+    Promise.all([
+      api.getLinkAccessRules(link.id),
+      loadLinkScopedContacts(link, workspaceSlug),
+    ])
       .then(([rulesRes, linkContacts]) => {
         if (cancelled) return;
         const next = buildAllowedVisitors(rulesRes.data ?? [], linkContacts);
@@ -146,7 +156,7 @@ export function SendVerificationCodeDialog({
     return () => {
       cancelled = true;
     };
-  }, [open, link]);
+  }, [open, link, workspaceSlug]);
 
   const filteredVisitors = useMemo(() => {
     const q = query.trim().toLowerCase();

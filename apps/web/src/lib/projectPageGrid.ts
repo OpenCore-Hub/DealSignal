@@ -5,6 +5,34 @@ export const PAGE_GRID_VIRTUALIZE_THRESHOLD = 48;
 export const PAGE_GRID_OVERSCAN_ROWS = 2;
 export const PAGE_GRID_GAP_PX = 16;
 
+/** Portrait letter-page fallback when page dimensions are unknown. */
+export const DEFAULT_PAGE_ASPECT_RATIO = 3 / 4;
+export const DEFAULT_PAGE_ASPECT_RATIO_CSS = "3 / 4";
+
+/** Numeric width/height ratio for layout math (grid estimate, canvas fit). */
+export function pageAspectRatio(
+  width?: number | null,
+  height?: number | null,
+  fallback = DEFAULT_PAGE_ASPECT_RATIO,
+): number {
+  if (width != null && height != null && width > 0 && height > 0) {
+    return width / height;
+  }
+  return fallback;
+}
+
+/** CSS `aspect-ratio` value preserving integer dimensions when possible. */
+export function pageAspectRatioCSS(
+  width?: number | null,
+  height?: number | null,
+  fallback = DEFAULT_PAGE_ASPECT_RATIO_CSS,
+): string {
+  if (width != null && height != null && width > 0 && height > 0) {
+    return `${width} / ${height}`;
+  }
+  return fallback;
+}
+
 export type PageGridItem = {
   pageNumber: number;
   viewCount: number;
@@ -53,16 +81,18 @@ export function buildPageGridItems(
   return items;
 }
 
-/** Card uses aspect-[3/4]; row height ≈ card height + gap. */
+/** Card height is driven by the page aspect ratio; row height ≈ card + gap. */
 export function estimatePageCardRowHeight(
   containerWidth: number,
   columns: number,
+  aspectRatio = DEFAULT_PAGE_ASPECT_RATIO,
   gapPx = PAGE_GRID_GAP_PX,
 ): number {
   const cols = Math.max(1, columns);
   const width = Math.max(120, containerWidth);
   const colWidth = Math.max(72, (width - gapPx * (cols - 1)) / cols);
-  return Math.round(colWidth * (4 / 3) + gapPx);
+  const ratio = aspectRatio > 0 ? aspectRatio : DEFAULT_PAGE_ASPECT_RATIO;
+  return Math.round(colWidth / ratio + gapPx);
 }
 
 export function pageGridRowCount(pageCount: number, columns: number): number {

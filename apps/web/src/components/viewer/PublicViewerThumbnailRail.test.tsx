@@ -69,4 +69,15 @@ describe("PublicViewerThumbnailRail", () => {
       expect(onSelect).toHaveBeenCalledWith(2);
     });
   });
+
+  it("uses the page aspect ratio when dimensions are available", () => {
+    const { container } = renderRail({
+      pages: [{ pageNumber: 1, width: 420, height: 297 }],
+      currentPage: 1,
+      onSelect: vi.fn(),
+    });
+
+    const frame = container.querySelector('[data-testid="public-thumbnail-frame"]');
+    expect(frame).toHaveStyle({ aspectRatio: "420 / 297" });
+  });
 });

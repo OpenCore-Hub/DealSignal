@@ -1,11 +1,11 @@
 import {
   useState,
   useRef,
-  useEffect,
   useMemo,
   useCallback,
   type KeyboardEvent,
 } from "react";
+import { useParams } from "react-router";
 import { useTranslation } from "react-i18next";
 import {
   X,
@@ -17,6 +17,7 @@ import {
   Users,
 } from "@phosphor-icons/react";
 import { api } from "@/lib/api";
+import { useWorkspaceContacts } from "@/hooks/useWorkspaceContacts";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -80,6 +81,7 @@ export function ContactEmailTagInput({
 }: ContactEmailTagInputProps) {
   const { t } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const [raw, setRaw] = useState("");
   const [invalid, setInvalid] = useState<string[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -89,8 +91,7 @@ export function ContactEmailTagInput({
     [lockedValues],
   );
 
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [contactsLoading, setContactsLoading] = useState(true);
+  const { contacts, loading: contactsLoading, setContacts } = useWorkspaceContacts(workspaceSlug);
 
   const [contactListOpen, setContactListOpen] = useState(false);
   const [contactSearch, setContactSearch] = useState("");
@@ -99,24 +100,6 @@ export function ContactEmailTagInput({
   const [newContactEmail, setNewContactEmail] = useState("");
   const [newContactName, setNewContactName] = useState("");
   const [creatingContact, setCreatingContact] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = async () => {
-      try {
-        const res = await api.getContacts();
-        if (!cancelled) setContacts(res.data);
-      } catch {
-        if (!cancelled) setContacts([]);
-      } finally {
-        if (!cancelled) setContactsLoading(false);
-      }
-    };
-    load();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   const contactByEmail = useMemo(() => {
     const map = new Map<string, Contact>();
@@ -221,10 +204,13 @@ export function ContactEmailTagInput({
     if (!newContactEmail) return;
     setCreatingContact(true);
     try {
-      const contact = await api.createContact({
-        email: newContactEmail,
-        name: newContactName,
-      });
+      const contact = await api.createContact(
+        {
+          email: newContactEmail,
+          name: newContactName,
+        },
+        workspaceSlug,
+      );
       setContacts((prev) => [...prev, contact]);
       addValue(contact.email);
       setAddContactOpen(false);

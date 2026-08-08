@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   attachOwnerAskRepeatCounts,
   countSimilarAskQuestions,
+  countOwnerAskPendingAttention,
   countUnreadOwnerAskTurns,
   matchesOwnerAskInboxFilter,
+  ownerAskTurnIsFormalDegraded,
   moveOwnerAskPinnedFAQ,
   normalizeAskQuestionKey,
   ownerAskFaqReorderEnabled,
@@ -66,6 +68,35 @@ describe("countUnreadOwnerAskTurns", () => {
   });
 });
 
+describe("countOwnerAskPendingAttention", () => {
+  it("sums needs-host replies and active formal queue", () => {
+    const host = [
+      { lane: "host", status: "host_pending" },
+      { lane: "host", status: "host_answered" },
+    ] as OwnerAskTurn[];
+    const formal = [
+      { formal_status: "pending_review", route_reason: "policy_formal" },
+      { formal_status: "published", route_reason: "policy_formal" },
+    ] as OwnerAskTurn[];
+    expect(countOwnerAskPendingAttention(host, formal)).toBe(2);
+  });
+});
+
+describe("ownerAskTurnIsFormalDegraded", () => {
+  it("detects formal_not_entitled route reason", () => {
+    expect(
+      ownerAskTurnIsFormalDegraded({
+        route_reason: "formal_not_entitled",
+      } as OwnerAskTurn),
+    ).toBe(true);
+    expect(
+      ownerAskTurnIsFormalDegraded({
+        route_reason: "policy_formal",
+      } as OwnerAskTurn),
+    ).toBe(false);
+  });
+});
+
 describe("matchesOwnerAskInboxFilter", () => {
   it("includes hybrid host_pending in needs_host view", () => {
     const turn = {
@@ -92,6 +123,17 @@ describe("matchesOwnerAskInboxFilter", () => {
     } as OwnerAskTurn;
     expect(matchesOwnerAskInboxFilter(formalTurn, "host", "host_pending")).toBe(false);
     expect(matchesOwnerAskInboxFilter(formalTurn, "", "formal_queue")).toBe(true);
+  });
+
+  it("excludes published formal from formal_queue tab", () => {
+    const publishedFormal = {
+      lane: "host",
+      status: "host_answered",
+      route_reason: "policy_formal",
+      formal_status: "published",
+      host_answer: "Guidance is $42M ARR.",
+    } as OwnerAskTurn;
+    expect(matchesOwnerAskInboxFilter(publishedFormal, "", "formal_queue")).toBe(false);
   });
 
   it("excludes hybrid pending from ai_handled view", () => {

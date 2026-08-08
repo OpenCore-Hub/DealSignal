@@ -71,6 +71,10 @@ import {
   type BackendIntegrationStatus,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
+import {
+  clearCachedAccountEmail,
+  setCachedAccountEmail,
+} from "@/lib/authAccount";
 import { consumeKnowledgeSSE } from "@/lib/knowledge/consumeKnowledgeSSE";
 import type { KnowledgeStreamEvent } from "@/lib/knowledge/streamEvents";
 import { useUIStore } from "@/stores/uiStore";
@@ -287,6 +291,7 @@ export const api = {
       "/auth/login",
       { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
     );
+    setCachedAccountEmail(res.user.email);
     return res.user;
   },
   register: async (email: string, password: string) => {
@@ -295,12 +300,23 @@ export const api = {
       "/auth/register",
       { method: "POST", body: JSON.stringify({ email, password }), skipAuth: true }
     );
+    setCachedAccountEmail(res.user.email);
     return res.user;
   },
   logout: async () => {
-    await request<void>(undefined, "/auth/logout", {
-      method: "POST",
-    });
+    try {
+      await request<void>(undefined, "/auth/logout", {
+        method: "POST",
+      });
+    } finally {
+      clearCachedAccountEmail();
+    }
+  },
+  /** Current authenticated account (owner viewer watermark uses login email). */
+  getMe: async () => {
+    const res = await request<{ user: User }>(undefined, "/auth/me");
+    setCachedAccountEmail(res.user.email);
+    return res.user;
   },
   refresh: async () => {
     await request<{ expires_in: number }>(
@@ -407,7 +423,20 @@ export const api = {
     }
   ) =>
     request<{
-      link: { id: string; name?: string; permissionType: string; downloadEnabled: boolean; watermarkEnabled: boolean; screenshotProtectionEnabled?: boolean; qaEnabled: boolean; visitorAskUnified?: boolean; fileRequestsEnabled: boolean; isBundle: boolean; dealRoomId?: string };
+      link: {
+        id: string;
+        name?: string;
+        permissionType: string;
+        downloadEnabled: boolean;
+        watermarkEnabled: boolean;
+        watermarkText?: string;
+        screenshotProtectionEnabled?: boolean;
+        qaEnabled: boolean;
+        visitorAskUnified?: boolean;
+        fileRequestsEnabled: boolean;
+        isBundle: boolean;
+        dealRoomId?: string;
+      };
       documents: { id: string; title: string; pageCount: number; sourceType: string; folderPath?: string }[];
       visitorId: string;
       requiresEmail: boolean;
@@ -987,6 +1016,7 @@ export const api = {
         ask_ai_monthly_limit?: number;
         ask_ai_quota_exceeded?: boolean;
         ask_ai_entitled?: boolean;
+        formal_entitled?: boolean;
       };
     }>(getWorkspaceSlug(), `/links/${linkId}/ask-policy`, {
       method: "PATCH",
@@ -1006,6 +1036,7 @@ export const api = {
         askAiMonthlyLimit: res.data.ask_ai_monthly_limit,
         askAiQuotaExceeded: res.data.ask_ai_quota_exceeded,
         askAiEntitled: res.data.ask_ai_entitled,
+        formalEntitled: res.data.formal_entitled,
       },
     })),
 
@@ -1020,6 +1051,7 @@ export const api = {
         ask_ai_monthly_limit: number;
         ask_ai_quota_exceeded: boolean;
         ask_ai_entitled?: boolean;
+        formal_entitled?: boolean;
       };
     }>(getWorkspaceSlug(), `/links/${linkId}/ask-policy`).then((res) => ({
       data: {
@@ -1031,6 +1063,7 @@ export const api = {
         askAiMonthlyLimit: res.data.ask_ai_monthly_limit,
         askAiQuotaExceeded: res.data.ask_ai_quota_exceeded,
         askAiEntitled: res.data.ask_ai_entitled,
+        formalEntitled: res.data.formal_entitled,
       },
     })),
 
@@ -1091,19 +1124,20 @@ export const api = {
     );
   },
 
-  getContacts: () =>
-    request<{ data: Contact[] }>(getWorkspaceSlug(), "/contacts"),
-  createContact: (payload: { email: string; name?: string }) =>
-    request<Contact>(getWorkspaceSlug(), "/contacts", {
+  /** Prefer passing route `workspaceSlug` so requests never follow a stale window.location. */
+  getContacts: (workspaceSlug?: string) =>
+    request<{ data: Contact[] }>(workspaceSlug ?? getWorkspaceSlug(), "/contacts"),
+  createContact: (payload: { email: string; name?: string }, workspaceSlug?: string) =>
+    request<Contact>(workspaceSlug ?? getWorkspaceSlug(), "/contacts", {
       method: "POST",
       body: JSON.stringify(payload),
     }),
-  getContactById: (id: string) =>
-    request<Contact>(getWorkspaceSlug(), `/contacts/${id}`),
-  getActivitiesByContactId: (contactId: string) =>
+  getContactById: (id: string, workspaceSlug?: string) =>
+    request<Contact>(workspaceSlug ?? getWorkspaceSlug(), `/contacts/${id}`),
+  getActivitiesByContactId: (contactId: string, workspaceSlug?: string) =>
     request<{ data: Activity[] }>(
-      getWorkspaceSlug(),
-      `/contacts/${contactId}/activities`
+      workspaceSlug ?? getWorkspaceSlug(),
+      `/contacts/${contactId}/activities`,
     ),
 
   getDealRooms: (opts?: { page?: number; page_size?: number; q?: string }) => {
@@ -1457,11 +1491,15 @@ export const api = {
       body: JSON.stringify({ email, role }),
     }),
 
-  sendMarketingBatch: (payload: SendMarketingBatchRequest) =>
-    request<{ data: SendMarketingBatchResult }>(getWorkspaceSlug(), "/marketing/send", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  sendMarketingBatch: (payload: SendMarketingBatchRequest, workspaceSlug?: string) =>
+    request<{ data: SendMarketingBatchResult }>(
+      workspaceSlug ?? getWorkspaceSlug(),
+      "/marketing/send",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
 
   getWorkspaceSettings: () => request<WorkspaceSettings>(getWorkspaceSlug(), "/settings"),
   updateWorkspaceSettings: (settings: WorkspaceSettings) =>

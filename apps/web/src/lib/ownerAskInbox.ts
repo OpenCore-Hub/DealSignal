@@ -58,7 +58,7 @@ export function matchesOwnerAskInboxFilter(
   const s = status ?? "";
   if (!l && !s) return true;
   if (s === "formal_queue") {
-    return ownerAskTurnIsFormalQueue(turn);
+    return ownerAskTurnIsFormalQueueActive(turn);
   }
   if (s === "host_pending" && l === "host") {
     if (ownerAskTurnIsFormalQueue(turn)) return false;
@@ -85,8 +85,29 @@ export function ownerAskTurnIsFormalQueue(turn: OwnerAskTurn): boolean {
   );
 }
 
+/** Host-lane fallback when Formal mode is configured but plan is not entitled. */
+export function ownerAskTurnIsFormalDegraded(turn: OwnerAskTurn): boolean {
+  return turn.route_reason === "formal_not_entitled";
+}
+
+/** Badge / nav attention: needs-host replies + active Formal review queue. */
+export function countOwnerAskPendingAttention(
+  needsHostTurns: OwnerAskTurn[],
+  formalQueueTurns: OwnerAskTurn[],
+): number {
+  return (
+    needsHostTurns.filter((turn) => ownerAskTurnNeedsHostReply(turn)).length +
+    formalQueueTurns.filter((turn) => ownerAskTurnNeedsFormalPublish(turn)).length
+  );
+}
+
+/** Mirrors backend isFormalQueueActive — pending/scheduled only, not published. */
 export function ownerAskTurnNeedsFormalPublish(turn: OwnerAskTurn): boolean {
   return turn.formal_status === "pending_review" || turn.formal_status === "scheduled";
+}
+
+export function ownerAskTurnIsFormalQueueActive(turn: OwnerAskTurn): boolean {
+  return ownerAskTurnIsFormalQueue(turn) && ownerAskTurnNeedsFormalPublish(turn);
 }
 
 export function ownerAskTurnCanPinFAQ(turn: OwnerAskTurn): boolean {

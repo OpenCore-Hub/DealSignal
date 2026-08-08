@@ -8,7 +8,8 @@ import { DocumentPageGrid } from "./DocumentPageGrid";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { formatDuration } from "@/lib/formatters";
-import { buildPageGridItems } from "@/lib/projectPageGrid";
+import { useAsyncData } from "@/hooks/useAsyncData";
+import { buildPageGridItems, pageAspectRatio } from "@/lib/projectPageGrid";
 import type { PageAnalytics } from "@/types";
 
 interface DocumentContentProps {
@@ -44,6 +45,15 @@ export function DocumentContent({
     () => buildPageGridItems(pageCount, analytics),
     [analytics, pageCount],
   );
+
+  const { data: pageMeta } = useAsyncData(
+    async () => api.getDocumentPages(documentId),
+    [documentId],
+  );
+  const documentAspectRatio = useMemo(() => {
+    const first = pageMeta?.pages?.[0];
+    return pageAspectRatio(first?.width, first?.height);
+  }, [pageMeta]);
 
   const selectedAnalytic = useMemo(() => {
     if (!selectedPage) return null;
@@ -89,6 +99,7 @@ export function DocumentContent({
         documentId={documentId}
         selectedPage={selectedPage}
         focusPage={focusPage ?? selectedPage}
+        aspectRatio={documentAspectRatio}
         onSelectPage={handleSelectPage}
       />
 

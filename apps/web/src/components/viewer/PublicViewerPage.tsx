@@ -1631,7 +1631,15 @@ export function PublicViewerPage() {
         publicAccessCredentials={accessCredentials}
         requestedPage={requestedViewerPage}
         onRequestedPageApplied={() => setRequestedViewerPage(null)}
-        watermark={access.link.watermarkEnabled ? { watermarkText: access.link.watermarkText } : null}
+        watermark={
+          access.link.watermarkEnabled
+            ? {
+                // Structured parse + live clock happen in WatermarkOverlay so
+                // share-link preview matches owner /viewer dynamic watermark.
+                watermarkText: access.link.watermarkText,
+              }
+            : null
+        }
         sidebarOpen={showWorkspace && sidebarOpen}
         onToggleSidebar={showWorkspace ? toggleSidebar : undefined}
         sidebar={

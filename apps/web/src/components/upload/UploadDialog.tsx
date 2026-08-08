@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,15 +13,29 @@ import { Uploader } from "./Uploader";
 export function UploadDialog() {
   const { t } = useTranslation("documents");
   const { uploadDialogOpen, setUploadDialogOpen } = useUIStore();
+  const [awaitingConflict, setAwaitingConflict] = useState(false);
+
+  const handleOpenChange = useCallback(
+    (open: boolean) => {
+      // Nested replace ConfirmDialog must not dismiss this host dialog —
+      // otherwise the prompt unmounts and the user never sees 覆盖/放弃.
+      if (!open && awaitingConflict) return;
+      setUploadDialogOpen(open);
+    },
+    [awaitingConflict, setUploadDialogOpen],
+  );
 
   return (
-    <Dialog open={uploadDialogOpen} onOpenChange={setUploadDialogOpen}>
+    <Dialog open={uploadDialogOpen} onOpenChange={handleOpenChange}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("upload.title")}</DialogTitle>
           <DialogDescription>{t("upload.description")}</DialogDescription>
         </DialogHeader>
-        <Uploader onUploadComplete={() => setUploadDialogOpen(false)} />
+        <Uploader
+          onAwaitingConflictChange={setAwaitingConflict}
+          onUploadComplete={() => setUploadDialogOpen(false)}
+        />
       </DialogContent>
     </Dialog>
   );
