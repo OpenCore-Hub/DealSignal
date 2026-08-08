@@ -81,6 +81,7 @@ type Service struct {
 	visitorAskKnowledge  VisitorAskKnowledge
 	askSecurity          AskSecurityRecorder
 	formalAskEntitlement FormalAskEntitlement
+	formalAskInsights    FormalAskInsights
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
@@ -109,12 +110,23 @@ type ActionSyncer interface {
 	ResolveBySource(ctx context.Context, workspaceID, sourceType, sourceID string)
 }
 
+// FormalAskInsights bridges Formal Q&A into Insights suggestions (radar sync remains via action syncer).
+type FormalAskInsights interface {
+	OnSubmitted(ctx context.Context, workspaceID, linkID, documentID, turnID, sessionID, visitorID, visitorEmail, question, lang string) error
+	OnResolved(ctx context.Context, workspaceID, turnID string) error
+}
+
 // ServiceOption configures a Service.
 type ServiceOption func(*Service)
 
 // WithActionSyncer wires an action syncer so link events can resolve action items.
 func WithActionSyncer(a ActionSyncer) ServiceOption {
 	return func(s *Service) { s.actionSyncer = a }
+}
+
+// WithFormalAskInsights wires Formal Ask → Insights suggestion creation/resolution.
+func WithFormalAskInsights(b FormalAskInsights) ServiceOption {
+	return func(s *Service) { s.formalAskInsights = b }
 }
 
 // WithNDAService wires One-Click NDA sealing and notifications.
@@ -5649,11 +5661,18 @@ func (s *Service) resolveLinkAccessRequest(workspaceID, linkID string) {
 }
 
 func (s *Service) resolveLinkQuestion(workspaceID, questionID string) {
-	if s.actionSyncer == nil {
-		return
+	if s.actionSyncer != nil {
+		s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkQuestion, questionID)
+		s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeDealRoomLinkQuestion, questionID)
 	}
-	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeLinkQuestion, questionID)
-	s.actionSyncer.ResolveBySource(context.Background(), workspaceID, action.SourceTypeDealRoomLinkQuestion, questionID)
+	if s.formalAskInsights != nil {
+		if err := s.formalAskInsights.OnResolved(context.Background(), workspaceID, questionID); err != nil {
+			logger.ErrorCtx(context.Background(), "formal ask insights resolve failed", err,
+				logger.Attr("turn_id", questionID),
+				logger.Attr("workspace_id", workspaceID),
+			)
+		}
+	}
 }
 
 func (s *Service) resolveExpiringLink(workspaceID, linkID string) {

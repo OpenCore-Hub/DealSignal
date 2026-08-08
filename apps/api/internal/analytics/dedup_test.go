@@ -127,10 +127,10 @@ func TestFailoverDedupDBNoRowsAllowsOpen(t *testing.T) {
 func TestFailoverDedupPageViewDifferentPages(t *testing.T) {
 	redis := &fakeRedisSetNXer{}
 	checker := NewFailoverDedupChecker(redis, &fakeDedupQuerier{}, time.Minute, time.Minute)
-	if _, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", 1); err != nil {
+	if _, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", "", 1); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ok, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", 2)
+	ok, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", "", 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -142,14 +142,30 @@ func TestFailoverDedupPageViewDifferentPages(t *testing.T) {
 func TestFailoverDedupPageViewDuplicate(t *testing.T) {
 	redis := &fakeRedisSetNXer{}
 	checker := NewFailoverDedupChecker(redis, &fakeDedupQuerier{}, time.Minute, time.Minute)
-	if _, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", 3); err != nil {
+	if _, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", "doc-a", 3); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	ok, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", 3)
+	ok, err := checker.MarkPageView(context.Background(), "550e8400-e29b-41d4-a716-446655440000", "visitor_1", "doc-a", 3)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if ok {
 		t.Fatal("expected duplicate page view to be rejected")
+	}
+}
+
+func TestFailoverDedupPageViewDifferentDocumentsSamePage(t *testing.T) {
+	redis := &fakeRedisSetNXer{}
+	checker := NewFailoverDedupChecker(redis, &fakeDedupQuerier{}, time.Minute, time.Minute)
+	linkID := "550e8400-e29b-41d4-a716-446655440000"
+	if _, err := checker.MarkPageView(context.Background(), linkID, "visitor_1", "doc-a", 1); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	ok, err := checker.MarkPageView(context.Background(), linkID, "visitor_1", "doc-b", 1)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected same page on different documents to be allowed")
 	}
 }

@@ -187,21 +187,23 @@ func (s *Syncer) syncPendingAskTurns(ctx context.Context, tenantID, workspaceID 
 	if err != nil {
 		return fmt.Errorf("list pending formal ask turns: %w", err)
 	}
-	currentDealRoom := make(map[string]bool, len(hostRows)+len(formalRows))
+	n := len(hostRows) + len(formalRows)
+	currentDealRoom := make(map[string]bool, n)
+	currentLibrary := make(map[string]bool, n)
 	for _, r := range hostRows {
-		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeAnswer, currentDealRoom); err != nil {
+		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeAnswer, currentDealRoom, currentLibrary); err != nil {
 			return err
 		}
 	}
 	for _, r := range formalRows {
-		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeReview, currentDealRoom); err != nil {
+		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeReview, currentDealRoom, currentLibrary); err != nil {
 			return err
 		}
 	}
 	if err := s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeDealRoomLinkQuestion, currentDealRoom); err != nil {
 		return err
 	}
-	return s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeLinkQuestion, map[string]bool{})
+	return s.closeStaleActionsBySourceID(ctx, workspaceID, SourceTypeLinkQuestion, currentLibrary)
 }
 
 func (s *Syncer) upsertPendingAskTurnAction(
@@ -210,14 +212,23 @@ func (s *Syncer) upsertPendingAskTurnAction(
 	turnID, dealRoomID, linkID pgtype.UUID,
 	visitorEmail, linkName pgtype.Text,
 	actionType string,
-	current map[string]bool,
+	currentDealRoom, currentLibrary map[string]bool,
 ) error {
-	if !dealRoomID.Valid {
+	if !turnID.Valid {
 		return nil
 	}
-	current[uuid.UUID(turnID.Bytes).String()] = true
-	target := dealRoomAskTargetID(dealRoomID, linkID)
-	return s.upsertOperationalTextTarget(ctx, tenantID, workspaceID, SourceTypeDealRoomLinkQuestion, turnID, target, visitorEmail, linkName, actionType)
+	turnKey := uuid.UUID(turnID.Bytes).String()
+	if dealRoomID.Valid {
+		currentDealRoom[turnKey] = true
+		target := dealRoomAskTargetID(dealRoomID, linkID)
+		return s.upsertOperationalTextTarget(ctx, tenantID, workspaceID, SourceTypeDealRoomLinkQuestion, turnID, target, visitorEmail, linkName, actionType)
+	}
+	if !linkID.Valid {
+		return nil
+	}
+	// Document-library share links: source_id = turn, target_id = link for Ask inbox deep-link.
+	currentLibrary[turnKey] = true
+	return s.upsertOperationalTextTarget(ctx, tenantID, workspaceID, SourceTypeLinkQuestion, turnID, uuid.UUID(linkID.Bytes).String(), visitorEmail, linkName, actionType)
 }
 
 func dealRoomAskTargetID(roomID, linkID pgtype.UUID) string {
@@ -361,7 +372,8 @@ func (s *Syncer) upsertOperational(
 }
 
 func titleForAction(sourceType, actionType, actor, target string) string {
-	if sourceType == SourceTypeDealRoomLinkQuestion && actionType == operationalActionTypeReview {
+	if actionType == operationalActionTypeReview &&
+		(sourceType == SourceTypeDealRoomLinkQuestion || sourceType == SourceTypeLinkQuestion) {
 		if target != "" {
 			return fmt.Sprintf("Review formal Q&A from %s on %s", actor, target)
 		}

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -31,6 +32,9 @@ func (h *Handler) RegisterRoutes(r *gin.RouterGroup) {
 	g.POST("/hubspot/disconnect", h.HubSpotDisconnect)
 	g.POST("/hubspot/sync", h.HubSpotSync)
 	g.GET("/sync-logs", h.ListSyncLogs)
+	g.GET("/webhook", h.GetOutboundWebhook)
+	g.PUT("/webhook", h.SaveOutboundWebhook)
+	g.DELETE("/webhook", h.DeleteOutboundWebhook)
 }
 
 // RegisterOAuthRoutes mounts OAuth callback routes on the public API group.
@@ -40,8 +44,10 @@ func (h *Handler) RegisterOAuthRoutes(r *gin.RouterGroup) {
 }
 
 type saveSettingsRequest struct {
-	EmailEnabled    bool   `json:"email_enabled"`
-	SlackWebhookURL string `json:"slack_webhook_url"`
+	EmailEnabled        bool   `json:"email_enabled"`
+	DailyDigestEnabled  bool   `json:"daily_digest_enabled"`
+	KeyPageSlackEnabled bool   `json:"key_page_slack_enabled"`
+	SlackWebhookURL     string `json:"slack_webhook_url"`
 }
 
 func workspaceID(c *gin.Context) string {
@@ -146,4 +152,40 @@ func (h *Handler) ListSyncLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{"data": logs})
+}
+
+func (h *Handler) GetOutboundWebhook(c *gin.Context) {
+	v, err := h.service.GetOutboundWebhook(c.Request.Context(), workspaceID(c))
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}
+
+func (h *Handler) SaveOutboundWebhook(c *gin.Context) {
+	var req SaveOutboundWebhookRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
+		return
+	}
+	v, err := h.service.SaveOutboundWebhook(c.Request.Context(), workspaceID(c), req)
+	if err != nil {
+		msg := err.Error()
+		if strings.Contains(msg, "webhook url") {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": msg})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, v)
+}
+
+func (h *Handler) DeleteOutboundWebhook(c *gin.Context) {
+	if err := h.service.DeleteOutboundWebhook(c.Request.Context(), workspaceID(c)); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"code": "ok", "message": "webhook deleted"})
 }

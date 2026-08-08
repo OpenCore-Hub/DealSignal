@@ -43,6 +43,7 @@ export function ContactSelector({
   const {
     contacts: fetchedContacts,
     loading: fetchedLoading,
+    setContacts: setFetchedContacts,
   } = useWorkspaceContacts(workspaceSlug, { enabled: !contactsProp });
   const [createdContacts, setCreatedContacts] = useState<Contact[]>([]);
   const loading = contactsProp ? false : fetchedLoading;
@@ -145,9 +146,17 @@ export function ContactSelector({
         },
         workspaceSlug,
       );
-      setCreatedContacts((prev) => [...prev, contact]);
+      if (!contact?.id) {
+        throw new Error("create contact: missing id");
+      }
+      // Keep chip/list resolvable even before the workspace list refetch lands.
+      setCreatedContacts((prev) =>
+        prev.some((c) => c.id === contact.id) ? prev : [...prev, contact],
+      );
       if (!contactsProp) {
-        setFetchedContacts((prev) => [...prev, contact]);
+        setFetchedContacts((prev) =>
+          prev.some((c) => c.id === contact.id) ? prev : [...prev, contact],
+        );
       }
       addContact(contact.id);
       setAddContactOpen(false);

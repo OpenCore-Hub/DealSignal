@@ -86,6 +86,8 @@ function activityEventLabel(
       return t(short ? "activity.revisitShort" : "activity.revisit");
     case "download":
       return t(short ? "activity.downloadShort" : "activity.download");
+    case "share":
+      return t(short ? "activity.shareShort" : "activity.share");
     default:
       return t("activity.unknown");
   }

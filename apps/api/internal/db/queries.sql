@@ -297,6 +297,13 @@ FROM pages
 WHERE document_id = $1 AND page_number = $2
 LIMIT 1;
 
+-- name: GetPageTitleByDocumentAndNumber :one
+-- Title used for heat / key-page matching (empty when missing).
+SELECT COALESCE(NULLIF(TRIM(title), ''), '')::text AS title
+FROM pages
+WHERE document_id = $1 AND page_number = $2
+LIMIT 1;
+
 -- name: CreateLink :one
 INSERT INTO links (
     tenant_id, workspace_id, document_id, deal_room_id, public_token, name, permission_type, expires_at, max_access_count,
@@ -617,13 +624,65 @@ SELECT $2, $3, $4, $5, $6, 'link_opened', $7, $8
 WHERE EXISTS (SELECT 1 FROM inc);
 
 -- name: CreatePageView :exec
-INSERT INTO page_views (tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth)
-VALUES ($1, $2, $3, $4, $5, $6, $7::numeric);
+INSERT INTO page_views (
+    tenant_id, workspace_id, link_id, visitor_id, page_number, duration_seconds, scroll_depth, reading_session_id, document_id
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7::numeric, sqlc.narg(reading_session_id), sqlc.narg(document_id));
+
+-- name: GetOpenReadingSession :one
+SELECT *
+FROM reading_sessions
+WHERE link_id = $1
+  AND visitor_id = $2
+  AND ended_at IS NULL
+LIMIT 1;
+
+-- name: CloseReadingSession :exec
+UPDATE reading_sessions
+SET ended_at = last_activity_at
+WHERE id = $1
+  AND ended_at IS NULL;
+
+-- name: CreateReadingSession :one
+INSERT INTO reading_sessions (
+    tenant_id,
+    workspace_id,
+    link_id,
+    document_id,
+    visitor_id,
+    started_at,
+    last_activity_at,
+    max_page,
+    distinct_page_count,
+    total_duration_seconds
+) VALUES (
+    $1, $2, $3, $4, $5, now(), now(), $6, 0, 0
+)
+RETURNING *;
+
+-- name: UpsertReadingSessionPage :exec
+INSERT INTO reading_session_pages (session_id, page_number, first_seen_at, duration_seconds)
+VALUES ($1, $2, now(), $3)
+ON CONFLICT (session_id, page_number) DO UPDATE
+SET duration_seconds = reading_session_pages.duration_seconds + EXCLUDED.duration_seconds;
+
+-- name: RefreshReadingSessionStats :one
+UPDATE reading_sessions rs
+SET
+    last_activity_at = now(),
+    max_page = GREATEST(rs.max_page, sqlc.arg(page_number)),
+    total_duration_seconds = rs.total_duration_seconds + sqlc.arg(duration_seconds),
+    distinct_page_count = (
+        SELECT COUNT(*)::int FROM reading_session_pages p WHERE p.session_id = rs.id
+    )
+WHERE rs.id = sqlc.arg(id)
+RETURNING *;
 
 -- name: GetLinkAccessMetrics :one
 SELECT
     COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
     COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal') AS forward_signals,
     COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
 FROM access_logs
 WHERE link_id = $1;
@@ -633,6 +692,7 @@ WHERE link_id = $1;
 SELECT
     COUNT(*) FILTER (WHERE event_type = 'link_opened') AS opens,
     COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened') AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal') AS forward_signals,
     COUNT(*) FILTER (WHERE event_type = 'download_attempted') AS downloads
 FROM access_logs
 WHERE link_id = $1
@@ -697,7 +757,7 @@ SELECT
     COUNT(*) AS total_key_page_views
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
@@ -709,10 +769,22 @@ SELECT
     COUNT(*) AS total_key_page_views
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND pv.created_at > now() - interval '24 hours'
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
+
+-- name: CountVisitorEngagedKeyPageViews :one
+-- Engaged (≥3s) key-page views for one visitor on a link (heat keyword patterns).
+SELECT COUNT(*)::bigint AS count
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+WHERE pv.link_id = $1
+  AND pv.visitor_id = $2
+  AND pv.duration_seconds >= 3
+  AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
 
 -- name: GetLinkKeyPageViewDetails :many
@@ -724,7 +796,7 @@ SELECT
     COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = $1
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
@@ -932,6 +1004,41 @@ GROUP BY pv.visitor_id, ve.visitor_email
 ORDER BY last_seen_at DESC
 LIMIT $3;
 
+-- name: GetVisitorSummariesByDocumentInRange :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.link_id IN (
+        SELECT l.id FROM links l
+        WHERE l.document_id = sqlc.arg(document_id)
+          AND l.workspace_id = sqlc.arg(workspace_id)
+          AND l.status != 'deleted'
+    )
+      AND al.workspace_id = sqlc.arg(workspace_id)
+      AND al.visitor_email IS NOT NULL AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    pv.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    COUNT(*)::bigint AS page_view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    MAX(pv.created_at)::timestamptz AS last_seen_at
+FROM page_views pv
+LEFT JOIN visitor_emails ve ON ve.visitor_id = pv.visitor_id
+WHERE pv.link_id IN (
+    SELECT l.id FROM links l
+    WHERE l.document_id = sqlc.arg(document_id)
+      AND l.workspace_id = sqlc.arg(workspace_id)
+      AND l.status != 'deleted'
+)
+  AND pv.workspace_id = sqlc.arg(workspace_id)
+  AND pv.created_at >= sqlc.arg(range_start)
+  AND pv.created_at < sqlc.arg(range_end)
+GROUP BY pv.visitor_id, ve.visitor_email
+ORDER BY last_seen_at DESC
+LIMIT sqlc.arg(page_limit);
+
 -- name: GetLastAccessLogByLink :one
 SELECT id, tenant_id, workspace_id, link_id, visitor_id, visitor_email, event_type, ip, user_agent, created_at
 FROM access_logs
@@ -954,6 +1061,7 @@ FROM page_views
 WHERE link_id = $1
   AND visitor_id = $2
   AND page_number = $3
+  AND document_id IS NOT DISTINCT FROM sqlc.narg(document_id)::uuid
 ORDER BY created_at DESC
 LIMIT 1;
 
@@ -967,6 +1075,7 @@ SELECT
     link_id,
     COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
     COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
     COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
 FROM access_logs
 WHERE link_id = ANY($1::uuid[])
@@ -1014,7 +1123,7 @@ SELECT
     COUNT(*) AS total_key_page_views
 FROM page_views pv
 JOIN links l ON l.id = pv.link_id
-JOIN pages p ON p.document_id = l.document_id AND p.page_number = pv.page_number
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
 WHERE pv.link_id = ANY(sqlc.arg(link_ids)::uuid[])
   AND p.title IS NOT NULL AND p.title <> ''
   AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
@@ -1028,6 +1137,7 @@ SELECT
     created_at,
     opens,
     unique_visitors,
+    forward_signals,
     downloads,
     avg_duration_seconds,
     total_page_views,
@@ -1070,6 +1180,23 @@ WHERE p.document_id = $1 AND p.workspace_id = $2
 GROUP BY p.page_number, p.created_at
 ORDER BY p.page_number;
 
+-- name: GetPageAnalyticsByDocumentInRange :many
+SELECT
+    p.page_number,
+    COUNT(pv.id) AS view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COALESCE(MAX(pv.created_at), p.created_at) AS last_viewed_at
+FROM pages p
+LEFT JOIN links l ON l.document_id = p.document_id AND l.status != 'deleted'
+LEFT JOIN page_views pv
+  ON pv.link_id = l.id
+ AND pv.page_number = p.page_number
+ AND pv.created_at >= sqlc.arg(range_start)
+ AND pv.created_at < sqlc.arg(range_end)
+WHERE p.document_id = sqlc.arg(document_id) AND p.workspace_id = sqlc.arg(workspace_id)
+GROUP BY p.page_number, p.created_at
+ORDER BY p.page_number;
+
 -- name: GetPageTitlesByDocument :many
 SELECT
     p.page_number,
@@ -1087,11 +1214,174 @@ FROM (
     SELECT DISTINCT ON (link_id, visitor_id) link_id, visitor_id, page_number
     FROM page_views
     WHERE link_id IN (
-        SELECT id FROM links WHERE document_id = $1 AND status != 'deleted'
+        SELECT id FROM links WHERE links.document_id = $1 AND status != 'deleted'
     )
     ORDER BY link_id, visitor_id, created_at DESC
 ) last_views
 GROUP BY page_number;
+
+-- name: GetPageExitCountsByDocumentInRange :many
+SELECT page_number, COUNT(*) AS exit_count
+FROM (
+    SELECT DISTINCT ON (pv.link_id, pv.visitor_id) pv.link_id, pv.visitor_id, pv.page_number
+    FROM page_views pv
+    WHERE pv.link_id IN (
+        SELECT id FROM links
+        WHERE links.document_id = sqlc.arg(document_id) AND status != 'deleted'
+    )
+      AND pv.created_at >= sqlc.arg(range_start)
+      AND pv.created_at < sqlc.arg(range_end)
+    ORDER BY pv.link_id, pv.visitor_id, pv.created_at DESC
+) last_views
+GROUP BY page_number;
+
+-- name: GetDocumentVisitorReach :many
+-- Legacy per-visitor reach (kept for tests / fallback). Prefer GetDocumentReadingSessionReach.
+SELECT
+    pv.visitor_id,
+    MAX(pv.page_number)::int AS max_page,
+    COUNT(DISTINCT pv.page_number)::bigint AS distinct_pages,
+    COALESCE(SUM(pv.duration_seconds), 0)::bigint AS total_duration_seconds
+FROM page_views pv
+WHERE pv.link_id IN (
+    SELECT l.id FROM links l
+    WHERE l.document_id = sqlc.arg(document_id)
+      AND l.workspace_id = sqlc.arg(workspace_id)
+      AND l.status != 'deleted'
+)
+  AND pv.workspace_id = sqlc.arg(workspace_id)
+  AND pv.visitor_id IS NOT NULL
+  AND pv.visitor_id <> ''
+GROUP BY pv.visitor_id
+ORDER BY MAX(pv.created_at) DESC;
+
+-- name: GetDocumentReadingSessionReach :many
+-- Formal idle-gap reading sessions for document funnel.
+SELECT
+    rs.id,
+    rs.max_page,
+    rs.distinct_page_count::bigint AS distinct_pages,
+    rs.total_duration_seconds::bigint AS total_duration_seconds
+FROM reading_sessions rs
+WHERE rs.document_id = sqlc.arg(document_id)
+  AND rs.workspace_id = sqlc.arg(workspace_id)
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = sqlc.arg(document_id)
+        AND l.workspace_id = sqlc.arg(workspace_id)
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC;
+
+-- name: GetDocumentReadingSessionReachInRange :many
+SELECT
+    rs.id,
+    rs.max_page,
+    rs.distinct_page_count::bigint AS distinct_pages,
+    rs.total_duration_seconds::bigint AS total_duration_seconds
+FROM reading_sessions rs
+WHERE rs.document_id = sqlc.arg(document_id)
+  AND rs.workspace_id = sqlc.arg(workspace_id)
+  AND rs.last_activity_at >= sqlc.arg(range_start)
+  AND rs.last_activity_at < sqlc.arg(range_end)
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = sqlc.arg(document_id)
+        AND l.workspace_id = sqlc.arg(workspace_id)
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC;
+
+-- name: ListDocumentReadingSessions :many
+-- Insights session timeline: who / when / deepest page.
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.workspace_id = sqlc.arg(workspace_id)
+      AND al.link_id IN (
+          SELECT l.id FROM links l
+          WHERE l.document_id = sqlc.arg(document_id)
+            AND l.workspace_id = sqlc.arg(workspace_id)
+            AND l.status != 'deleted'
+      )
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    rs.id,
+    rs.link_id,
+    rs.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    rs.started_at,
+    rs.last_activity_at,
+    rs.ended_at,
+    rs.max_page,
+    rs.distinct_page_count,
+    rs.total_duration_seconds
+FROM reading_sessions rs
+LEFT JOIN visitor_emails ve ON ve.visitor_id = rs.visitor_id
+WHERE rs.document_id = sqlc.arg(document_id)
+  AND rs.workspace_id = sqlc.arg(workspace_id)
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = sqlc.arg(document_id)
+        AND l.workspace_id = sqlc.arg(workspace_id)
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListDocumentReadingSessionsInRange :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.workspace_id = sqlc.arg(workspace_id)
+      AND al.link_id IN (
+          SELECT l.id FROM links l
+          WHERE l.document_id = sqlc.arg(document_id)
+            AND l.workspace_id = sqlc.arg(workspace_id)
+            AND l.status != 'deleted'
+      )
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    rs.id,
+    rs.link_id,
+    rs.visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    rs.started_at,
+    rs.last_activity_at,
+    rs.ended_at,
+    rs.max_page,
+    rs.distinct_page_count,
+    rs.total_duration_seconds
+FROM reading_sessions rs
+LEFT JOIN visitor_emails ve ON ve.visitor_id = rs.visitor_id
+WHERE rs.document_id = sqlc.arg(document_id)
+  AND rs.workspace_id = sqlc.arg(workspace_id)
+  AND rs.last_activity_at >= sqlc.arg(range_start)
+  AND rs.last_activity_at < sqlc.arg(range_end)
+  AND EXISTS (
+      SELECT 1 FROM links l
+      WHERE l.id = rs.link_id
+        AND l.document_id = sqlc.arg(document_id)
+        AND l.workspace_id = sqlc.arg(workspace_id)
+        AND l.status != 'deleted'
+  )
+ORDER BY rs.last_activity_at DESC
+LIMIT sqlc.arg(page_limit);
+
+-- name: ListReadingSessionPagesBySessionIDs :many
+SELECT session_id, page_number, duration_seconds
+FROM reading_session_pages
+WHERE session_id = ANY(sqlc.arg(session_ids)::uuid[])
+ORDER BY session_id, page_number ASC;
 
 -- name: CreateDealRoom :one
 INSERT INTO deal_rooms (
@@ -1599,7 +1889,10 @@ RETURNING *;
 -- name: ListSuggestionsByLink :many
 SELECT *
 FROM suggestions
-WHERE link_id = $1 AND workspace_id = $2 AND dismissed = false
+WHERE link_id = $1
+  AND workspace_id = $2
+  AND dismissed = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now())
 ORDER BY created_at DESC;
 
 -- name: CountRecentSuggestionsByLinkTypeSubtype :one
@@ -1616,10 +1909,43 @@ WHERE workspace_id = $1
   AND created_at > now() - interval '24 hours'
   AND metadata @> sqlc.arg(session_metadata)::jsonb;
 
+-- name: CountActiveSuggestionsByMetadata :one
+SELECT COUNT(*) AS count
+FROM suggestions
+WHERE workspace_id = $1
+  AND dismissed = false
+  AND metadata @> sqlc.arg(match_metadata)::jsonb;
+
 -- name: DismissSuggestion :exec
 UPDATE suggestions
-SET dismissed = true, updated_at = now()
+SET dismissed = true, snoozed_until = NULL, updated_at = now()
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: DismissSuggestionsByMetadata :exec
+UPDATE suggestions
+SET dismissed = true, snoozed_until = NULL, updated_at = now()
+WHERE workspace_id = $1
+  AND dismissed = false
+  AND metadata @> sqlc.arg(match_metadata)::jsonb;
+
+-- name: SnoozeSuggestion :one
+UPDATE suggestions
+SET snoozed_until = $3, updated_at = now()
+WHERE id = $1 AND workspace_id = $2 AND dismissed = false
+RETURNING *;
+
+-- name: SnoozeActionItemsBySignal :exec
+UPDATE action_items
+SET status = 'snoozed', updated_at = now()
+WHERE signal_id = $1 AND workspace_id = $2 AND status = 'pending';
+
+-- name: SnoozeActionItemBySource :exec
+UPDATE action_items
+SET status = 'snoozed', updated_at = now()
+WHERE workspace_id = $1
+  AND source_type = $2
+  AND source_id = $3
+  AND status = 'pending';
 
 -- name: InsertSuggestionOutbox :execrows
 INSERT INTO suggestion_outbox (tenant_id, workspace_id, link_id, lang)
@@ -1668,6 +1994,44 @@ DO UPDATE SET
     salesforce_connected = EXCLUDED.salesforce_connected,
     updated_at = now()
 RETURNING workspace_id, email_enabled, slack_webhook_url, slack_connected, hubspot_connected, salesforce_connected, updated_at;
+
+-- name: GetWorkspaceOutboundWebhook :one
+SELECT workspace_id, tenant_id, url, secret, enabled, event_types, created_at, updated_at
+FROM workspace_outbound_webhooks
+WHERE workspace_id = $1;
+
+-- name: UpsertWorkspaceOutboundWebhook :one
+INSERT INTO workspace_outbound_webhooks (
+    workspace_id, tenant_id, url, secret, enabled, event_types
+) VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (workspace_id)
+DO UPDATE SET
+    url = EXCLUDED.url,
+    secret = EXCLUDED.secret,
+    enabled = EXCLUDED.enabled,
+    event_types = EXCLUDED.event_types,
+    updated_at = now()
+RETURNING workspace_id, tenant_id, url, secret, enabled, event_types, created_at, updated_at;
+
+-- name: DeleteWorkspaceOutboundWebhook :exec
+DELETE FROM workspace_outbound_webhooks
+WHERE workspace_id = $1;
+
+-- name: GetWorkspaceKeyPageSettings :one
+SELECT workspace_id, tenant_id, default_circle, extra_keywords, created_at, updated_at
+FROM workspace_key_page_settings
+WHERE workspace_id = $1;
+
+-- name: UpsertWorkspaceKeyPageSettings :one
+INSERT INTO workspace_key_page_settings (
+    workspace_id, tenant_id, default_circle, extra_keywords
+) VALUES ($1, $2, $3, $4)
+ON CONFLICT (workspace_id)
+DO UPDATE SET
+    default_circle = EXCLUDED.default_circle,
+    extra_keywords = EXCLUDED.extra_keywords,
+    updated_at = now()
+RETURNING workspace_id, tenant_id, default_circle, extra_keywords, created_at, updated_at;
 
 -- name: CreateNotification :one
 INSERT INTO notifications (workspace_id, user_id, channel, subject, body, recipient_email, metadata)
@@ -2210,6 +2574,123 @@ FROM access_logs
 WHERE workspace_id = $1
   AND created_at >= now() - interval '7 days';
 
+-- name: GetWorkspaceDailyLinkOpens :many
+-- UTC calendar-day series of link opens for Insights overview trend.
+SELECT
+    ((al.created_at AT TIME ZONE 'UTC')::date)::text AS day,
+    COUNT(*)::bigint AS opens,
+    COUNT(
+      DISTINCT COALESCE(
+        NULLIF(al.visitor_id, ''),
+        LOWER(NULLIF(al.visitor_email, ''))
+      )
+    )::bigint AS unique_visitors
+FROM access_logs al
+WHERE al.workspace_id = sqlc.arg(workspace_id)
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= (timezone('utc', now()) - (sqlc.arg(day_count)::int * interval '1 day'))
+GROUP BY 1
+ORDER BY 1;
+
+-- name: GetWorkspaceDailyLinkOpensInRange :many
+-- Dense-capable daily opens for an arbitrary UTC half-open window [start, end).
+SELECT
+    ((al.created_at AT TIME ZONE 'UTC')::date)::text AS day,
+    COUNT(*)::bigint AS opens,
+    COUNT(
+      DISTINCT COALESCE(
+        NULLIF(al.visitor_id, ''),
+        LOWER(NULLIF(al.visitor_email, ''))
+      )
+    )::bigint AS unique_visitors
+FROM access_logs al
+WHERE al.workspace_id = sqlc.arg(workspace_id)
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= sqlc.arg(range_start)
+  AND al.created_at < sqlc.arg(range_end)
+GROUP BY 1
+ORDER BY 1;
+
+-- name: CountWorkspaceLinkOpenVisitorsInRange :one
+-- Distinct visitors with ≥1 link_opened in [range_start, range_end) (UTC).
+SELECT COUNT(
+  DISTINCT COALESCE(
+    NULLIF(al.visitor_id, ''),
+    LOWER(NULLIF(al.visitor_email, ''))
+  )
+)::bigint AS unique_visitors
+FROM access_logs al
+WHERE al.workspace_id = sqlc.arg(workspace_id)
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= sqlc.arg(range_start)
+  AND al.created_at < sqlc.arg(range_end);
+
+-- name: CountWorkspaceLinkOpensInRange :one
+SELECT COUNT(*)::bigint AS opens
+FROM access_logs al
+WHERE al.workspace_id = sqlc.arg(workspace_id)
+  AND al.event_type = 'link_opened'
+  AND al.created_at >= sqlc.arg(range_start)
+  AND al.created_at < sqlc.arg(range_end);
+
+-- name: ListEnabledDailyDigestRules :many
+SELECT id, tenant_id, workspace_id, rule_type, channels, enabled, unsubscribable, merge_window_minutes, created_at, updated_at
+FROM notification_rules
+WHERE rule_type = 'daily_digest'
+  AND enabled = true
+ORDER BY workspace_id;
+
+-- name: CountDigestNotificationsForDay :one
+SELECT COUNT(*)::bigint
+FROM notifications n
+WHERE n.workspace_id = sqlc.arg(workspace_id)
+  AND n.channel = sqlc.arg(channel)
+  AND n.metadata->>'rule_type' = 'daily_digest'
+  AND n.metadata->>'digest_day' = sqlc.arg(digest_day)::text
+  AND n.status IN ('pending', 'processing', 'sent', 'failed');
+
+-- name: ListWorkspaceOwnerAdminIDs :many
+SELECT user_id
+FROM workspace_members
+WHERE workspace_id = $1
+  AND role IN ('owner', 'admin')
+ORDER BY joined_at ASC;
+
+-- name: GetWorkspacePageViewEngagementInRange :one
+-- Page-view engagement for Insights overview KPI strip.
+SELECT
+    COUNT(*)::bigint AS page_view_count,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    COALESCE(
+      PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY pv.duration_seconds),
+      0
+    )::float8 AS median_duration_seconds
+FROM page_views pv
+WHERE pv.workspace_id = sqlc.arg(workspace_id)
+  AND pv.created_at >= sqlc.arg(range_start)
+  AND pv.created_at < sqlc.arg(range_end);
+
+-- name: GetWorkspaceReadingSessionStatsInRange :one
+-- Workspace reading-session completion for Insights command-center KPI.
+-- Measurable = sessions whose document has a known page_count > 0.
+-- Completed = max_page >= document.page_count (same rule as document funnel).
+SELECT
+    COUNT(*)::bigint AS session_count,
+    COUNT(*) FILTER (
+        WHERE d.page_count IS NOT NULL AND d.page_count > 0
+    )::bigint AS measurable_sessions,
+    COUNT(*) FILTER (
+        WHERE d.page_count IS NOT NULL
+          AND d.page_count > 0
+          AND rs.max_page >= d.page_count
+    )::bigint AS completed_sessions
+FROM reading_sessions rs
+JOIN documents d ON d.id = rs.document_id AND d.workspace_id = rs.workspace_id
+WHERE rs.workspace_id = sqlc.arg(workspace_id)
+  AND rs.document_id IS NOT NULL
+  AND rs.last_activity_at >= sqlc.arg(range_start)
+  AND rs.last_activity_at < sqlc.arg(range_end);
+
 -- name: CountPendingQuestionsByWorkspace :one
 SELECT COUNT(*) AS pending_count
 FROM link_ask_turns
@@ -2299,7 +2780,9 @@ LIMIT $2;
 -- name: ListSuggestionsByWorkspace :many
 SELECT *
 FROM suggestions
-WHERE workspace_id = $1 AND dismissed = false
+WHERE workspace_id = $1
+  AND dismissed = false
+  AND (snoozed_until IS NULL OR snoozed_until <= now())
 ORDER BY created_at DESC;
 
 -- name: ListUnsyncedSuggestionsByWorkspace :many
@@ -2349,11 +2832,12 @@ INSERT INTO link_features (
     key_page_views,
     downloads,
     bounces,
+    forward_signals,
     distinct_ips_1h,
     distinct_emails_24h,
     unknown_emails_24h,
     downloads_24h
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 ON CONFLICT (link_id, window_start) DO UPDATE SET
     opens = EXCLUDED.opens,
     unique_visitors = EXCLUDED.unique_visitors,
@@ -2363,6 +2847,7 @@ ON CONFLICT (link_id, window_start) DO UPDATE SET
     key_page_views = EXCLUDED.key_page_views,
     downloads = EXCLUDED.downloads,
     bounces = EXCLUDED.bounces,
+    forward_signals = EXCLUDED.forward_signals,
     distinct_ips_1h = EXCLUDED.distinct_ips_1h,
     distinct_emails_24h = EXCLUDED.distinct_emails_24h,
     unknown_emails_24h = EXCLUDED.unknown_emails_24h,
@@ -2411,6 +2896,9 @@ LIMIT 1;
 
 -- name: GetContactAggregatesByWorkspace :many
 -- Split log stats and page-view stats to avoid access_logs ⨯ page_views row explosion.
+-- key_page_views uses the same title LIKE patterns as link heat (heat.KeyPagePatterns).
+-- forward_signals counts persisted access_logs.event_type='forward_signal' markers.
+-- bounces matches GetLinkBounceCount: link_opened with visitor_id and no page_views on that link.
 WITH email_logs AS (
     SELECT
         LOWER(al.visitor_email) AS email,
@@ -2431,9 +2919,26 @@ log_stats AS (
         COUNT(DISTINCT link_id)::bigint AS unique_links,
         COUNT(DISTINCT visitor_id) FILTER (WHERE visitor_id IS NOT NULL AND visitor_id <> '')::bigint AS unique_visitors,
         COUNT(DISTINCT id) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
         MAX(created_at)::timestamptz AS last_seen_at
     FROM email_logs
     GROUP BY email
+),
+bounce_stats AS (
+    SELECT
+        el.email,
+        COUNT(DISTINCT el.id)::bigint AS bounces
+    FROM email_logs el
+    WHERE el.event_type = 'link_opened'
+      AND el.visitor_id IS NOT NULL
+      AND el.visitor_id <> ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM page_views p
+          WHERE p.link_id = el.link_id
+            AND p.visitor_id = el.visitor_id
+      )
+    GROUP BY el.email
 ),
 visitor_emails AS (
     SELECT DISTINCT email, visitor_id
@@ -2448,6 +2953,18 @@ pv_stats AS (
     FROM visitor_emails ve
     JOIN page_views pv ON pv.workspace_id = $1 AND pv.visitor_id = ve.visitor_id
     GROUP BY ve.email
+),
+key_page_stats AS (
+    SELECT
+        ve.email,
+        COUNT(pv.id)::bigint AS key_page_views
+    FROM visitor_emails ve
+    JOIN page_views pv ON pv.workspace_id = $1 AND pv.visitor_id = ve.visitor_id
+    JOIN links l ON l.id = pv.link_id AND l.workspace_id = $1 AND l.status != 'deleted'
+    JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+    WHERE p.title IS NOT NULL AND p.title <> ''
+      AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
+    GROUP BY ve.email
 )
 SELECT
     c.id AS contact_id,
@@ -2457,11 +2974,16 @@ SELECT
     ls.unique_visitors,
     COALESCE(ps.total_duration_seconds, 0)::bigint AS total_duration_seconds,
     COALESCE(ps.total_page_views, 0)::bigint AS total_page_views,
+    COALESCE(kps.key_page_views, 0)::bigint AS key_page_views,
+    ls.forward_signals,
     ls.downloads,
+    COALESCE(bs.bounces, 0)::bigint AS bounces,
     ls.last_seen_at
 FROM log_stats ls
 LEFT JOIN contacts c ON c.workspace_id = $1 AND LOWER(c.email) = ls.email
 LEFT JOIN pv_stats ps ON ps.email = ls.email
+LEFT JOIN key_page_stats kps ON kps.email = ls.email
+LEFT JOIN bounce_stats bs ON bs.email = ls.email
 ORDER BY ls.opens DESC
 LIMIT $2;
 
@@ -2523,8 +3045,22 @@ log_stats AS (
         COUNT(DISTINCT link_id)::bigint AS unique_links,
         COUNT(DISTINCT visitor_id) FILTER (WHERE visitor_id IS NOT NULL AND visitor_id <> '')::bigint AS unique_visitors,
         COUNT(DISTINCT id) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads,
+        COUNT(DISTINCT id) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
         MAX(created_at)::timestamptz AS last_seen_at
     FROM email_logs
+),
+bounce_stats AS (
+    SELECT COUNT(DISTINCT el.id)::bigint AS bounces
+    FROM email_logs el
+    WHERE el.event_type = 'link_opened'
+      AND el.visitor_id IS NOT NULL
+      AND el.visitor_id <> ''
+      AND NOT EXISTS (
+          SELECT 1
+          FROM page_views p
+          WHERE p.link_id = el.link_id
+            AND p.visitor_id = el.visitor_id
+      )
 ),
 visitor_ids AS (
     SELECT DISTINCT visitor_id
@@ -2538,6 +3074,16 @@ pv_stats AS (
     FROM page_views pv
     WHERE pv.workspace_id = $1
       AND pv.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+),
+key_page_stats AS (
+    SELECT COUNT(pv.id)::bigint AS key_page_views
+    FROM page_views pv
+    JOIN links l ON l.id = pv.link_id AND l.workspace_id = $1 AND l.status != 'deleted'
+    JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+    WHERE pv.workspace_id = $1
+      AND pv.visitor_id IN (SELECT visitor_id FROM visitor_ids)
+      AND p.title IS NOT NULL AND p.title <> ''
+      AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
 )
 SELECT
     COALESCE((SELECT opens FROM log_stats), 0)::bigint AS opens,
@@ -2545,7 +3091,10 @@ SELECT
     COALESCE((SELECT unique_visitors FROM log_stats), 0)::bigint AS unique_visitors,
     COALESCE((SELECT total_duration_seconds FROM pv_stats), 0)::bigint AS total_duration_seconds,
     COALESCE((SELECT total_page_views FROM pv_stats), 0)::bigint AS total_page_views,
+    COALESCE((SELECT key_page_views FROM key_page_stats), 0)::bigint AS key_page_views,
+    COALESCE((SELECT forward_signals FROM log_stats), 0)::bigint AS forward_signals,
     COALESCE((SELECT downloads FROM log_stats), 0)::bigint AS downloads,
+    COALESCE((SELECT bounces FROM bounce_stats), 0)::bigint AS bounces,
     (SELECT last_seen_at FROM log_stats) AS last_seen_at;
 
 -- name: ListContactActivitiesByEmail :many
@@ -2896,6 +3445,307 @@ WHERE l.deal_room_id = sqlc.arg(deal_room_id)
   AND (sqlc.narg(created_after)::timestamptz IS NULL OR se.created_at >= sqlc.narg(created_after))
   AND (sqlc.narg(created_before)::timestamptz IS NULL OR se.created_at < sqlc.narg(created_before))
 ORDER BY se.created_at DESC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- Insights access-audit: permission / gate failures across the workspace.
+-- Folder grain: document placement path, else link target_folder_path (deal-room shares).
+-- name: CountWorkspaceAccessAuditByType :many
+SELECT se.event_type, COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = sqlc.arg(workspace_id)
+  AND se.created_at >= sqlc.arg(range_start)
+  AND se.created_at < sqlc.arg(range_end)
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
+  AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))
+  AND (
+    sqlc.narg(folder_path)::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = sqlc.narg(folder_path)
+  )
+GROUP BY se.event_type
+ORDER BY count DESC, se.event_type ASC;
+
+-- name: CountWorkspaceAccessAuditByDealRoom :many
+SELECT
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name,
+    COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = se.workspace_id
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = sqlc.arg(workspace_id)
+  AND se.created_at >= sqlc.arg(range_start)
+  AND se.created_at < sqlc.arg(range_end)
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))
+  AND (
+    sqlc.narg(folder_path)::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = sqlc.narg(folder_path)
+  )
+GROUP BY l.deal_room_id, dr.name
+ORDER BY count DESC
+LIMIT 20;
+
+-- name: CountWorkspaceAccessAuditByMember :many
+SELECT
+    l.created_by AS member_id,
+    COALESCE(u.email, '')::text AS member_email,
+    COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN users u ON u.id = l.created_by
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = sqlc.arg(workspace_id)
+  AND se.created_at >= sqlc.arg(range_start)
+  AND se.created_at < sqlc.arg(range_end)
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
+  AND (
+    sqlc.narg(folder_path)::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = sqlc.narg(folder_path)
+  )
+GROUP BY l.created_by, u.email
+ORDER BY count DESC
+LIMIT 20;
+
+-- name: CountWorkspaceAccessAuditByFolder :many
+SELECT
+    COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '')::text AS folder_path,
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name,
+    COUNT(*)::bigint AS count
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = se.workspace_id
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = sqlc.arg(workspace_id)
+  AND se.created_at >= sqlc.arg(range_start)
+  AND se.created_at < sqlc.arg(range_end)
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
+  AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))
+GROUP BY
+    COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), ''),
+    l.deal_room_id,
+    dr.name
+ORDER BY count DESC
+LIMIT 20;
+
+-- name: ListWorkspaceAccessAuditEvents :many
+SELECT
+    se.id,
+    se.link_id,
+    se.event_type,
+    se.visitor_id,
+    se.email,
+    se.reason,
+    se.created_at,
+    COALESCE(
+        NULLIF(d.title, ''),
+        NULLIF(dr.name, ''),
+        NULLIF(l.name, ''),
+        ''
+    )::text AS document_title,
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name,
+    l.created_by AS member_id,
+    COALESCE(u.email, '')::text AS member_email,
+    COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '')::text AS folder_path
+FROM security_events se
+LEFT JOIN links l ON l.id = se.link_id
+LEFT JOIN documents d ON d.id = l.document_id
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = se.workspace_id
+LEFT JOIN users u ON u.id = l.created_by
+LEFT JOIN deal_room_documents drd
+  ON drd.document_id = l.document_id
+ AND drd.room_id = l.deal_room_id
+WHERE se.workspace_id = sqlc.arg(workspace_id)
+  AND se.created_at >= sqlc.arg(range_start)
+  AND se.created_at < sqlc.arg(range_end)
+  AND se.event_type = ANY (ARRAY[
+    'blocked_email',
+    'blocked_domain',
+    'not_in_allow_list',
+    'no_allow_match',
+    'invalid_password',
+    'scope_violation',
+    'security_gate_failed',
+    'session_security_config_changed',
+    'expired_link_accessed',
+    'revoked_link_accessed',
+    'max_access_reached',
+    'invite_token_failed',
+    'invite_token_expired',
+    'invite_token_revoked',
+    'rate_limit_exceeded'
+  ]::text[])
+  AND (sqlc.narg(event_type)::text IS NULL OR se.event_type = sqlc.narg(event_type))
+  AND (sqlc.narg(deal_room_id)::uuid IS NULL OR l.deal_room_id = sqlc.narg(deal_room_id))
+  AND (sqlc.narg(member_id)::uuid IS NULL OR l.created_by = sqlc.narg(member_id))
+  AND (
+    sqlc.narg(folder_path)::text IS NULL
+    OR COALESCE(NULLIF(BTRIM(drd.folder_path), ''), NULLIF(BTRIM(l.target_folder_path), ''), '') = sqlc.narg(folder_path)
+  )
+ORDER BY se.created_at DESC
+LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
+
+-- Insights key-page compliance: views whose page title matches heat key-page keywords.
+-- name: GetWorkspaceKeyPageComplianceSummary :one
+SELECT
+    COUNT(*)::bigint AS total_views,
+    COUNT(*) FILTER (WHERE pv.duration_seconds >= 3)::bigint AS engaged_views,
+    COUNT(DISTINCT pv.visitor_id) FILTER (
+        WHERE pv.visitor_id IS NOT NULL AND btrim(pv.visitor_id) <> ''
+    )::bigint AS unique_visitors,
+    COUNT(DISTINCT (COALESCE(pv.document_id, l.document_id), pv.page_number))::bigint AS distinct_pages
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+WHERE pv.workspace_id = sqlc.arg(workspace_id)
+  AND pv.created_at >= sqlc.arg(range_start)
+  AND pv.created_at < sqlc.arg(range_end)
+  AND p.title IS NOT NULL AND btrim(p.title) <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[]);
+
+-- name: ListWorkspaceKeyPageComplianceByPage :many
+SELECT
+    COALESCE(pv.document_id, l.document_id) AS document_id,
+    COALESCE(d.title, '')::text AS document_title,
+    pv.page_number,
+    COALESCE(NULLIF(TRIM(p.title), ''), 'Page ' || pv.page_number)::text AS page_title,
+    COUNT(*)::bigint AS views,
+    COUNT(DISTINCT pv.visitor_id) FILTER (
+        WHERE pv.visitor_id IS NOT NULL AND btrim(pv.visitor_id) <> ''
+    )::bigint AS unique_visitors,
+    COALESCE(AVG(pv.duration_seconds), 0)::float8 AS avg_duration_seconds,
+    MAX(pv.created_at)::timestamptz AS last_viewed_at
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+JOIN documents d ON d.id = COALESCE(pv.document_id, l.document_id)
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+WHERE pv.workspace_id = sqlc.arg(workspace_id)
+  AND pv.created_at >= sqlc.arg(range_start)
+  AND pv.created_at < sqlc.arg(range_end)
+  AND p.title IS NOT NULL AND btrim(p.title) <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
+GROUP BY COALESCE(pv.document_id, l.document_id), d.title, pv.page_number, p.title
+ORDER BY views DESC, last_viewed_at DESC NULLS LAST
+LIMIT 50;
+
+-- name: ListWorkspaceKeyPageComplianceEvents :many
+WITH visitor_emails AS (
+    SELECT al.visitor_id, MAX(al.visitor_email) AS visitor_email
+    FROM access_logs al
+    WHERE al.workspace_id = sqlc.arg(workspace_id)
+      AND al.visitor_id IS NOT NULL
+      AND al.visitor_email IS NOT NULL
+      AND al.visitor_email <> ''
+    GROUP BY al.visitor_id
+)
+SELECT
+    pv.id,
+    pv.link_id,
+    COALESCE(pv.visitor_id, '')::text AS visitor_id,
+    COALESCE(ve.visitor_email, '')::text AS visitor_email,
+    COALESCE(pv.document_id, l.document_id) AS document_id,
+    COALESCE(d.title, '')::text AS document_title,
+    pv.page_number,
+    COALESCE(NULLIF(TRIM(p.title), ''), 'Page ' || pv.page_number)::text AS page_title,
+    pv.duration_seconds,
+    pv.created_at,
+    l.deal_room_id,
+    COALESCE(dr.name, '')::text AS deal_room_name
+FROM page_views pv
+JOIN links l ON l.id = pv.link_id
+LEFT JOIN documents d ON d.id = COALESCE(pv.document_id, l.document_id)
+JOIN pages p ON p.document_id = COALESCE(pv.document_id, l.document_id) AND p.page_number = pv.page_number
+LEFT JOIN deal_rooms dr ON dr.id = l.deal_room_id AND dr.workspace_id = pv.workspace_id
+LEFT JOIN visitor_emails ve ON ve.visitor_id = pv.visitor_id
+WHERE pv.workspace_id = sqlc.arg(workspace_id)
+  AND pv.created_at >= sqlc.arg(range_start)
+  AND pv.created_at < sqlc.arg(range_end)
+  AND p.title IS NOT NULL AND btrim(p.title) <> ''
+  AND lower(p.title) LIKE ANY (sqlc.arg(patterns)::text[])
+ORDER BY pv.created_at DESC, pv.id DESC
 LIMIT sqlc.arg(page_limit) OFFSET sqlc.arg(page_offset);
 
 -- name: CreateEmailLog :one
@@ -3762,6 +4612,22 @@ SELECT MIN(created_at)::timestamptz AS first_accessed_at
 FROM access_logs
 WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened';
 
+-- name: GetVisitorLastAccess :one
+SELECT MAX(created_at)::timestamptz AS last_accessed_at
+FROM access_logs
+WHERE link_id = $1 AND visitor_id = $2 AND event_type = 'link_opened';
+
+-- name: CountOtherLinkVisitors :one
+-- Distinct visitors on a link excluding one visitor (call before recording
+-- that visitor's open to detect forward/virality).
+SELECT COUNT(DISTINCT visitor_id)::bigint
+FROM access_logs
+WHERE link_id = $1
+  AND event_type = 'link_opened'
+  AND visitor_id IS NOT NULL
+  AND visitor_id <> ''
+  AND visitor_id <> $2;
+
 -- name: CountVisitorAccesses :one
 SELECT COUNT(*)::int
 FROM access_logs
@@ -3863,8 +4729,12 @@ WITH link_activity AS (
         MAX(al.created_at) AS last_active_at,
         COUNT(*) FILTER (WHERE al.created_at > NOW() - INTERVAL '30 days')::bigint AS recent_events,
         MAX(daily.cnt)::bigint AS peak_daily_events,
-        bool_or(al.event_type = 'forward_visited') AS was_forwarded,
-        bool_or(al.event_type = 'file_downloaded') AS had_downloads
+        (COUNT(DISTINCT al.visitor_id) FILTER (
+            WHERE al.event_type = 'link_opened'
+              AND al.visitor_id IS NOT NULL
+              AND al.visitor_id <> ''
+        ) > 1) AS was_forwarded,
+        bool_or(al.event_type = 'download_attempted') AS had_downloads
     FROM links l
     JOIN access_logs al ON al.link_id = l.id
     JOIN (

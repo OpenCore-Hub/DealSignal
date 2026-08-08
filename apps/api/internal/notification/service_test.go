@@ -73,6 +73,10 @@ func (m *mockNotificationQuerier) GetNotificationSettings(_ context.Context, _ p
 	return m.settings, m.settingsErr
 }
 
+func (m *mockNotificationQuerier) GetWorkspaceOutboundWebhook(_ context.Context, _ pgtype.UUID) (db.WorkspaceOutboundWebhook, error) {
+	return db.WorkspaceOutboundWebhook{}, pgx.ErrNoRows
+}
+
 func (m *mockNotificationQuerier) GetUserByID(_ context.Context, _ pgtype.UUID) (db.User, error) {
 	return m.user, m.userErr
 }

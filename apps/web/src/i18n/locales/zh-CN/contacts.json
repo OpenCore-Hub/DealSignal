@@ -5,6 +5,7 @@
   },
   "searchPlaceholder": "搜索联系人...",
   "unknownOrganization": "未知机构",
+  "visitCount_one": "{{count}} 次访问",
   "visitCount_other": "{{count}} 次访问",
   "totalDuration": "累计 {{duration}}",
   "lastSeen": "最后 {{time}}",
@@ -47,10 +48,12 @@
     "pageView": "查看第 {{page}} 页",
     "revisit": "再次访问",
     "download": "下载文档",
+    "share": "检测到转发",
     "openShort": "打开",
     "pageViewShort": "查看第 {{page}} 页",
     "revisitShort": "再次访问",
     "downloadShort": "下载",
+    "shareShort": "检测到转发",
     "unknown": "活动"
   },
   "new": {

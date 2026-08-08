@@ -177,30 +177,35 @@ describe("integration status adapters", () => {
     };
     expect(toIntegrationStatus(backend)).toEqual({
       emailEnabled: false,
+      dailyDigestEnabled: false,
+      keyPageSlackEnabled: false,
       slack: true,
       hubspot: false,
-      zapier: false,
     });
   });
 
   it("defaults emailEnabled to true when backend field is missing", () => {
     expect(toIntegrationStatus({})).toEqual({
       emailEnabled: true,
+      dailyDigestEnabled: false,
+      keyPageSlackEnabled: false,
       slack: false,
       hubspot: false,
-      zapier: false,
     });
   });
 
   it("maps frontend integration status to backend shape", () => {
     const frontend = {
       emailEnabled: true,
+      dailyDigestEnabled: true,
+      keyPageSlackEnabled: true,
       slack: false,
       hubspot: true,
-      zapier: false,
     };
     expect(toBackendIntegrationStatus(frontend)).toEqual({
       email_enabled: true,
+      daily_digest_enabled: true,
+      key_page_slack_enabled: true,
       slack_connected: false,
       hubspot_connected: true,
     });

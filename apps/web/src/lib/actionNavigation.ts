@@ -5,9 +5,42 @@ import type { ActionItem } from "@/types";
 
 type NavAction = Pick<ActionItem, "sourceType" | "sourceId" | "targetId" | "actionType">;
 
-/** Formal Q&A dashboard todos use actionType review on deal_room_link_question rows. */
+/** Formal Q&A dashboard todos use actionType review (deal-room or document-library Ask). */
 export function isFormalAskReviewAction(action: Pick<ActionItem, "sourceType" | "actionType">): boolean {
-  return action.sourceType === "deal_room_link_question" && action.actionType === "review";
+  return (
+    (action.sourceType === "deal_room_link_question" || action.sourceType === "link_question") &&
+    action.actionType === "review"
+  );
+}
+
+/** Document-library Ask inbox deep link on the link detail page. */
+export function libraryAskPath(
+  workspaceSlug: string,
+  linkId: string,
+  opts?: { formalQueue?: boolean },
+): string {
+  const params = new URLSearchParams();
+  if (opts?.formalQueue) {
+    params.set("askInbox", "formal_queue");
+  } else {
+    params.set("askInbox", "needs_host");
+  }
+  const qs = params.toString();
+  return `/${workspaceSlug}/links/${linkId}${qs ? `?${qs}` : ""}`;
+}
+
+/** Insights Formal Ask CTA: deal-room Ask inbox vs document-library link Ask. */
+export function formalAskSuggestionPath(
+  workspaceSlug: string,
+  suggestion: { linkId: string; dealRoomId?: string },
+): string | null {
+  const linkId = suggestion.linkId?.trim();
+  if (!workspaceSlug || !linkId) return null;
+  const dealRoomId = suggestion.dealRoomId?.trim();
+  if (dealRoomId) {
+    return dealRoomAskPath(workspaceSlug, dealRoomId, { linkId, formalQueue: true });
+  }
+  return libraryAskPath(workspaceSlug, linkId, { formalQueue: true });
 }
 
 /**
@@ -54,8 +87,11 @@ export function actionNavigatePath(
     }
 
     case "link_question":
-      // Legacy rows pointed at /links/{questionId}; require targetId or refuse.
-      return null;
+      // sourceId = turn id; targetId = link id (document-library Ask).
+      if (!action.targetId) return null;
+      return libraryAskPath(workspaceSlug, action.targetId, {
+        formalQueue: isFormalAskReviewAction(action),
+      });
 
     case "uploaded_file":
     case "expiring_link":

@@ -1,17 +1,20 @@
 import { useState } from "react";
+import { Link, useParams } from "react-router";
 import { Shield, Key, FileText } from "@phosphor-icons/react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api } from "@/lib/api";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { cn } from "@/lib/utils";
 import type { SecuritySettings } from "@/types";
 
 export function SettingsSecurityPage() {
   const { t } = useTranslation("settings");
   const { t: tc } = useTranslation("common");
+  const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const { data, loading, error, refetch } = useAsyncData(() => api.getSecuritySettings(), []);
   const [draft, setDraft] = useState<SecuritySettings | null>(null);
 
@@ -124,9 +127,12 @@ export function SettingsSecurityPage() {
         </CardHeader>
         <CardContent>
           <p className="text-body text-muted-foreground">{t("security.auditLogDescription")}</p>
-          <Button className="mt-4" disabled title={t("security.auditLogDisabled")}>
+          <Link
+            to={`/${workspaceSlug}/insights/access`}
+            className={cn(buttonVariants(), "mt-4 inline-flex")}
+          >
             {t("security.viewAuditLog")}
-          </Button>
+          </Link>
         </CardContent>
       </Card>
     </div>

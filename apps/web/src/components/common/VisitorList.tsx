@@ -12,7 +12,8 @@ interface Visitor {
   email: string;
   name?: string;
   organization?: string;
-  heatLevel: HeatLevel;
+  /** Real heat.Compute level only — omit when unavailable (do not invent from views). */
+  heatLevel?: HeatLevel;
   visitCount: number;
   avgDurationSeconds: number;
   lastSeenAt: string;
@@ -58,7 +59,7 @@ export function VisitorList({ visitors, className, returnTo, returnLabel }: Visi
                 {visitor.organization ?? t("visitor.unknownOrganization")} · {t("visitor.visitCount", { count: visitor.visitCount })} · {t("visitor.avgDuration", { duration: formatDuration(visitor.avgDurationSeconds) })} · {t("visitor.lastSeen", { time: formatRelativeTime(visitor.lastSeenAt) })}
               </p>
             </div>
-            <HeatBadge level={visitor.heatLevel} />
+            {visitor.heatLevel ? <HeatBadge level={visitor.heatLevel} /> : null}
           </Link>
         </li>
       ))}

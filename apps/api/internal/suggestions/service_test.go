@@ -46,6 +46,25 @@ func TestRuleEngineHotSignal(t *testing.T) {
 	}
 }
 
+func TestRuleEngineKeyPageRead(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, _, _, err := engine.Evaluate(RuleInput{
+		Metrics: MetricsInput{KeyPageViews24h: 2, Opens24h: 1},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, match := range matches {
+		if match.Type == "hot_signal" && match.Subtype == SubtypeKeyPage {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected key_page hot_signal match, got %v", matches)
+	}
+}
+
 func TestRuleEngineBounceRisk(t *testing.T) {
 	engine := newTestRuleEngine(t)
 	m := suggestionMetrics{
@@ -128,11 +147,16 @@ func TestPriorityAndTitle(t *testing.T) {
 	}
 }
 
-func TestHeatInputUsesUniqueVisitorsAsForwardSignals(t *testing.T) {
-	m := suggestionMetrics{uniqueVisitors: 5}
+func TestHeatInputUsesForwardSignalMarkers(t *testing.T) {
+	m := suggestionMetrics{uniqueVisitors: 5, forwardSignals: 2}
 	input := m.heatInput(0)
-	if input.ForwardSignals != 5 {
-		t.Fatalf("expected ForwardSignals=5, got %d", input.ForwardSignals)
+	if input.ForwardSignals != 2 {
+		t.Fatalf("expected ForwardSignals=2 from markers, got %d", input.ForwardSignals)
+	}
+	// UV alone must not invent forwards.
+	proxy := suggestionMetrics{uniqueVisitors: 5}.heatInput(0)
+	if proxy.ForwardSignals != 0 {
+		t.Fatalf("expected ForwardSignals=0 without markers, got %d", proxy.ForwardSignals)
 	}
 }
 

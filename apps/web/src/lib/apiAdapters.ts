@@ -1,4 +1,4 @@
-import type { IntegrationStatus, PermissionConfig } from "@/types";
+import type { IntegrationStatus, OutboundWebhookConfig, PermissionConfig } from "@/types";
 
 export interface CreateLinkPayload {
   document_ids?: string[];
@@ -182,6 +182,8 @@ export function toCreateDealRoomPayload(
 export interface BackendIntegrationStatus {
   workspace_id?: string;
   email_enabled?: boolean;
+  daily_digest_enabled?: boolean;
+  key_page_slack_enabled?: boolean;
   slack_webhook_url?: string;
   slack_connected?: boolean;
   hubspot_connected?: boolean;
@@ -194,10 +196,10 @@ export function toIntegrationStatus(
 ): IntegrationStatus {
   return {
     emailEnabled: backend.email_enabled ?? true,
+    dailyDigestEnabled: backend.daily_digest_enabled ?? false,
+    keyPageSlackEnabled: backend.key_page_slack_enabled ?? false,
     slack: backend.slack_connected ?? false,
     hubspot: backend.hubspot_connected ?? false,
-    // Zapier is not yet supported by the backend; keep it as a UI placeholder.
-    zapier: false,
   };
 }
 
@@ -206,8 +208,31 @@ export function toBackendIntegrationStatus(
 ): BackendIntegrationStatus {
   return {
     email_enabled: status.emailEnabled,
+    daily_digest_enabled: status.dailyDigestEnabled,
+    key_page_slack_enabled: status.keyPageSlackEnabled,
     slack_connected: status.slack,
     hubspot_connected: status.hubspot,
-    // Zapier state is local-only until backend support is added.
+  };
+}
+
+export type BackendOutboundWebhook = {
+  configured: boolean;
+  enabled: boolean;
+  url?: string;
+  event_types?: string[];
+  secret_hint?: string;
+  secret?: string;
+  updated_at?: string;
+};
+
+export function toOutboundWebhookConfig(backend: BackendOutboundWebhook): OutboundWebhookConfig {
+  return {
+    configured: backend.configured ?? false,
+    enabled: backend.enabled ?? false,
+    url: backend.url,
+    eventTypes: backend.event_types,
+    secretHint: backend.secret_hint,
+    secret: backend.secret,
+    updatedAt: backend.updated_at,
   };
 }

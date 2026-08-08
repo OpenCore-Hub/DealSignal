@@ -39,9 +39,25 @@ type Querier interface {
 	ListActionItemsByWorkspaceForUser(ctx context.Context, arg db.ListActionItemsByWorkspaceForUserParams) ([]db.ActionItem, error)
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
 	GetPageAnalyticsByDocument(ctx context.Context, arg db.GetPageAnalyticsByDocumentParams) ([]db.GetPageAnalyticsByDocumentRow, error)
+	GetPageAnalyticsByDocumentInRange(ctx context.Context, arg db.GetPageAnalyticsByDocumentInRangeParams) ([]db.GetPageAnalyticsByDocumentInRangeRow, error)
 	GetPageTitlesByDocument(ctx context.Context, arg db.GetPageTitlesByDocumentParams) ([]db.GetPageTitlesByDocumentRow, error)
+	GetPageTitleByDocumentAndNumber(ctx context.Context, arg db.GetPageTitleByDocumentAndNumberParams) (string, error)
+	CountVisitorEngagedKeyPageViews(ctx context.Context, arg db.CountVisitorEngagedKeyPageViewsParams) (int64, error)
 	GetPageExitCountsByDocument(ctx context.Context, documentID pgtype.UUID) ([]db.GetPageExitCountsByDocumentRow, error)
+	GetPageExitCountsByDocumentInRange(ctx context.Context, arg db.GetPageExitCountsByDocumentInRangeParams) ([]db.GetPageExitCountsByDocumentInRangeRow, error)
 	GetVisitorSummariesByDocument(ctx context.Context, arg db.GetVisitorSummariesByDocumentParams) ([]db.GetVisitorSummariesByDocumentRow, error)
+	GetVisitorSummariesByDocumentInRange(ctx context.Context, arg db.GetVisitorSummariesByDocumentInRangeParams) ([]db.GetVisitorSummariesByDocumentInRangeRow, error)
+	GetDocumentVisitorReach(ctx context.Context, arg db.GetDocumentVisitorReachParams) ([]db.GetDocumentVisitorReachRow, error)
+	GetDocumentReadingSessionReach(ctx context.Context, arg db.GetDocumentReadingSessionReachParams) ([]db.GetDocumentReadingSessionReachRow, error)
+	GetDocumentReadingSessionReachInRange(ctx context.Context, arg db.GetDocumentReadingSessionReachInRangeParams) ([]db.GetDocumentReadingSessionReachInRangeRow, error)
+	ListDocumentReadingSessions(ctx context.Context, arg db.ListDocumentReadingSessionsParams) ([]db.ListDocumentReadingSessionsRow, error)
+	ListDocumentReadingSessionsInRange(ctx context.Context, arg db.ListDocumentReadingSessionsInRangeParams) ([]db.ListDocumentReadingSessionsInRangeRow, error)
+	ListReadingSessionPagesBySessionIDs(ctx context.Context, sessionIds []pgtype.UUID) ([]db.ListReadingSessionPagesBySessionIDsRow, error)
+	GetOpenReadingSession(ctx context.Context, arg db.GetOpenReadingSessionParams) (db.ReadingSession, error)
+	CloseReadingSession(ctx context.Context, id pgtype.UUID) error
+	CreateReadingSession(ctx context.Context, arg db.CreateReadingSessionParams) (db.ReadingSession, error)
+	UpsertReadingSessionPage(ctx context.Context, arg db.UpsertReadingSessionPageParams) error
+	RefreshReadingSessionStats(ctx context.Context, arg db.RefreshReadingSessionStatsParams) (db.ReadingSession, error)
 	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
 	GetDocumentsByIDs(ctx context.Context, arg db.GetDocumentsByIDsParams) ([]db.GetDocumentsByIDsRow, error)
 	GetLastAccessLogByLink(ctx context.Context, linkID pgtype.UUID) (db.AccessLog, error)
@@ -53,8 +69,27 @@ type Querier interface {
 	CreateSecurityEvent(ctx context.Context, arg db.CreateSecurityEventParams) error
 	CountSecurityEventsByIPAndWindow(ctx context.Context, arg db.CountSecurityEventsByIPAndWindowParams) (int64, error)
 	GetVisitorFirstAccess(ctx context.Context, arg db.GetVisitorFirstAccessParams) (pgtype.Timestamptz, error)
+	GetVisitorLastAccess(ctx context.Context, arg db.GetVisitorLastAccessParams) (pgtype.Timestamptz, error)
+	CountOtherLinkVisitors(ctx context.Context, arg db.CountOtherLinkVisitorsParams) (int64, error)
 	CountVisitorAccesses(ctx context.Context, arg db.CountVisitorAccessesParams) (int32, error)
 	CountWeeklyVisitorsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error)
+	GetWorkspaceDailyLinkOpens(ctx context.Context, arg db.GetWorkspaceDailyLinkOpensParams) ([]db.GetWorkspaceDailyLinkOpensRow, error)
+	GetWorkspaceDailyLinkOpensInRange(ctx context.Context, arg db.GetWorkspaceDailyLinkOpensInRangeParams) ([]db.GetWorkspaceDailyLinkOpensInRangeRow, error)
+	CountWorkspaceLinkOpenVisitorsInRange(ctx context.Context, arg db.CountWorkspaceLinkOpenVisitorsInRangeParams) (int64, error)
+	GetWorkspacePageViewEngagementInRange(ctx context.Context, arg db.GetWorkspacePageViewEngagementInRangeParams) (db.GetWorkspacePageViewEngagementInRangeRow, error)
+	GetWorkspaceReadingSessionStatsInRange(ctx context.Context, arg db.GetWorkspaceReadingSessionStatsInRangeParams) (db.GetWorkspaceReadingSessionStatsInRangeRow, error)
+	CountWorkspaceAccessAuditByType(ctx context.Context, arg db.CountWorkspaceAccessAuditByTypeParams) ([]db.CountWorkspaceAccessAuditByTypeRow, error)
+	CountWorkspaceAccessAuditByDealRoom(ctx context.Context, arg db.CountWorkspaceAccessAuditByDealRoomParams) ([]db.CountWorkspaceAccessAuditByDealRoomRow, error)
+	CountWorkspaceAccessAuditByMember(ctx context.Context, arg db.CountWorkspaceAccessAuditByMemberParams) ([]db.CountWorkspaceAccessAuditByMemberRow, error)
+	CountWorkspaceAccessAuditByFolder(ctx context.Context, arg db.CountWorkspaceAccessAuditByFolderParams) ([]db.CountWorkspaceAccessAuditByFolderRow, error)
+	ListWorkspaceAccessAuditEvents(ctx context.Context, arg db.ListWorkspaceAccessAuditEventsParams) ([]db.ListWorkspaceAccessAuditEventsRow, error)
+	GetWorkspaceKeyPageComplianceSummary(ctx context.Context, arg db.GetWorkspaceKeyPageComplianceSummaryParams) (db.GetWorkspaceKeyPageComplianceSummaryRow, error)
+	ListWorkspaceKeyPageComplianceByPage(ctx context.Context, arg db.ListWorkspaceKeyPageComplianceByPageParams) ([]db.ListWorkspaceKeyPageComplianceByPageRow, error)
+	ListWorkspaceKeyPageComplianceEvents(ctx context.Context, arg db.ListWorkspaceKeyPageComplianceEventsParams) ([]db.ListWorkspaceKeyPageComplianceEventsRow, error)
+	GetWorkspaceKeyPageSettings(ctx context.Context, workspaceID pgtype.UUID) (db.WorkspaceKeyPageSetting, error)
+	UpsertWorkspaceKeyPageSettings(ctx context.Context, arg db.UpsertWorkspaceKeyPageSettingsParams) (db.WorkspaceKeyPageSetting, error)
+	GetWorkspaceByID(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetWorkspaceMember(ctx context.Context, arg db.GetWorkspaceMemberParams) (db.WorkspaceMember, error)
 	CountPendingQuestionsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) (int64, error)
 	ListRecentActivitiesByWorkspace(ctx context.Context, arg db.ListRecentActivitiesByWorkspaceParams) ([]db.ListRecentActivitiesByWorkspaceRow, error)
 }
@@ -125,12 +160,52 @@ func NewService(q Querier, dedup DedupChecker, cfg *config.Config, syncer ...Sig
 
 // RecordLinkOpened atomically increments the link access counter and records the event.
 func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID, email, ip, ua string) error {
+	_, err := s.recordLinkOpened(ctx, link, visitorID, email, ip, ua)
+	return err
+}
+
+// RecordClassifiedOpen classifies the open (DetectForwardOrReturn), records
+// link_opened when not deduped, persists forward_signal / return_visit markers,
+// and returns the notification rule event (first_open | forward_signal | "").
+// Deduped opens return empty notifyEvent so callers do not re-fire alerts.
+func (s *Service) RecordClassifiedOpen(ctx context.Context, link db.Link, visitorID, email, ip, ua string) (notifyEvent string, err error) {
+	kind := s.DetectForwardOrReturn(ctx, link.ID, visitorID)
+	recorded, err := s.recordLinkOpened(ctx, link, visitorID, email, ip, ua)
+	if err != nil {
+		return "", err
+	}
+	if !recorded {
+		return "", nil
+	}
+	switch kind {
+	case OpenKindForwardSignal, OpenKindReturnVisit:
+		// Best-effort classification marker; never fail the open path.
+		_ = s.queries.CreateAccessLog(ctx, db.CreateAccessLogParams{
+			TenantID:     link.TenantID,
+			WorkspaceID:  link.WorkspaceID,
+			LinkID:       link.ID,
+			VisitorID:    pgtype.Text{String: visitorID, Valid: visitorID != ""},
+			VisitorEmail: pgtype.Text{String: email, Valid: email != ""},
+			EventType:    kind,
+			Ip:           hashIPText(s.cfg.IPHashKey, ip),
+			UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
+		})
+	}
+	switch kind {
+	case OpenKindFirstOpen, OpenKindForwardSignal:
+		return kind, nil
+	default:
+		return "", nil
+	}
+}
+
+func (s *Service) recordLinkOpened(ctx context.Context, link db.Link, visitorID, email, ip, ua string) (recorded bool, err error) {
 	shouldRecord, err := s.dedup.MarkOpen(ctx, linkIDString(link.ID), visitorID)
 	if err != nil {
-		return fmt.Errorf("dedup open: %w", err)
+		return false, fmt.Errorf("dedup open: %w", err)
 	}
 	if !shouldRecord {
-		return nil
+		return false, nil
 	}
 
 	rows, err := s.queries.RecordLinkOpened(ctx, db.RecordLinkOpenedParams{
@@ -144,23 +219,35 @@ func (s *Service) RecordLinkOpened(ctx context.Context, link db.Link, visitorID,
 		UserAgent:    pgtype.Text{String: ua, Valid: ua != ""},
 	})
 	if err != nil {
-		return fmt.Errorf("record link opened: %w", err)
+		return false, fmt.Errorf("record link opened: %w", err)
 	}
 	if rows == 0 {
-		return ErrLinkMaxAccessReached
+		return false, ErrLinkMaxAccessReached
 	}
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
-	return nil
+	return true, nil
 }
 
-// RecordPageView records a page-view event.
-func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID string, pageNumber int32, durationSeconds int32, scrollDepth float64) error {
-	shouldRecord, err := s.dedup.MarkPageView(ctx, linkIDString(link.ID), visitorID, pageNumber)
+// RecordPageView records a page-view event and maintains an idle-gap reading session.
+// documentID is the document being viewed (required for honest key-page matching on
+// bundle / deal-room links). Empty falls back to the link's primary document_id.
+// recorded is false when dedup skips the write (callers must not notify on skips).
+func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID string, pageNumber int32, durationSeconds int32, scrollDepth float64, documentID string) (recorded bool, err error) {
+	docUUID, err := resolvePageViewDocumentID(link, documentID)
 	if err != nil {
-		return fmt.Errorf("dedup page view: %w", err)
+		return false, err
+	}
+	shouldRecord, err := s.dedup.MarkPageView(ctx, linkIDString(link.ID), visitorID, uuidToString(docUUID), pageNumber)
+	if err != nil {
+		return false, fmt.Errorf("dedup page view: %w", err)
 	}
 	if !shouldRecord {
-		return nil
+		return false, nil
+	}
+
+	sessionID, err := s.resolveReadingSession(ctx, link, visitorID, pageNumber, durationSeconds, docUUID)
+	if err != nil {
+		return false, err
 	}
 
 	var depth pgtype.Numeric
@@ -168,15 +255,28 @@ func (s *Service) RecordPageView(ctx context.Context, link db.Link, visitorID st
 		depth.Valid = true
 		_ = depth.Scan(fmt.Sprintf("%f", scrollDepth))
 	}
-	return s.queries.CreatePageView(ctx, db.CreatePageViewParams{
-		TenantID:        link.TenantID,
-		WorkspaceID:     link.WorkspaceID,
-		LinkID:          link.ID,
-		VisitorID:       pgtype.Text{String: visitorID, Valid: visitorID != ""},
-		PageNumber:      pageNumber,
-		DurationSeconds: durationSeconds,
-		Column7:         depth,
-	})
+	if err := s.queries.CreatePageView(ctx, db.CreatePageViewParams{
+		TenantID:         link.TenantID,
+		WorkspaceID:      link.WorkspaceID,
+		LinkID:           link.ID,
+		VisitorID:        pgtype.Text{String: visitorID, Valid: visitorID != ""},
+		PageNumber:       pageNumber,
+		DurationSeconds:  durationSeconds,
+		Column7:          depth,
+		ReadingSessionID: sessionID,
+		DocumentID:       docUUID,
+	}); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// resolvePageViewDocumentID prefers the event document, else the link primary document.
+func resolvePageViewDocumentID(link db.Link, documentID string) (pgtype.UUID, error) {
+	if documentID != "" {
+		return parseUUID(documentID)
+	}
+	return link.DocumentID, nil
 }
 
 // RecordDownload records a download attempt event.
@@ -230,29 +330,53 @@ func (s *Service) RecordCustomEvent(ctx context.Context, link db.Link, eventType
 	return nil
 }
 
-// DetectForwardOrReturn checks whether this is a first-time visit (forward_signal)
-// or a return visit after 30+ minutes (return_visit). Returns the event type to record,
-// or empty string if neither applies (within 30min window).
+// Open classification kinds returned by DetectForwardOrReturn.
+const (
+	OpenKindFirstOpen     = "first_open"
+	OpenKindForwardSignal = "forward_signal"
+	OpenKindReturnVisit   = "return_visit"
+)
+
+// DetectForwardOrReturn classifies a link_opened event for this visitor.
+// Call BEFORE recording the open so "other visitors" counts exclude the current open.
+//
+//   - first_open: new visitor and nobody else has opened the link yet
+//   - forward_signal: new visitor after at least one other visitor (share-out / virality)
+//   - return_visit: known visitor returning after 30+ minutes since last open
+//   - "": known visitor within the 30-minute return window (or unclassifiable)
 func (s *Service) DetectForwardOrReturn(ctx context.Context, linkID pgtype.UUID, visitorID string) string {
-	firstAccess, err := s.queries.GetVisitorFirstAccess(ctx, db.GetVisitorFirstAccessParams{
-		LinkID:    linkID,
-		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
-	})
-	if err != nil || !firstAccess.Valid {
-		return "forward_signal"
-	}
-	count, err := s.queries.CountVisitorAccesses(ctx, db.CountVisitorAccessesParams{
-		LinkID:    linkID,
-		VisitorID: pgtype.Text{String: visitorID, Valid: visitorID != ""},
-	})
-	if err != nil {
+	if visitorID == "" {
 		return ""
 	}
-	if count <= 1 {
-		return "forward_signal"
+	visitorText := pgtype.Text{String: visitorID, Valid: true}
+	firstAccess, err := s.queries.GetVisitorFirstAccess(ctx, db.GetVisitorFirstAccessParams{
+		LinkID:    linkID,
+		VisitorID: visitorText,
+	})
+	isNewVisitor := err != nil || !firstAccess.Valid
+	if isNewVisitor {
+		others, err := s.queries.CountOtherLinkVisitors(ctx, db.CountOtherLinkVisitorsParams{
+			LinkID:    linkID,
+			VisitorID: visitorText,
+		})
+		if err != nil {
+			return ""
+		}
+		if others > 0 {
+			return OpenKindForwardSignal
+		}
+		return OpenKindFirstOpen
 	}
-	if time.Since(firstAccess.Time) > 30*time.Minute {
-		return "return_visit"
+
+	lastAccess, err := s.queries.GetVisitorLastAccess(ctx, db.GetVisitorLastAccessParams{
+		LinkID:    linkID,
+		VisitorID: visitorText,
+	})
+	if err != nil || !lastAccess.Valid {
+		return ""
+	}
+	if time.Since(lastAccess.Time) > 30*time.Minute {
+		return OpenKindReturnVisit
 	}
 	return ""
 }
@@ -326,7 +450,8 @@ func (s *Service) RecordAuthenticatedEvent(ctx context.Context, workspaceID, doc
 
 	switch eventType {
 	case "page_viewed":
-		return s.RecordPageView(ctx, *link, visitorID, pageNumber, durationSeconds, scrollDepth)
+		_, err := s.RecordPageView(ctx, *link, visitorID, pageNumber, durationSeconds, scrollDepth, documentID)
+		return err
 	case "download_attempted":
 		return s.RecordDownload(ctx, *link, visitorID, email, ip, ua)
 	default:
@@ -335,7 +460,8 @@ func (s *Service) RecordAuthenticatedEvent(ctx context.Context, workspaceID, doc
 }
 
 // GetScore returns the heat score for a link scoped to a workspace.
-func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID, circle heat.Circle) (heat.Result, error) {
+// circleOverride nil uses the workspace default circle + extras.
+func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID, circleOverride *heat.Circle) (heat.Result, error) {
 	link, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
 		ID:          linkID,
 		WorkspaceID: workspaceID,
@@ -344,13 +470,13 @@ func (s *Service) GetScore(ctx context.Context, linkID, workspaceID pgtype.UUID,
 		return heat.Result{}, err
 	}
 
-	return s.getScoreForLink(ctx, link, circle)
+	return s.getScoreForLink(ctx, link, circleOverride)
 }
 
 // computeHeatFromScoreRow computes a heat result from a pre-aggregated
 // link_heat_scores row. Decay is applied at request time so the score stays
 // accurate between materialized view refreshes.
-func computeHeatFromScoreRow(row db.LinkHeatScore, keyPageViews int) heat.Result {
+func computeHeatFromScoreRow(row db.LinkHeatScore, keyPageViews int, circle heat.Circle) heat.Result {
 	revisits := int(row.Opens) - int(row.UniqueVisitors)
 	if revisits < 0 {
 		revisits = 0
@@ -363,12 +489,12 @@ func computeHeatFromScoreRow(row db.LinkHeatScore, keyPageViews int) heat.Result
 		decayDays = time.Since(row.CreatedAt.Time).Hours() / 24
 	}
 
-	return heat.Compute(heat.CircleDefault, heat.Input{
+	return heat.Compute(circle, heat.Input{
 		Opens:              int(row.Opens),
 		Revisits:           revisits,
 		AvgDurationMinutes: row.AvgDurationSeconds / 60.0,
 		KeyPageViews:       keyPageViews,
-		ForwardSignals:     int(row.UniqueVisitors),
+		ForwardSignals:     int(row.ForwardSignals),
 		Downloads:          int(row.Downloads),
 		BouncePenalty:      int(row.BounceCount),
 		DecayDays:          decayDays,
@@ -376,7 +502,7 @@ func computeHeatFromScoreRow(row db.LinkHeatScore, keyPageViews int) heat.Result
 }
 
 // getScoreForLink computes the heat score without re-fetching the link from DB.
-func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat.Circle) (heat.Result, error) {
+func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circleOverride *heat.Circle) (heat.Result, error) {
 	access, err := s.queries.GetLinkAccessMetrics(ctx, link.ID)
 	if err != nil {
 		return heat.Result{}, fmt.Errorf("access metrics: %w", err)
@@ -396,7 +522,11 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat
 	}
 
 	keyPageViews := 0
-	patterns := heat.KeyPagePatterns(circle)
+	rs, rsErr := s.loadWorkspaceRuleSet(ctx, workspaceIDFromLink(link), circleOverride)
+	if rsErr != nil {
+		return heat.Result{}, rsErr
+	}
+	patterns := rs.Patterns()
 	if len(patterns) > 0 {
 		keyMetrics, err := s.queries.GetLinkKeyPageViewMetrics(ctx, db.GetLinkKeyPageViewMetricsParams{
 			LinkID:   link.ID,
@@ -407,6 +537,7 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat
 		}
 		keyPageViews = int(keyMetrics.TotalKeyPageViews)
 	}
+	circle := rs.Circle
 
 	lastAccess, err := s.queries.GetLinkLastAccessAt(ctx, link.ID)
 	if err != nil {
@@ -426,7 +557,7 @@ func (s *Service) getScoreForLink(ctx context.Context, link db.Link, circle heat
 		Revisits:           revisits,
 		AvgDurationMinutes: pageViews.AvgDurationSeconds / 60.0,
 		KeyPageViews:       keyPageViews,
-		ForwardSignals:     int(access.UniqueVisitors),
+		ForwardSignals:     int(access.ForwardSignals),
 		Downloads:          int(access.Downloads),
 		BouncePenalty:      int(bounce),
 		DecayDays:          decayDays,
@@ -514,8 +645,9 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID, userID string
 	}
 
 	keyPageViewsByLink := make(map[string]int64)
+	wsRuleSet, _ := s.loadWorkspaceRuleSet(ctx, workspaceID, nil)
 	if len(linkIDs) > 0 {
-		patterns := heat.KeyPagePatterns(heat.CircleDefault)
+		patterns := wsRuleSet.Patterns()
 		if len(patterns) > 0 {
 			kpRows, _ := s.queries.GetLinkKeyPageViewMetricsBatch(ctx, db.GetLinkKeyPageViewMetricsBatchParams{
 				LinkIds:  linkIDs,
@@ -529,7 +661,7 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID, userID string
 
 	for _, row := range heatRows {
 		linkIDStr := uuid.UUID(row.LinkID.Bytes).String()
-		res := computeHeatFromScoreRow(row, int(keyPageViewsByLink[linkIDStr]))
+		res := computeHeatFromScoreRow(row, int(keyPageViewsByLink[linkIDStr]), wsRuleSet.Circle)
 		scoreCache[linkIDStr] = res
 		switch res.Level {
 		case "hot":
@@ -681,17 +813,20 @@ func (s *Service) DashboardStats(ctx context.Context, workspaceID, userID string
 
 // LinkScore pairs a link with its computed heat score.
 type LinkScore struct {
-	Link  db.Link
-	Score int
-	Level string
+	Link          db.Link
+	Score         int
+	Level         string
+	DocumentTitle string
 }
 
-// DocumentScore pairs a document with its view-based heat level.
+// DocumentScore pairs a document with engagement metrics and link-derived heat.
 type DocumentScore struct {
-	ID    pgtype.UUID
-	Title string
-	Views int64
-	Level string
+	ID            pgtype.UUID
+	Title         string
+	Views         int64
+	Score         int
+	Level         string
+	PrimaryLinkID pgtype.UUID // hottest share link on this document (for heat breakdown)
 }
 
 // ContactScore pairs a contact aggregate with its computed heat score.
@@ -703,22 +838,84 @@ type ContactScore struct {
 	LastSeenAt pgtype.Timestamptz
 }
 
-// InsightsOverview is the raw data backing the insights overview response.
-type InsightsOverview struct {
-	TierCounts   map[string]int
-	TopDocuments []DocumentScore
-	TopLinks     []LinkScore
-	TopContacts  []ContactScore
+// DailyVisitPoint is one UTC day of workspace link-open activity.
+type DailyVisitPoint struct {
+	Date           string
+	Opens          int64
+	UniqueVisitors int64
 }
 
-// InsightsOverview aggregates discovery-oriented analytics.
-func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (InsightsOverview, error) {
+// InsightsOverview is the raw data backing the insights overview response.
+type InsightsOverview struct {
+	TierCounts      map[string]int
+	ActiveLinkCount int
+	RangeDays       int
+	RangeFrom       string // YYYY-MM-DD inclusive (UTC)
+	RangeTo         string // YYYY-MM-DD inclusive (UTC)
+	RangeCustom     bool
+	GeneratedAt     time.Time
+	// EventRetentionDays is access_logs partition retention (config); UI discloses it.
+	EventRetentionDays int
+	// PageViewRetentionDays is page_views partition retention (config).
+	PageViewRetentionDays           int
+	DailyVisits                     []DailyVisitPoint
+	PeriodOpens                     int64
+	PreviousPeriodOpens             int64
+	PeriodUniqueVisitors            int64
+	PreviousPeriodUniqueVisitors    int64
+	PeriodMedianDurationSeconds          float64
+	PreviousPeriodMedianDurationSeconds  float64
+	PeriodAvgDurationSeconds             float64
+	PeriodPageViewCount                  int64
+	PeriodSessionCount                   int64
+	PeriodMeasurableSessions             int64
+	PeriodCompletedSessions              int64
+	PeriodCompletionRate                 float64
+	PreviousPeriodSessionCount           int64
+	PreviousPeriodCompletedSessions      int64
+	PreviousPeriodCompletionRate         float64
+	OpenSignalCount                      int
+	TopDocuments                         []DocumentScore
+	TopLinks                             []LinkScore
+	TopContacts                          []ContactScore // digest enrichment only; not surfaced as radar CTA
+}
+
+const insightsTrendDaysDefault = 7
+
+// normalizeInsightsDays clamps the Insights trend window to supported presets.
+func normalizeInsightsDays(days int) int {
+	switch days {
+	case 30, 90:
+		return days
+	default:
+		return insightsTrendDaysDefault
+	}
+}
+
+// InsightsOverview aggregates discovery-oriented analytics for a preset window.
+// days selects the trend window (7 | 30 | 90); tops remain lifetime heat rankings.
+func (s *Service) InsightsOverview(ctx context.Context, workspaceID string, days int) (InsightsOverview, error) {
+	return s.InsightsOverviewQuery(ctx, workspaceID, InsightsRangeQuery{Days: days})
+}
+
+// InsightsOverviewQuery aggregates discovery-oriented analytics for a preset
+// or custom UTC calendar range. Tops remain lifetime heat rankings.
+func (s *Service) InsightsOverviewQuery(ctx context.Context, workspaceID string, q InsightsRangeQuery) (InsightsOverview, error) {
+	now := time.Now().UTC()
+	rng, err := resolveInsightsRange(q, now)
+	if err != nil {
+		return InsightsOverview{}, err
+	}
+	days := rng.Days
 	wsUUID, err := parseUUID(workspaceID)
 	if err != nil {
 		return InsightsOverview{}, err
 	}
 
-	overview := InsightsOverview{TierCounts: map[string]int{"hot": 0, "warm": 0, "cold": 0}}
+	overview := InsightsOverview{
+		TierCounts:  map[string]int{"hot": 0, "warm": 0, "cold": 0},
+		DailyVisits: make([]DailyVisitPoint, 0, days),
+	}
 	links, err := s.queries.ListLinksByWorkspace(ctx, wsUUID)
 	if err != nil {
 		return overview, fmt.Errorf("links: %w", err)
@@ -739,8 +936,9 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 	}
 
 	keyPageViewsByLink := make(map[string]int64)
+	overviewRuleSet, _ := s.loadWorkspaceRuleSet(ctx, workspaceID, nil)
 	if len(linkIDs) > 0 {
-		patterns := heat.KeyPagePatterns(heat.CircleDefault)
+		patterns := overviewRuleSet.Patterns()
 		if len(patterns) > 0 {
 			kpRows, _ := s.queries.GetLinkKeyPageViewMetricsBatch(ctx, db.GetLinkKeyPageViewMetricsBatchParams{
 				LinkIds:  linkIDs,
@@ -752,15 +950,34 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 		}
 	}
 
+	// Document heat = max heat.Compute score among that document's share links
+	// (same algorithm as tierCounts / topLinks — never a separate views threshold).
+	type docHeat struct {
+		res           heat.Result
+		primaryLinkID pgtype.UUID
+		docID         pgtype.UUID
+	}
+	heatByDoc := make(map[string]docHeat)
+	viewsByDoc := make(map[string]int64)
+
 	overview.TopLinks = make([]LinkScore, 0, len(links))
+	overview.ActiveLinkCount = len(links)
 	for _, link := range links {
 		linkIDStr := uuid.UUID(link.ID.Bytes).String()
 		res := heat.Result{Level: "cold"}
 		if row, ok := heatByLink[linkIDStr]; ok {
-			res = computeHeatFromScoreRow(row, int(keyPageViewsByLink[linkIDStr]))
+			res = computeHeatFromScoreRow(row, int(keyPageViewsByLink[linkIDStr]), overviewRuleSet.Circle)
 		}
 		overview.TierCounts[res.Level]++
 		overview.TopLinks = append(overview.TopLinks, LinkScore{Link: link, Score: res.Score, Level: res.Level})
+
+		if link.DocumentID.Valid {
+			docID := uuid.UUID(link.DocumentID.Bytes).String()
+			viewsByDoc[docID] += int64(link.AccessCount)
+			if prev, ok := heatByDoc[docID]; !ok || res.Score > prev.res.Score {
+				heatByDoc[docID] = docHeat{res: res, primaryLinkID: link.ID, docID: link.DocumentID}
+			}
+		}
 	}
 
 	sort.Slice(overview.TopLinks, func(i, j int) bool {
@@ -772,25 +989,88 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 		overview.TopLinks = overview.TopLinks[:topN]
 	}
 
-	docMetrics, err := s.queries.GetDocumentViewMetrics(ctx, db.GetDocumentViewMetricsParams{
-		WorkspaceID: wsUUID,
-		Limit:       int32(topN),
-	})
-	if err != nil {
-		return overview, fmt.Errorf("document metrics: %w", err)
+	// Resolve document titles for top links (never surface raw localhost URLs as the primary label).
+	docIDs := make([]pgtype.UUID, 0, len(overview.TopLinks))
+	seenDoc := make(map[string]struct{}, len(overview.TopLinks))
+	for _, ls := range overview.TopLinks {
+		if !ls.Link.DocumentID.Valid {
+			continue
+		}
+		id := uuid.UUID(ls.Link.DocumentID.Bytes).String()
+		if _, ok := seenDoc[id]; ok {
+			continue
+		}
+		seenDoc[id] = struct{}{}
+		docIDs = append(docIDs, ls.Link.DocumentID)
 	}
-	for _, d := range docMetrics {
+	titleByDoc := make(map[string]string, len(docIDs))
+	if len(docIDs) > 0 {
+		docs, err := s.queries.GetDocumentsByIDs(ctx, db.GetDocumentsByIDsParams{
+			Column1:     docIDs,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			return overview, fmt.Errorf("document titles: %w", err)
+		}
+		for _, d := range docs {
+			titleByDoc[uuid.UUID(d.ID.Bytes).String()] = strings.TrimSpace(d.Title)
+		}
+	}
+	for i := range overview.TopLinks {
+		if overview.TopLinks[i].Link.DocumentID.Valid {
+			overview.TopLinks[i].DocumentTitle = titleByDoc[uuid.UUID(overview.TopLinks[i].Link.DocumentID.Bytes).String()]
+		}
+	}
+
+	// Rank documents by max link heat.Compute — never by raw views (views stay as secondary metric).
+	docRanked := make([]docHeat, 0, len(heatByDoc))
+	for _, h := range heatByDoc {
+		docRanked = append(docRanked, h)
+	}
+	sort.Slice(docRanked, func(i, j int) bool {
+		if docRanked[i].res.Score != docRanked[j].res.Score {
+			return docRanked[i].res.Score > docRanked[j].res.Score
+		}
+		di := uuid.UUID(docRanked[i].docID.Bytes).String()
+		dj := uuid.UUID(docRanked[j].docID.Bytes).String()
+		return viewsByDoc[di] > viewsByDoc[dj]
+	})
+	if len(docRanked) > topN {
+		docRanked = docRanked[:topN]
+	}
+	topDocIDs := make([]pgtype.UUID, 0, len(docRanked))
+	for _, h := range docRanked {
+		topDocIDs = append(topDocIDs, h.docID)
+	}
+	docTitleByID := make(map[string]string, len(topDocIDs))
+	if len(topDocIDs) > 0 {
+		docs, err := s.queries.GetDocumentsByIDs(ctx, db.GetDocumentsByIDsParams{
+			Column1:     topDocIDs,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			return overview, fmt.Errorf("top document titles: %w", err)
+		}
+		for _, d := range docs {
+			docTitleByID[uuid.UUID(d.ID.Bytes).String()] = strings.TrimSpace(d.Title)
+		}
+	}
+	for _, h := range docRanked {
+		docID := uuid.UUID(h.docID.Bytes).String()
 		overview.TopDocuments = append(overview.TopDocuments, DocumentScore{
-			ID:    d.ID,
-			Title: d.Title,
-			Views: d.Views,
-			Level: levelForDocumentViews(d.Views),
+			ID:            h.docID,
+			Title:         docTitleByID[docID],
+			Views:         viewsByDoc[docID],
+			Score:         h.res.Score,
+			Level:         h.res.Level,
+			PrimaryLinkID: h.primaryLinkID,
 		})
 	}
 
 	contacts, err := s.queries.GetContactAggregatesByWorkspace(ctx, db.GetContactAggregatesByWorkspaceParams{
 		WorkspaceID: wsUUID,
 		Limit:       int32(topN),
+		Patterns:    overviewRuleSet.Patterns(),
 	})
 	if err != nil {
 		return overview, fmt.Errorf("contact metrics: %w", err)
@@ -804,14 +1084,19 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 		if revisits < 0 {
 			revisits = 0
 		}
-		res := heat.Compute(heat.CircleDefault, heat.Input{
+		decayDays := 0.0
+		if c.LastSeenAt.Valid {
+			decayDays = time.Since(c.LastSeenAt.Time).Hours() / 24
+		}
+		res := heat.Compute(overviewRuleSet.Circle, heat.Input{
 			Opens:              int(c.Opens),
 			Revisits:           revisits,
 			AvgDurationMinutes: avgMin,
-			KeyPageViews:       int(c.TotalPageViews),
-			ForwardSignals:     int(c.UniqueVisitors),
+			KeyPageViews:       int(c.KeyPageViews),
+			ForwardSignals:     int(c.ForwardSignals),
 			Downloads:          int(c.Downloads),
-			BouncePenalty:      0,
+			BouncePenalty:      int(c.Bounces),
+			DecayDays:          decayDays,
 		})
 		id := ""
 		if c.ContactID.Valid {
@@ -826,18 +1111,188 @@ func (s *Service) InsightsOverview(ctx context.Context, workspaceID string) (Ins
 		})
 	}
 
+	overview.RangeDays = days
+	overview.RangeFrom = rng.From
+	overview.RangeTo = rng.To
+	overview.RangeCustom = rng.Custom
+	overview.GeneratedAt = now
+	if s.cfg != nil {
+		overview.EventRetentionDays = s.cfg.AccessLogsRetentionDays
+		overview.PageViewRetentionDays = s.cfg.PageViewsRetentionDays
+	}
+
+	currentStart, currentEnd, previousStart, previousEnd := rng.compareWindows()
+	// Fetch previous+current so we can compare equal-length windows.
+	dailyRows, err := s.queries.GetWorkspaceDailyLinkOpensInRange(ctx, db.GetWorkspaceDailyLinkOpensInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: previousStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: currentEnd, Valid: true},
+	})
+	if err != nil {
+		return overview, fmt.Errorf("daily visits: %w", err)
+	}
+	previous := fillDailyVisitSeriesFrom(dailyRows, previousStart, days)
+	current := fillDailyVisitSeriesFrom(dailyRows, currentStart, days)
+	overview.DailyVisits = current
+	overview.PeriodOpens = sumDailyOpens(current)
+	overview.PreviousPeriodOpens = sumDailyOpens(previous)
+
+	if uv, uvErr := s.queries.CountWorkspaceLinkOpenVisitorsInRange(ctx, db.CountWorkspaceLinkOpenVisitorsInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: currentStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: currentEnd, Valid: true},
+	}); uvErr != nil {
+		return overview, fmt.Errorf("period unique visitors: %w", uvErr)
+	} else {
+		overview.PeriodUniqueVisitors = uv
+	}
+	if uv, uvErr := s.queries.CountWorkspaceLinkOpenVisitorsInRange(ctx, db.CountWorkspaceLinkOpenVisitorsInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: previousStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: previousEnd, Valid: true},
+	}); uvErr != nil {
+		return overview, fmt.Errorf("previous period unique visitors: %w", uvErr)
+	} else {
+		overview.PreviousPeriodUniqueVisitors = uv
+	}
+
+	eng, engErr := s.queries.GetWorkspacePageViewEngagementInRange(ctx, db.GetWorkspacePageViewEngagementInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: currentStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: currentEnd, Valid: true},
+	})
+	if engErr != nil {
+		return overview, fmt.Errorf("period engagement: %w", engErr)
+	}
+	overview.PeriodPageViewCount = eng.PageViewCount
+	overview.PeriodAvgDurationSeconds = eng.AvgDurationSeconds
+	overview.PeriodMedianDurationSeconds = eng.MedianDurationSeconds
+
+	prevEng, prevEngErr := s.queries.GetWorkspacePageViewEngagementInRange(ctx, db.GetWorkspacePageViewEngagementInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: previousStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: previousEnd, Valid: true},
+	})
+	if prevEngErr != nil {
+		return overview, fmt.Errorf("previous period engagement: %w", prevEngErr)
+	}
+	overview.PreviousPeriodMedianDurationSeconds = prevEng.MedianDurationSeconds
+
+	curSessions, sessErr := s.queries.GetWorkspaceReadingSessionStatsInRange(ctx, db.GetWorkspaceReadingSessionStatsInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: currentStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: currentEnd, Valid: true},
+	})
+	if sessErr != nil {
+		return overview, fmt.Errorf("period reading sessions: %w", sessErr)
+	}
+	overview.PeriodSessionCount = curSessions.SessionCount
+	overview.PeriodMeasurableSessions = curSessions.MeasurableSessions
+	overview.PeriodCompletedSessions = curSessions.CompletedSessions
+	overview.PeriodCompletionRate = completionRate(curSessions.CompletedSessions, curSessions.MeasurableSessions)
+
+	prevSessions, sessErr := s.queries.GetWorkspaceReadingSessionStatsInRange(ctx, db.GetWorkspaceReadingSessionStatsInRangeParams{
+		WorkspaceID: wsUUID,
+		RangeStart:  pgtype.Timestamptz{Time: previousStart, Valid: true},
+		RangeEnd:    pgtype.Timestamptz{Time: previousEnd, Valid: true},
+	})
+	if sessErr != nil {
+		return overview, fmt.Errorf("previous period reading sessions: %w", sessErr)
+	}
+	overview.PreviousPeriodSessionCount = prevSessions.SessionCount
+	overview.PreviousPeriodCompletedSessions = prevSessions.CompletedSessions
+	overview.PreviousPeriodCompletionRate = completionRate(prevSessions.CompletedSessions, prevSessions.MeasurableSessions)
+
+	signals, sigErr := s.queries.ListSignalsByWorkspace(ctx, wsUUID)
+	if sigErr != nil {
+		return overview, fmt.Errorf("open signals: %w", sigErr)
+	}
+	overview.OpenSignalCount = len(signals)
+
 	return overview, nil
 }
 
-func levelForDocumentViews(views int64) string {
-	switch {
-	case views >= 10:
-		return "hot"
-	case views >= 3:
-		return "warm"
-	default:
-		return "cold"
+func completionRate(completed, measurable int64) float64 {
+	if measurable <= 0 {
+		return 0
 	}
+	return float64(completed) / float64(measurable)
+}
+
+// insightsCompareWindows returns UTC calendar windows matching the dense daily series:
+// current = [today-(days-1) 00:00, tomorrow 00:00), previous = equal prior window.
+func insightsCompareWindows(days int, now time.Time) (currentStart, currentEnd, previousStart, previousEnd time.Time) {
+	rng, _ := resolveInsightsRange(InsightsRangeQuery{Days: days}, now)
+	return rng.compareWindows()
+}
+
+// fillDailyVisitSeries returns a dense UTC day series ending today (oldest → newest).
+func fillDailyVisitSeries(rows []db.GetWorkspaceDailyLinkOpensRow, days int, now time.Time) []DailyVisitPoint {
+	if days <= 0 {
+		days = insightsTrendDaysDefault
+	}
+	start := utcDay(now).AddDate(0, 0, -(days - 1))
+	converted := make([]db.GetWorkspaceDailyLinkOpensInRangeRow, len(rows))
+	for i, r := range rows {
+		converted[i] = db.GetWorkspaceDailyLinkOpensInRangeRow{
+			Day:            r.Day,
+			Opens:          r.Opens,
+			UniqueVisitors: r.UniqueVisitors,
+		}
+	}
+	return fillDailyVisitSeriesFrom(converted, start, days)
+}
+
+// fillDailyVisitSeriesFrom densifies rows into [start, start+days) UTC days.
+func fillDailyVisitSeriesFrom(rows []db.GetWorkspaceDailyLinkOpensInRangeRow, start time.Time, days int) []DailyVisitPoint {
+	if days <= 0 {
+		days = insightsTrendDaysDefault
+	}
+	byDay := make(map[string]db.GetWorkspaceDailyLinkOpensInRangeRow, len(rows))
+	for _, r := range rows {
+		byDay[r.Day] = r
+	}
+	start = utcDay(start)
+	out := make([]DailyVisitPoint, 0, days)
+	for i := 0; i < days; i++ {
+		day := start.AddDate(0, 0, i)
+		key := day.Format("2006-01-02")
+		pt := DailyVisitPoint{Date: day.Format(time.RFC3339)}
+		if r, ok := byDay[key]; ok {
+			pt.Opens = r.Opens
+			pt.UniqueVisitors = r.UniqueVisitors
+		}
+		out = append(out, pt)
+	}
+	return out
+}
+
+// splitComparedDailySeries builds a 2×days dense series and splits into
+// previous window then current window (each length=days, oldest→newest).
+func splitComparedDailySeries(rows []db.GetWorkspaceDailyLinkOpensRow, days int, now time.Time) (current, previous []DailyVisitPoint) {
+	days = normalizeInsightsDays(days)
+	rng, _ := resolveInsightsRange(InsightsRangeQuery{Days: days}, now)
+	_, _, previousStart, _ := rng.compareWindows()
+	// Convert preset rows into the InRange row shape for densify.
+	converted := make([]db.GetWorkspaceDailyLinkOpensInRangeRow, len(rows))
+	for i, r := range rows {
+		converted[i] = db.GetWorkspaceDailyLinkOpensInRangeRow{
+			Day:            r.Day,
+			Opens:          r.Opens,
+			UniqueVisitors: r.UniqueVisitors,
+		}
+	}
+	all := fillDailyVisitSeriesFrom(converted, previousStart, days*2)
+	previous = all[:days]
+	current = all[days:]
+	return current, previous
+}
+
+func sumDailyOpens(points []DailyVisitPoint) (opens int64) {
+	for _, p := range points {
+		opens += p.Opens
+	}
+	return opens
 }
 
 // VisitorSummary is per-visitor engagement for a document.
@@ -859,8 +1314,20 @@ type PageAnalytic struct {
 	ExitRate           float64
 }
 
-// PageAnalytics returns per-page engagement for a document.
+type pageAnalyticsMetricRow struct {
+	PageNumber         int32
+	ViewCount          int64
+	AvgDurationSeconds float64
+	LastViewedAt       pgtype.Timestamptz
+}
+
+// PageAnalytics returns per-page engagement for a document (lifetime).
 func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID string) ([]PageAnalytic, error) {
+	return s.PageAnalyticsRange(ctx, documentID, workspaceID, nil)
+}
+
+// PageAnalyticsRange returns per-page engagement, optionally filtered to rng.
+func (s *Service) PageAnalyticsRange(ctx context.Context, documentID, workspaceID string, rng *InsightsRange) ([]PageAnalytic, error) {
 	docUUID, err := parseUUID(documentID)
 	if err != nil {
 		return nil, err
@@ -870,12 +1337,43 @@ func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID str
 		return nil, err
 	}
 
-	rows, err := s.queries.GetPageAnalyticsByDocument(ctx, db.GetPageAnalyticsByDocumentParams{
-		DocumentID:  docUUID,
-		WorkspaceID: wsUUID,
-	})
-	if err != nil {
-		return nil, err
+	var rows []pageAnalyticsMetricRow
+	if rng == nil {
+		raw, qErr := s.queries.GetPageAnalyticsByDocument(ctx, db.GetPageAnalyticsByDocumentParams{
+			DocumentID:  docUUID,
+			WorkspaceID: wsUUID,
+		})
+		if qErr != nil {
+			return nil, qErr
+		}
+		rows = make([]pageAnalyticsMetricRow, len(raw))
+		for i, r := range raw {
+			rows[i] = pageAnalyticsMetricRow{
+				PageNumber:         r.PageNumber,
+				ViewCount:          r.ViewCount,
+				AvgDurationSeconds: r.AvgDurationSeconds,
+				LastViewedAt:       r.LastViewedAt,
+			}
+		}
+	} else {
+		raw, qErr := s.queries.GetPageAnalyticsByDocumentInRange(ctx, db.GetPageAnalyticsByDocumentInRangeParams{
+			DocumentID:  docUUID,
+			WorkspaceID: wsUUID,
+			RangeStart:  pgtype.Timestamptz{Time: rng.Start, Valid: true},
+			RangeEnd:    pgtype.Timestamptz{Time: rng.End, Valid: true},
+		})
+		if qErr != nil {
+			return nil, qErr
+		}
+		rows = make([]pageAnalyticsMetricRow, len(raw))
+		for i, r := range raw {
+			rows[i] = pageAnalyticsMetricRow{
+				PageNumber:         r.PageNumber,
+				ViewCount:          r.ViewCount,
+				AvgDurationSeconds: r.AvgDurationSeconds,
+				LastViewedAt:       r.LastViewedAt,
+			}
+		}
 	}
 
 	titles, err := s.queries.GetPageTitlesByDocument(ctx, db.GetPageTitlesByDocumentParams{
@@ -892,13 +1390,27 @@ func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID str
 		}
 	}
 
-	exits, err := s.queries.GetPageExitCountsByDocument(ctx, docUUID)
-	if err != nil {
-		return nil, err
-	}
-	exitByPage := make(map[int32]int64, len(exits))
-	for _, e := range exits {
-		exitByPage[e.PageNumber] = e.ExitCount
+	exitByPage := make(map[int32]int64)
+	if rng == nil {
+		exits, qErr := s.queries.GetPageExitCountsByDocument(ctx, docUUID)
+		if qErr != nil {
+			return nil, qErr
+		}
+		for _, e := range exits {
+			exitByPage[e.PageNumber] = e.ExitCount
+		}
+	} else {
+		exits, qErr := s.queries.GetPageExitCountsByDocumentInRange(ctx, db.GetPageExitCountsByDocumentInRangeParams{
+			DocumentID: docUUID,
+			RangeStart: pgtype.Timestamptz{Time: rng.Start, Valid: true},
+			RangeEnd:   pgtype.Timestamptz{Time: rng.End, Valid: true},
+		})
+		if qErr != nil {
+			return nil, qErr
+		}
+		for _, e := range exits {
+			exitByPage[e.PageNumber] = e.ExitCount
+		}
 	}
 
 	out := make([]PageAnalytic, len(rows))
@@ -928,8 +1440,90 @@ func (s *Service) PageAnalytics(ctx context.Context, documentID, workspaceID str
 	return out, nil
 }
 
-// DocumentVisitors returns per-visitor engagement for a document.
+// DocumentReadingFunnel returns reading-session completion and page reach drop-off (lifetime).
+func (s *Service) DocumentReadingFunnel(ctx context.Context, documentID, workspaceID string) (DocumentReadingFunnel, error) {
+	return s.DocumentReadingFunnelRange(ctx, documentID, workspaceID, nil)
+}
+
+// DocumentReadingFunnelRange returns the funnel, optionally filtered by session activity window.
+func (s *Service) DocumentReadingFunnelRange(ctx context.Context, documentID, workspaceID string, rng *InsightsRange) (DocumentReadingFunnel, error) {
+	docUUID, err := parseUUID(documentID)
+	if err != nil {
+		return DocumentReadingFunnel{}, err
+	}
+	wsUUID, err := parseUUID(workspaceID)
+	if err != nil {
+		return DocumentReadingFunnel{}, err
+	}
+
+	doc, err := s.queries.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          docUUID,
+		WorkspaceID: wsUUID,
+	})
+	if err != nil {
+		return DocumentReadingFunnel{}, err
+	}
+
+	var sessions []visitorReach
+	if rng == nil {
+		rows, qErr := s.queries.GetDocumentReadingSessionReach(ctx, db.GetDocumentReadingSessionReachParams{
+			DocumentID:  docUUID,
+			WorkspaceID: wsUUID,
+		})
+		if qErr != nil {
+			return DocumentReadingFunnel{}, fmt.Errorf("reading session reach: %w", qErr)
+		}
+		sessions = make([]visitorReach, 0, len(rows))
+		for _, r := range rows {
+			sessions = append(sessions, visitorReach{
+				MaxPage:              r.MaxPage,
+				DistinctPages:        r.DistinctPages,
+				TotalDurationSeconds: r.TotalDurationSeconds,
+			})
+		}
+	} else {
+		rows, qErr := s.queries.GetDocumentReadingSessionReachInRange(ctx, db.GetDocumentReadingSessionReachInRangeParams{
+			DocumentID:  docUUID,
+			WorkspaceID: wsUUID,
+			RangeStart:  pgtype.Timestamptz{Time: rng.Start, Valid: true},
+			RangeEnd:    pgtype.Timestamptz{Time: rng.End, Valid: true},
+		})
+		if qErr != nil {
+			return DocumentReadingFunnel{}, fmt.Errorf("reading session reach: %w", qErr)
+		}
+		sessions = make([]visitorReach, 0, len(rows))
+		for _, r := range rows {
+			sessions = append(sessions, visitorReach{
+				MaxPage:              r.MaxPage,
+				DistinctPages:        r.DistinctPages,
+				TotalDurationSeconds: r.TotalDurationSeconds,
+			})
+		}
+	}
+
+	pageCount := int32(0)
+	if doc.PageCount.Valid {
+		pageCount = doc.PageCount.Int32
+	}
+	out := buildReadingFunnel(documentID, pageCount, sessions)
+	if rng == nil {
+		out.Lifetime = true
+	} else {
+		out.RangeDays = rng.Days
+		out.RangeFrom = rng.From
+		out.RangeTo = rng.To
+		out.RangeCustom = rng.Custom
+	}
+	return out, nil
+}
+
+// DocumentVisitors returns per-visitor engagement for a document (lifetime).
 func (s *Service) DocumentVisitors(ctx context.Context, documentID, workspaceID string) ([]VisitorSummary, error) {
+	return s.DocumentVisitorsRange(ctx, documentID, workspaceID, nil)
+}
+
+// DocumentVisitorsRange returns per-visitor engagement, optionally filtered by page_views.created_at.
+func (s *Service) DocumentVisitorsRange(ctx context.Context, documentID, workspaceID string, rng *InsightsRange) ([]VisitorSummary, error) {
 	docUUID, err := parseUUID(documentID)
 	if err != nil {
 		return nil, err
@@ -939,13 +1533,54 @@ func (s *Service) DocumentVisitors(ctx context.Context, documentID, workspaceID 
 		return nil, err
 	}
 
-	rows, err := s.queries.GetVisitorSummariesByDocument(ctx, db.GetVisitorSummariesByDocumentParams{
-		DocumentID:  docUUID,
-		WorkspaceID: wsUUID,
-		Limit:       100,
-	})
-	if err != nil {
-		return nil, err
+	type visitorRow struct {
+		VisitorID          pgtype.Text
+		VisitorEmail       string
+		PageViewCount      int64
+		AvgDurationSeconds float64
+		LastSeenAt         pgtype.Timestamptz
+	}
+	var rows []visitorRow
+	if rng == nil {
+		raw, qErr := s.queries.GetVisitorSummariesByDocument(ctx, db.GetVisitorSummariesByDocumentParams{
+			DocumentID:  docUUID,
+			WorkspaceID: wsUUID,
+			Limit:       100,
+		})
+		if qErr != nil {
+			return nil, qErr
+		}
+		rows = make([]visitorRow, len(raw))
+		for i, r := range raw {
+			rows[i] = visitorRow{
+				VisitorID:          r.VisitorID,
+				VisitorEmail:       r.VisitorEmail,
+				PageViewCount:      r.PageViewCount,
+				AvgDurationSeconds: r.AvgDurationSeconds,
+				LastSeenAt:         r.LastSeenAt,
+			}
+		}
+	} else {
+		raw, qErr := s.queries.GetVisitorSummariesByDocumentInRange(ctx, db.GetVisitorSummariesByDocumentInRangeParams{
+			DocumentID:  docUUID,
+			WorkspaceID: wsUUID,
+			RangeStart:  pgtype.Timestamptz{Time: rng.Start, Valid: true},
+			RangeEnd:    pgtype.Timestamptz{Time: rng.End, Valid: true},
+			PageLimit:   100,
+		})
+		if qErr != nil {
+			return nil, qErr
+		}
+		rows = make([]visitorRow, len(raw))
+		for i, r := range raw {
+			rows[i] = visitorRow{
+				VisitorID:          r.VisitorID,
+				VisitorEmail:       r.VisitorEmail,
+				PageViewCount:      r.PageViewCount,
+				AvgDurationSeconds: r.AvgDurationSeconds,
+				LastSeenAt:         r.LastSeenAt,
+			}
+		}
 	}
 
 	out := make([]VisitorSummary, len(rows))

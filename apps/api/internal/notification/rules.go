@@ -26,7 +26,7 @@ func NewRuleEngine(q *db.Queries, enqueuer func(ctx context.Context, workspaceID
 type Event struct {
 	WorkspaceID     string
 	LinkID          string
-	EventType       string // first_open, repeat_key_page, forward_signal, abnormal_access, hot_signal
+	EventType       string // first_open, key_page, repeat_key_page, forward_signal, abnormal_access, hot_signal
 	VisitorID       string
 	VisitorEmail    string
 	RecipientUserID string // link.created_by; notification recipient
@@ -45,13 +45,13 @@ func (e *RuleEngine) Evaluate(ctx context.Context, ev Event) error {
 	}
 	_ = ev.LinkID // used in metadata
 
-	rules, err := e.queries.ListNotificationRulesByWorkspace(ctx, pgtype.UUID{Bytes: wsUUID, Valid: true})
+	dbRules, err := e.queries.ListNotificationRulesByWorkspace(ctx, pgtype.UUID{Bytes: wsUUID, Valid: true})
 	if err != nil {
 		return fmt.Errorf("rule engine: list rules: %w", err)
 	}
-	if len(rules) == 0 {
-		rules = defaultRules(wsUUID)
-	}
+	// DB rows override defaults per rule_type; missing types keep built-in defaults.
+	// Critical: enabling daily_digest alone must not silence key_page / first_open.
+	rules := mergeWorkspaceRules(dbRules, wsUUID)
 
 	for _, rule := range rules {
 		if !rule.Enabled {
@@ -66,7 +66,35 @@ func (e *RuleEngine) Evaluate(ctx context.Context, ev Event) error {
 		}
 		e.fireRule(ctx, rule, wsUUID, ev)
 	}
+	// Outbound webhook is a workspace subscription independent of email/slack rules.
+	e.enqueueOutboundWebhook(ctx, ev)
 	return nil
+}
+
+// mergeWorkspaceRules overlays persisted rules onto the built-in defaults.
+func mergeWorkspaceRules(dbRules []db.NotificationRule, wsUUID [16]byte) []db.NotificationRule {
+	byType := make(map[string]db.NotificationRule, len(dbRules)+8)
+	order := make([]string, 0, len(dbRules)+8)
+	for _, r := range defaultRules(wsUUID) {
+		byType[r.RuleType] = r
+		order = append(order, r.RuleType)
+	}
+	seen := make(map[string]struct{}, len(order))
+	for _, t := range order {
+		seen[t] = struct{}{}
+	}
+	for _, r := range dbRules {
+		byType[r.RuleType] = r
+		if _, ok := seen[r.RuleType]; !ok {
+			order = append(order, r.RuleType)
+			seen[r.RuleType] = struct{}{}
+		}
+	}
+	out := make([]db.NotificationRule, 0, len(order))
+	for _, t := range order {
+		out = append(out, byType[t])
+	}
+	return out
 }
 
 // defaultRules returns a workspace-agnostic default ruleset used when no
@@ -90,10 +118,28 @@ func defaultRules(wsUUID [16]byte) []db.NotificationRule {
 	}
 	return []db.NotificationRule{
 		mk("first_open", false, 10),
+		mk("key_page", false, 10),
 		mk("repeat_key_page", false, 10),
 		mk("forward_signal", false, 10),
 		mk("abnormal_access", true, 0),
 		mk("hot_signal", false, 10),
+	}
+}
+
+func notificationSubject(ev Event) string {
+	switch ev.EventType {
+	case "key_page":
+		if title := ev.Metadata["page_title"]; title != "" {
+			return fmt.Sprintf("[key_page] Sensitive page viewed: %s", title)
+		}
+		return "[key_page] Sensitive page viewed"
+	case "repeat_key_page":
+		if title := ev.Metadata["page_title"]; title != "" {
+			return fmt.Sprintf("[repeat_key_page] Sensitive page revisited: %s", title)
+		}
+		return "[repeat_key_page] Sensitive page revisited"
+	default:
+		return fmt.Sprintf("[%s] Activity on your link", ev.EventType)
 	}
 }
 
@@ -107,7 +153,7 @@ func (e *RuleEngine) fireRule(ctx context.Context, rule db.NotificationRule, wsU
 		window = 10
 	}
 	windowStr := pgtype.Text{String: fmt.Sprintf("%d", window), Valid: true}
-	subject := fmt.Sprintf("[%s] Activity on your link", ev.EventType)
+	subject := notificationSubject(ev)
 
 	channels := rule.Channels
 	if len(channels) == 0 {
@@ -165,13 +211,45 @@ func mergeNotificationBody(existing string, metadata map[string]string) string {
 
 // formatEventBody creates a human-readable notification body from an event.
 func formatEventBody(ev Event) string {
-	b := fmt.Sprintf("Event: %s\nLink: %s\nTime: %s",
-		ev.EventType, ev.LinkID, time.Now().UTC().Format(time.RFC3339))
+	switch ev.EventType {
+	case "key_page", "repeat_key_page":
+		return formatKeyPageBody(ev)
+	default:
+		b := fmt.Sprintf("Event: %s\nLink: %s\nTime: %s",
+			ev.EventType, ev.LinkID, time.Now().UTC().Format(time.RFC3339))
+		if ev.VisitorEmail != "" {
+			b += fmt.Sprintf("\nVisitor: %s", ev.VisitorEmail)
+		}
+		for k, v := range ev.Metadata {
+			b += fmt.Sprintf("\n%s: %s", k, v)
+		}
+		return b
+	}
+}
+
+func formatKeyPageBody(ev Event) string {
+	label := "Sensitive page viewed"
+	if ev.EventType == "repeat_key_page" {
+		label = "Sensitive page revisited"
+	}
+	b := label + "\n"
+	if title := ev.Metadata["page_title"]; title != "" {
+		b += fmt.Sprintf("Page: %s\n", title)
+	}
+	if cat := ev.Metadata["category"]; cat != "" {
+		b += fmt.Sprintf("Category: %s\n", cat)
+	}
+	if pn := ev.Metadata["page_number"]; pn != "" {
+		b += fmt.Sprintf("Page #: %s\n", pn)
+	}
+	if d := ev.Metadata["duration_seconds"]; d != "" {
+		b += fmt.Sprintf("Dwell: %ss\n", d)
+	}
 	if ev.VisitorEmail != "" {
-		b += fmt.Sprintf("\nVisitor: %s", ev.VisitorEmail)
+		b += fmt.Sprintf("Visitor: %s\n", ev.VisitorEmail)
+	} else if ev.VisitorID != "" {
+		b += fmt.Sprintf("Visitor ID: %s\n", ev.VisitorID)
 	}
-	for k, v := range ev.Metadata {
-		b += fmt.Sprintf("\n%s: %s", k, v)
-	}
+	b += fmt.Sprintf("Link: %s\nTime: %s", ev.LinkID, time.Now().UTC().Format(time.RFC3339))
 	return b
 }

@@ -30,18 +30,13 @@ import { documentsSharePath } from "@/lib/documentsSharePath";
 import { canAddDocumentToDealRoom } from "@/lib/documentCategory";
 import { cn } from "@/lib/utils";
 import type { Column, ColumnDef } from "@tanstack/react-table";
+import { documentHeatFromLinks } from "@/lib/heat/documentHeat";
 import type { Document, HeatLevel, Link } from "@/types";
 
 export interface DocumentRow extends Document {
   links: Link[];
   totalViews: number;
   heatLevel: HeatLevel;
-}
-
-export function calculateHeatLevel(totalViews: number): HeatLevel {
-  if (totalViews >= 30) return "hot";
-  if (totalViews >= 5) return "warm";
-  return "cold";
 }
 
 export function buildDocumentRows(documents: Document[], links: Link[]): DocumentRow[] {
@@ -59,7 +54,8 @@ export function buildDocumentRows(documents: Document[], links: Link[]): Documen
       ...doc,
       links: docLinks,
       totalViews,
-      heatLevel: calculateHeatLevel(totalViews),
+      // Same contract as Insights: document heat = max link heat.Compute.
+      heatLevel: documentHeatFromLinks(docLinks),
     };
   });
 }

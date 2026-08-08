@@ -111,6 +111,7 @@
       "unknownContact": "未知访客",
       "unknownIntent": "未知意图",
       "hot_signal": "{{contact}} 打开了 {{opens}} 次，停留 {{duration}}，查看了 {{keyPages}}",
+      "key_page": "{{contact}} 阅读了敏感页（{{keyPages}}）",
       "follow_up": "{{contact}} · {{opens}} 次打开 · {{duration}} · {{keyPages}}",
       "risk_alert": "{{opens}} 次打开 · {{duration}} · {{keyPageCount}} 个关键页",
       "question": "{{actor}} 提问了 {{intent}}：{{question}}"
@@ -120,6 +121,7 @@
       "risk_alert": "风险预警",
       "follow_up": "跟进建议",
       "hot": "高意向信号",
+      "key_page": "敏感页阅读",
       "warm": "温信号",
       "cold": "冷信号",
       "risk": "风险提醒"

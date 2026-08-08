@@ -60,7 +60,10 @@ function makeStats(): DashboardStats {
 
 function makeInsights(): InsightsOverview {
   return {
+    tierEntity: "link",
     tierCounts: { hot: 1, warm: 0, cold: 0 },
+    activeLinkCount: 1,
+    dailyVisits: [],
     topDocuments: [],
     topLinks: [],
     topContacts: [],
