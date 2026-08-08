@@ -484,10 +484,14 @@ export interface Suggestion {
   contactEmail: string;
   documentTitle: string;
   linkId: string;
+  /** Set when the suggestion’s link belongs to a deal room (Formal Ask CTA routing). */
+  dealRoomId?: string;
   heatLevel: HeatLevel;
   score: number;
   reason: string;
   action: string;
+  /** Present for Formal Q&A–sourced suggestions (`formal_ask`). */
+  kind?: string;
   lastActivityAt: string;
 }
 
@@ -985,9 +989,22 @@ export interface BillingInfo {
 
 export interface IntegrationStatus {
   emailEnabled: boolean;
+  dailyDigestEnabled: boolean;
+  keyPageSlackEnabled: boolean;
   slack: boolean;
   hubspot: boolean;
-  zapier: boolean;
+}
+
+/** Workspace outbound webhook (Zapier Catch Hook / custom HTTPS endpoint). */
+export interface OutboundWebhookConfig {
+  configured: boolean;
+  enabled: boolean;
+  url?: string;
+  eventTypes?: string[];
+  secretHint?: string;
+  /** Present only immediately after create or rotate. */
+  secret?: string;
+  updatedAt?: string;
 }
 
 export interface SecuritySettings {

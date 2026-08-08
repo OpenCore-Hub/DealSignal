@@ -1,6 +1,7 @@
 import { http, HttpResponse } from "msw";
 import type {
   ActionItem,
+  Circle,
   Contact,
   DealRoom,
   DealRoomAccessPolicy,
@@ -16,6 +17,17 @@ import type {
   WorkspaceMember,
 } from "@/types";
 import { qaEnabledForLinkId } from "@/lib/qaScope";
+import { keyPageRulesForCircle, keywordLangFromI18n } from "@/lib/heat/heatScore";
+
+/** In-memory workspace key-page settings for MSW (additive extras + default circle). */
+let mockKeyPageSettings = {
+  defaultCircle: "founder" as "founder" | "investor_ir" | "sales",
+  extraKeywords: {} as Record<string, string[]>,
+};
+
+function keyPageLangFromRequest(request: Request) {
+  return keywordLangFromI18n(request.headers.get("Accept-Language") ?? undefined);
+}
 import { attachOwnerAskRepeatCounts, matchesOwnerAskInboxFilter, ownerAskTurnCanPinFAQ } from "@/lib/ownerAskInbox";
 import {
   mockAccessLogs,
@@ -29,6 +41,7 @@ import {
   mockLinks,
   mockLinkAccessRequests,
   mockNdaTemplates,
+  mockDocumentVisitors,
   mockPageAnalytics,
   mockSignals,
   mockSuggestions,
@@ -38,13 +51,26 @@ import {
   getMockDashboardStats,
   getMockSignalFeed,
 } from "./data";
+import { computeMockLinkHeat } from "./mockHeat";
 
 let workspaceSettings = { ...defaultWorkspaceSettings };
 
 let integrationsStatus = {
-  slack: false,
-  hubspot: false,
-  zapier: false,
+  email_enabled: true,
+  daily_digest_enabled: false,
+  key_page_slack_enabled: false,
+  slack_connected: false,
+  hubspot_connected: false,
+};
+
+let outboundWebhook = {
+  configured: false,
+  enabled: false,
+  url: "",
+  event_types: ["key_page", "repeat_key_page"] as string[],
+  secret_hint: "",
+  secret: "",
+  updated_at: "",
 };
 
 let securitySettings = {
@@ -163,6 +189,7 @@ const initialState = {
   links: structuredClone(mockLinks),
   dealRooms: structuredClone(mockDealRooms),
   members: structuredClone(mockWorkspaceMembers),
+  suggestions: structuredClone(mockSuggestions),
   linkAccessRequests: structuredClone(mockLinkAccessRequests),
   ndaTemplates: structuredClone(mockNdaTemplates),
   settings: structuredClone(defaultWorkspaceSettings),
@@ -659,6 +686,7 @@ async function resetMockState() {
   mockLinks.splice(0, mockLinks.length, ...initialState.links);
   mockDealRooms.splice(0, mockDealRooms.length, ...initialState.dealRooms);
   mockWorkspaceMembers.splice(0, mockWorkspaceMembers.length, ...initialState.members);
+  mockSuggestions.splice(0, mockSuggestions.length, ...structuredClone(initialState.suggestions));
   mockRoomAccessPolicies.clear();
   mockLinkAccessRequests.splice(
     0,
@@ -673,6 +701,15 @@ async function resetMockState() {
   workspaceSettings = { ...initialState.settings };
   integrationsStatus = { ...initialState.integrations };
   securitySettings = { ...initialState.security };
+  outboundWebhook = {
+    configured: false,
+    enabled: false,
+    url: "",
+    event_types: ["key_page", "repeat_key_page"],
+    secret_hint: "",
+    secret: "",
+    updated_at: "",
+  };
 }
 const KNOWLEDGE_QA_CACHE = "msw-e2e-knowledge-qa";
 const KNOWLEDGE_QA_STATE_URL = "https://msw.local/knowledge-qa-state";
@@ -4114,50 +4151,652 @@ export const handlers = [
   }),
 
   // Insights
-  http.get("*/api/workspaces/:workspaceSlug/insights/overview", ({ params }) => {
-    const tierCounts = {
-      hot: mockHeatAlerts.filter((a) => a.heatLevel === "hot").length + 2,
-      warm: mockHeatAlerts.filter((a) => a.heatLevel === "warm").length + 1,
-      cold: mockLinks.filter((l) => l.heatLevel === "cold").length,
-    };
+  http.get("*/api/workspaces/:workspaceSlug/insights/overview", ({ params, request }) => {
+    // Mirror backend: tierCounts from link heat; document heat = max linked heat (not views thresholds).
+    const url = new URL(request.url);
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    let rangeDays = 7;
+    let rangeFrom = "";
+    let rangeTo = "";
+    let rangeCustom = false;
+    if (fromParam && toParam) {
+      const fromMs = Date.parse(`${fromParam}T00:00:00Z`);
+      const toMs = Date.parse(`${toParam}T00:00:00Z`);
+      if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs >= fromMs) {
+        rangeDays = Math.floor((toMs - fromMs) / 86_400_000) + 1;
+        if (rangeDays > 90) {
+          return HttpResponse.json(
+            { code: "invalid_input", message: "insights range exceeds maximum" },
+            { status: 400 },
+          );
+        }
+        rangeFrom = fromParam;
+        rangeTo = toParam;
+        rangeCustom = true;
+      }
+    }
+    if (!rangeCustom) {
+      const rawDays = Number(url.searchParams.get("days") ?? "7");
+      rangeDays = rawDays === 30 || rawDays === 90 ? rawDays : 7;
+      const end = new Date();
+      end.setUTCHours(0, 0, 0, 0);
+      const start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - (rangeDays - 1));
+      rangeFrom = start.toISOString().slice(0, 10);
+      rangeTo = end.toISOString().slice(0, 10);
+    }
+    const tierCounts = { hot: 0, warm: 0, cold: 0 } as Record<"hot" | "warm" | "cold", number>;
+    for (const l of mockLinks) {
+      const level = (l.heatLevel ?? "cold") as "hot" | "warm" | "cold";
+      tierCounts[level] = (tierCounts[level] ?? 0) + 1;
+    }
+    const heatRank = { hot: 3, warm: 2, cold: 1 } as const;
     const topDocuments = mockDocuments
       .map((d) => {
-        const views = mockLinks
-          .filter((l) => l.documentId === d.id)
-          .reduce((sum, l) => sum + l.accessCount, 0);
-        const heatLevel = views > 30 ? "hot" : views > 5 ? "warm" : "cold";
-        return { id: d.id, title: d.title, views, heatLevel };
+        const linked = mockLinks.filter((l) => l.documentId === d.id);
+        const views = linked.reduce((sum, l) => sum + l.accessCount, 0);
+        const pages = mockPageAnalytics[d.id];
+        let heatLevel: "hot" | "warm" | "cold" = "cold";
+        let score = 0;
+        let primaryLinkId: string | undefined;
+        for (const l of linked) {
+          const heat = computeMockLinkHeat(l, "founder", pages);
+          if (heat.score > score || (heat.score === score && heatRank[heat.level] > heatRank[heatLevel])) {
+            heatLevel = heat.level;
+            score = heat.score;
+            primaryLinkId = l.id;
+          }
+        }
+        return { id: d.id, title: d.title, views, score, heatLevel, primaryLinkId };
       })
-      .sort((a, b) => b.views - a.views)
+      .filter((d) => mockLinks.some((l) => l.documentId === d.id))
+      .sort((a, b) => b.score - a.score || b.views - a.views)
       .slice(0, 5);
-    const topLinks = mockLinks
-      .map((l) => ({
+    const topLinks = [...mockLinks]
+      .map((l) => {
+        const pages = l.documentId ? mockPageAnalytics[l.documentId] : undefined;
+        const heat = computeMockLinkHeat(l, "founder", pages);
+        return { link: l, heat };
+      })
+      .sort(
+        (a, b) =>
+          heatRank[b.heat.level] - heatRank[a.heat.level] || b.heat.score - a.heat.score,
+      )
+      .slice(0, 5)
+      .map(({ link: l, heat }) => ({
         id: l.id,
+        title: l.documentTitle ?? "",
+        documentId: l.documentId,
         shortUrl: l.shortUrl,
         views: l.accessCount,
-        heatLevel: l.heatLevel,
-      }))
-      .sort((a, b) => b.views - a.views)
-      .slice(0, 5);
-    const topContacts = workspaceContacts(params.workspaceSlug)
-      .map((c) => ({
-        id: c.id,
-        email: c.email,
-        score: c.score,
-        heatLevel: c.heatLevel,
-      }))
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 5);
-    return HttpResponse.json({ tierCounts, topDocuments, topLinks, topContacts });
+        score: heat.score,
+        heatLevel: heat.level,
+      }));
+    const seriesStart = new Date(`${rangeFrom}T00:00:00Z`);
+    const dailyVisits = Array.from({ length: rangeDays }, (_, i) => {
+      const d = new Date(seriesStart);
+      d.setUTCDate(d.getUTCDate() + i);
+      const isLast = i === rangeDays - 1;
+      return {
+        date: d.toISOString(),
+        opens: isLast ? 1 : 0,
+        uniqueVisitors: isLast ? 1 : 0,
+      };
+    });
+    const periodOpens = dailyVisits.reduce((sum, d) => sum + d.opens, 0);
+    const periodUniqueVisitors = dailyVisits.reduce((sum, d) => sum + d.uniqueVisitors, 0);
+    return HttpResponse.json({
+      tierEntity: "link",
+      tierCounts,
+      activeLinkCount: mockLinks.length,
+      rangeDays,
+      rangeFrom,
+      rangeTo,
+      rangeCustom,
+      generatedAt: new Date().toISOString(),
+      periodOpens,
+      previousPeriodOpens: 0,
+      periodUniqueVisitors,
+      previousPeriodUniqueVisitors: 0,
+      periodMedianDurationSeconds: periodOpens > 0 ? 42 : 0,
+      previousPeriodMedianDurationSeconds: 0,
+      periodAvgDurationSeconds: periodOpens > 0 ? 55 : 0,
+      periodPageViewCount: periodOpens > 0 ? 3 : 0,
+      periodSessionCount: periodOpens > 0 ? 2 : 0,
+      periodMeasurableSessions: periodOpens > 0 ? 2 : 0,
+      periodCompletedSessions: periodOpens > 0 ? 1 : 0,
+      periodCompletionRate: periodOpens > 0 ? 0.5 : 0,
+      previousPeriodSessionCount: 0,
+      previousPeriodCompletedSessions: 0,
+      previousPeriodCompletionRate: 0,
+      openSignalCount: mockSignals.length,
+      dailyVisits,
+      topDocuments,
+      topLinks,
+      topContacts: workspaceContacts(params.workspaceSlug)
+        .map((c) => ({
+          id: c.id,
+          email: c.email,
+          score: c.score,
+          heatLevel: c.heatLevel,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 5),
+    });
   }),
 
-  http.get("*/api/workspaces/:workspaceSlug/insights/pages/:documentId", ({ params }) => {
-    return HttpResponse.json({ data: mockPageAnalytics[params.documentId as string] || [] });
+  http.get("*/api/workspaces/:workspaceSlug/insights/key-page-settings", ({ request }) => {
+    const circle = mockKeyPageSettings.defaultCircle;
+    const baseRules = keyPageRulesForCircle(circle, keyPageLangFromRequest(request));
+    const extras = mockKeyPageSettings.extraKeywords;
+    const byCat = new Map(baseRules.map((r) => [r.category, [...r.keywords]]));
+    for (const [cat, kws] of Object.entries(extras)) {
+      const cur = byCat.get(cat) ?? [];
+      for (const kw of kws) {
+        if (!cur.some((x) => x.toLowerCase() === kw.toLowerCase())) cur.push(kw);
+      }
+      byCat.set(cat, cur);
+    }
+    const matchRules = [...byCat.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, keywords]) => ({ category, keywords }));
+    return HttpResponse.json({
+      defaultCircle: circle,
+      extraKeywords: extras,
+      builtinRules: baseRules,
+      matchRules,
+      canEdit: true,
+      updatedAt: new Date().toISOString(),
+    });
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/insights/key-page-settings", async ({ request }) => {
+    const body = (await request.json()) as {
+      defaultCircle?: string;
+      extraKeywords?: Record<string, string[]>;
+    };
+    const circle =
+      body.defaultCircle === "investor_ir" || body.defaultCircle === "sales"
+        ? body.defaultCircle
+        : "founder";
+    mockKeyPageSettings = {
+      defaultCircle: circle,
+      extraKeywords: body.extraKeywords ?? {},
+    };
+    const baseRules = keyPageRulesForCircle(circle, keyPageLangFromRequest(request));
+    const extras = mockKeyPageSettings.extraKeywords;
+    const byCat = new Map(baseRules.map((r) => [r.category, [...r.keywords]]));
+    for (const [cat, kws] of Object.entries(extras)) {
+      const cur = byCat.get(cat) ?? [];
+      for (const kw of kws) {
+        if (!cur.some((x) => x.toLowerCase() === kw.toLowerCase())) cur.push(kw);
+      }
+      byCat.set(cat, cur);
+    }
+    const matchRules = [...byCat.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, keywords]) => ({ category, keywords }));
+    return HttpResponse.json({
+      defaultCircle: circle,
+      extraKeywords: extras,
+      builtinRules: baseRules,
+      matchRules,
+      canEdit: true,
+      updatedAt: new Date().toISOString(),
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/key-pages", ({ request }) => {
+    const url = new URL(request.url);
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    let rangeDays = 30;
+    let rangeFrom = "";
+    let rangeTo = "";
+    let rangeCustom = false;
+    if (fromParam && toParam) {
+      const fromMs = Date.parse(`${fromParam}T00:00:00Z`);
+      const toMs = Date.parse(`${toParam}T00:00:00Z`);
+      if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs >= fromMs) {
+        rangeDays = Math.floor((toMs - fromMs) / 86_400_000) + 1;
+        if (rangeDays > 90) {
+          return HttpResponse.json(
+            { code: "invalid_input", message: "insights range exceeds maximum" },
+            { status: 400 },
+          );
+        }
+        rangeFrom = fromParam;
+        rangeTo = toParam;
+        rangeCustom = true;
+      }
+    }
+    if (!rangeCustom) {
+      const rawDays = Number(url.searchParams.get("days") ?? "30");
+      rangeDays = rawDays === 7 || rawDays === 90 ? rawDays : 30;
+      const end = new Date();
+      end.setUTCHours(0, 0, 0, 0);
+      const start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - (rangeDays - 1));
+      rangeFrom = start.toISOString().slice(0, 10);
+      rangeTo = end.toISOString().slice(0, 10);
+    }
+    const circleRaw = url.searchParams.get("circle") ?? "founder";
+    const circle =
+      circleRaw === "investor_ir" || circleRaw === "sales" ? circleRaw : "founder";
+    const baseRules = keyPageRulesForCircle(circle, keyPageLangFromRequest(request));
+    const extras = mockKeyPageSettings.extraKeywords;
+    const byCat = new Map(baseRules.map((r) => [r.category, [...r.keywords]]));
+    for (const [cat, kws] of Object.entries(extras)) {
+      const cur = byCat.get(cat) ?? [];
+      for (const kw of kws) {
+        if (!cur.some((x) => x.toLowerCase() === kw.toLowerCase())) cur.push(kw);
+      }
+      byCat.set(cat, cur);
+    }
+    const matchRules = [...byCat.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, keywords]) => ({ category, keywords }));
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? "25") || 25));
+    const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0") || 0);
+    const events = [
+      {
+        id: "kpv-mock-1",
+        linkId: mockLinks[0]?.id,
+        visitorId: "v-mock-1",
+        visitorEmail: "buyer@example.com",
+        documentId: mockDocuments[0]?.id,
+        documentTitle: mockDocuments[0]?.title ?? "Pitch Deck",
+        pageNumber: 4,
+        pageTitle: "Financial Projections",
+        category: "financials",
+        durationSeconds: 42,
+        createdAt: new Date().toISOString(),
+        dealRoomId: "dr-mock-1",
+        dealRoomName: "Series A Room",
+      },
+    ];
+    const page = events.slice(offset, offset + limit + 1);
+    const hasMore = page.length > limit;
+    return HttpResponse.json({
+      rangeDays,
+      rangeFrom,
+      rangeTo,
+      rangeCustom,
+      circle,
+      generatedAt: new Date().toISOString(),
+      totalViews: 1,
+      engagedViews: 1,
+      uniqueVisitors: 1,
+      distinctPages: 1,
+      matchRules,
+      byCategory: [{ category: "financials", count: 1 }],
+      pages: [
+        {
+          documentId: mockDocuments[0]?.id,
+          documentTitle: mockDocuments[0]?.title ?? "Pitch Deck",
+          pageNumber: 4,
+          pageTitle: "Financial Projections",
+          category: "financials",
+          views: 1,
+          uniqueVisitors: 1,
+          avgDurationSeconds: 42,
+          lastViewedAt: new Date().toISOString(),
+        },
+      ],
+      events: hasMore ? page.slice(0, limit) : page,
+      hasMore,
+      limit,
+      offset,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/access-audit", ({ request }) => {
+    const url = new URL(request.url);
+    const fromParam = url.searchParams.get("from");
+    const toParam = url.searchParams.get("to");
+    let rangeDays = 30;
+    let rangeFrom = "";
+    let rangeTo = "";
+    let rangeCustom = false;
+    if (fromParam && toParam) {
+      const fromMs = Date.parse(`${fromParam}T00:00:00Z`);
+      const toMs = Date.parse(`${toParam}T00:00:00Z`);
+      if (!Number.isNaN(fromMs) && !Number.isNaN(toMs) && toMs >= fromMs) {
+        rangeDays = Math.floor((toMs - fromMs) / 86_400_000) + 1;
+        if (rangeDays > 90) {
+          return HttpResponse.json(
+            { code: "invalid_input", message: "insights range exceeds maximum" },
+            { status: 400 },
+          );
+        }
+        rangeFrom = fromParam;
+        rangeTo = toParam;
+        rangeCustom = true;
+      }
+    }
+    if (!rangeCustom) {
+      const rawDays = Number(url.searchParams.get("days") ?? "30");
+      rangeDays = rawDays === 7 || rawDays === 90 ? rawDays : 30;
+      const end = new Date();
+      end.setUTCHours(0, 0, 0, 0);
+      const start = new Date(end);
+      start.setUTCDate(start.getUTCDate() - (rangeDays - 1));
+      rangeFrom = start.toISOString().slice(0, 10);
+      rangeTo = end.toISOString().slice(0, 10);
+    }
+    const eventTypeFilter = url.searchParams.get("eventType") ?? "";
+    const dealRoomFilter = url.searchParams.get("dealRoomId") ?? "";
+    const memberFilter = url.searchParams.get("memberId") ?? "";
+    const folderFilter = url.searchParams.get("folderPath") ?? "";
+    const limit = Math.min(100, Math.max(1, Number(url.searchParams.get("limit") ?? "25") || 25));
+    const offset = Math.max(0, Number(url.searchParams.get("offset") ?? "0") || 0);
+    const allEvents = [
+      {
+        id: "se-mock-1",
+        linkId: mockLinks[0]?.id,
+        eventType: "invalid_password",
+        email: "buyer@example.com",
+        visitorId: "v-mock-1",
+        reason: "password mismatch",
+        createdAt: new Date().toISOString(),
+        documentTitle: mockDocuments[0]?.title ?? "Pitch Deck",
+        dealRoomId: "dr-mock-1",
+        dealRoomName: "Series A Room",
+        memberId: "member-mock-1",
+        memberEmail: "owner@example.com",
+        folderPath: "Finance",
+      },
+      {
+        id: "se-mock-2",
+        linkId: mockLinks[1]?.id ?? mockLinks[0]?.id,
+        eventType: "blocked_email",
+        email: "blocked@competitor.com",
+        reason: "email deny list",
+        createdAt: new Date(Date.now() - 3600_000).toISOString(),
+        documentTitle: mockDocuments[0]?.title ?? "Pitch Deck",
+        dealRoomName: "",
+        memberId: "member-mock-1",
+        memberEmail: "owner@example.com",
+        folderPath: "",
+      },
+    ];
+    const filtered = allEvents.filter((e) => {
+      if (eventTypeFilter && e.eventType !== eventTypeFilter) return false;
+      if (dealRoomFilter && e.dealRoomId !== dealRoomFilter) return false;
+      if (memberFilter && e.memberId !== memberFilter) return false;
+      if (folderFilter && e.folderPath !== folderFilter) return false;
+      return true;
+    });
+    const page = filtered.slice(offset, offset + limit + 1);
+    const hasMore = page.length > limit;
+    const events = hasMore ? page.slice(0, limit) : page;
+    return HttpResponse.json({
+      rangeDays,
+      rangeFrom,
+      rangeTo,
+      rangeCustom,
+      generatedAt: new Date().toISOString(),
+      totalEvents: filtered.length,
+      byType: [
+        { eventType: "invalid_password", count: 1 },
+        { eventType: "blocked_email", count: 1 },
+      ].filter((b) => !eventTypeFilter || b.eventType === eventTypeFilter),
+      byDealRoom: [
+        { dealRoomId: "dr-mock-1", dealRoomName: "Series A Room", count: 1 },
+        { dealRoomId: null, dealRoomName: "", count: 1, scope: "library" },
+      ],
+      byMember: [
+        { memberId: "member-mock-1", memberEmail: "owner@example.com", count: 2 },
+      ].filter((b) => !memberFilter || b.memberId === memberFilter),
+      byFolder: [
+        {
+          folderPath: "Finance",
+          dealRoomId: "dr-mock-1",
+          dealRoomName: "Series A Room",
+          count: 1,
+        },
+        {
+          folderPath: "",
+          dealRoomId: null,
+          dealRoomName: "",
+          count: 1,
+          scope: "root",
+        },
+      ].filter((b) => !folderFilter || b.folderPath === folderFilter),
+      events,
+      hasMore,
+      limit,
+      offset,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/overview/export", ({ request }) => {
+    const url = new URL(request.url);
+    const rawDays = Number(url.searchParams.get("days") ?? "7");
+    const rangeDays = rawDays === 30 || rawDays === 90 ? rawDays : 7;
+    const lines = ["date,opens,unique_visitors"];
+    for (let i = 0; i < rangeDays; i++) {
+      const d = new Date();
+      d.setUTCHours(0, 0, 0, 0);
+      d.setUTCDate(d.getUTCDate() - (rangeDays - 1 - i));
+      const isToday = i === rangeDays - 1;
+      lines.push(`${d.toISOString().slice(0, 10)},${isToday ? 1 : 0},${isToday ? 1 : 0}`);
+    }
+    return new HttpResponse(`${lines.join("\n")}\n`, {
+      status: 200,
+      headers: {
+        "Content-Type": "text/csv; charset=utf-8",
+        "Content-Disposition": `attachment; filename="insights-daily-${rangeDays}d.csv"`,
+      },
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/analytics/links/:linkId/score", ({ request, params }) => {
+    const url = new URL(request.url);
+    const circleRaw = url.searchParams.get("circle") ?? "founder";
+    const circle = (
+      circleRaw === "investor_ir" || circleRaw === "sales" ? circleRaw : "founder"
+    ) as Circle;
+    const link = mockLinks.find((l) => l.id === params.linkId);
+    if (!link) {
+      return HttpResponse.json(
+        { code: "not_found", message: "link not found" },
+        { status: 404 },
+      );
+    }
+    const pages = link.documentId ? mockPageAnalytics[link.documentId] : undefined;
+    const heat = computeMockLinkHeat(link, circle, pages);
+    return HttpResponse.json({
+      linkId: params.linkId,
+      score: heat.score,
+      level: heat.level,
+      trend: heat.trend,
+      breakdown: heat.breakdown,
+      updatedAt: new Date().toISOString(),
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/pages/:documentId", ({ request, params }) => {
+    const url = new URL(request.url);
+    const hasRange =
+      url.searchParams.has("days") ||
+      (url.searchParams.has("from") && url.searchParams.has("to"));
+    return HttpResponse.json({
+      data: mockPageAnalytics[params.documentId as string] || [],
+      ...(hasRange
+        ? {
+            rangeDays: Number(url.searchParams.get("days") || 30),
+            rangeFrom: url.searchParams.get("from") || undefined,
+            rangeTo: url.searchParams.get("to") || undefined,
+            rangeCustom: url.searchParams.has("from"),
+          }
+        : { lifetime: true }),
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/documents/:documentId/visitors", ({ request, params }) => {
+    const url = new URL(request.url);
+    const hasRange =
+      url.searchParams.has("days") ||
+      (url.searchParams.has("from") && url.searchParams.has("to"));
+    return HttpResponse.json({
+      data: mockDocumentVisitors[params.documentId as string] || [],
+      ...(hasRange
+        ? {
+            rangeDays: Number(url.searchParams.get("days") || 30),
+            rangeFrom: url.searchParams.get("from") || undefined,
+            rangeTo: url.searchParams.get("to") || undefined,
+            rangeCustom: url.searchParams.has("from"),
+          }
+        : { lifetime: true }),
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/documents/:documentId/sessions", ({ params }) => {
+    const documentId = String(params.documentId ?? "");
+    const visitors = mockDocumentVisitors[documentId] || [];
+    const pageCount =
+      mockDocuments.find((d) => d.id === documentId)?.pageCount ||
+      mockPageAnalytics[documentId]?.length ||
+      0;
+    const sessions = visitors.map((v, idx) => {
+      const maxPage = Math.min(pageCount || 1, Math.max(1, Math.round(v.pageViewCount / 2) || 1));
+      const pages = Array.from({ length: maxPage }, (_, i) => ({
+        pageNumber: i + 1,
+        durationSeconds: Math.max(5, Math.round(v.avgDurationSeconds / Math.max(1, maxPage))),
+      }));
+      return {
+        id: `sess-${documentId}-${idx}`,
+        linkId: mockLinks.find((l) => l.documentId === documentId)?.id ?? `link-${idx}`,
+        visitorId: v.visitorId,
+        visitorEmail: v.visitorEmail,
+        startedAt: v.lastSeenAt,
+        lastActivityAt: v.lastSeenAt,
+        maxPage,
+        distinctPageCount: pages.length,
+        totalDurationSeconds: Math.round(v.avgDurationSeconds * Math.max(1, v.pageViewCount)),
+        completed: pageCount > 0 && maxPage >= pageCount,
+        pages,
+      };
+    });
+    return HttpResponse.json({
+      documentId,
+      pageCount,
+      sessionModel: "reading_session",
+      sessions,
+    });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/insights/documents/:documentId/funnel", ({ params }) => {
+    const documentId = String(params.documentId ?? "");
+    const visitors = mockDocumentVisitors[documentId] || [];
+    const pageAnalytics = mockPageAnalytics[documentId] || [];
+    const pageCount =
+      mockDocuments.find((d) => d.id === documentId)?.pageCount ||
+      pageAnalytics.length ||
+      0;
+    const sessionCount = visitors.length;
+    if (sessionCount === 0 || pageCount === 0) {
+      return HttpResponse.json({
+        documentId,
+        pageCount,
+        sessionCount: 0,
+        completedSessions: 0,
+        completionRate: 0,
+        medianMaxPage: 0,
+        avgPagesPerSession: 0,
+        avgDurationSeconds: 0,
+        biggestDropOffPage: 0,
+        steps: [],
+        sessionModel: "reading_session",
+      });
+    }
+    // Deterministic mock depths from visitor pageViewCount.
+    const depths = visitors.map((v) =>
+      Math.min(pageCount, Math.max(1, Math.round(v.pageViewCount / 2) || 1)),
+    );
+    const completedSessions = depths.filter((d) => d >= pageCount).length;
+    const steps = Array.from({ length: pageCount }, (_, i) => {
+      const pageNumber = i + 1;
+      const visitorsReached = depths.filter((d) => d >= pageNumber).length;
+      const prev = i === 0 ? visitorsReached : depths.filter((d) => d >= i).length;
+      return {
+        pageNumber,
+        visitorsReached,
+        dropOffFromPrev: i === 0 || prev === 0 ? 0 : 1 - visitorsReached / prev,
+      };
+    });
+    let biggestDropOffPage = 0;
+    let biggestAbs = -1;
+    for (let i = 1; i < steps.length; i++) {
+      const abs = steps[i - 1]!.visitorsReached - steps[i]!.visitorsReached;
+      if (abs > biggestAbs) {
+        biggestAbs = abs;
+        biggestDropOffPage = steps[i]!.pageNumber;
+      }
+    }
+    const sorted = [...depths].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianMaxPage =
+      sorted.length % 2 === 1
+        ? sorted[mid]!
+        : (sorted[mid - 1]! + sorted[mid]!) / 2;
+    return HttpResponse.json({
+      documentId,
+      pageCount,
+      sessionCount,
+      completedSessions,
+      completionRate: completedSessions / sessionCount,
+      medianMaxPage,
+      avgPagesPerSession:
+        depths.reduce((s, d) => s + d, 0) / sessionCount,
+      avgDurationSeconds:
+        visitors.reduce((s, v) => s + v.avgDurationSeconds, 0) / sessionCount,
+      biggestDropOffPage,
+      steps,
+      sessionModel: "reading_session",
+    });
   }),
 
   http.get("*/api/workspaces/:workspaceSlug/insights/suggestions", () => {
     return HttpResponse.json({ data: mockSuggestions });
   }),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/analytics/links/:linkId/suggestions/:id/dismiss",
+    ({ params }) => {
+      const id = String(params.id ?? "");
+      const idx = mockSuggestions.findIndex((s) => s.id === id);
+      if (idx < 0) {
+        return HttpResponse.json(
+          { code: "not_found", message: "Suggestion not found" },
+          { status: 404 },
+        );
+      }
+      mockSuggestions.splice(idx, 1);
+      return new HttpResponse(null, { status: 204 });
+    },
+  ),
+
+  http.post(
+    "*/api/workspaces/:workspaceSlug/insights/suggestions/:id/snooze",
+    async ({ params, request }) => {
+      const id = String(params.id ?? "");
+      const body = (await request.json().catch(() => ({}))) as { hours?: number };
+      const hours = body.hours === 72 || body.hours === 168 ? body.hours : 24;
+      const idx = mockSuggestions.findIndex((s) => s.id === id);
+      if (idx < 0) {
+        return HttpResponse.json(
+          { code: "not_found", message: "Suggestion not found" },
+          { status: 404 },
+        );
+      }
+      mockSuggestions.splice(idx, 1);
+      const until = new Date(Date.now() + hours * 3600_000).toISOString();
+      return HttpResponse.json({ id, snoozed_until: until });
+    },
+  ),
 
   // Members
   http.get("*/api/workspaces/:workspaceSlug/members", () => {
@@ -4214,13 +4853,13 @@ export const handlers = [
 
   // Integrations
   http.get("*/api/workspaces/:workspaceSlug/integrations/settings", () => {
-    return HttpResponse.json({ data: integrationsStatus });
+    return HttpResponse.json(integrationsStatus);
   }),
 
   http.put("*/api/workspaces/:workspaceSlug/integrations/settings", async ({ request }) => {
-    const body = (await request.json()) as typeof integrationsStatus;
+    const body = (await request.json()) as Partial<typeof integrationsStatus>;
     integrationsStatus = { ...integrationsStatus, ...body };
-    return HttpResponse.json({ data: integrationsStatus });
+    return HttpResponse.json(integrationsStatus);
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/integrations/slack/connect", () => {
@@ -4228,7 +4867,7 @@ export const handlers = [
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/integrations/slack/disconnect", () => {
-    integrationsStatus.slack = false;
+    integrationsStatus.slack_connected = false;
     return HttpResponse.json({ code: "ok", message: "disconnected" });
   }),
 
@@ -4237,8 +4876,68 @@ export const handlers = [
   }),
 
   http.post("*/api/workspaces/:workspaceSlug/integrations/hubspot/disconnect", () => {
-    integrationsStatus.hubspot = false;
+    integrationsStatus.hubspot_connected = false;
     return HttpResponse.json({ code: "ok", message: "disconnected" });
+  }),
+
+  http.get("*/api/workspaces/:workspaceSlug/integrations/webhook", () => {
+    const { secret: _secret, ...publicView } = outboundWebhook;
+    return HttpResponse.json({
+      configured: publicView.configured,
+      enabled: publicView.enabled,
+      url: publicView.url || undefined,
+      event_types: publicView.event_types,
+      secret_hint: publicView.secret_hint || undefined,
+      updated_at: publicView.updated_at || undefined,
+    });
+  }),
+
+  http.put("*/api/workspaces/:workspaceSlug/integrations/webhook", async ({ request }) => {
+    const body = (await request.json()) as {
+      url?: string;
+      enabled?: boolean;
+      event_types?: string[];
+      rotate_secret?: boolean;
+    };
+    const url = (body.url ?? "").trim();
+    if (!url.startsWith("https://") && !url.startsWith("http://localhost") && !url.startsWith("http://127.0.0.1")) {
+      return HttpResponse.json({ code: "invalid_input", message: "webhook url must use https" }, { status: 400 });
+    }
+    const rotate = Boolean(body.rotate_secret) || !outboundWebhook.configured;
+    const secret = rotate
+      ? `mocksecret${Math.random().toString(16).slice(2)}${Math.random().toString(16).slice(2)}`
+      : outboundWebhook.secret;
+    outboundWebhook = {
+      configured: true,
+      enabled: Boolean(body.enabled),
+      url,
+      event_types: body.event_types?.length ? body.event_types : ["key_page", "repeat_key_page"],
+      secret_hint: `••••${secret.slice(-4)}`,
+      secret,
+      updated_at: new Date().toISOString(),
+    };
+    return HttpResponse.json({
+      configured: true,
+      enabled: outboundWebhook.enabled,
+      url: outboundWebhook.url,
+      event_types: outboundWebhook.event_types,
+      secret_hint: outboundWebhook.secret_hint,
+      secret: rotate ? secret : undefined,
+      updated_at: outboundWebhook.updated_at,
+    });
+  }),
+
+  http.delete("*/api/workspaces/:workspaceSlug/integrations/webhook", () => {
+    outboundWebhook = {
+      configured: false,
+      enabled: false,
+      url: "",
+      event_types: ["key_page", "repeat_key_page"],
+      secret_hint: "",
+      secret: "",
+      updated_at: "",
+    };
+    return HttpResponse.json({ code: "ok", message: "webhook deleted" });
   }),
 
   // Security

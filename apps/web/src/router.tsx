@@ -25,6 +25,8 @@ const InsightsPage = lazy(() => import("@/routes/insights").then((m) => ({ defau
 const InsightsOverviewPage = lazy(() => import("@/routes/insights/overview").then((m) => ({ default: m.InsightsOverviewPage })));
 const InsightsPagesPage = lazy(() => import("@/routes/insights/pages").then((m) => ({ default: m.InsightsPagesPage })));
 const InsightsSuggestionsPage = lazy(() => import("@/routes/insights/suggestions").then((m) => ({ default: m.InsightsSuggestionsPage })));
+const InsightsAccessPage = lazy(() => import("@/routes/insights/access").then((m) => ({ default: m.InsightsAccessPage })));
+const InsightsKeyPagesPage = lazy(() => import("@/routes/insights/key-pages").then((m) => ({ default: m.InsightsKeyPagesPage })));
 const SettingsPage = lazy(() => import("@/routes/settings").then((m) => ({ default: m.SettingsPage })));
 const SettingsGeneralPage = lazy(() => import("@/routes/settings/general").then((m) => ({ default: m.SettingsGeneralPage })));
 const SettingsBrandPage = lazy(() => import("@/routes/settings/brand").then((m) => ({ default: m.SettingsBrandPage })));
@@ -189,6 +191,8 @@ export const router = createBrowserRouter([
           { index: true, element: <Navigate to="overview" replace /> },
           { path: "overview", element: <InsightsOverviewPage /> },
           { path: "pages", element: <InsightsPagesPage /> },
+          { path: "access", element: <InsightsAccessPage /> },
+          { path: "key-pages", element: <InsightsKeyPagesPage /> },
           { path: "suggestions", element: <InsightsSuggestionsPage /> },
         ],
       },

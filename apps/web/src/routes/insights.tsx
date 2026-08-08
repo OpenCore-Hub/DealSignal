@@ -10,6 +10,8 @@ export function InsightsPage() {
   const tabs = [
     { path: "overview", label: t("nav.overview") },
     { path: "pages", label: t("nav.pages") },
+    { path: "access", label: t("nav.access") },
+    { path: "key-pages", label: t("nav.keyPages") },
     { path: "suggestions", label: t("nav.suggestions") },
   ];
 

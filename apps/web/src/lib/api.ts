@@ -36,6 +36,7 @@ import type {
   HeatAlert,
   HeatLevel,
   IntegrationStatus,
+  OutboundWebhookConfig,
   Link,
   LinkAccessRequest,
   PendingLinkAccessRequest,
@@ -68,7 +69,9 @@ import {
   toCreateDealRoomPayload,
   toCreateLinkPayload,
   toIntegrationStatus,
+  toOutboundWebhookConfig,
   type BackendIntegrationStatus,
+  type BackendOutboundWebhook,
   type UpdateLinkPayload,
 } from "@/lib/apiAdapters";
 import {
@@ -104,11 +107,326 @@ export interface DashboardStats {
   recentActivities: RecentActivityItem[];
 }
 
+export interface InsightsDailyVisit {
+  date: string;
+  opens: number;
+  uniqueVisitors: number;
+}
+
+/** Supported Insights overview trend windows (matches API normalizeInsightsDays). */
+export type InsightsRangeDays = 7 | 30 | 90;
+
+/** Params for GET /insights/overview — preset days or custom UTC from/to. */
+export type InsightsOverviewParams =
+  | { days?: InsightsRangeDays; from?: undefined; to?: undefined }
+  | { from: string; to: string; days?: undefined };
+
 export interface InsightsOverview {
+  /** Always "link" — tierCounts bucket share links via heat.Compute. */
+  tierEntity?: "link";
   tierCounts: Record<HeatLevel, number>;
-  topDocuments: { id: string; title: string; views: number; heatLevel: HeatLevel }[];
-  topLinks: { id: string; shortUrl: string; views: number; heatLevel: HeatLevel }[];
-  topContacts: { id: string; email: string; score: number; heatLevel: HeatLevel }[];
+  activeLinkCount: number;
+  /** Selected trend window length in days (preset or custom span). */
+  rangeDays?: number;
+  /** Inclusive UTC start date (YYYY-MM-DD). */
+  rangeFrom?: string;
+  /** Inclusive UTC end date (YYYY-MM-DD). */
+  rangeTo?: string;
+  /** True when the window was requested via from/to. */
+  rangeCustom?: boolean;
+  /** Server generation timestamp (UTC RFC3339). */
+  generatedAt?: string;
+  /** access_logs partition retention days (server config). */
+  eventRetentionDays?: number;
+  /** page_views partition retention days (server config). */
+  pageViewRetentionDays?: number;
+  /** Sum of link opens in the selected window. */
+  periodOpens?: number;
+  /** Sum of link opens in the prior equal-length window. */
+  previousPeriodOpens?: number;
+  /** Distinct visitors with ≥1 link_opened in the selected window. */
+  periodUniqueVisitors?: number;
+  /** Distinct visitors in the prior equal-length window. */
+  previousPeriodUniqueVisitors?: number;
+  /** Median page-view duration (seconds) in the selected window. */
+  periodMedianDurationSeconds?: number;
+  /** Median page-view duration in the prior equal-length window. */
+  previousPeriodMedianDurationSeconds?: number;
+  /** Average page-view duration (seconds) in the selected window. */
+  periodAvgDurationSeconds?: number;
+  /** Page-view count in the selected window. */
+  periodPageViewCount?: number;
+  /** Reading sessions with activity in the selected window. */
+  periodSessionCount?: number;
+  /** Sessions whose document has a known page_count (completion denominator). */
+  periodMeasurableSessions?: number;
+  /** Sessions that reached the last page (max_page ≥ page_count). */
+  periodCompletedSessions?: number;
+  /** completed / measurable in the selected window (0–1). */
+  periodCompletionRate?: number;
+  previousPeriodSessionCount?: number;
+  previousPeriodCompletedSessions?: number;
+  previousPeriodCompletionRate?: number;
+  /** Open Deal Radar signals (honest action summary — not topContacts length). */
+  openSignalCount?: number;
+  /** Dense UTC day series of link_opened counts for rangeDays (server-aggregated). */
+  dailyVisits: InsightsDailyVisit[];
+  topDocuments: {
+    id: string;
+    title: string;
+    views: number;
+    score?: number;
+    heatLevel: HeatLevel;
+    /** Hottest share link on this document — opens heat breakdown. */
+    primaryLinkId?: string;
+  }[];
+  topLinks: {
+    id: string;
+    title?: string;
+    documentId?: string;
+    shortUrl: string;
+    views: number;
+    score?: number;
+    heatLevel: HeatLevel;
+  }[];
+  /** Lifetime heat contacts for Deal Radar feeds — not used as Insights Overview CTA count. */
+  topContacts?: { id: string; email: string; score: number; heatLevel: HeatLevel }[];
+}
+
+/** GET /analytics/links/:linkId/score — heat.Compute breakdown. */
+export interface LinkHeatScore {
+  linkId: string;
+  score: number;
+  level: HeatLevel;
+  trend: "rising" | "falling" | "stable";
+  breakdown: Record<string, number>;
+  updatedAt: string;
+}
+
+/** GET /insights/access-audit — permission / gate failure slice. */
+export interface AccessAuditTypeCount {
+  eventType: string;
+  count: number;
+}
+
+export interface AccessAuditRoomCount {
+  dealRoomId?: string | null;
+  dealRoomName: string;
+  count: number;
+  /** Present when dealRoomId is null (library / non–deal-room links). */
+  scope?: "library";
+}
+
+export interface AccessAuditMemberCount {
+  memberId?: string | null;
+  memberEmail: string;
+  count: number;
+  /** Present when memberId is null (orphan / deleted creator). */
+  scope?: "unknown";
+}
+
+export interface AccessAuditFolderCount {
+  folderPath: string;
+  dealRoomId?: string | null;
+  dealRoomName: string;
+  count: number;
+  /** Present when folderPath is empty (room root / no placement). */
+  scope?: "root";
+}
+
+export interface AccessAuditEvent {
+  id: string;
+  linkId?: string;
+  eventType: string;
+  visitorId?: string;
+  email?: string;
+  reason?: string;
+  createdAt: string;
+  documentTitle: string;
+  dealRoomId?: string;
+  dealRoomName: string;
+  memberId?: string;
+  memberEmail?: string;
+  folderPath?: string;
+}
+
+export interface AccessAudit {
+  rangeDays: number;
+  rangeFrom?: string;
+  rangeTo?: string;
+  rangeCustom?: boolean;
+  generatedAt: string;
+  totalEvents: number;
+  byType: AccessAuditTypeCount[];
+  byDealRoom: AccessAuditRoomCount[];
+  byMember: AccessAuditMemberCount[];
+  byFolder: AccessAuditFolderCount[];
+  events: AccessAuditEvent[];
+  hasMore: boolean;
+  limit: number;
+  offset: number;
+}
+
+export type AccessAuditParams = {
+  days?: InsightsRangeDays;
+  from?: string;
+  to?: string;
+  eventType?: string;
+  dealRoomId?: string;
+  memberId?: string;
+  folderPath?: string;
+  limit?: number;
+  offset?: number;
+};
+
+/** Heat circle used for key-page keyword matching. */
+export type KeyPageHeatCircle = "founder" | "investor_ir" | "sales";
+
+/** GET /insights/key-pages — sensitive / key-page compliance report. */
+export interface KeyPageComplianceCategoryCount {
+  category: string;
+  count: number;
+}
+
+export interface KeyPageCompliancePage {
+  documentId: string;
+  documentTitle: string;
+  pageNumber: number;
+  pageTitle: string;
+  category: string;
+  views: number;
+  uniqueVisitors: number;
+  avgDurationSeconds: number;
+  lastViewedAt?: string;
+}
+
+export interface KeyPageComplianceEvent {
+  id: string;
+  linkId?: string;
+  visitorId?: string;
+  visitorEmail?: string;
+  documentId?: string;
+  documentTitle: string;
+  pageNumber: number;
+  pageTitle: string;
+  category: string;
+  durationSeconds: number;
+  createdAt: string;
+  dealRoomId?: string;
+  dealRoomName: string;
+}
+
+export interface KeyPageComplianceMatchRule {
+  category: string;
+  keywords: string[];
+}
+
+export interface KeyPageCompliance {
+  rangeDays: number;
+  rangeFrom?: string;
+  rangeTo?: string;
+  rangeCustom?: boolean;
+  circle: KeyPageHeatCircle | string;
+  generatedAt: string;
+  totalViews: number;
+  engagedViews: number;
+  uniqueVisitors: number;
+  distinctPages: number;
+  /** Same heat-circle title keywords the API used for matching (EN+ZH). */
+  matchRules: KeyPageComplianceMatchRule[];
+  byCategory: KeyPageComplianceCategoryCount[];
+  pages: KeyPageCompliancePage[];
+  events: KeyPageComplianceEvent[];
+  hasMore: boolean;
+  limit: number;
+  offset: number;
+}
+
+export interface KeyPageSettings {
+  defaultCircle: KeyPageHeatCircle | string;
+  extraKeywords: Record<string, string[]>;
+  /** Circle built-ins only (no workspace extras) — for editor disclosure. */
+  builtinRules: KeyPageComplianceMatchRule[];
+  /** Effective merged keywords (builtins + extras). */
+  matchRules: KeyPageComplianceMatchRule[];
+  canEdit: boolean;
+  updatedAt?: string;
+}
+
+export type KeyPageSettingsUpdate = {
+  defaultCircle: KeyPageHeatCircle | string;
+  extraKeywords: Record<string, string[]>;
+};
+
+export type KeyPageComplianceParams = {
+  days?: InsightsRangeDays;
+  from?: string;
+  to?: string;
+  circle?: KeyPageHeatCircle;
+  limit?: number;
+  offset?: number;
+};
+
+/** GET /insights/documents/:id/funnel — visitor-session reach drop-off. */
+export interface DocumentFunnelStep {
+  pageNumber: number;
+  visitorsReached: number;
+  dropOffFromPrev: number;
+}
+
+export interface DocumentReadingFunnel {
+  documentId: string;
+  pageCount: number;
+  sessionCount: number;
+  completedSessions: number;
+  completionRate: number;
+  medianMaxPage: number;
+  avgPagesPerSession: number;
+  avgDurationSeconds: number;
+  biggestDropOffPage: number;
+  steps: DocumentFunnelStep[];
+  /** Idle-gap session grain from reading_sessions ("reading_session"). */
+  sessionModel?: "reading_session";
+  rangeDays?: number;
+  rangeFrom?: string;
+  rangeTo?: string;
+  rangeCustom?: boolean;
+  /** True when no days/from/to was sent (lifetime aggregate). */
+  lifetime?: boolean;
+}
+
+/** GET /insights/documents/:id/sessions — idle-gap reading session timeline. */
+export interface DocumentReadingSessionPage {
+  pageNumber: number;
+  durationSeconds: number;
+}
+
+export interface DocumentReadingSession {
+  id: string;
+  linkId: string;
+  visitorId: string;
+  visitorEmail?: string;
+  startedAt: string;
+  lastActivityAt: string;
+  endedAt?: string;
+  maxPage: number;
+  distinctPageCount: number;
+  totalDurationSeconds: number;
+  completed: boolean;
+  pages: DocumentReadingSessionPage[];
+}
+
+export interface DocumentReadingSessions {
+  documentId: string;
+  pageCount: number;
+  sessionModel: "reading_session";
+  sessions: DocumentReadingSession[];
+  rangeDays?: number;
+  rangeFrom?: string;
+  rangeTo?: string;
+  rangeCustom?: boolean;
+  /** True when no days/from/to was sent (lifetime aggregate). */
+  lifetime?: boolean;
 }
 
 export interface SignalFeed {
@@ -692,6 +1010,7 @@ export const api = {
       public_token: string;
       visitor_id?: string;
       email?: string;
+      document_id?: string;
       page_number?: number;
       duration_seconds?: number;
       scroll_depth?: number;
@@ -1468,20 +1787,151 @@ export const api = {
       method: "POST",
     }),
 
-  getInsightsOverview: () =>
-    request<InsightsOverview>(getWorkspaceSlug(), "/insights/overview"),
-  getPageAnalytics: (documentId: string) =>
-    request<{ data: PageAnalytics[] }>(
+  getInsightsOverview: (params: InsightsOverviewParams | InsightsRangeDays = 7) => {
+    const q = typeof params === "number" ? { days: params } : params;
+    const qs = new URLSearchParams();
+    if (q.from && q.to) {
+      qs.set("from", q.from);
+      qs.set("to", q.to);
+    } else {
+      qs.set("days", String(q.days ?? 7));
+    }
+    return request<InsightsOverview>(
       getWorkspaceSlug(),
-      `/insights/pages/${documentId}`
-    ),
-  getDocumentVisitors: (documentId: string) =>
-    request<{ data: VisitorSummary[] }>(
+      `/insights/overview?${qs.toString()}`,
+    );
+  },
+  getAccessAudit: (params: AccessAuditParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.from && params.to) {
+      qs.set("from", params.from);
+      qs.set("to", params.to);
+    } else {
+      qs.set("days", String(params.days ?? 7));
+    }
+    if (params.eventType) qs.set("eventType", params.eventType);
+    if (params.dealRoomId) qs.set("dealRoomId", params.dealRoomId);
+    if (params.memberId) qs.set("memberId", params.memberId);
+    if (params.folderPath) qs.set("folderPath", params.folderPath);
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    return request<AccessAudit>(
       getWorkspaceSlug(),
-      `/insights/documents/${documentId}/visitors`
+      `/insights/access-audit?${qs.toString()}`,
+    );
+  },
+  getKeyPageCompliance: (params: KeyPageComplianceParams = {}) => {
+    const qs = new URLSearchParams();
+    if (params.from && params.to) {
+      qs.set("from", params.from);
+      qs.set("to", params.to);
+    } else {
+      qs.set("days", String(params.days ?? 30));
+    }
+    qs.set("circle", params.circle ?? "founder");
+    if (params.limit != null) qs.set("limit", String(params.limit));
+    if (params.offset != null) qs.set("offset", String(params.offset));
+    return request<KeyPageCompliance>(
+      getWorkspaceSlug(),
+      `/insights/key-pages?${qs.toString()}`,
+    );
+  },
+  getKeyPageSettings: () =>
+    request<KeyPageSettings>(getWorkspaceSlug(), "/insights/key-page-settings"),
+  saveKeyPageSettings: (body: KeyPageSettingsUpdate) =>
+    request<KeyPageSettings>(getWorkspaceSlug(), "/insights/key-page-settings", {
+      method: "PUT",
+      body: JSON.stringify(body),
+    }),
+  getPageAnalytics: (documentId: string, params?: InsightsOverviewParams) => {
+    const qs = new URLSearchParams();
+    if (params?.from && params?.to) {
+      qs.set("from", params.from);
+      qs.set("to", params.to);
+    } else if (params?.days != null) {
+      qs.set("days", String(params.days));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{
+      data: PageAnalytics[];
+      rangeDays?: number;
+      rangeFrom?: string;
+      rangeTo?: string;
+      rangeCustom?: boolean;
+      lifetime?: boolean;
+    }>(getWorkspaceSlug(), `/insights/pages/${documentId}${suffix}`);
+  },
+  getDocumentVisitors: (documentId: string, params?: InsightsOverviewParams) => {
+    const qs = new URLSearchParams();
+    if (params?.from && params?.to) {
+      qs.set("from", params.from);
+      qs.set("to", params.to);
+    } else if (params?.days != null) {
+      qs.set("days", String(params.days));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<{
+      data: VisitorSummary[];
+      rangeDays?: number;
+      rangeFrom?: string;
+      rangeTo?: string;
+      rangeCustom?: boolean;
+      lifetime?: boolean;
+    }>(getWorkspaceSlug(), `/insights/documents/${documentId}/visitors${suffix}`);
+  },
+  getDocumentReadingFunnel: (documentId: string, params?: InsightsOverviewParams) => {
+    const qs = new URLSearchParams();
+    if (params?.from && params?.to) {
+      qs.set("from", params.from);
+      qs.set("to", params.to);
+    } else if (params?.days != null) {
+      qs.set("days", String(params.days));
+    }
+    const suffix = qs.toString() ? `?${qs.toString()}` : "";
+    return request<DocumentReadingFunnel>(
+      getWorkspaceSlug(),
+      `/insights/documents/${documentId}/funnel${suffix}`,
+    );
+  },
+  getDocumentReadingSessions: (
+    documentId: string,
+    limit = 40,
+    params?: InsightsOverviewParams,
+  ) => {
+    const qs = new URLSearchParams();
+    qs.set("limit", String(limit));
+    if (params?.from && params?.to) {
+      qs.set("from", params.from);
+      qs.set("to", params.to);
+    } else if (params?.days != null) {
+      qs.set("days", String(params.days));
+    }
+    return request<DocumentReadingSessions>(
+      getWorkspaceSlug(),
+      `/insights/documents/${documentId}/sessions?${qs.toString()}`,
+    );
+  },
+  getLinkHeatScore: (linkId: string, circle: "founder" | "investor_ir" | "sales" = "founder") =>
+    request<LinkHeatScore>(
+      getWorkspaceSlug(),
+      `/analytics/links/${linkId}/score?circle=${encodeURIComponent(circle)}`,
     ),
   getSuggestions: () =>
     request<{ data: Suggestion[] }>(getWorkspaceSlug(), "/insights/suggestions"),
+  /** Dismiss a workspace suggestion (link-scoped backend route). */
+  dismissSuggestion: (linkId: string, suggestionId: string) =>
+    request<void>(
+      getWorkspaceSlug(),
+      `/analytics/links/${linkId}/suggestions/${suggestionId}/dismiss`,
+      { method: "POST" },
+    ),
+  /** Snooze a workspace suggestion (1d / 3d / 7d). Hides until snoozed_until; mirrors radar action snooze. */
+  snoozeSuggestion: (suggestionId: string, hours: 24 | 72 | 168 = 24) =>
+    request<{ id: string; snoozed_until?: string }>(
+      getWorkspaceSlug(),
+      `/insights/suggestions/${suggestionId}/snooze`,
+      { method: "POST", body: JSON.stringify({ hours }) },
+    ),
 
   getWorkspaceMembers: () =>
     request<{ data: WorkspaceMember[] }>(getWorkspaceSlug(), "/members"),
@@ -1557,6 +2007,39 @@ export const api = {
   disconnectHubSpot: () =>
     request<{ code: string; message: string }>(getWorkspaceSlug(), "/integrations/hubspot/disconnect", {
       method: "POST",
+    }),
+
+  getOutboundWebhook: async (): Promise<OutboundWebhookConfig> => {
+    const backend = await request<BackendOutboundWebhook>(
+      getWorkspaceSlug(),
+      "/integrations/webhook",
+    );
+    return toOutboundWebhookConfig(backend);
+  },
+  saveOutboundWebhook: async (input: {
+    url: string;
+    enabled: boolean;
+    eventTypes?: string[];
+    rotateSecret?: boolean;
+  }): Promise<OutboundWebhookConfig> => {
+    const backend = await request<BackendOutboundWebhook>(
+      getWorkspaceSlug(),
+      "/integrations/webhook",
+      {
+        method: "PUT",
+        body: JSON.stringify({
+          url: input.url,
+          enabled: input.enabled,
+          event_types: input.eventTypes,
+          rotate_secret: input.rotateSecret ?? false,
+        }),
+      },
+    );
+    return toOutboundWebhookConfig(backend);
+  },
+  deleteOutboundWebhook: () =>
+    request<{ code: string; message: string }>(getWorkspaceSlug(), "/integrations/webhook", {
+      method: "DELETE",
     }),
 
   getSecuritySettings: () => request<SecuritySettings>(getWorkspaceSlug(), "/security"),

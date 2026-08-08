@@ -17,10 +17,12 @@ import type {
   RiskAlert,
   Signal,
   Suggestion,
+  VisitorSummary,
   Workspace,
   WorkspaceMember,
   WorkspaceSettings,
 } from "@/types";
+import { countLinksByHeatLevel, syncMockLinkHeatLevels } from "./mockHeat";
 
 export const mockWorkspaces: Workspace[] = [
   { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name" },
@@ -97,6 +99,19 @@ export const mockDocuments: Document[] = [
     category: "agreement",
     createdAt: "2026-06-01T09:00:00Z",
     updatedAt: "2026-06-01T09:05:00Z",
+  },
+  {
+    id: "doc_deal_1",
+    title: "Data Room Index",
+    sourceType: "pdf",
+    fileName: "Data Room Index.pdf",
+    fileType: "pdf",
+    fileSize: 180_000,
+    pageCount: 3,
+    status: "ready",
+    category: "deal_room",
+    createdAt: "2026-06-18T10:00:00Z",
+    updatedAt: "2026-06-18T10:05:00Z",
   },
 ];
 
@@ -495,6 +510,41 @@ export const mockAccessLogs: AccessLog[] = [
   },
 ];
 
+export const mockDocumentVisitors: Record<string, VisitorSummary[]> = {
+  doc_1: [
+    {
+      visitorId: "vis_1",
+      visitorEmail: "sarah.chen@horizon.vc",
+      pageViewCount: 12,
+      avgDurationSeconds: 42,
+      lastSeenAt: "2026-06-20T18:42:00Z",
+    },
+    {
+      visitorId: "vis_2",
+      visitorEmail: "marcus@boldstart.vc",
+      pageViewCount: 8,
+      avgDurationSeconds: 28,
+      lastSeenAt: "2026-06-20T16:15:00Z",
+    },
+    {
+      visitorId: "vis_anon_1",
+      visitorEmail: "",
+      pageViewCount: 2,
+      avgDurationSeconds: 9,
+      lastSeenAt: "2026-06-19T11:00:00Z",
+    },
+  ],
+  doc_deal_1: [
+    {
+      visitorId: "vis_3",
+      visitorEmail: "wei.lp@futurefund.com",
+      pageViewCount: 5,
+      avgDurationSeconds: 35,
+      lastSeenAt: "2026-06-19T20:30:00Z",
+    },
+  ],
+};
+
 export const mockPageAnalytics: Record<string, PageAnalytics[]> = {
   doc_1: [
     { pageNumber: 1, title: "Cover", avgDurationSeconds: 18, exitRate: 0.05, viewCount: 47 },
@@ -517,6 +567,9 @@ export const mockPageAnalytics: Record<string, PageAnalytics[]> = {
     { pageNumber: 18, title: "Appendix", avgDurationSeconds: 15, exitRate: 0.12, viewCount: 24 },
   ],
 };
+
+// Align static mock heatLevel with founder heat.Compute (same thresholds as API).
+syncMockLinkHeatLevels(mockLinks, mockPageAnalytics);
 
 export const mockSuggestions: Suggestion[] = [
   {
@@ -1056,10 +1109,13 @@ const mockRecentActivities = [
 ];
 
 export function getMockDashboardStats() {
+  // Tier counts come from link heat.Compute levels — never from heatAlerts length
+  // (alerts are visitor-scoped notifications and must not inflate dashboard KPIs).
+  const tier = countLinksByHeatLevel(mockLinks);
   return {
-    hotCount: mockHeatAlerts.filter((a) => a.heatLevel === "hot").length,
-    warmCount: mockHeatAlerts.filter((a) => a.heatLevel === "warm").length,
-    coldCount: mockLinks.filter((l) => l.heatLevel === "cold").length,
+    hotCount: tier.hot,
+    warmCount: tier.warm,
+    coldCount: tier.cold,
     weeklyVisitors: 12,
     pendingQuestions: 2,
     recentDocuments: mockDocuments.slice(0, 5),

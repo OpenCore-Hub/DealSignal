@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { actionNavigatePath, isFormalAskReviewAction } from "./actionNavigation";
+import {
+  actionNavigatePath,
+  formalAskSuggestionPath,
+  isFormalAskReviewAction,
+} from "./actionNavigation";
 
 describe("actionNavigatePath", () => {
   it("routes document share access requests to Document Library Share only", () => {
@@ -78,7 +82,29 @@ describe("actionNavigatePath", () => {
     ).toBe("/acme/deal-rooms/room-1?tab=qa&linkId=link-room&askInbox=formal_queue");
   });
 
-  it("refuses legacy link_question rows without a deal-room target", () => {
+  it("routes document-library Ask todos to link detail Ask inbox", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "link_question",
+        sourceId: "turn-1",
+        targetId: "link-lib",
+        actionType: "answer",
+      }),
+    ).toBe("/acme/links/link-lib?askInbox=needs_host");
+  });
+
+  it("routes document-library formal review todos to formal queue", () => {
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "link_question",
+        sourceId: "turn-formal",
+        targetId: "link-lib",
+        actionType: "review",
+      }),
+    ).toBe("/acme/links/link-lib?askInbox=formal_queue");
+  });
+
+  it("refuses link_question rows without targetId", () => {
     expect(
       actionNavigatePath("acme", {
         sourceType: "link_question",
@@ -101,7 +127,7 @@ describe("actionNavigatePath", () => {
 });
 
 describe("isFormalAskReviewAction", () => {
-  it("matches deal-room formal review todos only", () => {
+  it("matches formal review todos on deal-room and library Ask", () => {
     expect(
       isFormalAskReviewAction({ sourceType: "deal_room_link_question", actionType: "review" }),
     ).toBe(true);
@@ -109,7 +135,25 @@ describe("isFormalAskReviewAction", () => {
       isFormalAskReviewAction({ sourceType: "deal_room_link_question", actionType: "answer" }),
     ).toBe(false);
     expect(isFormalAskReviewAction({ sourceType: "link_question", actionType: "review" })).toBe(
-      false,
+      true,
     );
+  });
+});
+
+describe("formalAskSuggestionPath", () => {
+  it("routes deal-room Formal Ask suggestions to room QA formal queue", () => {
+    expect(
+      formalAskSuggestionPath("acme", { linkId: "link-room", dealRoomId: "room-1" }),
+    ).toBe("/acme/deal-rooms/room-1?tab=qa&linkId=link-room&askInbox=formal_queue");
+  });
+
+  it("routes library Formal Ask suggestions to link Ask formal queue", () => {
+    expect(formalAskSuggestionPath("acme", { linkId: "link-lib" })).toBe(
+      "/acme/links/link-lib?askInbox=formal_queue",
+    );
+  });
+
+  it("refuses empty linkId", () => {
+    expect(formalAskSuggestionPath("acme", { linkId: "" })).toBeNull();
   });
 });
