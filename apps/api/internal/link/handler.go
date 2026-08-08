@@ -22,12 +22,12 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/analytics"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
@@ -130,8 +130,9 @@ func (h *Handler) visitorAskLimits() visitorask.Limits {
 		return visitorask.Limits{}
 	}
 	return visitorask.Limits{
-		AskAIRPM:        h.cfg.VisitorAskAIRPM,
-		AskAIDailyLimit: h.cfg.VisitorAskAIDailyLimit,
+		AskAIRPM:            h.cfg.VisitorAskAIRPM,
+		AskAIDailyLimit:     h.cfg.VisitorAskAIDailyLimit,
+		AskFormalDailyLimit: h.cfg.VisitorAskFormalDailyLimit,
 	}
 }
 
@@ -633,6 +634,11 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 			c.JSON(http.StatusConflict, gin.H{"code": "document_not_ready", "message": httpx.SafeMessage("document_not_ready", err)})
 		case errors.Is(err, ErrDuplicateName):
 			c.JSON(http.StatusConflict, gin.H{"code": "duplicate_name", "message": httpx.SafeMessage("duplicate_name", err)})
+		case errors.Is(err, ErrAskFormalNotEntitled):
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    "formal_not_entitled",
+				"message": "formal q&a is not available on this plan",
+			})
 		case errors.Is(err, ErrRoomSecurityFloor), errors.Is(err, ErrInvalidPermission),
 			errors.Is(err, ErrInvalidInput), errors.Is(err, ErrInvalidPassword),
 			errors.Is(err, ErrRequiresPassword), errors.Is(err, ErrConflictingAccessRule):
@@ -932,6 +938,7 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 // Query params:
 //   - scope=document (default): Document Library inbox only
 //   - scope=deal_room&deal_room_id=: one deal-room share inbox only
+//
 // There is no unscoped "all" mode — that would mix applicant PII across surfaces.
 func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
 	workspaceID := middleware.WorkspaceIDFrom(c)
@@ -2106,6 +2113,10 @@ func (h *Handler) PublicDownloadURL(c *gin.Context) {
 	})
 }
 
+// watermarkUTCLayout is the world-unified clock shown on dynamic watermarks
+// (always UTC; never server local timezone). Keep in sync with the web overlay.
+const watermarkUTCLayout = "2006-01-02 15:04:05 UTC"
+
 // watermarkTextFor builds a visible watermark string for the current visitor.
 // It combines the visitor email, the current UTC time, and a short hash of the
 // IP address so the watermark both identifies the viewer and discourages leaks.
@@ -2117,7 +2128,7 @@ func (h *Handler) watermarkTextFor(email, ip string) string {
 	if ip != "" {
 		ipHash = compliance.ShortHashIP(h.cfg.IPHashKey, ip, 8)
 	}
-	return fmt.Sprintf("%s | %s | IP:%s", email, time.Now().UTC().Format(time.RFC3339), ipHash)
+	return fmt.Sprintf("%s | %s | IP:%s", email, time.Now().UTC().Format(watermarkUTCLayout), ipHash)
 }
 
 // signResourceURL returns an HMAC-signed proxy URL for a storage resource.
@@ -3268,6 +3279,7 @@ func (h *Handler) linkAskPolicyPayload(ctx context.Context, link db.Link) (gin.H
 		"ask_ai_monthly_limit":  quota.Limit,
 		"ask_ai_quota_exceeded": askAIQuotaExceededView(quota),
 		"ask_ai_entitled":       h.service.checkAskAIEntitlement(ctx, link) == nil,
+		"formal_entitled":       h.service.isFormalAskEntitled(ctx, link),
 	}, nil
 }
 
@@ -3312,6 +3324,13 @@ func (h *Handler) PatchLinkAskPolicy(c *gin.Context) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})
 			return
 		}
+		if errors.Is(err, ErrAskFormalNotEntitled) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    "formal_not_entitled",
+				"message": "formal q&a is not available on this plan",
+			})
+			return
+		}
 		if errors.Is(err, ErrInvalidInput) {
 			code := "invalid_input"
 			if errors.Is(err, ErrAskAINotEntitled) {
@@ -3352,9 +3371,12 @@ func writeAskHostError(c *gin.Context, err error) {
 		c.JSON(http.StatusConflict, gin.H{"code": "ask_turn_not_formal_pending", "message": "ask turn is not in formal review queue"})
 	case errors.Is(err, ErrAskTurnFormalAnswerReq):
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "formal answer is required"})
+	case errors.Is(err, ErrAskFormalNotEntitled):
+		c.JSON(http.StatusForbidden, gin.H{"code": "formal_not_entitled", "message": "formal q&a is not available on this plan"})
 	case errors.Is(err, ErrNotFoundInWorkspace):
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "not found"})
 	default:
+		logger.ErrorCtx(c.Request.Context(), "ask host handler unexpected error", err)
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 	}
 }
@@ -3550,6 +3572,13 @@ func (h *Handler) PublicCreateAsk(c *gin.Context) {
 	)
 	if err != nil {
 		if writeAskValidationError(c, err) {
+			return
+		}
+		if errors.Is(err, ErrAskFormalNotEntitled) {
+			c.JSON(http.StatusForbidden, gin.H{
+				"code":    "formal_not_entitled",
+				"message": "formal q&a is not available on this plan",
+			})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})

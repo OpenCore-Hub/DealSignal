@@ -1,8 +1,11 @@
 import { useTranslation } from "react-i18next";
+import { pageAspectRatioCSS } from "@/lib/projectPageGrid";
 import { cn } from "@/lib/utils";
 
 export interface PublicThumbnailPage {
   pageNumber: number;
+  width?: number;
+  height?: number;
 }
 
 interface PublicViewerThumbnailRailProps {
@@ -37,6 +40,7 @@ export function PublicViewerThumbnailRail({
         const isActive = currentPage === p.pageNumber;
         const previewUrl = thumbnailUrls[p.pageNumber];
         const pageLabel = t("viewer.pageLabelShort", { pageNumber: p.pageNumber });
+        const aspectRatio = pageAspectRatioCSS(p.width, p.height);
         return (
           <button
             key={p.pageNumber}
@@ -53,9 +57,11 @@ export function PublicViewerThumbnailRail({
           >
             <div
               className={cn(
-                "relative aspect-[3/4] w-full overflow-hidden rounded-lg border bg-neutral-100 shadow-sm transition-transform duration-200 group-active:scale-[0.98] dark:bg-neutral-900",
+                "relative w-full overflow-hidden rounded-lg border bg-neutral-100 shadow-sm transition-transform duration-200 group-active:scale-[0.98] dark:bg-neutral-900",
                 isActive ? "border-emerald-500/40" : "border-border/70",
               )}
+              style={{ aspectRatio }}
+              data-testid="public-thumbnail-frame"
             >
               {previewUrl ? (
                 <img

@@ -1,9 +1,13 @@
 import { describe, expect, it } from "vitest";
 import {
+  DEFAULT_PAGE_ASPECT_RATIO,
+  DEFAULT_PAGE_ASPECT_RATIO_CSS,
   PAGE_GRID_VIRTUALIZE_THRESHOLD,
   buildPageGridItems,
   columnCountForWidth,
   estimatePageCardRowHeight,
+  pageAspectRatio,
+  pageAspectRatioCSS,
   pageGridRowCount,
   shouldVirtualizePageGrid,
 } from "./projectPageGrid";
@@ -40,5 +44,18 @@ describe("projectPageGrid", () => {
     expect(estimatePageCardRowHeight(720, 4)).toBeGreaterThan(100);
     expect(pageGridRowCount(50, 5)).toBe(10);
     expect(pageGridRowCount(0, 5)).toBe(0);
+  });
+
+  it("shrinks row height for landscape page ratios", () => {
+    const portrait = estimatePageCardRowHeight(720, 4, DEFAULT_PAGE_ASPECT_RATIO);
+    const landscape = estimatePageCardRowHeight(720, 4, 420 / 297);
+    expect(landscape).toBeLessThan(portrait);
+  });
+
+  it("derives page aspect helpers from dimensions", () => {
+    expect(pageAspectRatio(420, 297)).toBeCloseTo(420 / 297);
+    expect(pageAspectRatio(0, 100)).toBe(DEFAULT_PAGE_ASPECT_RATIO);
+    expect(pageAspectRatioCSS(420, 297)).toBe("420 / 297");
+    expect(pageAspectRatioCSS(undefined, 10)).toBe(DEFAULT_PAGE_ASPECT_RATIO_CSS);
   });
 });

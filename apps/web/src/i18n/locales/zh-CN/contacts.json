@@ -23,21 +23,24 @@
     "tabs": {
       "overview": "概览",
       "timeline": "活动时间线",
-      "documents": "浏览文档",
-      "notes": "备注"
+      "documents": "浏览文档"
     },
     "recentActivity": "最近活动摘要",
+    "engagementTrend": "活跃趋势",
+    "noEngagement": {
+      "description": "联系人通过分享链接产生打开/翻页后，这里会显示每日活跃量。"
+    },
     "noActivities": {
       "title": "暂无活动记录",
       "description": "当联系人访问文档时，这里会显示最近活动。"
     },
     "viewedDocuments": "浏览过的文档",
+    "untitledDocument": "未命名文档",
     "noDocuments": {
       "title": "暂无浏览记录",
       "description": "联系人尚未通过链接浏览任何文档。"
     },
-    "view": "查看",
-    "notesHint": "暂无备注。点击右上角“写邮件”即可记录沟通要点。"
+    "view": "查看"
   },
   "activity": {
     "open": "打开文档",
@@ -47,7 +50,8 @@
     "openShort": "打开",
     "pageViewShort": "查看第 {{page}} 页",
     "revisitShort": "再次访问",
-    "downloadShort": "下载"
+    "downloadShort": "下载",
+    "unknown": "活动"
   },
   "new": {
     "title": "新建联系人",
@@ -62,10 +66,19 @@
     "createFailed": "创建联系人失败。",
     "create": "创建联系人"
   },
+  "selection": {
+    "selectAll": "全选",
+    "clear": "清除",
+    "selectedCount_one": "已选 {{count}} 人",
+    "selectedCount_other": "已选 {{count}} 人",
+    "selectContact": "选择 {{name}}"
+  },
   "marketingBatch": {
     "trigger": "批量发邮件",
+    "triggerWithCount": "批量发邮件（{{count}}）",
+    "noneSelected": "请先勾选一位或多位联系人",
     "title": "批量营销邮件",
-    "description": "向当前 {{count}} 位联系人发送营销邮件。",
+    "description": "向已选的 {{count}} 位联系人发送营销邮件。",
     "subject": "邮件主题",
     "subjectPlaceholder": "输入主题",
     "body": "邮件正文",
@@ -75,6 +88,9 @@
     "send": "发送",
     "sending": "发送中...",
     "result": "已发送 {{sent}} 封，失败 {{failed}} 封",
+    "failedRecipients": "失败收件人：{{emails}}",
+    "recipientsNotInWorkspace": "部分邮箱不属于当前工作区联系人，请刷新列表后重试。",
+    "tooManyRecipients": "单次发送人数过多，请减少勾选后重试。",
     "error": "发送失败，请重试。"
   }
 }

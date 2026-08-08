@@ -72,6 +72,8 @@ interface ParsedCookie {
 
 // ── Cookie jar ────────────────────────────────────────────────────
 let cookieJar: ParsedCookie[] = [];
+/** publicToken → X-Link-Session token (mirrors browser PublicViewer session). */
+const linkSessionByToken = new Map<string, string>();
 
 export function getCookieJar(): string[] {
   return cookieJar.map((c) => `${c.name}=${c.value}`);
@@ -79,6 +81,28 @@ export function getCookieJar(): string[] {
 
 export function clearCookieJar(): void {
   cookieJar = [];
+  linkSessionByToken.clear();
+}
+
+function rememberLinkSession(publicToken: string, sessionToken: string | undefined | null): void {
+  const token = publicToken.trim();
+  const session = (sessionToken ?? "").trim();
+  if (!token || !session) return;
+  linkSessionByToken.set(token, session);
+}
+
+function linkSessionForPath(input: string): string | undefined {
+  const match = input.match(/\/api\/v1\/public\/links\/([^/?#]+)/);
+  if (!match?.[1]) return undefined;
+  return linkSessionByToken.get(match[1]);
+}
+
+function captureLinkSessionRefresh(input: string, res: Response): void {
+  const refreshed = res.headers.get("X-Link-Session-Refresh");
+  if (!refreshed) return;
+  const match = input.match(/\/api\/v1\/public\/links\/([^/?#]+)/);
+  if (!match?.[1]) return;
+  rememberLinkSession(match[1], refreshed);
 }
 
 function parseSameSite(
@@ -190,12 +214,20 @@ export async function apiFetch(input: string, init?: RequestInit): Promise<Respo
     headers.set("Cookie", cookieHeader);
   }
 
+  if (!headers.has("X-Link-Session")) {
+    const linkSession = linkSessionForPath(input);
+    if (linkSession) {
+      headers.set("X-Link-Session", linkSession);
+    }
+  }
+
   const res = await fetch(`${API_BASE}${input}`, {
     ...init,
     headers,
   });
 
   updateJarFromResponse(res);
+  captureLinkSessionRefresh(input, res);
   return res;
 }
 
@@ -674,6 +706,8 @@ export interface OwnerAskTurn {
   lane: string;
   status: string;
   visitor_email?: string;
+  pinned_faq_at?: string;
+  formal_status?: string;
 }
 
 export interface DashboardActionItem {
@@ -729,16 +763,24 @@ export async function seedDealRoomLink(
 export async function accessPublicLinkApi(
   publicToken: string,
   email = `visitor-${Date.now()}@example.com`,
-): Promise<{ visitorId: string; email: string }> {
+): Promise<{ visitorId: string; email: string; sessionToken: string }> {
   const res = await apiFetch(`/api/v1/public/links/${publicToken}`, {
     method: "POST",
     body: JSON.stringify({ email }),
   });
   if (!res.ok) throw new Error(`public access failed: ${res.status} ${await res.text()}`);
-  const body = (await res.json()) as { visitorId?: string; visitor_id?: string };
+  const body = (await res.json()) as {
+    visitorId?: string;
+    visitor_id?: string;
+    sessionToken?: string;
+    session_token?: string;
+  };
   const visitorId = body.visitorId ?? body.visitor_id ?? "";
   if (!visitorId) throw new Error("public access missing visitorId");
-  return { visitorId, email };
+  const sessionToken = body.sessionToken ?? body.session_token ?? "";
+  if (!sessionToken) throw new Error("public access missing sessionToken");
+  rememberLinkSession(publicToken, sessionToken);
+  return { visitorId, email, sessionToken };
 }
 
 export async function submitPublicAsk(
@@ -915,6 +957,86 @@ export async function answerOwnerAskTurn(
   );
   if (!res.ok) throw new Error(`host answer failed: ${res.status} ${await res.text()}`);
   const body = (await res.json()) as { data: OwnerAskTurn };
+  return body.data;
+}
+
+interface PublicAskFAQ {
+  id: string;
+  question: string;
+  answer: string;
+  pinned_at?: string;
+}
+
+export async function pinOwnerAskTurnFAQ(
+  workspaceSlug: string,
+  linkId: string,
+  turnId: string,
+): Promise<OwnerAskTurn> {
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/links/${linkId}/ask/${turnId}/pin-faq`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`pin FAQ failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: OwnerAskTurn };
+  return body.data;
+}
+
+export async function unpinOwnerAskTurnFAQ(
+  workspaceSlug: string,
+  linkId: string,
+  turnId: string,
+): Promise<OwnerAskTurn> {
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/links/${linkId}/ask/${turnId}/unpin-faq`,
+    { method: "POST" },
+  );
+  if (!res.ok) throw new Error(`unpin FAQ failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: OwnerAskTurn };
+  return body.data;
+}
+
+export async function listPublicAskFAQs(publicToken: string): Promise<PublicAskFAQ[]> {
+  const res = await apiFetch(`/api/v1/public/links/${publicToken}/ask/faq`);
+  if (!res.ok) throw new Error(`public ask FAQ failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: PublicAskFAQ[] };
+  return body.data ?? [];
+}
+
+interface PublicFormalAsk {
+  id: string;
+  question: string;
+  answer: string;
+  published_at?: string;
+  visitor_email?: string;
+}
+
+export async function listPublicFormalAsk(publicToken: string): Promise<PublicFormalAsk[]> {
+  const res = await apiFetch(`/api/v1/public/links/${publicToken}/ask/formal`);
+  if (!res.ok) throw new Error(`public formal ask failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: PublicFormalAsk[] };
+  return body.data ?? [];
+}
+
+export async function publishFormalAskTurn(
+  workspaceSlug: string,
+  linkId: string,
+  turnId: string,
+  answer: string,
+  opts?: { publishAt?: string; anonymize?: boolean },
+): Promise<OwnerAskTurn> {
+  const res = await apiFetch(
+    `/api/workspaces/${workspaceSlug}/links/${linkId}/ask/${turnId}/formal-publish`,
+    {
+      method: "PATCH",
+      body: JSON.stringify({
+        answer,
+        ...(opts?.publishAt ? { publish_at: opts.publishAt } : {}),
+        ...(typeof opts?.anonymize === "boolean" ? { anonymize: opts.anonymize } : {}),
+      }),
+    },
+  );
+  if (!res.ok) throw new Error(`formal publish failed: ${res.status} ${await res.text()}`);
+  const body = (await res.json()) as { data: OwnerAskTurn & { formal_status?: string } };
   return body.data;
 }
 

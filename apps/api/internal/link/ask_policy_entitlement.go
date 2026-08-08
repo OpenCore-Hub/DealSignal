@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 )
 
 // checkAskAIEntitlement verifies workspace infra and deal-room corpus are ready for AI lane.
@@ -29,4 +30,41 @@ func (s *Service) dealRoomAskAIReady(ctx context.Context, link db.Link) bool {
 		return false
 	}
 	return s.visitorAskKnowledge.RoomCorpusAskReady(ctx, link.WorkspaceID, link.DealRoomID)
+}
+
+// FormalAskEntitlement reports whether a workspace tenant may use the Formal
+// Q&A workflow. It is wired from the control plane in production and fails
+// closed: an absent checker or an entitlement error denies Formal mode.
+type FormalAskEntitlement interface {
+	IsFormalAskEntitled(ctx context.Context, tenantSlug string) (bool, error)
+}
+
+// SetFormalAskEntitlement wires the control-plane entitlement checker.
+func (s *Service) SetFormalAskEntitlement(e FormalAskEntitlement) {
+	if s != nil {
+		s.formalAskEntitlement = e
+	}
+}
+
+func (s *Service) isFormalAskEntitled(ctx context.Context, link db.Link) bool {
+	if s == nil || s.formalAskEntitlement == nil {
+		return false
+	}
+	tenant, err := s.queries.GetWorkspaceRagTenant(ctx, link.WorkspaceID)
+	if err != nil {
+		logger.ErrorCtx(ctx, "formal ask entitlement: load rag tenant failed",
+			err,
+			logger.Attr("workspace_id", link.WorkspaceID.String()),
+		)
+		return false
+	}
+	ok, err := s.formalAskEntitlement.IsFormalAskEntitled(ctx, tenant.ExternalTenantSlug)
+	if err != nil {
+		logger.ErrorCtx(ctx, "formal ask entitlement check failed",
+			err,
+			logger.Attr("tenant_slug", tenant.ExternalTenantSlug),
+		)
+		return false
+	}
+	return ok
 }

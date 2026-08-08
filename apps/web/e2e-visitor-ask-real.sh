@@ -40,6 +40,7 @@ if [[ "$RUN_UI" == "true" ]]; then
     e2e/visitor-ask-owner-reply-real.spec.ts \
     e2e/visitor-ask-dashboard-nav-real.spec.ts \
     e2e/visitor-ask-engage-policy-real.spec.ts \
+    e2e/visitor-ask-formal-ui-real.spec.ts \
     --reporter=list
 fi
 

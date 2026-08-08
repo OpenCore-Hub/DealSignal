@@ -107,10 +107,13 @@ describe("ContactSelector", () => {
     fireEvent.click(screen.getByTestId("contact-add-submit"));
 
     await waitFor(() => {
-      expect(createContactMock).toHaveBeenCalledWith({
-        email: "bob@fund.com",
-        name: "Bob",
-      });
+      expect(createContactMock).toHaveBeenCalledWith(
+        {
+          email: "bob@fund.com",
+          name: "Bob",
+        },
+        "acme",
+      );
     });
     await waitFor(() => {
       expect(onChange).toHaveBeenCalledWith(["c-new"]);

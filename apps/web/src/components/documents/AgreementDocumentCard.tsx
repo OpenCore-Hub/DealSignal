@@ -6,6 +6,7 @@ import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/formatters";
+import { pageAspectRatioCSS } from "@/lib/projectPageGrid";
 import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import type { DocumentRow } from "./DocumentsColumns";
 
@@ -34,6 +35,7 @@ export function AgreementDocumentCard({
   }, [doc.id, previewReady]);
 
   const imageUrl = signedUrlData?.image_url;
+  const pageAspect = pageAspectRatioCSS(signedUrlData?.width, signedUrlData?.height);
 
   return (
     <div
@@ -56,12 +58,13 @@ export function AgreementDocumentCard({
     >
       <div
         className={cn(
-          "relative aspect-[3/4] overflow-hidden rounded-xl border border-border/80 bg-muted/40",
+          "relative overflow-hidden rounded-xl border border-border/80 bg-muted/40",
           "p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
           "transition-[border-color,box-shadow,background-color] duration-200",
           "group-hover:border-border group-hover:bg-muted/55",
           "group-hover:shadow-[0_8px_24px_rgba(15,23,42,0.08)]",
         )}
+        style={{ aspectRatio: pageAspect }}
       >
         <div className="relative h-full w-full overflow-hidden rounded-md bg-background shadow-sm ring-1 ring-black/[0.06]">
           {previewReady && loading ? (

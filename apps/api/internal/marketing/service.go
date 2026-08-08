@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
@@ -12,6 +13,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// MaxBatchRecipients caps a single marketing send to limit abuse and provider load.
+const MaxBatchRecipients = 200
 
 func pgUUIDFromString(id string) pgtype.UUID {
 	if id == "" {
@@ -29,7 +33,21 @@ var (
 	ErrNoRecipients = errors.New("at least one recipient is required")
 	// ErrSubjectRequired is returned when the subject is empty.
 	ErrSubjectRequired = errors.New("subject is required")
+	// ErrTooManyRecipients is returned when the batch exceeds MaxBatchRecipients.
+	ErrTooManyRecipients = errors.New("too many recipients")
+	// ErrInvalidWorkspace is returned when workspace_id is not a UUID.
+	ErrInvalidWorkspace = errors.New("invalid workspace")
 )
+
+// ErrRecipientsNotInWorkspace is returned when one or more recipients are not
+// contacts in the target workspace (prevents arbitrary-address spam).
+type ErrRecipientsNotInWorkspace struct {
+	Unknown []string
+}
+
+func (e *ErrRecipientsNotInWorkspace) Error() string {
+	return "one or more recipients are not workspace contacts"
+}
 
 // SendBatchRequest is the payload for sending a bulk marketing email.
 type SendBatchRequest struct {
@@ -63,6 +81,7 @@ type SendBatchResult struct {
 type Querier interface {
 	CreateEmailLog(ctx context.Context, arg db.CreateEmailLogParams) (db.EmailLog, error)
 	UpdateEmailLogStatus(ctx context.Context, arg db.UpdateEmailLogStatusParams) error
+	ListContactsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.Contact, error)
 }
 
 // Service orchestrates bulk marketing email delivery.
@@ -86,13 +105,54 @@ type recipientSend struct {
 
 // SendBatch delivers a marketing email to each recipient.
 // It creates an email_log row per recipient so opens and clicks can be tracked.
+// Recipients must already exist as contacts in the workspace (fail closed).
 func (s *Service) SendBatch(ctx context.Context, workspaceID string, req SendBatchRequest) (SendBatchResult, error) {
 	if len(req.Recipients) == 0 {
 		return SendBatchResult{}, ErrNoRecipients
 	}
-	if req.Subject == "" {
+	if strings.TrimSpace(req.Subject) == "" {
 		return SendBatchResult{}, ErrSubjectRequired
 	}
+	if len(req.Recipients) > MaxBatchRecipients {
+		return SendBatchResult{}, ErrTooManyRecipients
+	}
+
+	wsUUID, err := parseWorkspaceUUID(workspaceID)
+	if err != nil {
+		return SendBatchResult{}, ErrInvalidWorkspace
+	}
+	allowed, err := s.workspaceContactEmails(ctx, wsUUID)
+	if err != nil {
+		return SendBatchResult{}, fmt.Errorf("list workspace contacts: %w", err)
+	}
+
+	// Deduplicate while preserving request order; reject unknowns before any send.
+	seen := make(map[string]struct{}, len(req.Recipients))
+	normalized := make([]string, 0, len(req.Recipients))
+	unknown := make([]string, 0)
+	for _, raw := range req.Recipients {
+		email := normalizeEmail(raw)
+		if email == "" {
+			continue
+		}
+		if _, ok := seen[email]; ok {
+			continue
+		}
+		seen[email] = struct{}{}
+		if _, ok := allowed[email]; !ok {
+			unknown = append(unknown, email)
+			continue
+		}
+		normalized = append(normalized, email)
+	}
+	if len(unknown) > 0 {
+		return SendBatchResult{}, &ErrRecipientsNotInWorkspace{Unknown: unknown}
+	}
+	if len(normalized) == 0 {
+		return SendBatchResult{}, ErrNoRecipients
+	}
+	req.Recipients = normalized
+	req.Subject = strings.TrimSpace(req.Subject)
 
 	templateVars := make(map[string]string, len(req.TemplateVariables)+6)
 	maps.Copy(templateVars, req.TemplateVariables)
@@ -297,12 +357,33 @@ func (s *Service) sendBatchIndividually(ctx context.Context, result SendBatchRes
 	return result
 }
 
+func (s *Service) workspaceContactEmails(ctx context.Context, workspaceID pgtype.UUID) (map[string]struct{}, error) {
+	rows, err := s.queries.ListContactsByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]struct{}, len(rows))
+	for _, c := range rows {
+		if !c.Email.Valid {
+			continue
+		}
+		email := normalizeEmail(c.Email.String)
+		if email == "" {
+			continue
+		}
+		out[email] = struct{}{}
+	}
+	return out, nil
+}
+
+func parseWorkspaceUUID(workspaceID string) (pgtype.UUID, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(workspaceID))
+	if err != nil {
+		return pgtype.UUID{}, err
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
+}
+
 func normalizeEmail(email string) string {
-	for len(email) > 0 && (email[0] == ' ' || email[0] == '\t') {
-		email = email[1:]
-	}
-	for len(email) > 0 && (email[len(email)-1] == ' ' || email[len(email)-1] == '\t') {
-		email = email[:len(email)-1]
-	}
-	return email
+	return strings.ToLower(strings.TrimSpace(email))
 }

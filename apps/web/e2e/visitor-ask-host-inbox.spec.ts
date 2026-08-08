@@ -6,6 +6,7 @@ import {
   setupAuthenticatedPage,
   attachDebug,
   gotoAuthenticatedWaitForApi,
+  ASK_INBOX_TITLE,
   WORKSPACE_SLUG,
 } from "./helpers";
 
@@ -19,7 +20,7 @@ test.describe("Deal room Ask inbox (MSW) — B10", () => {
       `/${WORKSPACE_SLUG}/deal-rooms/room_1?tab=qa`,
       "/deal-rooms/room_1/ask",
     );
-    await expect(page.getByText("Ask inbox")).toBeVisible({ timeout: 15000 });
+    await expect(page.getByText(ASK_INBOX_TITLE)).toBeVisible({ timeout: 15000 });
     await expect(page.getByRole("tab", { name: /Needs host/i })).toHaveAttribute(
       "aria-selected",
       "true",

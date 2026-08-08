@@ -84,8 +84,9 @@ export function ShareTab({
       {link ? (
         <div className="space-y-3">
           <div className="space-y-2">
-            <Label>{t("share.linkName")}<span className="ml-1 text-destructive">*</span></Label>
+            <Label htmlFor="link-share-name">{t("share.linkName")}<span className="ml-1 text-destructive">*</span></Label>
             <Input
+              id="link-share-name"
               value={draft.name}
               onChange={(e) => updateDraft({ name: e.target.value })}
               placeholder={t("share.linkNamePlaceholder")}
@@ -124,8 +125,9 @@ export function ShareTab({
         </div>
       ) : (
         <div className="space-y-2">
-          <Label>{t("share.linkName")}<span className="ml-1 text-destructive">*</span></Label>
+          <Label htmlFor="link-share-name">{t("share.linkName")}<span className="ml-1 text-destructive">*</span></Label>
           <Input
+            id="link-share-name"
             value={draft.name}
             onChange={(e) => updateDraft({ name: e.target.value })}
             placeholder={t("share.linkNamePlaceholder")}

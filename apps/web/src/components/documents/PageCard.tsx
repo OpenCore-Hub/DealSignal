@@ -16,6 +16,7 @@ interface PageCardProps {
   viewCount: number;
   avgDurationSeconds: number;
   exitRate?: number;
+  aspectRatio?: number;
   isSelected: boolean;
   onClick: () => void;
 }
@@ -26,6 +27,7 @@ export function PageCard({
   viewCount,
   avgDurationSeconds,
   exitRate,
+  aspectRatio,
   isSelected,
   onClick,
 }: PageCardProps) {
@@ -58,7 +60,10 @@ export function PageCard({
         }
       }}
     >
-      <div className="relative aspect-[3/4] bg-muted/40">
+      <div
+        className="relative aspect-[3/4] bg-muted/40"
+        style={aspectRatio ? { aspectRatio: String(aspectRatio) } : undefined}
+      >
         {loading ? (
           <Skeleton className="h-full w-full" />
         ) : imageUrl ? (

@@ -54,6 +54,9 @@ func (s *Service) syncDealRoomAskPolicy(
 	if link.AskAiEnabled == askAIEnabled && askModeOrDefault(link.AskMode) == mode {
 		return nil
 	}
+	if mode == AskModeFormal && !s.isFormalAskEntitled(ctx, link) {
+		return ErrAskFormalNotEntitled
+	}
 	_, err := qtx.UpdateLinkAskPolicy(ctx, db.UpdateLinkAskPolicyParams{
 		ID:                link.ID,
 		WorkspaceID:       link.WorkspaceID,
@@ -122,6 +125,9 @@ func (s *Service) UpdateLinkAskPolicy(
 			return db.Link{}, fmt.Errorf("%w: ask_ai_monthly_quota must be >= 0", ErrInvalidInput)
 		}
 		quota = pgtype.Int4{Int32: *req.AskAIMonthlyQuota, Valid: true}
+	}
+	if mode == AskModeFormal && !s.isFormalAskEntitled(ctx, existing) {
+		return db.Link{}, ErrAskFormalNotEntitled
 	}
 
 	updated, err := s.queries.UpdateLinkAskPolicy(ctx, db.UpdateLinkAskPolicyParams{

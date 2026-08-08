@@ -186,7 +186,11 @@ export function ViewerCanvas({
     <div className="flex min-h-0 flex-1 overflow-hidden">
       {isPublic ? (
         <PublicViewerThumbnailRail
-          pages={pageList.map((p) => ({ pageNumber: p.pageNumber }))}
+          pages={pageList.map((p) => ({
+            pageNumber: p.pageNumber,
+            width: p.width,
+            height: p.height,
+          }))}
           currentPage={page}
           thumbnailUrls={publicThumbnailUrls}
           onSelect={onSelectPage}

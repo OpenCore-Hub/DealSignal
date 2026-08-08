@@ -144,6 +144,7 @@ export function useVisitorAskPanel(opts: {
           if (e.code === "qa_disabled") setError(t("viewer.askDisabled"));
           else if (e.code === "rate_limit_exceeded") setError(t("viewer.askRateLimited"));
           else if (e.code === "limiter_unavailable") setError(t("viewer.askLimiterUnavailable"));
+          else if (e.code === "formal_not_entitled") setError(t("viewer.askFormalNotEntitled"));
           else setError(t("viewer.askError"));
         } else {
           setError(t("viewer.askError"));

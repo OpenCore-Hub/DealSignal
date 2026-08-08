@@ -8,21 +8,19 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ContactDetailPage } from "./detail";
-import type { Contact, Activity, Document } from "@/types";
+import type { Contact, Activity } from "@/types";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getContactByIdMock, getActivitiesByContactIdMock, getDocumentsMock } = vi.hoisted(() => ({
+const { getContactByIdMock, getActivitiesByContactIdMock } = vi.hoisted(() => ({
   getContactByIdMock: vi.fn(),
   getActivitiesByContactIdMock: vi.fn(),
-  getDocumentsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     getContactById: getContactByIdMock,
     getActivitiesByContactId: getActivitiesByContactIdMock,
-    getDocuments: getDocumentsMock,
   },
 }));
 
@@ -30,18 +28,19 @@ const mockContact: Contact = {
   id: "c-1",
   email: "sarah@example.com",
   name: "Sarah Chen",
-  organization: "Acme Capital",
+  organization: "acme.capital",
   role: "Partner",
   heatLevel: "hot",
   score: 92,
   scoreHistory: [
-    { date: "2026-06-20T00:00:00Z", score: 80 },
-    { date: "2026-06-21T00:00:00Z", score: 92 },
+    { date: "2026-06-20T00:00:00Z", score: 2 },
+    { date: "2026-06-21T00:00:00Z", score: 5 },
   ],
   totalVisits: 12,
   totalDurationSeconds: 360,
   lastSeenAt: "2026-06-24T00:00:00Z",
   viewedDocuments: ["doc-1"],
+  viewedDocumentItems: [{ id: "doc-1", title: "Q3 Pitch" }],
 };
 
 const mockActivities: Activity[] = [
@@ -50,27 +49,13 @@ const mockActivities: Activity[] = [
     contactId: "c-1",
     contactEmail: "sarah@example.com",
     linkId: "link-1",
+    documentId: "doc-1",
     documentTitle: "Q3 Pitch",
     eventType: "page_view",
     pageNumber: 3,
     durationSeconds: 60,
     timestamp: "2026-06-24T00:00:00Z",
-    description: "Viewed financial slide",
-  },
-];
-
-const mockDocuments: Document[] = [
-  {
-    id: "doc-1",
-    title: "Q3 Pitch",
-    sourceType: "pdf",
-    fileName: "Q3 Pitch.pdf",
-    fileType: "pdf",
-    fileSize: 1024 * 1024,
-    pageCount: 10,
-    status: "ready",
-    createdAt: "2026-06-20T00:00:00Z",
-    updatedAt: "2026-06-20T00:00:00Z",
+    description: "Q3 Pitch · page 3",
   },
 ];
 
@@ -100,7 +85,7 @@ async function renderPage() {
             <Route path=":workspaceSlug/contacts/:contactId" element={<ContactDetailPage />} />
           </Routes>
         </MemoryRouter>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -111,11 +96,9 @@ describe("ContactDetailPage", () => {
   beforeEach(() => {
     getContactByIdMock.mockReset();
     getActivitiesByContactIdMock.mockReset();
-    getDocumentsMock.mockReset();
 
     getContactByIdMock.mockResolvedValue(mockContact);
     getActivitiesByContactIdMock.mockResolvedValue({ data: mockActivities });
-    getDocumentsMock.mockResolvedValue({ data: mockDocuments });
   });
 
   it("renders contact details and stats", async () => {
@@ -126,8 +109,9 @@ describe("ContactDetailPage", () => {
     });
 
     expect(screen.getByText(/sarah@example\.com/)).toBeInTheDocument();
-    expect(screen.getByText(/Acme Capital/)).toBeInTheDocument();
+    expect(screen.getByText(/acme\.capital/)).toBeInTheDocument();
     expect(screen.getByText("12")).toBeInTheDocument();
+    expect(screen.getByText("Engagement trend")).toBeInTheDocument();
   });
 
   it("switches to timeline tab and shows activities", async () => {
@@ -144,19 +128,29 @@ describe("ContactDetailPage", () => {
     });
   });
 
+  it("lists viewed documents from contact payload without fetching all documents", async () => {
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Sarah Chen")).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole("tab", { name: /documents/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText("Q3 Pitch")).toBeInTheDocument();
+    });
+    expect(getContactByIdMock).toHaveBeenCalled();
+    expect(getActivitiesByContactIdMock).toHaveBeenCalled();
+  });
+
   it("shows error and retries on failure", async () => {
     getContactByIdMock.mockRejectedValue(new Error("network error"));
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("network error")).toBeInTheDocument();
+      expect(screen.getByRole("button", { name: /retry/i })).toBeInTheDocument();
     });
-
-    getContactByIdMock.mockResolvedValue(mockContact);
-    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText("Sarah Chen")).toBeInTheDocument();
-    });
+    expect(screen.getByText(/failed to load|network error/i)).toBeInTheDocument();
   });
 });

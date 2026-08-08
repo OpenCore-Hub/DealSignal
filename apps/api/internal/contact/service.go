@@ -33,6 +33,7 @@ type Querier interface {
 	GetContactAggregatesByWorkspace(ctx context.Context, arg db.GetContactAggregatesByWorkspaceParams) ([]db.GetContactAggregatesByWorkspaceRow, error)
 	ListContactActivitiesByEmail(ctx context.Context, arg db.ListContactActivitiesByEmailParams) ([]db.ListContactActivitiesByEmailRow, error)
 	ListContactViewedDocumentIDs(ctx context.Context, arg db.ListContactViewedDocumentIDsParams) ([]string, error)
+	ListContactViewedDocuments(ctx context.Context, arg db.ListContactViewedDocumentsParams) ([]db.ListContactViewedDocumentsRow, error)
 	ListContactViewedDocumentIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListContactViewedDocumentIDsByWorkspaceRow, error)
 }
 
@@ -40,9 +41,14 @@ type Querier interface {
 type Cache interface {
 	Get(ctx context.Context, key string, dest interface{}) error
 	Set(ctx context.Context, key string, value interface{}, ttl time.Duration) error
+	Delete(ctx context.Context, key string) error
 }
 
 const contactListCacheTTL = 20 * time.Second
+
+func contactListCacheKey(workspaceID string) string {
+	return fmt.Sprintf("contacts:list:v1:%s", workspaceID)
+}
 
 // Service aggregates visitor activity into contact records.
 type Service struct {
@@ -69,24 +75,34 @@ func NewService(q Querier, opts ...ServiceOption) *Service {
 
 // Contact is the enriched response model for a workspace contact.
 type Contact struct {
-	ID                   string       `json:"id"`
-	Email                string       `json:"email"`
-	Name                 string       `json:"name"`
-	Organization         string       `json:"organization,omitempty"`
-	Role                 string       `json:"role,omitempty"`
-	HeatLevel            string       `json:"heatLevel"`
-	Score                int          `json:"score"`
-	ScoreHistory         []ScorePoint `json:"scoreHistory"`
-	TotalVisits          int64        `json:"totalVisits"`
-	TotalDurationSeconds int64        `json:"totalDurationSeconds"`
-	LastSeenAt           string       `json:"lastSeenAt,omitempty"`
-	ViewedDocuments      []string     `json:"viewedDocuments"`
+	ID                   string           `json:"id"`
+	Email                string           `json:"email"`
+	Name                 string           `json:"name"`
+	Organization         string           `json:"organization,omitempty"`
+	Role                 string           `json:"role,omitempty"`
+	HeatLevel            string           `json:"heatLevel"`
+	Score                int              `json:"score"`
+	ScoreHistory         []ScorePoint     `json:"scoreHistory"`
+	TotalVisits          int64            `json:"totalVisits"`
+	TotalDurationSeconds int64            `json:"totalDurationSeconds"`
+	LastSeenAt           string           `json:"lastSeenAt,omitempty"`
+	ViewedDocuments      []string         `json:"viewedDocuments"`
+	ViewedDocumentItems  []ViewedDocument `json:"viewedDocumentItems,omitempty"`
 }
 
-// ScorePoint is a single score snapshot.
+// ScorePoint is one day of engagement intensity for trend charts.
+// Events is the raw event count that day (opens + page views + downloads).
+// Score mirrors Events for backward-compatible clients; prefer Events.
 type ScorePoint struct {
-	Date  string `json:"date"`
-	Score int    `json:"score"`
+	Date   string `json:"date"`
+	Events int    `json:"events"`
+	Score  int    `json:"score"`
+}
+
+// ViewedDocument is a document the contact accessed via a share link.
+type ViewedDocument struct {
+	ID    string `json:"id"`
+	Title string `json:"title"`
 }
 
 // Activity is a single contact engagement event.
@@ -95,6 +111,7 @@ type Activity struct {
 	ContactID       string `json:"contactId"`
 	ContactEmail    string `json:"contactEmail"`
 	LinkID          string `json:"linkId"`
+	DocumentID      string `json:"documentId,omitempty"`
 	DocumentTitle   string `json:"documentTitle"`
 	EventType       string `json:"eventType"`
 	PageNumber      int32  `json:"pageNumber,omitempty"`
@@ -133,6 +150,7 @@ func (s *Service) CreateContact(ctx context.Context, workspaceID string, req Cre
 		return Contact{}, fmt.Errorf("create contact: %w", err)
 	}
 
+	s.invalidateListCache(ctx, workspaceID)
 	return s.buildContact(c, db.GetContactAggregatesByWorkspaceRow{}, nil), nil
 }
 
@@ -148,25 +166,34 @@ func (s *Service) SyncContacts(ctx context.Context, workspaceID string) error {
 		return fmt.Errorf("find unsynced emails: %w", err)
 	}
 
+	upserted := 0
 	for _, email := range emails {
 		if !email.Valid || email.String == "" {
 			continue
 		}
+		normalized := strings.ToLower(strings.TrimSpace(email.String))
+		if normalized == "" {
+			continue
+		}
 		_, err := s.queries.UpsertContactByEmail(ctx, db.UpsertContactByEmailParams{
 			WorkspaceID: wsUUID,
-			Email:       email,
+			Email:       pgtype.Text{String: normalized, Valid: true},
 			Name:        "",
 		})
 		if err != nil {
-			return fmt.Errorf("upsert contact %s: %w", email.String, err)
+			return fmt.Errorf("upsert contact %s: %w", normalized, err)
 		}
+		upserted++
+	}
+	if upserted > 0 {
+		s.invalidateListCache(ctx, workspaceID)
 	}
 	return nil
 }
 
 // ListContacts returns enriched contacts for a workspace.
 func (s *Service) ListContacts(ctx context.Context, workspaceID string) ([]Contact, error) {
-	cacheKey := fmt.Sprintf("contacts:list:v1:%s", workspaceID)
+	cacheKey := contactListCacheKey(workspaceID)
 	if s.cache != nil {
 		var cached []Contact
 		if err := s.cache.Get(ctx, cacheKey, &cached); err == nil {
@@ -246,23 +273,51 @@ func (s *Service) GetContact(ctx context.Context, workspaceID, contactID string)
 		return Contact{}, fmt.Errorf("get contact: %w", err)
 	}
 
+	visitorEmail := ""
+	if c.Email.Valid {
+		visitorEmail = c.Email.String
+	}
 	agg, err := s.queries.GetContactAggregateByEmail(ctx, db.GetContactAggregateByEmailParams{
 		WorkspaceID:  wsUUID,
-		VisitorEmail: c.Email,
+		VisitorEmail: visitorEmail,
 	})
 	if err != nil {
 		return Contact{}, fmt.Errorf("contact aggregate: %w", err)
 	}
 
-	viewed, err := s.queries.ListContactViewedDocumentIDs(ctx, db.ListContactViewedDocumentIDsParams{
+	viewedRows, err := s.queries.ListContactViewedDocuments(ctx, db.ListContactViewedDocumentsParams{
 		WorkspaceID:  wsUUID,
-		VisitorEmail: c.Email,
+		VisitorEmail: visitorEmail,
 	})
 	if err != nil {
 		return Contact{}, fmt.Errorf("viewed documents: %w", err)
 	}
+	viewedIDs := make([]string, 0, len(viewedRows))
+	viewedItems := make([]ViewedDocument, 0, len(viewedRows))
+	for _, row := range viewedRows {
+		viewedIDs = append(viewedIDs, row.DocumentID)
+		title := strings.TrimSpace(row.Title)
+		if title == "" {
+			title = row.DocumentID
+		}
+		viewedItems = append(viewedItems, ViewedDocument{ID: row.DocumentID, Title: title})
+	}
 
-	return s.buildContact(c, toWorkspaceAggregate(agg), viewed), nil
+	contact := s.buildContact(c, toWorkspaceAggregate(agg), viewedIDs)
+	contact.ViewedDocumentItems = viewedItems
+
+	// Detail trend: real daily engagement from recent events (not a stub empty array).
+	actRows, err := s.queries.ListContactActivitiesByEmail(ctx, db.ListContactActivitiesByEmailParams{
+		WorkspaceID:  wsUUID,
+		VisitorEmail: visitorEmail,
+		RowLimit:     500,
+	})
+	if err != nil {
+		return Contact{}, fmt.Errorf("engagement history: %w", err)
+	}
+	contact.ScoreHistory = engagementHistoryFromActivities(actRows, 14)
+
+	return contact, nil
 }
 
 // ListActivities returns engagement events for a contact.
@@ -291,30 +346,39 @@ func (s *Service) ListActivities(ctx context.Context, workspaceID, contactID str
 		return nil, fmt.Errorf("get contact: %w", err)
 	}
 
+	visitorEmail := ""
+	if c.Email.Valid {
+		visitorEmail = c.Email.String
+	}
 	rows, err := s.queries.ListContactActivitiesByEmail(ctx, db.ListContactActivitiesByEmailParams{
 		WorkspaceID:  wsUUID,
-		VisitorEmail: c.Email,
-		Limit:        limit,
+		VisitorEmail: visitorEmail,
+		RowLimit:     limit,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("list activities: %w", err)
 	}
 
 	contactIDStr := uuidToString(c.ID)
-	email := c.Email.String
 	out := make([]Activity, 0, len(rows))
 	for _, r := range rows {
+		eventType := mapEventType(r.EventType)
+		docID := ""
+		if r.DocumentID.Valid {
+			docID = uuidToString(r.DocumentID)
+		}
 		out = append(out, Activity{
 			ID:              uuidToString(r.ID),
 			ContactID:       contactIDStr,
-			ContactEmail:    email,
+			ContactEmail:    visitorEmail,
 			LinkID:          uuidToString(r.LinkID),
+			DocumentID:      docID,
 			DocumentTitle:   r.DocumentTitle,
-			EventType:       mapEventType(r.EventType),
+			EventType:       eventType,
 			PageNumber:      r.PageNumber,
 			DurationSeconds: r.DurationSeconds,
 			Timestamp:       r.CreatedAt.Time.Format(time.RFC3339),
-			Description:     "",
+			Description:     activityDocumentTitle(r.DocumentTitle),
 		})
 	}
 	return out, nil
@@ -350,6 +414,8 @@ func (s *Service) buildContact(c db.Contact, agg db.GetContactAggregatesByWorksp
 		ID:                   uuidToString(c.ID),
 		Email:                email,
 		Name:                 name,
+		// Organization is only set when we have a real CRM value — never invent
+		// one from the email domain (that presents as fake company data).
 		HeatLevel:            res.Level,
 		Score:                res.Score,
 		ScoreHistory:         []ScorePoint{},
@@ -361,6 +427,51 @@ func (s *Service) buildContact(c db.Contact, agg db.GetContactAggregatesByWorksp
 		contact.LastSeenAt = agg.LastSeenAt.Time.Format(time.RFC3339)
 	}
 	return contact
+}
+
+// engagementHistoryFromActivities buckets recent events by UTC day for trend charts.
+func engagementHistoryFromActivities(rows []db.ListContactActivitiesByEmailRow, days int) []ScorePoint {
+	if days <= 0 {
+		days = 14
+	}
+	now := time.Now().UTC()
+	startDay := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC).AddDate(0, 0, -(days - 1))
+	counts := make(map[string]int, days)
+	for _, r := range rows {
+		if !r.CreatedAt.Valid {
+			continue
+		}
+		ts := r.CreatedAt.Time.UTC()
+		day := time.Date(ts.Year(), ts.Month(), ts.Day(), 0, 0, 0, 0, time.UTC)
+		if day.Before(startDay) {
+			continue
+		}
+		counts[day.Format("2006-01-02")]++
+	}
+	out := make([]ScorePoint, 0, days)
+	total := 0
+	for d := 0; d < days; d++ {
+		day := startDay.AddDate(0, 0, d)
+		key := day.Format("2006-01-02")
+		n := counts[key]
+		total += n
+		out = append(out, ScorePoint{
+			Date:   day.Format(time.RFC3339),
+			Events: n,
+			Score:  n, // deprecated alias of Events
+		})
+	}
+	// Omit all-zero series so the UI can show a true empty state.
+	if total == 0 {
+		return []ScorePoint{}
+	}
+	return out
+}
+
+// activityDocumentTitle returns a machine-neutral document title for clients.
+// UI copy (event verbs, page labels) must be localized on the frontend.
+func activityDocumentTitle(documentTitle string) string {
+	return strings.TrimSpace(documentTitle)
 }
 
 func toWorkspaceAggregate(r db.GetContactAggregateByEmailRow) db.GetContactAggregatesByWorkspaceRow {
@@ -410,6 +521,13 @@ func sortContacts(contacts []Contact) {
 		}
 		return contacts[i].LastSeenAt > contacts[j].LastSeenAt
 	})
+}
+
+func (s *Service) invalidateListCache(ctx context.Context, workspaceID string) {
+	if s == nil || s.cache == nil || workspaceID == "" {
+		return
+	}
+	_ = s.cache.Delete(ctx, contactListCacheKey(workspaceID))
 }
 
 func parseUUID(id string) (pgtype.UUID, error) {

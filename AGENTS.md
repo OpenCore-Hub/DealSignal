@@ -32,7 +32,11 @@ Readiness probe: `curl http://localhost:8080/readyz`
 - `VISITOR_ASK_AI_RPM` — optional visitor AI lane RPM per link+visitor (default `10`).
 - `VISITOR_ASK_AI_DAILY_LIMIT` — optional visitor AI lane daily cap (default `50`).
 - `VISITOR_ASK_AI_MONTHLY_QUOTA_DEFAULT` — link-level monthly AI cap when `ask_ai_monthly_quota` is NULL (default `500`).
+- `VISITOR_ASK_FORMAL_DAILY_LIMIT` — optional Formal-mode visitor Ask daily cap per link+visitor (default `20`).
 - `VISITOR_ASK_UNIFIED` — set `1` to expose unified visitor Ask UI on public links (Phase A/B rollout gate).
+- `FORMAL_PUBLISH_INTERVAL_SECONDS` — Formal Q&A due-sweep worker interval (default `15`). Lazy-on-read remains as fallback.
+- `FORMAL_PUBLISH_BATCH_SIZE` — max scheduled Formal turns published per worker tick (default `50`).
+- `FORMAL_ASK_ENTITLED_PLAN_CODES` — comma- and/or space-separated control-plane plan codes allowed to use Formal Q&A (default `enterprise trial`).
 
 ## Testing
 
@@ -58,7 +62,7 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm test:e2e          # MSW mocks
-pnpm test:e2e:visitor-ask  # Phase B visitor Ask MSW gate (13 specs)
+pnpm test:e2e:visitor-ask  # Phase B/C visitor Ask MSW gate (12 specs: smoke/naming/FAQ/formal visitor + serial host/AI/policy/pin/formal)
 ./e2e-real-backend.sh  # real backend
 REAL_API_BASE_URL=http://localhost:8090 pnpm test:e2e:category-real  # document category tri-state API gate
 REAL_API_BASE_URL=http://localhost:8090 ./e2e-visitor-ask-real.sh --ui  # visitor Ask real UI (host loop + Engage policy)

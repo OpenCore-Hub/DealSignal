@@ -296,6 +296,19 @@ func (s *Service) ValidateAccessToken(ctx context.Context, token string) (*Token
 	return claims, nil
 }
 
+// GetUser returns the public profile for a user ID (e.g. current session /auth/me).
+func (s *Service) GetUser(ctx context.Context, userID string) (User, error) {
+	uid, err := uuid.Parse(userID)
+	if err != nil {
+		return User{}, ErrUnauthorized
+	}
+	u, err := s.queries.GetUserByID(ctx, pgtype.UUID{Bytes: uid, Valid: true})
+	if err != nil {
+		return User{}, ErrUnauthorized
+	}
+	return userFromDB(u), nil
+}
+
 // VerifyEmail marks a user's email as verified.
 func (s *Service) VerifyEmail(ctx context.Context, userID string) error {
 	uid, err := uuid.Parse(userID)

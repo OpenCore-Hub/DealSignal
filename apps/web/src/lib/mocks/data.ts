@@ -1000,6 +1000,19 @@ export const mockActionItems: ActionItem[] = [
     createdAt: "2026-06-20T14:00:00Z",
     updatedAt: "2026-06-20T14:00:00Z",
   },
+  {
+    id: "act_room_formal_ask",
+    sourceType: "deal_room_link_question",
+    sourceId: "owner_formal_1",
+    targetId: "room_1/link_room_1",
+    title: "Review formal Q&A from compliance@example.com on Acme Seed Data Room",
+    impact: "medium",
+    dueAt: "2026-06-21T23:00:00Z",
+    status: "pending",
+    actionType: "review",
+    createdAt: "2026-06-20T15:00:00Z",
+    updatedAt: "2026-06-20T15:00:00Z",
+  },
 ];
 
 const mockRiskAlerts: RiskAlert[] = mockSignals

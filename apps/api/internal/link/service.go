@@ -65,21 +65,22 @@ type RoomListInvalidator interface {
 
 // Service handles smart links.
 type Service struct {
-	queries             *db.Queries
-	pool                Beginner
-	redisClient         *redis.Client
-	mailer              mailer.Mailer
-	notifier            Notifier
-	viewerBaseURL       string
-	cfg                 *config.Config
-	llm                 LLMClient
-	emailSem            chan struct{} // limits concurrent email sends (bounded goroutines)
-	indexGenGroup       singleflight.Group
-	actionSyncer        ActionSyncer
-	ndaSvc              *nda.Service
-	roomListInvalidator RoomListInvalidator
-	visitorAskKnowledge VisitorAskKnowledge
-	askSecurity         AskSecurityRecorder
+	queries              *db.Queries
+	pool                 Beginner
+	redisClient          *redis.Client
+	mailer               mailer.Mailer
+	notifier             Notifier
+	viewerBaseURL        string
+	cfg                  *config.Config
+	llm                  LLMClient
+	emailSem             chan struct{} // limits concurrent email sends (bounded goroutines)
+	indexGenGroup        singleflight.Group
+	actionSyncer         ActionSyncer
+	ndaSvc               *nda.Service
+	roomListInvalidator  RoomListInvalidator
+	visitorAskKnowledge  VisitorAskKnowledge
+	askSecurity          AskSecurityRecorder
+	formalAskEntitlement FormalAskEntitlement
 	// accessCodeEpoch tracks the latest code-rotation generation per
 	// publicToken+email so async sends can detect superseded codes without
 	// touching the DB (safe under the integration-test shared-tx fixture).
@@ -178,18 +179,18 @@ var (
 	// Deal-room sharing / access-rule errors.
 	ErrDealRoomNotFound = errors.New("deal room not found")
 	ErrBlockedEmail     = errors.New("email is blocked")
-	ErrNotAllowedEmail                = errors.New("email is not allowed")
+	ErrNotAllowedEmail  = errors.New("email is not allowed")
 	// ErrDeliveryEmailMismatch means the visitor submitted an email that does not
 	// match the address bound to a valid verification code. Handlers MUST NOT
 	// expose AuthorizedEmail to clients (privacy); it is audit-only.
-	ErrDeliveryEmailMismatch = errors.New("delivery email does not match verified email")
-	ErrRequiresPassword      = errors.New("password required")
-	ErrInvalidPassword       = errors.New("invalid password")
-	ErrInviteExpired         = errors.New("invitation expired")
-	ErrInviteRevoked         = errors.New("invitation revoked")
-	ErrInviteAlreadyUsed     = errors.New("invitation already used")
-	ErrInvalidAccessRule     = errors.New("invalid access rule")
-	ErrConflictingAccessRule = errors.New("conflicting access rule")
+	ErrDeliveryEmailMismatch     = errors.New("delivery email does not match verified email")
+	ErrRequiresPassword          = errors.New("password required")
+	ErrInvalidPassword           = errors.New("invalid password")
+	ErrInviteExpired             = errors.New("invitation expired")
+	ErrInviteRevoked             = errors.New("invitation revoked")
+	ErrInviteAlreadyUsed         = errors.New("invitation already used")
+	ErrInvalidAccessRule         = errors.New("invalid access rule")
+	ErrConflictingAccessRule     = errors.New("conflicting access rule")
 	ErrDuplicateName             = errors.New("a link with this name already exists")
 	ErrEmailCodeRateLimited      = errors.New("too many verification code requests, please try again later")
 	ErrAccessCodeContactNotFound = errors.New("access code contact not found")
@@ -820,17 +821,17 @@ func (s *Service) UpdateLink(ctx context.Context, linkID, workspaceID string, re
 		MaxAccessCount:           req.MaxAccessCount,
 		DownloadEnabled:          req.DownloadEnabled,
 		WatermarkEnabled:         req.WatermarkEnabled,
-		QaEnabled:                func() bool {
+		QaEnabled: func() bool {
 			if isDealRoomLink {
 				return true
 			}
 			return ResolveQaEnabled(false, req.QaEnabled)
 		}(),
-		FileRequestsEnabled:      req.FileRequestsEnabled,
-		IndexFileEnabled:         req.IndexFileEnabled,
-		LinkType:                 existing.LinkType,
-		TargetFolderPath:         existing.TargetFolderPath,
-		ContactIDs:               req.ContactIDs,
+		FileRequestsEnabled: req.FileRequestsEnabled,
+		IndexFileEnabled:    req.IndexFileEnabled,
+		LinkType:            existing.LinkType,
+		TargetFolderPath:    existing.TargetFolderPath,
+		ContactIDs:          req.ContactIDs,
 	}
 
 	requireEmail, requireEmailVerification, requireNDA, perm, err := normalizeSecurityConfig(createReq)
@@ -3045,10 +3046,10 @@ type LinkAccessRequest struct {
 // PendingLinkAccessRequest is a workspace-scoped pending request with share context.
 type PendingLinkAccessRequest struct {
 	LinkAccessRequest
-	LinkName       string `json:"link_name,omitempty"`
-	DocumentTitle  string `json:"document_title,omitempty"`
-	PublicToken    string `json:"-"`
-	CustomDomain   string `json:"-"`
+	LinkName      string `json:"link_name,omitempty"`
+	DocumentTitle string `json:"document_title,omitempty"`
+	PublicToken   string `json:"-"`
+	CustomDomain  string `json:"-"`
 }
 
 var (
@@ -4020,17 +4021,17 @@ func (s *Service) RenewLink(ctx context.Context, workspaceID, linkID string, new
 	// Bump security_version so any stale sessions are invalidated.
 	newVersion := link.SecurityVersion + 1
 	if _, err := s.queries.UpdateLinkFull(ctx, db.UpdateLinkFullParams{
-		Name:                     link.Name,
-		DocumentID:               link.DocumentID,
-		DealRoomID:               link.DealRoomID,
-		PermissionType:           link.PermissionType,
-		ExpiresAt:                expiresAt,
-		MaxAccessCount:           link.MaxAccessCount,
-		DownloadEnabled:          link.DownloadEnabled,
-		WatermarkEnabled:         link.WatermarkEnabled,
-		RequireEmail:             link.RequireEmail,
-		RequireEmailVerification: link.RequireEmailVerification,
-		RequireNda:               link.RequireNda,
+		Name:                        link.Name,
+		DocumentID:                  link.DocumentID,
+		DealRoomID:                  link.DealRoomID,
+		PermissionType:              link.PermissionType,
+		ExpiresAt:                   expiresAt,
+		MaxAccessCount:              link.MaxAccessCount,
+		DownloadEnabled:             link.DownloadEnabled,
+		WatermarkEnabled:            link.WatermarkEnabled,
+		RequireEmail:                link.RequireEmail,
+		RequireEmailVerification:    link.RequireEmailVerification,
+		RequireNda:                  link.RequireNda,
 		RequirePassword:             link.RequirePassword,
 		PasswordHash:                link.PasswordHash,
 		CustomDomain:                link.CustomDomain,
@@ -4167,20 +4168,20 @@ func clampAccessLogsOffset(offset int) int {
 
 // LinkAnalytics aggregates access metrics for a single link.
 type LinkAnalytics struct {
-	TotalViews             int64                 `json:"total_views"`
-	UniqueVisitors         int64                 `json:"unique_visitors"`
-	DownloadAttempts       int64                 `json:"download_attempts"`
-	FirstAccessAt          *time.Time            `json:"first_access_at,omitempty"`
-	LastAccessAt           *time.Time            `json:"last_access_at,omitempty"`
-	ViewsOverTime          []DailyView           `json:"views_over_time"`
-	AverageDurationSeconds float64               `json:"average_duration_seconds"`
-	RecentVisitors         []RecentVisitor       `json:"recent_visitors"`
+	TotalViews             int64           `json:"total_views"`
+	UniqueVisitors         int64           `json:"unique_visitors"`
+	DownloadAttempts       int64           `json:"download_attempts"`
+	FirstAccessAt          *time.Time      `json:"first_access_at,omitempty"`
+	LastAccessAt           *time.Time      `json:"last_access_at,omitempty"`
+	ViewsOverTime          []DailyView     `json:"views_over_time"`
+	AverageDurationSeconds float64         `json:"average_duration_seconds"`
+	RecentVisitors         []RecentVisitor `json:"recent_visitors"`
 	// RecentVisitorsHasMore is true when more visitors exist beyond the first page.
-	RecentVisitorsHasMore bool                 `json:"recent_visitors_has_more"`
-	KeyPages              []KeyPage            `json:"key_pages"`
-	QARecords             []QARecord           `json:"qa_records"`
-	AskSummary            *LinkAskSummary      `json:"ask_summary,omitempty"`
-	AccessCodeContacts    []AccessCodeContact  `json:"access_code_contacts"`
+	RecentVisitorsHasMore bool                `json:"recent_visitors_has_more"`
+	KeyPages              []KeyPage           `json:"key_pages"`
+	QARecords             []QARecord          `json:"qa_records"`
+	AskSummary            *LinkAskSummary     `json:"ask_summary,omitempty"`
+	AccessCodeContacts    []AccessCodeContact `json:"access_code_contacts"`
 	// AccessCodeContactsHasMore is true when more contacts exist beyond the first page.
 	AccessCodeContactsHasMore bool `json:"access_code_contacts_has_more"`
 	// AccessCodeFailedCount is the total failed deliveries (for nav badges).
@@ -4223,8 +4224,8 @@ type RecentVisitorsPage struct {
 }
 
 const (
-	recentVisitorsPageSize    = 10
-	recentVisitorsMaxPageSize = 50
+	recentVisitorsPageSize        = 10
+	recentVisitorsMaxPageSize     = 50
 	accessCodeContactsPageSize    = 10
 	accessCodeContactsMaxPageSize = 100
 	accessCodeContactsResendLimit = 1000

@@ -119,7 +119,8 @@
         "hostOnly": "Host replies",
         "aiSupervised": "AI first, host fallback",
         "aiSelfServe": "AI replies",
-        "formal": "Review & publish"
+        "formal": "Review & publish",
+        "formalNotEntitled": "Formal Q&A requires an entitled plan (Enterprise or trial)."
       },
       "fileRequests": "Enable file requests",
       "fileRequestsDescription": "Allow viewers to request additional files",
@@ -221,6 +222,9 @@
     "formalPublishSuccess": "Formal answer published",
     "formalScheduleSuccess": "Formal answer scheduled",
     "formalPublishFailed": "Failed to publish formal answer",
+    "formalNotEntitled": "Formal Q&A is not available on this plan",
+    "formalDegradedBadge": "Formal unavailable",
+    "formalDegradedHint": "This question fell back to host reply because Formal Q&A is not entitled on this plan.",
     "emptyAiTitle": "No AI-handled questions yet",
     "emptyAiDescription": "When visitors receive AI answers on this link, they appear here for review.",
     "emptyAllTitle": "No Ask questions yet",

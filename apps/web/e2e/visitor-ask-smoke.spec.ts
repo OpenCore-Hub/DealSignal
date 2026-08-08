@@ -2,18 +2,20 @@
  * Visitor Ask smoke (MSW) — Ask Host empty state, submit question, pending badge.
  */
 import { test, expect } from "@playwright/test";
-import { resetMockState, attachDebug, openVisitorAskPanel } from "./helpers";
+import { resetMockState, attachDebug, openVisitorAskPanel, setMockLinkAskPolicy } from "./helpers";
 
 const SMOKE_TOKEN = "AskSmoke1";
+const SMOKE_LINK_ID = "link_visitor_ask_smoke";
 
 test.describe("Visitor Ask smoke (MSW)", () => {
   test("Ask Host empty → submit → awaiting reply", async ({ page }) => {
     attachDebug(page);
     await resetMockState(page);
+    await setMockLinkAskPolicy(page, SMOKE_LINK_ID, { askAiEnabled: false });
 
     const hostInput = await openVisitorAskPanel(page, SMOKE_TOKEN);
 
-    await hostInput.fill("Can you share the full model?");
+    await hostInput.fill("__host__ Can you share the full model?");
     await page.getByRole("button", { name: "Ask", exact: true }).and(page.locator('[type="submit"]')).click();
 
     await expect(page.getByText("Can you share the full model?")).toBeVisible({ timeout: 10000 });

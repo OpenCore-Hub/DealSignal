@@ -26,16 +26,18 @@ const (
 var (
 	ErrAskTurnNotFormalPending = errors.New("ask turn is not in formal review queue")
 	ErrAskTurnFormalAnswerReq  = errors.New("formal answer is required")
+	ErrAskFormalNotEntitled    = errors.New("formal q&a is not entitled for this workspace")
 )
 
 // PublicFormalAsk is the visitor-visible published formal Q&A entry.
 type PublicFormalAsk struct {
-	ID          string    `json:"id"`
-	Question    string    `json:"question"`
-	Answer      string    `json:"answer"`
-	PublishedAt time.Time `json:"published_at"`
-	LinkID      string    `json:"link_id,omitempty"`
-	LinkName    string    `json:"link_name,omitempty"`
+	ID           string    `json:"id"`
+	Question     string    `json:"question"`
+	Answer       string    `json:"answer"`
+	PublishedAt  time.Time `json:"published_at"`
+	LinkID       string    `json:"link_id,omitempty"`
+	LinkName     string    `json:"link_name,omitempty"`
+	VisitorEmail string    `json:"visitor_email,omitempty"`
 }
 
 type FormalPublishInput struct {
@@ -93,7 +95,12 @@ func isFormalQueueActive(t OwnerAskTurn) bool {
 		(t.FormalStatus == formalStatusPendingReview || t.FormalStatus == formalStatusScheduled)
 }
 
-func mapPublicFormalAsk(t db.LinkAskTurn, linkID pgtype.UUID, linkName string) (PublicFormalAsk, bool) {
+func mapPublicFormalAsk(
+	t db.LinkAskTurn,
+	linkID pgtype.UUID,
+	linkName string,
+	visitorEmail string,
+) (PublicFormalAsk, bool) {
 	if !t.FormalStatus.Valid || t.FormalStatus.String != formalStatusPublished {
 		return PublicFormalAsk{}, false
 	}
@@ -119,11 +126,17 @@ func mapPublicFormalAsk(t db.LinkAskTurn, linkID pgtype.UUID, linkName string) (
 	if linkName != "" {
 		out.LinkName = linkName
 	}
+	// Default formal_anonymize=true hides identity; owners may publish with anonymize=false.
+	if !t.FormalAnonymize {
+		if email := strings.TrimSpace(visitorEmail); email != "" {
+			out.VisitorEmail = email
+		}
+	}
 	return out, true
 }
 
-func mapPublicFormalAskFromRoomRow(row db.ListRoomPublishedFormalAskRow) (PublicFormalAsk, bool) {
-	return mapPublicFormalAsk(db.LinkAskTurn{
+func linkAskTurnFromPublishedFormalRow(row db.ListLinkPublishedFormalAskRow) db.LinkAskTurn {
+	return db.LinkAskTurn{
 		ID:                row.ID,
 		SessionID:         row.SessionID,
 		TenantID:          row.TenantID,
@@ -146,7 +159,49 @@ func mapPublicFormalAskFromRoomRow(row db.ListRoomPublishedFormalAskRow) (Public
 		FormalAnonymize:   row.FormalAnonymize,
 		CreatedAt:         row.CreatedAt,
 		UpdatedAt:         row.UpdatedAt,
-	}, row.LinkID, pgTextString(row.LinkName))
+	}
+}
+
+func mapPublicFormalAskFromLinkRow(row db.ListLinkPublishedFormalAskRow) (PublicFormalAsk, bool) {
+	return mapPublicFormalAsk(
+		linkAskTurnFromPublishedFormalRow(row),
+		row.LinkID,
+		"",
+		row.VisitorEmail,
+	)
+}
+
+func mapPublicFormalAskFromRoomRow(row db.ListRoomPublishedFormalAskRow) (PublicFormalAsk, bool) {
+	return mapPublicFormalAsk(
+		linkAskTurnFromPublishedFormalRow(db.ListLinkPublishedFormalAskRow{
+			ID:                row.ID,
+			SessionID:         row.SessionID,
+			TenantID:          row.TenantID,
+			WorkspaceID:       row.WorkspaceID,
+			LinkID:            row.LinkID,
+			VisitorID:         row.VisitorID,
+			Question:          row.Question,
+			Lane:              row.Lane,
+			Status:            row.Status,
+			AiPayload:         row.AiPayload,
+			HostAnswer:        row.HostAnswer,
+			AnsweredBy:        row.AnsweredBy,
+			RouteReason:       row.RouteReason,
+			PinnedFaqAt:       row.PinnedFaqAt,
+			PinnedFaqBy:       row.PinnedFaqBy,
+			PinnedFaqSort:     row.PinnedFaqSort,
+			FormalStatus:      row.FormalStatus,
+			FormalPublishAt:   row.FormalPublishAt,
+			FormalPublishedAt: row.FormalPublishedAt,
+			FormalAnonymize:   row.FormalAnonymize,
+			CreatedAt:         row.CreatedAt,
+			UpdatedAt:         row.UpdatedAt,
+			VisitorEmail:      row.VisitorEmail,
+		}),
+		row.LinkID,
+		pgTextString(row.LinkName),
+		row.VisitorEmail,
+	)
 }
 
 func (s *Service) recordAskFormalSubmitted(ctx context.Context, link db.Link, visitorID, email string) {
@@ -208,6 +263,45 @@ func (s *Service) resolvePublishedFormalTurnActions(
 	return nil
 }
 
+const defaultFormalPublishBatchSize int32 = 50
+
+// PublishDueFormalAskTurnsGlobal publishes scheduled formal answers whose
+// publish_at has elapsed. Used by the background FormalPublishWorker so
+// visitors see due answers even without lazy-on-read traffic.
+func (s *Service) PublishDueFormalAskTurnsGlobal(ctx context.Context, limit int32) (int64, error) {
+	if s == nil || s.queries == nil {
+		return 0, nil
+	}
+	if limit <= 0 {
+		limit = defaultFormalPublishBatchSize
+	}
+	rows, err := s.queries.PublishDueFormalAskTurnsGlobal(ctx, limit)
+	if err != nil {
+		return 0, err
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	byWorkspace := make(map[[16]byte][]db.PublishDueFormalAskTurnsRow)
+	for _, row := range rows {
+		key := row.WorkspaceID.Bytes
+		byWorkspace[key] = append(byWorkspace[key], db.PublishDueFormalAskTurnsRow{
+			ID:         row.ID,
+			LinkID:     row.LinkID,
+			HostAnswer: row.HostAnswer,
+			AnsweredBy: row.AnsweredBy,
+		})
+	}
+	for wsBytes, wsRows := range byWorkspace {
+		wsID := pgtype.UUID{Bytes: wsBytes, Valid: true}
+		if err := s.resolvePublishedFormalTurnActions(ctx, wsID, wsRows); err != nil {
+			return int64(len(rows)), err
+		}
+	}
+	return int64(len(rows)), nil
+}
+
 // ListPublicFormalAsk returns published formal Q&A visible to visitors.
 func (s *Service) ListPublicFormalAsk(ctx context.Context, link db.Link) ([]PublicFormalAsk, error) {
 	if err := s.publishDueFormalTurns(ctx, link); err != nil {
@@ -240,7 +334,7 @@ func (s *Service) ListPublicFormalAsk(ctx context.Context, link db.Link) ([]Publ
 	}
 	out := make([]PublicFormalAsk, 0, len(rows))
 	for _, row := range rows {
-		if entry, ok := mapPublicFormalAsk(row, link.ID, linkNameString(link)); ok {
+		if entry, ok := mapPublicFormalAskFromLinkRow(row); ok {
 			out = append(out, entry)
 		}
 	}
@@ -260,6 +354,9 @@ func (s *Service) PublishFormalAskTurn(
 	}
 	if err := authorizeAskHostOwnerView(ctx, s.queries, link.WorkspaceID, link.DealRoomID, uuid.UUID(userID.Bytes).String()); err != nil {
 		return OwnerAskTurn{}, err
+	}
+	if !s.isFormalAskEntitled(ctx, link) {
+		return OwnerAskTurn{}, ErrAskFormalNotEntitled
 	}
 
 	turn, err := s.queries.GetLinkAskTurnByID(ctx, db.GetLinkAskTurnByIDParams{

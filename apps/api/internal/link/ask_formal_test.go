@@ -24,13 +24,26 @@ func TestMatchesOwnerAskInboxFilter_FormalQueue(t *testing.T) {
 	if matchesOwnerAskInboxFilter(formalPending, askLaneHost, askStatusHostPending) {
 		t.Fatal("formal pending must not appear in needs_host tab")
 	}
+
+	formalPublished := OwnerAskTurn{
+		PublicAskTurn: PublicAskTurn{
+			Lane:         askLaneHost,
+			Status:       askStatusHostAnswered,
+			RouteReason:  routeReasonPolicyFormal,
+			FormalStatus: formalStatusPublished,
+			HostAnswer:   "Guidance is $42M ARR.",
+		},
+	}
+	if matchesOwnerAskInboxFilter(formalPublished, "", ownerAskInboxFormalQueue) {
+		t.Fatal("published formal must not appear in formal_queue tab")
+	}
 }
 
 func TestMapPublicFormalAsk(t *testing.T) {
 	now := time.Now().UTC()
 	turn := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	row := dbLinkAskTurnFormalPublished(turn, now, "What is revenue?", " $12M ")
-	entry, ok := mapPublicFormalAsk(row, pgtype.UUID{}, "")
+	entry, ok := mapPublicFormalAsk(row, pgtype.UUID{}, "", "visitor@example.com")
 	if !ok {
 		t.Fatal("expected published formal ask")
 	}
@@ -39,6 +52,18 @@ func TestMapPublicFormalAsk(t *testing.T) {
 	}
 	if entry.Question != "What is revenue?" {
 		t.Fatalf("question = %q", entry.Question)
+	}
+	if entry.VisitorEmail != "" {
+		t.Fatalf("anonymized entry should omit visitor_email, got %q", entry.VisitorEmail)
+	}
+
+	row.FormalAnonymize = false
+	entry, ok = mapPublicFormalAsk(row, pgtype.UUID{}, "", "visitor@example.com")
+	if !ok {
+		t.Fatal("expected published formal ask")
+	}
+	if entry.VisitorEmail != "visitor@example.com" {
+		t.Fatalf("visitor_email = %q", entry.VisitorEmail)
 	}
 }
 
@@ -64,6 +89,7 @@ func dbLinkAskTurnFormalPublished(id pgtype.UUID, publishedAt time.Time, questio
 		HostAnswer:        pgtype.Text{String: answer, Valid: true},
 		FormalStatus:      pgtype.Text{String: formalStatusPublished, Valid: true},
 		FormalPublishedAt: pgtype.Timestamptz{Time: publishedAt, Valid: true},
+		FormalAnonymize:   true,
 		UpdatedAt:         pgtype.Timestamptz{Time: publishedAt, Valid: true},
 	}
 }

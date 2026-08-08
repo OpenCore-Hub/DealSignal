@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { I18nextProvider, initReactI18next } from "react-i18next";
+import { MemoryRouter, Route, Routes } from "react-router";
 import i18n from "i18next";
 import { api } from "@/lib/api";
 import { ApiError } from "@/lib/apiClient";
@@ -31,7 +32,15 @@ i18nInstance.use(initReactI18next).init({
 });
 
 function Wrapper({ children }: { children: React.ReactNode }) {
-  return <I18nextProvider i18n={i18nInstance}>{children}</I18nextProvider>;
+  return (
+    <I18nextProvider i18n={i18nInstance}>
+      <MemoryRouter initialEntries={["/acme/deal-rooms/room-1"]}>
+        <Routes>
+          <Route path=":workspaceSlug/deal-rooms/:roomId" element={children} />
+        </Routes>
+      </MemoryRouter>
+    </I18nextProvider>
+  );
 }
 
 vi.mock("@/lib/api", () => ({
@@ -156,7 +165,7 @@ describe("SendVerificationCodeDialog", () => {
       expect(screen.getByText("杨生")).toBeInTheDocument();
     });
     expect(api.getContacts).not.toHaveBeenCalled();
-    expect(api.getContactById).toHaveBeenCalledWith("c1");
+    expect(api.getContactById).toHaveBeenCalledWith("c1", "acme");
     expect(api.getLinkAccessRules).toHaveBeenCalledWith("link-1");
     expect(screen.getByText("alice@example.com")).toBeInTheDocument();
     expect(screen.getByText("bob@example.com")).toBeInTheDocument();

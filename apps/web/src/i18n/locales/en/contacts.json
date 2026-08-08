@@ -24,21 +24,24 @@
     "tabs": {
       "overview": "Overview",
       "timeline": "Timeline",
-      "documents": "Documents",
-      "notes": "Notes"
+      "documents": "Documents"
     },
     "recentActivity": "Recent activity",
+    "engagementTrend": "Engagement trend",
+    "noEngagement": {
+      "description": "Daily opens and page views will appear here after the contact engages with a share link."
+    },
     "noActivities": {
       "title": "No activity yet",
       "description": "Recent activity will appear here when a contact views a document."
     },
     "viewedDocuments": "Viewed documents",
+    "untitledDocument": "Untitled document",
     "noDocuments": {
       "title": "No viewed documents",
       "description": "This contact has not viewed any documents via a link yet."
     },
-    "view": "View",
-    "notesHint": "No notes yet. Click Write email to capture conversation highlights."
+    "view": "View"
   },
   "activity": {
     "open": "opened the document",
@@ -48,7 +51,8 @@
     "openShort": "Opened",
     "pageViewShort": "Viewed page {{page}}",
     "revisitShort": "Returned",
-    "downloadShort": "Downloaded"
+    "downloadShort": "Downloaded",
+    "unknown": "Activity"
   },
   "new": {
     "title": "New Contact",
@@ -63,10 +67,19 @@
     "createFailed": "Failed to create contact.",
     "create": "Create Contact"
   },
+  "selection": {
+    "selectAll": "Select all",
+    "clear": "Clear",
+    "selectedCount_one": "{{count}} selected",
+    "selectedCount_other": "{{count}} selected",
+    "selectContact": "Select {{name}}"
+  },
   "marketingBatch": {
     "trigger": "Bulk email",
+    "triggerWithCount": "Bulk email ({{count}})",
+    "noneSelected": "Select one or more contacts first",
     "title": "Bulk marketing email",
-    "description": "Send a marketing email to {{count}} contacts.",
+    "description": "Send a marketing email to {{count}} selected contacts.",
     "subject": "Subject",
     "subjectPlaceholder": "Enter subject",
     "body": "Body",
@@ -76,6 +89,9 @@
     "send": "Send",
     "sending": "Sending...",
     "result": "Sent {{sent}}, failed {{failed}}",
+    "failedRecipients": "Failed recipients: {{emails}}",
+    "recipientsNotInWorkspace": "One or more selected emails are not contacts in this workspace. Refresh the list and try again.",
+    "tooManyRecipients": "Too many recipients for a single send. Select fewer contacts and try again.",
     "error": "Failed to send, please try again."
   }
 }

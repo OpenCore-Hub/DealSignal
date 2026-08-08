@@ -82,14 +82,23 @@ if (typeof window !== "undefined") {
     },
   });
 
-  // Mock sessionStorage too so auth/session-dependent code behaves consistently.
+  // Mock sessionStorage (real Map-backed store) for login-email cache etc.
+  const sessionStore: Record<string, string> = {};
   Object.defineProperty(window, "sessionStorage", {
     writable: true,
     value: {
-      getItem: () => null,
-      setItem: () => {},
-      removeItem: () => {},
-      clear: () => {},
+      getItem: (key: string) => sessionStore[key] ?? null,
+      setItem: (key: string, value: string) => {
+        sessionStore[key] = value;
+      },
+      removeItem: (key: string) => {
+        delete sessionStore[key];
+      },
+      clear: () => {
+        for (const key of Object.keys(sessionStore)) {
+          delete sessionStore[key];
+        }
+      },
       length: 0,
       key: () => null,
     },

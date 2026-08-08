@@ -125,6 +125,8 @@ type Config struct {
 	VisitorAskAIRPM int
 	// VisitorAskAIDailyLimit caps AI lane requests per visitor+link per day.
 	VisitorAskAIDailyLimit int
+	// VisitorAskFormalDailyLimit caps Formal-mode asks per visitor+link per day (stricter than host).
+	VisitorAskFormalDailyLimit int
 
 	SignalRulesPath string
 
@@ -132,6 +134,13 @@ type Config struct {
 	FeatureWorkerInterval time.Duration
 
 	HeatScoreRefreshInterval time.Duration
+
+	// FormalPublishInterval is how often the Formal Q&A due-sweep worker runs (0 → 15s).
+	FormalPublishInterval time.Duration
+	// FormalPublishBatchSize caps turns published per worker tick (0 → 50).
+	FormalPublishBatchSize int
+	// FormalAskEntitledPlanCodes controls which control-plane plan codes may use Formal Q&A.
+	FormalAskEntitledPlanCodes []string
 
 	EventsEnabled       bool
 	EventsStreamName    string
@@ -224,8 +233,8 @@ func Load() (*Config, error) {
 		HubSpotClientID:           os.Getenv("HUBSPOT_CLIENT_ID"),
 		HubSpotClientSecret:       os.Getenv("HUBSPOT_CLIENT_SECRET"),
 
-		RateLimitPublicRPM:     getEnvInt("RATE_LIMIT_PUBLIC_RPM", 100),
-		RateLimitAuthRPM:       getEnvInt("RATE_LIMIT_AUTH_RPM", 20),
+		RateLimitPublicRPM: getEnvInt("RATE_LIMIT_PUBLIC_RPM", 100),
+		RateLimitAuthRPM:   getEnvInt("RATE_LIMIT_AUTH_RPM", 20),
 		// Batch deal-room folder uploads issue one create per file; 10/min is too
 		// low for normal diligence packs (dozens of xlsx/pdf). Default 60/min.
 		RateLimitUploadRPM:     getEnvInt("RATE_LIMIT_UPLOAD_RPM", 60),
@@ -244,20 +253,23 @@ func Load() (*Config, error) {
 
 		SignalRulesPath: getEnv("SIGNAL_RULES_PATH", "config/signal_rules.yaml"),
 
-		FeatureWorkerEnabled:     strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
-		FeatureWorkerInterval:    time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
-		HeatScoreRefreshInterval: time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
+		FeatureWorkerEnabled:       strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
+		FeatureWorkerInterval:      time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
+		HeatScoreRefreshInterval:   time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
+		FormalPublishInterval:      time.Duration(getEnvInt("FORMAL_PUBLISH_INTERVAL_SECONDS", 15)) * time.Second,
+		FormalPublishBatchSize:     getEnvInt("FORMAL_PUBLISH_BATCH_SIZE", 50),
+		FormalAskEntitledPlanCodes: parseDelimitedList(getEnv("FORMAL_ASK_ENTITLED_PLAN_CODES", "enterprise trial")),
 
 		EventsEnabled:       strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
 		EventsStreamName:    getEnv("EVENTS_STREAM_NAME", "events:signal"),
 		EventsConsumerGroup: getEnv("EVENTS_CONSUMER_GROUP", "signal-sync"),
 
-		AccessLogsRetentionDays:     getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
-		PageViewsRetentionDays:      getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
-		SecurityEventsRetentionDays: getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
-		KnowledgeQARetentionDays:    getEnvInt("KNOWLEDGE_QA_RETENTION_DAYS", 90),
-		KnowledgeQAMemberRPM:        getEnvInt("KNOWLEDGE_QA_MEMBER_RPM", 20),
-		KnowledgeQAFollowUpRPM:      getEnvInt("KNOWLEDGE_QA_FOLLOWUP_RPM", 40),
+		AccessLogsRetentionDays:        getEnvInt("ACCESS_LOGS_RETENTION_DAYS", 90),
+		PageViewsRetentionDays:         getEnvInt("PAGE_VIEWS_RETENTION_DAYS", 90),
+		SecurityEventsRetentionDays:    getEnvInt("SECURITY_EVENTS_RETENTION_DAYS", 180),
+		KnowledgeQARetentionDays:       getEnvInt("KNOWLEDGE_QA_RETENTION_DAYS", 90),
+		KnowledgeQAMemberRPM:           getEnvInt("KNOWLEDGE_QA_MEMBER_RPM", 20),
+		KnowledgeQAFollowUpRPM:         getEnvInt("KNOWLEDGE_QA_FOLLOWUP_RPM", 40),
 		KnowledgeQARewriteEnabled:      strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_ENABLED", "true")) == "true",
 		KnowledgeQARewriteCacheEnabled: strings.ToLower(getEnv("KNOWLEDGE_QA_REWRITE_CACHE_ENABLED", "true")) == "true",
 		KnowledgeQATableLaneEnabled:    strings.ToLower(getEnv("KNOWLEDGE_QA_TABLE_LANE_ENABLED", "true")) == "true",
@@ -266,6 +278,7 @@ func Load() (*Config, error) {
 		DefaultAskAIMonthlyQuota:       int32(getEnvInt("VISITOR_ASK_AI_MONTHLY_QUOTA_DEFAULT", 500)),
 		VisitorAskAIRPM:                getEnvInt("VISITOR_ASK_AI_RPM", 10),
 		VisitorAskAIDailyLimit:         getEnvInt("VISITOR_ASK_AI_DAILY_LIMIT", 50),
+		VisitorAskFormalDailyLimit:     getEnvInt("VISITOR_ASK_FORMAL_DAILY_LIMIT", 20),
 
 		CORSAllowedOrigins: getEnv("CORS_ALLOWED_ORIGINS", "http://localhost:5173"),
 		MetricsEnabled:     strings.ToLower(getEnv("METRICS_ENABLED", "true")) == "true",
@@ -411,4 +424,14 @@ func getEnvInt(key string, fallback int) int {
 func visitorAskUnifiedEnabledFromEnv() bool {
 	v := strings.TrimSpace(os.Getenv("VISITOR_ASK_UNIFIED"))
 	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// parseDelimitedList splits on commas and/or whitespace and lowercases tokens.
+func parseDelimitedList(raw string) []string {
+	normalized := strings.ToLower(strings.TrimSpace(raw))
+	if normalized == "" {
+		return nil
+	}
+	normalized = strings.ReplaceAll(normalized, ",", " ")
+	return strings.Fields(normalized)
 }

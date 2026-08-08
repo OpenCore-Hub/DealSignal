@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
@@ -36,6 +37,21 @@ func TestValidateAskMode(t *testing.T) {
 	}
 	if err := validateAskMode("invalid"); err == nil {
 		t.Fatal("expected error for invalid mode")
+	}
+}
+
+func TestVisitorAskSubmitChannel(t *testing.T) {
+	if got := visitorAskSubmitChannel(AskModeFormal, true); got != visitorask.ChannelAskFormal {
+		t.Fatalf("formal entitled = %q", got)
+	}
+	if got := visitorAskSubmitChannel(AskModeFormal, false); got != visitorask.ChannelAskHost {
+		t.Fatalf("formal not entitled must not use formal channel, got %q", got)
+	}
+	if got := visitorAskSubmitChannel(AskModeSupervised, true); got != visitorask.ChannelAskHost {
+		t.Fatalf("supervised = %q", got)
+	}
+	if got := visitorAskSubmitChannel("", false); got != visitorask.ChannelAskHost {
+		t.Fatalf("default = %q", got)
 	}
 }
 

@@ -14,6 +14,7 @@ import {
   visitPublicLink,
   attachDebug,
 } from "./real-helpers";
+import { ASK_INBOX_TITLE } from "./helpers";
 
 let workspaceSlug: string;
 let roomId: string;
@@ -68,7 +69,7 @@ test.describe("Visitor Ask owner reply (real backend UI)", () => {
 
     await authenticatePage(page);
     await page.goto(`/${workspaceSlug}/deal-rooms/${roomId}?tab=qa`);
-    await expect(page.getByText("Ask inbox", { exact: true })).toBeVisible({
+    await expect(page.getByText(ASK_INBOX_TITLE)).toBeVisible({
       timeout: 20000,
     });
     await expect(page.getByText(question)).toBeVisible({ timeout: 15000 });

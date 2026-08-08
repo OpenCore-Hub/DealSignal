@@ -5,7 +5,13 @@
  * Never cross-contaminate inboxes.
  */
 import { test, expect } from "@playwright/test";
-import { setupAuthenticatedPage, attachDebug, WORKSPACE_SLUG } from "./helpers";
+import {
+  setupAuthenticatedPage,
+  attachDebug,
+  ASK_INBOX_TITLE,
+  FORMAL_QUEUE_TAB,
+  WORKSPACE_SLUG,
+} from "./helpers";
 
 test.describe("Dashboard action surface navigation (MSW)", () => {
   test("document share todo opens Document Library Share, not a deal room", async ({ page }) => {
@@ -118,10 +124,43 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     await expect(page).toHaveURL(
       new RegExp(`/${WORKSPACE_SLUG}/deal-rooms/room_1\\?tab=qa&linkId=link_room_1`),
     );
-    await expect(page.getByText("Ask inbox", { exact: true })).toBeVisible({
+    await expect(page.getByText(ASK_INBOX_TITLE)).toBeVisible({
       timeout: 15000,
     });
     await expect(page).not.toHaveURL(/\/documents/);
     await expect(page).not.toHaveURL(/\/links\//);
+  });
+
+  test("formal Ask review todo opens QA formal queue with link filter", async ({ page }) => {
+    attachDebug(page);
+    await setupAuthenticatedPage(page);
+
+    await page.goto(`/${WORKSPACE_SLUG}/dashboard`);
+    await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
+      timeout: 15000,
+    });
+    const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
+    if (await actionsTab.isVisible().catch(() => false)) {
+      await actionsTab.click();
+    }
+
+    const formalTodo = page.getByText(
+      /Review formal Q&A from compliance@example\.com on Acme Seed Data Room/i,
+    );
+    await expect(formalTodo).toBeVisible({ timeout: 15000 });
+    await formalTodo.click();
+
+    await expect(page).toHaveURL(
+      new RegExp(
+        `/${WORKSPACE_SLUG}/deal-rooms/room_1\\?tab=qa&linkId=link_room_1&askInbox=formal_queue`,
+      ),
+    );
+    await expect(page.getByRole("tab", { name: FORMAL_QUEUE_TAB })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    await expect(
+      page.getByText("What is the board-approved revenue guidance?"),
+    ).toBeVisible({ timeout: 15000 });
   });
 });

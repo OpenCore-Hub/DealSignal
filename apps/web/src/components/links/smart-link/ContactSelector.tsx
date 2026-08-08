@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Combobox } from "@base-ui/react/combobox";
 import { api } from "@/lib/api";
+import { useWorkspaceContacts } from "@/hooks/useWorkspaceContacts";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "react-i18next";
 import type { Contact } from "@/types";
@@ -31,7 +32,7 @@ function isValidEmail(value: string) {
 }
 
 export function ContactSelector({
-  workspaceSlug: _workspaceSlug,
+  workspaceSlug,
   value,
   onChange,
   contacts: contactsProp,
@@ -39,9 +40,12 @@ export function ContactSelector({
   const { t } = useTranslation("links");
   const { t: tShare } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
-  const [fetchedContacts, setFetchedContacts] = useState<Contact[]>([]);
+  const {
+    contacts: fetchedContacts,
+    loading: fetchedLoading,
+  } = useWorkspaceContacts(workspaceSlug, { enabled: !contactsProp });
   const [createdContacts, setCreatedContacts] = useState<Contact[]>([]);
-  const [loading, setLoading] = useState(!contactsProp);
+  const loading = contactsProp ? false : fetchedLoading;
   const [comboboxValue, setComboboxValue] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [addContactOpen, setAddContactOpen] = useState(false);
@@ -58,31 +62,17 @@ export function ContactSelector({
     };
   }, []);
 
+  // Drop in-session creates when the workspace changes or parent supplies contacts.
+  useEffect(() => {
+    setCreatedContacts([]);
+  }, [workspaceSlug, contactsProp]);
+
   const contacts = useMemo(() => {
     const base = contactsProp ?? fetchedContacts;
     if (createdContacts.length === 0) return base;
     const ids = new Set(base.map((c) => c.id));
     return [...base, ...createdContacts.filter((c) => !ids.has(c.id))];
   }, [contactsProp, fetchedContacts, createdContacts]);
-
-  useEffect(() => {
-    if (contactsProp) return;
-    let cancelled = false;
-    api
-      .getContacts()
-      .then((res) => {
-        if (!cancelled) setFetchedContacts(res.data);
-      })
-      .catch(() => {
-        if (!cancelled) setFetchedContacts([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [contactsProp]);
 
   const selectedContacts = useMemo(
     () => contacts.filter((c) => value.includes(c.id)),
@@ -148,10 +138,13 @@ export function ContactSelector({
     if (!email || !isValidEmail(email)) return;
     setCreatingContact(true);
     try {
-      const contact = await api.createContact({
-        email,
-        name: newContactName.trim() || undefined,
-      });
+      const contact = await api.createContact(
+        {
+          email,
+          name: newContactName.trim() || undefined,
+        },
+        workspaceSlug,
+      );
       setCreatedContacts((prev) => [...prev, contact]);
       if (!contactsProp) {
         setFetchedContacts((prev) => [...prev, contact]);

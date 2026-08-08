@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ConfirmDialog } from "@/components/common/ConfirmDialog";
 import { api } from "@/lib/api";
@@ -20,31 +20,74 @@ interface ReplacePrompt {
   resolve: (decision: ReplaceDecision) => void;
 }
 
+/** True for 409 document_exists — duck-typed so HMR / bundled duplicates still match. */
+export function isDocumentExistsError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const code = "code" in err ? String((err as { code: unknown }).code) : "";
+  if (code === "document_exists") return true;
+  return err instanceof ApiError && err.status === 409 && code === "document_exists";
+}
+
 /**
  * Shared upload helper: on 409 document_exists, ask Replace/Cancel once,
  * then retry with replace=true. Serializes concurrent prompts so multi-file
  * uploads never stack dialogs.
  */
-export function useDocumentUploadConflict() {
+export function useDocumentUploadConflict(opts?: {
+  onAwaitingConflictChange?: (awaiting: boolean) => void;
+}) {
   const { t } = useTranslation("documents");
   const [prompt, setPrompt] = useState<ReplacePrompt | null>(null);
+  const promptRef = useRef<ReplacePrompt | null>(null);
+  const settlingRef = useRef(false);
   const promptChainRef = useRef(Promise.resolve());
+  const onAwaitingConflictChange = opts?.onAwaitingConflictChange;
+
+  useEffect(() => {
+    onAwaitingConflictChange?.(Boolean(prompt));
+  }, [prompt, onAwaitingConflictChange]);
+
+  // If the host unmounts mid-prompt (route change), settle as cancel so upload
+  // promises cannot hang forever.
+  useEffect(() => {
+    return () => {
+      const current = promptRef.current;
+      if (!current || settlingRef.current) return;
+      settlingRef.current = true;
+      promptRef.current = null;
+      current.resolve("cancel");
+    };
+  }, []);
 
   const askReplace = useCallback((fileName: string) => {
     return new Promise<ReplaceDecision>((resolve) => {
-      promptChainRef.current = promptChainRef.current.then(
-        () =>
-          new Promise<void>((release) => {
-            setPrompt({
-              fileName,
-              resolve: (decision) => {
-                resolve(decision);
-                release();
-              },
-            });
-          }),
-      );
+      const enqueue = () =>
+        new Promise<void>((release) => {
+          settlingRef.current = false;
+          const next: ReplacePrompt = {
+            fileName,
+            resolve: (decision) => {
+              resolve(decision);
+              release();
+            },
+          };
+          promptRef.current = next;
+          setPrompt(next);
+        });
+
+      // Recover if a prior link rejected so the queue cannot stall permanently.
+      promptChainRef.current = promptChainRef.current.then(enqueue, enqueue);
     });
+  }, []);
+
+  const settle = useCallback((decision: ReplaceDecision) => {
+    if (settlingRef.current) return;
+    const current = promptRef.current;
+    if (!current) return;
+    settlingRef.current = true;
+    promptRef.current = null;
+    setPrompt(null);
+    current.resolve(decision);
   }, []);
 
   const uploadDocument = useCallback(
@@ -52,7 +95,7 @@ export function useDocumentUploadConflict() {
       try {
         return await api.uploadDocument(file, category);
       } catch (err) {
-        if (!(err instanceof ApiError) || err.code !== "document_exists") {
+        if (!isDocumentExistsError(err)) {
           throw err;
         }
         const decision = await askReplace(file.name);
@@ -74,14 +117,11 @@ export function useDocumentUploadConflict() {
       })}
       confirmLabel={t("upload.replaceConfirm")}
       cancelLabel={t("upload.replaceCancel")}
-      onConfirm={() => {
-        prompt?.resolve("replace");
-        setPrompt(null);
-      }}
-      onCancel={() => {
-        prompt?.resolve("cancel");
-        setPrompt(null);
-      }}
+      // Sit above host dialogs (UploadDialog) and avoid X dismiss races.
+      contentClassName="sm:max-w-md z-[60]"
+      showCloseButton={false}
+      onConfirm={() => settle("replace")}
+      onCancel={() => settle("cancel")}
     />
   );
 

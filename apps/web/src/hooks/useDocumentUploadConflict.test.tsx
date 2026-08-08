@@ -5,6 +5,7 @@ import { useState } from "react";
 import { ApiError } from "@/lib/apiClient";
 import {
   UploadCancelledError,
+  isDocumentExistsError,
   useDocumentUploadConflict,
 } from "./useDocumentUploadConflict";
 
@@ -23,8 +24,16 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-function Harness({ file }: { file: File }) {
-  const { uploadDocument, conflictDialog } = useDocumentUploadConflict();
+function Harness({
+  file,
+  onAwaitingConflictChange,
+}: {
+  file: File;
+  onAwaitingConflictChange?: (awaiting: boolean) => void;
+}) {
+  const { uploadDocument, conflictDialog } = useDocumentUploadConflict({
+    onAwaitingConflictChange,
+  });
   const [status, setStatus] = useState("idle");
   return (
     <div>
@@ -46,6 +55,24 @@ function Harness({ file }: { file: File }) {
   );
 }
 
+describe("isDocumentExistsError", () => {
+  it("matches ApiError and duck-typed payloads", () => {
+    expect(
+      isDocumentExistsError(
+        new ApiError({
+          status: 409,
+          code: "document_exists",
+          message: "exists",
+          requestId: "r1",
+        }),
+      ),
+    ).toBe(true);
+    expect(isDocumentExistsError({ code: "document_exists", status: 409 })).toBe(true);
+    expect(isDocumentExistsError({ code: "http_error", status: 409 })).toBe(false);
+    expect(isDocumentExistsError(new Error("nope"))).toBe(false);
+  });
+});
+
 describe("useDocumentUploadConflict", () => {
   beforeEach(() => {
     uploadDocumentMock.mockReset();
@@ -63,28 +90,24 @@ describe("useDocumentUploadConflict", () => {
 
   it("retries with replace after the user confirms", async () => {
     uploadDocumentMock
-      .mockRejectedValueOnce(
-        new ApiError({
-          status: 409,
-          code: "document_exists",
-          message: "exists",
-          requestId: "r1",
-        }),
-      )
+      .mockRejectedValueOnce({ code: "document_exists", status: 409, message: "exists" })
       .mockResolvedValueOnce({ id: "d1", title: "a.pdf" });
 
+    const awaiting = vi.fn();
     const file = new File(["x"], "a.pdf", { type: "application/pdf" });
-    render(<Harness file={file} />);
+    render(<Harness file={file} onAwaitingConflictChange={awaiting} />);
 
     fireEvent.click(screen.getByRole("button", { name: "upload" }));
     await screen.findByText("upload.replaceTitle");
+    expect(awaiting).toHaveBeenCalledWith(true);
     fireEvent.click(screen.getByRole("button", { name: "upload.replaceConfirm" }));
 
     await waitFor(() => expect(screen.getByTestId("status")).toHaveTextContent("ok"));
     expect(uploadDocumentMock).toHaveBeenLastCalledWith(file, undefined, { replace: true });
+    await waitFor(() => expect(awaiting).toHaveBeenCalledWith(false));
   });
 
-  it("surfaces UploadCancelledError when the user cancels", async () => {
+  it("surfaces UploadCancelledError when the user discards", async () => {
     uploadDocumentMock.mockRejectedValueOnce(
       new ApiError({
         status: 409,

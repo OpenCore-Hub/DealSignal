@@ -208,6 +208,8 @@ export interface PublicFormalAsk {
   published_at: string;
   link_id?: string;
   link_name?: string;
+  /** Present only when the owner published with anonymize=false. */
+  visitor_email?: string;
 }
 
 /** Owner-facing unified Ask turn (host inbox). */
@@ -354,6 +356,11 @@ export interface Evidence {
   match_type?: string;
 }
 
+export interface ContactViewedDocument {
+  id: string;
+  title: string;
+}
+
 export interface Contact {
   id: string;
   email: string;
@@ -362,11 +369,14 @@ export interface Contact {
   role?: string;
   heatLevel: HeatLevel;
   score: number;
-  scoreHistory: { date: string; score: number }[];
+  /** Daily engagement event counts (UTC) for trend chart — not a stub. */
+  scoreHistory: { date: string; events?: number; score: number }[];
   totalVisits: number;
   totalDurationSeconds: number;
   lastSeenAt?: string;
   viewedDocuments: string[];
+  /** Prefer this for the Documents tab (id + title from access history). */
+  viewedDocumentItems?: ContactViewedDocument[];
 }
 
 export interface Activity {
@@ -374,6 +384,7 @@ export interface Activity {
   contactId: string;
   contactEmail: string;
   linkId: string;
+  documentId?: string;
   documentTitle: string;
   eventType: "open" | "page_view" | "revisit" | "download" | "share";
   pageNumber?: number;
@@ -1106,7 +1117,7 @@ export interface ContactProfile {
   role?: string;
   heatLevel: HeatLevel;
   score: number;
-  scoreHistory: { date: string; score: number }[];
+  scoreHistory: { date: string; events?: number; score: number }[];
   relatedContacts: string[];
   notes?: string;
 }

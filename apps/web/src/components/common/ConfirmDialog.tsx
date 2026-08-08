@@ -16,6 +16,9 @@ interface ConfirmDialogProps {
   cancelLabel: string;
   destructive?: boolean;
   loading?: boolean;
+  /** Extra classes for DialogContent (e.g. nested modal z-index). */
+  contentClassName?: string;
+  showCloseButton?: boolean;
   onConfirm: () => void;
   onCancel: () => void;
 }
@@ -28,12 +31,22 @@ export function ConfirmDialog({
   cancelLabel,
   destructive,
   loading,
+  contentClassName,
+  showCloseButton = true,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={(isOpen) => !isOpen && onCancel()}>
-      <DialogContent className="sm:max-w-md">
+    <Dialog
+      open={open}
+      onOpenChange={(isOpen) => {
+        if (!isOpen) onCancel();
+      }}
+    >
+      <DialogContent
+        className={contentClassName ?? "sm:max-w-md"}
+        showCloseButton={showCloseButton}
+      >
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>

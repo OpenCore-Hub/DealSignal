@@ -17,6 +17,7 @@ import {
   accessPublicLinkApi,
   submitPublicAsk,
 } from "./real-helpers";
+import { ASK_INBOX_TITLE } from "./helpers";
 
 let workspaceSlug: string;
 let roomId: string;
@@ -69,7 +70,7 @@ test.describe("Visitor Ask dashboard navigation (real backend UI)", () => {
     await expect(page).toHaveURL(
       new RegExp(`/${workspaceSlug}/deal-rooms/${roomId}\\?tab=qa&linkId=${linkId}`),
     );
-    await expect(page.getByText("Ask inbox", { exact: true })).toBeVisible({
+    await expect(page.getByText(ASK_INBOX_TITLE)).toBeVisible({
       timeout: 15000,
     });
     await expect(page).not.toHaveURL(/\/documents/);

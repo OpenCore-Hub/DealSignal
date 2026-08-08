@@ -254,6 +254,59 @@ run_e2e_visitor_ask() {
   fi
   echo "ok"
 
+  echo -n "[pin host answered turn as FAQ] "
+  local pin_body="$tmp_dir/pin.json" pin_http
+  pin_http=$(curl -sS -o "$pin_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask/$turn_id/pin-faq")
+  if [[ "$pin_http" != "200" ]]; then
+    echo "FAIL pin-faq HTTP $pin_http"
+    cat "$pin_body"
+    return 1
+  fi
+  if [[ "$(jq -r '.data.pinned_faq_at // .data.pinnedFaqAt // empty' "$pin_body")" == "" ]]; then
+    echo "FAIL pin-faq missing pinned_faq_at"
+    cat "$pin_body"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[visitor public ask/faq lists pinned entry] "
+  local faq_body="$tmp_dir/faq.json"
+  faq_body=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/faq")
+  if [[ "$(echo "$faq_body" | jq -r --arg id "$turn_id" '[.data[] | select(.id == $id)] | length')" != "1" ]]; then
+    echo "FAIL pinned FAQ not visible to visitor"
+    echo "$faq_body" | jq -c '.data[:3]'
+    return 1
+  fi
+  if [[ "$(echo "$faq_body" | jq -r --arg id "$turn_id" --arg ans "$answer" '[.data[] | select(.id == $id and .answer == $ans)] | length')" != "1" ]]; then
+    echo "FAIL FAQ answer mismatch"
+    echo "$faq_body" | jq -c '.data[:3]'
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[unpin FAQ] "
+  local unpin_body="$tmp_dir/unpin.json" unpin_http
+  unpin_http=$(curl -sS -o "$unpin_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X POST "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask/$turn_id/unpin-faq")
+  if [[ "$unpin_http" != "200" ]]; then
+    echo "FAIL unpin-faq HTTP $unpin_http"
+    cat "$unpin_body"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[visitor public ask/faq empty after unpin] "
+  faq_body=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/faq")
+  if [[ "$(echo "$faq_body" | jq -r --arg id "$turn_id" '[.data[] | select(.id == $id)] | length')" != "0" ]]; then
+    echo "FAIL FAQ still visible after unpin"
+    echo "$faq_body" | jq -c '.data[:3]'
+    return 1
+  fi
+  echo "ok"
+
   echo -n "[link analytics ask_summary] "
   local analytics_body="$tmp_dir/analytics.json"
   analytics_body=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
@@ -394,6 +447,17 @@ run_e2e_visitor_ask_formal() {
   fi
   echo "ok turn=$turn_id"
 
+  echo -n "[visitor formal board empty before publish] "
+  local formal_before="$tmp_dir/formal-before.json"
+  formal_before=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/formal")
+  if [[ "$(echo "$formal_before" | jq -r '.data | length')" != "0" ]]; then
+    echo "FAIL expected empty formal board before publish"
+    echo "$formal_before" | jq -c '.data[:3]'
+    return 1
+  fi
+  echo "ok"
+
   echo -n "[dashboard formal review action] "
   local stats todo_count action_type target_id
   stats=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
@@ -420,6 +484,53 @@ run_e2e_visitor_ask_formal() {
   fi
   echo "ok"
 
+  echo -n "[schedule formal publish] "
+  local future_epoch publish_at schedule_body schedule_http
+  schedule_body="$tmp_dir/formal-schedule.json"
+  future_epoch=$(( $(date +%s) + 86400 ))
+  if date -r "$future_epoch" >/dev/null 2>&1; then
+    publish_at=$(date -u -r "$future_epoch" +%Y-%m-%dT%H:%M:%SZ)
+  else
+    publish_at=$(date -u -d "@$future_epoch" +%Y-%m-%dT%H:%M:%SZ)
+  fi
+  schedule_http=$(curl -sS -o "$schedule_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X PATCH "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask/$turn_id/formal-publish" \
+    -H "Content-Type: application/json" \
+    -d "{\"answer\":\"$formal_answer\",\"publish_at\":\"$publish_at\"}")
+  if [[ "$schedule_http" != "200" ]]; then
+    echo "FAIL schedule formal-publish HTTP $schedule_http"
+    cat "$schedule_body"
+    return 1
+  fi
+  if [[ "$(jq -r '.data.formal_status // .data.formalStatus // empty' "$schedule_body")" != "scheduled" ]]; then
+    echo "FAIL formal_status not scheduled"
+    cat "$schedule_body"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[visitor formal board empty while scheduled] "
+  formal_before=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/formal")
+  if [[ "$(echo "$formal_before" | jq -r '.data | length')" != "0" ]]; then
+    echo "FAIL scheduled formal visible before publish time"
+    echo "$formal_before" | jq -c '.data[:3]'
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[dashboard formal review action still pending when scheduled] "
+  stats=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/dashboard/stats")
+  todo_count=$(echo "$stats" | jq -r --arg sid "$turn_id" \
+    '[.actionItems[]? | select(.sourceType == "deal_room_link_question" and .sourceId == $sid and .status == "pending")] | length')
+  if [[ "$todo_count" != "1" ]]; then
+    echo "FAIL expected pending formal review action while scheduled, got $todo_count"
+    echo "$stats" | jq -c '[.actionItems[]? | {sourceType, sourceId, actionType, status}] | .[:8]'
+    return 1
+  fi
+  echo "ok"
+
   echo -n "[formal publish clears dashboard todo] "
   local publish_body="$tmp_dir/formal-publish.json" publish_http
   publish_http=$(curl -sS -o "$publish_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
@@ -438,6 +549,113 @@ run_e2e_visitor_ask_formal() {
   if [[ "$todo_count" != "0" ]]; then
     echo "FAIL expected formal action resolved after publish, got $todo_count pending"
     echo "$stats" | jq -c '[.actionItems[]? | select(.sourceId == $sid)]' --arg sid "$turn_id"
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[visitor formal board lists published entry] "
+  local formal_after="$tmp_dir/formal-after.json"
+  formal_after=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/formal")
+  if [[ "$(echo "$formal_after" | jq -r --arg id "$turn_id" '[.data[] | select(.id == $id)] | length')" != "1" ]]; then
+    echo "FAIL published formal not visible to visitor"
+    echo "$formal_after" | jq -c '.data[:3]'
+    return 1
+  fi
+  if [[ "$(echo "$formal_after" | jq -r --arg id "$turn_id" --arg ans "$formal_answer" '[.data[] | select(.id == $id and .answer == $ans)] | length')" != "1" ]]; then
+    echo "FAIL formal answer mismatch on visitor board"
+    echo "$formal_after" | jq -c '.data[:3]'
+    return 1
+  fi
+  echo -n "[visitor formal board anonymizes by default] "
+  if [[ "$(echo "$formal_after" | jq -r --arg id "$turn_id" '[.data[] | select(.id == $id and (.visitor_email // "") != "")] | length')" != "0" ]]; then
+    echo "FAIL expected empty visitor_email on anonymized formal board"
+    echo "$formal_after" | jq -c '.data[:3]'
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[visitor formal board exposes email when anonymize=false] "
+  local attr_question attr_answer attr_ask_body attr_turn_id attr_publish_body attr_formal
+  attr_question="E2E formal attribution: who asked?"
+  attr_answer="Approved attribution: mid-teens growth (named)."
+  attr_ask_body="$tmp_dir/formal-attr-ask.json"
+  ask_http=$(curl -sS -o "$attr_ask_body" -w "%{http_code}" -c "$visitor_jar" -b "$visitor_jar" \
+    -X POST "$BASE_URL/api/v1/public/links/$public_token/ask" \
+    -H "Content-Type: application/json" \
+    -d "{\"question\":\"$attr_question\"}")
+  if [[ "$ask_http" != "201" ]]; then
+    echo "FAIL attribution ask HTTP $ask_http"
+    cat "$attr_ask_body"
+    return 1
+  fi
+  attr_turn_id=$(jq -r '.data.id' "$attr_ask_body")
+  attr_publish_body="$tmp_dir/formal-attr-publish.json"
+  publish_http=$(curl -sS -o "$attr_publish_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X PATCH "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask/$attr_turn_id/formal-publish" \
+    -H "Content-Type: application/json" \
+    -d "{\"answer\":\"$attr_answer\",\"anonymize\":false}")
+  if [[ "$publish_http" != "200" ]]; then
+    echo "FAIL attribution formal-publish HTTP $publish_http"
+    cat "$attr_publish_body"
+    return 1
+  fi
+  attr_formal=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/formal")
+  if [[ "$(echo "$attr_formal" | jq -r --arg id "$attr_turn_id" --arg email "e2e-formal-visitor@example.com" \
+    '[.data[] | select(.id == $id and (.visitor_email // "") == $email)] | length')" != "1" ]]; then
+    echo "FAIL expected visitor_email on non-anonymized formal board"
+    echo "$attr_formal" | jq -c --arg id "$attr_turn_id" '[.data[] | select(.id == $id)]'
+    return 1
+  fi
+  echo "ok"
+
+  echo -n "[worker due-sweep publishes scheduled formal without lazy-on-read] "
+  local worker_question worker_answer worker_turn_id worker_ask_body worker_schedule_body
+  worker_question="E2E formal worker: delayed disclosure?"
+  worker_answer="Worker-published guidance: low-teens growth."
+  worker_ask_body="$tmp_dir/formal-worker-ask.json"
+  ask_http=$(curl -sS -o "$worker_ask_body" -w "%{http_code}" -c "$visitor_jar" -b "$visitor_jar" \
+    -X POST "$BASE_URL/api/v1/public/links/$public_token/ask" \
+    -H "Content-Type: application/json" \
+    -d "{\"question\":\"$worker_question\"}")
+  if [[ "$ask_http" != "201" ]]; then
+    echo "FAIL worker ask HTTP $ask_http"
+    cat "$worker_ask_body"
+    return 1
+  fi
+  worker_turn_id=$(jq -r '.data.id' "$worker_ask_body")
+  future_epoch=$(( $(date +%s) + 3 ))
+  if date -r "$future_epoch" >/dev/null 2>&1; then
+    publish_at=$(date -u -r "$future_epoch" +%Y-%m-%dT%H:%M:%SZ)
+  else
+    publish_at=$(date -u -d "@$future_epoch" +%Y-%m-%dT%H:%M:%SZ)
+  fi
+  worker_schedule_body="$tmp_dir/formal-worker-schedule.json"
+  schedule_http=$(curl -sS -o "$worker_schedule_body" -w "%{http_code}" -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    -X PATCH "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask/$worker_turn_id/formal-publish" \
+    -H "Content-Type: application/json" \
+    -d "{\"answer\":\"$worker_answer\",\"publish_at\":\"$publish_at\"}")
+  if [[ "$schedule_http" != "200" ]]; then
+    echo "FAIL worker schedule HTTP $schedule_http"
+    cat "$worker_schedule_body"
+    return 1
+  fi
+  # Owner inbox does not lazy-publish; wait for FORMAL_PUBLISH_INTERVAL (default 15s) + due window.
+  sleep 20
+  local owner_turns
+  owner_turns=$(curl -fsS -c "$COOKIE_JAR" -b "$COOKIE_JAR" \
+    "$BASE_URL/api/workspaces/$WORKSPACE_SLUG/links/$link_id/ask")
+  if [[ "$(echo "$owner_turns" | jq -r --arg id "$worker_turn_id" '[.data[] | select(.id == $id and (.formal_status // .formalStatus) == "published")] | length')" != "1" ]]; then
+    echo "FAIL worker did not publish scheduled formal (owner inbox still not published)"
+    echo "$owner_turns" | jq -c --arg id "$worker_turn_id" '[.data[] | select(.id == $id) | {id, formal_status, status}]'
+    return 1
+  fi
+  formal_after=$(curl -fsS -c "$visitor_jar" -b "$visitor_jar" \
+    "$BASE_URL/api/v1/public/links/$public_token/ask/formal")
+  if [[ "$(echo "$formal_after" | jq -r --arg id "$worker_turn_id" --arg ans "$worker_answer" '[.data[] | select(.id == $id and .answer == $ans)] | length')" != "1" ]]; then
+    echo "FAIL worker-published formal missing from visitor board"
+    echo "$formal_after" | jq -c '.data[:5]'
     return 1
   fi
   echo "ok"

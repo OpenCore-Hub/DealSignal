@@ -5,7 +5,6 @@ import {
   FileText,
   Clock,
   Folder,
-  Note,
   Users,
 } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
@@ -16,82 +15,149 @@ import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
 import { HeatBadge } from "@/components/common/HeatBadge";
-import { ActivityTimeline } from "@/components/common/ActivityTimeline";
+import { ActivityTimeline, type ActivityType } from "@/components/common/ActivityTimeline";
 import { TrendChart } from "@/components/common/TrendChart";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { EmptyState } from "@/components/common/EmptyState";
-import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { api } from "@/lib/api";
 import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { useTranslation } from "react-i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import type { Activity, Contact } from "@/types";
 
-function ContactScoreChart({
+function ContactEngagementChart({
   scoreHistory,
   title,
   emptyDescription,
   locale,
 }: {
-  scoreHistory: { date: string; score: number }[];
+  scoreHistory: { date: string; events?: number; score: number }[];
   title: string;
   emptyDescription: string;
   locale: string;
 }) {
   const labels = useMemo(
     () => scoreHistory.map((h) => new Date(h.date).toLocaleDateString(locale, { month: "short", day: "numeric" })),
-    [scoreHistory, locale]
+    [scoreHistory, locale],
   );
-  const data = useMemo(() => scoreHistory.map((h) => h.score), [scoreHistory]);
+  const data = useMemo(
+    () => scoreHistory.map((h) => (typeof h.events === "number" ? h.events : h.score)),
+    [scoreHistory],
+  );
 
-  return <TrendChart title={title} labels={labels} data={data} emptyDescription={emptyDescription} />;
+  return (
+    <TrendChart
+      title={title}
+      labels={labels}
+      data={data}
+      emptyDescription={emptyDescription}
+      formatValue={(v) => String(v)}
+    />
+  );
 }
 
+function contactSubtitle(contact: Contact, unknownOrganization: string): string {
+  const parts = [contact.email];
+  const org = contact.organization?.trim();
+  if (org) {
+    parts.push(org);
+  } else {
+    parts.push(unknownOrganization);
+  }
+  const role = contact.role?.trim();
+  if (role) parts.push(role);
+  return parts.join(" · ");
+}
+
+function activityEventLabel(
+  a: Activity,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  variant: "full" | "short" = "full",
+): string {
+  const short = variant === "short";
+  switch (a.eventType) {
+    case "open":
+      return t(short ? "activity.openShort" : "activity.open");
+    case "page_view":
+      return t(short ? "activity.pageViewShort" : "activity.pageView", {
+        page: a.pageNumber ?? 0,
+      });
+    case "revisit":
+      return t(short ? "activity.revisitShort" : "activity.revisit");
+    case "download":
+      return t(short ? "activity.downloadShort" : "activity.download");
+    default:
+      return t("activity.unknown");
+  }
+}
+
+/** Contact CRM detail: overview / timeline / viewed documents. */
 export function ContactDetailPage() {
+  const { workspaceSlug, contactId } = useParams<{ workspaceSlug: string; contactId: string }>();
+  if (!workspaceSlug || !contactId) return null;
+  return (
+    <ContactDetailPageInner
+      key={`${workspaceSlug}:${contactId}`}
+      workspaceSlug={workspaceSlug}
+      contactId={contactId}
+    />
+  );
+}
+
+function ContactDetailPageInner({
+  workspaceSlug,
+  contactId,
+}: {
+  workspaceSlug: string;
+  contactId: string;
+}) {
   const { t, i18n } = useTranslation("contacts");
   const { t: tc } = useTranslation("common");
   const navigate = useNavigate();
-  const { workspaceSlug, contactId } = useParams<{ workspaceSlug: string; contactId: string }>();
   const location = useLocation();
   const locale = i18n.language;
 
+  // Backend GetContact is workspace-scoped; remount + deps prevent cross-workspace flash.
   const { data, loading, error, refetch } = useAsyncData(async () => {
-    if (!contactId) {
-      throw new Error(t("detail.notFound"));
-    }
-    const [c, a, docsRes] = await Promise.all([
-      api.getContactById(contactId),
-      api.getActivitiesByContactId(contactId),
-      // Viewed docs may be library (general) or data-room uploads; exclude agreements.
-      api.getDocuments(undefined, undefined, { excludeAgreement: true }),
+    const [c, a] = await Promise.all([
+      api.getContactById(contactId, workspaceSlug),
+      api.getActivitiesByContactId(contactId, workspaceSlug),
     ]);
-    return { contact: c, activities: a.data, documents: docsRes.data };
-  }, [contactId, t]);
+    return { contact: c, activities: a.data };
+  }, [workspaceSlug, contactId, t]);
 
   const contact = data?.contact ?? null;
+  const activities = data?.activities ?? [];
 
   const timelineActivities = useMemo(
     () =>
-      (data?.activities ?? []).map((a) => ({
+      activities.map((a) => ({
         id: a.id,
         time: formatRelativeTime(a.timestamp, locale),
-        title: `${a.contactEmail} ${
-          a.eventType === "open"
-            ? t("activity.open")
-            : a.eventType === "page_view"
-            ? t("activity.pageView", { page: a.pageNumber })
-            : a.eventType === "revisit"
-            ? t("activity.revisit")
-            : t("activity.download")
-        }`,
-        description: `${a.documentTitle} · ${t(a.description)}`,
+        title: activityEventLabel(a, t),
+        // Prefer structured title; ignore English-composed backend description strings.
+        description: a.documentTitle?.trim() || undefined,
+        type: a.eventType as ActivityType,
       })),
-    [data?.activities, locale, t]
+    [activities, locale, t],
   );
 
-  const viewedDocuments = useMemo(
-    () => (data?.documents ?? []).filter((d) => contact?.viewedDocuments.includes(d.id)),
-    [data?.documents, contact]
-  );
+  const viewedDocuments = useMemo(() => {
+    if (contact?.viewedDocumentItems?.length) {
+      return contact.viewedDocumentItems.map((d) => ({
+        id: d.id,
+        title: d.title?.trim() || d.id,
+      }));
+    }
+    // Fallback: unique docs from activity stream when items payload is absent.
+    const map = new Map<string, { id: string; title: string }>();
+    for (const a of activities) {
+      const id = a.documentId?.trim();
+      if (!id || map.has(id)) continue;
+      map.set(id, { id, title: a.documentTitle?.trim() || id });
+    }
+    return Array.from(map.values());
+  }, [contact, activities]);
 
   if (error) {
     return (
@@ -112,7 +178,7 @@ export function ContactDetailPage() {
 
       <PageHeader
         title={contact.name}
-        description={`${contact.email} · ${contact.organization || t("unknownOrganization")} · ${contact.role || ""}`}
+        description={contactSubtitle(contact, t("unknownOrganization"))}
       >
         <Button variant="outline" className="gap-1.5" onClick={() => window.open(`mailto:${contact.email}`)}>
           <Envelope size={16} />
@@ -142,14 +208,13 @@ export function ContactDetailPage() {
             <TabsTrigger value="overview">{t("detail.tabs.overview")}</TabsTrigger>
             <TabsTrigger value="timeline">{t("detail.tabs.timeline")}</TabsTrigger>
             <TabsTrigger value="documents">{t("detail.tabs.documents")}</TabsTrigger>
-            <TabsTrigger value="notes">{t("detail.tabs.notes")}</TabsTrigger>
           </TabsList>
 
           <TabsContent value="overview" className="space-y-6">
-            <ContactScoreChart
-              scoreHistory={contact.scoreHistory}
-              title={t("detail.recentActivity")}
-              emptyDescription={t("detail.noActivities.description")}
+            <ContactEngagementChart
+              scoreHistory={contact.scoreHistory ?? []}
+              title={t("detail.engagementTrend")}
+              emptyDescription={t("detail.noEngagement.description")}
               locale={locale}
             />
             <Card>
@@ -160,7 +225,7 @@ export function ContactDetailPage() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                {(data?.activities ?? []).length === 0 ? (
+                {activities.length === 0 ? (
                   <EmptyState
                     icon={<Clock size={48} />}
                     title={t("detail.noActivities.title")}
@@ -169,18 +234,12 @@ export function ContactDetailPage() {
                   />
                 ) : (
                   <ul className="space-y-2">
-                    {(data?.activities ?? []).slice(0, 5).map((a) => (
+                    {activities.slice(0, 5).map((a) => (
                       <li key={a.id} className="flex items-center justify-between rounded-md border border-border p-3">
                         <div>
-                          <p className="text-sm font-medium">{a.documentTitle}</p>
+                          <p className="text-sm font-medium">{a.documentTitle || t("detail.untitledDocument")}</p>
                           <p className="text-caption text-muted-foreground">
-                            {a.eventType === "open"
-                              ? t("activity.openShort")
-                              : a.eventType === "page_view"
-                              ? t("activity.pageViewShort", { page: a.pageNumber })
-                              : a.eventType === "revisit"
-                              ? t("activity.revisitShort")
-                              : t("activity.downloadShort")}
+                            {activityEventLabel(a, t, "short")}
                             {" · "}
                             {formatRelativeTime(a.timestamp, locale)}
                           </p>
@@ -273,20 +332,6 @@ export function ContactDetailPage() {
                     })}
                   </ul>
                 )}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="notes">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-h2 flex items-center gap-2">
-                  <Note size={20} />
-                  {t("detail.tabs.notes")}
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-muted-foreground">{t("detail.notesHint")}</p>
               </CardContent>
             </Card>
           </TabsContent>

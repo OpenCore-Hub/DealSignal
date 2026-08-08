@@ -26,6 +26,11 @@ import {
   listOwnerLinkAsk,
   listOwnerRoomAsk,
   answerOwnerAskTurn,
+  pinOwnerAskTurnFAQ,
+  unpinOwnerAskTurnFAQ,
+  listPublicAskFAQs,
+  listPublicFormalAsk,
+  publishFormalAskTurn,
   fetchDashboardActionItems,
   apiFetch,
 } from "./real-helpers";
@@ -85,6 +90,191 @@ test.describe("Visitor Ask (real backend API)", () => {
     const turn = mine.find((t) => t.id === created.id);
     expect(turn?.status).toBe("host_answered");
     expect(turn?.host_answer).toBe(answer);
+
+    restoreCookieJar(authCookies);
+  });
+
+  test("host answered turn: pin FAQ → visitor sees it → unpin hides it", async () => {
+    const authCookies = snapshotCookieJar();
+    const doc = await seedDocument(workspaceSlug);
+    const room = await seedDealRoom(workspaceSlug, {
+      name: "Visitor Ask Pin FAQ Room",
+      templateType: "seed",
+      documentIds: [doc.id],
+    });
+    const link = await seedDealRoomLink(workspaceSlug, room.id, {
+      name: `Ask Pin FAQ Link ${Date.now()}`,
+    });
+
+    const visitorEmail = `ask-faq-visitor-${Date.now()}@example.com`;
+    const question = "Real API: what is the runway?";
+    const answer = "Runway is 18 months at current burn.";
+
+    restoreCookieJar([]);
+    await accessPublicLinkApi(link.publicToken, visitorEmail);
+    const created = await submitPublicAsk(link.publicToken, question);
+    const visitorCookies = snapshotCookieJar();
+
+    restoreCookieJar(authCookies);
+    await answerOwnerAskTurn(workspaceSlug, link.id, created.id, answer);
+    const pinned = await pinOwnerAskTurnFAQ(workspaceSlug, link.id, created.id);
+    expect(pinned.pinned_faq_at).toBeTruthy();
+
+    restoreCookieJar(visitorCookies);
+    let faqs = await listPublicAskFAQs(link.publicToken);
+    expect(faqs.some((faq) => faq.id === created.id && faq.answer === answer)).toBe(true);
+
+    restoreCookieJar(authCookies);
+    await unpinOwnerAskTurnFAQ(workspaceSlug, link.id, created.id);
+
+    restoreCookieJar(visitorCookies);
+    faqs = await listPublicAskFAQs(link.publicToken);
+    expect(faqs.some((faq) => faq.id === created.id)).toBe(false);
+
+    restoreCookieJar(authCookies);
+  });
+
+  test("formal mode: schedule hides board; immediate publish surfaces on visitor formal API", async () => {
+    const authCookies = snapshotCookieJar();
+    const doc = await seedDocument(workspaceSlug);
+    const room = await seedDealRoom(workspaceSlug, {
+      name: "Visitor Ask Formal Board Room",
+      templateType: "seed",
+      documentIds: [doc.id],
+    });
+    const link = await seedDealRoomLink(workspaceSlug, room.id, {
+      name: `Ask Formal Board Link ${Date.now()}`,
+    });
+
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askMode: "formal" });
+
+    const visitorEmail = `ask-formal-visitor-${Date.now()}@example.com`;
+    const question = "Real API formal: revenue guidance?";
+    const answer = "Approved guidance: low-teens growth.";
+
+    restoreCookieJar([]);
+    await accessPublicLinkApi(link.publicToken, visitorEmail);
+    const created = await submitPublicAsk(link.publicToken, question);
+    expect(created.formal_status).toBe("pending_review");
+    const visitorCookies = snapshotCookieJar();
+
+    let formalBoard = await listPublicFormalAsk(link.publicToken);
+    expect(formalBoard.some((entry) => entry.id === created.id)).toBe(false);
+
+    restoreCookieJar(authCookies);
+    const future = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    const scheduled = await publishFormalAskTurn(workspaceSlug, link.id, created.id, answer, {
+      publishAt: future,
+    });
+    expect(scheduled.formal_status).toBe("scheduled");
+
+    restoreCookieJar(visitorCookies);
+    formalBoard = await listPublicFormalAsk(link.publicToken);
+    expect(formalBoard.some((entry) => entry.id === created.id)).toBe(false);
+
+    restoreCookieJar(authCookies);
+    const published = await publishFormalAskTurn(workspaceSlug, link.id, created.id, answer);
+    expect(published.formal_status).toBe("published");
+
+    restoreCookieJar(visitorCookies);
+    formalBoard = await listPublicFormalAsk(link.publicToken);
+    expect(formalBoard.some((entry) => entry.id === created.id && entry.answer === answer)).toBe(
+      true,
+    );
+    const publishedEntry = formalBoard.find((entry) => entry.id === created.id);
+    // Default publish keeps formal_anonymize=true.
+    expect(publishedEntry?.visitor_email).toBeUndefined();
+
+    restoreCookieJar(authCookies);
+  });
+
+  test("formal schedule due is published by background worker without visitor lazy-on-read", async () => {
+    test.setTimeout(90_000);
+    const authCookies = snapshotCookieJar();
+    const doc = await seedDocument(workspaceSlug);
+    const room = await seedDealRoom(workspaceSlug, {
+      name: "Visitor Ask Formal Worker Room",
+      templateType: "seed",
+      documentIds: [doc.id],
+    });
+    const link = await seedDealRoomLink(workspaceSlug, room.id, {
+      name: `Ask Formal Worker Link ${Date.now()}`,
+    });
+
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askMode: "formal" });
+
+    const visitorEmail = `ask-formal-worker-${Date.now()}@example.com`;
+    const question = "Real API formal worker: delayed disclosure?";
+    const answer = "Worker-published guidance: mid-teens growth.";
+
+    restoreCookieJar([]);
+    await accessPublicLinkApi(link.publicToken, visitorEmail);
+    const created = await submitPublicAsk(link.publicToken, question);
+
+    restoreCookieJar(authCookies);
+    const dueAt = new Date(Date.now() + 3_000).toISOString();
+    const scheduled = await publishFormalAskTurn(workspaceSlug, link.id, created.id, answer, {
+      publishAt: dueAt,
+    });
+    expect(scheduled.formal_status).toBe("scheduled");
+
+    // Owner inbox does not lazy-publish; wait for due + FormalPublishWorker tick.
+    const deadline = Date.now() + 45_000;
+    let published = false;
+    while (Date.now() < deadline) {
+      const ownerTurns = await listOwnerLinkAsk(workspaceSlug, link.id);
+      const turn = ownerTurns.find((row) => row.id === created.id);
+      if (turn?.formal_status === "published") {
+        published = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 2_000));
+    }
+    expect(published, "expected FormalPublishWorker to publish due scheduled turn").toBe(true);
+
+    restoreCookieJar([]);
+    await accessPublicLinkApi(link.publicToken, visitorEmail);
+    const formalBoard = await listPublicFormalAsk(link.publicToken);
+    expect(formalBoard.some((entry) => entry.id === created.id && entry.answer === answer)).toBe(
+      true,
+    );
+
+    restoreCookieJar(authCookies);
+  });
+
+  test("formal publish with anonymize false exposes visitor email on public board", async () => {
+    const authCookies = snapshotCookieJar();
+    const doc = await seedDocument(workspaceSlug);
+    const room = await seedDealRoom(workspaceSlug, {
+      name: "Visitor Ask Formal Attribution Room",
+      templateType: "seed",
+      documentIds: [doc.id],
+    });
+    const link = await seedDealRoomLink(workspaceSlug, room.id, {
+      name: `Ask Formal Attribution Link ${Date.now()}`,
+    });
+
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askMode: "formal" });
+
+    const visitorEmail = `ask-formal-attribution-${Date.now()}@example.com`;
+    const question = "Real API formal attribution: who asked?";
+    const answer = "Attribution is allowed on this disclosure.";
+
+    restoreCookieJar([]);
+    await accessPublicLinkApi(link.publicToken, visitorEmail);
+    const created = await submitPublicAsk(link.publicToken, question);
+    const visitorCookies = snapshotCookieJar();
+
+    restoreCookieJar(authCookies);
+    await publishFormalAskTurn(workspaceSlug, link.id, created.id, answer, {
+      anonymize: false,
+    });
+
+    restoreCookieJar(visitorCookies);
+    const formalBoard = await listPublicFormalAsk(link.publicToken);
+    const entry = formalBoard.find((row) => row.id === created.id);
+    expect(entry?.answer).toBe(answer);
+    expect(entry?.visitor_email).toBe(visitorEmail);
 
     restoreCookieJar(authCookies);
   });

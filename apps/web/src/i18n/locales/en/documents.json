@@ -17,10 +17,10 @@
     "uploading": "Uploading...",
     "pending": "Pending",
     "replaceTitle": "File already exists",
-    "replaceDescription": "“{{name}}” is already in the document library. Replace it with this upload?",
-    "replaceConfirm": "Replace",
-    "replaceCancel": "Cancel",
-    "replaceCancelled": "Upload cancelled",
+    "replaceDescription": "“{{name}}” is already in the document library. Overwrite it with this upload, or discard this upload?",
+    "replaceConfirm": "Overwrite",
+    "replaceCancel": "Discard",
+    "replaceCancelled": "Upload discarded",
     "blockedFilesSkipped": "Skipped hidden, empty, or temporary files. Close open workbooks and try again."
   },
   "category": {
@@ -350,6 +350,7 @@
     "askFaqLoadError": "Could not load common questions.",
     "askFormalSectionTitle": "Published Q&A",
     "askFormalSectionHint": "Approved answers published by the deal team. Visitor identities may be anonymized.",
+    "askFormalAskedBy": "Asked by {{email}}",
     "askFormalFromLink": "From link: {{link}}",
     "askFormalAskSimilar": "Ask this",
     "askFormalLoadError": "Could not load published Q&A.",
@@ -384,6 +385,8 @@
     "inactiveBlurWarning": "Content blurred while inactive",
     "inactiveBlurHint": "Helps reduce leak risk; screenshots remain attributable via watermark.",
     "watermarkFallback": "CONFIDENTIAL",
+    "watermarkPreviewIp": "preview",
+    "askFormalNotEntitled": "Formal Q&A is not available on this plan.",
     "pageCountShort": "{{count}} p"
   }
 }

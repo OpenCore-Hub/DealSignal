@@ -1,8 +1,9 @@
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { useParams } from "react-router";
 import { motion } from "motion/react";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
+import { useWorkspaceContacts } from "@/hooks/useWorkspaceContacts";
 import {
   BundlePipelineProvider,
   createInitialState,
@@ -18,7 +19,7 @@ import {
   SHARE_CONTENT_DOCUMENT_CATEGORY,
   buildEditModeDocumentLists,
 } from "./pipelineUtils";
-import type { Contact, PermissionConfig } from "@/types";
+import type { PermissionConfig } from "@/types";
 import { api } from "@/lib/api";
 import { toast } from "sonner";
 import { CaretLeftIcon, CaretRightIcon } from "@phosphor-icons/react";
@@ -31,28 +32,11 @@ import { Button } from "@/components/ui/button";
 function BundlePipelineInner() {
   const { state, dispatch } = useBundlePipeline();
   const reducedMotion = useReducedMotion();
-  const { id } = useParams<{ id: string }>();
+  const { id, workspaceSlug } = useParams<{ id: string; workspaceSlug: string }>();
   const isEdit = !!id;
   const canProceedNav = state.selectedDocuments.length >= 1;
 
-  const [contacts, setContacts] = useState<Contact[]>([]);
-
-  // Load workspace contacts once. They are needed by the security step to
-  // let users pick contacts for email verification.
-  useEffect(() => {
-    let cancelled = false;
-    api
-      .getContacts()
-      .then((res) => {
-        if (!cancelled) setContacts(res.data);
-      })
-      .catch(() => {
-        if (!cancelled) setContacts([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  const { contacts } = useWorkspaceContacts(workspaceSlug);
 
   // beforeunload protection for edit mode dirty state
   useEffect(() => {

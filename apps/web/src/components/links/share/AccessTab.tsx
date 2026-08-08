@@ -25,6 +25,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { ContactEmailTagInput } from "./ContactEmailTagInput";
 import { CollapsibleSection } from "./CollapsibleSection";
@@ -277,6 +278,28 @@ export function AccessTab({
   const sections = layout === "sections";
   const showAllow = audienceMode === "full";
   const showBlock = audienceMode === "full" || audienceMode === "block-only";
+  // Fail closed until Ask policy loads — never flash Formal as selectable.
+  const [formalEntitled, setFormalEntitled] = useState(false);
+
+  useEffect(() => {
+    if (!isDealRoomLink || !linkId) {
+      // Formal mode only applies to deal-room links; non-DR surfaces ignore this flag.
+      setFormalEntitled(false);
+      return;
+    }
+    let cancelled = false;
+    void api
+      .getLinkAskPolicy(linkId)
+      .then((res) => {
+        if (!cancelled) setFormalEntitled(res.data.formalEntitled === true);
+      })
+      .catch(() => {
+        if (!cancelled) setFormalEntitled(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isDealRoomLink, linkId]);
   const showViewersSection = showAllow || showBlock;
   const verifyFloor = Boolean(roomSecurityFloors?.requireEmailVerification);
   const ndaFloor = Boolean(roomSecurityFloors?.requireNda);
@@ -730,6 +753,12 @@ export function AccessTab({
             value={draft.visitorAskExperience}
             onChange={(visitorAskExperience: VisitorAskExperience) =>
               updateDraft({ visitorAskExperience })
+            }
+            disabledValues={formalEntitled ? [] : ["formal"]}
+            disabledHint={
+              formalEntitled
+                ? undefined
+                : t("accessRules.advanced.visitorAskExperience.formalNotEntitled")
             }
             highlighted={isHighlighted("visitorAskExperience")}
           />

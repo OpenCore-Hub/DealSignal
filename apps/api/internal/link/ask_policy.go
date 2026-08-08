@@ -16,20 +16,21 @@ const (
 )
 
 const (
-	routeReasonUnifiedAsk      = "unified_ask"
-	routeReasonUserEscalate    = "user_escalate"
-	routeReasonPolicyFormal    = "policy_formal"
-	routeReasonAINotEnabled    = "ai_not_enabled"
-	routeReasonAIQuotaExceeded = "ai_quota_exceeded"
-	routeReasonAILanePending   = "ai_lane_pending"
-	routeReasonLowConfidence   = "low_confidence"
+	routeReasonUnifiedAsk        = "unified_ask"
+	routeReasonUserEscalate      = "user_escalate"
+	routeReasonPolicyFormal      = "policy_formal"
+	routeReasonFormalNotEntitled = "formal_not_entitled"
+	routeReasonAINotEnabled      = "ai_not_enabled"
+	routeReasonAIQuotaExceeded   = "ai_quota_exceeded"
+	routeReasonAILanePending     = "ai_lane_pending"
+	routeReasonLowConfidence     = "low_confidence"
 )
 
 // AskPolicy is the link-level visitor Ask routing policy (Phase B AI gating).
 type AskPolicy struct {
-	Mode            string
-	AIEnabled       bool
-	AIMonthlyQuota  *int32
+	Mode           string
+	AIEnabled      bool
+	AIMonthlyQuota *int32
 }
 
 func loadAskPolicy(link db.Link) AskPolicy {

@@ -7,11 +7,19 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/visitorask"
 )
 
 type publicAskSubmission struct {
 	Question string
 	Escalate bool
+}
+
+func visitorAskSubmitChannel(askMode string, formalEntitled bool) visitorask.Channel {
+	if askModeOrDefault(askMode) == AskModeFormal && formalEntitled {
+		return visitorask.ChannelAskFormal
+	}
+	return visitorask.ChannelAskHost
 }
 
 func (h *Handler) gatePublicAskSubmission(c *gin.Context) (AccessResult, publicAskSubmission, bool) {
@@ -25,8 +33,19 @@ func (h *Handler) gatePublicAskSubmission(c *gin.Context) (AccessResult, publicA
 		c.JSON(http.StatusForbidden, gin.H{"code": "qa_disabled", "message": "Q&A is not enabled for this link"})
 		return AccessResult{}, publicAskSubmission{}, false
 	}
+	formalMode := askModeOrDefault(result.Link.AskMode) == AskModeFormal
+	formalEntitled := formalMode && h.service.isFormalAskEntitled(c.Request.Context(), result.Link)
+	// Formal mode without plan entitlement: reject before rate-limit / turn creation.
+	if formalMode && !formalEntitled {
+		c.JSON(http.StatusForbidden, gin.H{
+			"code":    "formal_not_entitled",
+			"message": "formal q&a is not available on this plan",
+		})
+		return AccessResult{}, publicAskSubmission{}, false
+	}
 	linkID := uuid.UUID(result.Link.ID.Bytes).String()
-	if h.rejectIfVisitorAskLimited(c, result, linkID) {
+	// Formal mode uses a stricter per-visitor daily channel (Phase C anti-abuse).
+	if h.rejectIfAskLimited(c, result, linkID, visitorAskSubmitChannel(result.Link.AskMode, formalEntitled)) {
 		return AccessResult{}, publicAskSubmission{}, false
 	}
 	var body struct {

@@ -9,6 +9,7 @@ import { OwnerAskInboxCard } from "@/components/ask/OwnerAskInboxCard";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import {
+  countOwnerAskPendingAttention,
   moveOwnerAskPinnedFAQ,
   ownerAskFaqReorderEnabled,
   ownerAskInboxQuery,
@@ -142,9 +143,42 @@ export function OwnerAskInboxPanel({
   }, [data, localOverrides, view]);
 
   useEffect(() => {
-    if (view !== "needs_host" || loading) return;
-    onPendingCountChange?.(turns.length);
-  }, [view, loading, turns.length, onPendingCountChange]);
+    if (!onPendingCountChange) return;
+    let cancelled = false;
+    const loadPendingAttention = async () => {
+      try {
+        const hostQuery = ownerAskInboxQuery("needs_host");
+        const formalQuery = ownerAskInboxQuery("formal_queue");
+        let hostTurns: OwnerAskTurn[] = [];
+        let formalTurns: OwnerAskTurn[] = [];
+        if (scope.type === "room" && roomId) {
+          const filteredLinkId = linkFilter && linkFilter !== "all" ? linkFilter : undefined;
+          const [hostRes, formalRes] = await Promise.all([
+            api.listRoomAsk(roomId, { ...hostQuery, linkId: filteredLinkId }),
+            api.listRoomAsk(roomId, { ...formalQuery, linkId: filteredLinkId }),
+          ]);
+          hostTurns = hostRes.data ?? [];
+          formalTurns = formalRes.data ?? [];
+        } else if (scope.type === "link" && linkId) {
+          const [hostRes, formalRes] = await Promise.all([
+            api.listLinkAsk(linkId, hostQuery),
+            api.listLinkAsk(linkId, formalQuery),
+          ]);
+          hostTurns = hostRes.data ?? [];
+          formalTurns = formalRes.data ?? [];
+        }
+        if (!cancelled) {
+          onPendingCountChange(countOwnerAskPendingAttention(hostTurns, formalTurns));
+        }
+      } catch {
+        // Keep last badge value on transient fetch errors.
+      }
+    };
+    void loadPendingAttention();
+    return () => {
+      cancelled = true;
+    };
+  }, [scope.type, roomId, linkId, linkFilter, data, onPendingCountChange]);
 
   const handleAnswered = (turn: OwnerAskTurn) => {
     setLocalOverrides((prev) => ({ ...prev, [turn.id]: turn }));
@@ -159,12 +193,20 @@ export function OwnerAskInboxPanel({
   };
 
   const handleFormalPublished = (turn: OwnerAskTurn) => {
-    setLocalOverrides((prev) => ({ ...prev, [turn.id]: turn }));
+    setLocalOverrides((prev) => {
+      const next = { ...prev };
+      delete next[turn.id];
+      return next;
+    });
     void refetch();
   };
 
   const handleUnpinned = (turn: OwnerAskTurn) => {
-    setLocalOverrides((prev) => ({ ...prev, [turn.id]: turn }));
+    setLocalOverrides((prev) => {
+      const next = { ...prev };
+      delete next[turn.id];
+      return next;
+    });
     void refetch();
   };
 

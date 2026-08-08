@@ -73,3 +73,20 @@ func TestDenyMessageAskAI(t *testing.T) {
 		t.Fatal("unexpected AI rate limit event type")
 	}
 }
+
+func TestCheckAskFormalRateLimited(t *testing.T) {
+	d := Check(context.Background(), &mockLimiter{allow: false}, ChannelAskFormal, "link-1", "v1", Limits{})
+	if d != DecisionRateLimited {
+		t.Fatalf("got %v, want RateLimited", d)
+	}
+	if EventReason(ChannelAskFormal) != "ask_formal" {
+		t.Fatalf("unexpected reason %q", EventReason(ChannelAskFormal))
+	}
+	if EventTypeForRateLimit(ChannelAskFormal) != EventTypeRateLimited {
+		t.Fatal("Formal should reuse rate_limit_exceeded event type")
+	}
+	msg := DenyMessage(ChannelAskFormal, DecisionRateLimited)
+	if msg == "" || msg == DenyMessage(ChannelAskHost, DecisionRateLimited) {
+		t.Fatalf("expected distinct Formal message, got %q", msg)
+	}
+}

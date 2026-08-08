@@ -75,6 +75,9 @@ const { apiMock, resolveGetDocument, resolveGetPageAnalytics } = vi.hoisted(() =
         Promise.resolve({ page_number: 1, image_url: "", expires_at: "", width: 612, height: 792 })
       ),
       recordPublicEvent: vi.fn(() => Promise.resolve(undefined)),
+      getMe: vi.fn(() =>
+        Promise.resolve({ id: "u_owner", email: "owner@example.com", name: "owner" }),
+      ),
     },
     resolveGetDocument: (value: Document) => resolveDoc(value),
     resolveGetPageAnalytics: (value: { data: PageAnalytics[] }) => resolveAnalytics(value),
@@ -170,6 +173,12 @@ describe("CanvasViewer", () => {
     apiMock.getPublicDocumentPages.mockClear();
     apiMock.getPublicPageSignedUrl.mockClear();
     apiMock.recordPublicEvent.mockClear();
+    apiMock.getMe.mockClear();
+    apiMock.getMe.mockResolvedValue({
+      id: "u_owner",
+      email: "owner@example.com",
+      name: "owner",
+    });
   });
 
   it("renders document, thumbnails, highlight and watermark", async () => {
@@ -205,6 +214,39 @@ describe("CanvasViewer", () => {
 
     await screen.findByText("Q3 Pitch");
     expect(screen.queryByText(/viewer@example\.test/)).not.toBeInTheDocument();
+    expect(apiMock.getMe).not.toHaveBeenCalled();
+  });
+
+  it("loads login email for owner viewer watermark", async () => {
+    await renderWithProviders("/viewer/doc-001");
+    await loadDocument();
+
+    await screen.findByText("Q3 Pitch");
+    await waitFor(() => {
+      expect(apiMock.getMe).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("viewer-watermark-overlay")).toHaveAttribute(
+        "data-watermark-text",
+        expect.stringContaining("owner@example.com"),
+      );
+    });
+  });
+
+  it("uses cached login email when getMe is unavailable", async () => {
+    sessionStorage.setItem("ds.auth.accountEmail", "cached@example.com");
+    apiMock.getMe.mockRejectedValue(new Error("not_found"));
+    await renderWithProviders("/viewer/doc-001");
+    await loadDocument();
+
+    await screen.findByText("Q3 Pitch");
+    await waitFor(() => {
+      expect(screen.getByTestId("viewer-watermark-overlay")).toHaveAttribute(
+        "data-watermark-text",
+        expect.stringContaining("cached@example.com"),
+      );
+    });
+    sessionStorage.removeItem("ds.auth.accountEmail");
   });
 
   it("switches page when clicking a thumbnail", async () => {

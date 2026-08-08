@@ -3,6 +3,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useTranslation } from "react-i18next";
 import { PageCard } from "./PageCard";
 import {
+  DEFAULT_PAGE_ASPECT_RATIO,
   PAGE_GRID_GAP_PX,
   PAGE_GRID_OVERSCAN_ROWS,
   columnCountForWidth,
@@ -18,6 +19,7 @@ interface DocumentPageGridProps {
   documentId: string;
   selectedPage: number | null;
   focusPage?: number | null;
+  aspectRatio?: number;
   onSelectPage: (pageNumber: number) => void;
 }
 
@@ -29,6 +31,7 @@ export function DocumentPageGrid({
   documentId,
   selectedPage,
   focusPage = null,
+  aspectRatio = DEFAULT_PAGE_ASPECT_RATIO,
   onSelectPage,
 }: DocumentPageGridProps) {
   const { t } = useTranslation("documents");
@@ -53,7 +56,7 @@ export function DocumentPageGrid({
   const virtualize = shouldVirtualizePageGrid(items.length);
   const columns = columnCountForWidth(width || 720);
   const rowCount = pageGridRowCount(items.length, columns);
-  const estimateSize = estimatePageCardRowHeight(width || 720, columns);
+  const estimateSize = estimatePageCardRowHeight(width || 720, columns, aspectRatio);
 
   const virtualizer = useVirtualizer({
     count: virtualize ? rowCount : 0,
@@ -92,6 +95,7 @@ export function DocumentPageGrid({
               viewCount={page.viewCount}
               avgDurationSeconds={page.avgDurationSeconds}
               exitRate={page.exitRate}
+              aspectRatio={aspectRatio}
               isSelected={selectedPage === page.pageNumber}
               onClick={() => onSelectPage(page.pageNumber)}
             />
@@ -150,6 +154,7 @@ export function DocumentPageGrid({
                         viewCount={page.viewCount}
                         avgDurationSeconds={page.avgDurationSeconds}
                         exitRate={page.exitRate}
+                        aspectRatio={aspectRatio}
                         isSelected={selectedPage === page.pageNumber}
                         onClick={() => onSelectPage(page.pageNumber)}
                       />
