@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { api, type PublicLinkCredentials } from "@/lib/api";
+import { getCachedAccountEmail } from "@/lib/authAccount";
 import { isViewerAccessErrorKind, viewerPolicyBlockI18nKeys } from "@/lib/viewerAccessErrors";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { ViewerToolbar } from "./ViewerToolbar";
@@ -65,10 +66,44 @@ export function CanvasViewer({
   const [knowledgeSidebarOpen, setKnowledgeSidebarOpen] = useState(
     () => Boolean(ownerKnowledgeRoomId),
   );
+  // Owner /viewer: identity = logged-in account email (same shape as share-link).
+  const [ownerEmail, setOwnerEmail] = useState<string | undefined>(() =>
+    !publicToken && watermark === undefined ? getCachedAccountEmail() : undefined,
+  );
 
   useEffect(() => {
     if (ownerKnowledgeRoomId) setKnowledgeSidebarOpen(true);
   }, [ownerKnowledgeRoomId]);
+
+  useEffect(() => {
+    if (publicToken || watermark !== undefined) return;
+    let cancelled = false;
+    const cached = getCachedAccountEmail();
+    if (cached) setOwnerEmail(cached);
+    api
+      .getMe()
+      .then((user) => {
+        if (cancelled) return;
+        const email = user.email?.trim();
+        if (email) setOwnerEmail(email);
+      })
+      .catch(() => {
+        // Keep session cache when /auth/me is unavailable (stale API image).
+        if (cancelled) return;
+        const fallback = getCachedAccountEmail();
+        if (fallback) setOwnerEmail(fallback);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publicToken, watermark]);
+
+  const resolvedWatermark: WatermarkInfo | null | undefined =
+    watermark !== undefined
+      ? watermark
+      : ownerEmail
+        ? { email: ownerEmail }
+        : {};
 
   const {
     doc,
@@ -344,7 +379,7 @@ export function CanvasViewer({
         analytics={analytics}
         imageUrl={imageUrl}
         evidence={evidence}
-        watermark={watermark}
+        watermark={resolvedWatermark}
         screenshotProtectionEnabled={publicLink?.screenshotProtectionEnabled}
         onSelectPage={setPage}
         sidebar={effectiveSidebar}
