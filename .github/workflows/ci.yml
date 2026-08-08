@@ -695,9 +695,22 @@ jobs:
     name: Deploy to staging
     runs-on: ubuntu-latest
     needs: [docker-push-api, docker-push-web]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.STAGING_HOST != '' && secrets.STAGING_SSH_KEY != '' && secrets.STAGING_COMPOSE_PATH != ''
+    # secrets.* is invalid in job-level if; gate deploy via environment: staging instead.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment: staging
     steps:
+      - name: Require staging deploy secrets
+        env:
+          STAGING_HOST: ${{ secrets.STAGING_HOST }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_COMPOSE_PATH: ${{ secrets.STAGING_COMPOSE_PATH }}
+        run: |
+          missing=0
+          [ -n "$STAGING_HOST" ] || { echo "STAGING_HOST is empty"; missing=1; }
+          [ -n "$STAGING_SSH_KEY" ] || { echo "STAGING_SSH_KEY is empty"; missing=1; }
+          [ -n "$STAGING_COMPOSE_PATH" ] || { echo "STAGING_COMPOSE_PATH is empty"; missing=1; }
+          exit "$missing"
+
       - name: Add SSH key
         uses: webfactory/ssh-agent@v0.9.0
         with:
