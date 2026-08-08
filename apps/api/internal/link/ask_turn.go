@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -188,10 +189,36 @@ func (s *Service) createHostAskTurn(
 
 	if routeReason == routeReasonPolicyFormal {
 		s.recordAskFormalSubmitted(ctx, link, visitorID, visitorEmail)
+		s.emitFormalAskInsightsSubmitted(ctx, link, turn, visitorID, visitorEmail, q)
 	}
 
 	s.softInvalidateRoomList(ctx, link.WorkspaceID)
 	return turn, nil
+}
+
+func (s *Service) emitFormalAskInsightsSubmitted(
+	ctx context.Context,
+	link db.Link,
+	turn db.LinkAskTurn,
+	visitorID, visitorEmail, question string,
+) {
+	if s == nil || s.formalAskInsights == nil {
+		return
+	}
+	docID := ""
+	if link.DocumentID.Valid {
+		docID = uuid.UUID(link.DocumentID.Bytes).String()
+	}
+	wsID := uuid.UUID(link.WorkspaceID.Bytes).String()
+	linkID := uuid.UUID(link.ID.Bytes).String()
+	turnID := uuid.UUID(turn.ID.Bytes).String()
+	sessionID := uuid.UUID(turn.SessionID.Bytes).String()
+	if err := s.formalAskInsights.OnSubmitted(ctx, wsID, linkID, docID, turnID, sessionID, visitorID, visitorEmail, question, ""); err != nil {
+		logger.ErrorCtx(ctx, "formal ask insights suggestion failed", err,
+			logger.Attr("turn_id", turnID),
+			logger.Attr("link_id", linkID),
+		)
+	}
 }
 
 // SubmitPublicAsk is the unified visitor Ask entry (policy-aware routing; Phase B AI lane).

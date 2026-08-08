@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -109,6 +110,10 @@ func (m *mockContactQuerier) ListContactViewedDocumentIDsByWorkspace(_ context.C
 	return out, nil
 }
 
+func (m *mockContactQuerier) GetWorkspaceKeyPageSettings(_ context.Context, _ pgtype.UUID) (db.WorkspaceKeyPageSetting, error) {
+	return db.WorkspaceKeyPageSetting{}, pgx.ErrNoRows
+}
+
 func TestDisplayNameFallsBackToEmailLocalPart(t *testing.T) {
 	c := db.Contact{Name: pgtype.Text{Valid: false}}
 	got := displayName(c, "sarah.chen@horizon.vc")
@@ -157,11 +162,13 @@ func TestBuildContactComputesHeatScore(t *testing.T) {
 		Opens:                5,
 		UniqueVisitors:       3,
 		TotalPageViews:       4,
+		KeyPageViews:         2,
+		ForwardSignals:       1,
 		TotalDurationSeconds: 240,
 		Downloads:            1,
 		LastSeenAt:           pgtype.Timestamptz{Time: time.Now(), Valid: true},
 	}
-	contact := svc.buildContact(c, agg, []string{"doc-1", "doc-2"})
+	contact := svc.buildContact(c, agg, []string{"doc-1", "doc-2"}, heat.CircleDefault)
 
 	if contact.Email != "a@horizon.vc" {
 		t.Fatalf("expected email a@horizon.vc, got %s", contact.Email)
@@ -183,6 +190,43 @@ func TestBuildContactComputesHeatScore(t *testing.T) {
 	}
 	if len(contact.ViewedDocuments) != 2 {
 		t.Fatalf("expected 2 viewed documents, got %d", len(contact.ViewedDocuments))
+	}
+
+	// Must not treat TotalPageViews as KeyPageViews (historical fake proxy).
+	base := db.GetContactAggregatesByWorkspaceRow{
+		Opens:                2,
+		UniqueVisitors:       1,
+		TotalPageViews:       8,
+		KeyPageViews:         0,
+		ForwardSignals:       0,
+		Bounces:              0,
+		TotalDurationSeconds: 60,
+	}
+	asProxy := base
+	asProxy.KeyPageViews = asProxy.TotalPageViews // old fake: all page views = key pages
+	honestScore := svc.buildContact(c, base, nil, heat.CircleDefault).Score
+	proxyScore := svc.buildContact(c, asProxy, nil, heat.CircleDefault).Score
+	if proxyScore <= honestScore {
+		t.Fatalf("proxy KeyPageViews=TotalPageViews must inflate score; honest=%d proxy=%d", honestScore, proxyScore)
+	}
+
+	// Real bounce counts must lower heat vs hard-coded BouncePenalty=0.
+	withBounces := base
+	withBounces.Bounces = 5
+	bouncedScore := svc.buildContact(c, withBounces, nil, heat.CircleDefault).Score
+	if bouncedScore >= honestScore {
+		t.Fatalf("bounces must reduce score; honest=%d bounced=%d", honestScore, bouncedScore)
+	}
+
+	// Stale LastSeenAt must apply DecayDays (same contract as link heat).
+	fresh := agg
+	fresh.LastSeenAt = pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	stale := agg
+	stale.LastSeenAt = pgtype.Timestamptz{Time: time.Now().Add(-30 * 24 * time.Hour), Valid: true}
+	freshScore := svc.buildContact(c, fresh, nil, heat.CircleDefault).Score
+	staleScore := svc.buildContact(c, stale, nil, heat.CircleDefault).Score
+	if staleScore >= freshScore {
+		t.Fatalf("stale LastSeenAt must decay score; fresh=%d stale=%d", freshScore, staleScore)
 	}
 }
 
@@ -269,7 +313,8 @@ func TestCreateContactInvalidatesListCache(t *testing.T) {
 			contactListCacheKey(ws): {{ID: "stale", Email: "stale@example.com"}},
 		},
 	}
-	svc := NewService(&mockContactQuerier{}, WithCache(cache))
+	q := &mockContactQuerier{}
+	svc := NewService(q, WithCache(cache))
 	_, err := svc.CreateContact(context.Background(), ws, CreateContactRequest{
 		Email: "New@Example.com",
 		Name:  "New",
@@ -277,12 +322,38 @@ func TestCreateContactInvalidatesListCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	if len(q.upserted) != 1 {
+		t.Fatalf("expected UpsertContactByEmail, got %#v", q.upserted)
+	}
+	if got := q.upserted[0].Email.String; got != "new@example.com" {
+		t.Fatalf("email normalized = %q, want new@example.com", got)
+	}
 	wantKey := contactListCacheKey(ws)
 	if len(cache.deleted) != 1 || cache.deleted[0] != wantKey {
 		t.Fatalf("expected Delete(%q), got %#v", wantKey, cache.deleted)
 	}
 	if _, ok := cache.store[wantKey]; ok {
 		t.Fatal("stale list cache entry should be removed")
+	}
+}
+
+func TestCreateContactIsIdempotentViaUpsert(t *testing.T) {
+	ws := uuid.New().String()
+	q := &mockContactQuerier{}
+	svc := NewService(q)
+	first, err := svc.CreateContact(context.Background(), ws, CreateContactRequest{Email: "dup@example.com"})
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	second, err := svc.CreateContact(context.Background(), ws, CreateContactRequest{Email: "dup@example.com", Name: "Dup"})
+	if err != nil {
+		t.Fatalf("second create must not fail: %v", err)
+	}
+	if first.Email != "dup@example.com" || second.Email != "dup@example.com" {
+		t.Fatalf("emails = %q / %q", first.Email, second.Email)
+	}
+	if len(q.upserted) != 2 {
+		t.Fatalf("expected 2 upserts, got %d", len(q.upserted))
 	}
 }
 
@@ -411,6 +482,8 @@ func TestListActivitiesMapsEventTypes(t *testing.T) {
 			{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, LinkID: linkID, EventType: "link_opened", DocumentTitle: "Pitch Deck", CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}},
 			{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, LinkID: linkID, EventType: "page_viewed", PageNumber: 3, DurationSeconds: 45, DocumentTitle: "Pitch Deck", CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}},
 			{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, LinkID: linkID, EventType: "download_attempted", DocumentTitle: "Pitch Deck", CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}},
+			{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, LinkID: linkID, EventType: "forward_signal", DocumentTitle: "Pitch Deck", CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}},
+			{ID: pgtype.UUID{Bytes: uuid.New(), Valid: true}, LinkID: linkID, EventType: "return_visit", DocumentTitle: "Pitch Deck", CreatedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}},
 		},
 	}
 	svc := NewService(q)
@@ -418,8 +491,8 @@ func TestListActivitiesMapsEventTypes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(acts) != 3 {
-		t.Fatalf("expected 3 activities, got %d", len(acts))
+	if len(acts) != 5 {
+		t.Fatalf("expected 5 activities, got %d", len(acts))
 	}
 	if acts[0].EventType != "open" {
 		t.Fatalf("expected open, got %s", acts[0].EventType)
@@ -429,5 +502,11 @@ func TestListActivitiesMapsEventTypes(t *testing.T) {
 	}
 	if acts[2].EventType != "download" {
 		t.Fatalf("expected download, got %s", acts[2].EventType)
+	}
+	if acts[3].EventType != "share" {
+		t.Fatalf("expected share for forward_signal, got %s", acts[3].EventType)
+	}
+	if acts[4].EventType != "revisit" {
+		t.Fatalf("expected revisit for return_visit, got %s", acts[4].EventType)
 	}
 }

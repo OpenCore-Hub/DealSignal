@@ -235,7 +235,11 @@ func (s *Server) registerRoutes() error {
 			actionSyncer := action.NewSyncer(queries)
 
 			ndaSvc := nda.NewService(queries, storageClient, appMailer)
-			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil, link.WithActionSyncer(actionSyncer), link.WithNDAService(ndaSvc))
+			linkSvc := link.NewService(queries, s.dbPool, s.redisClient, appMailer, s.cfg.ViewerBaseURL, s.cfg, notificationSvc, nil,
+				link.WithActionSyncer(actionSyncer),
+				link.WithNDAService(ndaSvc),
+				link.WithFormalAskInsights(link.FormalAskInsightsAdapter{Suggestions: suggestionSvc}),
+			)
 			ndaHandler := nda.NewHandler(ndaSvc)
 			var dedupChecker analytics.DedupChecker
 			if s.redisClient != nil && s.cfg.DedupRedisEnabled {
@@ -409,6 +413,49 @@ func (s *Server) registerRoutes() error {
 			notificationWorker := notification.NewWorker(notificationSvc, 30*time.Second)
 			s.registerWorker(notificationWorker)
 			notificationWorker.Start(s.shutdownCtx)
+
+			digestRunner := notification.NewDigestRunner(
+				queries,
+				notificationSvc,
+				notification.NewInsightsOverviewAdapter(func(ctx context.Context, workspaceID string, days int) (
+					periodOpens, previousPeriodOpens, periodUV int64,
+					medianDuration float64,
+					hot, warm int,
+					topDocuments, topContacts []string,
+					err error,
+				) {
+					ov, err := analyticsSvc.InsightsOverview(ctx, workspaceID, days)
+					if err != nil {
+						return 0, 0, 0, 0, 0, 0, nil, nil, err
+					}
+					docs := make([]string, 0, 3)
+					for i, d := range ov.TopDocuments {
+						if i >= 3 {
+							break
+						}
+						if d.Title != "" {
+							docs = append(docs, d.Title)
+						}
+					}
+					contacts := make([]string, 0, 3)
+					for i, c := range ov.TopContacts {
+						if i >= 3 {
+							break
+						}
+						if c.Email != "" {
+							contacts = append(contacts, c.Email)
+						}
+					}
+					return ov.PeriodOpens, ov.PreviousPeriodOpens, ov.PeriodUniqueVisitors,
+						ov.PeriodMedianDurationSeconds,
+						ov.TierCounts["hot"], ov.TierCounts["warm"],
+						docs, contacts, nil
+				}),
+				s.cfg.InsightsDigestHourUTC,
+			)
+			digestWorker := notification.NewDigestWorker(digestRunner, s.cfg.InsightsDigestInterval)
+			s.registerWorker(digestWorker)
+			digestWorker.Start(s.shutdownCtx)
 
 			renewalWorker := domain.NewRenewalWorker(domainSvc, 1*time.Hour, 7*24*time.Hour)
 			s.registerWorker(renewalWorker)

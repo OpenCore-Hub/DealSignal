@@ -135,6 +135,11 @@ type Config struct {
 
 	HeatScoreRefreshInterval time.Duration
 
+	// InsightsDigestHourUTC is the earliest UTC hour when daily digests may enqueue (0–23, default 8).
+	InsightsDigestHourUTC int
+	// InsightsDigestInterval is how often the digest scheduler ticks (default 15m).
+	InsightsDigestInterval time.Duration
+
 	// FormalPublishInterval is how often the Formal Q&A due-sweep worker runs (0 → 15s).
 	FormalPublishInterval time.Duration
 	// FormalPublishBatchSize caps turns published per worker tick (0 → 50).
@@ -256,6 +261,8 @@ func Load() (*Config, error) {
 		FeatureWorkerEnabled:       strings.ToLower(getEnv("FEATURE_WORKER_ENABLED", "true")) == "true",
 		FeatureWorkerInterval:      time.Duration(getEnvInt("FEATURE_WORKER_INTERVAL_MINUTES", 5)) * time.Minute,
 		HeatScoreRefreshInterval:   time.Duration(getEnvInt("HEAT_SCORE_REFRESH_INTERVAL_SECONDS", 120)) * time.Second,
+		InsightsDigestHourUTC:      getEnvInt("INSIGHTS_DIGEST_HOUR_UTC", 8),
+		InsightsDigestInterval:     time.Duration(getEnvInt("INSIGHTS_DIGEST_INTERVAL_MINUTES", 15)) * time.Minute,
 		FormalPublishInterval:      time.Duration(getEnvInt("FORMAL_PUBLISH_INTERVAL_SECONDS", 15)) * time.Second,
 		FormalPublishBatchSize:     getEnvInt("FORMAL_PUBLISH_BATCH_SIZE", 50),
 		FormalAskEntitledPlanCodes: parseDelimitedList(getEnv("FORMAL_ASK_ENTITLED_PLAN_CODES", "enterprise trial")),

@@ -12,11 +12,12 @@ import (
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heatkw"
 	"github.com/google/uuid"
-	"golang.org/x/text/cases"
-	"golang.org/x/text/language"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // ErrContactNotFound is returned when a contact does not exist in the workspace.
@@ -35,6 +36,7 @@ type Querier interface {
 	ListContactViewedDocumentIDs(ctx context.Context, arg db.ListContactViewedDocumentIDsParams) ([]string, error)
 	ListContactViewedDocuments(ctx context.Context, arg db.ListContactViewedDocumentsParams) ([]db.ListContactViewedDocumentsRow, error)
 	ListContactViewedDocumentIDsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListContactViewedDocumentIDsByWorkspaceRow, error)
+	GetWorkspaceKeyPageSettings(ctx context.Context, workspaceID pgtype.UUID) (db.WorkspaceKeyPageSetting, error)
 }
 
 // Cache is a minimal key/value cache for contact list enrichment.
@@ -47,7 +49,8 @@ type Cache interface {
 const contactListCacheTTL = 20 * time.Second
 
 func contactListCacheKey(workspaceID string) string {
-	return fmt.Sprintf("contacts:list:v1:%s", workspaceID)
+	// v4: heat also applies DecayDays from LastSeenAt (same contract as link heat).
+	return fmt.Sprintf("contacts:list:v4:%s", workspaceID)
 }
 
 // Service aggregates visitor activity into contact records.
@@ -141,17 +144,29 @@ func (s *Service) CreateContact(ctx context.Context, workspaceID string, req Cre
 		return Contact{}, fmt.Errorf("invalid email: %w", err)
 	}
 
-	c, err := s.queries.CreateContact(ctx, db.CreateContactParams{
+	// Upsert: workspace email is unique; ContactSelector "create" must succeed when the
+	// contact already exists (synced visitor / prior create), not 500 on 23505.
+	c, err := s.queries.UpsertContactByEmail(ctx, db.UpsertContactByEmailParams{
 		WorkspaceID: wsUUID,
 		Email:       pgtype.Text{String: strings.ToLower(email), Valid: true},
-		Name:        pgtype.Text{String: strings.TrimSpace(req.Name), Valid: req.Name != ""},
+		Name:        strings.TrimSpace(req.Name),
 	})
 	if err != nil {
 		return Contact{}, fmt.Errorf("create contact: %w", err)
 	}
 
 	s.invalidateListCache(ctx, workspaceID)
-	return s.buildContact(c, db.GetContactAggregatesByWorkspaceRow{}, nil), nil
+	rs, _ := heatkw.Load(ctx, s.queries, workspaceID, nil)
+	return s.buildContact(c, db.GetContactAggregatesByWorkspaceRow{}, nil, rs.Circle), nil
+}
+
+func normalizeContactCircle(circle heat.Circle) heat.Circle {
+	switch circle {
+	case heat.CircleFounder, heat.CircleInvestor, heat.CircleSales:
+		return circle
+	default:
+		return heat.CircleDefault
+	}
 }
 
 // SyncContacts materializes contact rows for every visitor email seen in the workspace.
@@ -215,9 +230,11 @@ func (s *Service) ListContacts(ctx context.Context, workspaceID string) ([]Conta
 		return nil, fmt.Errorf("list contacts: %w", err)
 	}
 
+	rs, _ := heatkw.Load(ctx, s.queries, workspaceID, nil)
 	aggRows, err := s.queries.GetContactAggregatesByWorkspace(ctx, db.GetContactAggregatesByWorkspaceParams{
 		WorkspaceID: wsUUID,
 		Limit:       10000,
+		Patterns:    rs.Patterns(),
 	})
 	if err != nil {
 		return nil, fmt.Errorf("contact aggregates: %w", err)
@@ -241,7 +258,7 @@ func (s *Service) ListContacts(ctx context.Context, workspaceID string) ([]Conta
 	for _, c := range rows {
 		email := strings.ToLower(c.Email.String)
 		agg := aggByEmail[email]
-		out = append(out, s.buildContact(c, agg, viewedByEmail[email]))
+		out = append(out, s.buildContact(c, agg, viewedByEmail[email], rs.Circle))
 	}
 
 	sortContacts(out)
@@ -277,9 +294,11 @@ func (s *Service) GetContact(ctx context.Context, workspaceID, contactID string)
 	if c.Email.Valid {
 		visitorEmail = c.Email.String
 	}
+	rs, _ := heatkw.Load(ctx, s.queries, workspaceID, nil)
 	agg, err := s.queries.GetContactAggregateByEmail(ctx, db.GetContactAggregateByEmailParams{
 		WorkspaceID:  wsUUID,
 		VisitorEmail: visitorEmail,
+		Patterns:     rs.Patterns(),
 	})
 	if err != nil {
 		return Contact{}, fmt.Errorf("contact aggregate: %w", err)
@@ -303,7 +322,7 @@ func (s *Service) GetContact(ctx context.Context, workspaceID, contactID string)
 		viewedItems = append(viewedItems, ViewedDocument{ID: row.DocumentID, Title: title})
 	}
 
-	contact := s.buildContact(c, toWorkspaceAggregate(agg), viewedIDs)
+	contact := s.buildContact(c, toWorkspaceAggregate(agg), viewedIDs, rs.Circle)
 	contact.ViewedDocumentItems = viewedItems
 
 	// Detail trend: real daily engagement from recent events (not a stub empty array).
@@ -384,7 +403,7 @@ func (s *Service) ListActivities(ctx context.Context, workspaceID, contactID str
 	return out, nil
 }
 
-func (s *Service) buildContact(c db.Contact, agg db.GetContactAggregatesByWorkspaceRow, viewed []string) Contact {
+func (s *Service) buildContact(c db.Contact, agg db.GetContactAggregatesByWorkspaceRow, viewed []string, circle heat.Circle) Contact {
 	email := c.Email.String
 	name := displayName(c, email)
 
@@ -397,23 +416,24 @@ func (s *Service) buildContact(c db.Contact, agg db.GetContactAggregatesByWorksp
 		revisits = 0
 	}
 
-	res := heat.Compute(heat.CircleDefault, heat.Input{
+	res := heat.Compute(normalizeContactCircle(circle), heat.Input{
 		Opens:              int(agg.Opens),
 		Revisits:           revisits,
 		AvgDurationMinutes: avgMin,
-		KeyPageViews:       int(agg.TotalPageViews),
-		ForwardSignals:     int(agg.UniqueVisitors),
+		KeyPageViews:       int(agg.KeyPageViews),
+		ForwardSignals:     int(agg.ForwardSignals),
 		Downloads:          int(agg.Downloads),
-		BouncePenalty:      0,
+		BouncePenalty:      int(agg.Bounces),
+		DecayDays:          contactDecayDays(agg.LastSeenAt),
 	})
 	if res.Level == "" {
 		res.Level = "cold"
 	}
 
 	contact := Contact{
-		ID:                   uuidToString(c.ID),
-		Email:                email,
-		Name:                 name,
+		ID:    uuidToString(c.ID),
+		Email: email,
+		Name:  name,
 		// Organization is only set when we have a real CRM value — never invent
 		// one from the email domain (that presents as fake company data).
 		HeatLevel:            res.Level,
@@ -427,6 +447,15 @@ func (s *Service) buildContact(c db.Contact, agg db.GetContactAggregatesByWorksp
 		contact.LastSeenAt = agg.LastSeenAt.Time.Format(time.RFC3339)
 	}
 	return contact
+}
+
+// contactDecayDays mirrors link heat: days since last real activity.
+// Missing LastSeenAt means no decay factor (typically zero-activity rows).
+func contactDecayDays(lastSeen pgtype.Timestamptz) float64 {
+	if !lastSeen.Valid {
+		return 0
+	}
+	return time.Since(lastSeen.Time).Hours() / 24
 }
 
 // engagementHistoryFromActivities buckets recent events by UTC day for trend charts.
@@ -482,7 +511,10 @@ func toWorkspaceAggregate(r db.GetContactAggregateByEmailRow) db.GetContactAggre
 		UniqueVisitors:       r.UniqueVisitors,
 		TotalDurationSeconds: r.TotalDurationSeconds,
 		TotalPageViews:       r.TotalPageViews,
+		KeyPageViews:         r.KeyPageViews,
+		ForwardSignals:       r.ForwardSignals,
 		Downloads:            r.Downloads,
+		Bounces:              r.Bounces,
 		LastSeenAt:           r.LastSeenAt,
 	}
 }
@@ -509,6 +541,12 @@ func mapEventType(t string) string {
 		return "download"
 	case "page_viewed":
 		return "page_view"
+	case "forward_signal":
+		// Detected share/forward marker persisted on access_logs.
+		return "share"
+	case "return_visit":
+		// Same visitor returning after a prior open (DetectForwardOrReturn).
+		return "revisit"
 	default:
 		return t
 	}

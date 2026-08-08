@@ -26,7 +26,6 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/compliance"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/knowledge"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
@@ -261,6 +260,7 @@ type EventRequest struct {
 	Email           string  `json:"email,omitempty"`
 	Password        string  `json:"password,omitempty"`
 	NDAAgreed       bool    `json:"nda_agreed,omitempty"`
+	DocumentID      string  `json:"document_id,omitempty"`
 	PageNumber      int32   `json:"page_number,omitempty"`
 	DurationSeconds int32   `json:"duration_seconds,omitempty"`
 	ScrollDepth     float64 `json:"scroll_depth,omitempty"`
@@ -291,17 +291,37 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 	}
 
 	ctx := c.Request.Context()
+	notifyEvent := ""
+	metadata := map[string]string{}
 	switch req.EventType {
 	case "link_opened":
-		err = h.analytics.RecordLinkOpened(ctx, res.Link, visitorID, email, c.ClientIP(), c.Request.UserAgent())
+		notifyEvent, err = h.analytics.RecordClassifiedOpen(ctx, res.Link, visitorID, email, c.ClientIP(), c.Request.UserAgent())
 	case "page_viewed":
 		if req.PageNumber <= 0 {
 			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "page_number required"})
 			return
 		}
-		err = h.analytics.RecordPageView(ctx, res.Link, visitorID, req.PageNumber, req.DurationSeconds, req.ScrollDepth)
+		documentID, scopeErr := h.resolveEventDocumentID(ctx, res.Link, req.DocumentID)
+		if scopeErr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", scopeErr)})
+			return
+		}
+		var recorded bool
+		recorded, err = h.analytics.RecordPageView(ctx, res.Link, visitorID, req.PageNumber, req.DurationSeconds, req.ScrollDepth, documentID)
+		if err == nil && recorded {
+			alert, ok, resolveErr := h.analytics.ResolveKeyPageNotification(ctx, res.Link, visitorID, req.PageNumber, req.DurationSeconds, documentID)
+			if resolveErr != nil {
+				err = resolveErr
+			} else if ok {
+				notifyEvent = alert.EventType
+				for k, v := range alert.Metadata {
+					metadata[k] = v
+				}
+			}
+		}
 	case "download_attempted":
 		err = h.analytics.RecordDownload(ctx, res.Link, visitorID, email, c.ClientIP(), c.Request.UserAgent())
+		// Downloads are not forward signals — do not map them to forward_signal.
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "unsupported event_type"})
 		return
@@ -312,27 +332,42 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 		return
 	}
 
-	metadata := map[string]string{}
-	if req.EventType == "page_viewed" {
-		metadata["page_number"] = strconv.Itoa(int(req.PageNumber))
+	if notifyEvent != "" {
+		_ = h.service.EvaluateNotificationRules(ctx, res.Link, notifyEvent, visitorID, email, metadata)
 	}
-	_ = h.service.EvaluateNotificationRules(ctx, res.Link, ruleEventType(req.EventType), visitorID, email, metadata)
 
 	h.triggerSuggestions(c.Request.Context(), res.Link, langFromContext(c))
 	c.Status(http.StatusNoContent)
 }
 
-// ruleEventType maps frontend event names to notification rule event types.
-func ruleEventType(eventType string) string {
-	switch eventType {
-	case "link_opened":
-		return "first_open"
-	case "page_viewed":
-		return "repeat_key_page"
-	case "download_attempted":
-		return "forward_signal"
+// resolveEventDocumentID validates an optional page-view document against Access scope.
+// Empty document_id falls back to the link primary document when present; multi-doc
+// links may omit it (page view still records, but key-page matching stays gated).
+func (h *Handler) resolveEventDocumentID(ctx context.Context, link db.Link, documentID string) (string, error) {
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		if link.DocumentID.Valid {
+			return uuid.UUID(link.DocumentID.Bytes).String(), nil
+		}
+		return "", nil
 	}
-	return eventType
+	parsed, err := uuid.Parse(documentID)
+	if err != nil {
+		return "", fmt.Errorf("invalid document_id")
+	}
+	if h.service == nil || h.service.queries == nil {
+		return "", fmt.Errorf("document scope unavailable")
+	}
+	allowed, err := AuthorizedDocumentIDs(ctx, h.service.queries, link)
+	if err != nil {
+		return "", err
+	}
+	for _, id := range allowed {
+		if id == parsed {
+			return parsed.String(), nil
+		}
+	}
+	return "", fmt.Errorf("document_id not in link scope")
 }
 
 func (h *Handler) triggerSuggestions(ctx context.Context, link db.Link, lang string) {
@@ -1631,7 +1666,7 @@ func (h *Handler) Access(c *gin.Context) {
 					// re-authentication.
 					securityChanged := sessionSecurityGatesUnsatisfied(link, session)
 					if securityChanged {
-						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "session_security_config_changed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
 					} else {
 						h.respondAccessSuccess(c, link, token, session.Email, session.NDAAgreed, session.VisitorID, session.EmailVerified, session.PasswordVerified, "", "")
 						return
@@ -1724,11 +1759,14 @@ func (h *Handler) Access(c *gin.Context) {
 		return
 	}
 
-	if err := h.analytics.RecordLinkOpened(c.Request.Context(), result.Link, result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent()); err != nil {
+	notifyEvent, err := h.analytics.RecordClassifiedOpen(c.Request.Context(), result.Link, result.VisitorID, result.Email, c.ClientIP(), c.Request.UserAgent())
+	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	_ = h.service.EvaluateNotificationRules(c.Request.Context(), result.Link, "first_open", result.VisitorID, result.Email, nil)
+	if notifyEvent != "" {
+		_ = h.service.EvaluateNotificationRules(c.Request.Context(), result.Link, notifyEvent, result.VisitorID, result.Email, nil)
+	}
 	h.triggerSuggestions(c.Request.Context(), result.Link, langFromContext(c))
 
 	passwordVerified := !result.Link.RequirePassword || body.Password != ""
@@ -2298,7 +2336,7 @@ func (h *Handler) resolvePublicAccess(c *gin.Context, token string) (AccessResul
 				securityChanged := sessionSecurityGatesUnsatisfied(link, session)
 				if securityChanged {
 					if h.analytics != nil {
-						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "security_gate_failed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
+						_ = h.analytics.RecordSecurityEvent(c.Request.Context(), link, "session_security_config_changed", session.VisitorID, session.Email, c.ClientIP(), c.Request.UserAgent(), "session_security_config_changed")
 					}
 				}
 				if !securityChanged {
@@ -2677,7 +2715,7 @@ func (h *Handler) linkResponse(c *gin.Context, link db.Link) (gin.H, error) {
 		)
 	}
 
-	score, scoreErr := h.analytics.GetScore(ctx, link.ID, link.WorkspaceID, heat.CircleDefault)
+	score, scoreErr := h.analytics.GetScore(ctx, link.ID, link.WorkspaceID, nil)
 	if scoreErr != nil {
 		logger.ErrorCtx(ctx, "get analytics score failed", scoreErr,
 			logger.Attr("link_id", uuidToString(link.ID)),

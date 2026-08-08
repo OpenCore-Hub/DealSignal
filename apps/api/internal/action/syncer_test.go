@@ -81,4 +81,8 @@ func TestTitleForFormalAskReview(t *testing.T) {
 	if !strings.Contains(got, "formal") {
 		t.Fatalf("expected formal wording, got %q", got)
 	}
+	lib := titleForAction(SourceTypeLinkQuestion, operationalActionTypeReview, "a@x.com", "Pitch Deck Link")
+	if !strings.Contains(lib, "formal") {
+		t.Fatalf("library formal review should use formal wording, got %q", lib)
+	}
 }
