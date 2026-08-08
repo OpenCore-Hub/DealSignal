@@ -1,7 +1,157 @@
 {
-  "title": "首页",
+  "title": "交易雷达",
   "welcome": {
-    "title": "欢迎回来"
+    "title": "交易雷达"
+  },
+  "radar": {
+    "title": "交易雷达",
+    "upNext": "今日关注",
+    "openCount_one": "{{count}} 项待处理",
+    "openCount_other": "{{count}} 项待处理",
+    "filtersLabel": "队列筛选",
+    "filters": {
+      "all": "全部",
+      "buying_window": "买入窗口",
+      "diligence_gate": "尽调闸门",
+      "commitment_ask": "承诺问答",
+      "leak_watch": "泄密盯梢",
+      "access_decay": "访问衰减",
+      "abuse_guard": "滥用守卫"
+    },
+    "products": {
+      "buying_window": "买入窗口",
+      "diligence_gate": "尽调闸门",
+      "commitment_ask": "承诺问答",
+      "leak_watch": "泄密盯梢",
+      "access_decay": "访问衰减",
+      "abuse_guard": "滥用守卫"
+    },
+    "cta": {
+      "approve": "审批",
+      "reply": "回复",
+      "email": "写邮件",
+      "renew": "续期",
+      "review": "查看",
+      "open": "打开"
+    },
+    "evidence": "证据",
+    "snooze": "延后",
+    "snoozeHours": {
+      "24": "延后 1 天",
+      "72": "延后 3 天",
+      "168": "延后 7 天"
+    },
+    "clearedToday": "今日已完成",
+    "analyzeInInsights": "去洞察分析",
+    "undo": "撤销",
+    "nextUpLabel": "下一步优先",
+    "byDeal": "按交易",
+    "strandCount_one": "{{count}} 项",
+    "strandCount_other": "{{count}} 项",
+    "showMoreInStrand_one": "再显示 {{count}} 项",
+    "showMoreInStrand_other": "再显示 {{count}} 项",
+    "dealFallback": "工作区",
+    "whyNow": {
+      "sla_overdue": "已逾 SLA {{hours}} 小时 — 先清这一项",
+      "coalesced": "近 24 小时合并了 {{count}} 条相关信号",
+      "buying_window": "买入窗口正热 — 趁意向未冷却跟进",
+      "diligence_gate": "有人堵在闸门 — 尽快批或拒",
+      "commitment_ask": "承诺级提问待当日答复",
+      "leak_watch": "材料可能外传 — 先审再继续触达",
+      "access_decay": "访问通道在衰减 — 续期或确认废弃",
+      "abuse_guard": "提问/访问压力异常 — 检查配额与策略"
+    },
+    "evidenceChips": {
+      "forward": "转发",
+      "download": "下载",
+      "capture": "截屏尝试",
+      "key_page": "关键页",
+      "ask": "提问",
+      "engagement": "互动",
+      "gate": "闸门",
+      "access": "访问",
+      "abuse": "滥用",
+      "coalesced": "合并 {{count}} 条"
+    },
+    "evidenceRail": {
+      "title": "证据",
+      "empty": "选择一条雷达工单，查看为何此刻重要。",
+      "loading": "正在加载证据…",
+      "error": "证据加载失败。",
+      "keyPages": "关键页",
+      "topPages": "高频页面",
+      "recentVisitors": "最近访客",
+      "securityEvents": "安全事件",
+      "anonymousVisitor": "匿名访客",
+      "page": "第 {{page}} 页",
+      "views_one": "{{count}} 次查看",
+      "views_other": "{{count}} 次查看",
+      "openFull": "打开完整证据",
+      "eventTypes": {
+        "capture_attempt": "截屏尝试",
+        "forward_signal": "转发信号",
+        "expired_link_accessed": "访问已过期链接",
+        "max_access_reached": "达到最大访问次数",
+        "revoked_link_accessed": "访问已撤销链接",
+        "blocked_email": "邮箱被拦",
+        "blocked_domain": "域名被拦",
+        "ask_ai_rate_limited": "Ask AI 限流",
+        "ask_escalated": "提问已升级",
+        "ask_formal_submitted": "正式提问已提交",
+        "abnormal_access_pattern": "异常访问",
+        "rate_limit_exceeded": "触发限流",
+        "unknown": "安全事件"
+      },
+      "reasons": {
+        "printscreen": "Print Screen",
+        "print": "打印",
+        "mac_capture": "Mac 截屏",
+        "win_snip": "Windows 截图",
+        "other": "其他",
+        "unknown": "原因未知"
+      },
+      "metrics": {
+        "opens24h": "24h 打开",
+        "visitors24h": "24h 访客",
+        "forwards24h": "24h 转发",
+        "downloads24h": "24h 下载",
+        "captures24h": "24h 截屏尝试"
+      }
+    },
+    "toast": {
+      "done": "已标记完成",
+      "snoozed": "已延后",
+      "ignored": "已忽略",
+      "undoFailed": "撤销失败 — 请刷新后重试"
+    },
+    "lensLabel": "角色透镜",
+    "lens": {
+      "founder": "创始人",
+      "investor_ir": "投资人 IR",
+      "sales": "销售"
+    },
+    "confidence": {
+      "low": "低置信",
+      "medium": "中置信",
+      "high": "高置信"
+    },
+    "outcome": {
+      "choose": "选择完成原因",
+      "acted": "已处理",
+      "false_positive": "误报",
+      "renewed": "已续期",
+      "approved": "已审批",
+      "replied": "已回复",
+      "other": "其他"
+    },
+    "inboxZero": {
+      "title": "今日通道干净",
+      "description": "今天已清完 {{count}} 项。趋势与内容诊断在洞察里继续看——不占这条行动通道。"
+    },
+    "noiseHint": "{{product}} 已按闭环结果软降权（近 {{sample}} 次完成中误报 {{rate}}%）。",
+    "shortcuts": {
+      "hint": "J/K 切换 · E 完成 · S 延后 1 天"
+    }
   },
   "metrics": {
     "title": "关键指标",
@@ -42,7 +192,7 @@
   },
   "sections": {
     "attention": "今日关注",
-    "activeRooms": "最近活跃",
+    "activeRooms": "需处理的数据室",
     "signals": "信号流",
     "recentVisitors": "最近访客",
     "actions": "待办行动",
@@ -80,8 +230,11 @@
       "action": "上传第一份文档"
     },
     "actions": {
-      "title": "暂无待办行动",
-      "description": "所有信号都已处理完毕"
+      "title": "当前已清空",
+      "description": "没有待跟进、Ask、审批或风险。新的访客活动会自动出现在这里。",
+      "shareCta": "再分享一个链接",
+      "filteredTitle": "此筛选下暂无内容",
+      "filteredDescription": "可切换到「全部」，或等新活动到来后再筛选。"
     },
     "rooms": {
       "title": "暂无活跃数据室",

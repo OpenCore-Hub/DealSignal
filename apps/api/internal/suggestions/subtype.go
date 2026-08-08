@@ -15,6 +15,7 @@ const (
 	SubtypeBlockedAttempt  = "blocked_attempt"
 	SubtypeAnomaly         = "anomaly"
 	SubtypeForward         = "forward"
+	SubtypeCaptureAttempt  = "capture_attempt"
 )
 
 // IsRiskSubtype reports whether a subtype belongs to a risk_alert.
@@ -22,7 +23,8 @@ func IsRiskSubtype(subtype string) bool {
 	switch subtype {
 	case SubtypeBounce, SubtypeDownload, SubtypeExpired,
 		SubtypeAccessExhausted, SubtypeAccessRevoked,
-		SubtypeBlockedAttempt, SubtypeAnomaly, SubtypeForward:
+		SubtypeBlockedAttempt, SubtypeAnomaly, SubtypeForward,
+		SubtypeCaptureAttempt:
 		return true
 	}
 	return false

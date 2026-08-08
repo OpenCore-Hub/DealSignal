@@ -8,7 +8,7 @@
   },
   "page": {
     "title": "Insights",
-    "description": "Track document heat, page engagement, access denials, key-page reads, and smart follow-up suggestions."
+    "description": "Track document heat, page engagement, access denials, and key-page reads. Follow-ups live on Deal Radar."
   },
   "overview": {
     "hot": "Hot links",
@@ -99,6 +99,7 @@
   "suggestions": {
     "emptyTitle": "No suggestions yet",
     "emptyDescription": "No pending suggestions. New ones appear automatically when heat signals are detected.",
+    "radarRedirectDescription": "Follow-up todos, Formal Ask replies, and high-intent outreach now live on Deal Radar — the action inbox.",
     "viewContact": "View contact",
     "writeEmail": "Write follow-up email",
     "openFormalAsk": "Open Formal Q&A",

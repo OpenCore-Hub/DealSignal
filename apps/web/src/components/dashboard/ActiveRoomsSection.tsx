@@ -71,7 +71,7 @@ export function ActiveRoomsSection({
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-body flex items-center gap-2 font-medium text-muted-foreground">
-          <FolderOpen size={16} className="text-hot-500" />
+          <FolderOpen size={16} className="text-muted-foreground" />
           {t("sections.activeRooms")}
         </CardTitle>
       </CardHeader>
@@ -96,7 +96,7 @@ export function ActiveRoomsSection({
                   role="link"
                   tabIndex={0}
                   aria-label={t("room.enter", { name: room.name })}
-                  className="group/card spotlight relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-card p-4 shadow-card transition-all hover:-translate-y-0.5 hover:shadow-card-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background pressable"
+                  className="group/card relative flex cursor-pointer flex-col overflow-hidden rounded-xl border border-border bg-card p-4 transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background"
                   onClick={() => openRoom(room.id)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" || e.key === " ") {

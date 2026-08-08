@@ -70,6 +70,7 @@ func (s *Service) GetFeed(ctx context.Context, workspaceID, userID string) (Feed
 			return Feed{}, fmt.Errorf("sync operational actions: %w", err)
 		}
 	}
+	_ = s.queries.ReactivateExpiredSnoozedActions(ctx, wsUUID)
 
 	signals, err := s.queries.ListSignalsByWorkspace(ctx, wsUUID)
 	if err != nil {
@@ -87,8 +88,26 @@ func (s *Service) GetFeed(ctx context.Context, workspaceID, userID string) (Feed
 	return Feed{Signals: signals, Actions: actions}, nil
 }
 
+// AllowedSnoozeHours mirrors suggestions (1d / 3d / 7d).
+var AllowedSnoozeHours = map[int]struct{}{24: {}, 72: {}, 168: {}}
+
+var ErrInvalidSnoozeDuration = errors.New("invalid snooze duration")
+var ErrInvalidOutcome = errors.New("invalid outcome")
+
+// ValidActionOutcome reports whether outcome is allowed on done.
+func ValidActionOutcome(s string) bool {
+	switch s {
+	case "acted", "false_positive", "renewed", "approved", "replied", "other":
+		return true
+	default:
+		return false
+	}
+}
+
 // UpdateActionStatus updates the status of an action item.
-func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID, status string) (db.ActionItem, error) {
+// When status is snoozed, snoozeHours may be 24, 72, or 168 (default 24).
+// When status is done, outcome may be acted|false_positive|renewed|approved|replied|other (default acted).
+func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID, status string, snoozeHours int, outcome string) (db.ActionItem, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return db.ActionItem{}, err
@@ -98,10 +117,36 @@ func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID,
 		return db.ActionItem{}, err
 	}
 
+	var until pgtype.Timestamptz
+	if status == "snoozed" {
+		hours := snoozeHours
+		if hours == 0 {
+			hours = 24
+		}
+		if _, ok := AllowedSnoozeHours[hours]; !ok {
+			return db.ActionItem{}, ErrInvalidSnoozeDuration
+		}
+		until = pgtype.Timestamptz{Time: time.Now().UTC().Add(time.Duration(hours) * time.Hour), Valid: true}
+	}
+
+	var outcomeParam pgtype.Text
+	if status == "done" {
+		o := outcome
+		if o == "" {
+			o = "acted"
+		}
+		if !ValidActionOutcome(o) {
+			return db.ActionItem{}, ErrInvalidOutcome
+		}
+		outcomeParam = pgtype.Text{String: o, Valid: true}
+	}
+
 	action, err := s.queries.UpdateActionItemStatus(ctx, db.UpdateActionItemStatusParams{
-		Status:      status,
-		ID:          actionUUID,
-		WorkspaceID: wsUUID,
+		Status:       status,
+		ID:           actionUUID,
+		WorkspaceID:  wsUUID,
+		SnoozedUntil: until,
+		Outcome:      outcomeParam,
 	})
 	if err != nil {
 		return db.ActionItem{}, fmt.Errorf("update action status: %w", err)
@@ -113,11 +158,15 @@ func (s *Service) UpdateActionStatus(ctx context.Context, workspaceID, actionID,
 			WorkspaceID: wsUUID,
 		})
 		if serr == nil && sig.SuggestionID.Valid {
+			feedbackType := "acted"
+			if action.Outcome.Valid && action.Outcome.String == "false_positive" {
+				feedbackType = "dismissed"
+			}
 			_, _ = s.queries.CreateSuggestionFeedback(ctx, db.CreateSuggestionFeedbackParams{
 				TenantID:     sig.TenantID,
 				WorkspaceID:  sig.WorkspaceID,
 				SuggestionID: sig.SuggestionID,
-				FeedbackType: "acted",
+				FeedbackType: feedbackType,
 			})
 		}
 	}

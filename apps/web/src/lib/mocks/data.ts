@@ -23,6 +23,17 @@ import type {
   WorkspaceSettings,
 } from "@/types";
 import { countLinksByHeatLevel, syncMockLinkHeatLevels } from "./mockHeat";
+import {
+  actionNavigatePath,
+  isFormalAskReviewAction,
+} from "@/lib/actionNavigation";
+import type {
+  RadarEvidencePack,
+  RadarFeed,
+  RadarProduct,
+  RadarVerb,
+  RadarWorkItem,
+} from "@/lib/radarQueue";
 
 export const mockWorkspaces: Workspace[] = [
   { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name" },
@@ -1133,6 +1144,181 @@ export function getMockSignalFeed() {
     signals: mockSignals,
     actions: mockActionItems,
   };
+}
+
+/** MSW radar feed derived from the same fixtures as GET /signals (not empty stubs). */
+export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
+  const sigById = new Map(mockSignals.map((s) => [s.id, s]));
+  const pending = mockActionItems.filter((a) => a.status === "pending");
+  const items: RadarWorkItem[] = [];
+
+  for (const action of pending) {
+    const signal = action.signalId ? sigById.get(action.signalId) : undefined;
+    if (signal?.subtype === "bounce") continue;
+    const { product, verb } = mockClassify(action, signal);
+    const navigatePath =
+      actionNavigatePath(workspaceSlug, action) ||
+      (signal?.documentId
+        ? `/${workspaceSlug}/documents/${signal.documentId}?tab=analytics`
+        : signal?.linkId
+          ? `/${workspaceSlug}/links/${signal.linkId}`
+          : undefined);
+    const confidence =
+      product === "leak_watch"
+        ? signal?.subtype === "forward" || signal?.subtype === "download"
+          ? "medium"
+          : "low"
+        : undefined;
+    items.push({
+      id: action.id,
+      product,
+      headline: action.title,
+      subtitle: signal?.suggestion || signal?.description || "",
+      actor:
+        signal?.context?.contactName ||
+        signal?.context?.contactEmail ||
+        undefined,
+      verb,
+      priority: (action.impact || signal?.priority || "medium") as RadarWorkItem["priority"],
+      confidence,
+      slaDueAt: action.dueAt,
+      createdAt: action.createdAt,
+      dealKey: signal?.linkId
+        ? `link:${signal.linkId}`
+        : action.targetId
+          ? `room:${action.targetId.split("/")[0]}`
+          : action.sourceId
+            ? `src:${action.sourceId}`
+            : "workspace",
+      dealName:
+        signal?.context?.documentTitle ||
+        signal?.title ||
+        action.title,
+      dealRoomId:
+        action.sourceType === "deal_room_link_access_request"
+          ? action.targetId
+          : action.sourceType === "room_access_request" ||
+              action.sourceType === "room_nda"
+            ? action.sourceId
+            : undefined,
+      linkId: signal?.linkId || action.sourceId,
+      documentId: signal?.documentId,
+      contactId: signal?.contactId,
+      actionId: action.id,
+      signalId: signal?.id,
+      navigatePath: navigatePath ?? undefined,
+      evidencePath: navigatePath ?? undefined,
+      contactEmail:
+        signal?.context?.contactEmail || signal?.context?.visitorEmail,
+      documentTitle: signal?.context?.documentTitle,
+    });
+  }
+
+  const counts: Record<string, number> = { all: items.length };
+  for (const p of [
+    "buying_window",
+    "diligence_gate",
+    "commitment_ask",
+    "leak_watch",
+    "access_decay",
+    "abuse_guard",
+  ] as RadarProduct[]) {
+    counts[p] = items.filter((i) => i.product === p).length;
+  }
+
+  return {
+    nextUp: items[0] ?? null,
+    strands: [],
+    items,
+    clearedToday: mockActionItems.filter((a) => a.status === "done").length,
+    counts,
+    lens: "founder",
+  };
+}
+
+/** Evidence pack for MSW — derived from the same action/signal fixtures. */
+export function getMockRadarEvidence(
+  itemId: string,
+  workspaceSlug = "acme-capital",
+): RadarEvidencePack | null {
+  const feed = getMockRadarFeed(workspaceSlug);
+  const item = feed.items.find((i) => i.id === itemId);
+  if (!item) return null;
+  const signal = item.signalId
+    ? mockSignals.find((s) => s.id === item.signalId)
+    : undefined;
+  return {
+    itemId: item.id,
+    product: item.product,
+    headline: item.headline,
+    whyNow: item.subtitle || signal?.description,
+    actor: item.actor,
+    dealName: item.dealName,
+    linkId: item.linkId,
+    documentId: item.documentId,
+    navigatePath: item.navigatePath,
+    evidencePath: item.evidencePath,
+    insightsPath: item.linkId
+      ? `/${workspaceSlug}/links/${item.linkId}`
+      : `/${workspaceSlug}/insights/overview`,
+    metrics: {
+      opens24h: signal?.context?.opens ?? 0,
+      uniqueVisitors24h: signal?.context?.uniqueVisitors ?? 0,
+      forwardSignals24h: 0,
+      downloads24h: 0,
+    },
+    keyPageTitles: signal?.context?.keyPageTitles,
+  };
+}
+
+function mockClassify(
+  action: ActionItem,
+  signal?: Signal,
+): { product: RadarProduct; verb: RadarVerb } {
+  const src = action.sourceType;
+  if (
+    action.actionType === "approve" ||
+    action.actionType === "sign" ||
+    action.actionType === "verify" ||
+    src === "link_access_request" ||
+    src === "deal_room_link_access_request" ||
+    src === "room_access_request" ||
+    src === "room_nda"
+  ) {
+    return { product: "diligence_gate", verb: "approve" };
+  }
+  if (
+    action.actionType === "answer" ||
+    src === "link_question" ||
+    src === "deal_room_link_question" ||
+    isFormalAskReviewAction(action)
+  ) {
+    return { product: "commitment_ask", verb: "reply" };
+  }
+  if (
+    action.actionType === "renew" ||
+    src === "expiring_link" ||
+    src === "expiring_room"
+  ) {
+    return { product: "access_decay", verb: "renew" };
+  }
+  if (signal?.type === "risk_alert") {
+    if (
+      signal.subtype === "expired" ||
+      signal.subtype === "access_exhausted" ||
+      signal.subtype === "access_revoked"
+    ) {
+      return { product: "access_decay", verb: "review" };
+    }
+    return { product: "leak_watch", verb: "review" };
+  }
+  if (action.actionType === "review") {
+    return { product: "leak_watch", verb: "review" };
+  }
+  if (action.actionType === "email" || action.actionType === "call") {
+    return { product: "buying_window", verb: "email" };
+  }
+  return { product: "buying_window", verb: "open" };
 }
 export const mockDealRoomTemplates: DealRoomTemplate[] = [
   {

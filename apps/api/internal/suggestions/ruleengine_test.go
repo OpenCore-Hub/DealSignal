@@ -13,6 +13,13 @@ func TestRuleEngineDefaultsBucketAndEnabled(t *testing.T) {
 		t.Fatalf("failed to create engine: %v", err)
 	}
 	for _, r := range engine.config.ExpressionRules {
+		// Bounce is intentionally disabled — Insights content diagnosis, not Radar.
+		if r.ID == "risk_bounce" {
+			if r.isEnabled() {
+				t.Errorf("rule risk_bounce should be disabled")
+			}
+			continue
+		}
 		if !r.isEnabled() {
 			t.Errorf("rule %s should be enabled by default", r.ID)
 		}

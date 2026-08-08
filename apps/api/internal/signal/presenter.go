@@ -66,6 +66,12 @@ func ActionItem(a db.ActionItem) gin.H {
 	if a.TargetID.Valid {
 		item["targetId"] = a.TargetID.String
 	}
+	if a.SnoozedUntil.Valid {
+		item["snoozedUntil"] = a.SnoozedUntil.Time.Format(time.RFC3339)
+	}
+	if a.Outcome.Valid && a.Outcome.String != "" {
+		item["outcome"] = a.Outcome.String
+	}
 	return item
 }
 

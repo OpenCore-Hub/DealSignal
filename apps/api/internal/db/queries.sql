@@ -698,6 +698,19 @@ FROM access_logs
 WHERE link_id = $1
   AND created_at > now() - interval '24 hours';
 
+-- name: GetLinkAccessMetrics24hBatch :many
+-- Rolling 24-hour access metrics for Deal Radar Leak Watch confidence.
+SELECT
+    link_id,
+    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
+FROM access_logs
+WHERE link_id = ANY($1::uuid[])
+  AND created_at > now() - interval '24 hours'
+GROUP BY link_id;
+
 -- name: GetLinkLastAccessAt :one
 SELECT MAX(created_at)::timestamptz AS last_access_at
 FROM access_logs
@@ -1936,16 +1949,33 @@ RETURNING *;
 
 -- name: SnoozeActionItemsBySignal :exec
 UPDATE action_items
-SET status = 'snoozed', updated_at = now()
-WHERE signal_id = $1 AND workspace_id = $2 AND status = 'pending';
+SET status = 'snoozed',
+    snoozed_until = sqlc.arg(snoozed_until),
+    updated_at = now()
+WHERE signal_id = sqlc.arg(signal_id)
+  AND workspace_id = sqlc.arg(workspace_id)
+  AND status = 'pending';
 
 -- name: SnoozeActionItemBySource :exec
 UPDATE action_items
-SET status = 'snoozed', updated_at = now()
-WHERE workspace_id = $1
-  AND source_type = $2
-  AND source_id = $3
+SET status = 'snoozed',
+    snoozed_until = sqlc.arg(snoozed_until),
+    updated_at = now()
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND source_type = sqlc.arg(source_type)
+  AND source_id = sqlc.arg(source_id)
   AND status = 'pending';
+
+-- name: ReactivateExpiredSnoozedActions :exec
+-- Wake timed snoozes; also heal legacy rows snoozed without snoozed_until (default 24h).
+UPDATE action_items
+SET status = 'pending', snoozed_until = NULL, updated_at = now()
+WHERE workspace_id = $1
+  AND status = 'snoozed'
+  AND (
+      (snoozed_until IS NOT NULL AND snoozed_until <= now())
+      OR (snoozed_until IS NULL AND updated_at <= now() - interval '24 hours')
+  );
 
 -- name: InsertSuggestionOutbox :execrows
 INSERT INTO suggestion_outbox (tenant_id, workspace_id, link_id, lang)
@@ -2378,9 +2408,34 @@ ORDER BY created_at DESC;
 
 -- name: UpdateActionItemStatus :one
 UPDATE action_items
-SET status = $1, updated_at = now()
-WHERE id = $2 AND workspace_id = $3
+SET status = sqlc.arg(status),
+    snoozed_until = CASE
+        WHEN sqlc.arg(status) = 'snoozed' THEN COALESCE(sqlc.narg(snoozed_until), now() + interval '24 hours')
+        ELSE NULL
+    END,
+    outcome = CASE
+        WHEN sqlc.arg(status) = 'done' THEN COALESCE(NULLIF(sqlc.narg(outcome)::text, ''), 'acted')
+        ELSE NULL
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg(id) AND workspace_id = sqlc.arg(workspace_id)
 RETURNING *;
+
+-- name: CountRecentActionOutcomesByWorkspace :many
+-- Closed-loop learning for Deal Radar: 30d done outcomes by signal subtype / action type.
+SELECT
+    COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
+    a.outcome,
+    COUNT(*)::bigint AS count
+FROM action_items a
+LEFT JOIN signals s
+    ON s.id = a.signal_id
+   AND s.workspace_id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND a.status = 'done'
+  AND a.outcome IS NOT NULL
+  AND a.updated_at > now() - interval '30 days'
+GROUP BY 1, 2;
 
 -- name: ListPendingDocumentLinkAccessRequestsByWorkspace :many
 -- Dashboard sync: document-library share applications only.
@@ -3391,6 +3446,21 @@ FROM security_events
 WHERE link_id = $1
   AND created_at > now() - interval '24 hours'
 ORDER BY created_at DESC;
+
+-- name: CountCaptureAttemptsByLink24h :one
+SELECT COUNT(*)::bigint AS count
+FROM security_events
+WHERE link_id = $1
+  AND event_type = 'capture_attempt'
+  AND created_at > now() - interval '24 hours';
+
+-- name: CountCaptureAttempts24hBatch :many
+SELECT link_id, COUNT(*)::bigint AS count
+FROM security_events
+WHERE link_id = ANY($1::uuid[])
+  AND event_type = 'capture_attempt'
+  AND created_at > now() - interval '24 hours'
+GROUP BY link_id;
 
 -- name: ListAskHighRiskSecurityEventsByLink :many
 -- Owner-visible Visitor Ask high-risk events (US#32): block (blocked_email /

@@ -264,6 +264,8 @@ type EventRequest struct {
 	PageNumber      int32   `json:"page_number,omitempty"`
 	DurationSeconds int32   `json:"duration_seconds,omitempty"`
 	ScrollDepth     float64 `json:"scroll_depth,omitempty"`
+	// Reason is used by capture_attempt (printscreen|print|mac_capture|win_snip|other).
+	Reason string `json:"reason,omitempty"`
 }
 
 // RecordEvent receives a public event and stores it.
@@ -322,6 +324,18 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 	case "download_attempted":
 		err = h.analytics.RecordDownload(ctx, res.Link, visitorID, email, c.ClientIP(), c.Request.UserAgent())
 		// Downloads are not forward signals — do not map them to forward_signal.
+	case "capture_attempt":
+		// Soft deterrence only when host enabled screenshot protection.
+		// Always evidence; suggestion escalation is thresholded in rule engine.
+		if !res.Link.ScreenshotProtectionEnabled {
+			c.Status(http.StatusNoContent)
+			return
+		}
+		reason := normalizeCaptureAttemptReason(req.Reason)
+		h.writeLinkSecurityEvent(ctx, res.Link, "capture_attempt", visitorID, email, c.ClientIP(), c.Request.UserAgent(), reason)
+		h.triggerSuggestions(ctx, res.Link, langFromContext(c))
+		c.Status(http.StatusNoContent)
+		return
 	default:
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "unsupported event_type"})
 		return
@@ -338,6 +352,15 @@ func (h *Handler) RecordEvent(c *gin.Context) {
 
 	h.triggerSuggestions(c.Request.Context(), res.Link, langFromContext(c))
 	c.Status(http.StatusNoContent)
+}
+
+func normalizeCaptureAttemptReason(raw string) string {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "printscreen", "print", "mac_capture", "win_snip":
+		return strings.ToLower(strings.TrimSpace(raw))
+	default:
+		return "other"
+	}
 }
 
 // resolveEventDocumentID validates an optional page-view document against Access scope.

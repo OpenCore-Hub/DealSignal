@@ -2,9 +2,9 @@
 # Each expression rule is evaluated against a RuleInput map. Available fields:
 #   heat.level, heat.score, heat.trend
 #   opens, revisits, avgDurationMinutes, bounces, downloads, totalPageViews,
-#   keyPageViews, uniqueVisitors
+#   keyPageViews, uniqueVisitors, forwardSignals
 #   opens24h, revisits24h, avgDurationMinutes24h, bounces24h, downloads24h,
-#   totalPageViews24h, keyPageViews24h, uniqueVisitors24h
+#   totalPageViews24h, keyPageViews24h, uniqueVisitors24h, forwardSignals24h
 #   distinctIPs1h, distinctEmails24h, unknownEmails24h
 # Security event rules map an event_type to a risk_alert subtype.
 
@@ -49,15 +49,21 @@ expression_rules:
 
   - id: follow_up_revisit
     condition: 'revisits24h > 0'
+    enabled: true
+    bucket_percent: 100
+    bucket_key: link_id
     output:
       type: follow_up
       subtype: revisit
-      priority: low
+      priority: medium
       reason_template: '{{.revisits24h}} return visit(s) in the last 24 hours'
-      action_template: 'Re-engage the returning visitor'
+      action_template: 'Re-engage the returning visitor — timing window is open'
 
+  # Bounce / short-dwell is Insights content diagnosis, not a Deal Radar work item.
+  # Kept disabled so it never creates risk_alert actions that pollute the inbox.
   - id: risk_bounce
     condition: 'bounces24h > 0 && avgDurationMinutes24h < 0.5'
+    enabled: false
     output:
       type: risk_alert
       subtype: bounce
@@ -68,16 +74,33 @@ expression_rules:
         bounces: '{{.bounces24h}}'
         avg_duration_minutes: '{{.avgDurationMinutes24h}}'
 
+  # Cluster fan-out: many IPs in a short window (classic forward storm).
   - id: risk_forward
     condition: 'distinctIPs1h >= 3'
     output:
       type: risk_alert
       subtype: forward
-      priority: medium
+      priority: high
       reason_template: '{{.distinctIPs1h}} distinct IPs opened this link in the last hour'
       action_template: 'Check for unauthorized forwarding'
       metadata:
         distinct_ips: '{{.distinctIPs1h}}'
+
+  # Marker-based forward: access_logs.event_type=forward_signal within 24h.
+  # Fires earlier than the IP-cluster rule (single confirmed forward marker).
+  - id: risk_forward_marker
+    condition: 'forwardSignals24h >= 1'
+    enabled: true
+    bucket_percent: 100
+    bucket_key: link_id
+    output:
+      type: risk_alert
+      subtype: forward
+      priority: high
+      reason_template: '{{.forwardSignals24h}} forward signal marker(s) in the last 24 hours'
+      action_template: 'Review who may have shared the link outside the intended circle'
+      metadata:
+        forward_signals_24h: '{{.forwardSignals24h}}'
 
   - id: risk_suspicious_download
     condition: 'downloads24h > 0 && (distinctEmails24h > 1 || unknownEmails24h > 0)'
@@ -91,6 +114,31 @@ expression_rules:
         total_downloads: '{{.downloads24h}}'
         distinct_emails: '{{.distinctEmails24h}}'
         distinct_unknown_emails: '{{.unknownEmails24h}}'
+
+  # Screenshot protection: single capture_attempt is evidence-only (no security_event_rules
+  # mapping). Escalate only with session volume or stacked exfil markers.
+  - id: risk_capture_attempt_burst
+    condition: 'screenshotProtectionEnabled && captureAttempts24h >= 3'
+    output:
+      type: risk_alert
+      subtype: capture_attempt
+      priority: medium
+      reason_template: '{{.captureAttempts24h}} capture attempts in the last 24 hours while screenshot protection was on'
+      action_template: 'Review possible screenshot exfil intent and tighten sharing if needed'
+      metadata:
+        capture_attempts_24h: '{{.captureAttempts24h}}'
+  - id: risk_capture_with_exfil
+    condition: 'screenshotProtectionEnabled && captureAttempts24h >= 1 && (forwardSignals24h >= 1 || downloads24h >= 1)'
+    output:
+      type: risk_alert
+      subtype: capture_attempt
+      priority: high
+      reason_template: 'Capture attempt stacked with forward/download markers (capture={{.captureAttempts24h}}, forwards={{.forwardSignals24h}}, downloads={{.downloads24h}})'
+      action_template: 'Investigate possible screenshot + share-out leak path'
+      metadata:
+        capture_attempts_24h: '{{.captureAttempts24h}}'
+        forward_signals_24h: '{{.forwardSignals24h}}'
+        downloads_24h: '{{.downloads24h}}'
 
 security_event_rules:
   expired_link_accessed:
@@ -133,3 +181,20 @@ security_event_rules:
     priority: medium
     reason_template: 'Abnormal access pattern detected'
     action_template: 'Investigate anomaly'
+  # Visitor Ask abuse / escalation — previously written to security_events but
+  # never mapped into Deal Radar risk cards.
+  rate_limit_exceeded:
+    subtype: anomaly
+    priority: high
+    reason_template: 'Visitor Ask rate limit exceeded'
+    action_template: 'Review Ask abuse on this link and tighten quotas if needed'
+  ask_ai_rate_limited:
+    subtype: anomaly
+    priority: high
+    reason_template: 'Visitor AI Ask rate limit exceeded'
+    action_template: 'Investigate AI Ask abuse and contact the visitor if known'
+  ask_escalated:
+    subtype: anomaly
+    priority: high
+    reason_template: 'Visitor Ask was escalated to the host'
+    action_template: 'Open Ask inbox and respond to the escalated question'

@@ -382,6 +382,21 @@ export function CanvasViewer({
         watermark={resolvedWatermark}
         screenshotProtectionEnabled={publicLink?.screenshotProtectionEnabled}
         onSelectPage={setPage}
+        onCaptureAttempt={
+          publicToken && publicLink?.screenshotProtectionEnabled
+            ? (reason) => {
+                void api.recordPublicEvent(
+                  {
+                    event_type: "capture_attempt",
+                    public_token: publicToken,
+                    visitor_id: publicVisitorId,
+                    reason,
+                  },
+                  publicAccessCredentials,
+                );
+              }
+            : undefined
+        }
         sidebar={effectiveSidebar}
         variant={publicToken ? "public" : "default"}
         publicToken={publicToken}

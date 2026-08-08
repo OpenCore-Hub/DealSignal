@@ -49,6 +49,8 @@ import {
   mockWorkspaces,
   defaultWorkspaceSettings,
   getMockDashboardStats,
+  getMockRadarEvidence,
+  getMockRadarFeed,
   getMockSignalFeed,
 } from "./data";
 import { computeMockLinkHeat } from "./mockHeat";
@@ -4969,6 +4971,53 @@ export const handlers = [
     if (body?.status) action.status = body.status as ActionItem["status"];
     return HttpResponse.json(action);
   }),
+
+  // Deal Radar — compiled feed (fixture-derived, same sources as /signals)
+  http.get("*/api/workspaces/:workspaceSlug/radar", ({ params, request }) => {
+    const slug = String(params.workspaceSlug || "acme-capital");
+    const circle = new URL(request.url).searchParams.get("circle") || "founder";
+    const feed = getMockRadarFeed(slug);
+    return HttpResponse.json({
+      ...feed,
+      lens:
+        circle === "investor_ir" || circle === "sales" ? circle : "founder",
+    });
+  }),
+
+  http.get(
+    "*/api/workspaces/:workspaceSlug/radar/items/:id/evidence",
+    ({ params }) => {
+      const slug = String(params.workspaceSlug || "acme-capital");
+      const pack = getMockRadarEvidence(String(params.id), slug);
+      if (!pack) return new HttpResponse(null, { status: 404 });
+      return HttpResponse.json(pack);
+    },
+  ),
+
+  http.patch(
+    "*/api/workspaces/:workspaceSlug/radar/items/:id",
+    async ({ params, request }) => {
+      const body = (await request.json()) as {
+        status?: string;
+        snooze_hours?: number;
+        outcome?: ActionItem["outcome"];
+      };
+      const action = mockActionItems.find((a) => a.id === params.id);
+      if (!action) return new HttpResponse(null, { status: 404 });
+      if (body?.status) action.status = body.status as ActionItem["status"];
+      if (body?.status === "snoozed" && body.snooze_hours) {
+        action.snoozedUntil = new Date(
+          Date.now() + body.snooze_hours * 3600_000,
+        ).toISOString();
+      }
+      if (body?.status === "done") {
+        action.outcome = body.outcome || "acted";
+      } else if (body?.status) {
+        delete action.outcome;
+      }
+      return HttpResponse.json(action);
+    },
+  ),
 
   // Public viewer — pre-NDA allowlist check (parity with backend CheckPublicEmail).
   http.post("*/api/v1/public/links/:token/check-email", async ({ params, request }) => {

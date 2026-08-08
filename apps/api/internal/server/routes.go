@@ -31,6 +31,7 @@ import (
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/nda"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/notification"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/radar"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/sse"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/storage"
@@ -382,6 +383,7 @@ func (s *Server) registerRoutes() error {
 
 			suggestionHandler := suggestions.NewHandler(suggestionSvc)
 			signalHandler := signal.NewHandler(signalSvc)
+			radarHandler := radar.NewHandler(radar.NewService(queries, signalSvc))
 
 			contactOpts := []contact.ServiceOption{}
 			if s.redisClient != nil {
@@ -407,6 +409,7 @@ func (s *Server) registerRoutes() error {
 			complianceHandler.RegisterRoutes(ws)
 			suggestionHandler.RegisterRoutes(ws)
 			signalHandler.RegisterRoutes(ws)
+			radarHandler.RegisterRoutes(ws)
 			contactHandler.RegisterRoutes(ws)
 			marketingHandler.RegisterRoutes(ws)
 

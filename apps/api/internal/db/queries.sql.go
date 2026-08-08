@@ -534,6 +534,55 @@ func (q *Queries) CountActiveSuggestionsByMetadata(ctx context.Context, arg Coun
 	return count, err
 }
 
+const countCaptureAttempts24hBatch = `-- name: CountCaptureAttempts24hBatch :many
+SELECT link_id, COUNT(*)::bigint AS count
+FROM security_events
+WHERE link_id = ANY($1::uuid[])
+  AND event_type = 'capture_attempt'
+  AND created_at > now() - interval '24 hours'
+GROUP BY link_id
+`
+
+type CountCaptureAttempts24hBatchRow struct {
+	LinkID pgtype.UUID
+	Count  int64
+}
+
+func (q *Queries) CountCaptureAttempts24hBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]CountCaptureAttempts24hBatchRow, error) {
+	rows, err := q.db.Query(ctx, countCaptureAttempts24hBatch, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountCaptureAttempts24hBatchRow
+	for rows.Next() {
+		var i CountCaptureAttempts24hBatchRow
+		if err := rows.Scan(&i.LinkID, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const countCaptureAttemptsByLink24h = `-- name: CountCaptureAttemptsByLink24h :one
+SELECT COUNT(*)::bigint AS count
+FROM security_events
+WHERE link_id = $1
+  AND event_type = 'capture_attempt'
+  AND created_at > now() - interval '24 hours'
+`
+
+func (q *Queries) CountCaptureAttemptsByLink24h(ctx context.Context, linkID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countCaptureAttemptsByLink24h, linkID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countDealRoomMembershipsByDocument = `-- name: CountDealRoomMembershipsByDocument :one
 SELECT COUNT(*)::bigint AS count
 FROM deal_room_documents
@@ -1078,6 +1127,49 @@ func (q *Queries) CountPendingQuestionsByWorkspace(ctx context.Context, workspac
 	var pending_count int64
 	err := row.Scan(&pending_count)
 	return pending_count, err
+}
+
+const countRecentActionOutcomesByWorkspace = `-- name: CountRecentActionOutcomesByWorkspace :many
+SELECT
+    COALESCE(NULLIF(s.subtype, ''), a.action_type) AS kind,
+    a.outcome,
+    COUNT(*)::bigint AS count
+FROM action_items a
+LEFT JOIN signals s
+    ON s.id = a.signal_id
+   AND s.workspace_id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND a.status = 'done'
+  AND a.outcome IS NOT NULL
+  AND a.updated_at > now() - interval '30 days'
+GROUP BY 1, 2
+`
+
+type CountRecentActionOutcomesByWorkspaceRow struct {
+	Kind    string
+	Outcome pgtype.Text
+	Count   int64
+}
+
+// Closed-loop learning for Deal Radar: 30d done outcomes by signal subtype / action type.
+func (q *Queries) CountRecentActionOutcomesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]CountRecentActionOutcomesByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, countRecentActionOutcomesByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountRecentActionOutcomesByWorkspaceRow
+	for rows.Next() {
+		var i CountRecentActionOutcomesByWorkspaceRow
+		if err := rows.Scan(&i.Kind, &i.Outcome, &i.Count); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const countRecentDistinctIPsByLink = `-- name: CountRecentDistinctIPsByLink :one
@@ -1723,7 +1815,7 @@ INSERT INTO action_items (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 ON CONFLICT (signal_id) DO UPDATE SET
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 `
 
 type CreateActionItemParams struct {
@@ -1764,6 +1856,8 @@ func (q *Queries) CreateActionItem(ctx context.Context, arg CreateActionItemPara
 		&i.SourceType,
 		&i.SourceID,
 		&i.TargetID,
+		&i.SnoozedUntil,
+		&i.Outcome,
 	)
 	return i, err
 }
@@ -3215,7 +3309,7 @@ ON CONFLICT (workspace_id, source_type, source_id) DO UPDATE SET
         ELSE 'pending'
     END,
     updated_at = now()
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 `
 
 type CreateOperationalActionItemParams struct {
@@ -3262,6 +3356,8 @@ func (q *Queries) CreateOperationalActionItem(ctx context.Context, arg CreateOpe
 		&i.SourceType,
 		&i.SourceID,
 		&i.TargetID,
+		&i.SnoozedUntil,
+		&i.Outcome,
 	)
 	return i, err
 }
@@ -4604,7 +4700,7 @@ func (q *Queries) GetAccessRequestByID(ctx context.Context, arg GetAccessRequest
 }
 
 const getActionItemByID = `-- name: GetActionItemByID :one
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 FROM action_items
 WHERE id = $1 AND workspace_id = $2 LIMIT 1
 `
@@ -4632,12 +4728,14 @@ func (q *Queries) GetActionItemByID(ctx context.Context, arg GetActionItemByIDPa
 		&i.SourceType,
 		&i.SourceID,
 		&i.TargetID,
+		&i.SnoozedUntil,
+		&i.Outcome,
 	)
 	return i, err
 }
 
 const getActionItemBySource = `-- name: GetActionItemBySource :one
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 FROM action_items
 WHERE workspace_id = $1 AND source_type = $2 AND source_id = $3 LIMIT 1
 `
@@ -4666,6 +4764,8 @@ func (q *Queries) GetActionItemBySource(ctx context.Context, arg GetActionItemBy
 		&i.SourceType,
 		&i.SourceID,
 		&i.TargetID,
+		&i.SnoozedUntil,
+		&i.Outcome,
 	)
 	return i, err
 }
@@ -6823,6 +6923,54 @@ func (q *Queries) GetLinkAccessMetrics24h(ctx context.Context, linkID pgtype.UUI
 		&i.Downloads,
 	)
 	return i, err
+}
+
+const getLinkAccessMetrics24hBatch = `-- name: GetLinkAccessMetrics24hBatch :many
+SELECT
+    link_id,
+    COUNT(*) FILTER (WHERE event_type = 'link_opened')::bigint AS opens,
+    COUNT(DISTINCT visitor_id) FILTER (WHERE event_type = 'link_opened')::bigint AS unique_visitors,
+    COUNT(*) FILTER (WHERE event_type = 'forward_signal')::bigint AS forward_signals,
+    COUNT(*) FILTER (WHERE event_type = 'download_attempted')::bigint AS downloads
+FROM access_logs
+WHERE link_id = ANY($1::uuid[])
+  AND created_at > now() - interval '24 hours'
+GROUP BY link_id
+`
+
+type GetLinkAccessMetrics24hBatchRow struct {
+	LinkID         pgtype.UUID
+	Opens          int64
+	UniqueVisitors int64
+	ForwardSignals int64
+	Downloads      int64
+}
+
+// Rolling 24-hour access metrics for Deal Radar Leak Watch confidence.
+func (q *Queries) GetLinkAccessMetrics24hBatch(ctx context.Context, dollar_1 []pgtype.UUID) ([]GetLinkAccessMetrics24hBatchRow, error) {
+	rows, err := q.db.Query(ctx, getLinkAccessMetrics24hBatch, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []GetLinkAccessMetrics24hBatchRow
+	for rows.Next() {
+		var i GetLinkAccessMetrics24hBatchRow
+		if err := rows.Scan(
+			&i.LinkID,
+			&i.Opens,
+			&i.UniqueVisitors,
+			&i.ForwardSignals,
+			&i.Downloads,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const getLinkAccessMetricsBatch = `-- name: GetLinkAccessMetricsBatch :many
@@ -10291,7 +10439,7 @@ func (q *Queries) ListActionItemsBySignal(ctx context.Context, signalID pgtype.U
 }
 
 const listActionItemsByWorkspace = `-- name: ListActionItemsByWorkspace :many
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 FROM action_items
 WHERE workspace_id = $1
   AND (
@@ -10329,6 +10477,8 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 			&i.SourceType,
 			&i.SourceID,
 			&i.TargetID,
+			&i.SnoozedUntil,
+			&i.Outcome,
 		); err != nil {
 			return nil, err
 		}
@@ -10341,7 +10491,7 @@ func (q *Queries) ListActionItemsByWorkspace(ctx context.Context, workspaceID pg
 }
 
 const listActionItemsByWorkspaceForUser = `-- name: ListActionItemsByWorkspaceForUser :many
-SELECT a.id, a.tenant_id, a.workspace_id, a.signal_id, a.title, a.impact, a.due_at, a.status, a.action_type, a.created_at, a.updated_at, a.source_type, a.source_id, a.target_id
+SELECT a.id, a.tenant_id, a.workspace_id, a.signal_id, a.title, a.impact, a.due_at, a.status, a.action_type, a.created_at, a.updated_at, a.source_type, a.source_id, a.target_id, a.snoozed_until, a.outcome
 FROM action_items a
 WHERE a.workspace_id = $1
   AND (
@@ -10397,6 +10547,8 @@ func (q *Queries) ListActionItemsByWorkspaceForUser(ctx context.Context, arg Lis
 			&i.SourceType,
 			&i.SourceID,
 			&i.TargetID,
+			&i.SnoozedUntil,
+			&i.Outcome,
 		); err != nil {
 			return nil, err
 		}
@@ -14107,7 +14259,7 @@ func (q *Queries) ListPagesByDocument(ctx context.Context, documentID pgtype.UUI
 }
 
 const listPendingActionItemsBySourceType = `-- name: ListPendingActionItemsBySourceType :many
-SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+SELECT id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 FROM action_items
 WHERE workspace_id = $1 AND source_type = $2 AND status = 'pending'
 ORDER BY created_at DESC
@@ -14142,6 +14294,8 @@ func (q *Queries) ListPendingActionItemsBySourceType(ctx context.Context, arg Li
 			&i.SourceType,
 			&i.SourceID,
 			&i.TargetID,
+			&i.SnoozedUntil,
+			&i.Outcome,
 		); err != nil {
 			return nil, err
 		}
@@ -17733,6 +17887,23 @@ func (q *Queries) PublishDueFormalAskTurnsGlobal(ctx context.Context, limit int3
 	return items, nil
 }
 
+const reactivateExpiredSnoozedActions = `-- name: ReactivateExpiredSnoozedActions :exec
+UPDATE action_items
+SET status = 'pending', snoozed_until = NULL, updated_at = now()
+WHERE workspace_id = $1
+  AND status = 'snoozed'
+  AND (
+      (snoozed_until IS NOT NULL AND snoozed_until <= now())
+      OR (snoozed_until IS NULL AND updated_at <= now() - interval '24 hours')
+  )
+`
+
+// Wake timed snoozes; also heal legacy rows snoozed without snoozed_until (default 24h).
+func (q *Queries) ReactivateExpiredSnoozedActions(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, reactivateExpiredSnoozedActions, workspaceID)
+	return err
+}
+
 const recordLinkOpened = `-- name: RecordLinkOpened :execrows
 WITH inc AS (
     UPDATE links
@@ -18351,37 +18522,50 @@ func (q *Queries) SetLinkNDABinding(ctx context.Context, arg SetLinkNDABindingPa
 
 const snoozeActionItemBySource = `-- name: SnoozeActionItemBySource :exec
 UPDATE action_items
-SET status = 'snoozed', updated_at = now()
-WHERE workspace_id = $1
-  AND source_type = $2
-  AND source_id = $3
+SET status = 'snoozed',
+    snoozed_until = $1,
+    updated_at = now()
+WHERE workspace_id = $2
+  AND source_type = $3
+  AND source_id = $4
   AND status = 'pending'
 `
 
 type SnoozeActionItemBySourceParams struct {
-	WorkspaceID pgtype.UUID
-	SourceType  pgtype.Text
-	SourceID    pgtype.Text
+	SnoozedUntil pgtype.Timestamptz
+	WorkspaceID  pgtype.UUID
+	SourceType   pgtype.Text
+	SourceID     pgtype.Text
 }
 
 func (q *Queries) SnoozeActionItemBySource(ctx context.Context, arg SnoozeActionItemBySourceParams) error {
-	_, err := q.db.Exec(ctx, snoozeActionItemBySource, arg.WorkspaceID, arg.SourceType, arg.SourceID)
+	_, err := q.db.Exec(ctx, snoozeActionItemBySource,
+		arg.SnoozedUntil,
+		arg.WorkspaceID,
+		arg.SourceType,
+		arg.SourceID,
+	)
 	return err
 }
 
 const snoozeActionItemsBySignal = `-- name: SnoozeActionItemsBySignal :exec
 UPDATE action_items
-SET status = 'snoozed', updated_at = now()
-WHERE signal_id = $1 AND workspace_id = $2 AND status = 'pending'
+SET status = 'snoozed',
+    snoozed_until = $1,
+    updated_at = now()
+WHERE signal_id = $2
+  AND workspace_id = $3
+  AND status = 'pending'
 `
 
 type SnoozeActionItemsBySignalParams struct {
-	SignalID    pgtype.UUID
-	WorkspaceID pgtype.UUID
+	SnoozedUntil pgtype.Timestamptz
+	SignalID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
 }
 
 func (q *Queries) SnoozeActionItemsBySignal(ctx context.Context, arg SnoozeActionItemsBySignalParams) error {
-	_, err := q.db.Exec(ctx, snoozeActionItemsBySignal, arg.SignalID, arg.WorkspaceID)
+	_, err := q.db.Exec(ctx, snoozeActionItemsBySignal, arg.SnoozedUntil, arg.SignalID, arg.WorkspaceID)
 	return err
 }
 
@@ -18635,19 +18819,36 @@ func (q *Queries) UpdateAccessRequestStatus(ctx context.Context, arg UpdateAcces
 
 const updateActionItemStatus = `-- name: UpdateActionItemStatus :one
 UPDATE action_items
-SET status = $1, updated_at = now()
-WHERE id = $2 AND workspace_id = $3
-RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id
+SET status = $1,
+    snoozed_until = CASE
+        WHEN $1 = 'snoozed' THEN COALESCE($2, now() + interval '24 hours')
+        ELSE NULL
+    END,
+    outcome = CASE
+        WHEN $1 = 'done' THEN COALESCE(NULLIF($3::text, ''), 'acted')
+        ELSE NULL
+    END,
+    updated_at = now()
+WHERE id = $4 AND workspace_id = $5
+RETURNING id, tenant_id, workspace_id, signal_id, title, impact, due_at, status, action_type, created_at, updated_at, source_type, source_id, target_id, snoozed_until, outcome
 `
 
 type UpdateActionItemStatusParams struct {
-	Status      string
-	ID          pgtype.UUID
-	WorkspaceID pgtype.UUID
+	Status       string
+	SnoozedUntil pgtype.Timestamptz
+	Outcome      pgtype.Text
+	ID           pgtype.UUID
+	WorkspaceID  pgtype.UUID
 }
 
 func (q *Queries) UpdateActionItemStatus(ctx context.Context, arg UpdateActionItemStatusParams) (ActionItem, error) {
-	row := q.db.QueryRow(ctx, updateActionItemStatus, arg.Status, arg.ID, arg.WorkspaceID)
+	row := q.db.QueryRow(ctx, updateActionItemStatus,
+		arg.Status,
+		arg.SnoozedUntil,
+		arg.Outcome,
+		arg.ID,
+		arg.WorkspaceID,
+	)
 	var i ActionItem
 	err := row.Scan(
 		&i.ID,
@@ -18664,6 +18865,8 @@ func (q *Queries) UpdateActionItemStatus(ctx context.Context, arg UpdateActionIt
 		&i.SourceType,
 		&i.SourceID,
 		&i.TargetID,
+		&i.SnoozedUntil,
+		&i.Outcome,
 	)
 	return i, err
 }

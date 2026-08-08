@@ -342,6 +342,7 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 			TotalPageViews:        m.totalPageViews,
 			KeyPageViews:          m.keyPageViews,
 			UniqueVisitors:        m.uniqueVisitors,
+			ForwardSignals:        m.forwardSignals,
 			Opens24h:              m.opens24h,
 			Revisits24h:           m.revisits24h,
 			AvgDurationMinutes24h: m.avgDurationMinutes24h,
@@ -350,6 +351,9 @@ func (s *Service) evaluateRules(link db.Link, result heat.Result, m suggestionMe
 			TotalPageViews24h:     m.totalPageViews24h,
 			KeyPageViews24h:       m.keyPageViews24h,
 			UniqueVisitors24h:     m.uniqueVisitors24h,
+			ForwardSignals24h:     m.forwardSignals24h,
+			CaptureAttempts24h:          m.captureAttempts24h,
+			ScreenshotProtectionEnabled: link.ScreenshotProtectionEnabled,
 		},
 		Behavior:       behavior,
 		Context:        ctxSnapshot,
@@ -580,19 +584,22 @@ func (s *Service) Snooze(ctx context.Context, workspaceID, suggestionID string, 
 		SuggestionID: row.ID,
 		FeedbackType: "snoozed",
 	})
-	s.mirrorSnoozeRadarActions(ctx, wsUUID, id, row.Metadata)
+	s.mirrorSnoozeRadarActions(ctx, wsUUID, id, row.Metadata, until)
 	return suggestionFromRow(row, ""), nil
 }
 
 // mirrorSnoozeRadarActions snoozes suggestion-linked signal actions and Formal Ask operational todos (by turn_id).
-func (s *Service) mirrorSnoozeRadarActions(ctx context.Context, wsUUID, suggestionID pgtype.UUID, metadata []byte) {
+// snoozed_until must be set so ReactivateExpiredSnoozedActions can wake the radar item.
+func (s *Service) mirrorSnoozeRadarActions(ctx context.Context, wsUUID, suggestionID pgtype.UUID, metadata []byte, until time.Time) {
+	untilTS := pgtype.Timestamptz{Time: until.UTC(), Valid: true}
 	if sig, err := s.queries.GetSignalBySuggestion(ctx, db.GetSignalBySuggestionParams{
 		SuggestionID: suggestionID,
 		WorkspaceID:  wsUUID,
 	}); err == nil {
 		_ = s.queries.SnoozeActionItemsBySignal(ctx, db.SnoozeActionItemsBySignalParams{
-			SignalID:    sig.ID,
-			WorkspaceID: wsUUID,
+			SignalID:     sig.ID,
+			WorkspaceID:  wsUUID,
+			SnoozedUntil: untilTS,
 		})
 	}
 	turnID := metadataString(metadata, "turn_id")
@@ -601,9 +608,10 @@ func (s *Service) mirrorSnoozeRadarActions(ctx context.Context, wsUUID, suggesti
 	}
 	for _, sourceType := range []string{"link_question", "deal_room_link_question"} {
 		_ = s.queries.SnoozeActionItemBySource(ctx, db.SnoozeActionItemBySourceParams{
-			WorkspaceID: wsUUID,
-			SourceType:  pgtype.Text{String: sourceType, Valid: true},
-			SourceID:    pgtype.Text{String: turnID, Valid: true},
+			WorkspaceID:  wsUUID,
+			SourceType:   pgtype.Text{String: sourceType, Valid: true},
+			SourceID:     pgtype.Text{String: turnID, Valid: true},
+			SnoozedUntil: untilTS,
 		})
 	}
 }
@@ -708,6 +716,7 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *Feature
 	m.opens24h = int(access24h.Opens)
 	m.uniqueVisitors24h = int(access24h.UniqueVisitors)
 	m.downloads24h = int(access24h.Downloads)
+	m.forwardSignals24h = int(access24h.ForwardSignals)
 	m.revisits24h = m.opens24h - m.uniqueVisitors24h
 	if m.revisits24h < 0 {
 		m.revisits24h = 0
@@ -733,6 +742,12 @@ func (s *Service) metrics(ctx context.Context, linkID pgtype.UUID, snap *Feature
 	}
 	m.bounces24h = int(bounceCount24h)
 
+	captures24h, err := s.queries.CountCaptureAttemptsByLink24h(ctx, linkID)
+	if err != nil {
+		return m, fmt.Errorf("capture attempts 24h: %w", err)
+	}
+	m.captureAttempts24h = int(captures24h)
+
 	return m, nil
 }
 
@@ -755,6 +770,8 @@ type suggestionMetrics struct {
 	totalPageViews24h     int
 	downloads24h          int
 	bounces24h            int
+	forwardSignals24h     int
+	captureAttempts24h    int
 }
 
 func (s *Service) behaviorFeatures(ctx context.Context, linkID pgtype.UUID, snap *FeatureSnapshot) (BehaviorInput, error) {

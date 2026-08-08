@@ -8,7 +8,7 @@
   },
   "page": {
     "title": "洞察",
-    "description": "追踪文档热度、页面参与度、访问拒绝、敏感页阅读与智能跟进建议。"
+    "description": "追踪文档热度、页面参与度、访问拒绝与敏感页阅读。跟进行动在交易雷达处理。"
   },
   "overview": {
     "hot": "高热度链接",
@@ -99,6 +99,7 @@
   "suggestions": {
     "emptyTitle": "暂无跟进建议",
     "emptyDescription": "当前没有待办建议，系统会在检测到新的热度信号时自动生成。",
+    "radarRedirectDescription": "跟进待办、Formal Ask 回复与高意向外联已统一到交易雷达——行动收件箱。",
     "viewContact": "查看联系人",
     "writeEmail": "写跟进邮件",
     "openFormalAsk": "打开正式问答",

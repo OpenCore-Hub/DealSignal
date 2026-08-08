@@ -1,12 +1,13 @@
 package signal
 
 import (
+	"errors"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
@@ -45,7 +46,9 @@ func (h *Handler) List(c *gin.Context) {
 // UpdateAction updates the status of an action item.
 func (h *Handler) UpdateAction(c *gin.Context) {
 	var req struct {
-		Status string `json:"status" binding:"required,oneof=pending done snoozed ignored"`
+		Status      string `json:"status" binding:"required,oneof=pending done snoozed ignored"`
+		SnoozeHours int    `json:"snooze_hours"`
+		Outcome     string `json:"outcome"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
@@ -53,8 +56,16 @@ func (h *Handler) UpdateAction(c *gin.Context) {
 	}
 
 	workspaceID := middleware.WorkspaceIDFrom(c)
-	action, err := h.service.UpdateActionStatus(c.Request.Context(), workspaceID, c.Param("id"), req.Status)
+	action, err := h.service.UpdateActionStatus(c.Request.Context(), workspaceID, c.Param("id"), req.Status, req.SnoozeHours, req.Outcome)
 	if err != nil {
+		if errors.Is(err, ErrInvalidSnoozeDuration) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "snooze_hours must be 24, 72, or 168"})
+			return
+		}
+		if errors.Is(err, ErrInvalidOutcome) {
+			c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": "outcome must be acted, false_positive, renewed, approved, replied, or other"})
+			return
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}

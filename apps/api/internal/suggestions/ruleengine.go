@@ -45,6 +45,7 @@ type MetricsInput struct {
 	TotalPageViews         int
 	KeyPageViews           int
 	UniqueVisitors         int
+	ForwardSignals         int
 	Opens24h               int
 	Revisits24h            int
 	AvgDurationMinutes24h  float64
@@ -53,6 +54,9 @@ type MetricsInput struct {
 	TotalPageViews24h      int
 	KeyPageViews24h        int
 	UniqueVisitors24h      int
+	ForwardSignals24h           int
+	CaptureAttempts24h          int
+	ScreenshotProtectionEnabled bool
 }
 
 // BehaviorInput exposes behavior-risk features to rule expressions.
@@ -347,6 +351,7 @@ func (e *RuleEngine) buildExprInput(input RuleInput) map[string]interface{} {
 		"totalPageViews":         input.Metrics.TotalPageViews,
 		"keyPageViews":           input.Metrics.KeyPageViews,
 		"uniqueVisitors":         input.Metrics.UniqueVisitors,
+		"forwardSignals":         input.Metrics.ForwardSignals,
 		"opens24h":               input.Metrics.Opens24h,
 		"revisits24h":            input.Metrics.Revisits24h,
 		"avgDurationMinutes24h":  input.Metrics.AvgDurationMinutes24h,
@@ -355,7 +360,10 @@ func (e *RuleEngine) buildExprInput(input RuleInput) map[string]interface{} {
 		"totalPageViews24h":      input.Metrics.TotalPageViews24h,
 		"keyPageViews24h":        input.Metrics.KeyPageViews24h,
 		"uniqueVisitors24h":      input.Metrics.UniqueVisitors24h,
-		"distinctIPs1h":          input.Behavior.DistinctIPs1h,
+		"forwardSignals24h":      input.Metrics.ForwardSignals24h,
+		"captureAttempts24h":            input.Metrics.CaptureAttempts24h,
+		"screenshotProtectionEnabled":   input.Metrics.ScreenshotProtectionEnabled,
+		"distinctIPs1h":                 input.Behavior.DistinctIPs1h,
 		"distinctEmails24h":      input.Behavior.DistinctEmails24h,
 		"unknownEmails24h":       input.Behavior.UnknownEmails24h,
 	}

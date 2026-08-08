@@ -1,7 +1,157 @@
 {
-  "title": "Home",
+  "title": "Deal Radar",
   "welcome": {
-    "title": "Welcome back"
+    "title": "Deal Radar"
+  },
+  "radar": {
+    "title": "Deal Radar",
+    "upNext": "Today's focus",
+    "openCount_one": "{{count}} open",
+    "openCount_other": "{{count}} open",
+    "filtersLabel": "Queue filters",
+    "filters": {
+      "all": "All",
+      "buying_window": "Buying window",
+      "diligence_gate": "Diligence gate",
+      "commitment_ask": "Ask",
+      "leak_watch": "Leak watch",
+      "access_decay": "Access decay",
+      "abuse_guard": "Abuse guard"
+    },
+    "products": {
+      "buying_window": "Buying window",
+      "diligence_gate": "Diligence gate",
+      "commitment_ask": "Commitment ask",
+      "leak_watch": "Leak watch",
+      "access_decay": "Access decay",
+      "abuse_guard": "Abuse guard"
+    },
+    "cta": {
+      "approve": "Approve",
+      "reply": "Reply",
+      "email": "Email",
+      "renew": "Renew",
+      "review": "Review",
+      "open": "Open"
+    },
+    "evidence": "Evidence",
+    "snooze": "Snooze",
+    "snoozeHours": {
+      "24": "Snooze 1 day",
+      "72": "Snooze 3 days",
+      "168": "Snooze 7 days"
+    },
+    "clearedToday": "Cleared today",
+    "analyzeInInsights": "Analyze in Insights",
+    "undo": "Undo",
+    "nextUpLabel": "Do this next",
+    "byDeal": "By deal",
+    "strandCount_one": "{{count}} item",
+    "strandCount_other": "{{count}} items",
+    "showMoreInStrand_one": "Show {{count}} more",
+    "showMoreInStrand_other": "Show {{count}} more",
+    "dealFallback": "Workspace",
+    "whyNow": {
+      "sla_overdue": "SLA overdue by {{hours}}h — clear this first",
+      "coalesced": "{{count}} related signals merged in the last 24h",
+      "buying_window": "Active buying window — follow up while intent is warm",
+      "diligence_gate": "Someone is blocked at the gate — approve or reject",
+      "commitment_ask": "A commitment-grade ask is waiting for a reply today",
+      "leak_watch": "Possible material leak — review before continuing outreach",
+      "access_decay": "Access channel is decaying — renew or confirm retirement",
+      "abuse_guard": "Ask / access pressure looks abusive — review quotas"
+    },
+    "evidenceChips": {
+      "forward": "Forward",
+      "download": "Download",
+      "capture": "Capture attempt",
+      "key_page": "Key page",
+      "ask": "Ask",
+      "engagement": "Engagement",
+      "gate": "Gate",
+      "access": "Access",
+      "abuse": "Abuse",
+      "coalesced": "{{count}} merged"
+    },
+    "evidenceRail": {
+      "title": "Evidence",
+      "empty": "Select a radar item to inspect why it matters.",
+      "loading": "Loading evidence…",
+      "error": "Could not load evidence.",
+      "keyPages": "Key pages",
+      "topPages": "Top pages",
+      "recentVisitors": "Recent visitors",
+      "securityEvents": "Security events",
+      "anonymousVisitor": "Anonymous visitor",
+      "page": "Page {{page}}",
+      "views_one": "{{count}} view",
+      "views_other": "{{count}} views",
+      "openFull": "Open full evidence",
+      "eventTypes": {
+        "capture_attempt": "Capture attempt",
+        "forward_signal": "Forward signal",
+        "expired_link_accessed": "Expired link accessed",
+        "max_access_reached": "Max access reached",
+        "revoked_link_accessed": "Revoked link accessed",
+        "blocked_email": "Blocked email",
+        "blocked_domain": "Blocked domain",
+        "ask_ai_rate_limited": "Ask AI rate limited",
+        "ask_escalated": "Ask escalated",
+        "ask_formal_submitted": "Formal ask submitted",
+        "abnormal_access_pattern": "Abnormal access",
+        "rate_limit_exceeded": "Rate limit exceeded",
+        "unknown": "Security event"
+      },
+      "reasons": {
+        "printscreen": "Print screen",
+        "print": "Print",
+        "mac_capture": "Mac capture",
+        "win_snip": "Windows snip",
+        "other": "Other",
+        "unknown": "Reason unavailable"
+      },
+      "metrics": {
+        "opens24h": "Opens (24h)",
+        "visitors24h": "Visitors (24h)",
+        "forwards24h": "Forwards (24h)",
+        "downloads24h": "Downloads (24h)",
+        "captures24h": "Capture attempts (24h)"
+      }
+    },
+    "toast": {
+      "done": "Marked done",
+      "snoozed": "Snoozed",
+      "ignored": "Ignored",
+      "undoFailed": "Could not undo — refresh and try again"
+    },
+    "lensLabel": "Role lens",
+    "lens": {
+      "founder": "Founder",
+      "investor_ir": "Investor IR",
+      "sales": "Sales"
+    },
+    "confidence": {
+      "low": "Low confidence",
+      "medium": "Medium confidence",
+      "high": "High confidence"
+    },
+    "outcome": {
+      "choose": "Choose completion reason",
+      "acted": "Acted",
+      "false_positive": "False positive",
+      "renewed": "Renewed",
+      "approved": "Approved",
+      "replied": "Replied",
+      "other": "Other"
+    },
+    "inboxZero": {
+      "title": "Lane clear for today",
+      "description": "You cleared {{count}} item(s) today. Trends and content diagnosis stay in Insights — not in this action lane."
+    },
+    "noiseHint": "{{product}} was soft-demoted ({{rate}}% false positive over {{sample}} closed items).",
+    "shortcuts": {
+      "hint": "J/K move · E done · S snooze 1d"
+    }
   },
   "metrics": {
     "title": "Key metrics",
@@ -41,8 +191,8 @@
     }
   },
   "sections": {
-    "attention": "Attention",
-    "activeRooms": "Recently active",
+    "attention": "Today's focus",
+    "activeRooms": "Rooms needing you",
     "signals": "Signals",
     "recentVisitors": "Recent visitors",
     "actions": "Actions",
@@ -82,8 +232,11 @@
       "action": "Upload your first document"
     },
     "actions": {
-      "title": "No pending actions",
-      "description": "All signals have been handled."
+      "title": "You're clear for now",
+      "description": "No open follow-ups, Ask, approvals, or risks. New visitor activity will land here automatically.",
+      "shareCta": "Share another link",
+      "filteredTitle": "Nothing in this filter",
+      "filteredDescription": "Try All, or clear another filter after new activity arrives."
     },
     "rooms": {
       "title": "No active deal rooms",

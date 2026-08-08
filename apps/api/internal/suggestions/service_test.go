@@ -65,13 +65,15 @@ func TestRuleEngineKeyPageRead(t *testing.T) {
 	}
 }
 
-func TestRuleEngineBounceRisk(t *testing.T) {
+func TestRuleEngineBounceRiskDisabled(t *testing.T) {
 	engine := newTestRuleEngine(t)
 	m := suggestionMetrics{
-		opens:              2,
-		uniqueVisitors:     2,
-		avgDurationMinutes: 0.1,
-		bounces:            2,
+		opens:                 2,
+		uniqueVisitors:        2,
+		avgDurationMinutes:    0.1,
+		bounces:               2,
+		bounces24h:            2,
+		avgDurationMinutes24h: 0.1,
 	}
 	result := heat.Compute(heat.CircleDefault, m.heatInput(0))
 	matches, _, _, err := engine.Evaluate(RuleInput{
@@ -81,14 +83,10 @@ func TestRuleEngineBounceRisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	found := false
 	for _, match := range matches {
 		if match.Type == "risk_alert" && match.Subtype == SubtypeBounce {
-			found = true
+			t.Fatalf("bounce must stay out of Deal Radar rules, got %v", matches)
 		}
-	}
-	if !found {
-		t.Fatalf("expected bounce risk_alert match, got %v", matches)
 	}
 }
 
@@ -111,6 +109,100 @@ func TestRuleEngineForwardRisk(t *testing.T) {
 	}
 }
 
+func TestRuleEngineForwardMarkerRisk(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, _, _, err := engine.Evaluate(RuleInput{
+		Metrics: MetricsInput{ForwardSignals24h: 1},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, match := range matches {
+		if match.ID == "risk_forward_marker" && match.Subtype == SubtypeForward {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected risk_forward_marker match, got %v", matches)
+	}
+}
+
+func TestRuleEngineCaptureAttemptDoesNotEscalateOnSingleEvent(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, _, _, err := engine.Evaluate(RuleInput{
+		Metrics: MetricsInput{CaptureAttempts24h: 1},
+		SecurityEvents: []SecurityEventInput{
+			{EventType: "capture_attempt", Reason: "printscreen"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, match := range matches {
+		if match.Subtype == SubtypeCaptureAttempt {
+			t.Fatalf("single capture_attempt must stay evidence-only, got %+v", match)
+		}
+	}
+}
+
+func TestRuleEngineCaptureAttemptBurstEscalates(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, _, _, err := engine.Evaluate(RuleInput{
+		Metrics: MetricsInput{CaptureAttempts24h: 3, ScreenshotProtectionEnabled: true},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, match := range matches {
+		if match.ID == "risk_capture_attempt_burst" && match.Subtype == SubtypeCaptureAttempt {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected capture burst escalate, got %v", matches)
+	}
+}
+
+func TestRuleEngineCaptureBurstRequiresProtection(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, _, _, err := engine.Evaluate(RuleInput{
+		Metrics: MetricsInput{CaptureAttempts24h: 3, ScreenshotProtectionEnabled: false},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	for _, match := range matches {
+		if match.Subtype == SubtypeCaptureAttempt {
+			t.Fatalf("capture escalate must require screenshot protection, got %+v", match)
+		}
+	}
+}
+
+func TestRuleEngineCaptureWithExfilEscalates(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	matches, _, _, err := engine.Evaluate(RuleInput{
+		Metrics: MetricsInput{
+			CaptureAttempts24h:          1,
+			ForwardSignals24h:           1,
+			ScreenshotProtectionEnabled: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	found := false
+	for _, match := range matches {
+		if match.ID == "risk_capture_with_exfil" && match.Subtype == SubtypeCaptureAttempt {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("expected capture+exfil escalate, got %v", matches)
+	}
+}
+
 func TestRuleEngineSecurityEvent(t *testing.T) {
 	engine := newTestRuleEngine(t)
 	matches, _, _, err := engine.Evaluate(RuleInput{
@@ -129,6 +221,33 @@ func TestRuleEngineSecurityEvent(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("expected expired risk_alert match, got %v", matches)
+	}
+}
+
+func TestRuleEngineAskAbuseSecurityEvents(t *testing.T) {
+	engine := newTestRuleEngine(t)
+	for _, eventType := range []string{
+		"rate_limit_exceeded",
+		"ask_ai_rate_limited",
+		"ask_escalated",
+	} {
+		matches, _, _, err := engine.Evaluate(RuleInput{
+			SecurityEvents: []SecurityEventInput{
+				{EventType: eventType, Reason: "ask"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", eventType, err)
+		}
+		found := false
+		for _, match := range matches {
+			if match.Type == "risk_alert" && match.Subtype == SubtypeAnomaly {
+				found = true
+			}
+		}
+		if !found {
+			t.Fatalf("%s: expected anomaly risk_alert, got %v", eventType, matches)
+		}
 	}
 }
 

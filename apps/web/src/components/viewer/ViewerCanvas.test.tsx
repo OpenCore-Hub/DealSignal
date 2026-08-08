@@ -207,6 +207,39 @@ describe("ViewerCanvas", () => {
     expect(screen.queryByTestId("inactive-blur-overlay")).not.toBeInTheDocument();
   });
 
+  it("reports capture_attempt on PrintScreen when protection is on", async () => {
+    const onCaptureAttempt = vi.fn();
+    await renderCanvas({
+      screenshotProtectionEnabled: true,
+      onCaptureAttempt,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "PrintScreen", bubbles: true }),
+      );
+    });
+
+    expect(onCaptureAttempt).toHaveBeenCalledWith("printscreen");
+    expect(screen.getByText("Print and capture discouraged")).toBeInTheDocument();
+  });
+
+  it("does not report capture_attempt when protection is off", async () => {
+    const onCaptureAttempt = vi.fn();
+    await renderCanvas({
+      screenshotProtectionEnabled: false,
+      onCaptureAttempt,
+    });
+
+    await act(async () => {
+      window.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "PrintScreen", bubbles: true }),
+      );
+    });
+
+    expect(onCaptureAttempt).not.toHaveBeenCalled();
+  });
+
   it("keeps Ask sidebar interactive while the inactive blur overlay is visible", async () => {
     const onAskClick = vi.fn();
     await renderCanvas({

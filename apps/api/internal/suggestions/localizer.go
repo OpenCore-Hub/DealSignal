@@ -43,6 +43,7 @@ func newLocalizedStrings(lang string) *localizedStrings {
 			formalAskAction:     "在 Formal Q&A 收件箱审核并发布正式答复",
 			subtypeTitles: map[string]string{
 				SubtypeHot:             "高意向信号",
+				SubtypeKeyPage:         "关键页深读",
 				SubtypeRevisit:         "重复访问",
 				SubtypeDownload:        "下载意向",
 				SubtypeQuestion:        "访客提问",
@@ -54,6 +55,7 @@ func newLocalizedStrings(lang string) *localizedStrings {
 				SubtypeBlockedAttempt:  "被拦截的访问",
 				SubtypeAnomaly:         "异常访问模式",
 				SubtypeForward:         "可能的转发扩散",
+				SubtypeCaptureAttempt:  "可能的截屏外传意图",
 			},
 		}
 	}
@@ -75,6 +77,7 @@ func newLocalizedStrings(lang string) *localizedStrings {
 		formalAskAction:     "Review and publish a formal answer in the Formal Q&A inbox",
 		subtypeTitles: map[string]string{
 			SubtypeHot:             "High-intent signal",
+			SubtypeKeyPage:         "Key-page deep read",
 			SubtypeRevisit:         "Repeat visit",
 			SubtypeDownload:        "Download intent",
 			SubtypeQuestion:        "Visitor question",
@@ -86,6 +89,7 @@ func newLocalizedStrings(lang string) *localizedStrings {
 			SubtypeBlockedAttempt:  "Blocked access attempt",
 			SubtypeAnomaly:         "Suspicious access pattern",
 			SubtypeForward:         "Possible forward",
+			SubtypeCaptureAttempt:  "Possible screenshot exfil intent",
 		},
 	}
 }

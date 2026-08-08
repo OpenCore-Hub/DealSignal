@@ -22,20 +22,22 @@ type AccessLog struct {
 }
 
 type ActionItem struct {
-	ID          pgtype.UUID
-	TenantID    pgtype.UUID
-	WorkspaceID pgtype.UUID
-	SignalID    pgtype.UUID
-	Title       string
-	Impact      string
-	DueAt       pgtype.Timestamptz
-	Status      string
-	ActionType  string
-	CreatedAt   pgtype.Timestamptz
-	UpdatedAt   pgtype.Timestamptz
-	SourceType  pgtype.Text
-	SourceID    pgtype.Text
-	TargetID    pgtype.Text
+	ID           pgtype.UUID
+	TenantID     pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	SignalID     pgtype.UUID
+	Title        string
+	Impact       string
+	DueAt        pgtype.Timestamptz
+	Status       string
+	ActionType   string
+	CreatedAt    pgtype.Timestamptz
+	UpdatedAt    pgtype.Timestamptz
+	SourceType   pgtype.Text
+	SourceID     pgtype.Text
+	TargetID     pgtype.Text
+	SnoozedUntil pgtype.Timestamptz
+	Outcome      pgtype.Text
 }
 
 type Chunk struct {

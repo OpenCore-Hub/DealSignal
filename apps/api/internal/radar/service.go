@@ -1,0 +1,276 @@
+package radar
+
+import (
+	"context"
+	"fmt"
+	"time"
+
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
+)
+
+// SignalFeed provides the synced signal/action feed.
+type SignalFeed interface {
+	GetFeed(ctx context.Context, workspaceID, userID string) (signal.Feed, error)
+	UpdateActionStatus(ctx context.Context, workspaceID, actionID, status string, snoozeHours int, outcome string) (db.ActionItem, error)
+}
+
+// Service compiles Deal Radar feeds from the live signal store.
+type Service struct {
+	queries *db.Queries
+	signals SignalFeed
+	now     func() time.Time
+}
+
+// NewService creates a radar service.
+func NewService(q *db.Queries, signals SignalFeed) *Service {
+	return &Service{
+		queries: q,
+		signals: signals,
+		now:     func() time.Time { return time.Now().UTC() },
+	}
+}
+
+// Get compiles the workspace radar feed for the viewer.
+func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug string, circle heat.Circle) (Feed, error) {
+	raw, err := s.signals.GetFeed(ctx, workspaceID, userID)
+	if err != nil {
+		return Feed{}, err
+	}
+
+	links, rooms, err := s.resolveDealMeta(ctx, workspaceID, raw)
+	if err != nil {
+		return Feed{}, err
+	}
+
+	metrics, err := s.loadLinkMetrics(ctx, links)
+	if err != nil {
+		return Feed{}, err
+	}
+
+	demote, noiseHints, err := s.loadOutcomeLearning(ctx, workspaceID)
+	if err != nil {
+		return Feed{}, err
+	}
+
+	if circle == "" {
+		circle = heat.CircleDefault
+	}
+
+	return Compile(CompileInput{
+		WorkspaceSlug: workspaceSlug,
+		Now:           s.now(),
+		Circle:        circle,
+		Actions:       raw.Actions,
+		Signals:       raw.Signals,
+		Links:         links,
+		Rooms:         rooms,
+		Metrics:       metrics,
+		OutcomeDemote: demote,
+		NoiseHints:    noiseHints,
+	}), nil
+}
+
+func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (map[Product]int, []NoiseHint, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+	rows, err := s.queries.CountRecentActionOutcomesByWorkspace(ctx, wsUUID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("action outcomes: %w", err)
+	}
+	input := make([]OutcomeRow, 0, len(rows))
+	for _, r := range rows {
+		outcome := ""
+		if r.Outcome.Valid {
+			outcome = r.Outcome.String
+		}
+		input = append(input, OutcomeRow{
+			Kind:    r.Kind,
+			Outcome: outcome,
+			Count:   int(r.Count),
+		})
+	}
+	demote, hints := LearnFromOutcomes(input)
+	return demote, hints, nil
+}
+
+// UpdateItem updates the underlying action status for a radar work item.
+// Work item ids are action UUIDs (see Compile).
+func (s *Service) UpdateItem(ctx context.Context, workspaceID, itemID, status string, snoozeHours int, outcome string) (db.ActionItem, error) {
+	return s.signals.UpdateActionStatus(ctx, workspaceID, itemID, status, snoozeHours, outcome)
+}
+
+func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta) (map[string]LinkMetrics24h, error) {
+	if len(links) == 0 {
+		return map[string]LinkMetrics24h{}, nil
+	}
+	ids := make([]pgtype.UUID, 0, len(links))
+	for id := range links {
+		u, err := pgUUID(id)
+		if err != nil {
+			continue
+		}
+		ids = append(ids, u)
+	}
+	if len(ids) == 0 {
+		return map[string]LinkMetrics24h{}, nil
+	}
+
+	rows, err := s.queries.GetLinkAccessMetrics24hBatch(ctx, ids)
+	if err != nil {
+		return nil, fmt.Errorf("link metrics 24h batch: %w", err)
+	}
+
+	out := make(map[string]LinkMetrics24h, len(rows))
+	for _, row := range rows {
+		id := uuid.UUID(row.LinkID.Bytes).String()
+		out[id] = LinkMetrics24h{
+			Opens:          int(row.Opens),
+			UniqueVisitors: int(row.UniqueVisitors),
+			ForwardSignals: int(row.ForwardSignals),
+			Downloads:      int(row.Downloads),
+		}
+	}
+
+	if captures, err := s.queries.CountCaptureAttempts24hBatch(ctx, ids); err == nil {
+		for _, row := range captures {
+			id := uuid.UUID(row.LinkID.Bytes).String()
+			m := out[id]
+			m.CaptureAttempts = int(row.Count)
+			out[id] = m
+		}
+	}
+
+	// IP cluster only for links that already show download pressure (cheap escalate check).
+	for id, m := range out {
+		if m.Downloads < 2 {
+			continue
+		}
+		linkUUID, err := pgUUID(id)
+		if err != nil {
+			continue
+		}
+		ips, err := s.queries.CountRecentDistinctIPsByLink(ctx, linkUUID)
+		if err != nil {
+			continue
+		}
+		m.DistinctIPs1h = int(ips)
+		out[id] = m
+	}
+
+	return out, nil
+}
+
+func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw signal.Feed) (map[string]LinkMeta, map[string]string, error) {
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	linkIDs := map[string]struct{}{}
+	roomIDs := map[string]struct{}{}
+
+	for _, a := range raw.Actions {
+		src := ""
+		if a.SourceType.Valid {
+			src = a.SourceType.String
+		}
+		sourceID := ""
+		if a.SourceID.Valid {
+			sourceID = a.SourceID.String
+		}
+		targetID := ""
+		if a.TargetID.Valid {
+			targetID = a.TargetID.String
+		}
+		switch src {
+		case "link_access_request", "deal_room_link_access_request", "expiring_link", "uploaded_file":
+			if sourceID != "" {
+				linkIDs[sourceID] = struct{}{}
+			}
+			if src == "deal_room_link_access_request" && targetID != "" {
+				roomIDs[targetID] = struct{}{}
+			}
+		case "room_access_request", "room_nda", "expiring_room":
+			if sourceID != "" {
+				roomIDs[sourceID] = struct{}{}
+			}
+		case "link_question":
+			if targetID != "" {
+				linkIDs[targetID] = struct{}{}
+			}
+		case "deal_room_link_question":
+			roomID, linkID := parseDealRoomAskTarget(targetID)
+			if roomID != "" {
+				roomIDs[roomID] = struct{}{}
+			}
+			if linkID != "" {
+				linkIDs[linkID] = struct{}{}
+			}
+		}
+	}
+	for _, sig := range raw.Signals {
+		if sig.LinkID.Valid {
+			linkIDs[uuid.UUID(sig.LinkID.Bytes).String()] = struct{}{}
+		}
+	}
+
+	links := make(map[string]LinkMeta, len(linkIDs))
+	for id := range linkIDs {
+		linkUUID, err := pgUUID(id)
+		if err != nil {
+			continue
+		}
+		link, err := s.queries.GetLinkByIDAndWorkspace(ctx, db.GetLinkByIDAndWorkspaceParams{
+			ID:          linkUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			continue
+		}
+		meta := LinkMeta{ID: id}
+		if link.Name.Valid {
+			meta.Name = link.Name.String
+		}
+		if link.DealRoomID.Valid {
+			rid := uuid.UUID(link.DealRoomID.Bytes).String()
+			meta.DealRoomID = rid
+			roomIDs[rid] = struct{}{}
+		}
+		if link.DocumentID.Valid {
+			meta.DocumentID = uuid.UUID(link.DocumentID.Bytes).String()
+		}
+		links[id] = meta
+	}
+
+	rooms := make(map[string]string, len(roomIDs))
+	for id := range roomIDs {
+		roomUUID, err := pgUUID(id)
+		if err != nil {
+			continue
+		}
+		room, err := s.queries.GetDealRoomByID(ctx, db.GetDealRoomByIDParams{
+			ID:          roomUUID,
+			WorkspaceID: wsUUID,
+		})
+		if err != nil {
+			continue
+		}
+		rooms[id] = room.Name
+	}
+
+	return links, rooms, nil
+}
+
+func pgUUID(id string) (pgtype.UUID, error) {
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("invalid uuid: %w", err)
+	}
+	return pgtype.UUID{Bytes: parsed, Valid: true}, nil
+}

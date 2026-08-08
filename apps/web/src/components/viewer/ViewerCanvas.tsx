@@ -30,6 +30,8 @@ interface ViewerCanvasProps {
   watermark?: WatermarkInfo | null;
   screenshotProtectionEnabled?: boolean;
   onSelectPage: (page: number) => void;
+  /** Best-effort capture telemetry (public links with protection on). */
+  onCaptureAttempt?: (reason: string) => void;
   sidebar?: React.ReactNode;
   /** Public share-link visitor styling */
   variant?: "default" | "public";
@@ -48,6 +50,7 @@ export function ViewerCanvas({
   watermark,
   screenshotProtectionEnabled,
   onSelectPage,
+  onCaptureAttempt,
   sidebar,
   variant = "default",
   publicToken,
@@ -56,6 +59,9 @@ export function ViewerCanvas({
   const { t } = useTranslation("documents");
   const isPublic = variant === "public";
   const viewportRef = useRef<HTMLDivElement>(null);
+  const lastCaptureReportAt = useRef(0);
+  const onCaptureAttemptRef = useRef(onCaptureAttempt);
+  onCaptureAttemptRef.current = onCaptureAttempt;
   const [viewportSize, setViewportSize] = useState({ width: 800, height: 600 });
   const [printWarning, setPrintWarning] = useState(false);
   /** Soft deterrent: blur page content when the tab/window is not active. */
@@ -116,22 +122,46 @@ export function ViewerCanvas({
       setIsInactive(hidden || unfocused);
     };
 
+    const reportCapture = (reason: string) => {
+      const now = Date.now();
+      // Debounce client reports so holding a key doesn't flood evidence.
+      if (now - lastCaptureReportAt.current < 8_000) return;
+      lastCaptureReportAt.current = now;
+      onCaptureAttemptRef.current?.(reason);
+    };
+
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "p") {
         e.preventDefault();
         setPrintWarning(true);
         setTimeout(() => setPrintWarning(false), 4000);
+        reportCapture("print");
+        return;
       }
       // Common screenshot shortcuts (best-effort; OS capture may still succeed).
+      if (e.key === "PrintScreen" || e.key === "Snapshot") {
+        e.preventDefault();
+        setPrintWarning(true);
+        setTimeout(() => setPrintWarning(false), 4000);
+        reportCapture("printscreen");
+        return;
+      }
+      if (e.ctrlKey && e.shiftKey && (e.key === "s" || e.key === "S")) {
+        e.preventDefault();
+        setPrintWarning(true);
+        setTimeout(() => setPrintWarning(false), 4000);
+        reportCapture("win_snip");
+        return;
+      }
       if (
-        e.key === "PrintScreen" ||
-        e.key === "Snapshot" ||
-        (e.ctrlKey && e.shiftKey && (e.key === "s" || e.key === "S")) ||
-        (e.metaKey && e.shiftKey && (e.key === "3" || e.key === "4" || e.key === "5"))
+        e.metaKey &&
+        e.shiftKey &&
+        (e.key === "3" || e.key === "4" || e.key === "5")
       ) {
         e.preventDefault();
         setPrintWarning(true);
         setTimeout(() => setPrintWarning(false), 4000);
+        reportCapture("mac_capture");
       }
     };
 

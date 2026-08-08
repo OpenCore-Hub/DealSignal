@@ -78,6 +78,7 @@ import {
   clearCachedAccountEmail,
   setCachedAccountEmail,
 } from "@/lib/authAccount";
+import type { RadarEvidencePack, RadarFeed } from "@/lib/radarQueue";
 import { consumeKnowledgeSSE } from "@/lib/knowledge/consumeKnowledgeSSE";
 import type { KnowledgeStreamEvent } from "@/lib/knowledge/streamEvents";
 import { useUIStore } from "@/stores/uiStore";
@@ -1014,6 +1015,7 @@ export const api = {
       page_number?: number;
       duration_seconds?: number;
       scroll_depth?: number;
+      reason?: string;
     },
     creds?: PublicLinkCredentials
   ) =>
@@ -2052,10 +2054,54 @@ export const api = {
   getSignals: () => request<SignalFeed>(getWorkspaceSlug(), "/signals"),
   getSignalById: (id: string) =>
     request<Signal>(getWorkspaceSlug(), `/signals/${id}`),
-  updateActionStatus: (id: string, status: ActionItem["status"]) =>
+  /** Compiled Deal Radar feed (server-side productize + coalesce + rank). */
+  getRadar: (opts?: { circle?: "founder" | "investor_ir" | "sales" }) => {
+    const params = new URLSearchParams();
+    if (opts?.circle && opts.circle !== "founder") {
+      params.set("circle", opts.circle);
+    }
+    const q = params.toString();
+    return request<RadarFeed>(
+      getWorkspaceSlug(),
+      q ? `/radar?${q}` : "/radar",
+    );
+  },
+  getRadarEvidence: (itemId: string) =>
+    request<RadarEvidencePack>(
+      getWorkspaceSlug(),
+      `/radar/items/${itemId}/evidence`,
+    ),
+  updateRadarItem: (
+    id: string,
+    status: ActionItem["status"],
+    snoozeHours?: 24 | 72 | 168,
+    outcome?: ActionItem["outcome"],
+  ) =>
+    request<ActionItem>(getWorkspaceSlug(), `/radar/items/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        status,
+        ...(status === "snoozed" && snoozeHours
+          ? { snooze_hours: snoozeHours }
+          : {}),
+        ...(status === "done" && outcome ? { outcome } : {}),
+      }),
+    }),
+  updateActionStatus: (
+    id: string,
+    status: ActionItem["status"],
+    snoozeHours?: 24 | 72 | 168,
+    outcome?: ActionItem["outcome"],
+  ) =>
     request<ActionItem>(getWorkspaceSlug(), `/signals/actions/${id}`, {
       method: "PATCH",
-      body: JSON.stringify({ status }),
+      body: JSON.stringify({
+        status,
+        ...(status === "snoozed" && snoozeHours
+          ? { snooze_hours: snoozeHours }
+          : {}),
+        ...(status === "done" && outcome ? { outcome } : {}),
+      }),
     }),
 
   getDealRoomTemplates: () =>

@@ -1,78 +1,191 @@
-import { useMemo } from "react";
-import { useParams, useNavigate } from "react-router";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Link,
+  useLocation,
+  useNavigate,
+  useParams,
+  useSearchParams,
+} from "react-router";
 import { motion } from "motion/react";
-import { ArrowRight } from "@phosphor-icons/react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChartLine, ArrowRight } from "@phosphor-icons/react";
+import { toast } from "sonner";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "react-i18next";
 import { useReducedMotion } from "@/hooks/useReducedMotion";
 import { useAsyncData } from "@/hooks/useAsyncData";
-import { api, type DashboardStats, type InsightsOverview } from "@/lib/api";
-import { useSignalStore } from "@/stores/signalStore";
-import { sortSignals } from "@/lib/sortSignals";
-import type { ActionItem, DealRoom } from "@/types";
-import { actionNavigatePath } from "@/lib/actionNavigation";
-import { MetricsCards } from "./MetricsCards";
-import { AttentionZone } from "./AttentionZone";
-import { ActiveRoomsSection } from "./ActiveRoomsSection";
-import { RecentActivityFeed } from "./RecentActivityFeed";
-import { RecentVisitorsFeed } from "./RecentVisitorsFeed";
-import { HeatMap } from "./HeatMap";
-
-interface DashboardData {
-  stats: DashboardStats;
-  rooms: DealRoom[];
-  insights: InsightsOverview | null;
-}
+import { api } from "@/lib/api";
+import { apiErrorMessage } from "@/lib/apiErrors";
+import { useRadarStore } from "@/stores/radarStore";
+import type { ActionStatus } from "@/types";
+import {
+  parseRadarCircle,
+  withMailtoHrefs,
+  type RadarFeed,
+  type RadarOutcome,
+  type RadarWorkItem,
+} from "@/lib/radarQueue";
+import { RadarEvidenceRail } from "./RadarEvidenceRail";
+import { RadarQueue } from "./RadarQueue";
+import type { SnoozeHours } from "./RadarRow";
 
 export function DashboardPage() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const navigate = useNavigate();
+  const location = useLocation();
+  const [searchParams] = useSearchParams();
+  const circle = parseRadarCircle(searchParams.get("circle"));
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
+  const { t: tInsights } = useTranslation("insights");
+  const [feedOverride, setFeedOverride] = useState<RadarFeed | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const setOpenCount = useRadarStore((s) => s.setOpenCount);
 
-  const { signals, actions, fetchSignals, updateActionStatus } =
-    useSignalStore();
+  useEffect(() => {
+    setFeedOverride(null);
+  }, [circle]);
 
-  const {
-    data,
-    loading,
-    error,
-    refetch,
-  } = useAsyncData<DashboardData>(
-    async () => {
-      const [statsRes, signalsRes, roomsRes, insightsRes] = await Promise.allSettled([
-        api.getDashboardStats(),
-        fetchSignals(),
-        api.getDealRooms({ page: 1, page_size: 12 }),
-        api.getInsightsOverview(),
-      ]);
-
-      if (statsRes.status === "rejected") {
-        throw statsRes.reason;
-      }
-      if (signalsRes.status === "rejected") {
-        // fetchSignals mutates the signal store; leave signals as-is on failure.
-        console.error("failed to fetch signals", signalsRes.reason);
-      }
-
-      return {
-        stats: statsRes.value,
-        rooms: roomsRes.status === "fulfilled" ? roomsRes.value.data : [],
-        insights: insightsRes.status === "fulfilled" ? insightsRes.value : null,
-      };
-    },
-    [fetchSignals]
+  const { data, loading, error, refetch } = useAsyncData<RadarFeed>(
+    async () => api.getRadar({ circle }),
+    [circle],
   );
 
-  const sortedSignals = useMemo(() => sortSignals(signals), [signals]);
+  const feed = useMemo(() => {
+    const base = feedOverride ?? data;
+    if (!base) {
+      return {
+        nextUp: null,
+        strands: [],
+        items: [],
+        clearedToday: 0,
+        counts: { all: 0 },
+      } satisfies RadarFeed;
+    }
+    const items = withMailtoHrefs(base.items, {
+      subject: (document) =>
+        tInsights("suggestions.emailSubject", { document }),
+      body: ({ email, document, action }) =>
+        tInsights("suggestions.emailBody", { email, document, action }),
+    });
+    const byId = new Map(items.map((i) => [i.id, i]));
+    const strands = (base.strands ?? []).map((strand) => ({
+      ...strand,
+      dealName: strand.dealName || t("radar.dealFallback"),
+      items: strand.items
+        .map((i) => byId.get(i.id) ?? i)
+        .map((i) => ({
+          ...i,
+          dealName: i.dealName || t("radar.dealFallback"),
+        })),
+    }));
+    const nextUpRaw =
+      base.nextUp && byId.get(base.nextUp.id)
+        ? byId.get(base.nextUp.id)!
+        : items[0] ?? null;
+    const nextUp = nextUpRaw
+      ? { ...nextUpRaw, dealName: nextUpRaw.dealName || t("radar.dealFallback") }
+      : null;
+    return {
+      ...base,
+      items: items.map((i) => ({
+        ...i,
+        dealName: i.dealName || t("radar.dealFallback"),
+      })),
+      strands,
+      nextUp,
+    };
+  }, [feedOverride, data, tInsights, t]);
 
-  const handleActionClick = (action: ActionItem) => {
-    if (!workspaceSlug) return;
-    const path = actionNavigatePath(workspaceSlug, action);
-    if (path) navigate(path);
+  useEffect(() => {
+    setOpenCount(feed.items.length);
+  }, [feed.items.length, setOpenCount]);
+
+  useEffect(() => {
+    if (!selectedId && feed.nextUp) {
+      setSelectedId(feed.nextUp.id);
+      return;
+    }
+    if (selectedId && !feed.items.some((i) => i.id === selectedId)) {
+      setSelectedId(feed.nextUp?.id ?? feed.items[0]?.id ?? null);
+    }
+  }, [feed.items, feed.nextUp, selectedId]);
+
+  const selectedItem =
+    feed.items.find((i) => i.id === selectedId) ?? feed.nextUp ?? null;
+
+  const handlePrimary = (item: RadarWorkItem) => {
+    setSelectedId(item.id);
+    if (item.verb === "email" && item.mailtoHref) {
+      window.open(item.mailtoHref, "_blank", "noopener,noreferrer");
+      return;
+    }
+    const path = item.navigatePath || item.evidencePath;
+    if (path) {
+      navigate(path, {
+        state: {
+          returnTo: location.pathname + location.search,
+          returnLabel: tCommon("back"),
+        },
+      });
+    }
+  };
+
+  const handleStatusChange = (
+    id: string,
+    status: ActionStatus,
+    snoozeHours?: SnoozeHours,
+    outcome?: RadarOutcome,
+  ) => {
+    const previous = feed;
+    setFeedOverride({
+      ...feed,
+      items: feed.items.filter((i) => i.id !== id),
+      strands: feed.strands
+        .map((s) => ({
+          ...s,
+          items: s.items.filter((i) => i.id !== id),
+        }))
+        .filter((s) => s.items.length > 0),
+      nextUp: feed.nextUp?.id === id ? null : feed.nextUp,
+      clearedToday:
+        status === "done" ? feed.clearedToday + 1 : feed.clearedToday,
+      counts: {
+        ...feed.counts,
+        all: Math.max(0, (feed.counts.all ?? feed.items.length) - 1),
+      },
+    });
+    void api
+      .updateRadarItem(id, status, snoozeHours, outcome)
+      .then(() => {
+        toast(t(`radar.toast.${status}`), {
+          action: {
+            label: t("radar.undo"),
+            onClick: () => {
+              void api
+                .updateRadarItem(id, "pending")
+                .then(() => {
+                  setFeedOverride(null);
+                  void refetch();
+                })
+                .catch((e) => {
+                  toast.error(
+                    apiErrorMessage(e) || t("radar.toast.undoFailed"),
+                  );
+                });
+            },
+          },
+        });
+        if (status === "pending") {
+          setFeedOverride(null);
+          void refetch();
+        }
+      })
+      .catch((e) => {
+        setFeedOverride(previous);
+        toast.error(apiErrorMessage(e));
+      });
   };
 
   if (error) {
@@ -86,92 +199,75 @@ export function DashboardPage() {
 
   if (loading || !data) {
     return (
-      <div className="space-y-10">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-5 w-64" />
-          </div>
-          <div className="flex gap-2">
-            <Skeleton className="h-9 w-28" />
-            <Skeleton className="h-9 w-24" />
-            <Skeleton className="h-9 w-24" />
-          </div>
+      <div className="space-y-8">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-5 w-56" />
         </div>
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-          {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-24" />
-          ))}
-        </div>
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-          <div className="space-y-8 lg:col-span-2">
-            <Skeleton className="h-80" />
-            <Skeleton className="h-80" />
+        <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+          <div className="space-y-3 lg:col-span-8">
+            <Skeleton className="h-10 w-full" />
+            <Skeleton className="h-96 w-full" />
           </div>
-          <div className="space-y-8">
-            <Skeleton className="h-80" />
-            <Skeleton className="h-72" />
-            <Skeleton className="h-96" />
+          <div className="space-y-4 lg:col-span-4">
+            <Skeleton className="h-40 w-full" />
+            <Skeleton className="h-64 w-full" />
           </div>
         </div>
       </div>
     );
   }
 
-  const { stats, rooms, insights } = data;
   const slug = workspaceSlug ?? "";
-  const activeRoomsCount = rooms.filter((r) => r.status === "active").length;
-  const highIntentContacts = insights?.topContacts?.length ?? 0;
 
   return (
     <motion.div
-      initial={reducedMotion ? false : { opacity: 0, y: 12 }}
+      initial={reducedMotion ? false : { opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-      className="space-y-10"
+      transition={{ duration: 0.28, ease: [0.16, 1, 0.3, 1] }}
+      className="space-y-8"
     >
-      <MetricsCards
-        workspaceSlug={slug}
-        activeRooms={activeRoomsCount}
-        weeklyVisitors={stats.weeklyVisitors}
-        pendingQuestions={stats.pendingQuestions}
-        highIntentContacts={highIntentContacts}
-      />
-
-      <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-        <div className="space-y-8 lg:col-span-2">
-          <AttentionZone
-            actions={actions}
-            signals={sortedSignals}
-            riskAlerts={stats.riskAlerts}
+      <div className="grid grid-cols-1 gap-8 lg:grid-cols-12">
+        <div className="min-w-0 lg:col-span-8">
+          <RadarQueue
             workspaceSlug={slug}
-            onActionStatusChange={updateActionStatus}
-            onActionClick={handleActionClick}
-          />
-
-          <RecentActivityFeed
-            activities={stats.recentActivities ?? []}
-            workspaceSlug={slug}
+            feed={feed}
+            selectedId={selectedId}
+            onSelect={(item) => setSelectedId(item.id)}
+            onPrimary={handlePrimary}
+            onStatusChange={handleStatusChange}
           />
         </div>
 
-        <div className="space-y-6">
-          <Card>
-            <CardHeader className="pb-3">
-              <CardTitle className="text-body flex items-center gap-2 font-medium text-muted-foreground">
-                <ArrowRight size={16} className="text-hot-500" />
-                {t("sections.heatMap")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <HeatMap links={stats.recentLinks ?? []} />
-            </CardContent>
-          </Card>
+        <aside className="space-y-6 lg:col-span-4">
+          <div
+            className="rounded-xl border border-border px-4 py-3"
+            data-testid="radar-cleared-today"
+          >
+            <p className="text-caption text-muted-foreground">
+              {t("radar.clearedToday")}
+            </p>
+            <p className="text-stat mt-1 tabular-nums">{feed.clearedToday}</p>
+          </div>
 
-          <RecentVisitorsFeed insights={insights} workspaceSlug={slug} />
+          <RadarEvidenceRail item={selectedItem} workspaceSlug={slug} />
 
-          <ActiveRoomsSection rooms={rooms} workspaceSlug={slug} />
-        </div>
+          <Link
+            to={`/${slug}/insights/overview`}
+            state={{
+              returnTo: location.pathname + location.search,
+              returnLabel: tCommon("back"),
+            }}
+            className="flex items-center justify-between rounded-xl border border-border px-4 py-3 text-sm transition-colors hover:bg-muted/40"
+            data-testid="radar-insights-link"
+          >
+            <span className="flex items-center gap-2 font-medium">
+              <ChartLine size={16} />
+              {t("radar.analyzeInInsights")}
+            </span>
+            <ArrowRight size={16} className="text-muted-foreground" />
+          </Link>
+        </aside>
       </div>
     </motion.div>
   );

@@ -1095,6 +1095,15 @@ export interface ActionItem {
   actionType: ActionType;
   createdAt: string;
   updatedAt: string;
+  snoozedUntil?: string;
+  /** Set when status is done — closed-loop completion reason. */
+  outcome?:
+    | "acted"
+    | "false_positive"
+    | "renewed"
+    | "approved"
+    | "replied"
+    | "other";
 }
 
 export interface HeatScoreWeights {
