@@ -3,7 +3,12 @@
  * never legacy "AI Copilot" / "AI Agents" / "Q&A conversations".
  */
 import { test, expect } from "@playwright/test";
-import { setupAuthenticatedPage, attachDebug, WORKSPACE_SLUG } from "./helpers";
+import {
+  setupAuthenticatedPage,
+  attachDebug,
+  ASK_INBOX_TITLE,
+  WORKSPACE_SLUG,
+} from "./helpers";
 
 test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
   test("deal-room Access advanced shows Q&A strategy", async ({ page }) => {
@@ -17,10 +22,10 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 10000 });
-    await expect(dialog.getByRole("button", { name: /^Advanced$/i })).toBeVisible({
+    await expect(dialog.getByRole("button", { name: /^Advanced/i })).toBeVisible({
       timeout: 10000,
     });
-    await dialog.getByRole("button", { name: /^Advanced$/i }).click();
+    await dialog.getByRole("button", { name: /^Advanced/i }).click();
     await expect(dialog.getByTestId("visitor-ask-experience")).toBeVisible({
       timeout: 5000,
     });
@@ -43,8 +48,7 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
     const linkName = `No AI ${Date.now()}`;
     await dialog.getByLabel(/Link name/i).fill(linkName);
 
-    await dialog.getByRole("tab", { name: /Access/i }).click();
-    await dialog.getByRole("button", { name: /^Advanced$/i }).click();
+    await dialog.getByRole("button", { name: /^Advanced/i }).click();
     await dialog.getByTestId("visitor-ask-experience-host_only").click();
     await expect(dialog.getByTestId("visitor-ask-experience-host_only")).toHaveAttribute(
       "aria-checked",
@@ -62,7 +66,7 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
 
     const editDialog = page.getByRole("dialog");
     await expect(editDialog).toBeVisible({ timeout: 10000 });
-    await editDialog.getByRole("button", { name: /^Advanced$/i }).click();
+    await editDialog.getByRole("button", { name: /^Advanced/i }).click();
     await expect(editDialog.getByTestId("visitor-ask-experience-host_only")).toHaveAttribute(
       "aria-checked",
       "true",
@@ -110,7 +114,7 @@ test.describe("Visitor Ask naming (MSW) — B5/B7", () => {
 
     await expect(page.getByText(/Ask activity/i)).toBeVisible({ timeout: 10000 });
     await expect(page.getByTestId("visitor-ask-experience")).toHaveCount(0);
-    await expect(page.getByText("Ask inbox", { exact: true })).toBeVisible();
+    await expect(page.getByText(ASK_INBOX_TITLE)).toBeVisible();
     await expect(page.getByTestId("ask-docs-audit-panel")).toHaveCount(0);
     await expect(page.getByText(/Visitor questions/i)).toHaveCount(0);
     await expect(page.getByText(/^Q&A records$/i)).toHaveCount(0);

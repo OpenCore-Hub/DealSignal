@@ -18,7 +18,7 @@ test.describe("Visitor Ask Access policy (MSW)", () => {
 
     const dialog = page.getByRole("dialog");
     await expect(dialog).toBeVisible({ timeout: 10000 });
-    await dialog.getByRole("button", { name: /^Advanced$/i }).click();
+    await dialog.getByRole("button", { name: /^Advanced/i }).click();
 
     await expect(dialog.getByTestId("visitor-ask-experience")).toBeVisible({ timeout: 5000 });
     await expect(dialog.getByText(/Q&A strategy/i)).toBeVisible();
@@ -37,7 +37,7 @@ test.describe("Visitor Ask Access policy (MSW)", () => {
     const linkName = `Host only ${Date.now()}`;
     await dialog.getByLabel(/Link name/i).fill(linkName);
 
-    await dialog.getByRole("button", { name: /^Advanced$/i }).click();
+    await dialog.getByRole("button", { name: /^Advanced/i }).click();
     await dialog.getByTestId("visitor-ask-experience-host_only").click();
 
     await dialog.getByRole("button", { name: /Create link/i }).click();
@@ -51,7 +51,7 @@ test.describe("Visitor Ask Access policy (MSW)", () => {
 
     const editDialog = page.getByRole("dialog");
     await expect(editDialog).toBeVisible({ timeout: 10000 });
-    await editDialog.getByRole("button", { name: /^Advanced$/i }).click();
+    await editDialog.getByRole("button", { name: /^Advanced/i }).click();
 
     const hostOnly = editDialog.getByTestId("visitor-ask-experience-host_only");
     await expect(hostOnly).toHaveAttribute("aria-checked", "true");

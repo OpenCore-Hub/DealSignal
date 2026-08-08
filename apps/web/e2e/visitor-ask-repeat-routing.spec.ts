@@ -46,22 +46,10 @@ test.describe("Visitor Ask repeat question routing (MSW)", () => {
     attachDebug(page);
     await resetMockState(page);
     await setMockLinkAskPolicy(page, SMOKE_LINK_ID, { askAiEnabled: false });
+    await openVisitorAskPanel(page, SMOKE_TOKEN);
 
-    // Probe routing before opening viewer (policy override must apply on POST /ask).
-    const hostProbe = await page.evaluate(
-      async ({ token, question }) => {
-        const r = await fetch(`/api/v1/public/links/${token}/ask`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ question }),
-        });
-        return (await r.json()) as {
-          data: { id: string; lane: string; status: string };
-        };
-      },
-      { token: SMOKE_TOKEN, question: Q_NET_PROFIT_2025 },
-    );
-    expect(hostProbe.data.lane, "AI off should create host lane").toBe("host");
+    const hostFirst = await submitAskAndParseLane(page, Q_NET_PROFIT_2025);
+    expect(hostFirst.lane, "AI off should create host lane").toBe("host");
 
     await setMockLinkAskPolicy(page, SMOKE_LINK_ID, { askAiEnabled: true });
     await openVisitorAskPanel(page, SMOKE_TOKEN);
@@ -74,7 +62,7 @@ test.describe("Visitor Ask repeat question routing (MSW)", () => {
     const third = await submitAskAndParseLane(page, Q_NET_PROFIT_2025);
     expect(third.lane, `route_reason=${third.route_reason ?? "none"}`).toBe("ai");
     expect(third.status).toBe("ai_streaming");
-    expect(third.id).not.toBe(hostProbe.data.id);
+    expect(third.id).not.toBe(hostFirst.id);
 
     const listRes = await page.evaluate(async (token) => {
       const r = await fetch(`/api/v1/public/links/${token}/ask/me`);

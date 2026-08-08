@@ -2,6 +2,11 @@ import type { Page } from "@playwright/test";
 
 export const WORKSPACE_SLUG = "acme-capital";
 
+/** Locale-robust Ask UI labels (en + zh-CN). */
+export const ASK_INBOX_TITLE = /Ask inbox|Ask 收件箱/;
+export const FORMAL_QUEUE_TAB = /Formal queue|Formal 队列/i;
+export const PUBLISHED_QA_REGION = /Published Q&A|已发布 Q&A/i;
+
 /** Poll until MSW handles `/__e2e/*` (worker.start is async after document load). */
 export async function waitForMsw(page: Page) {
   const deadline = Date.now() + 15_000;
