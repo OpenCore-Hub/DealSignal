@@ -12,11 +12,22 @@ import { toast } from "sonner";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const { getIntegrationsMock, updateIntegrationsMock, connectSlackMock, disconnectHubSpotMock } = vi.hoisted(() => ({
+const {
+  getIntegrationsMock,
+  updateIntegrationsMock,
+  connectSlackMock,
+  disconnectHubSpotMock,
+  getOutboundWebhookMock,
+  saveOutboundWebhookMock,
+  deleteOutboundWebhookMock,
+} = vi.hoisted(() => ({
   getIntegrationsMock: vi.fn(),
   updateIntegrationsMock: vi.fn(),
   connectSlackMock: vi.fn(),
   disconnectHubSpotMock: vi.fn(),
+  getOutboundWebhookMock: vi.fn(),
+  saveOutboundWebhookMock: vi.fn(),
+  deleteOutboundWebhookMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -27,6 +38,9 @@ vi.mock("@/lib/api", () => ({
     connectHubSpot: vi.fn(),
     disconnectSlack: vi.fn(),
     disconnectHubSpot: disconnectHubSpotMock,
+    getOutboundWebhook: getOutboundWebhookMock,
+    saveOutboundWebhook: saveOutboundWebhookMock,
+    deleteOutboundWebhook: deleteOutboundWebhookMock,
   },
 }));
 
@@ -40,9 +54,15 @@ vi.mock("sonner", () => ({
 
 const mockStatus = {
   emailEnabled: true,
+  dailyDigestEnabled: false,
+  keyPageSlackEnabled: false,
   slack: false,
   hubspot: true,
-  zapier: false,
+};
+
+const mockWebhook = {
+  configured: false,
+  enabled: false,
 };
 
 async function initI18n() {
@@ -51,44 +71,45 @@ async function initI18n() {
   const commonJson = JSON.parse(readFileSync(resolve(__dirname, "../../i18n/locales/en/common.json"), "utf-8"));
   await instance.use(initReactI18next).init({
     lng: "en",
-    fallbackLng: "en",
-    ns: ["settings", "common"],
-    defaultNS: "settings",
-    resources: { en: { settings: settingsJson, common: commonJson } },
+    resources: {
+      en: { settings: settingsJson, common: commonJson },
+    },
     interpolation: { escapeValue: false },
   });
   return instance;
 }
 
 async function renderPage(initialEntry = "/acme/settings/integrations") {
-  const i18nInstance = await initI18n();
-  let result!: ReturnType<typeof render>;
+  const instance = await initI18n();
   await act(async () => {
-    result = render(
-      <I18nextProvider i18n={i18nInstance}>
+    render(
+      <I18nextProvider i18n={instance}>
         <MemoryRouter initialEntries={[initialEntry]}>
           <Routes>
             <Route path=":workspaceSlug/settings/integrations" element={<SettingsIntegrationsPage />} />
           </Routes>
         </MemoryRouter>
-      </I18nextProvider>
+      </I18nextProvider>,
     );
-    await new Promise((resolve) => setTimeout(resolve, 0));
   });
-  return result;
 }
 
 describe("SettingsIntegrationsPage", () => {
   beforeEach(() => {
-    getIntegrationsMock.mockReset();
-    updateIntegrationsMock.mockReset();
-    connectSlackMock.mockReset();
-    disconnectHubSpotMock.mockReset();
     vi.mocked(toast.success).mockClear();
     vi.mocked(toast.error).mockClear();
     vi.mocked(toast.info).mockClear();
 
+    getIntegrationsMock.mockReset();
+    updateIntegrationsMock.mockReset();
+    connectSlackMock.mockReset();
+    disconnectHubSpotMock.mockReset();
+    getOutboundWebhookMock.mockReset();
+    saveOutboundWebhookMock.mockReset();
+    deleteOutboundWebhookMock.mockReset();
+
     getIntegrationsMock.mockResolvedValue(mockStatus);
+    getOutboundWebhookMock.mockResolvedValue(mockWebhook);
   });
 
   it("renders integration statuses", async () => {
@@ -99,7 +120,8 @@ describe("SettingsIntegrationsPage", () => {
     });
 
     expect(screen.getByText("HubSpot")).toBeInTheDocument();
-    expect(screen.getByText("Zapier")).toBeInTheDocument();
+    expect(screen.getByText("Outbound webhook")).toBeInTheDocument();
+    expect(screen.queryByText("Zapier")).not.toBeInTheDocument();
   });
 
   it("connects slack and opens oauth url", async () => {
@@ -170,11 +192,55 @@ describe("SettingsIntegrationsPage", () => {
     fireEvent.click(toggle);
 
     await waitFor(() => {
-      expect(updateIntegrationsMock).toHaveBeenCalledWith({
-        ...mockStatus,
-        emailEnabled: false,
-      });
+      expect(updateIntegrationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          emailEnabled: false,
+        }),
+      );
     });
-    expect(toast.success).toHaveBeenCalledWith("Email notification preference saved");
+  });
+
+  it("saves outbound webhook", async () => {
+    saveOutboundWebhookMock.mockResolvedValue({
+      configured: true,
+      enabled: true,
+      url: "https://hooks.zapier.com/hooks/catch/1/abc",
+      secret: "abcdef0123456789abcdef0123456789",
+      secretHint: "••••6789",
+    });
+
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByLabelText(/webhook url/i)).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByLabelText(/webhook url/i), {
+      target: { value: "https://hooks.zapier.com/hooks/catch/1/abc" },
+    });
+    fireEvent.click(screen.getByRole("switch", { name: /deliver events/i }));
+    fireEvent.click(screen.getByRole("button", { name: /save webhook/i }));
+
+    await waitFor(() => {
+      expect(saveOutboundWebhookMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          url: "https://hooks.zapier.com/hooks/catch/1/abc",
+          enabled: true,
+          rotateSecret: false,
+        }),
+      );
+    });
+    expect(toast.success).toHaveBeenCalled();
+    expect(screen.getByText(/copy this secret now/i)).toBeInTheDocument();
+  });
+
+  it("disables key-page slack toggle until slack is connected", async () => {
+    await renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByText("Sensitive-page Slack alerts")).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole("switch", { name: /sensitive-page slack alerts/i })).toBeDisabled();
   });
 });

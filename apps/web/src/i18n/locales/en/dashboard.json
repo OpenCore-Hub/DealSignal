@@ -113,6 +113,7 @@
       "unknownContact": "Unknown visitor",
       "unknownIntent": "Unknown intent",
       "hot_signal": "{{contact}} opened {{opens}} times, spent {{duration}}, viewed {{keyPages}}",
+      "key_page": "{{contact}} viewed sensitive key pages ({{keyPages}})",
       "follow_up": "{{contact}} · {{opens}} opens · {{duration}} · {{keyPages}}",
       "risk_alert": "{{opens}} opens · {{duration}} · {{keyPageCount}} key pages",
       "question": "{{actor}} asked about {{intent}}: {{question}}"
@@ -122,6 +123,7 @@
       "risk_alert": "Risk alert",
       "follow_up": "Follow-up suggestion",
       "hot": "High-intent signal",
+      "key_page": "Sensitive key-page read",
       "warm": "Warm signal",
       "cold": "Cold signal",
       "risk": "Risk alert"

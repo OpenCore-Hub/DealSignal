@@ -108,7 +108,11 @@ export function SignalCard({ signal, action, onActionStatusChange }: SignalCardP
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-h3 truncate">{t(`signal.types.${signal.type}`, { defaultValue: signal.title })}</h3>
+            <h3 className="text-h3 truncate">
+              {t(`signal.types.${signal.subtype === "key_page" ? "key_page" : signal.type}`, {
+                defaultValue: signal.title,
+              })}
+            </h3>
             <Badge variant="outline" className={priorityConfig[signal.priority]}>
               {priorityLabel}
             </Badge>
@@ -215,6 +219,14 @@ function renderSignalSummary(
       actor: contact,
       intent: ctx.intent || t("signal.summary.unknownIntent"),
       question: ctx.question || "",
+    });
+  }
+
+  if (subtype === "key_page") {
+    const titles = (ctx.keyPageTitles ?? []).slice(0, 3).join(", ");
+    return t("signal.summary.key_page", {
+      contact,
+      keyPages: titles || String(ctx.keyPageCount ?? "—"),
     });
   }
 

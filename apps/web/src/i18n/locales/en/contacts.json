@@ -48,10 +48,12 @@
     "pageView": "viewed page {{page}}",
     "revisit": "returned",
     "download": "downloaded the document",
+    "share": "forward detected",
     "openShort": "Opened",
     "pageViewShort": "Viewed page {{page}}",
     "revisitShort": "Returned",
     "downloadShort": "Downloaded",
+    "shareShort": "Forward detected",
     "unknown": "Activity"
   },
   "new": {

@@ -49,7 +49,10 @@ beforeEach(() => {
 describe("RecentVisitorsFeed", () => {
   it("makes the row a link when a real contact id is present", async () => {
     const insights: InsightsOverview = {
+      tierEntity: "link",
       tierCounts: { hot: 1, warm: 0, cold: 0 },
+      activeLinkCount: 1,
+      dailyVisits: [],
       topDocuments: [],
       topLinks: [],
       topContacts: [
@@ -63,7 +66,10 @@ describe("RecentVisitorsFeed", () => {
 
   it("does not make the row clickable when the backend returns an email fallback id", async () => {
     const insights: InsightsOverview = {
+      tierEntity: "link",
       tierCounts: { hot: 0, warm: 0, cold: 0 },
+      activeLinkCount: 0,
+      dailyVisits: [],
       topDocuments: [],
       topLinks: [],
       topContacts: [

@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Copy, PencilSimple, ToggleRight, FileText, ShareNetwork } from "@phosphor-icons/react";
+import { Copy, PencilSimple, ToggleRight, FileText, ShareNetwork, ChatTeardropText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/common/PageHeader";
 import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
@@ -12,6 +12,7 @@ import { ActivityTimeline } from "@/components/common/ActivityTimeline";
 import { PageDurationChart } from "@/components/common/PageDurationChart";
 import { PermissionBadge } from "@/components/common/PermissionBadge";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
+import { OwnerAskInboxPanel } from "@/components/ask/OwnerAskInboxPanel";
 import { LinkAccessLog } from "./LinkAccessLog";
 import { LinkShareDialog } from "./share";
 import { copyToClipboard } from "@/lib/clipboard";
@@ -20,6 +21,7 @@ import { apiErrorMessage } from "@/lib/apiErrors";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
+import { parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
 import type { AccessLog, Document, Link } from "@/types";
 
 function buildPageDurationData(
@@ -52,8 +54,11 @@ function buildPageDurationData(
 export function LinkDetail() {
   const navigate = useNavigate();
   const { workspaceSlug, linkId } = useParams<{ workspaceSlug: string; linkId: string }>();
+  const [searchParams] = useSearchParams();
   const { t } = useTranslation("links");
+  const { t: tShare } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
+  const askInboxView = parseOwnerAskInboxView(searchParams.get("askInbox"));
   const [link, setLink] = useState<Link | null>(null);
   const [document, setDocument] = useState<Document | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
@@ -251,6 +256,23 @@ export function LinkDetail() {
           </Card>
         </div>
       </DetailLayout>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-h2 flex items-center gap-2">
+            <ChatTeardropText size={20} />
+            {tShare("management.questionsTitle")}
+          </CardTitle>
+          <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <OwnerAskInboxPanel
+            scope={{ type: "link", linkId: link.id }}
+            i18nNs="linkShare"
+            initialView={askInboxView}
+          />
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

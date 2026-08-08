@@ -156,6 +156,7 @@ export function useViewerDocument({
           event_type: "page_viewed",
           public_token: publicToken,
           visitor_id: publicVisitorId,
+          document_id: documentId,
           page_number: page,
           duration_seconds: duration,
         },

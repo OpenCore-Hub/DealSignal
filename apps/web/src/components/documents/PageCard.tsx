@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { formatDuration } from "@/lib/formatters";
-import { calculateHeatLevel } from "./DocumentsColumns";
 import { cn } from "@/lib/utils";
 
 interface PageCardProps {
@@ -33,7 +32,6 @@ export function PageCard({
 }: PageCardProps) {
   const { t, i18n } = useTranslation("documents");
   const { t: tc } = useTranslation("common");
-  const heatLevel = calculateHeatLevel(viewCount);
   const durationLabel = formatDuration(avgDurationSeconds, i18n.language);
   const exitPercent =
     exitRate !== undefined ? Math.round(exitRate * 100) : null;
@@ -81,7 +79,7 @@ export function PageCard({
         )}
 
         {viewCount > 0 && (
-          <Badge variant={heatLevel} className="absolute right-2 top-2">
+          <Badge variant="secondary" className="absolute right-2 top-2 tabular-nums">
             {viewCount}
           </Badge>
         )}

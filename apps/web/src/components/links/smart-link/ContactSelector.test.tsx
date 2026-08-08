@@ -6,13 +6,14 @@ import i18n from "i18next";
 import { ContactSelector } from "./ContactSelector";
 import type { Contact } from "@/types";
 
-const { createContactMock } = vi.hoisted(() => ({
+const { createContactMock, getContactsMock } = vi.hoisted(() => ({
   createContactMock: vi.fn(),
+  getContactsMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
-    getContacts: vi.fn(),
+    getContacts: getContactsMock,
     createContact: createContactMock,
   },
 }));
@@ -70,6 +71,7 @@ async function setupI18n() {
 describe("ContactSelector", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    getContactsMock.mockResolvedValue({ data: [contact] });
   });
 
   it("creates a contact inline and selects it without leaving the page", async () => {
@@ -117,6 +119,48 @@ describe("ContactSelector", () => {
     });
     await waitFor(() => {
       expect(onChange).toHaveBeenCalledWith(["c-new"]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("contact-add-email")).not.toBeInTheDocument();
+    });
+  });
+
+  it("closes dialog and selects when contacts are loaded via hook (no contacts prop)", async () => {
+    const onChange = vi.fn();
+    createContactMock.mockResolvedValue({
+      id: "c-hook",
+      email: "hook@fund.com",
+      name: "Hook",
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    });
+    const instance = await setupI18n();
+
+    render(
+      <I18nextProvider i18n={instance}>
+        <ContactSelector workspaceSlug="acme" value={[]} onChange={onChange} />
+      </I18nextProvider>,
+    );
+
+    await waitFor(() => {
+      expect(getContactsMock).toHaveBeenCalledWith("acme");
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId("contact-selector-trigger")).not.toBeDisabled();
+    });
+
+    fireEvent.click(screen.getByTestId("contact-selector-trigger"));
+    fireEvent.click(await screen.findByTestId("contact-add-new"));
+    fireEvent.change(await screen.findByTestId("contact-add-email"), {
+      target: { value: "hook@fund.com" },
+    });
+    fireEvent.click(screen.getByTestId("contact-add-submit"));
+
+    await waitFor(() => {
+      expect(onChange).toHaveBeenCalledWith(["c-hook"]);
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("contact-add-email")).not.toBeInTheDocument();
     });
   });
 });

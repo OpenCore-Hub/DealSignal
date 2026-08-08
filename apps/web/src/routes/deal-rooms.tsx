@@ -101,49 +101,57 @@ export function DealRoomsPage() {
   return (
     <div className="flex h-full flex-col gap-6">
       <PageHeader title={t("page.title")} description={t("page.description")}>
-        <div className="relative w-44">
-          <MagnifyingGlass
-            size={16}
-            className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-          />
-          <Input
-            type="search"
-            placeholder={t("search.placeholder")}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="pl-9"
-            aria-label={t("search.placeholder")}
-          />
+        <div
+          className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-end"
+          data-testid="deal-rooms-toolbar"
+        >
+          <div className="relative min-w-0 flex-1 sm:max-w-xs sm:flex-none sm:w-56">
+            <MagnifyingGlass
+              size={16}
+              className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+            />
+            <Input
+              type="search"
+              placeholder={t("search.placeholder")}
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              className="pl-9"
+              aria-label={t("search.placeholder")}
+            />
+          </div>
+          <Select value={selectedTag} onValueChange={(value) => setSelectedTag(value ?? "all")}>
+            <SelectTrigger
+              className="w-full gap-1.5 pl-3 sm:w-44"
+              aria-label={t("tags.label")}
+            >
+              <Tag size={16} className="text-muted-foreground" />
+              <span className="line-clamp-1 flex-1 text-left">
+                {selectedTag === "all" ? t("tags.all") : selectedTag}
+              </span>
+            </SelectTrigger>
+            <SelectContent
+              side="bottom"
+              align="start"
+              alignItemWithTrigger={false}
+              collisionAvoidance={{ side: "none", align: "none" }}
+              className="max-h-60"
+            >
+              <SelectItem value="all">{t("tags.all")}</SelectItem>
+              {allTags.map((tag) => (
+                <SelectItem key={tag} value={tag}>
+                  {tag}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            className="w-full shrink-0 gap-1.5 sm:w-auto"
+            onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
+          >
+            <Plus size={16} weight="bold" />
+            {t("page.create")}
+          </Button>
         </div>
-        <Select value={selectedTag} onValueChange={(value) => setSelectedTag(value ?? "all")}>
-          <SelectTrigger
-            className="w-44 gap-1.5 pl-3"
-            aria-label={t("tags.label")}
-          >
-            <Tag size={16} className="text-muted-foreground" />
-            <span className="line-clamp-1 flex-1 text-left">
-              {selectedTag === "all" ? t("tags.all") : selectedTag}
-            </span>
-          </SelectTrigger>
-          <SelectContent
-            side="bottom"
-            align="start"
-            alignItemWithTrigger={false}
-            collisionAvoidance={{ side: "none", align: "none" }}
-            className="max-h-60"
-          >
-            <SelectItem value="all">{t("tags.all")}</SelectItem>
-            {allTags.map((tag) => (
-              <SelectItem key={tag} value={tag}>
-                {tag}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <Button className="gap-1.5" onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}>
-          <Plus size={16} weight="bold" />
-          {t("page.create")}
-        </Button>
       </PageHeader>
 
       {error ? (

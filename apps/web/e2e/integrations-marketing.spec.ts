@@ -27,7 +27,7 @@ test.describe("Integrations & marketing (real backend)", () => {
   test("updates integration settings", async () => {
     const res = await apiFetch(`/api/workspaces/${workspaceSlug}/integrations/settings`, {
       method: "PUT",
-      body: JSON.stringify({ slack: false, hubspot: false, zapier: false }),
+      body: JSON.stringify({ email_enabled: true, daily_digest_enabled: false, key_page_slack_enabled: false }),
     });
     expect(res.ok).toBe(true);
   });
@@ -49,6 +49,23 @@ test.describe("Integrations & marketing (real backend)", () => {
       method: "POST",
     });
     expect([200, 400, 404]).toContain(discRes.status);
+  });
+
+  test("reads and rejects insecure outbound webhook", async () => {
+    const getRes = await apiFetch(`/api/workspaces/${workspaceSlug}/integrations/webhook`);
+    expect(getRes.ok).toBe(true);
+    const body = (await getRes.json()) as { configured?: boolean };
+    expect(body).toHaveProperty("configured");
+
+    const bad = await apiFetch(`/api/workspaces/${workspaceSlug}/integrations/webhook`, {
+      method: "PUT",
+      body: JSON.stringify({
+        url: "http://example.com/hooks/catch/1",
+        enabled: true,
+        event_types: ["key_page"],
+      }),
+    });
+    expect(bad.status).toBe(400);
   });
 
   test("connects and disconnects HubSpot (API)", async () => {

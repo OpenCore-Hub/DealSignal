@@ -212,7 +212,8 @@
   },
   "visitor": {
     "unknownOrganization": "未知机构",
-    "visitCount": "{{count}} 次访问",
+    "visitCount_one": "{{count}} 次访问",
+    "visitCount_other": "{{count}} 次访问",
     "avgDuration": "平均停留 {{duration}}",
     "lastSeen": "最后 {{time}}",
     "unknown": "未知",
