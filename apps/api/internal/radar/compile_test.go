@@ -92,6 +92,69 @@ func TestCompileDiligenceGateAndNextUp(t *testing.T) {
 	}
 }
 
+func TestCompileExcludesUploadedFileFromDiligenceGate(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "Review uploaded file deck.pdf on Investor Link",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			SourceType: pgText(action.SourceTypeUploadedFile),
+			SourceID:   pgText(uuid.New().String()),
+			CreatedAt:  pgTime(now.Add(-time.Hour)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 0 {
+		t.Fatalf("uploaded_file must not enter radar products, got %+v", feed.Items)
+	}
+}
+
+func TestCompileRoomNDAMemberKeyedNavigatesToRoom(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := uuid.New().String()
+	memberID := uuid.New().String()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms: map[string]RoomMeta{
+			roomID: {Name: "Startup Fundraising", Scenario: ScenarioStartupFundraising},
+		},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "NDA signature required from lp@vc.com for Startup Fundraising",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "sign",
+			SourceType: pgText(action.SourceTypeRoomNDA),
+			SourceID:   pgText(memberID),
+			TargetID:   pgText(roomID),
+			CreatedAt:  pgTime(now.Add(-30 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Product != ProductDiligenceGate {
+		t.Fatalf("product=%s", item.Product)
+	}
+	if item.DealName != "Startup Fundraising" {
+		t.Fatalf("dealName=%s", item.DealName)
+	}
+	wantPath := "/acme/deal-rooms/" + roomID + "?tab=access"
+	if item.NavigatePath != wantPath {
+		t.Fatalf("navigatePath=%s want %s", item.NavigatePath, wantPath)
+	}
+}
+
 func TestCompileBuyingWindowCoalesce(t *testing.T) {
 	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
 	linkID := uuid.New()

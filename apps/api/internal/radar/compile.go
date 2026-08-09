@@ -355,6 +355,11 @@ func classify(a db.ActionItem, sig *db.Signal) (Product, Verb, bool) {
 	src := textOrEmpty(a.SourceType)
 	actType := a.ActionType
 
+	// File-request review is host ops, not a deal Diligence gate.
+	if src == action.SourceTypeUploadedFile {
+		return "", "", false
+	}
+
 	if isApprove(a) {
 		return ProductDiligenceGate, VerbApprove, true
 	}
@@ -410,8 +415,12 @@ func classify(a db.ActionItem, sig *db.Signal) (Product, Verb, bool) {
 
 func isApprove(a db.ActionItem) bool {
 	src := textOrEmpty(a.SourceType)
+	// uploaded_file uses "review" and must never land here.
+	if src == action.SourceTypeUploadedFile {
+		return false
+	}
 	switch a.ActionType {
-	case "approve", "sign", "verify":
+	case "approve", "sign":
 		return true
 	}
 	switch src {
@@ -492,8 +501,15 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	dealRoomID := ""
 	dealName := ""
 	scenario := ScenarioUnknown
-	if src == action.SourceTypeRoomAccessRequest || src == action.SourceTypeRoomNDA || src == action.SourceTypeExpiringRoom {
+	if src == action.SourceTypeRoomAccessRequest || src == action.SourceTypeExpiringRoom {
 		dealRoomID = sourceID
+	}
+	if src == action.SourceTypeRoomNDA {
+		// Member-keyed: target_id = room. Legacy room-keyed: source_id = room.
+		dealRoomID = targetID
+		if dealRoomID == "" {
+			dealRoomID = sourceID
+		}
 	}
 	if src == action.SourceTypeDealRoomLinkAccessRequest {
 		dealRoomID = targetID

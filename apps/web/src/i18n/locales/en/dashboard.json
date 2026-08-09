@@ -422,7 +422,7 @@
     "actions": {
       "title": "You're clear for now",
       "description": "No open follow-ups, Ask, approvals, or risks. New visitor activity will land here automatically.",
-      "shareCta": "Share another link",
+      "createDealRoom": "Create data room",
       "filteredTitle": "Nothing in this filter",
       "filteredDescription": "Try All, or clear another filter after new activity arrives."
     },
