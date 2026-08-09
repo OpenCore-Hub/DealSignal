@@ -2613,10 +2613,18 @@ WHERE r.workspace_id = $1 AND r.status = 'pending'
 ORDER BY r.created_at DESC;
 
 -- name: ListPendingRoomNDAsByWorkspace :many
+-- External parties waiting on NDA only. Room operators (owner/admin) and
+-- empty-email rows must never become Diligence-gate radar items.
 SELECT m.id, m.email, m.room_id, dr.name AS room_name
 FROM room_members m
 JOIN deal_rooms dr ON dr.id = m.room_id
-WHERE m.workspace_id = $1 AND m.nda_status = 'pending'
+WHERE m.workspace_id = $1
+  AND m.nda_status = 'pending'
+  AND dr.requires_nda = true
+  AND dr.deleted_at IS NULL
+  AND m.role NOT IN ('owner', 'admin')
+  AND m.email IS NOT NULL
+  AND BTRIM(m.email) <> ''
 ORDER BY m.created_at DESC;
 
 -- name: ListPendingAskTurnsByWorkspace :many

@@ -420,7 +420,7 @@
     "actions": {
       "title": "当前已清空",
       "description": "没有待跟进、Ask、审批或风险。新的访客活动会自动出现在这里。",
-      "shareCta": "再分享一个链接",
+      "createDealRoom": "创建数据室",
       "filteredTitle": "此筛选下暂无内容",
       "filteredDescription": "可切换到「全部」，或等新活动到来后再筛选。"
     },

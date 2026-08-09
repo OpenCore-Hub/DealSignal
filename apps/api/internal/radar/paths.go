@@ -22,8 +22,14 @@ func navigatePath(workspaceSlug string, sourceType, sourceID, targetID string, f
 			return ""
 		}
 		return dealRoomAccessPath(slug, targetID, sourceID)
-	case action.SourceTypeRoomAccessRequest, action.SourceTypeRoomNDA:
+	case action.SourceTypeRoomAccessRequest:
 		return dealRoomAccessPath(slug, sourceID, "")
+	case action.SourceTypeRoomNDA:
+		roomID := targetID
+		if roomID == "" {
+			roomID = sourceID // legacy room-keyed rows
+		}
+		return dealRoomAccessPath(slug, roomID, "")
 	case action.SourceTypeExpiringRoom:
 		return "/" + slug + "/deal-rooms/" + sourceID
 	case action.SourceTypeDealRoomLinkQuestion:

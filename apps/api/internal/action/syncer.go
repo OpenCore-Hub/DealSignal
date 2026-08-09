@@ -4,6 +4,7 @@ package action
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -17,7 +18,9 @@ import (
 // and Deal Room inboxes never share a dashboard deep-link:
 //   - link_access_request            → document library share (source_id = link id)
 //   - deal_room_link_access_request  → deal-room share (source_id = link id, target_id = room id)
-// Room-level items use source_id = room id for both resolve and navigation.
+// Room membership access requests use source_id = room id.
+// Room NDA items use source_id = room_members.id and target_id = room id
+// (resolve per signer; navigate via target_id, with legacy room-keyed fallback).
 const (
 	SourceTypeLinkAccessRequest         = "link_access_request"
 	SourceTypeDealRoomLinkAccessRequest = "deal_room_link_access_request"
@@ -164,9 +167,20 @@ func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.
 	}
 	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		roomID := uuid.UUID(r.RoomID.Bytes).String()
-		current[roomID] = true
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeRoomNDA, r.RoomID, pgtype.UUID{}, pgtype.Text{String: r.Email, Valid: true}, pgtype.Text{String: r.RoomName, Valid: true}, "sign"); err != nil {
+		email := strings.TrimSpace(r.Email)
+		if email == "" || !r.ID.Valid || !r.RoomID.Valid {
+			continue
+		}
+		memberID := uuid.UUID(r.ID.Bytes).String()
+		current[memberID] = true
+		// source_id = member id (resolve key); target_id = room id (navigation).
+		if err := s.upsertOperational(
+			ctx, tenantID, workspaceID, SourceTypeRoomNDA,
+			r.ID, r.RoomID,
+			pgtype.Text{String: email, Valid: true},
+			pgtype.Text{String: r.RoomName, Valid: r.RoomName != ""},
+			"sign",
+		); err != nil {
 			return err
 		}
 	}
@@ -289,7 +303,8 @@ func (s *Syncer) syncUploadedFiles(ctx context.Context, tenantID, workspaceID pg
 		return fmt.Errorf("list pending uploaded files: %w", err)
 	}
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeUploadedFile, r.ID, pgtype.UUID{}, pgtype.Text{String: r.OriginalFilename, Valid: true}, r.LinkName, "verify"); err != nil {
+		// "review" — not Diligence-gate approve/sign/verify.
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeUploadedFile, r.ID, pgtype.UUID{}, pgtype.Text{String: r.OriginalFilename, Valid: true}, r.LinkName, "review"); err != nil {
 			return err
 		}
 	}
@@ -400,6 +415,10 @@ func titleFor(sourceType, actor, target string) string {
 		}
 		return fmt.Sprintf("Approve room access request from %s", actor)
 	case SourceTypeRoomNDA:
+		actor = strings.TrimSpace(actor)
+		if actor == "" {
+			actor = "visitor"
+		}
 		if target != "" {
 			return fmt.Sprintf("NDA signature required from %s for %s", actor, target)
 		}

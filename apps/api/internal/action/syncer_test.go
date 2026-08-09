@@ -24,6 +24,16 @@ func TestTitleForSurfaceIsolation(t *testing.T) {
 	}
 }
 
+func TestTitleForRoomNDAEmptyActorUsesVisitorFallback(t *testing.T) {
+	got := titleFor(SourceTypeRoomNDA, "", "Startup Fundraising")
+	if got != "NDA signature required from visitor for Startup Fundraising" {
+		t.Fatalf("got %q", got)
+	}
+	if strings.Contains(got, "from  for") {
+		t.Fatalf("empty-actor gap still present: %q", got)
+	}
+}
+
 func TestImpactForAccessSurfaces(t *testing.T) {
 	for _, st := range []string{
 		SourceTypeLinkAccessRequest,

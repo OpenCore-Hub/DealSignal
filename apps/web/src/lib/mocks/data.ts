@@ -34,6 +34,7 @@ import type {
   RadarVerb,
   RadarWorkItem,
 } from "@/lib/radarQueue";
+import { groupIntoStrands } from "@/lib/radarQueue";
 
 export const mockWorkspaces: Workspace[] = [
   { id: "ws_1", slug: "acme-capital", name: "mock.workspaces.acme.name" },
@@ -1155,6 +1156,8 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
   for (const action of pending) {
     const signal = action.signalId ? sigById.get(action.signalId) : undefined;
     if (signal?.subtype === "bounce") continue;
+    // Match API Compile: uploaded_file is host ops, not a radar product.
+    if (action.sourceType === "uploaded_file") continue;
     const { product, verb } = mockClassify(action, signal);
     const navigatePath =
       actionNavigatePath(workspaceSlug, action) ||
@@ -1197,10 +1200,11 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
       dealRoomId:
         action.sourceType === "deal_room_link_access_request"
           ? action.targetId
-          : action.sourceType === "room_access_request" ||
-              action.sourceType === "room_nda"
-            ? action.sourceId
-            : undefined,
+          : action.sourceType === "room_nda"
+            ? action.targetId || action.sourceId
+            : action.sourceType === "room_access_request"
+              ? action.sourceId
+              : undefined,
       linkId: signal?.linkId || action.sourceId,
       documentId: signal?.documentId,
       contactId: signal?.contactId,
@@ -1228,7 +1232,7 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
 
   return {
     nextUp: items[0] ?? null,
-    strands: [],
+    strands: groupIntoStrands(items),
     items,
     clearedToday: mockActionItems.filter((a) => a.status === "done").length,
     counts,
@@ -1281,7 +1285,6 @@ function mockClassify(
   if (
     action.actionType === "approve" ||
     action.actionType === "sign" ||
-    action.actionType === "verify" ||
     src === "link_access_request" ||
     src === "deal_room_link_access_request" ||
     src === "room_access_request" ||

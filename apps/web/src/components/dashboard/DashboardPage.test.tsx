@@ -157,7 +157,7 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "empty.actions.description": "No open items",
       "empty.actions.filteredTitle": "Nothing in this filter",
       "empty.actions.filteredDescription": "Try another filter",
-      "empty.actions.shareCta": "Share a link",
+      "empty.actions.createDealRoom": "Create data room",
       "actions.moreOptions": "More",
       "actions.ignore": "Ignore",
     },
@@ -249,6 +249,14 @@ describe("DashboardPage inbox", () => {
       expect(screen.getByTestId("radar-next-up")).toBeInTheDocument();
     });
     expect(screen.getByText("Do this next")).toBeInTheDocument();
+  });
+
+  it("routes the empty-state action to the create data room page", async () => {
+    await renderPage();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Create data room" }),
+    );
+    expect(mockFns.navigate).toHaveBeenCalledWith("/acme/deal-rooms/new");
   });
 
   it("shows error state and allows retry", async () => {

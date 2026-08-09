@@ -10,7 +10,6 @@ import {
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { documentsSharePath } from "@/lib/documentsSharePath";
 import {
   countRadarFilters,
   defaultOutcomeForProduct,
@@ -286,9 +285,9 @@ export function RadarQueue({
               </Button>
               <Button
                 variant="ghost"
-                onClick={() => navigate(documentsSharePath(workspaceSlug))}
+                onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
               >
-                {t("empty.actions.shareCta")}
+                {t("empty.actions.createDealRoom")}
               </Button>
             </div>
           </div>
@@ -309,9 +308,9 @@ export function RadarQueue({
             action={
               filter === "all"
                 ? {
-                    label: t("empty.actions.shareCta"),
+                    label: t("empty.actions.createDealRoom"),
                     onClick: () =>
-                      navigate(documentsSharePath(workspaceSlug)),
+                      navigate(`/${workspaceSlug}/deal-rooms/new`),
                   }
                 : {
                     label: t("radar.filters.all"),

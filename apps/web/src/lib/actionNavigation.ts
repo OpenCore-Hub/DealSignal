@@ -71,8 +71,13 @@ export function actionNavigatePath(
       });
 
     case "room_access_request":
-    case "room_nda":
       return dealRoomAccessPath(workspaceSlug, action.sourceId);
+
+    case "room_nda": {
+      // Member-keyed: targetId = room. Legacy: sourceId = room.
+      const roomId = action.targetId || action.sourceId;
+      return dealRoomAccessPath(workspaceSlug, roomId);
+    }
 
     case "expiring_room":
       return `/${workspaceSlug}/deal-rooms/${action.sourceId}`;

@@ -14992,7 +14992,13 @@ const listPendingRoomNDAsByWorkspace = `-- name: ListPendingRoomNDAsByWorkspace 
 SELECT m.id, m.email, m.room_id, dr.name AS room_name
 FROM room_members m
 JOIN deal_rooms dr ON dr.id = m.room_id
-WHERE m.workspace_id = $1 AND m.nda_status = 'pending'
+WHERE m.workspace_id = $1
+  AND m.nda_status = 'pending'
+  AND dr.requires_nda = true
+  AND dr.deleted_at IS NULL
+  AND m.role NOT IN ('owner', 'admin')
+  AND m.email IS NOT NULL
+  AND BTRIM(m.email) <> ''
 ORDER BY m.created_at DESC
 `
 
@@ -15003,6 +15009,8 @@ type ListPendingRoomNDAsByWorkspaceRow struct {
 	RoomName string
 }
 
+// External parties waiting on NDA only. Room operators (owner/admin) and
+// empty-email rows must never become Diligence-gate radar items.
 func (q *Queries) ListPendingRoomNDAsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListPendingRoomNDAsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listPendingRoomNDAsByWorkspace, workspaceID)
 	if err != nil {
