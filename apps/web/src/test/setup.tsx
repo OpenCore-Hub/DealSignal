@@ -3,8 +3,8 @@ import "@testing-library/jest-dom/vitest";
 
 // Mock @base-ui/react/menu for jsdom — Base UI Menu relies on pointer/positioning
 // APIs that are flaky or absent under CI jsdom (portal content never opens).
-vi.mock("@base-ui/react/menu", () => {
-  const React = require("react") as typeof import("react");
+vi.mock("@base-ui/react/menu", async () => {
+  const React = await import("react");
   const MenuCtx = React.createContext<{
     open: boolean;
     setOpen: (v: boolean) => void;
@@ -35,8 +35,9 @@ vi.mock("@base-ui/react/menu", () => {
     const ctx = React.useContext(MenuCtx);
     const onClick = (e: React.MouseEvent) => {
       ctx?.setOpen(!(ctx?.open ?? false));
-      const childOnClick = (render?.props as { onClick?: (ev: React.MouseEvent) => void } | undefined)
-        ?.onClick;
+      const childOnClick = (
+        render?.props as { onClick?: (ev: React.MouseEvent) => void } | undefined
+      )?.onClick;
       childOnClick?.(e);
     };
     if (React.isValidElement(render)) {
@@ -54,12 +55,18 @@ vi.mock("@base-ui/react/menu", () => {
   };
 
   const Portal = ({ children }: { children?: React.ReactNode }) => <>{children}</>;
-  const Positioner = ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => (
+  const Positioner = ({
+    children,
+    ...props
+  }: { children?: React.ReactNode } & Record<string, unknown>) => (
     <div data-slot="dropdown-menu-positioner" {...props}>
       {children}
     </div>
   );
-  const Popup = ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => {
+  const Popup = ({
+    children,
+    ...props
+  }: { children?: React.ReactNode } & Record<string, unknown>) => {
     const ctx = React.useContext(MenuCtx);
     if (!ctx?.open) return null;
     return (
@@ -96,12 +103,18 @@ vi.mock("@base-ui/react/menu", () => {
       </button>
     );
   };
-  const Group = ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => (
+  const Group = ({
+    children,
+    ...props
+  }: { children?: React.ReactNode } & Record<string, unknown>) => (
     <div data-slot="dropdown-menu-group" {...props}>
       {children}
     </div>
   );
-  const GroupLabel = ({ children, ...props }: { children?: React.ReactNode } & Record<string, unknown>) => (
+  const GroupLabel = ({
+    children,
+    ...props
+  }: { children?: React.ReactNode } & Record<string, unknown>) => (
     <div data-slot="dropdown-menu-label" {...props}>
       {children}
     </div>
