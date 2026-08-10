@@ -67,7 +67,16 @@
     "archived": "文档已归档",
     "unarchived": "文档已取消归档",
     "archiveFailed": "更新文档状态失败",
-    "archiveDisabled": "仅已完成文档可归档"
+    "archiveDisabled": "仅已完成文档可归档",
+    "archivedActionDisabled": "请先取消归档后再使用此操作"
+  },
+  "archive": {
+    "title": "归档文档？",
+    "description": "“{{name}}” 将移至文档库的「已归档」。",
+    "visitorRevoke": "访客将无法再通过现有分享链接打开此文档。",
+    "withLinks_one": "此文档在 {{count}} 条有效分享链接中。",
+    "withLinks_other": "此文档在 {{count}} 条有效分享链接中。",
+    "confirmLoading": "归档中…"
   },
   "delete": {
     "title": "删除文档？",

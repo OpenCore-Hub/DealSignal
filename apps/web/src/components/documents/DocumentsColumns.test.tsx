@@ -14,18 +14,22 @@ import {
 const {
   getDocumentDownloadUrlMock,
   archiveDocumentMock,
+  unarchiveDocumentMock,
   deleteOnDelete,
+  archiveOnArchive,
 } = vi.hoisted(() => ({
   getDocumentDownloadUrlMock: vi.fn(),
   archiveDocumentMock: vi.fn(),
+  unarchiveDocumentMock: vi.fn(),
   deleteOnDelete: vi.fn(),
+  archiveOnArchive: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
   api: {
     getDocumentDownloadUrl: getDocumentDownloadUrlMock,
     archiveDocument: archiveDocumentMock,
-    unarchiveDocument: vi.fn(),
+    unarchiveDocument: unarchiveDocumentMock,
   },
 }));
 
@@ -77,6 +81,7 @@ async function initI18n() {
             downloadFailed: "Failed to download document",
             deleteBusy: "Busy",
             archiveDisabled: "Only ready documents can be archived",
+            archivedActionDisabled: "Unarchive the document to use this action",
           },
           status: {
             ready: "Ready",
@@ -92,6 +97,7 @@ async function initI18n() {
           preview: "Preview",
           view: "View",
           createLink: "Create Link",
+          copyLink: "Copy Link",
           addToDealRoom: "Add to Deal Room",
           archive: "Archive",
           unarchive: "Unarchive",
@@ -110,6 +116,7 @@ function ActionsHarness({ doc }: { doc: DocumentRow }) {
   const columns = useDocumentColumns({
     workspaceSlug: "acme",
     navigate,
+    onArchive: archiveOnArchive,
     onDelete: deleteOnDelete,
   });
   const table = useReactTable({
@@ -130,6 +137,23 @@ describe("useDocumentColumns download/delete", () => {
       filename: "Pitch Deck.pdf",
       content_type: "application/pdf",
     });
+  });
+
+  it("requests archive confirmation instead of archiving immediately", async () => {
+    const i18nInstance = await initI18n();
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <ActionsHarness doc={readyDoc} />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Archive$/i }));
+    expect(archiveOnArchive).toHaveBeenCalledWith(expect.objectContaining({ id: "doc_1" }));
+    expect(archiveDocumentMock).not.toHaveBeenCalled();
   });
 
   it("downloads via signed URL and requests delete confirmation", async () => {
@@ -161,13 +185,40 @@ describe("useDocumentColumns download/delete", () => {
     expect(deleteOnDelete).toHaveBeenCalledWith(expect.objectContaining({ id: "doc_1" }));
   });
 
-  it("shows Unarchive for archived documents", async () => {
+  it("shows Unarchive for archived documents and disables share actions", async () => {
     const i18nInstance = await initI18n();
-    const archived: DocumentRow = { ...readyDoc, status: "archived" };
+    const archived: DocumentRow = {
+      ...readyDoc,
+      status: "archived",
+    };
+    function ArchivedActionsHarness() {
+      const navigate = vi.fn();
+      const columns = useDocumentColumns({
+        workspaceSlug: "acme",
+        navigate,
+        onDelete: deleteOnDelete,
+        onAddToDealRoom: vi.fn(),
+      });
+      const table = useReactTable({
+        data: [archived],
+        columns,
+        getCoreRowModel: getCoreRowModel(),
+      });
+      const actionsCell = table
+        .getRowModel()
+        .rows[0]!
+        .getVisibleCells()
+        .find((c) => c.column.id === "actions");
+      return (
+        <div>
+          {actionsCell ? flexRender(actionsCell.column.columnDef.cell, actionsCell.getContext()) : null}
+        </div>
+      );
+    }
     render(
       <I18nextProvider i18n={i18nInstance}>
         <MemoryRouter>
-          <ActionsHarness doc={archived} />
+          <ArchivedActionsHarness />
         </MemoryRouter>
       </I18nextProvider>,
     );
@@ -176,6 +227,22 @@ describe("useDocumentColumns download/delete", () => {
     const menu = await screen.findByRole("menu");
     expect(within(menu).getByRole("menuitem", { name: /^Unarchive$/i })).toBeInTheDocument();
     expect(within(menu).queryByRole("menuitem", { name: /^Archive$/i })).not.toBeInTheDocument();
+    expect(within(menu).queryByRole("menuitem", { name: /Copy link/i })).not.toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: /Create link/i })).toHaveAttribute(
+      "data-disabled",
+    );
+    expect(within(menu).getByRole("menuitem", { name: /Add to Deal Room/i })).toHaveAttribute(
+      "data-disabled",
+    );
+    expect(within(menu).getByRole("menuitem", { name: /Download/i })).toHaveAttribute(
+      "data-disabled",
+    );
+    expect(within(menu).getByRole("menuitem", { name: /^Unarchive$/i })).not.toHaveAttribute(
+      "data-disabled",
+    );
+    expect(within(menu).getByRole("menuitem", { name: /Delete/i })).not.toHaveAttribute(
+      "data-disabled",
+    );
   });
 
   it("disables download while processing and keeps delete available after ready", async () => {

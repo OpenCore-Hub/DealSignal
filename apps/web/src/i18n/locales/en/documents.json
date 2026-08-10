@@ -72,7 +72,16 @@
     "archived": "Document archived",
     "unarchived": "Document unarchived",
     "archiveFailed": "Failed to update document status",
-    "archiveDisabled": "Only ready documents can be archived"
+    "archiveDisabled": "Only ready documents can be archived",
+    "archivedActionDisabled": "Unarchive the document to use this action"
+  },
+  "archive": {
+    "title": "Archive document?",
+    "description": "“{{name}}” will move to Archived in your library.",
+    "visitorRevoke": "Visitors will no longer be able to open this document through existing share links.",
+    "withLinks_one": "This document is on {{count}} active share link.",
+    "withLinks_other": "This document is on {{count}} active share links.",
+    "confirmLoading": "Archiving…"
   },
   "delete": {
     "title": "Delete document?",

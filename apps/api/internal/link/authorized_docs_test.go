@@ -105,7 +105,10 @@ func TestAuthorizedDocumentIDs_EmptyAllowlistReturnsEmpty(t *testing.T) {
 func TestAuthorizedDocumentIDs_SingleDocumentLink(t *testing.T) {
 	docID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
 	q := &fakeAuthorizedDocQuerier{
-		legacy:   db.GetDocumentByIDRow{ID: pgtype.UUID{Bytes: docID, Valid: true}},
+		legacy: db.GetDocumentByIDRow{
+			ID:     pgtype.UUID{Bytes: docID, Valid: true},
+			Status: "ready",
+		},
 		legacyOK: true,
 	}
 	link := db.Link{
@@ -120,6 +123,81 @@ func TestAuthorizedDocumentIDs_SingleDocumentLink(t *testing.T) {
 	}
 	if len(got) != 1 || got[0] != docID {
 		t.Fatalf("expected single doc %s, got %v", docID, got)
+	}
+}
+
+func TestAuthorizedDocumentIDs_ExcludesArchivedLinkDocuments(t *testing.T) {
+	readyID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	archivedID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	q := &fakeAuthorizedDocQuerier{
+		linkDocs: []db.ListLinkDocumentsByPublicTokenRow{
+			{DocumentID: pgtype.UUID{Bytes: readyID, Valid: true}, Status: "ready"},
+			{DocumentID: pgtype.UUID{Bytes: archivedID, Valid: true}, Status: "archived"},
+		},
+	}
+	link := db.Link{PublicToken: "tok"}
+
+	got, err := AuthorizedDocumentIDs(context.Background(), q, link)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != readyID {
+		t.Fatalf("expected only ready doc %s, got %v", readyID, got)
+	}
+}
+
+func TestAuthorizedDocumentIDs_ExcludesArchivedLegacyDocument(t *testing.T) {
+	docID := uuid.MustParse("11111111-1111-1111-1111-111111111111")
+	q := &fakeAuthorizedDocQuerier{
+		legacy: db.GetDocumentByIDRow{
+			ID:     pgtype.UUID{Bytes: docID, Valid: true},
+			Status: "archived",
+		},
+		legacyOK: true,
+	}
+	link := db.Link{
+		DocumentID:  pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: pgtype.UUID{Bytes: uuid.MustParse("dddddddd-dddd-dddd-dddd-dddddddddddd"), Valid: true},
+		PublicToken: "tok",
+	}
+
+	got, err := AuthorizedDocumentIDs(context.Background(), q, link)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("expected archived legacy doc excluded, got %v", got)
+	}
+}
+
+func TestAuthorizedDocumentIDs_ExcludesArchivedDealRoomDocuments(t *testing.T) {
+	readyID := uuid.MustParse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	archivedID := uuid.MustParse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb")
+	roomID := pgtype.UUID{Bytes: uuid.MustParse("cccccccc-cccc-cccc-cccc-cccccccccccc"), Valid: true}
+
+	q := &fakeAuthorizedDocQuerier{
+		roomOK: true,
+		room: db.DealRoom{
+			ID:       roomID,
+			Settings: []byte(`{}`),
+		},
+		roomDocs: []db.ListDealRoomDocumentsWithMetaRow{
+			{DocumentID: pgtype.UUID{Bytes: readyID, Valid: true}, FolderPath: "/general", Status: "ready"},
+			{DocumentID: pgtype.UUID{Bytes: archivedID, Valid: true}, FolderPath: "/general", Status: "archived"},
+		},
+	}
+	link := db.Link{
+		DealRoomID:      roomID,
+		FolderScopeMode: FolderScopeModeFull,
+		PublicToken:     "tok",
+	}
+
+	got, err := AuthorizedDocumentIDs(context.Background(), q, link)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(got) != 1 || got[0] != readyID {
+		t.Fatalf("expected only ready deal-room doc %s, got %v", readyID, got)
 	}
 }
 

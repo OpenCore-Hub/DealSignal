@@ -1,10 +1,12 @@
 /**
  * Document operations — archive/unarchive, category tri-state, download URL.
+ * Trust gate: archive revokes visitor Access / signed-url for that document.
  */
 import { test, expect } from "@playwright/test";
 import {
   seedRealBackend,
   seedDocument,
+  seedLink,
   fetchDocument,
   apiFetch,
 } from "./real-helpers";
@@ -34,6 +36,62 @@ test.describe("Document operations (real backend)", () => {
     expect(unarchiveRes.ok).toBe(true);
     const unarchived = (await unarchiveRes.json()) as { status: string };
     expect(unarchived.status).toBe("ready");
+  });
+
+  test("archive revokes visitor document access on public link", async () => {
+    const doc = await seedDocument(workspaceSlug);
+    const link = await seedLink(workspaceSlug, doc.id, {
+      name: "Archive revoke gate",
+      permissionType: "public",
+    });
+
+    const beforeAccess = await apiFetch(`/api/v1/public/links/${link.publicToken}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    expect(beforeAccess.ok).toBe(true);
+    const beforeBody = (await beforeAccess.json()) as {
+      documents?: { id: string }[];
+      document?: { id: string };
+    };
+    const authorizedIds = new Set(
+      (beforeBody.documents ?? [])
+        .map((d) => d.id)
+        .concat(beforeBody.document?.id ? [beforeBody.document.id] : []),
+    );
+    expect(authorizedIds.has(doc.id)).toBe(true);
+
+    const beforeSigned = await apiFetch(
+      `/api/v1/public/documents/${doc.id}/pages/signed-url?token=${link.publicToken}&page_number=1`,
+    );
+    expect(beforeSigned.ok).toBe(true);
+
+    const archiveRes = await apiFetch(
+      `/api/workspaces/${workspaceSlug}/documents/${doc.id}/archive`,
+      { method: "POST" },
+    );
+    expect(archiveRes.ok).toBe(true);
+
+    const afterAccess = await apiFetch(`/api/v1/public/links/${link.publicToken}`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    expect(afterAccess.ok).toBe(true);
+    const afterBody = (await afterAccess.json()) as {
+      documents?: { id: string }[];
+      document?: { id: string };
+    };
+    const afterIds = new Set(
+      (afterBody.documents ?? [])
+        .map((d) => d.id)
+        .concat(afterBody.document?.id ? [afterBody.document.id] : []),
+    );
+    expect(afterIds.has(doc.id)).toBe(false);
+
+    const afterSigned = await apiFetch(
+      `/api/v1/public/documents/${doc.id}/pages/signed-url?token=${link.publicToken}&page_number=1`,
+    );
+    expect(afterSigned.status).toBe(403);
   });
 
   test("rejects invalid category on PATCH", async () => {

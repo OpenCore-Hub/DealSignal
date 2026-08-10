@@ -177,6 +177,11 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   }, [category, searchParams, setSearchParams]);
 
   const [docToAddToRoom, setDocToAddToRoom] = useState<DocumentRow | null>(null);
+  const [docToArchive, setDocToArchive] = useState<DocumentRow | null>(null);
+  const [archiveImpact, setArchiveImpact] = useState<{
+    activeLinkCount: number;
+  } | null>(null);
+  const [isArchiving, setIsArchiving] = useState(false);
   const [docToDelete, setDocToDelete] = useState<DocumentRow | null>(null);
   const [deleteImpact, setDeleteImpact] = useState<{
     activeLinkCount: number;
@@ -184,6 +189,30 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   } | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const filters: DocumentFilter[] = ["all", "shared", "archived"];
+
+  useEffect(() => {
+    if (!docToArchive) {
+      setArchiveImpact(null);
+      return;
+    }
+    let cancelled = false;
+    setArchiveImpact(null);
+    void api
+      .getDocumentDeleteImpact(docToArchive.id)
+      .then((impact) => {
+        if (!cancelled) {
+          setArchiveImpact({ activeLinkCount: impact.active_link_count });
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setArchiveImpact({ activeLinkCount: docToArchive.links.length });
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [docToArchive]);
 
   useEffect(() => {
     if (!docToDelete) {
@@ -229,7 +258,16 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
       api.getDocuments(filter, listCategory),
       api.getLinks(),
     ]);
-    return buildDocumentRows(docsRes.data, linksRes.data);
+    const rows = buildDocumentRows(docsRes.data, linksRes.data);
+    // Defense in depth: Archived tab never shows non-archived rows even if API is stale.
+    if (filter === "archived") {
+      return rows.filter((row) => row.status === "archived");
+    }
+    // Library Documents tab has a dedicated Archived tab; agreements keep archived in-list.
+    if (!category && filter === "all") {
+      return rows.filter((row) => row.status !== "archived");
+    }
+    return rows;
   }, [filter, category, showShareTab]);
 
   // Poll for status updates while any document is still being processed.
@@ -255,12 +293,12 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     navigate,
     refetch,
     onAddToDealRoom: setDocToAddToRoom,
+    onArchive: setDocToArchive,
     onDelete: setDocToDelete,
     returnTo: location.pathname + location.search,
     returnLabel: t("documents:detail.back"),
   });
 
-  // eslint-disable-next-line react-hooks/incompatible-library
   const table = useReactTable({
     data: data ?? [],
     columns,
@@ -482,7 +520,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
 
       <div className={cn(isAgreement ? "space-y-8" : "space-y-4")}>
       {isAgreement
-        ? agreementPageHeader(agreementToolbar({ showSearch: hasDocuments }), agreementMeta)
+        ? agreementPageHeader(agreementToolbar({ showSearch: Boolean(hasDocuments) }), agreementMeta)
         : null}
       {!data || data.length === 0 ? (
         filter !== "all" ? (
@@ -668,6 +706,60 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
           onAdded={() => setDocToAddToRoom(null)}
         />
       )}
+
+      <Dialog
+        open={!!docToArchive}
+        onOpenChange={(open) => !open && !isArchiving && setDocToArchive(null)}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>{t("documents:archive.title")}</DialogTitle>
+            <DialogDescription className="space-y-2 break-words">
+              <span className="block">
+                {t("documents:archive.description", { name: docToArchive?.title ?? "" })}
+              </span>
+              <span className="block">{t("documents:archive.visitorRevoke")}</span>
+              {(archiveImpact?.activeLinkCount ?? 0) > 0 ? (
+                <span className="block text-destructive">
+                  {t("documents:archive.withLinks", {
+                    count: archiveImpact?.activeLinkCount ?? 0,
+                  })}
+                </span>
+              ) : null}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setDocToArchive(null)}
+              disabled={isArchiving}
+            >
+              {t("common:cancel")}
+            </Button>
+            <Button
+              disabled={isArchiving}
+              onClick={async () => {
+                if (!docToArchive) return;
+                setIsArchiving(true);
+                try {
+                  await api.archiveDocument(docToArchive.id);
+                  toast.success(t("documents:columns.archived"));
+                  setDocToArchive(null);
+                  void refetch();
+                } catch (e) {
+                  toast.error(
+                    apiErrorMessage(e, { messageKey: "documents:columns.archiveFailed" }),
+                  );
+                } finally {
+                  setIsArchiving(false);
+                }
+              }}
+            >
+              {isArchiving ? t("documents:archive.confirmLoading") : t("common:archive")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!docToDelete} onOpenChange={(open) => !open && !isDeleting && setDocToDelete(null)}>
         <DialogContent className="sm:max-w-md">

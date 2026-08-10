@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components */
 import { useMemo } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import type { NavigateFunction } from "react-router";
@@ -9,7 +8,6 @@ import {
   CaretDown,
   CaretUp,
   CaretUpDown,
-  Copy,
   DownloadSimple,
   Eye,
   Link as LinkIcon,
@@ -25,7 +23,6 @@ import { DocumentStatusBadge } from "./DocumentStatusBadge";
 import { DocumentCategoryBadge } from "./DocumentCategoryBadge";
 import { RowActions } from "@/components/common/RowActions";
 import { formatDate, formatFileSize } from "@/lib/formatters";
-import { copyToClipboard } from "@/lib/clipboard";
 import { documentsSharePath } from "@/lib/documentsSharePath";
 import { canAddDocumentToDealRoom } from "@/lib/documentCategory";
 import { cn } from "@/lib/utils";
@@ -65,6 +62,8 @@ interface UseDocumentColumnsOptions {
   navigate: NavigateFunction;
   refetch?: () => void;
   onAddToDealRoom?: (doc: DocumentRow) => void;
+  /** Opens archive confirm (link count + visitor revoke copy). Unarchive stays inline. */
+  onArchive?: (doc: DocumentRow) => void;
   onDelete?: (doc: DocumentRow) => void;
   returnTo?: string;
   returnLabel?: string;
@@ -100,6 +99,7 @@ export function useDocumentColumns({
   navigate,
   refetch,
   onAddToDealRoom,
+  onArchive,
   onDelete,
   returnTo,
   returnLabel,
@@ -227,18 +227,23 @@ export function useDocumentColumns({
         ),
         cell: ({ row }) => {
           const doc = row.original;
-          const firstLink = doc.links[0];
 
           const busy = doc.status === "uploading" || doc.status === "processing";
-          const downloadReady = doc.status === "ready" || doc.status === "archived";
+          const archived = doc.status === "archived";
+          const downloadReady = doc.status === "ready";
           const showAddToDealRoom = Boolean(onAddToDealRoom) && canAddDocumentToDealRoom(doc.category);
 
           const handleArchive = async () => {
+            if (!archived && onArchive) {
+              onArchive(doc);
+              return;
+            }
             try {
-              if (doc.status === "archived") {
+              if (archived) {
                 await api.unarchiveDocument(doc.id);
                 toast.success(t("documents:columns.unarchived"));
               } else {
+                // Fallback when parent omits confirm (should not happen in DocumentsTable).
                 await api.archiveDocument(doc.id);
                 toast.success(t("documents:columns.archived"));
               }
@@ -294,35 +299,30 @@ export function useDocumentColumns({
                     label: t("common:createLink"),
                     icon: <LinkIcon size={16} />,
                     onClick: () => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
+                    disabled: busy || archived,
+                    title: archived ? t("documents:columns.archivedActionDisabled") : undefined,
                   },
-                  ...(firstLink?.shortUrl
-                    ? [
-                        {
-                          label: t("common:copyLink"),
-                          icon: <Copy size={16} />,
-                          onClick: () => copyToClipboard(firstLink.shortUrl, t("common:linkCopied")),
-                        },
-                      ]
-                    : []),
                   ...(showAddToDealRoom
                     ? [
                         {
                           label: t("common:addToDealRoom"),
                           icon: <Buildings size={16} />,
                           onClick: () => onAddToDealRoom?.(doc),
-                          disabled: busy || doc.status === "failed",
+                          disabled: busy || archived || doc.status === "failed",
+                          title: archived ? t("documents:columns.archivedActionDisabled") : undefined,
                         },
                       ]
                     : []),
                   {
-                    label: doc.status === "archived" ? t("common:unarchive") : t("common:archive"),
-                    icon:
-                      doc.status === "archived" ? (
-                        <ArrowCounterClockwise size={16} />
-                      ) : (
-                        <Archive size={16} />
-                      ),
-                    onClick: handleArchive,
+                    label: archived ? t("common:unarchive") : t("common:archive"),
+                    icon: archived ? (
+                      <ArrowCounterClockwise size={16} />
+                    ) : (
+                      <Archive size={16} />
+                    ),
+                    onClick: () => {
+                      void handleArchive();
+                    },
                     disabled: busy || doc.status === "failed",
                     title:
                       busy || doc.status === "failed"
@@ -336,7 +336,11 @@ export function useDocumentColumns({
                       void handleDownload();
                     },
                     disabled: !downloadReady,
-                    title: downloadReady ? undefined : t("documents:columns.downloadNotReady"),
+                    title: archived
+                      ? t("documents:columns.archivedActionDisabled")
+                      : downloadReady
+                        ? undefined
+                        : t("documents:columns.downloadNotReady"),
                   },
                   {
                     label: t("common:delete"),
@@ -353,6 +357,16 @@ export function useDocumentColumns({
         },
       },
     ],
-    [navigate, workspaceSlug, t, refetch, onAddToDealRoom, onDelete, returnTo, returnLabel],
+    [
+      navigate,
+      workspaceSlug,
+      t,
+      refetch,
+      onAddToDealRoom,
+      onArchive,
+      onDelete,
+      returnTo,
+      returnLabel,
+    ],
   );
 }
