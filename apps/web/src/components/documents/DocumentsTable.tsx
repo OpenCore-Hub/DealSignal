@@ -289,22 +289,30 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return () => clearInterval(interval);
   }, [data, refetch]);
 
-  const buildShareRow = (detail: DocumentsUploadedDetail): DocumentRow => ({
-    id: detail.documentId,
-    title: detail.documentTitle,
-    sourceType: "pdf",
-    fileName: detail.documentTitle,
-    fileType: "pdf",
-    fileSize: 0,
-    pageCount: 0,
-    status: (detail.status as DocumentRow["status"]) || "processing",
-    category: detail.category,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-    links: [],
-    totalViews: 0,
-    heatLevel: "cold" as HeatLevel,
-  });
+  const buildShareRow = (detail: DocumentsUploadedDetail): DocumentRow => {
+    const category =
+      detail.category === "general" ||
+      detail.category === "agreement" ||
+      detail.category === "deal_room"
+        ? detail.category
+        : "general";
+    return {
+      id: detail.documentId,
+      title: detail.documentTitle,
+      sourceType: "pdf",
+      fileName: detail.documentTitle,
+      fileType: "pdf",
+      fileSize: 0,
+      pageCount: 0,
+      status: (detail.status as DocumentRow["status"]) || "processing",
+      category,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      links: [],
+      totalViews: 0,
+      heatLevel: "cold" as HeatLevel,
+    };
+  };
 
   // Upload page handoff: ?shareDocumentId=… opens Share dialog after navigate.
   useEffect(() => {

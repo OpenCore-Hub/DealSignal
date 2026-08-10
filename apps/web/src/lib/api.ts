@@ -55,7 +55,6 @@ import type {
   WorkspaceInvitation,
   WorkspaceMember,
   WorkspaceSettings,
-  VisitorQuestion,
   PublicAskTurn,
   PublicAskFAQ,
   PublicFormalAsk,
@@ -192,6 +191,18 @@ export interface InsightsOverview {
   }[];
   /** Lifetime heat contacts for Deal Radar feeds — not used as Insights Overview CTA count. */
   topContacts?: { id: string; email: string; score: number; heatLevel: HeatLevel }[];
+  /** Dominant room Scenario Pack KPI strip + key-page disclosure. */
+  scenarioPack?: {
+    scenario: string;
+    label?: string;
+    digestLead?: string;
+    defaultCircle: string;
+    depth: string;
+    roomCount: number;
+    keyPageCategories?: string[];
+    keyPageRules?: Array<{ category: string; keywords: string[] }>;
+    kpis: Array<{ id: string; value: number }>;
+  } | null;
 }
 
 /** GET /analytics/links/:linkId/score — heat.Compute breakdown. */
@@ -1238,7 +1249,11 @@ export const api = {
   getLinkAccessRequests: (linkId: string) =>
     request<{ data: LinkAccessRequest[] }>(getWorkspaceSlug(), `/links/${linkId}/access-requests`),
   approveLinkAccessRequest: (linkId: string, requestId: string) =>
-    request<{ data: LinkAccessRequest }>(
+    request<{
+      data: LinkAccessRequest;
+      /** Soft warning when approval committed but verification email failed. */
+      warning?: { code: string; message: string };
+    }>(
       getWorkspaceSlug(),
       `/links/${linkId}/access-requests/${requestId}/approve`,
       { method: "POST" }
@@ -2057,7 +2072,9 @@ export const api = {
   /** Compiled Deal Radar feed (server-side productize + coalesce + rank). */
   getRadar: (opts?: { circle?: "founder" | "investor_ir" | "sales" }) => {
     const params = new URLSearchParams();
-    if (opts?.circle && opts.circle !== "founder") {
+    // Only send circle when the client explicitly overrides the role lens.
+    // Omitting it lets the server infer defaultLens from room Scenario Packs.
+    if (opts?.circle) {
       params.set("circle", opts.circle);
     }
     const q = params.toString();
@@ -2127,4 +2144,3 @@ export const api = {
       { method: "DELETE" }
     ).then((res) => res.data),
 };
-

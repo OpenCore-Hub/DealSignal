@@ -22,8 +22,12 @@ const contact: Contact = {
   id: "c1",
   email: "alice@vc.com",
   name: "Alice",
-  createdAt: "2026-01-01T00:00:00Z",
-  updatedAt: "2026-01-01T00:00:00Z",
+  heatLevel: "warm",
+  score: 80,
+  scoreHistory: [],
+  totalVisits: 3,
+  totalDurationSeconds: 120,
+  viewedDocuments: [],
 };
 
 async function setupI18n() {

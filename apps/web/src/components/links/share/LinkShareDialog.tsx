@@ -152,7 +152,7 @@ function LinkShareDialogContent({
     const keyChanged = currentId !== loadedLinkIdRef.current;
     if (keyChanged) {
       const nextDraft = link?.dealRoomId
-        ? hydrateEditDraftFromRoomPolicy(data.link, data.rules, data.policy)
+        ? hydrateEditDraftFromRoomPolicy(data!.link, data!.rules, data!.policy)
         : buildDraft(data?.link, data?.rules);
       setDraft(nextDraft);
       setHighlightedFields([]);
@@ -160,12 +160,12 @@ function LinkShareDialogContent({
       loadedLinkIdRef.current = currentId;
     } else if (currentId && !hasUnsavedChangesRef.current) {
       const nextDraft = data.link.dealRoomId
-        ? hydrateEditDraftFromRoomPolicy(data.link, data.rules, data.policy)
+        ? hydrateEditDraftFromRoomPolicy(data!.link, data!.rules, data!.policy)
         : buildDraft(data?.link, data?.rules);
       setDraft(nextDraft);
       setHighlightedFields([]);
     }
-  }, [data]);
+  }, [data, link?.dealRoomId]);
 
   const handleConditionalClose = useCallback(() => {
     if (hasUnsavedChangesRef.current) {
@@ -344,7 +344,7 @@ function LinkShareDialogContent({
                     roomBlockedEmails={lockedRoomBlocks}
                     ndaTemplates={ndaTemplates}
                     documents={resolveNdaDocumentFallback(agreementDocs)}
-                    linkId={link.id}
+                    linkId={link!.id}
                   />
                 </TabsContent>
 

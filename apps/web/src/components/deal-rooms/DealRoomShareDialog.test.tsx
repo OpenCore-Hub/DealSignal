@@ -117,6 +117,7 @@ describe("DealRoomShareDialog", () => {
         askAiMonthlyLimit: 500,
         askAiQuotaExceeded: false,
         askAiEntitled: true,
+        formalEntitled: false,
       },
     });
     vi.mocked(api.listNDATemplates).mockResolvedValue({ data: [] });

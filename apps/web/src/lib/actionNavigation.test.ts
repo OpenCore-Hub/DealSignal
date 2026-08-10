@@ -11,6 +11,7 @@ describe("actionNavigatePath", () => {
       actionNavigatePath("acme", {
         sourceType: "link_access_request",
         sourceId: "link-doc",
+        actionType: "approve",
       }),
     ).toBe("/acme/documents?tab=shared&linkId=link-doc");
   });
@@ -21,6 +22,7 @@ describe("actionNavigatePath", () => {
         sourceType: "deal_room_link_access_request",
         sourceId: "link-room",
         targetId: "room-1",
+        actionType: "approve",
       }),
     ).toBe("/acme/deal-rooms/room-1?tab=access&linkId=link-room");
   });
@@ -30,6 +32,7 @@ describe("actionNavigatePath", () => {
       actionNavigatePath("acme", {
         sourceType: "deal_room_link_access_request",
         sourceId: "link-room",
+        actionType: "approve",
       }),
     ).toBeNull();
   });
@@ -39,13 +42,25 @@ describe("actionNavigatePath", () => {
       actionNavigatePath("acme", {
         sourceType: "room_access_request",
         sourceId: "room-1",
+        actionType: "approve",
       }),
     ).toBe("/acme/deal-rooms/room-1?tab=access");
 
     expect(
       actionNavigatePath("acme", {
         sourceType: "room_nda",
+        sourceId: "member-1",
+        targetId: "room-1",
+        actionType: "sign",
+      }),
+    ).toBe("/acme/deal-rooms/room-1?tab=access");
+
+    // Legacy room-keyed NDA rows (pre member-keying).
+    expect(
+      actionNavigatePath("acme", {
+        sourceType: "room_nda",
         sourceId: "room-1",
+        actionType: "sign",
       }),
     ).toBe("/acme/deal-rooms/room-1?tab=access");
   });
@@ -55,6 +70,7 @@ describe("actionNavigatePath", () => {
       sourceType: "link_access_request",
       sourceId: "link-doc",
       targetId: "room-should-be-ignored",
+      actionType: "approve",
     });
     expect(path).toContain("/documents?");
     expect(path).not.toContain("/deal-rooms/");
@@ -109,6 +125,7 @@ describe("actionNavigatePath", () => {
       actionNavigatePath("acme", {
         sourceType: "link_question",
         sourceId: "question-legacy",
+        actionType: "answer",
       }),
     ).toBeNull();
   });

@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { useTranslation } from "react-i18next";
-import { Copy, PencilSimple, ToggleRight, FileText, ShareNetwork, ChatTeardropText } from "@phosphor-icons/react";
+import { Copy, PencilSimple, ToggleRight, FileText, ChatTeardropText } from "@phosphor-icons/react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { PageHeader } from "@/components/common/PageHeader";
 import { SmartBackButton } from "@/components/common/SmartBackButton";
 import { DetailLayout } from "@/components/common/DetailLayout";
 import { StatCard } from "@/components/common/StatCard";
@@ -14,14 +13,13 @@ import { PermissionBadge } from "@/components/common/PermissionBadge";
 import { SkeletonDetail } from "@/components/common/SkeletonLayout";
 import { OwnerAskInboxPanel } from "@/components/ask/OwnerAskInboxPanel";
 import { LinkAccessLog } from "./LinkAccessLog";
-import { LinkShareDialog } from "./share";
 import { copyToClipboard } from "@/lib/clipboard";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { documentsSharePath } from "@/lib/documentsSharePath";
-import { formatDate, formatDuration, formatRelativeTime } from "@/lib/formatters";
+import { formatDuration, formatRelativeTime } from "@/lib/formatters";
 import { calculateUniqueVisitors } from "@/lib/calculations";
-import { parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
+import { ownerAskInboxQuery, parseOwnerAskInboxView } from "@/lib/ownerAskInbox";
 import type { AccessLog, Document, Link } from "@/types";
 
 function buildPageDurationData(
@@ -59,12 +57,16 @@ export function LinkDetail() {
   const { t: tShare } = useTranslation("linkShare");
   const { t: tc } = useTranslation("common");
   const askInboxView = parseOwnerAskInboxView(searchParams.get("askInbox"));
+  // Deep links (?askInbox=…) must surface the inbox even while presence loads
+  // or if presence probe fails closed.
+  const askInboxForced = searchParams.has("askInbox");
   const [link, setLink] = useState<Link | null>(null);
   const [document, setDocument] = useState<Document | null>(null);
   const [logs, setLogs] = useState<AccessLog[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [retryTick, setRetryTick] = useState(0);
+  const [hasAskInbox, setHasAskInbox] = useState<boolean | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,9 +77,15 @@ export function LinkDetail() {
         setLoading(true);
         setError(null);
         const l = await api.getLinkById(id!);
+        // Deal-room / multi-doc links may omit a primary documentId.
+        const primaryDocId =
+          l.documentId?.trim() ||
+          l.documentIds?.find((id) => Boolean(id?.trim())) ||
+          l.documents?.find((d) => Boolean(d.id))?.id ||
+          undefined;
         const [logData, docData] = await Promise.all([
           api.getAccessLogs(id!),
-          api.getDocumentById(l.documentId),
+          primaryDocId ? api.getDocumentById(primaryDocId) : Promise.resolve(null),
         ]);
         if (!cancelled) {
           setLink(l);
@@ -95,6 +103,38 @@ export function LinkDetail() {
       cancelled = true;
     };
   }, [linkId, retryTick, tc]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const id = link?.id;
+    if (!id) {
+      setHasAskInbox(null);
+      return;
+    }
+    if (askInboxForced) {
+      setHasAskInbox(true);
+      return;
+    }
+    setHasAskInbox(null);
+    async function loadAskPresence() {
+      try {
+        const [allRes, pinnedRes] = await Promise.all([
+          api.listLinkAsk(id!, ownerAskInboxQuery("all")),
+          api.listLinkAskPinnedFAQ(id!),
+        ]);
+        if (!cancelled) {
+          setHasAskInbox((allRes.data?.length ?? 0) > 0 || (pinnedRes.data?.length ?? 0) > 0);
+        }
+      } catch {
+        // Fail closed: hide empty-looking Ask card on transient errors.
+        if (!cancelled) setHasAskInbox(false);
+      }
+    }
+    void loadAskPresence();
+    return () => {
+      cancelled = true;
+    };
+  }, [link?.id, askInboxForced]);
 
   const pageDurationData = useMemo(() => {
     const pageCount =
@@ -140,10 +180,7 @@ export function LinkDetail() {
     <div className="space-y-6">
       <SmartBackButton fallbackTo={documentsSharePath(workspaceSlug!)} fallbackLabel={t("backToLinks")} />
 
-      <PageHeader
-        title={(link.shortUrl || link.id).split("/").pop() || link.id}
-        description={t("detail.headerDescription", { doc: link.documentTitle, date: formatDate(link.createdAt) })}
-      >
+      <div className="flex flex-wrap items-center justify-end gap-2">
         <Button
           variant="outline"
           className="gap-1.5"
@@ -162,12 +199,6 @@ export function LinkDetail() {
           <Copy size={16} />
           {tc("copy")}
         </Button>
-        <LinkShareDialog linkId={link.id}>
-          <Button variant="outline" className="gap-1.5">
-            <ShareNetwork size={16} />
-            {t("detail.share")}
-          </Button>
-        </LinkShareDialog>
         <Button
           className="gap-1.5"
           onClick={async () => {
@@ -179,7 +210,7 @@ export function LinkDetail() {
           <ToggleRight size={16} />
           {link.isActive ? tc("status.disabled") : tc("status.enabled")}
         </Button>
-      </PageHeader>
+      </div>
 
       {link.isBundle && link.documents.length > 0 && (
         <Card>
@@ -257,22 +288,24 @@ export function LinkDetail() {
         </div>
       </DetailLayout>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-h2 flex items-center gap-2">
-            <ChatTeardropText size={20} />
-            {tShare("management.questionsTitle")}
-          </CardTitle>
-          <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <OwnerAskInboxPanel
-            scope={{ type: "link", linkId: link.id }}
-            i18nNs="linkShare"
-            initialView={askInboxView}
-          />
-        </CardContent>
-      </Card>
+      {hasAskInbox ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-h2 flex items-center gap-2">
+              <ChatTeardropText size={20} />
+              {tShare("management.questionsTitle")}
+            </CardTitle>
+            <CardDescription>{tShare("management.questionsDescription")}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <OwnerAskInboxPanel
+              scope={{ type: "link", linkId: link.id }}
+              i18nNs="linkShare"
+              initialView={askInboxView}
+            />
+          </CardContent>
+        </Card>
+      ) : null}
 
       <Card>
         <CardHeader>

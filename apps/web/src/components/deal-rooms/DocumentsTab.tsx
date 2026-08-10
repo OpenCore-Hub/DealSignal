@@ -41,7 +41,6 @@ function folderSelectionState(
 
 export function DocumentsTab({ roomId, selectedPaths, onChange }: DocumentsTabProps) {
   const { t } = useTranslation("dealRooms");
-  const { t: tc } = useTranslation("common");
 
   const { data, loading, error } = useAsyncData(
     async () => {
