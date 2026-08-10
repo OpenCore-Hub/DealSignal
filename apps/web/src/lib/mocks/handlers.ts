@@ -5410,6 +5410,12 @@ export const handlers = [
   http.get("*/api/v1/public/documents/:documentId/pages", ({ params }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
+    if (doc.status === "archived") {
+      return HttpResponse.json(
+        { code: "access_denied", message: "document access denied" },
+        { status: 403 },
+      );
+    }
     const pages = Array.from({ length: doc.pageCount }, (_, i) => ({
       pageNumber: i + 1,
       width: 800,
@@ -5421,6 +5427,12 @@ export const handlers = [
   http.get("*/api/v1/public/documents/:documentId/pages/signed-url", ({ params, request }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
+    if (doc.status === "archived") {
+      return HttpResponse.json(
+        { code: "access_denied", message: "document access denied" },
+        { status: 403 },
+      );
+    }
     const url = new URL(request.url);
     const pageNumber = Number(url.searchParams.get("page_number") ?? "1");
     return HttpResponse.json({
@@ -5435,6 +5447,12 @@ export const handlers = [
   http.get("*/api/v1/public/documents/:documentId/download-url", ({ params }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
+    if (doc.status === "archived") {
+      return HttpResponse.json(
+        { code: "access_denied", message: "document access denied" },
+        { status: 403 },
+      );
+    }
     return HttpResponse.json({
       downloadUrl: placeholdImageUrl(200, 200),
       expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),

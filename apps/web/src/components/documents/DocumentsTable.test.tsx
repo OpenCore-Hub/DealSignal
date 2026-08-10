@@ -1,16 +1,24 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, fireEvent } from "@testing-library/react";
+import { render, screen, waitFor, fireEvent, within } from "@testing-library/react";
 import { MemoryRouter, Routes, Route } from "react-router";
 import { I18nextProvider, initReactI18next } from "react-i18next";
 import i18n from "i18next";
 import { DocumentsTable } from "./DocumentsTable";
 import type { Document } from "@/types";
 
-const { getDocumentsMock, getLinksMock, getPageSignedUrlMock } = vi.hoisted(() => ({
+const {
+  getDocumentsMock,
+  getLinksMock,
+  getPageSignedUrlMock,
+  getDocumentDeleteImpactMock,
+  archiveDocumentMock,
+} = vi.hoisted(() => ({
   getDocumentsMock: vi.fn(),
   getLinksMock: vi.fn(),
   getPageSignedUrlMock: vi.fn(),
+  getDocumentDeleteImpactMock: vi.fn(),
+  archiveDocumentMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -18,6 +26,9 @@ vi.mock("@/lib/api", () => ({
     getDocuments: getDocumentsMock,
     getLinks: getLinksMock,
     getPageSignedUrl: getPageSignedUrlMock,
+    getDocumentDeleteImpact: getDocumentDeleteImpactMock,
+    archiveDocument: archiveDocumentMock,
+    unarchiveDocument: vi.fn(),
   },
 }));
 
@@ -79,11 +90,28 @@ const resources = {
         views: "Views",
         status: "Status",
         shareLinks: "Links",
+        actions: "Actions",
         pages: "{{count}} pages",
         pages_one: "{{count}} page",
         pages_other: "{{count}} pages",
         links: "{{count}} links",
         viewCount: "{{count}} views",
+        archived: "Document archived",
+        archiveFailed: "Failed to update document status",
+        archiveDisabled: "Only ready documents can be archived",
+        archivedActionDisabled: "Unarchive first",
+        downloadNotReady: "Not ready",
+        downloadFailed: "Download failed",
+        deleteBusy: "Busy",
+      },
+      archive: {
+        title: "Archive document?",
+        description: "“{{name}}” will move to Archived in your library.",
+        visitorRevoke:
+          "Visitors will no longer be able to open this document through existing share links.",
+        withLinks_one: "This document is on {{count}} active share link.",
+        withLinks_other: "This document is on {{count}} active share links.",
+        confirmLoading: "Archiving…",
       },
       status: {
         uploading: "Uploading",
@@ -117,6 +145,12 @@ const resources = {
       preview: "Preview",
       view: "View",
       delete: "Delete",
+      cancel: "Cancel",
+      archive: "Archive",
+      unarchive: "Unarchive",
+      createLink: "Create Link",
+      download: "Download",
+      moreActions: "More actions",
       addToDealRoom: "Add to Deal Room",
     },
   },
@@ -179,6 +213,11 @@ describe("DocumentsTable", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     getLinksMock.mockResolvedValue({ data: [] });
+    getDocumentDeleteImpactMock.mockResolvedValue({
+      active_link_count: 2,
+      deal_room_count: 0,
+    });
+    archiveDocumentMock.mockResolvedValue({ ...mockDocs[0], status: "archived" });
     getPageSignedUrlMock.mockResolvedValue({
       page_number: 1,
       image_url: "https://example.test/page-1.png",
@@ -196,7 +235,50 @@ describe("DocumentsTable", () => {
       expect(getDocumentsMock).toHaveBeenCalledWith("all", "general"),
     );
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
-    expect(screen.getByText("Old Report")).toBeInTheDocument();
+    // Archived docs belong on the Archived tab, not Documents.
+    expect(screen.queryByText("Old Report")).not.toBeInTheDocument();
+  });
+
+  it("confirms archive with visitor revoke copy and link count", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
+    getLinksMock.mockResolvedValue({
+      data: [
+        {
+          id: "link_1",
+          documentId: "doc_1",
+          name: "Share",
+          shortUrl: "https://example.test/v/abc",
+          accessCount: 3,
+          isActive: true,
+          createdAt: "2026-06-20T10:00:00Z",
+          updatedAt: "2026-06-20T10:00:00Z",
+        },
+      ],
+    });
+    await renderTable();
+    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Archive$/i }));
+
+    const dialog = await screen.findByRole("dialog");
+    expect(within(dialog).getByText("Archive document?")).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        "Visitors will no longer be able to open this document through existing share links.",
+      ),
+    ).toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        within(dialog).getByText("This document is on 2 active share links."),
+      ).toBeInTheDocument();
+    });
+
+    fireEvent.click(within(dialog).getByRole("button", { name: /^Archive$/i }));
+    await waitFor(() => {
+      expect(archiveDocumentMock).toHaveBeenCalledWith("doc_1");
+    });
   });
 
   it("switches filters and refetches documents", async () => {
@@ -221,6 +303,8 @@ describe("DocumentsTable", () => {
     await waitFor(() =>
       expect(getDocumentsMock).toHaveBeenLastCalledWith("archived", "general"),
     );
+    expect(await screen.findByText("Old Report")).toBeInTheDocument();
+    expect(screen.queryByText("Pitch Deck")).not.toBeInTheDocument();
   });
 
   it("hides search and top upload button when the library is empty", async () => {
@@ -241,7 +325,7 @@ describe("DocumentsTable", () => {
     getDocumentsMock.mockRejectedValue(new Error("boom"));
     await renderTable();
 
-    expect(await screen.findByText("boom")).toBeInTheDocument();
+    expect(await screen.findByText("Failed to load")).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Shared" })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole("tab", { name: "Shared" }));

@@ -3,12 +3,21 @@ package link
 import (
 	"context"
 	"errors"
+	"strings"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/dealroom"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
 )
+
+// documentStatusArchived is the library archive status. Visitors must not see
+// or fetch assets for documents in this state (Access list + asset gates).
+const documentStatusArchived = "archived"
+
+func isArchivedDocumentStatus(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), documentStatusArchived)
+}
 
 // ErrLockedFolderScope is returned when a share link allowlist includes a locked folder.
 var ErrLockedFolderScope = errors.New("locked folder cannot be included in share link scope")
@@ -80,6 +89,9 @@ func listAuthorizedDocuments(ctx context.Context, q AuthorizedDocumentQuerier, l
 		applyScope := dealRoomUsesFolderAllowlist(link)
 		out := make([]authorizedDocument, 0, len(drDocs))
 		for _, d := range drDocs {
+			if isArchivedDocumentStatus(d.Status) {
+				continue
+			}
 			if dealroom.ResourceLockedOut(d.Locked, d.FolderPath, lockedFolders) {
 				continue
 			}
@@ -104,6 +116,9 @@ func listAuthorizedDocuments(ctx context.Context, q AuthorizedDocumentQuerier, l
 	}
 	out := make([]authorizedDocument, 0, len(linkDocs))
 	for _, ld := range linkDocs {
+		if isArchivedDocumentStatus(ld.Status) {
+			continue
+		}
 		out = append(out, authorizedDocument{
 			ID:         uuid.UUID(ld.DocumentID.Bytes),
 			Title:      ld.Title,
@@ -126,6 +141,9 @@ func listAuthorizedDocuments(ctx context.Context, q AuthorizedDocumentQuerier, l
 	if err != nil {
 		return out, nil
 	}
+	if isArchivedDocumentStatus(doc.Status) {
+		return out, nil
+	}
 	return []authorizedDocument{{
 		ID:          uuid.UUID(doc.ID.Bytes),
 		Title:       doc.Title,
@@ -135,13 +153,4 @@ func listAuthorizedDocuments(ctx context.Context, q AuthorizedDocumentQuerier, l
 		FileSize:    0,
 		IncludeMeta: true,
 	}}, nil
-}
-
-func dealRoomDocumentAuthorizedForLink(
-	ctx context.Context,
-	q dealRoomLinkAccessQuerier,
-	link db.Link,
-	docID uuid.UUID,
-) bool {
-	return evaluateDealRoomDocumentAccess(ctx, q, link, docID) == linkDocAccessAllowed
 }

@@ -22,6 +22,7 @@ var (
 type linkDocumentAccessQuerier interface {
 	dealRoomLinkAccessQuerier
 	HasLinkDocument(ctx context.Context, arg db.HasLinkDocumentParams) (bool, error)
+	GetDocumentByID(ctx context.Context, arg db.GetDocumentByIDParams) (db.GetDocumentByIDRow, error)
 }
 
 // Link document access denial reasons for public asset endpoints.
@@ -70,17 +71,31 @@ func evaluateLinkDocumentAccess(
 	link db.Link,
 	docID uuid.UUID,
 ) linkDocumentAccessDenial {
-	if uuid.UUID(link.DocumentID.Bytes) == docID {
-		return linkDocAccessAllowed
+	membership := linkDocAccessDenied
+	switch {
+	case uuid.UUID(link.DocumentID.Bytes) == docID:
+		membership = linkDocAccessAllowed
+	case link.DealRoomID.Valid:
+		membership = evaluateDealRoomDocumentAccess(ctx, q, link, docID)
+	default:
+		inScope, err := q.HasLinkDocument(ctx, db.HasLinkDocumentParams{
+			LinkID:     pgtype.UUID{Bytes: link.ID.Bytes, Valid: true},
+			DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
+		})
+		if err != nil || !inScope {
+			return linkDocAccessDenied
+		}
+		membership = linkDocAccessAllowed
 	}
-	if link.DealRoomID.Valid {
-		return evaluateDealRoomDocumentAccess(ctx, q, link, docID)
+	if membership != linkDocAccessAllowed {
+		return membership
 	}
-	inScope, err := q.HasLinkDocument(ctx, db.HasLinkDocumentParams{
-		LinkID:     pgtype.UUID{Bytes: link.ID.Bytes, Valid: true},
-		DocumentID: pgtype.UUID{Bytes: docID, Valid: true},
+	// Archived library documents are removed from visitor share surfaces.
+	doc, err := q.GetDocumentByID(ctx, db.GetDocumentByIDParams{
+		ID:          pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: link.WorkspaceID,
 	})
-	if err != nil || !inScope {
+	if err != nil || isArchivedDocumentStatus(doc.Status) {
 		return linkDocAccessDenied
 	}
 	return linkDocAccessAllowed

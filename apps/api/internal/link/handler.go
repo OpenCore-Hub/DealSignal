@@ -1912,6 +1912,10 @@ func (h *Handler) PublicNDAPreview(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda document not found"})
 		return
 	}
+	if isArchivedDocumentStatus(doc.Status) {
+		c.JSON(http.StatusNotFound, gin.H{"code": "not_found", "message": "nda document not found"})
+		return
+	}
 	// Prefer rendered page images for in-page preview (safe for <img>).
 	// Never return an attachment-disposition PDF URL as the preview — browsers
 	// will download it when loaded in an iframe instead of rendering.

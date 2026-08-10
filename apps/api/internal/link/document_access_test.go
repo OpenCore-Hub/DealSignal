@@ -74,3 +74,128 @@ func TestEvaluateDealRoomDocumentAccess_OutOfScope(t *testing.T) {
 		t.Fatalf("expected out-of-scope denial, got %v", got)
 	}
 }
+
+func TestEvaluateLinkDocumentAccess_DeniesArchivedDocument(t *testing.T) {
+	docID := uuid.New()
+	wsID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	q := &fakeLinkDocumentAccessQuerier{
+		fakeAuthorizedDocQuerier: fakeAuthorizedDocQuerier{
+			legacy: db.GetDocumentByIDRow{
+				ID:     pgtype.UUID{Bytes: docID, Valid: true},
+				Status: "archived",
+			},
+			legacyOK: true,
+		},
+	}
+	link := db.Link{
+		DocumentID:  pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: wsID,
+	}
+
+	got := evaluateLinkDocumentAccess(context.Background(), q, link, docID)
+	if got != linkDocAccessDenied {
+		t.Fatalf("expected archived denial, got %v", got)
+	}
+}
+
+func TestEvaluateLinkDocumentAccess_DeniesArchivedDocumentCaseInsensitive(t *testing.T) {
+	docID := uuid.New()
+	wsID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	q := &fakeLinkDocumentAccessQuerier{
+		fakeAuthorizedDocQuerier: fakeAuthorizedDocQuerier{
+			legacy: db.GetDocumentByIDRow{
+				ID:     pgtype.UUID{Bytes: docID, Valid: true},
+				Status: "Archived",
+			},
+			legacyOK: true,
+		},
+	}
+	link := db.Link{
+		DocumentID:  pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: wsID,
+	}
+
+	got := evaluateLinkDocumentAccess(context.Background(), q, link, docID)
+	if got != linkDocAccessDenied {
+		t.Fatalf("expected archived denial for mixed-case status, got %v", got)
+	}
+}
+
+func TestEvaluateLinkDocumentAccess_AllowsReadyDocument(t *testing.T) {
+	docID := uuid.New()
+	wsID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	q := &fakeLinkDocumentAccessQuerier{
+		fakeAuthorizedDocQuerier: fakeAuthorizedDocQuerier{
+			legacy: db.GetDocumentByIDRow{
+				ID:     pgtype.UUID{Bytes: docID, Valid: true},
+				Status: "ready",
+			},
+			legacyOK: true,
+		},
+	}
+	link := db.Link{
+		DocumentID:  pgtype.UUID{Bytes: docID, Valid: true},
+		WorkspaceID: wsID,
+	}
+
+	got := evaluateLinkDocumentAccess(context.Background(), q, link, docID)
+	if got != linkDocAccessAllowed {
+		t.Fatalf("expected allowed, got %v", got)
+	}
+}
+
+func TestEvaluateLinkDocumentAccess_DeniesArchivedLinkDocumentMembership(t *testing.T) {
+	docID := uuid.New()
+	wsID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	linkID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	q := &fakeLinkDocumentAccessQuerier{
+		fakeAuthorizedDocQuerier: fakeAuthorizedDocQuerier{
+			legacy: db.GetDocumentByIDRow{
+				ID:     pgtype.UUID{Bytes: docID, Valid: true},
+				Status: "archived",
+			},
+			legacyOK: true,
+		},
+		hasLinkDoc: true,
+	}
+	link := db.Link{
+		ID:          linkID,
+		WorkspaceID: wsID,
+		// No primary DocumentID — membership via link_documents only.
+	}
+
+	got := evaluateLinkDocumentAccess(context.Background(), q, link, docID)
+	if got != linkDocAccessDenied {
+		t.Fatalf("expected archived denial for link_documents membership, got %v", got)
+	}
+}
+
+func TestEvaluateLinkDocumentAccess_DeniesArchivedDealRoomDocument(t *testing.T) {
+	docID := uuid.New()
+	wsID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	roomID := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+	q := &fakeLinkDocumentAccessQuerier{
+		fakeAuthorizedDocQuerier: fakeAuthorizedDocQuerier{
+			roomOK: true,
+			room:   db.DealRoom{ID: roomID, WorkspaceID: wsID, Settings: []byte(`{}`)},
+			legacy: db.GetDocumentByIDRow{
+				ID:     pgtype.UUID{Bytes: docID, Valid: true},
+				Status: "archived",
+			},
+			legacyOK: true,
+		},
+		roomDocsByID: map[string]db.DealRoomDocument{
+			docID.String(): {FolderPath: "/general"},
+		},
+	}
+	link := db.Link{
+		DealRoomID:      roomID,
+		WorkspaceID:     wsID,
+		FolderScopeMode: FolderScopeModeFull,
+	}
+
+	got := evaluateLinkDocumentAccess(context.Background(), q, link, docID)
+	if got != linkDocAccessDenied {
+		t.Fatalf("expected archived denial for deal-room membership, got %v", got)
+	}
+}
