@@ -292,9 +292,35 @@ describe("AccessTab", () => {
     expect(screen.queryByTestId("visitor-ask-experience")).not.toBeInTheDocument();
   });
 
-  it("selects visitor ask experience via card radio", () => {
-    const { updateDraft } = renderAccessTab(baseDraft, {}, true);
+  it("selects visitor ask experience via card radio", async () => {
+    vi.mocked(api.getLinkAskPolicy).mockResolvedValue({
+      data: {
+        id: "link-1",
+        askMode: "supervised",
+        askAiEnabled: true,
+        askAiMonthlyQuota: null,
+        askAiMonthlyUsed: 0,
+        askAiMonthlyLimit: 500,
+        askAiQuotaExceeded: false,
+        askAiEntitled: true,
+        formalEntitled: true,
+      },
+    });
+    const { updateDraft } = renderAccessTab(
+      baseDraft,
+      {},
+      true,
+      [],
+      false,
+      [],
+      undefined,
+      undefined,
+      "link-1",
+    );
     fireEvent.click(screen.getByText(/advanced/i));
+    await waitFor(() => {
+      expect(screen.getByTestId("visitor-ask-experience-formal")).toBeEnabled();
+    });
     fireEvent.click(screen.getByTestId("visitor-ask-experience-formal"));
     expect(updateDraft).toHaveBeenCalledWith({ visitorAskExperience: "formal" });
   });
@@ -493,6 +519,7 @@ describe("AccessTab", () => {
         askAiMonthlyLimit: 100,
         askAiQuotaExceeded: false,
         askAiEntitled: true,
+        formalEntitled: false,
       },
     });
 

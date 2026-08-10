@@ -135,7 +135,8 @@ function ContactsPageInner({ workspaceSlug }: { workspaceSlug: string }) {
           <div className="flex items-center gap-3">
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <Checkbox
-                checked={allFilteredSelected ? true : someFilteredSelected ? "indeterminate" : false}
+                checked={allFilteredSelected || someFilteredSelected}
+                indeterminate={!allFilteredSelected && someFilteredSelected}
                 onCheckedChange={toggleSelectAllFiltered}
                 aria-label={t("selection.selectAll")}
                 data-testid="contacts-select-all"

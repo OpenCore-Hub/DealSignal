@@ -5,6 +5,8 @@ import { api } from "@/lib/api";
 import { useKnowledgeFollowUpChips } from "./useKnowledgeFollowUpChips";
 import type { DealRoomKnowledgeQATurn } from "@/types";
 
+type FollowUpResult = Awaited<ReturnType<typeof api.suggestDealRoomKnowledgeFollowUps>>;
+
 vi.mock("@/lib/api", () => ({
   api: {
     suggestDealRoomKnowledgeFollowUps: vi.fn(),
@@ -86,10 +88,10 @@ describe("useKnowledgeFollowUpChips", () => {
   });
 
   it("ignores stale responses after turn changes", async () => {
-    const resolvers = new Map<string, (v: unknown) => void>();
+    const resolvers = new Map<string, (v: FollowUpResult) => void>();
     vi.mocked(api.suggestDealRoomKnowledgeFollowUps).mockImplementation(
       (_roomId, turnId) =>
-        new Promise((resolve) => {
+        new Promise<FollowUpResult>((resolve) => {
           resolvers.set(turnId, resolve);
         }),
     );

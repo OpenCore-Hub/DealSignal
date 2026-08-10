@@ -65,7 +65,7 @@ export type KnowledgeStreamEvent =
   | { type: "error"; message: string };
 
 function applyRewriteAudit(
-  turn: KnowledgeTurn,
+  _turn: KnowledgeTurn,
   patch: { retrieveQuery?: string; rewriteApplied?: boolean },
 ): Pick<KnowledgeTurn, "retrieveQuery" | "rewriteApplied"> {
   if (!patch.rewriteApplied) return {};
@@ -312,6 +312,7 @@ export function turnFromQATurn(
   if (status === "no_hits") {
     // P4: never mount evidence for typed no_hits (hadHits stays on refusal audit).
     const hadHits = (row.hits?.length ?? 0) > 0 || Boolean(row.refusal?.hadHits);
+    const fallbackHitCount = row.refusal?.hitCount ?? row.hits?.length ?? 0;
     return {
       id: row.id,
       query: row.question,
@@ -325,7 +326,7 @@ export function turnFromQATurn(
       refusal: row.refusal ?? {
         kind: "no_hits",
         hadHits,
-        hitCount: row.refusal?.hitCount ?? row.hits?.length ?? 0,
+        hitCount: fallbackHitCount,
       },
       ...rewrite,
     };

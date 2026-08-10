@@ -1,10 +1,10 @@
 import i18n from "i18next";
 import { initReactI18next } from "react-i18next";
 
-export async function createTestI18n(resources: Record<string, Record<string, string>> = {}) {
+export async function createTestI18n(resources: Record<string, Record<string, unknown>> = {}) {
   const instance = i18n.createInstance();
   const namespaces = Array.from(new Set(["common", "layout", ...Object.keys(resources)]));
-  const enResources: Record<string, Record<string, string>> = {};
+  const enResources: Record<string, Record<string, unknown>> = {};
   namespaces.forEach((ns) => {
     enResources[ns] = resources[ns] ?? {};
   });

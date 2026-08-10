@@ -70,7 +70,7 @@ export function useDealRoomTab(): { tab: DealRoomTab; setTab: (tab: DealRoomTab)
 
   const tab = useMemo<DealRoomTab>(() => {
     const value = searchParams.get("tab") as DealRoomTab | null;
-    if (value === "permissions" || value === "participants") {
+    if ((value as string) === "permissions" || (value as string) === "participants") {
       return "links";
     }
     return value && VALID_TABS.includes(value) ? value : "documents";
