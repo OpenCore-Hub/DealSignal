@@ -1,6 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Uploader } from "@/components/upload/Uploader";
+import type { Document } from "@/types";
 
 export function UploadPage() {
   const { t } = useTranslation("documents");
@@ -9,10 +10,24 @@ export function UploadPage() {
   const [searchParams] = useSearchParams();
   const category = searchParams.get("category") || undefined;
 
-  const redirectPath =
-    category === "agreement"
-      ? `/${workspaceSlug}/agreement-documents`
-      : `/${workspaceSlug}/documents`;
+  const handleUploadComplete = (document?: Document) => {
+    if (category === "agreement") {
+      navigate(`/${workspaceSlug}/agreement-documents`);
+      return;
+    }
+    // Uploader dispatches documents:uploaded before navigate, but DocumentsTable
+    // is not mounted yet — pass share handoff via query for the upload page path.
+    if (document?.id) {
+      const params = new URLSearchParams({
+        shareDocumentId: document.id,
+        shareDocumentTitle: document.title || document.fileName || document.id,
+        shareDocumentStatus: document.status || "processing",
+      });
+      navigate(`/${workspaceSlug}/documents?${params.toString()}`);
+      return;
+    }
+    navigate(`/${workspaceSlug}/documents`);
+  };
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
@@ -22,7 +37,7 @@ export function UploadPage() {
           {t("documents:upload.description")}
         </p>
       </div>
-      <Uploader category={category} onUploadComplete={() => navigate(redirectPath)} />
+      <Uploader category={category} onUploadComplete={handleUploadComplete} />
     </div>
   );
 }

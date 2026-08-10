@@ -13,12 +13,14 @@ const {
   getPageSignedUrlMock,
   getDocumentDeleteImpactMock,
   archiveDocumentMock,
+  createLinkMock,
 } = vi.hoisted(() => ({
   getDocumentsMock: vi.fn(),
   getLinksMock: vi.fn(),
   getPageSignedUrlMock: vi.fn(),
   getDocumentDeleteImpactMock: vi.fn(),
   archiveDocumentMock: vi.fn(),
+  createLinkMock: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -29,7 +31,12 @@ vi.mock("@/lib/api", () => ({
     getDocumentDeleteImpact: getDocumentDeleteImpactMock,
     archiveDocument: archiveDocumentMock,
     unarchiveDocument: vi.fn(),
+    createLink: createLinkMock,
   },
+}));
+
+vi.mock("@/lib/clipboard", () => ({
+  copyToClipboard: vi.fn().mockResolvedValue(true),
 }));
 
 vi.mock("@/hooks/useDocumentUploadConflict", () => ({
@@ -103,6 +110,18 @@ const resources = {
         downloadNotReady: "Not ready",
         downloadFailed: "Download failed",
         deleteBusy: "Busy",
+      },
+      share: {
+        cta: "Share",
+        title: "Share document",
+        description: "Create a share link for “{{name}}”.",
+        defaultsHint: "Uses create-link defaults.",
+        createAndCopy: "Create & copy link",
+        creating: "Creating…",
+        advanced: "Advanced settings",
+        copied: "Share link copied",
+        createFailed: "Failed",
+        notReady: "Not ready",
       },
       archive: {
         title: "Archive document?",
@@ -237,6 +256,27 @@ describe("DocumentsTable", () => {
     expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
     // Archived docs belong on the Archived tab, not Documents.
     expect(screen.queryByText("Old Report")).not.toBeInTheDocument();
+  });
+
+  it("opens library share dialog from row Share CTA", async () => {
+    getDocumentsMock.mockResolvedValue({ data: mockDocs });
+    createLinkMock.mockResolvedValue({
+      id: "link_new",
+      shortUrl: "https://example.test/v/new",
+    });
+    await renderTable();
+    expect(await screen.findByText("Pitch Deck")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("document-row-share"));
+    const dialog = await screen.findByTestId("document-share-dialog");
+    expect(within(dialog).getByText("Share document")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByTestId("document-share-create"));
+    await waitFor(() => {
+      expect(createLinkMock).toHaveBeenCalledWith(
+        ["doc_1"],
+        expect.objectContaining({ watermarkEnabled: true, expiryDays: 30 }),
+      );
+    });
   });
 
   it("confirms archive with visitor revoke copy and link count", async () => {

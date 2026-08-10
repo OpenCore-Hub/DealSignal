@@ -11,6 +11,7 @@ import {
   DownloadSimple,
   Eye,
   Link as LinkIcon,
+  ShareNetwork,
   Trash,
 } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -64,6 +65,8 @@ interface UseDocumentColumnsOptions {
   onAddToDealRoom?: (doc: DocumentRow) => void;
   /** Opens archive confirm (link count + visitor revoke copy). Unarchive stays inline. */
   onArchive?: (doc: DocumentRow) => void;
+  /** Opens library Share dialog (create + copy). Agreements omit this. */
+  onShare?: (doc: DocumentRow) => void;
   onDelete?: (doc: DocumentRow) => void;
   returnTo?: string;
   returnLabel?: string;
@@ -100,6 +103,7 @@ export function useDocumentColumns({
   refetch,
   onAddToDealRoom,
   onArchive,
+  onShare,
   onDelete,
   returnTo,
   returnLabel,
@@ -231,6 +235,7 @@ export function useDocumentColumns({
           const busy = doc.status === "uploading" || doc.status === "processing";
           const archived = doc.status === "archived";
           const downloadReady = doc.status === "ready";
+          const shareReady = doc.status === "ready" && !archived && Boolean(onShare);
           const showAddToDealRoom = Boolean(onAddToDealRoom) && canAddDocumentToDealRoom(doc.category);
 
           const handleArchive = async () => {
@@ -274,6 +279,26 @@ export function useDocumentColumns({
               className="flex items-center justify-end gap-0.5"
               onClick={(e) => e.stopPropagation()}
             >
+              {shareReady ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  aria-label={t("documents:share.cta")}
+                  className={cn(
+                    "h-7 gap-1 rounded-full px-2.5 text-xs font-medium",
+                    "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
+                    "opacity-80 group-hover/doc-row:opacity-100",
+                  )}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onShare?.(doc);
+                  }}
+                  data-testid="document-row-share"
+                >
+                  <ShareNetwork size={14} />
+                  {t("documents:share.cta")}
+                </Button>
+              ) : null}
               <Button
                 size="icon-sm"
                 variant="ghost"
@@ -295,13 +320,32 @@ export function useDocumentColumns({
               </Button>
               <RowActions
                 actions={[
-                  {
-                    label: t("common:createLink"),
-                    icon: <LinkIcon size={16} />,
-                    onClick: () => navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
-                    disabled: busy || archived,
-                    title: archived ? t("documents:columns.archivedActionDisabled") : undefined,
-                  },
+                  ...(onShare
+                    ? [
+                        {
+                          label: t("documents:share.cta"),
+                          icon: <ShareNetwork size={16} />,
+                          onClick: () => onShare(doc),
+                          disabled: busy || archived || doc.status !== "ready",
+                          title: archived
+                            ? t("documents:columns.archivedActionDisabled")
+                            : doc.status !== "ready"
+                              ? t("documents:share.notReady")
+                              : undefined,
+                        },
+                      ]
+                    : [
+                        {
+                          label: t("common:createLink"),
+                          icon: <LinkIcon size={16} />,
+                          onClick: () =>
+                            navigate(`/${workspaceSlug}/links/new?documentId=${doc.id}`),
+                          disabled: busy || archived,
+                          title: archived
+                            ? t("documents:columns.archivedActionDisabled")
+                            : undefined,
+                        },
+                      ]),
                   ...(showAddToDealRoom
                     ? [
                         {
@@ -364,6 +408,7 @@ export function useDocumentColumns({
       refetch,
       onAddToDealRoom,
       onArchive,
+      onShare,
       onDelete,
       returnTo,
       returnLabel,
