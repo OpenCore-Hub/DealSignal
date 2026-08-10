@@ -457,6 +457,9 @@ describe("DocumentsTable", () => {
 
     expect(await screen.findByTestId("agreement-doc-cards")).toBeInTheDocument();
     expect(await screen.findByTestId("agreement-doc-card-doc_1")).toBeInTheDocument();
+    // A-8: Agreements must not get the library Share CTA.
+    expect(screen.queryByTestId("document-row-share")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("document-share-dialog")).not.toBeInTheDocument();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
     expect(await screen.findByRole("img", { name: "Pitch Deck" })).toHaveAttribute(
       "src",
