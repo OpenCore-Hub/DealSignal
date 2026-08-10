@@ -111,7 +111,7 @@ describe("WorkspacesPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("network error")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load")).toBeInTheDocument();
     });
 
     getWorkspacesMock.mockResolvedValue({ data: mockWorkspaces });

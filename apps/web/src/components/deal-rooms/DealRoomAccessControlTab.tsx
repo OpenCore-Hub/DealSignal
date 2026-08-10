@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { Check } from "@phosphor-icons/react";
@@ -65,10 +65,14 @@ export function DealRoomAccessControlTab({
   }, [onDirtyChange]);
 
   const loadedKeyRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!data) return;
     const currentKey = `policy:${roomId}:${data.updatedAt ?? data.configured}`;
     const keyChanged = currentKey !== loadedKeyRef.current;
+    if (keyChanged && dirtyRef.current) {
+      loadedKeyRef.current = currentKey;
+      return;
+    }
     if (keyChanged || !dirtyRef.current) {
       setDraft(draftFromRoomAccessPolicy(data));
       setDirtyState(false);

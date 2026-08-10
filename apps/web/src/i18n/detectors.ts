@@ -31,16 +31,20 @@ export function resolveInitialLanguage(pathname: string, search: string): Suppor
     return detectBrowserLanguage();
   }
 
-  const stored = localStorage.getItem("i18nextLng");
-  if (stored) return normalizeLanguage(stored);
+  if (typeof localStorage !== "undefined") {
+    const stored = localStorage.getItem("i18nextLng");
+    if (stored) return normalizeLanguage(stored);
+  }
 
   if (typeof navigator !== "undefined") {
     const navLng = navigator.language;
     if (navLng) return normalizeLanguage(navLng);
   }
 
-  const htmlLang = document.documentElement.lang;
-  if (htmlLang) return normalizeLanguage(htmlLang);
+  if (typeof document !== "undefined") {
+    const htmlLang = document.documentElement.lang;
+    if (htmlLang) return normalizeLanguage(htmlLang);
+  }
 
   return "en";
 }
@@ -54,10 +58,12 @@ export const customLanguageDetector = {
   init() {},
 
   detect() {
+    if (typeof window === "undefined") return "en";
     return resolveInitialLanguage(window.location.pathname, window.location.search);
   },
 
   cacheUserLanguage(lng: string) {
+    if (typeof window === "undefined") return;
     // Do not persist visitor browser locale into the member preference key.
     if (isPublicShareLinkPath(window.location.pathname)) return;
     localStorage.setItem("i18nextLng", lng);

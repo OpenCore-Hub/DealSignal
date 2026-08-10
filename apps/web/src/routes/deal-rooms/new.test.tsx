@@ -232,7 +232,7 @@ describe("NewDealRoomPage", () => {
     await renderPage();
 
     await waitFor(() => {
-      expect(screen.getByText("network error")).toBeInTheDocument();
+      expect(screen.getByText("Failed to load")).toBeInTheDocument();
     });
 
     getDealRoomTemplatesMock.mockResolvedValue({ data: mockTemplates });

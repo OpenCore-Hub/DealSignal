@@ -16,7 +16,7 @@ import {
 } from "./real-helpers";
 
 let workspaceSlug: string;
-let roomId: string;
+let _roomId: string;
 let linkId: string;
 
 test.describe("Visitor Ask Engage policy (real backend UI)", () => {
@@ -30,7 +30,7 @@ test.describe("Visitor Ask Engage policy (real backend UI)", () => {
       templateType: "seed",
       documentIds: [doc.id],
     });
-    roomId = room.id;
+    _roomId = room.id;
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask Policy UI Link ${Date.now()}`,
     });

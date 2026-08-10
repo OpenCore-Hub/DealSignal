@@ -80,7 +80,7 @@ test.describe("Access request inbox scope (MSW)", () => {
           const body = (await r.json()) as { code?: string };
           code = body.code ?? "";
         } catch {
-          code = "";
+          // keep empty code on non-JSON responses
         }
         return { status: r.status, code };
       };

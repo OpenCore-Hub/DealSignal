@@ -16,17 +16,21 @@ vi.mock("@/lib/api", () => ({
   },
 }));
 
-vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string, opts?: { title?: string; name?: string; email?: string }) => {
-      if (key === "links:accessRequests.forDocument") return `Document: ${opts?.title ?? ""}`;
-      if (key === "linkShare:accessRequests.applicantWithName") {
-        return `${opts?.name} · ${opts?.email}`;
-      }
-      return key;
-    },
-  }),
-}));
+vi.mock("react-i18next", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-i18next")>();
+  return {
+    ...actual,
+    useTranslation: () => ({
+      t: (key: string, opts?: { title?: string; name?: string; email?: string }) => {
+        if (key === "links:accessRequests.forDocument") return `Document: ${opts?.title ?? ""}`;
+        if (key === "linkShare:accessRequests.applicantWithName") {
+          return `${opts?.name} · ${opts?.email}`;
+        }
+        return key;
+      },
+    }),
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
