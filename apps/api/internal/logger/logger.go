@@ -37,10 +37,10 @@ func Init(level string) {
 }
 
 // L returns the global logger. Init must have been called first.
+// Always route through Init so sync.Once establishes happens-before before
+// reading log; a naked nil check races with the Once writer under -race.
 func L() *slog.Logger {
-	if log == nil {
-		Init("info")
-	}
+	Init("info")
 	return log
 }
 

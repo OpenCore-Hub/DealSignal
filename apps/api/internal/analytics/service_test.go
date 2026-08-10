@@ -209,12 +209,7 @@ func (m *mockAnalyticsQuerier) GetDocumentReadingSessionReach(_ context.Context,
 func (m *mockAnalyticsQuerier) GetDocumentReadingSessionReachInRange(_ context.Context, _ db.GetDocumentReadingSessionReachInRangeParams) ([]db.GetDocumentReadingSessionReachInRangeRow, error) {
 	out := make([]db.GetDocumentReadingSessionReachInRangeRow, len(m.sessionReach))
 	for i, r := range m.sessionReach {
-		out[i] = db.GetDocumentReadingSessionReachInRangeRow{
-			ID:                   r.ID,
-			MaxPage:              r.MaxPage,
-			DistinctPages:        r.DistinctPages,
-			TotalDurationSeconds: r.TotalDurationSeconds,
-		}
+		out[i] = db.GetDocumentReadingSessionReachInRangeRow(r)
 	}
 	return out, nil
 }
@@ -226,18 +221,7 @@ func (m *mockAnalyticsQuerier) ListDocumentReadingSessions(_ context.Context, _ 
 func (m *mockAnalyticsQuerier) ListDocumentReadingSessionsInRange(_ context.Context, _ db.ListDocumentReadingSessionsInRangeParams) ([]db.ListDocumentReadingSessionsInRangeRow, error) {
 	out := make([]db.ListDocumentReadingSessionsInRangeRow, len(m.documentSessions))
 	for i, r := range m.documentSessions {
-		out[i] = db.ListDocumentReadingSessionsInRangeRow{
-			ID:                   r.ID,
-			LinkID:               r.LinkID,
-			VisitorID:            r.VisitorID,
-			VisitorEmail:         r.VisitorEmail,
-			StartedAt:            r.StartedAt,
-			LastActivityAt:       r.LastActivityAt,
-			EndedAt:              r.EndedAt,
-			MaxPage:              r.MaxPage,
-			DistinctPageCount:    r.DistinctPageCount,
-			TotalDurationSeconds: r.TotalDurationSeconds,
-		}
+		out[i] = db.ListDocumentReadingSessionsInRangeRow(r)
 	}
 	return out, nil
 }
@@ -369,11 +353,7 @@ func (m *mockAnalyticsQuerier) GetWorkspaceDailyLinkOpens(_ context.Context, _ d
 func (m *mockAnalyticsQuerier) GetWorkspaceDailyLinkOpensInRange(_ context.Context, _ db.GetWorkspaceDailyLinkOpensInRangeParams) ([]db.GetWorkspaceDailyLinkOpensInRangeRow, error) {
 	out := make([]db.GetWorkspaceDailyLinkOpensInRangeRow, len(m.dailyLinkOpens))
 	for i, r := range m.dailyLinkOpens {
-		out[i] = db.GetWorkspaceDailyLinkOpensInRangeRow{
-			Day:            r.Day,
-			Opens:          r.Opens,
-			UniqueVisitors: r.UniqueVisitors,
-		}
+		out[i] = db.GetWorkspaceDailyLinkOpensInRangeRow(r)
 	}
 	return out, nil
 }
@@ -950,9 +930,8 @@ func TestRecordPageViewReusesOpenSessionWithinIdle(t *testing.T) {
 func TestRecordPageViewClosesSessionOnDocumentSwitch(t *testing.T) {
 	openID := pgtype.UUID{Bytes: [16]byte{8}, Valid: true}
 	docA := pgtype.UUID{Bytes: [16]byte{10}, Valid: true}
-	docB := "0b000000-0000-0000-0000-000000000000"
 	docBUUID := pgtype.UUID{Bytes: [16]byte{11}, Valid: true}
-	docB = uuidToString(docBUUID)
+	docB := uuidToString(docBUUID)
 	q := &mockAnalyticsQuerier{
 		openReadingSession: db.ReadingSession{
 			ID:             openID,

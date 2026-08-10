@@ -86,10 +86,7 @@ func TestUpdateLinkHandlerQaEnabledDealRoom(t *testing.T) {
 	reqNil := (*bool)(nil)
 
 	resolve := func(existingDealRoom bool, existingQa bool, req *bool) bool {
-		if existingDealRoom {
-			return true
-		}
-		return false
+		return existingDealRoom
 	}
 
 	if !resolve(true, existingTrue, &reqFalse) {

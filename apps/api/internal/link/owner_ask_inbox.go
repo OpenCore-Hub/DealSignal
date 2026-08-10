@@ -253,11 +253,3 @@ func OwnerAskTurnToVisitorQuestion(t OwnerAskTurn) VisitorQuestion {
 	}
 	return out
 }
-
-func mapOwnerAskTurnsToVisitorQuestions(turns []OwnerAskTurn) []VisitorQuestion {
-	out := make([]VisitorQuestion, 0, len(turns))
-	for _, t := range turns {
-		out = append(out, OwnerAskTurnToVisitorQuestion(t))
-	}
-	return out
-}

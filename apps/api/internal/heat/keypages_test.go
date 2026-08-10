@@ -52,6 +52,7 @@ func TestKeyPageRulesDiscloseCircleKeywords(t *testing.T) {
 	}
 	if financials == nil {
 		t.Fatalf("missing financials: %+v", rules)
+		return
 	}
 	hasZH, hasEN := false, false
 	for _, kw := range financials.Keywords {

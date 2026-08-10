@@ -5,8 +5,6 @@ import (
 	"unicode"
 )
 
-const ownerAskRepeatPinThreshold = 3
-
 // normalizeAskQuestionKey mirrors frontend repeat detection (same link scope).
 func normalizeAskQuestionKey(question string) string {
 	question = strings.TrimSpace(strings.ToLower(question))

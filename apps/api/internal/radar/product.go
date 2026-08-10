@@ -11,12 +11,12 @@ import (
 type Product string
 
 const (
-	ProductBuyingWindow   Product = "buying_window"
-	ProductDiligenceGate  Product = "diligence_gate"
-	ProductCommitmentAsk  Product = "commitment_ask"
-	ProductLeakWatch      Product = "leak_watch"
-	ProductAccessDecay    Product = "access_decay"
-	ProductAbuseGuard     Product = "abuse_guard"
+	ProductBuyingWindow  Product = "buying_window"
+	ProductDiligenceGate Product = "diligence_gate"
+	ProductCommitmentAsk Product = "commitment_ask"
+	ProductLeakWatch     Product = "leak_watch"
+	ProductAccessDecay   Product = "access_decay"
+	ProductAbuseGuard    Product = "abuse_guard"
 )
 
 // Outcome is a closed-loop completion reason persisted on action_items.
@@ -94,10 +94,6 @@ func (p Product) Valid() bool {
 }
 
 // productRank orders Next Up / strand sorting (lower = more urgent band).
-func productRank(p Product) int {
-	return productRankForCircle(heat.CircleDefault, p)
-}
-
 // productRankForCircle adjusts product urgency by role lens.
 func productRankForCircle(circle heat.Circle, p Product) int {
 	switch circle {

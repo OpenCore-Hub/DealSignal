@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/locale"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/llm"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -163,10 +163,6 @@ func coverageSourceNames(hits []QueryHit, max int) []string {
 		}
 	}
 	return out
-}
-
-func sourceNames(hits []QueryHit) []string {
-	return coverageSourceNames(hits, followUpCoverageMax)
 }
 
 func templateFollowUps(turn QATurn, loc string) []FollowUpSuggestion {

@@ -21,10 +21,13 @@ type askLease struct {
 }
 
 func (h *Handler) acquireAskLease(c *gin.Context, roomID, userID, transport string) (*askLease, error) {
-	if err := h.admitAsk(c.Request.Context(), roomID, userID, transport); err != nil {
+	// Capture request context before spawning: gin may recycle *gin.Context
+	// after ServeHTTP returns, and reading c.Request from that goroutine races.
+	reqCtx := c.Request.Context()
+	if err := h.admitAsk(reqCtx, roomID, userID, transport); err != nil {
 		return nil, err
 	}
-	workCtx, workCancel := context.WithCancel(c.Request.Context())
+	workCtx, workCancel := context.WithCancel(reqCtx)
 	lease := &askLease{
 		h:          h,
 		roomID:     roomID,
@@ -33,7 +36,7 @@ func (h *Handler) acquireAskLease(c *gin.Context, roomID, userID, transport stri
 		workCancel: workCancel,
 	}
 	go func() {
-		<-c.Request.Context().Done()
+		<-reqCtx.Done()
 		lease.cancelWork()
 	}()
 	return lease, nil

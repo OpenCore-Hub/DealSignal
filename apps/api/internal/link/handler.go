@@ -636,12 +636,7 @@ func (h *Handler) UpdateFull(c *gin.Context) {
 	if req.WatermarkEnabled != nil {
 		watermarkEnabled = *req.WatermarkEnabled
 	}
-	qaEnabled := existing.QaEnabled
-	if existing.DealRoomID.Valid {
-		qaEnabled = true
-	} else {
-		qaEnabled = false
-	}
+	qaEnabled := existing.DealRoomID.Valid
 	fileRequestsEnabled := existing.FileRequestsEnabled
 	if req.FileRequestsEnabled != nil {
 		fileRequestsEnabled = *req.FileRequestsEnabled
@@ -2080,10 +2075,6 @@ func (h *Handler) SendEmailVerificationCode(c *gin.Context) {
 // For deal-room links it honors folder_scope_mode (full vs allowlist),
 // excludes locked folders/documents, and verifies the document is still
 // present in the deal room (stale-scope guard).
-func (h *Handler) verifyLinkDocumentAccess(ctx context.Context, link db.Link, docID uuid.UUID) bool {
-	return evaluateLinkDocumentAccess(ctx, h.service.queries, link, docID) == linkDocAccessAllowed
-}
-
 func (h *Handler) ensurePublicDocumentAccess(c *gin.Context, link db.Link, docID uuid.UUID) bool {
 	denial := evaluateLinkDocumentAccess(c.Request.Context(), h.service.queries, link, docID)
 	return writeLinkDocumentAccessDenied(c, denial)
@@ -3396,12 +3387,7 @@ func (h *Handler) PatchLinkAskPolicy(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"code": "invalid_input", "message": httpx.SafeMessage("invalid_input", err)})
 		return
 	}
-	link, err := h.service.UpdateLinkAskPolicy(c.Request.Context(), linkID, workspaceID, UpdateLinkAskPolicyRequest{
-		AskMode:           req.AskMode,
-		AskAIEnabled:      req.AskAIEnabled,
-		AskAIMonthlyQuota: req.AskAIMonthlyQuota,
-		ClearAIQuota:      req.ClearAIQuota,
-	})
+	link, err := h.service.UpdateLinkAskPolicy(c.Request.Context(), linkID, workspaceID, UpdateLinkAskPolicyRequest(req))
 	if err != nil {
 		if errors.Is(err, ErrNotFoundInWorkspace) {
 			c.JSON(http.StatusNotFound, gin.H{"code": "link_not_found", "message": "link not found"})

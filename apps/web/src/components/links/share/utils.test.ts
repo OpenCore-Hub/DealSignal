@@ -50,7 +50,12 @@ describe("toDateTimeLocal", () => {
   it("round-trips an ISO string through datetime-local", () => {
     const iso = "2026-08-17T08:41:00+08:00";
     const local = toDateTimeLocal(iso);
-    expect(local).toMatch(/^2026-08-17T08:41$/);
+    // Assert against the host timezone (CI is UTC; local may be +08).
+    const d = new Date(iso);
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const expected = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    expect(local).toBe(expected);
+    expect(new Date(toRFC3339(local)).getTime()).toBe(d.getTime());
   });
 
   it("returns empty string for empty input", () => {
