@@ -11,6 +11,8 @@ import {
 } from "@/hooks/useDocumentUploadConflict";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { filterUploadSelection, notifyUploadSelectionFiltered } from "@/lib/uploadFileFilters";
+import { dispatchDocumentsUploaded } from "@/lib/documentsUploadedEvent";
+import type { Document } from "@/types";
 
 interface UploadFile {
   id: string;
@@ -21,7 +23,7 @@ interface UploadFile {
 }
 
 interface UploaderProps {
-  onUploadComplete?: () => void;
+  onUploadComplete?: (document?: Document) => void;
   category?: string;
   /** Notify host surfaces (e.g. UploadDialog) while the replace prompt is open. */
   onAwaitingConflictChange?: (awaiting: boolean) => void;
@@ -93,7 +95,7 @@ export function Uploader({
   }, []);
 
   const markDone = useCallback(
-    (uploadId: string) => {
+    (uploadId: string, document?: Document) => {
       setUploadingIds((prev) => {
         const next = new Set(prev);
         next.delete(uploadId);
@@ -102,10 +104,20 @@ export function Uploader({
       setFiles((prev) =>
         prev.map((f) => (f.id === uploadId ? { ...f, progress: 100, status: "done" } : f)),
       );
-      onUploadComplete?.();
-      window.dispatchEvent(new CustomEvent("documents:uploaded"));
+      if (document) {
+        dispatchDocumentsUploaded({
+          documentId: document.id,
+          documentTitle: document.title || document.fileName || document.id,
+          status: document.status,
+          category: document.category ?? category,
+        });
+      } else {
+        dispatchDocumentsUploaded();
+      }
+      // Dispatch before host navigation so DocumentsTable can observe the event.
+      onUploadComplete?.(document);
     },
-    [onUploadComplete],
+    [onUploadComplete, category],
   );
 
   const markError = useCallback((uploadId: string, message: string) => {
@@ -156,9 +168,9 @@ export function Uploader({
       };
 
       try {
-        await uploadDocument(uploadFile.file, category);
+        const document = await uploadDocument(uploadFile.file, category);
         stopProgress();
-        markDone(uploadFile.id);
+        markDone(uploadFile.id, document);
       } catch (err) {
         stopProgress();
         if (err instanceof UploadCancelledError) {

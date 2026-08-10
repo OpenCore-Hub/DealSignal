@@ -17,12 +17,14 @@ const {
   unarchiveDocumentMock,
   deleteOnDelete,
   archiveOnArchive,
+  shareOnShare,
 } = vi.hoisted(() => ({
   getDocumentDownloadUrlMock: vi.fn(),
   archiveDocumentMock: vi.fn(),
   unarchiveDocumentMock: vi.fn(),
   deleteOnDelete: vi.fn(),
   archiveOnArchive: vi.fn(),
+  shareOnShare: vi.fn(),
 }));
 
 vi.mock("@/lib/api", () => ({
@@ -83,6 +85,10 @@ async function initI18n() {
             archiveDisabled: "Only ready documents can be archived",
             archivedActionDisabled: "Unarchive the document to use this action",
           },
+          share: {
+            cta: "Share",
+            notReady: "Document must be ready before sharing",
+          },
           status: {
             ready: "Ready",
             uploading: "Uploading",
@@ -117,6 +123,7 @@ function ActionsHarness({ doc }: { doc: DocumentRow }) {
     workspaceSlug: "acme",
     navigate,
     onArchive: archiveOnArchive,
+    onShare: shareOnShare,
     onDelete: deleteOnDelete,
   });
   const table = useReactTable({
@@ -137,6 +144,26 @@ describe("useDocumentColumns download/delete", () => {
       filename: "Pitch Deck.pdf",
       content_type: "application/pdf",
     });
+  });
+
+  it("opens share dialog via row Share CTA instead of navigating to /links/new", async () => {
+    const i18nInstance = await initI18n();
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <ActionsHarness doc={readyDoc} />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    fireEvent.click(screen.getByTestId("document-row-share"));
+    expect(shareOnShare).toHaveBeenCalledWith(expect.objectContaining({ id: "doc_1" }));
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    expect(within(menu).queryByRole("menuitem", { name: /Create Link/i })).not.toBeInTheDocument();
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /^Share$/i }));
+    expect(shareOnShare).toHaveBeenCalledTimes(2);
   });
 
   it("requests archive confirmation instead of archiving immediately", async () => {

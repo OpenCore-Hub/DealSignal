@@ -75,6 +75,20 @@
     "archiveDisabled": "Only ready documents can be archived",
     "archivedActionDisabled": "Unarchive the document to use this action"
   },
+  "share": {
+    "cta": "Share",
+    "title": "Share document",
+    "description": "Create a share link for “{{name}}” and copy it to the clipboard.",
+    "defaultsHint": "Uses the same defaults as Create link: public access, download on, watermark on, expires in 30 days.",
+    "createAndCopy": "Create & copy link",
+    "creating": "Creating…",
+    "advanced": "Advanced settings",
+    "copied": "Share link copied",
+    "createFailed": "Failed to create share link",
+    "notReady": "Document must be ready before sharing",
+    "uploadSuccess": "Document uploaded",
+    "uploadShareAction": "Share"
+  },
   "archive": {
     "title": "Archive document?",
     "description": "“{{name}}” will move to Archived in your library.",

@@ -56,9 +56,16 @@ import {
   sanitizeDocumentsLibrarySearchParams,
 } from "@/lib/documentsSharePath";
 import { AgreementDocumentCard } from "./AgreementDocumentCard";
-import { buildDocumentRows, useDocumentColumns } from "./DocumentsColumns";
+import { buildDocumentRows, useDocumentColumns, type DocumentRow } from "./DocumentsColumns";
 import { AddToDealRoomDialog } from "./AddToDealRoomDialog";
-import type { DocumentRow } from "./DocumentsColumns";
+import { DocumentShareDialog } from "./DocumentShareDialog";
+import {
+  DOCUMENTS_UPLOADED_EVENT,
+  dispatchDocumentsUploaded,
+  isLibraryShareableUpload,
+  type DocumentsUploadedDetail,
+} from "@/lib/documentsUploadedEvent";
+import type { HeatLevel } from "@/types";
 
 interface DocumentsTableProps {
   category?: string;
@@ -141,7 +148,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
           return;
         }
       }
-      window.dispatchEvent(new CustomEvent("documents:uploaded"));
+      dispatchDocumentsUploaded();
       toast.success(t("agreementDocuments:page.uploadSuccess"));
     } finally {
       setIsUploading(false);
@@ -177,6 +184,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   }, [category, searchParams, setSearchParams]);
 
   const [docToAddToRoom, setDocToAddToRoom] = useState<DocumentRow | null>(null);
+  const [docToShare, setDocToShare] = useState<DocumentRow | null>(null);
   const [docToArchive, setDocToArchive] = useState<DocumentRow | null>(null);
   const [archiveImpact, setArchiveImpact] = useState<{
     activeLinkCount: number;
@@ -281,12 +289,64 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return () => clearInterval(interval);
   }, [data, refetch]);
 
-  // Refresh immediately after an upload finishes (from dialog or upload page).
+  const buildShareRow = (detail: DocumentsUploadedDetail): DocumentRow => ({
+    id: detail.documentId,
+    title: detail.documentTitle,
+    sourceType: "pdf",
+    fileName: detail.documentTitle,
+    fileType: "pdf",
+    fileSize: 0,
+    pageCount: 0,
+    status: (detail.status as DocumentRow["status"]) || "processing",
+    category: detail.category,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    links: [],
+    totalViews: 0,
+    heatLevel: "cold" as HeatLevel,
+  });
+
+  // Upload page handoff: ?shareDocumentId=… opens Share dialog after navigate.
   useEffect(() => {
-    const handleUploaded = () => refetch();
-    window.addEventListener("documents:uploaded", handleUploaded);
-    return () => window.removeEventListener("documents:uploaded", handleUploaded);
-  }, [refetch]);
+    if (isAgreement || category) return;
+    const documentId = searchParams.get("shareDocumentId");
+    if (!documentId) return;
+    const detail: DocumentsUploadedDetail = {
+      documentId,
+      documentTitle: searchParams.get("shareDocumentTitle") || documentId,
+      status: searchParams.get("shareDocumentStatus") || "processing",
+      category: "general",
+    };
+    setDocToShare(buildShareRow(detail));
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete("shareDocumentId");
+        next.delete("shareDocumentTitle");
+        next.delete("shareDocumentStatus");
+        return next;
+      },
+      { replace: true },
+    );
+  }, [category, isAgreement, searchParams, setSearchParams]);
+
+  // Refresh after in-page upload; toast Share action for general library uploads.
+  useEffect(() => {
+    const handleUploaded = (event: Event) => {
+      void refetch();
+      if (isAgreement) return;
+      const detail = (event as CustomEvent<DocumentsUploadedDetail | undefined>).detail;
+      if (!isLibraryShareableUpload(detail)) return;
+      toast.success(t("documents:share.uploadSuccess"), {
+        action: {
+          label: t("documents:share.uploadShareAction"),
+          onClick: () => setDocToShare(buildShareRow(detail!)),
+        },
+      });
+    };
+    window.addEventListener(DOCUMENTS_UPLOADED_EVENT, handleUploaded);
+    return () => window.removeEventListener(DOCUMENTS_UPLOADED_EVENT, handleUploaded);
+  }, [refetch, isAgreement, t]);
 
   const columns = useDocumentColumns({
     workspaceSlug,
@@ -294,6 +354,7 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     refetch,
     onAddToDealRoom: setDocToAddToRoom,
     onArchive: setDocToArchive,
+    onShare: isAgreement ? undefined : setDocToShare,
     onDelete: setDocToDelete,
     returnTo: location.pathname + location.search,
     returnLabel: t("documents:detail.back"),
@@ -706,6 +767,21 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
           onAdded={() => setDocToAddToRoom(null)}
         />
       )}
+
+      {docToShare && workspaceSlug ? (
+        <DocumentShareDialog
+          open={!!docToShare}
+          onOpenChange={(open) => !open && setDocToShare(null)}
+          documentId={docToShare.id}
+          documentTitle={docToShare.title}
+          workspaceSlug={workspaceSlug}
+          documentStatus={docToShare.status}
+          onCreated={() => {
+            setDocToShare(null);
+            void refetch();
+          }}
+        />
+      ) : null}
 
       <Dialog
         open={!!docToArchive}
