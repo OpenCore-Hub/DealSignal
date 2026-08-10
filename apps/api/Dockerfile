@@ -1,8 +1,11 @@
 # syntax=docker/dockerfile:1
 # Pinned builder image for reproducible builds.
-FROM golang:1.25-alpine@sha256:523c3effe300580ed375e43f43b1c9b091b68e935a7c3a92bfcc4e7ed55b18c2 AS builder
+FROM golang:1.25.12-alpine@sha256:56961d79ea8129efddcc0b8643fd8a5416b4e6228cfd477e3fd61deb2672c587 AS builder
 
 WORKDIR /build
+
+# Allow go.mod toolchain directive if image patch lags briefly.
+ENV GOTOOLCHAIN=auto
 
 RUN apk add --no-cache ca-certificates git
 
