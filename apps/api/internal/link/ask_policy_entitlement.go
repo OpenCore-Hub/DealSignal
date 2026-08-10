@@ -2,10 +2,12 @@ package link
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/logger"
+	"github.com/jackc/pgx/v5"
 )
 
 // checkAskAIEntitlement verifies workspace infra and deal-room corpus are ready for AI lane.
@@ -50,19 +52,29 @@ func (s *Service) isFormalAskEntitled(ctx context.Context, link db.Link) bool {
 	if s == nil || s.formalAskEntitlement == nil {
 		return false
 	}
+	if s.queries == nil {
+		return false
+	}
+	tenantSlug := ""
 	tenant, err := s.queries.GetWorkspaceRagTenant(ctx, link.WorkspaceID)
-	if err != nil {
+	switch {
+	case err == nil:
+		tenantSlug = tenant.ExternalTenantSlug
+	case errors.Is(err, pgx.ErrNoRows):
+		// Workspaces without Docling provisioning have no RAG tenant row.
+		// Non-prod stub entitlement may still grant Formal with an empty slug.
+	default:
 		logger.ErrorCtx(ctx, "formal ask entitlement: load rag tenant failed",
 			err,
 			logger.Attr("workspace_id", link.WorkspaceID.String()),
 		)
 		return false
 	}
-	ok, err := s.formalAskEntitlement.IsFormalAskEntitled(ctx, tenant.ExternalTenantSlug)
+	ok, err := s.formalAskEntitlement.IsFormalAskEntitled(ctx, tenantSlug)
 	if err != nil {
 		logger.ErrorCtx(ctx, "formal ask entitlement check failed",
 			err,
-			logger.Attr("tenant_slug", tenant.ExternalTenantSlug),
+			logger.Attr("tenant_slug", tenantSlug),
 		)
 		return false
 	}

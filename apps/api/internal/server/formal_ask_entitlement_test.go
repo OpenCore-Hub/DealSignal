@@ -38,3 +38,35 @@ func TestDoclingFormalAskEntitlementStubRejectedInProduction(t *testing.T) {
 		t.Fatal("stub must not entitle in production")
 	}
 }
+
+func TestDoclingFormalAskEntitlementStubWithoutTenantSlug(t *testing.T) {
+	e := doclingFormalAskEntitlement{
+		client:    docling.NewClient("", "", 0),
+		planCodes: formalPlanCodeSet([]string{"enterprise", "trial"}),
+		stubPlan:  "trial",
+		appEnv:    "development",
+	}
+	ok, err := e.IsFormalAskEntitled(context.Background(), "")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if !ok {
+		t.Fatal("expected stub trial to entitle with empty tenant slug")
+	}
+}
+
+func TestDoclingFormalAskEntitlementEmptyTenantWithoutStub(t *testing.T) {
+	e := doclingFormalAskEntitlement{
+		client:    docling.NewClient("http://docling.example", "key", 0),
+		planCodes: formalPlanCodeSet([]string{"enterprise", "trial"}),
+		stubPlan:  "",
+		appEnv:    "development",
+	}
+	ok, err := e.IsFormalAskEntitled(context.Background(), "")
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ok {
+		t.Fatal("expected fail-closed without tenant or stub")
+	}
+}

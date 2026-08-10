@@ -619,6 +619,15 @@ func (e doclingFormalAskEntitlement) IsFormalAskEntitled(ctx context.Context, te
 		}
 		return false, nil
 	}
+	tenantSlug = strings.TrimSpace(tenantSlug)
+	if tenantSlug == "" {
+		// Control-plane lookup needs a provisioned tenant; allow non-prod stub
+		// when Docling is configured but the workspace has no RAG tenant yet.
+		if ok, used := e.stubEntitled(); used {
+			return ok, nil
+		}
+		return false, nil
+	}
 	ent, err := e.client.GetEntitlements(ctx, tenantSlug)
 	if err != nil {
 		if ok, used := e.stubEntitled(); used {

@@ -17,6 +17,11 @@ type LinkAskSummary struct {
 }
 
 func linkAskDeflectionRate(aiAnswered, hostPending int64) *float64 {
+	// Deflection is AI-resolved share of AI+host volume. With no AI answers yet,
+	// the metric is undefined (host-only backlog must not report 0%).
+	if aiAnswered <= 0 {
+		return nil
+	}
 	den := aiAnswered + hostPending
 	if den <= 0 {
 		return nil

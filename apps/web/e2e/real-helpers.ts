@@ -867,7 +867,9 @@ export async function fetchLinkAnalytics(
   if (!res.ok) {
     throw new Error(`fetch link analytics failed: ${res.status} ${await res.text()}`);
   }
-  return (await res.json()) as LinkAnalyticsResponse;
+  const body = (await res.json()) as { data?: LinkAnalyticsResponse } & LinkAnalyticsResponse;
+  // Owner analytics is enveloped as { data: ... }.
+  return body.data ?? body;
 }
 
 /** Parse visitor Ask SSE body for a done payload answer snippet. */

@@ -512,13 +512,24 @@ jobs:
       - name: Verify legacy question table dropped (migration 141)
         working-directory: apps/api
         run: |
-          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
-            "SELECT 1 FROM schema_migrations WHERE version = '141_drop_link_visitor_questions.up.sql';" | grep -q 1
-          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
-            "SELECT to_regclass('public.link_visitor_questions');" | grep -qx ''
-          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'link_ask_turns' AND column_name = 'host_question_id';" \
-            | grep -qx ''
+          set -euo pipefail
+          psqlq() {
+            docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc "$1"
+          }
+          applied="$(psqlq "SELECT 1 FROM schema_migrations WHERE version = '141_drop_link_visitor_questions.up.sql';" | tr -d '[:space:]')"
+          if [ "$applied" != "1" ]; then
+            echo "migration 141 not applied; recent versions:" >&2
+            psqlq "SELECT version FROM schema_migrations WHERE version LIKE '14%' ORDER BY version" >&2 || true
+            exit 1
+          fi
+          # to_regclass returns one NULL row (empty line); missing columns return zero rows.
+          # Never use `grep -qx ''` for absence checks — zero-byte stdin makes grep exit 1.
+          leftover_table="$(psqlq "SELECT to_regclass('public.link_visitor_questions');" | tr -d '[:space:]')"
+          leftover_col="$(psqlq "SELECT column_name FROM information_schema.columns WHERE table_name = 'link_ask_turns' AND column_name = 'host_question_id';" | tr -d '[:space:]')"
+          if [ -n "$leftover_table" ] || [ -n "$leftover_col" ]; then
+            echo "migration 141 incomplete: table='${leftover_table}' host_question_id='${leftover_col}'" >&2
+            exit 1
+          fi
 
       - name: Verify ask action source heal migration 142
         working-directory: apps/api

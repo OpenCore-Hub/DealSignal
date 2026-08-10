@@ -333,6 +333,8 @@ test.describe("Visitor Ask (real backend API)", () => {
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask AI Gate Link ${Date.now()}`,
     });
+    // Deal-room links default ask_ai_enabled=true; force the deny path under test.
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: false });
 
     restoreCookieJar([]);
     await accessPublicLinkApi(link.publicToken, `ai-gate-${Date.now()}@example.com`);
@@ -381,6 +383,7 @@ test.describe("Visitor Ask (real backend API)", () => {
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask Policy Stream ${Date.now()}`,
     });
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: false });
 
     restoreCookieJar([]);
     await accessPublicLinkApi(link.publicToken, `policy-stream-${Date.now()}@example.com`);
