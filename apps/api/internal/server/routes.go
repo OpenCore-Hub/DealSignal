@@ -312,6 +312,8 @@ func (s *Server) registerRoutes() error {
 			linkSvc.SetFormalAskEntitlement(doclingFormalAskEntitlement{
 				client:    doclingClient,
 				planCodes: formalPlanCodeSet(s.cfg.FormalAskEntitledPlanCodes),
+				stubPlan:  strings.ToLower(strings.TrimSpace(s.cfg.FormalAskEntitlementStubPlan)),
+				appEnv:    s.cfg.AppEnv,
 			})
 			knowledgeSvc := knowledge.NewService(
 				queries,
@@ -598,11 +600,30 @@ func checkSMTP(ctx context.Context, cfg *config.Config) error {
 type doclingFormalAskEntitlement struct {
 	client    *docling.Client
 	planCodes map[string]struct{}
+	stubPlan  string
+	appEnv    string
+}
+
+func (e doclingFormalAskEntitlement) stubEntitled() (bool, bool) {
+	if e.stubPlan == "" || strings.ToLower(strings.TrimSpace(e.appEnv)) == "production" {
+		return false, false
+	}
+	_, ok := e.planCodes[e.stubPlan]
+	return ok, true
 }
 
 func (e doclingFormalAskEntitlement) IsFormalAskEntitled(ctx context.Context, tenantSlug string) (bool, error) {
+	if e.client == nil || !e.client.Enabled() {
+		if ok, used := e.stubEntitled(); used {
+			return ok, nil
+		}
+		return false, nil
+	}
 	ent, err := e.client.GetEntitlements(ctx, tenantSlug)
 	if err != nil {
+		if ok, used := e.stubEntitled(); used {
+			return ok, nil
+		}
 		return false, err
 	}
 	_, ok := e.planCodes[strings.ToLower(strings.TrimSpace(ent.PlanCode))]
