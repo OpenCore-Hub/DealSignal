@@ -857,27 +857,27 @@ type InsightsOverview struct {
 	// EventRetentionDays is access_logs partition retention (config); UI discloses it.
 	EventRetentionDays int
 	// PageViewRetentionDays is page_views partition retention (config).
-	PageViewRetentionDays           int
-	DailyVisits                     []DailyVisitPoint
-	PeriodOpens                     int64
-	PreviousPeriodOpens             int64
-	PeriodUniqueVisitors            int64
-	PreviousPeriodUniqueVisitors    int64
-	PeriodMedianDurationSeconds          float64
-	PreviousPeriodMedianDurationSeconds  float64
-	PeriodAvgDurationSeconds             float64
-	PeriodPageViewCount                  int64
-	PeriodSessionCount                   int64
-	PeriodMeasurableSessions             int64
-	PeriodCompletedSessions              int64
-	PeriodCompletionRate                 float64
-	PreviousPeriodSessionCount           int64
-	PreviousPeriodCompletedSessions      int64
-	PreviousPeriodCompletionRate         float64
-	OpenSignalCount                      int
-	TopDocuments                         []DocumentScore
-	TopLinks                             []LinkScore
-	TopContacts                          []ContactScore // digest enrichment only; not surfaced as radar CTA
+	PageViewRetentionDays               int
+	DailyVisits                         []DailyVisitPoint
+	PeriodOpens                         int64
+	PreviousPeriodOpens                 int64
+	PeriodUniqueVisitors                int64
+	PreviousPeriodUniqueVisitors        int64
+	PeriodMedianDurationSeconds         float64
+	PreviousPeriodMedianDurationSeconds float64
+	PeriodAvgDurationSeconds            float64
+	PeriodPageViewCount                 int64
+	PeriodSessionCount                  int64
+	PeriodMeasurableSessions            int64
+	PeriodCompletedSessions             int64
+	PeriodCompletionRate                float64
+	PreviousPeriodSessionCount          int64
+	PreviousPeriodCompletedSessions     int64
+	PreviousPeriodCompletionRate        float64
+	OpenSignalCount                     int
+	TopDocuments                        []DocumentScore
+	TopLinks                            []LinkScore
+	TopContacts                         []ContactScore // digest enrichment only; not surfaced as radar CTA
 }
 
 const insightsTrendDaysDefault = 7
@@ -1234,11 +1234,7 @@ func fillDailyVisitSeries(rows []db.GetWorkspaceDailyLinkOpensRow, days int, now
 	start := utcDay(now).AddDate(0, 0, -(days - 1))
 	converted := make([]db.GetWorkspaceDailyLinkOpensInRangeRow, len(rows))
 	for i, r := range rows {
-		converted[i] = db.GetWorkspaceDailyLinkOpensInRangeRow{
-			Day:            r.Day,
-			Opens:          r.Opens,
-			UniqueVisitors: r.UniqueVisitors,
-		}
+		converted[i] = db.GetWorkspaceDailyLinkOpensInRangeRow(r)
 	}
 	return fillDailyVisitSeriesFrom(converted, start, days)
 }
@@ -1276,11 +1272,7 @@ func splitComparedDailySeries(rows []db.GetWorkspaceDailyLinkOpensRow, days int,
 	// Convert preset rows into the InRange row shape for densify.
 	converted := make([]db.GetWorkspaceDailyLinkOpensInRangeRow, len(rows))
 	for i, r := range rows {
-		converted[i] = db.GetWorkspaceDailyLinkOpensInRangeRow{
-			Day:            r.Day,
-			Opens:          r.Opens,
-			UniqueVisitors: r.UniqueVisitors,
-		}
+		converted[i] = db.GetWorkspaceDailyLinkOpensInRangeRow(r)
 	}
 	all := fillDailyVisitSeriesFrom(converted, previousStart, days*2)
 	previous = all[:days]

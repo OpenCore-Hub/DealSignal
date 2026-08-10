@@ -579,6 +579,7 @@ func TestParseExpiresAt(t *testing.T) {
 			}
 			if got == nil {
 				t.Fatal("expected non-nil time, got nil")
+				return
 			}
 			if got.IsZero() {
 				t.Fatal("expected non-zero time")

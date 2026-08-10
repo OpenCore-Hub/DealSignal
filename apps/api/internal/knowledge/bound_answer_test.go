@@ -144,21 +144,6 @@ func TestBindAnswerClaimsRejectsBrokenUnresolvedFragments(t *testing.T) {
 		}
 	}
 	// Complete factual sentence without cite should still surface when unbound.
-	found := false
-	for _, u := range bound.Unresolved {
-		if strings.Contains(u, "保密义务") {
-			found = true
-		}
-	}
-	if !found && len(bound.Unresolved) == 0 {
-		// Weak overlap may bind the NDA sentence — that's fine; debris must stay out.
-		for _, c := range bound.Claims {
-			if strings.Contains(c.Text, "###") || strings.HasSuffix(strings.TrimSpace(c.Text), "1.") {
-				// Claims may still hold raw sentences; unresolved is the user-facing gap list.
-				continue
-			}
-		}
-	}
 }
 
 func TestIsActionableUnresolvedGap(t *testing.T) {

@@ -16,7 +16,7 @@ func TestResolveAnswersQuotaLimit(t *testing.T) {
 	if limit != 500 || window != 30*24*time.Hour {
 		t.Fatalf("monthly: limit=%d window=%s", limit, window)
 	}
-	limit, window = resolveAnswersQuotaLimit(0, 0)
+	limit, _ = resolveAnswersQuotaLimit(0, 0)
 	if limit != 0 {
 		t.Fatalf("unlimited: %d", limit)
 	}

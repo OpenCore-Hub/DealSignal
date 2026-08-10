@@ -28,15 +28,6 @@ func askModeOrDefault(mode string) string {
 
 // setDealRoomAskAiEnabled persists ask_ai_enabled for deal-room links inside qtx.
 // Entitlement (RAG corpus, knowledge service) is enforced at ask/stream time, not on save.
-func (s *Service) syncDealRoomAskAiWithQaEnabled(
-	ctx context.Context,
-	qtx *db.Queries,
-	link db.Link,
-	askAIEnabled bool,
-) error {
-	return s.syncDealRoomAskPolicy(ctx, qtx, link, askAIEnabled, askModeOrDefault(link.AskMode))
-}
-
 func (s *Service) syncDealRoomAskPolicy(
 	ctx context.Context,
 	qtx *db.Queries,

@@ -9,6 +9,7 @@ func TestLinkAskDeflectionRate(t *testing.T) {
 	rate := linkAskDeflectionRate(3, 2)
 	if rate == nil {
 		t.Fatal("expected rate")
+		return
 	}
 	if *rate < 0.599 || *rate > 0.601 {
 		t.Fatalf("rate = %v want 0.6", *rate)

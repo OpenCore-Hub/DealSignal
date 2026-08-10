@@ -94,10 +94,10 @@ func NewService(pool Pool, q Querier, m mailer.Mailer, cfg *config.Config) *Serv
 }
 
 const (
-	notificationPollLimit    = 100
-	notificationMaxAttempts  = 3
-	notificationBackoffBase  = 5 * time.Minute
-	notificationBackoffMax   = 24 * time.Hour
+	notificationPollLimit   = 100
+	notificationMaxAttempts = 3
+	notificationBackoffBase = 5 * time.Minute
+	notificationBackoffMax  = 24 * time.Hour
 )
 
 func notificationBackoffDelay(attempts int32) time.Duration {
@@ -187,7 +187,7 @@ func (s *Service) SendPending(ctx context.Context) error {
 		if err != nil {
 			return fmt.Errorf("begin notification transaction: %w", err)
 		}
-		defer tx.Rollback(ctx)
+		defer func() { _ = tx.Rollback(ctx) }()
 
 		qtx := s.queries.(*db.Queries).WithTx(tx)
 		if err := s.sendPendingWithQuerier(ctx, qtx); err != nil {

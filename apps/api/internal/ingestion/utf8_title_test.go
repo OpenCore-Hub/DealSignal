@@ -42,9 +42,6 @@ func TestTruncatePageTitle_ByteSliceLegacyWouldBreak(t *testing.T) {
 	if utf8.ValidString(broken) {
 		t.Fatal("fixture expected invalid UTF-8 from mid-rune cut")
 	}
-	if broken[len(broken)-1] != 0xe5 && broken[len(broken)-1] != 0xa2 && broken[len(broken)-1] != 0x8c {
-		// "对" is E5 AF B9 — cut at 200 leaves a lead/cont byte; assert invalid only.
-	}
 	fixed := truncatePageTitle([]TextBlock{{Text: s}})
 	if !utf8.ValidString(fixed) {
 		t.Fatalf("fixed title invalid: %q", fixed)

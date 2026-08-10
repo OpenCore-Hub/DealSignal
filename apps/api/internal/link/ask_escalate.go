@@ -107,14 +107,6 @@ func (s *Service) attachHostQueueToAITurn(
 	if turn.Status == askStatusHostEscalated {
 		return turn, nil
 	}
-	if visitorEmail == "" {
-		if sess, err := s.queries.GetLinkAskSessionByID(ctx, turn.SessionID); err == nil {
-			if sess.VisitorEmail.Valid {
-				visitorEmail = sess.VisitorEmail.String
-			}
-		}
-	}
-
 	tx, err := s.pool.Begin(ctx)
 	if err != nil {
 		return db.LinkAskTurn{}, fmt.Errorf("begin transaction: %w", err)
