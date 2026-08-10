@@ -6,6 +6,9 @@ func TestLinkAskDeflectionRate(t *testing.T) {
 	if got := linkAskDeflectionRate(0, 0); got != nil {
 		t.Fatalf("expected nil for empty counts, got %v", *got)
 	}
+	if got := linkAskDeflectionRate(0, 4); got != nil {
+		t.Fatalf("expected nil with host-only backlog, got %v", *got)
+	}
 	rate := linkAskDeflectionRate(3, 2)
 	if rate == nil {
 		t.Fatal("expected rate")

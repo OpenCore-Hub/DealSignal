@@ -1,6 +1,7 @@
 package link
 
 import (
+	"context"
 	"errors"
 	"testing"
 
@@ -36,6 +37,22 @@ func TestFormalAskEntitlementFailsClosedWithoutChecker(t *testing.T) {
 	s := &Service{}
 	if s.isFormalAskEntitled(t.Context(), db.Link{}) {
 		t.Fatal("expected formal entitlement to fail closed without a checker")
+	}
+}
+
+type stubFormalAskEntitlement struct {
+	ok  bool
+	err error
+}
+
+func (s stubFormalAskEntitlement) IsFormalAskEntitled(context.Context, string) (bool, error) {
+	return s.ok, s.err
+}
+
+func TestFormalAskEntitlementFailsClosedWithoutQueries(t *testing.T) {
+	s := &Service{formalAskEntitlement: stubFormalAskEntitlement{ok: true}}
+	if s.isFormalAskEntitled(t.Context(), db.Link{}) {
+		t.Fatal("expected fail-closed when queries are unset")
 	}
 }
 
