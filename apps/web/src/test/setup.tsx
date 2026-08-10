@@ -12,9 +12,25 @@ vi.mock("@base-ui/react/menu", async () => {
 
   const Root = ({
     children,
+    open: openProp,
+    defaultOpen,
+    onOpenChange,
     ...props
-  }: { children?: React.ReactNode } & Record<string, unknown>) => {
-    const [open, setOpen] = React.useState(false);
+  }: {
+    children?: React.ReactNode;
+    open?: boolean;
+    defaultOpen?: boolean;
+    onOpenChange?: (open: boolean) => void;
+  } & Record<string, unknown>) => {
+    const [uncontrolledOpen, setUncontrolledOpen] = React.useState(
+      Boolean(defaultOpen),
+    );
+    const controlled = openProp !== undefined;
+    const open = controlled ? Boolean(openProp) : uncontrolledOpen;
+    const setOpen = (next: boolean) => {
+      if (!controlled) setUncontrolledOpen(next);
+      onOpenChange?.(next);
+    };
     return (
       <MenuCtx.Provider value={{ open, setOpen }}>
         <div data-slot="dropdown-menu" {...props}>
@@ -27,28 +43,34 @@ vi.mock("@base-ui/react/menu", async () => {
   const Trigger = ({
     children,
     render,
+    onClick: userOnClick,
     ...props
   }: {
     children?: React.ReactNode;
-    render?: React.ReactElement;
+    // Base UI accepts either an element or a props→element render function.
+    render?:
+      | React.ReactElement
+      | ((props: Record<string, unknown>) => React.ReactNode);
+    onClick?: (e: React.MouseEvent) => void;
   } & Record<string, unknown>) => {
     const ctx = React.useContext(MenuCtx);
     const onClick = (e: React.MouseEvent) => {
       ctx?.setOpen(!(ctx?.open ?? false));
-      const childOnClick = (
-        render?.props as { onClick?: (ev: React.MouseEvent) => void } | undefined
-      )?.onClick;
-      childOnClick?.(e);
+      userOnClick?.(e);
     };
+    const merged = {
+      ...props,
+      "data-slot": "dropdown-menu-trigger",
+      onClick,
+    };
+    if (typeof render === "function") {
+      return <>{render(merged)}</>;
+    }
     if (React.isValidElement(render)) {
-      return React.cloneElement(render as React.ReactElement<Record<string, unknown>>, {
-        ...props,
-        "data-slot": "dropdown-menu-trigger",
-        onClick,
-      });
+      return React.cloneElement(render as React.ReactElement<Record<string, unknown>>, merged);
     }
     return (
-      <button type="button" data-slot="dropdown-menu-trigger" onClick={onClick} {...props}>
+      <button type="button" {...merged}>
         {children}
       </button>
     );
@@ -90,14 +112,15 @@ vi.mock("@base-ui/react/menu", async () => {
       <button
         type="button"
         role="menuitem"
-        disabled={disabled}
         data-slot="dropdown-menu-item"
+        {...props}
+        disabled={Boolean(disabled)}
+        {...(disabled ? { "data-disabled": "" } : {})}
         onClick={(e) => {
           if (disabled) return;
           onClick?.(e);
           ctx?.setOpen(false);
         }}
-        {...props}
       >
         {children}
       </button>

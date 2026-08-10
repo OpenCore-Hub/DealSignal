@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Production-grade API readiness wait for CI docker-compose stacks.
-# Avoids `set -e` aborting on the first failed curl (GitHub Actions default shell).
+# GitHub Actions runs steps with `bash -e`; never let a failed curl abort the loop,
+# and never re-curl after success (startup races can reset the second request).
+set +e
 set -u
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 URL="${1:-http://localhost:8080/healthz}"
@@ -8,13 +10,14 @@ ATTEMPTS="${2:-60}"
 SLEEP_SECS="${3:-2}"
 
 for i in $(seq 1 "$ATTEMPTS"); do
-  if curl -fsS "$URL" >/dev/null; then
+  body="$(curl -fsS "$URL" 2>/dev/null)"
+  status=$?
+  if [ "$status" -eq 0 ]; then
     echo "API ready ($URL) after ${i} attempt(s)"
-    curl -fsS "$URL"
-    echo
+    printf '%s\n' "$body"
     exit 0
   fi
-  echo "wait-api: attempt ${i}/${ATTEMPTS} failed; sleeping ${SLEEP_SECS}s"
+  echo "wait-api: attempt ${i}/${ATTEMPTS} failed (curl exit ${status}); sleeping ${SLEEP_SECS}s"
   sleep "$SLEEP_SECS"
 done
 
