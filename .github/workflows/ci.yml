@@ -1,11 +1,12 @@
 name: CI
 
 on:
-  pull_request:
-  push:
-    branches:
-      - main
-      - master
+  workflow_dispatch:
+    inputs:
+      run_deploy:
+        description: After green gates, push images and deploy staging (main branch only)
+        type: boolean
+        default: false
 
 jobs:
   frontend:
@@ -621,7 +622,7 @@ jobs:
         backend-lint,
         backend-security,
       ]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.run_deploy == true
     permissions:
       contents: read
       packages: write
@@ -664,7 +665,7 @@ jobs:
     name: Build and push web Docker image
     runs-on: ubuntu-latest
     needs: [frontend, frontend-visitor-ask-e2e, frontend-visitor-ask-real-e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.run_deploy == true
     permissions:
       contents: read
       packages: write
@@ -708,7 +709,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: [docker-push-api, docker-push-web]
     # secrets.* is invalid in job-level if; gate deploy via environment: staging instead.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch' && inputs.run_deploy == true
     environment: staging
     steps:
       - name: Require staging deploy secrets
