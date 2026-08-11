@@ -2804,6 +2804,8 @@ ORDER BY r.created_at DESC;
 -- name: ListPendingDocumentLinkAccessRequestsDetailedByWorkspace :many
 -- Document Library share inbox: document links only (never deal-room shares).
 -- Creator-scoped: only link.created_by may see applicant emails.
+-- is_workspace_member mirrors radar/action sync internal-actor filter so the
+-- host inbox can label members (still actionable) without implying Deal Radar.
 SELECT
     r.id,
     r.link_id,
@@ -2832,7 +2834,14 @@ SELECT
             LIMIT 1
         ),
         COALESCE(l.name, '')
-    )::text AS document_title
+    )::text AS document_title,
+    EXISTS (
+        SELECT 1
+        FROM workspace_members wm
+        JOIN users u ON u.id = wm.user_id
+        WHERE wm.workspace_id = r.workspace_id
+          AND LOWER(u.email) = LOWER(r.email)
+    ) AS is_workspace_member
 FROM link_access_requests r
 JOIN links l ON l.id = r.link_id
 WHERE r.workspace_id = $1
@@ -2847,6 +2856,7 @@ ORDER BY r.created_at DESC;
 -- name: ListPendingDealRoomLinkAccessRequestsDetailedByWorkspace :many
 -- Deal-room share inbox: pending requests for links in one room only.
 -- Creator-scoped: only link.created_by may see applicant emails.
+-- is_workspace_member mirrors radar/action sync internal-actor filter.
 SELECT
     r.id,
     r.link_id,
@@ -2875,7 +2885,14 @@ SELECT
             LIMIT 1
         ),
         COALESCE(l.name, '')
-    )::text AS document_title
+    )::text AS document_title,
+    EXISTS (
+        SELECT 1
+        FROM workspace_members wm
+        JOIN users u ON u.id = wm.user_id
+        WHERE wm.workspace_id = r.workspace_id
+          AND LOWER(u.email) = LOWER(r.email)
+    ) AS is_workspace_member
 FROM link_access_requests r
 JOIN links l ON l.id = r.link_id
 WHERE r.workspace_id = $1
@@ -2890,6 +2907,54 @@ ORDER BY r.created_at DESC;
 SELECT *
 FROM link_access_requests
 WHERE id = $1 AND workspace_id = $2
+LIMIT 1;
+
+-- name: GetLatestPendingLinkAccessRequestByLink :one
+-- Radar Diligence-gate evidence: pending share-link access request.
+-- When applicant_email is set, match that applicant (action title attribution).
+-- Otherwise newest pending. Always exclude workspace members (same policy as
+-- ListPendingDocumentLinkAccessRequestsByWorkspace / radar sync).
+SELECT id, email, reason, signer_name, status, created_at, updated_at
+FROM link_access_requests r
+WHERE r.link_id = $1
+  AND r.status = 'pending'
+  AND (
+    sqlc.narg(applicant_email)::text IS NULL
+    OR BTRIM(sqlc.narg(applicant_email)::text) = ''
+    OR LOWER(r.email) = LOWER(BTRIM(sqlc.narg(applicant_email)::text))
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
+ORDER BY r.created_at DESC
+LIMIT 1;
+
+-- name: GetLatestPendingRoomAccessRequestByRoom :one
+-- Radar Diligence-gate evidence: pending room membership request.
+-- When applicant_email is set, match that applicant (action title attribution).
+-- Otherwise newest pending. Always exclude workspace members (same policy as
+-- ListPendingRoomAccessRequestsByWorkspace / radar sync).
+SELECT id, email, reason, status, created_at, updated_at
+FROM room_access_requests r
+WHERE r.room_id = $1
+  AND r.status = 'pending'
+  AND (
+    sqlc.narg(applicant_email)::text IS NULL
+    OR BTRIM(sqlc.narg(applicant_email)::text) = ''
+    OR LOWER(r.email) = LOWER(BTRIM(sqlc.narg(applicant_email)::text))
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM workspace_members wm
+      JOIN users u ON u.id = wm.user_id
+      WHERE wm.workspace_id = r.workspace_id
+        AND LOWER(u.email) = LOWER(r.email)
+  )
+ORDER BY r.created_at DESC
 LIMIT 1;
 
 -- name: ListPendingRoomAccessRequestsByWorkspace :many

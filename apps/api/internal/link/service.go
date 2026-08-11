@@ -2616,10 +2616,11 @@ func pendingFromDocumentRow(r db.ListPendingDocumentLinkAccessRequestsDetailedBy
 			CreatedAt:  r.CreatedAt.Time,
 			UpdatedAt:  r.UpdatedAt.Time,
 		},
-		LinkName:      r.LinkName.String,
-		DocumentTitle: r.DocumentTitle,
-		PublicToken:   r.PublicToken,
-		CustomDomain:  r.CustomDomain.String,
+		LinkName:          r.LinkName.String,
+		DocumentTitle:     r.DocumentTitle,
+		PublicToken:       r.PublicToken,
+		CustomDomain:      r.CustomDomain.String,
+		IsWorkspaceMember: r.IsWorkspaceMember,
 	}
 }
 
@@ -2635,10 +2636,11 @@ func pendingFromDealRoomRow(r db.ListPendingDealRoomLinkAccessRequestsDetailedBy
 			CreatedAt:  r.CreatedAt.Time,
 			UpdatedAt:  r.UpdatedAt.Time,
 		},
-		LinkName:      r.LinkName.String,
-		DocumentTitle: r.DocumentTitle,
-		PublicToken:   r.PublicToken,
-		CustomDomain:  r.CustomDomain.String,
+		LinkName:          r.LinkName.String,
+		DocumentTitle:     r.DocumentTitle,
+		PublicToken:       r.PublicToken,
+		CustomDomain:      r.CustomDomain.String,
+		IsWorkspaceMember: r.IsWorkspaceMember,
 	}
 }
 
@@ -3017,10 +3019,11 @@ type LinkAccessRequest struct {
 // PendingLinkAccessRequest is a workspace-scoped pending request with share context.
 type PendingLinkAccessRequest struct {
 	LinkAccessRequest
-	LinkName      string `json:"link_name,omitempty"`
-	DocumentTitle string `json:"document_title,omitempty"`
-	PublicToken   string `json:"-"`
-	CustomDomain  string `json:"-"`
+	LinkName          string `json:"link_name,omitempty"`
+	DocumentTitle     string `json:"document_title,omitempty"`
+	PublicToken       string `json:"-"`
+	CustomDomain      string `json:"-"`
+	IsWorkspaceMember bool   `json:"is_workspace_member"`
 }
 
 var (

@@ -11,7 +11,7 @@
     "filtersLabel": "队列筛选",
     "filters": {
       "all": "全部",
-      "buying_window": "买入窗口",
+      "buying_window": "热意向",
       "diligence_gate": "尽调闸门",
       "commitment_ask": "承诺问答",
       "leak_watch": "泄密盯梢",
@@ -19,7 +19,7 @@
       "abuse_guard": "滥用守卫"
     },
     "products": {
-      "buying_window": "买入窗口",
+      "buying_window": "热意向",
       "diligence_gate": "尽调闸门",
       "commitment_ask": "承诺问答",
       "leak_watch": "泄密盯梢",
@@ -54,7 +54,7 @@
     "whyNow": {
       "sla_overdue": "已逾 SLA {{hours}} 小时 — 先清这一项",
       "coalesced": "近 24 小时合并了 {{count}} 条相关信号",
-      "buying_window": "买入窗口正热 — 趁意向未冷却跟进",
+      "buying_window": "意向正热 — 趁热度未冷跟进",
       "diligence_gate": "有人堵在闸门 — 尽快批或拒",
       "commitment_ask": "承诺级提问待当日答复",
       "leak_watch": "材料可能外传 — 先审再继续触达",
@@ -272,7 +272,37 @@
         "top_pages": "高频页面",
         "recent_visitors": "最近访客",
         "security_events": "安全事件",
-        "link_id": "链接身份"
+        "link_id": "链接身份",
+        "access_request": "访问申请"
+      },
+      "accessRequest": {
+        "title": "访问申请",
+        "reason": "申请理由",
+        "noReason": "未填写理由",
+        "surface": "来源",
+        "surfaces": {
+          "document_link": "文档分享链接",
+          "deal_room_link": "数据室分享链接",
+          "room": "数据室成员申请"
+        }
+      },
+      "gateEvents": "门禁事件",
+      "gateTimeline": {
+        "beforeAndAfter": "申请前撞门禁 {{before}} 次，申请后仍撞 {{after}} 次——仍被拦住。",
+        "beforeOnly": "申请前撞门禁 {{before}} 次。",
+        "afterOnly": "提出申请后仍撞门禁 {{after}} 次——仍被拦住。",
+        "eventsOnly": "撞门禁 {{total}} 次——仍被拦住。"
+      },
+      "coalesced": {
+        "count": "{{count}}×"
+      },
+      "gateNoSuccessfulOpens": "尚无成功打开——访客仍被挡在门禁外。",
+      "emptyPrimary": {
+        "leak_watch": "该链接近 24h 尚无转发/下载佐证——请从信号触发侧复核。",
+        "abuse_guard": "该链接近 24h 尚无截屏或限流事件。",
+        "access_decay": "该链接近 24h 尚无过期/撤销访问事件。",
+        "buying_window": "该链接近 24h 尚无打开或关键页互动记录。",
+        "commitment_ask": "提问待主机回复——互动指标为次要证据。"
       },
       "keyPages": "关键页",
       "topPages": "高频页面",
@@ -283,6 +313,7 @@
       "views_one": "{{count}} 次查看",
       "views_other": "{{count}} 次查看",
       "openFull": "打开完整证据",
+      "openShareInbox": "去分享中审批",
       "eventTypes": {
         "capture_attempt": "截屏尝试",
         "forward_signal": "转发信号",
@@ -291,6 +322,8 @@
         "revoked_link_accessed": "访问已撤销链接",
         "blocked_email": "邮箱被拦",
         "blocked_domain": "域名被拦",
+        "security_gate_failed": "安全门禁失败",
+        "not_in_allow_list": "不在允许名单",
         "ask_ai_rate_limited": "Ask AI 限流",
         "ask_escalated": "提问已升级",
         "ask_formal_submitted": "正式提问已提交",
@@ -304,6 +337,12 @@
         "mac_capture": "Mac 截屏",
         "win_snip": "Windows 截图",
         "other": "其他",
+        "email_code_required": "需要邮箱验证",
+        "email_required": "需要填写邮箱",
+        "invalid_email_code": "验证码无效",
+        "nda_required": "需要签署 NDA",
+        "password": "需要密码或密码错误",
+        "delivery_email_mismatch": "投递邮箱不匹配",
         "unknown": "原因未知"
       },
       "metrics": {

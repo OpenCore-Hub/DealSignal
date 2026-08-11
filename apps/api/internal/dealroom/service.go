@@ -1084,6 +1084,16 @@ func (s *Service) ListAccessRequests(ctx context.Context, roomID, workspaceID, u
 	return s.queries.ListAccessRequestsByRoom(ctx, room.ID)
 }
 
+// LoadMemberEmails returns workspace member emails for radar-honesty labeling
+// on room membership access requests (same policy as link inbox / radar sync).
+func (s *Service) LoadMemberEmails(ctx context.Context, workspaceID string) (action.MemberEmailSet, error) {
+	wsUUID := pgUUID(workspaceID)
+	if !wsUUID.Valid {
+		return nil, fmt.Errorf("invalid workspace id")
+	}
+	return action.LoadMemberEmailSet(ctx, s.queries, wsUUID)
+}
+
 // PublicAccess checks if a visitor can access a public room.
 func (s *Service) PublicAccess(ctx context.Context, slug, email string) (db.DealRoom, db.RoomMember, error) {
 	room, err := s.queries.GetDealRoomBySlug(ctx, slug)

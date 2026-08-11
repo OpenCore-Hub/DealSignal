@@ -546,6 +546,26 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	sourceID := textOrEmpty(a.SourceID)
 	targetID := textOrEmpty(a.TargetID)
 
+	// Operational Diligence/Ask cards encode the applicant in the title when
+	// there is no signal context — surface that email on Actor/ContactEmail so
+	// Evidence rail attribution matches the radar card.
+	if email == "" {
+		switch src {
+		case action.SourceTypeLinkAccessRequest,
+			action.SourceTypeDealRoomLinkAccessRequest,
+			action.SourceTypeRoomAccessRequest,
+			action.SourceTypeRoomNDA,
+			action.SourceTypeLinkQuestion,
+			action.SourceTypeDealRoomLinkQuestion:
+			if parsed := emailFromActionTitle(a.Title); parsed != "" {
+				email = parsed
+				if actor == "" {
+					actor = parsed
+				}
+			}
+		}
+	}
+
 	// Operational actions often carry link/room ids on source/target.
 	if linkID == "" {
 		switch src {

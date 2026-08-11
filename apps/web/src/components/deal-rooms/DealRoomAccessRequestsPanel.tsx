@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Check, X, UserPlus } from "@phosphor-icons/react";
 import { toast } from "sonner";
@@ -25,6 +25,7 @@ type PendingAccessRequest = {
   linkId?: string;
   linkName?: string;
   source: "room" | "link";
+  isWorkspaceMember?: boolean;
 };
 
 interface DealRoomAccessRequestsPanelProps {
@@ -63,6 +64,7 @@ export function DealRoomAccessRequestsPanel({
         email: r.email,
         reason: r.reason,
         source: "room" as const,
+        isWorkspaceMember: Boolean(r.is_workspace_member),
       }));
 
     const linkPending: PendingAccessRequest[] = (pendingLinkRes.data ?? []).map((r) => ({
@@ -73,12 +75,24 @@ export function DealRoomAccessRequestsPanel({
       linkId: r.link_id,
       linkName: r.link_name || undefined,
       source: "link" as const,
+      isWorkspaceMember: Boolean(r.is_workspace_member),
     }));
 
     return [...roomPending, ...linkPending];
   }, [roomId]);
 
   const pending = requests ?? [];
+  const memberCount = useMemo(
+    () => pending.filter((r) => r.isWorkspaceMember).length,
+    [pending],
+  );
+  const radarHonestyHint = useMemo(() => {
+    if (memberCount === 0) return null;
+    if (memberCount === pending.length) {
+      return t("linkShare:accessRequests.internalOnlyHint");
+    }
+    return t("linkShare:accessRequests.mixedInternalHint", { count: memberCount });
+  }, [memberCount, pending.length, t]);
 
   const afterLinkReview = useCallback(
     async (detail: { email: string; action: "approve" | "reject" }) => {
@@ -199,6 +213,14 @@ export function DealRoomAccessRequestsPanel({
           <Badge variant="warm">{pending.length}</Badge>
         </CardTitle>
         <CardDescription>{t("dealRooms:accessRequests.description")}</CardDescription>
+        {radarHonestyHint ? (
+          <p
+            className="pt-1 text-sm text-muted-foreground"
+            data-testid="deal-room-access-requests-radar-honesty-hint"
+          >
+            {radarHonestyHint}
+          </p>
+        ) : null}
       </CardHeader>
       <CardContent className="space-y-3">
         {pending.map((request) => {
@@ -206,6 +228,7 @@ export function DealRoomAccessRequestsPanel({
             Boolean(focusLinkId) &&
             request.source === "link" &&
             request.linkId === focusLinkId;
+          const isMember = Boolean(request.isWorkspaceMember);
           return (
           <div
             key={`${request.source}-${request.id}`}
@@ -214,9 +237,26 @@ export function DealRoomAccessRequestsPanel({
             }`}
             data-testid={`deal-room-access-request-${request.id}`}
             data-focused={focused ? "true" : undefined}
+            data-workspace-member={isMember ? "true" : undefined}
           >
             <div className="min-h-0 min-w-0 space-y-1">
-              <p className="truncate text-sm font-medium">{request.email}</p>
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                <p className="truncate text-sm font-medium">{request.email}</p>
+                {isMember ? (
+                  <Badge
+                    variant="secondary"
+                    className="shrink-0 font-normal"
+                    data-testid={`deal-room-access-request-${request.id}-member-badge`}
+                  >
+                    {t("linkShare:accessRequests.workspaceMemberBadge")}
+                  </Badge>
+                ) : null}
+              </div>
+              {isMember ? (
+                <p className="text-xs text-muted-foreground">
+                  {t("linkShare:accessRequests.notOnRadar")}
+                </p>
+              ) : null}
               {request.signerName ? (
                 <p className="text-sm text-muted-foreground">
                   {t("dealRooms:accessRequests.signerName", { name: request.signerName })}

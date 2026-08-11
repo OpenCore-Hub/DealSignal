@@ -3,7 +3,6 @@ import {
   Clock,
   ClockCounterClockwise,
   DotsThree,
-  Envelope,
   ArrowRight,
   X,
 } from "@phosphor-icons/react";
@@ -34,6 +33,8 @@ interface RadarRowProps {
   item: RadarWorkItem;
   emphasized?: boolean;
   selected?: boolean;
+  /** Hide product caption when a product filter is active; keep layout space. */
+  hideProductLabel?: boolean;
   onPrimary: (item: RadarWorkItem) => void;
   onSelect?: (item: RadarWorkItem) => void;
   onEvidence?: (item: RadarWorkItem) => void;
@@ -78,6 +79,7 @@ export function RadarRow({
   item,
   emphasized,
   selected,
+  hideProductLabel,
   onPrimary,
   onSelect,
   onEvidence,
@@ -121,7 +123,13 @@ export function RadarRow({
                 })
               : item.headline || t(`radar.products.${item.product}`)}
           </span>
-          <span className="text-caption text-muted-foreground">
+          <span
+            className={`text-caption text-muted-foreground${
+              hideProductLabel ? " invisible" : ""
+            }`}
+            data-testid="radar-product-label"
+            aria-hidden={hideProductLabel || undefined}
+          >
             {t(`radar.products.${item.product}`)}
           </span>
           {item.confidence ? (
@@ -181,31 +189,17 @@ export function RadarRow({
       </button>
 
       <div className="flex shrink-0 items-center gap-1">
-        <Button
-          size="sm"
-          variant="default"
-          className="gap-1.5"
-          onClick={(e) => {
-            e.stopPropagation();
-            onPrimary(item);
-          }}
-        >
-          {item.verb === "email" ? <Envelope size={14} /> : null}
-          {t(ctaLabelKey(item.verb))}
-        </Button>
-
-        {item.evidencePath && onEvidence ? (
+        {item.verb !== "email" ? (
           <Button
             size="sm"
-            variant="ghost"
-            className="hidden text-muted-foreground sm:inline-flex"
+            variant="default"
+            className="gap-1.5"
             onClick={(e) => {
               e.stopPropagation();
-              onEvidence(item);
+              onPrimary(item);
             }}
           >
-            {t("radar.evidence")}
-            <ArrowRight size={14} className="ml-1" />
+            {t(ctaLabelKey(item.verb))}
           </Button>
         ) : null}
 
@@ -290,6 +284,22 @@ export function RadarRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {onEvidence ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="inline-flex text-muted-foreground"
+            data-testid="radar-evidence-link"
+            onClick={(e) => {
+              e.stopPropagation();
+              onEvidence(item);
+            }}
+          >
+            {t("radar.evidence")}
+            <ArrowRight size={14} className="ml-1" />
+          </Button>
+        ) : null}
       </div>
     </div>
   );

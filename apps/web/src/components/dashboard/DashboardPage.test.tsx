@@ -80,14 +80,14 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       "radar.openCount_other": "{{count}} open",
       "radar.filtersLabel": "Queue filters",
       "radar.filters.all": "All",
-      "radar.filters.buying_window": "Buying window",
+      "radar.filters.buying_window": "Hot intent",
       "radar.filters.diligence_gate": "Diligence gate",
       "radar.filters.commitment_ask": "Ask",
       "radar.filters.leak_watch": "Leak watch",
       "radar.filters.access_decay": "Access decay",
       "radar.filters.abuse_guard": "Abuse guard",
       "radar.products.diligence_gate": "Diligence gate",
-      "radar.products.buying_window": "Buying window",
+      "radar.products.buying_window": "Hot intent",
       "radar.cta.approve": "Approve",
       "radar.cta.reply": "Reply",
       "radar.cta.email": "Email",
@@ -173,10 +173,6 @@ async function renderPage(waitForLoad = true, entry = "/acme/dashboard") {
       dueDate: "Due",
       "overdue.days_one": "{{count}} day overdue",
       "overdue.days_other": "{{count}} days overdue",
-    },
-    insights: {
-      "suggestions.emailSubject": "Follow-up: {{document}}",
-      "suggestions.emailBody": "Hi {{email}} about {{document}} — {{action}}",
     },
   });
 
@@ -318,7 +314,6 @@ describe("DashboardPage inbox", () => {
         makeItem({
           navigatePath: undefined,
           evidencePath: undefined,
-          mailtoHref: null,
         }),
       ]),
     );
@@ -329,6 +324,41 @@ describe("DashboardPage inbox", () => {
     expect(toast.message).toHaveBeenCalledWith(
       "No open destination for this item",
     );
+  });
+
+  it("hides Email primary CTA for Hot intent and never opens mailto", async () => {
+    const openSpy = vi.spyOn(window, "open").mockImplementation(() => null);
+    const item = makeItem({
+      id: "act-hot",
+      actionId: "act-hot",
+      product: "buying_window",
+      verb: "email",
+      headline: "Follow up with buyer",
+      contactEmail: "buyer@acme.test",
+      navigatePath: "/acme/links/l1",
+      evidencePath: "/acme/links/l1",
+    });
+    mockFns.getRadar.mockResolvedValue(
+      makeFeed([item, makeItem({ id: "act-2", actionId: "act-2" })]),
+    );
+
+    await renderPage();
+    const nextUp = await screen.findByTestId("radar-next-up");
+
+    expect(
+      within(nextUp).queryByRole("button", { name: /^Email$/i }),
+    ).not.toBeInTheDocument();
+    expect(
+      within(nextUp).getByRole("button", { name: /Evidence/i }),
+    ).toBeInTheDocument();
+
+    // Row body selects only — no navigate / mailto.
+    fireEvent.click(within(nextUp).getByText("Follow up with buyer"));
+    expect(mockFns.navigate).not.toHaveBeenCalled();
+    expect(openSpy).not.toHaveBeenCalled();
+    expect(nextUp.querySelector('[data-radar-selected="true"]')).toBeTruthy();
+
+    openSpy.mockRestore();
   });
 
   it("refetches after direct complete on buying_window", async () => {

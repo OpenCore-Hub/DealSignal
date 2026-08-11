@@ -11,7 +11,7 @@
     "filtersLabel": "Queue filters",
     "filters": {
       "all": "All",
-      "buying_window": "Buying window",
+      "buying_window": "Hot intent",
       "diligence_gate": "Diligence gate",
       "commitment_ask": "Ask",
       "leak_watch": "Leak watch",
@@ -19,7 +19,7 @@
       "abuse_guard": "Abuse guard"
     },
     "products": {
-      "buying_window": "Buying window",
+      "buying_window": "Hot intent",
       "diligence_gate": "Diligence gate",
       "commitment_ask": "Commitment ask",
       "leak_watch": "Leak watch",
@@ -54,7 +54,7 @@
     "whyNow": {
       "sla_overdue": "SLA overdue by {{hours}}h — clear this first",
       "coalesced": "{{count}} related signals merged in the last 24h",
-      "buying_window": "Active buying window — follow up while intent is warm",
+      "buying_window": "Hot intent — follow up while interest is warm",
       "diligence_gate": "Someone is blocked at the gate — approve or reject",
       "commitment_ask": "A commitment-grade ask is waiting for a reply today",
       "leak_watch": "Possible material leak — review before continuing outreach",
@@ -272,7 +272,37 @@
         "top_pages": "Top pages",
         "recent_visitors": "Recent visitors",
         "security_events": "Security events",
-        "link_id": "Link identity"
+        "link_id": "Link identity",
+        "access_request": "Access request"
+      },
+      "accessRequest": {
+        "title": "Access request",
+        "reason": "Reason",
+        "noReason": "No reason provided",
+        "surface": "Surface",
+        "surfaces": {
+          "document_link": "Document share link",
+          "deal_room_link": "Data room share link",
+          "room": "Data room membership"
+        }
+      },
+      "gateEvents": "Gate events",
+      "gateTimeline": {
+        "beforeAndAfter": "Hit the gate {{before}}× before requesting, then {{after}}× after — still blocked.",
+        "beforeOnly": "Hit the gate {{before}}× before requesting access.",
+        "afterOnly": "Requested access, then hit the gate {{after}}× — still blocked.",
+        "eventsOnly": "Hit the gate {{total}}× — still blocked."
+      },
+      "coalesced": {
+        "count": "{{count}}×"
+      },
+      "gateNoSuccessfulOpens": "No successful opens yet — the visitor is still at the gate.",
+      "emptyPrimary": {
+        "leak_watch": "No corroborating 24h forward/download activity on this link yet — review from the signal trigger.",
+        "abuse_guard": "No capture or rate-limit events in the last 24h on this link yet.",
+        "access_decay": "No expired/revoked access events in the last 24h on this link yet.",
+        "buying_window": "No 24h opens or key-page engagement recorded on this link yet.",
+        "commitment_ask": "Ask is waiting on a host reply — engagement metrics are secondary."
       },
       "keyPages": "Key pages",
       "topPages": "Top pages",
@@ -283,6 +313,7 @@
       "views_one": "{{count}} view",
       "views_other": "{{count}} views",
       "openFull": "Open full evidence",
+      "openShareInbox": "Review in Share",
       "eventTypes": {
         "capture_attempt": "Capture attempt",
         "forward_signal": "Forward signal",
@@ -291,6 +322,8 @@
         "revoked_link_accessed": "Revoked link accessed",
         "blocked_email": "Blocked email",
         "blocked_domain": "Blocked domain",
+        "security_gate_failed": "Security gate failed",
+        "not_in_allow_list": "Not on allow list",
         "ask_ai_rate_limited": "Ask AI rate limited",
         "ask_escalated": "Ask escalated",
         "ask_formal_submitted": "Formal ask submitted",
@@ -304,6 +337,12 @@
         "mac_capture": "Mac capture",
         "win_snip": "Windows snip",
         "other": "Other",
+        "email_code_required": "Email verification required",
+        "email_required": "Email required",
+        "invalid_email_code": "Invalid verification code",
+        "nda_required": "NDA required",
+        "password": "Password required or incorrect",
+        "delivery_email_mismatch": "Delivery email mismatch",
         "unknown": "Reason unavailable"
       },
       "metrics": {

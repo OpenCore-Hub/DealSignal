@@ -12,8 +12,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/middleware"
 )
 
@@ -247,7 +248,7 @@ func (h *Handler) Get(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"code": "internal_error", "message": httpx.SafeMessage("internal_error", err)})
 		return
 	}
-	c.JSON(http.StatusOK, roomDetailResponse(detail))
+	c.JSON(http.StatusOK, roomDetailResponse(detail, h.memberEmails(c)))
 }
 
 // AddMemberRequest invites a member.
@@ -295,7 +296,7 @@ func (h *Handler) ApproveRequest(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, requestResponse(req))
+	c.JSON(http.StatusOK, requestResponse(req, h.memberEmails(c).Contains(req.Email)))
 }
 
 // PublicView returns a room for an authorized visitor.
@@ -357,7 +358,7 @@ func (h *Handler) CreateAccessRequest(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusCreated, requestResponse(request))
+	c.JSON(http.StatusCreated, requestResponse(request, false))
 }
 
 // NDARequest is the NDA agreement body.
@@ -747,7 +748,7 @@ func (h *Handler) ListAccessRequests(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"data": requestListResponse(requests)})
+	c.JSON(http.StatusOK, gin.H{"data": requestListResponse(requests, h.memberEmails(c))})
 }
 
 // RejectAccessRequest handles access request rejection.
@@ -764,7 +765,7 @@ func (h *Handler) RejectAccessRequest(c *gin.Context) {
 		}
 		return
 	}
-	c.JSON(http.StatusOK, requestResponse(req))
+	c.JSON(http.StatusOK, requestResponse(req, h.memberEmails(c).Contains(req.Email)))
 }
 
 func mapPublicError(c *gin.Context, err error) {
@@ -802,7 +803,7 @@ func roomSummaryResponse(r RoomSummary) gin.H {
 	return resp
 }
 
-func roomDetailResponse(r RoomDetail) gin.H {
+func roomDetailResponse(r RoomDetail, internal action.MemberEmailSet) gin.H {
 	resp := baseRoomResponse(r.Room)
 	resp["documentCount"] = r.DocumentCount
 	resp["memberCount"] = r.MemberCount
@@ -810,7 +811,7 @@ func roomDetailResponse(r RoomDetail) gin.H {
 	resp["folders"] = folderListResponse(r.Folders)
 	resp["documents"] = folderDocsListResponse(r.Documents)
 	resp["members"] = memberDetailListResponse(r.Members)
-	resp["accessRequests"] = requestListResponse(r.AccessRequests)
+	resp["accessRequests"] = requestListResponse(r.AccessRequests, internal)
 	return resp
 }
 
@@ -851,11 +852,12 @@ func memberResponse(m db.RoomMember) gin.H {
 	return resp
 }
 
-func requestResponse(r db.RoomAccessRequest) gin.H {
+func requestResponse(r db.RoomAccessRequest, isWorkspaceMember bool) gin.H {
 	resp := gin.H{
-		"id":     uuid.UUID(r.ID.Bytes).String(),
-		"email":  r.Email,
-		"status": r.Status,
+		"id":                   uuid.UUID(r.ID.Bytes).String(),
+		"email":                r.Email,
+		"status":               r.Status,
+		"is_workspace_member":  isWorkspaceMember,
 	}
 	if r.Reason.Valid {
 		resp["reason"] = r.Reason.String
@@ -973,10 +975,18 @@ func memberDetailListResponse(members []RoomMemberDetail) []gin.H {
 	return out
 }
 
-func requestListResponse(requests []db.RoomAccessRequest) []gin.H {
+func requestListResponse(requests []db.RoomAccessRequest, internal action.MemberEmailSet) []gin.H {
 	out := make([]gin.H, len(requests))
 	for i, r := range requests {
-		out[i] = requestResponse(r)
+		out[i] = requestResponse(r, internal.Contains(r.Email))
 	}
 	return out
+}
+
+func (h *Handler) memberEmails(c *gin.Context) action.MemberEmailSet {
+	set, err := h.service.LoadMemberEmails(c.Request.Context(), middleware.WorkspaceIDFrom(c))
+	if err != nil || set == nil {
+		return action.MemberEmailSet{}
+	}
+	return set
 }

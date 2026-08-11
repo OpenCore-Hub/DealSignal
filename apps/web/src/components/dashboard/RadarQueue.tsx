@@ -355,6 +355,7 @@ export function RadarQueue({
                 item={nextUp}
                 emphasized
                 selected={selectedId === nextUp.id}
+                hideProductLabel={filter !== "all"}
                 onPrimary={onPrimary}
                 onSelect={onSelect}
                 onEvidence={onSelect}
@@ -407,6 +408,7 @@ export function RadarQueue({
                           key={item.id}
                           item={item}
                           selected={selectedId === item.id}
+                          hideProductLabel={filter !== "all"}
                           onPrimary={onPrimary}
                           onSelect={onSelect}
                           onEvidence={onSelect}

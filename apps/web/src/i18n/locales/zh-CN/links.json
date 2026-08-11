@@ -18,7 +18,6 @@
     "createTime": "创建时间",
     "heat": "热度",
     "status": "状态",
-    "totalLinks": "{{count}} 个链接",
     "clearFilter": "清除筛选",
     "copyLink": "复制链接",
     "searchPlaceholder": "搜索链接…",

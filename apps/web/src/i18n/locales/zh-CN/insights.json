@@ -136,15 +136,14 @@
     "snooze3d": "推迟 3 天",
     "snooze7d": "推迟 7 天",
     "snoozed": "已推迟 {{hours}} 小时",
-    "emailSubject": "跟进：{{document}}",
-    "emailBody": "您好，\n\n想就《{{document}}》继续沟通（关于：{{action}}）。\n\n此致",
     "score": "{{score}} 分"
   },
   "access": {
     "title": "访问审计",
     "description": "权限与门禁失败汇总——可按类型、数据室、链接所有者、文件夹切片。",
+    "scopeHint": "本页仅审计权限与门禁失败。待审批的授权申请在「分享」中处理，不计入上方的拒绝次数。",
     "kpiTotal": "拒绝次数",
-    "kpiTotalHint": "近 {{days}} 天（UTC）",
+    "kpiTotalHint": "仅门禁失败 · 近 {{days}} 天（UTC）",
     "byTypeTitle": "按事件类型",
     "byRoomTitle": "按数据室",
     "byMemberTitle": "按链接所有者",
@@ -157,10 +156,14 @@
     "activeFilters": "筛选：",
     "clearFilters": "清除",
     "emptyTitle": "暂无访问拒绝",
-    "emptyDescription": "邮箱拦截、密码失败、邀请令牌等问题会在访客撞上门禁时出现在此。",
+    "emptyDescription": "邮箱拦截、密码失败、邀请令牌等问题会在访客撞上门禁时出现在此。授权申请请到「文档 → 分享」处理。",
+    "pendingRequestsBanner_one": "有 {{count}} 条待审批访问申请在「分享」中等待处理（不计入上方统计）。",
+    "pendingRequestsBanner_other": "有 {{count}} 条待审批访问申请在「分享」中等待处理（不计入上方统计）。",
+    "pendingRequestsCta": "打开分享",
     "eventsTitle": "最近事件",
     "colTime": "时间",
     "colType": "类型",
+    "colEvent": "事件",
     "colActor": "访客",
     "colTarget": "目标",
     "colMember": "链接所有者",
@@ -187,6 +190,15 @@
       "invite_token_expired": "邀请已过期",
       "invite_token_revoked": "邀请已撤销",
       "rate_limit_exceeded": "触发限流"
+    },
+    "reasons": {
+      "email_code_required": "需要邮箱验证",
+      "email_required": "需要填写邮箱",
+      "invalid_email_code": "验证码无效",
+      "nda_required": "需要签署 NDA",
+      "password": "需要密码或密码错误",
+      "delivery_email_mismatch": "投递邮箱不匹配",
+      "archived": "链接已归档"
     }
   },
   "keyPages": {
