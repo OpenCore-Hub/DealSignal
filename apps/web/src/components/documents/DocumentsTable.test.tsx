@@ -54,8 +54,17 @@ vi.mock("@/hooks/useDocumentUploadConflict", () => ({
 }));
 
 vi.mock("@/components/links/LinksTable", () => ({
-  LinksTable: ({ documentId }: { documentId?: string }) => (
-    <div data-testid="links-table">{documentId ? `filtered:${documentId}` : "all-links"}</div>
+  LinksTable: ({
+    documentId,
+    toolbar,
+  }: {
+    documentId?: string;
+    toolbar?: React.ReactNode;
+  }) => (
+    <div data-testid="links-table">
+      {toolbar}
+      <span>{documentId ? `filtered:${documentId}` : "all-links"}</span>
+    </div>
   ),
 }));
 

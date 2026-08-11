@@ -463,73 +463,73 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     return (
       <div>
         {filterTabs}
-        <div className="space-y-4">
-          <div className="flex flex-wrap items-center justify-end gap-3">
-            <div className="relative w-full min-w-[12rem] max-w-xs sm:w-56">
-              <MagnifyingGlass
-                size={16}
-                className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-              />
-              <Input
-                placeholder={t("links:table.searchPlaceholder")}
-                value={shareSearchInput}
-                onChange={(e) => setShareSearchInput(e.target.value)}
-                className="h-9 border-border/70 bg-background/80 pl-9 text-sm shadow-none backdrop-blur-sm"
-                data-testid="share-links-search"
-                aria-label={t("links:table.searchPlaceholder")}
-              />
-            </div>
-            <Select
-              value={shareCreatedWithin}
-              onValueChange={(value) => {
-                if (!isLinkCreatedWithin(value)) return;
-                patchShareListParams({ createdWithin: value });
-              }}
-            >
-              <SelectTrigger
-                className="h-9 min-w-[11.5rem] border-border/70 bg-background/80 shadow-none"
-                data-testid="share-created-within"
-                aria-label={t("links:table.createdWithinLabel")}
+        <LinksTable
+          embedded
+          documentId={shareDocumentId}
+          documentTitle={shareDocumentTitle}
+          searchQuery={deferredShareSearch}
+          createdWithin={shareCreatedWithin}
+          onClearListFilters={clearShareListFilters}
+          toolbar={
+            <div className="flex flex-wrap items-center justify-end gap-3">
+              <div className="relative w-full min-w-[12rem] max-w-xs sm:w-56">
+                <MagnifyingGlass
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground"
+                />
+                <Input
+                  placeholder={t("links:table.searchPlaceholder")}
+                  value={shareSearchInput}
+                  onChange={(e) => setShareSearchInput(e.target.value)}
+                  className="h-9 border-border/70 bg-background/80 pl-9 text-sm shadow-none backdrop-blur-sm"
+                  data-testid="share-links-search"
+                  aria-label={t("links:table.searchPlaceholder")}
+                />
+              </div>
+              <Select
+                value={shareCreatedWithin}
+                onValueChange={(value) => {
+                  if (!isLinkCreatedWithin(value)) return;
+                  patchShareListParams({ createdWithin: value });
+                }}
               >
-                <span className="flex min-w-0 items-center gap-1.5">
-                  <CalendarBlank size={14} className="shrink-0 text-muted-foreground" />
-                  <span className="truncate">
-                    {t(`links:table.createdWithin.${shareCreatedWithin}`)}
+                <SelectTrigger
+                  className="h-9 min-w-[11.5rem] border-border/70 bg-background/80 shadow-none"
+                  data-testid="share-created-within"
+                  aria-label={t("links:table.createdWithinLabel")}
+                >
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <CalendarBlank size={14} className="shrink-0 text-muted-foreground" />
+                    <span className="truncate">
+                      {t(`links:table.createdWithin.${shareCreatedWithin}`)}
+                    </span>
                   </span>
-                </span>
-              </SelectTrigger>
-              <SelectContent align="end" alignItemWithTrigger={false}>
-                {LINK_CREATED_WITHIN_VALUES.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {t(`links:table.createdWithin.${value}`)}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button
-              onClick={() =>
-                navigate(
-                  documentsCreateLinkPath(workspaceSlug!, {
-                    documentId: shareDocumentId,
-                  }),
-                )
-              }
-              className="gap-1.5 shrink-0"
-              data-testid="share-create-link"
-            >
-              <Plus size={16} weight="bold" />
-              {t("links:page.createLink")}
-            </Button>
-          </div>
-          <LinksTable
-            embedded
-            documentId={shareDocumentId}
-            documentTitle={shareDocumentTitle}
-            searchQuery={deferredShareSearch}
-            createdWithin={shareCreatedWithin}
-            onClearListFilters={clearShareListFilters}
-          />
-        </div>
+                </SelectTrigger>
+                <SelectContent align="end" alignItemWithTrigger={false}>
+                  {LINK_CREATED_WITHIN_VALUES.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {t(`links:table.createdWithin.${value}`)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button
+                onClick={() =>
+                  navigate(
+                    documentsCreateLinkPath(workspaceSlug!, {
+                      documentId: shareDocumentId,
+                    }),
+                  )
+                }
+                className="gap-1.5 shrink-0"
+                data-testid="share-create-link"
+              >
+                <Plus size={16} weight="bold" />
+                {t("links:page.createLink")}
+              </Button>
+            </div>
+          }
+        />
       </div>
     );
   }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { useLocation, useNavigate, useParams } from "react-router";
 import {
@@ -71,6 +71,11 @@ interface LinksTableProps {
   createdWithin?: LinkCreatedWithin;
   /** Clears Share-tab search + create-time filters (parent owns URL/state). */
   onClearListFilters?: () => void;
+  /**
+   * Optional Share-tab controls (search / filters / create).
+   * Rendered below pending access requests and above the links table.
+   */
+  toolbar?: ReactNode;
 }
 
 /** Column layout: long URL/title truncate; table scrolls horizontally when narrow. */
@@ -105,6 +110,7 @@ export function LinksTable({
   searchQuery = "",
   createdWithin = "all",
   onClearListFilters,
+  toolbar,
 }: LinksTableProps) {
   "use no memo";
   const navigate = useNavigate();
@@ -361,19 +367,32 @@ export function LinksTable({
     );
   }
 
-  if (loading) {
-    return <SkeletonList rows={6} />;
-  }
-
   // Always constrain the inbox to links visible in this table (document surface).
   // Combined with API scope=document, this prevents deal-room applicant PII leakage.
-  const accessInbox = <ShareAccessRequestsPanel linkIds={linkIds} />;
+  // While the links list is still loading, leave linkIds undefined so the inbox can
+  // paint above the Share toolbar without waiting on the table.
+  const accessInbox = (
+    <ShareAccessRequestsPanel
+      linkIds={loading && !documentId ? undefined : linkIds}
+    />
+  );
+
+  if (loading) {
+    return (
+      <div className="space-y-4">
+        {accessInbox}
+        {toolbar}
+        <SkeletonList rows={6} />
+      </div>
+    );
+  }
 
   if (data.length === 0) {
     if (listFiltersActive && allLinks.length > 0) {
       return (
         <div className="space-y-4">
           {accessInbox}
+          {toolbar}
           <EmptyState
             icon={<MagnifyingGlass size={64} />}
             title={t("empty.noMatchesTitle")}
@@ -409,6 +428,7 @@ export function LinksTable({
     return (
       <div className="space-y-4">
         {accessInbox}
+        {toolbar}
         <EmptyState
           icon={<LinkIcon size={64} />}
           title={emptyTitle}
@@ -422,6 +442,7 @@ export function LinksTable({
   return (
     <div className="space-y-4">
       {accessInbox}
+      {toolbar}
 
       {(!embedded || isFiltered) && (
         <div className="flex min-w-0 items-center gap-2">
