@@ -1,16 +1,26 @@
-import type { ReactNode } from "react";
+import { type ReactNode } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { ArrowRight, SpinnerGap } from "@phosphor-icons/react";
 import { useAsyncData } from "@/hooks/useAsyncData";
 import { api } from "@/lib/api";
 import {
-  radarHeadlineKey,
-  radarWhyNowFallbackKey,
-  radarWhyNowKey,
+  coalesceSecurityEvents,
+  evidenceEmptyPrimaryKey,
+  gateTimelineSummary,
+  type CoalescedSecurityEvent,
+  type GateTimelineSummary,
+} from "@/lib/radarEvidencePresentation";
+import {
+  evidenceMetricsHaveActivity,
   type RadarEvidencePack,
   type RadarWorkItem,
 } from "@/lib/radarQueue";
+import { cn } from "@/lib/utils";
+
+/** Shared tile for Evidence list rows (parity with metric tiles across all 6 products). */
+const EMBEDDED_ITEM =
+  "rounded-md border border-border bg-card px-2.5 py-2 text-sm";
 
 interface RadarEvidenceRailProps {
   item: RadarWorkItem | null;
@@ -21,7 +31,7 @@ export function RadarEvidenceRail({
   item,
   workspaceSlug,
 }: RadarEvidenceRailProps) {
-  const { t, i18n } = useTranslation("dashboard");
+  const { t } = useTranslation("dashboard");
 
   const { data, loading, error } = useAsyncData<RadarEvidencePack | null>(
     async () => {
@@ -45,27 +55,28 @@ export function RadarEvidenceRail({
     );
   }
 
+  const isDiligenceGate = item.product === "diligence_gate";
+  const accessRequest = data?.accessRequest;
+  const metricsActive = evidenceMetricsHaveActivity(data?.metrics);
+  const coalescedEvents = coalesceSecurityEvents(data?.securityEvents);
+  const emptyPrimaryKey = evidenceEmptyPrimaryKey(item.product, {
+    metricsActive,
+    hasSecurityEvents: coalescedEvents.length > 0,
+  });
+  // Timeline narrative is for Diligence gate (request ± gate hits), not leak/abuse.
+  const timeline =
+    isDiligenceGate
+      ? gateTimelineSummary(data?.securityEvents, accessRequest?.requestedAt)
+      : null;
+  // Selected radar row already shows deal / headline / actor / why-now — Evidence leads with facets only.
+  const cardActor = item.actor?.trim().toLowerCase() ?? "";
+
   return (
     <section
       data-testid="radar-evidence-rail"
       className="rounded-xl border border-border px-4 py-4"
     >
       <h3 className="text-sm font-semibold">{t("radar.evidenceRail.title")}</h3>
-      <p className="text-caption mt-1 text-muted-foreground">
-        {t(`radar.products.${item.product}`)}
-        {item.dealName ? ` · ${item.dealName}` : ""}
-      </p>
-      <p className="mt-2 text-sm font-medium text-foreground">
-        {item.headlineCode
-          ? t(radarHeadlineKey(item), {
-              defaultValue:
-                item.headline || t(`radar.products.${item.product}`),
-            })
-          : item.headline || t(`radar.products.${item.product}`)}
-      </p>
-      {item.actor ? (
-        <p className="text-caption mt-0.5 text-muted-foreground">{item.actor}</p>
-      ) : null}
 
       {loading ? (
         <div className="mt-4 flex items-center gap-2 text-caption text-muted-foreground">
@@ -98,33 +109,81 @@ export function RadarEvidenceRail({
             </p>
           ) : null}
 
-          {data.whyNowCode || item.whyNowCode ? (
-            <p className="text-sm text-muted-foreground" data-testid="radar-evidence-why-now">
-              {(() => {
-                const why = {
-                  scenario: item.scenario,
-                  whyNowCode: data.whyNowCode || item.whyNowCode,
-                };
-                const hours = data.whyNowHours ?? item.whyNowHours ?? 1;
-                const count =
-                  data.whyNowHours ??
-                  item.whyNowHours ??
-                  item.coalescedFrom?.length ??
-                  1;
-                return t(radarWhyNowKey(why), {
-                  hours,
-                  count,
-                  defaultValue: t(radarWhyNowFallbackKey(why), {
-                    hours,
-                    count,
-                  }),
-                });
-              })()}
+          {accessRequest ? (
+            <Block title={t("radar.evidenceRail.accessRequest.title")}>
+              <dl
+                className="space-y-1.5"
+                data-testid="radar-evidence-access-request"
+              >
+                {accessRequest.reason ? (
+                  <div className={EMBEDDED_ITEM}>
+                    <dt className="text-caption text-muted-foreground">
+                      {t("radar.evidenceRail.accessRequest.reason")}
+                    </dt>
+                    <dd className="text-foreground">{accessRequest.reason}</dd>
+                  </div>
+                ) : (
+                  <div className={EMBEDDED_ITEM}>
+                    <dt className="text-caption text-muted-foreground">
+                      {t("radar.evidenceRail.accessRequest.reason")}
+                    </dt>
+                    <dd className="text-muted-foreground">
+                      {t("radar.evidenceRail.accessRequest.noReason")}
+                    </dd>
+                  </div>
+                )}
+                <div className={EMBEDDED_ITEM}>
+                  <dt className="text-caption text-muted-foreground">
+                    {t("radar.evidenceRail.accessRequest.surface")}
+                  </dt>
+                  <dd className="text-muted-foreground">
+                    {t(`radar.evidenceRail.accessRequest.surfaces.${accessRequest.surface}`, {
+                      defaultValue: accessRequest.surface,
+                    })}
+                  </dd>
+                </div>
+              </dl>
+            </Block>
+          ) : null}
+
+          {timeline ? (
+            <p
+              className="text-sm text-muted-foreground"
+              data-testid="radar-evidence-gate-timeline"
+            >
+              {formatGateTimeline(t, timeline)}
             </p>
           ) : null}
 
-          {data.metrics ? (
-            <dl className="grid grid-cols-2 gap-2">
+          {coalescedEvents.length > 0 ? (
+            <Block
+              title={
+                isDiligenceGate
+                  ? t("radar.evidenceRail.gateEvents")
+                  : t("radar.evidenceRail.securityEvents")
+              }
+            >
+              <ul className="space-y-1.5" data-testid="radar-evidence-security-events">
+                {coalescedEvents.map((group) => (
+                  <CoalescedGateRow
+                    key={group.key}
+                    group={group}
+                    label={eventLabel(t, group)}
+                    countLabel={t("radar.evidenceRail.coalesced.count", {
+                      count: group.count,
+                    })}
+                    hideEmail={
+                      Boolean(cardActor) &&
+                      group.email?.trim().toLowerCase() === cardActor
+                    }
+                  />
+                ))}
+              </ul>
+            </Block>
+          ) : null}
+
+          {data.metrics && metricsActive ? (
+            <dl className="grid grid-cols-2 gap-2" data-testid="radar-evidence-metrics">
               <Metric
                 label={t("radar.evidenceRail.metrics.opens24h")}
                 value={data.metrics.opens24h}
@@ -150,11 +209,25 @@ export function RadarEvidenceRail({
             </dl>
           ) : null}
 
+          {/* Product-primary empty copy — never lead with four zero tiles. */}
+          {emptyPrimaryKey ? (
+            <p
+              className="text-caption text-muted-foreground"
+              data-testid={
+                isDiligenceGate
+                  ? "radar-evidence-gate-no-opens"
+                  : "radar-evidence-empty-primary"
+              }
+            >
+              {t(emptyPrimaryKey)}
+            </p>
+          ) : null}
+
           {data.keyPageTitles && data.keyPageTitles.length > 0 ? (
             <Block title={t("radar.evidenceRail.keyPages")}>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5" data-testid="radar-evidence-key-pages">
                 {data.keyPageTitles.map((title) => (
-                  <li key={title} className="text-sm text-foreground">
+                  <li key={title} className={cn(EMBEDDED_ITEM, "text-foreground")}>
                     {title}
                   </li>
                 ))}
@@ -164,11 +237,11 @@ export function RadarEvidenceRail({
 
           {data.topPages && data.topPages.length > 0 ? (
             <Block title={t("radar.evidenceRail.topPages")}>
-              <ul className="space-y-1">
+              <ul className="space-y-1.5" data-testid="radar-evidence-top-pages">
                 {data.topPages.map((p) => (
                   <li
                     key={p.pageNumber}
-                    className="flex justify-between gap-2 text-sm"
+                    className={cn(EMBEDDED_ITEM, "flex justify-between gap-2")}
                   >
                     <span>
                       {t("radar.evidenceRail.page", { page: p.pageNumber })}
@@ -184,17 +257,23 @@ export function RadarEvidenceRail({
 
           {data.recentVisitors && data.recentVisitors.length > 0 ? (
             <Block title={t("radar.evidenceRail.recentVisitors")}>
-              <ul className="space-y-1.5">
+              <ul
+                className="space-y-1.5"
+                data-testid="radar-evidence-recent-visitors"
+              >
                 {data.recentVisitors.map((v) => (
-                  <li key={v.visitorId} className="text-sm">
+                  <li
+                    key={v.visitorId}
+                    className={cn(
+                      EMBEDDED_ITEM,
+                      "flex flex-wrap items-baseline justify-between gap-x-2 gap-y-0.5",
+                    )}
+                  >
                     <span className="font-medium">
                       {v.email || t("radar.evidenceRail.anonymousVisitor")}
                     </span>
-                    <span className="ml-2 text-caption text-muted-foreground">
+                    <span className="text-caption text-muted-foreground">
                       {t("radar.evidenceRail.views", { count: v.totalViews })}
-                      {v.lastAccessAt
-                        ? ` · ${new Date(v.lastAccessAt).toLocaleString(i18n.language)}`
-                        : ""}
                     </span>
                   </li>
                 ))}
@@ -202,37 +281,20 @@ export function RadarEvidenceRail({
             </Block>
           ) : null}
 
-          {data.securityEvents && data.securityEvents.length > 0 ? (
-            <Block title={t("radar.evidenceRail.securityEvents")}>
-              <ul className="space-y-1.5">
-                {data.securityEvents.map((e, i) => (
-                  <li key={`${e.eventType}-${e.createdAt}-${i}`} className="text-sm">
-                    <span className="font-medium">
-                      {t(`radar.evidenceRail.eventTypes.${e.eventType}`, {
-                        defaultValue: t("radar.evidenceRail.eventTypes.unknown"),
-                      })}
-                    </span>
-                    {e.reason ? (
-                      <span className="ml-1 text-muted-foreground">
-                        —{" "}
-                        {t(`radar.evidenceRail.reasons.${e.reason}`, {
-                          defaultValue: t("radar.evidenceRail.reasons.unknown"),
-                        })}
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
-            </Block>
-          ) : null}
-
-          {(data.insightsPath || data.evidencePath) && (
+          {(data.insightsPath || data.evidencePath || data.navigatePath) && (
             <Link
-              to={data.insightsPath || data.evidencePath || `/${workspaceSlug}/insights/overview`}
+              to={
+                data.navigatePath ||
+                data.insightsPath ||
+                data.evidencePath ||
+                `/${workspaceSlug}/insights/overview`
+              }
               className="inline-flex items-center gap-1 text-sm font-medium text-foreground hover:underline"
               data-testid="radar-evidence-open"
             >
-              {t("radar.evidenceRail.openFull")}
+              {isDiligenceGate && accessRequest
+                ? t("radar.evidenceRail.openShareInbox")
+                : t("radar.evidenceRail.openFull")}
               <ArrowRight size={14} />
             </Link>
           )}
@@ -242,11 +304,78 @@ export function RadarEvidenceRail({
   );
 }
 
+function eventLabel(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  group: CoalescedSecurityEvent,
+): string {
+  if (group.reason) {
+    return t(`radar.evidenceRail.reasons.${group.reason}`, {
+      defaultValue: t(`radar.evidenceRail.eventTypes.${group.eventType}`, {
+        defaultValue: t("radar.evidenceRail.eventTypes.unknown"),
+      }),
+    });
+  }
+  return t(`radar.evidenceRail.eventTypes.${group.eventType}`, {
+    defaultValue: t("radar.evidenceRail.eventTypes.unknown"),
+  });
+}
+
+function formatGateTimeline(
+  t: (key: string, opts?: Record<string, unknown>) => string,
+  summary: GateTimelineSummary,
+): string {
+  switch (summary.kind) {
+    case "before_and_after":
+      return t("radar.evidenceRail.gateTimeline.beforeAndAfter", {
+        before: summary.before,
+        after: summary.after,
+      });
+    case "before_only":
+      return t("radar.evidenceRail.gateTimeline.beforeOnly", {
+        before: summary.before,
+      });
+    case "after_only":
+      return t("radar.evidenceRail.gateTimeline.afterOnly", {
+        after: summary.after,
+      });
+    case "events_only":
+      return t("radar.evidenceRail.gateTimeline.eventsOnly", {
+        total: summary.total,
+      });
+  }
+}
+
+function CoalescedGateRow({
+  group,
+  label,
+  countLabel,
+  hideEmail,
+}: {
+  group: CoalescedSecurityEvent;
+  label: string;
+  countLabel: string;
+  hideEmail?: boolean;
+}) {
+  return (
+    <li className={EMBEDDED_ITEM}>
+      <div className="flex flex-wrap items-baseline gap-x-1.5 gap-y-0.5">
+        <span className="font-medium">{label}</span>
+        {group.count > 1 ? (
+          <span className="text-caption text-muted-foreground">· {countLabel}</span>
+        ) : null}
+        {!hideEmail && group.email ? (
+          <span className="text-caption text-muted-foreground">· {group.email}</span>
+        ) : null}
+      </div>
+    </li>
+  );
+}
+
 function Metric({ label, value }: { label: string; value: number }) {
   return (
-    <div className="rounded-md border border-border px-2.5 py-2">
+    <div className={EMBEDDED_ITEM}>
       <dt className="text-caption text-muted-foreground">{label}</dt>
-      <dd className="text-sm font-semibold tabular-nums">{value}</dd>
+      <dd className="font-semibold tabular-nums">{value}</dd>
     </div>
   );
 }

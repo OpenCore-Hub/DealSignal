@@ -114,8 +114,6 @@ export interface RadarWorkItem {
   headlineCode?: string;
   state?: "open";
   scenario?: RadarScenario | string;
-  /** Populated client-side for mailto CTAs. */
-  mailtoHref?: string | null;
 }
 
 export interface RadarStrand {
@@ -404,47 +402,6 @@ export function applyRadarCircleLens(
   };
 }
 
-export function buildFollowUpMailto(
-  email: string,
-  subject: string,
-  body: string,
-): string {
-  const params = new URLSearchParams();
-  params.set("subject", subject);
-  params.set("body", body);
-  return `mailto:${email}?${params.toString()}`;
-}
-
-/** Attach localized mailto hrefs for email verbs. */
-export function withMailtoHrefs(
-  items: RadarWorkItem[],
-  opts: {
-    subject: (documentTitle: string) => string;
-    body: (args: {
-      email: string;
-      document: string;
-      action: string;
-    }) => string;
-  },
-): RadarWorkItem[] {
-  return items.map((item) => {
-    if (item.verb !== "email" || !item.contactEmail) return item;
-    const doc = item.documentTitle || item.headline;
-    return {
-      ...item,
-      mailtoHref: buildFollowUpMailto(
-        item.contactEmail,
-        opts.subject(doc),
-        opts.body({
-          email: item.contactEmail,
-          document: doc,
-          action: item.headline,
-        }),
-      ),
-    };
-  });
-}
-
 /** Group filtered items into deal strands (preserves item order / first-seen deal). */
 export function groupIntoStrands(items: RadarWorkItem[]): RadarStrand[] {
   const idx = new Map<string, number>();
@@ -465,6 +422,15 @@ export function groupIntoStrands(items: RadarWorkItem[]): RadarStrand[] {
     strands[existing].items.push(item);
   }
   return strands;
+}
+
+export interface RadarEvidenceAccessRequest {
+  email: string;
+  reason?: string;
+  signerName?: string;
+  status: string;
+  requestedAt: string;
+  surface: "document_link" | "deal_room_link" | "room" | string;
 }
 
 export interface RadarEvidencePack {
@@ -489,6 +455,8 @@ export interface RadarEvidencePack {
     downloads24h: number;
     captureAttempts24h?: number;
   };
+  /** Pending authorization application — primary Diligence gate evidence. */
+  accessRequest?: RadarEvidenceAccessRequest;
   keyPageTitles?: string[];
   topPages?: Array<{
     pageNumber: number;
@@ -514,8 +482,23 @@ export interface RadarEvidencePack {
     | "recent_visitors"
     | "security_events"
     | "link_id"
+    | "access_request"
     | string
   >;
+}
+
+/** True when any 24h engagement counter is non-zero. */
+export function evidenceMetricsHaveActivity(
+  metrics?: RadarEvidencePack["metrics"] | null,
+): boolean {
+  if (!metrics) return false;
+  return (
+    metrics.opens24h > 0 ||
+    metrics.uniqueVisitors24h > 0 ||
+    metrics.forwardSignals24h > 0 ||
+    metrics.downloads24h > 0 ||
+    (metrics.captureAttempts24h ?? 0) > 0
+  );
 }
 
 /**

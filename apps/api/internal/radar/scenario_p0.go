@@ -160,7 +160,7 @@ var p0DeepPacks = map[Scenario]Pack{
 		},
 	},
 	ScenarioSalesDataRoom: {
-		DigestLead: "This week’s focus: follow warm buying windows, renew prospect access, and clear commercial / security asks.",
+		DigestLead: "This week’s focus: follow hot intent, renew prospect access, and clear commercial / security asks.",
 		KeyPageExtra: map[string][]string{
 			"pricing": {
 				"sku", "discount", "order form", "msa pricing",

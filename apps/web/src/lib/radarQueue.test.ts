@@ -17,7 +17,6 @@ import {
   radarHeadlineKey,
   radarWhyNowFallbackKey,
   radarWhyNowKey,
-  withMailtoHrefs,
   type RadarFeed,
   type RadarStrand,
   type RadarWorkItem,
@@ -116,15 +115,6 @@ describe("radarQueue", () => {
     const sales = applyRadarCircleLens(feed, "sales");
     expect(sales.nextUp?.id).toBe("buy");
     expect(sales.lens).toBe("sales");
-  });
-
-  it("builds mailto hrefs for email verbs", () => {
-    const [item] = withMailtoHrefs([baseItem({})], {
-      subject: (d) => `Follow-up: ${d}`,
-      body: ({ email }) => `Hi ${email}`,
-    });
-    expect(item.mailtoHref).toContain("mailto:a@example.com");
-    expect(item.mailtoHref).toContain("Follow-up");
   });
 
   it("groups items into deal strands", () => {

@@ -1282,14 +1282,23 @@ export function getMockRadarFeed(workspaceSlug = "acme-capital"): RadarFeed {
   };
 }
 
-/** Evidence pack for MSW — derived from the same action/signal fixtures. */
+/** Evidence pack for MSW — prefers an override feed (e2e stress seed), else fixtures. */
 export function getMockRadarEvidence(
   itemId: string,
   workspaceSlug = "acme-capital",
+  feedOverride?: RadarFeed | null,
 ): RadarEvidencePack | null {
-  const feed = getMockRadarFeed(workspaceSlug);
+  const feed = feedOverride ?? getMockRadarFeed(workspaceSlug);
   const item = feed.items.find((i) => i.id === itemId);
   if (!item) return null;
+  return buildMockRadarEvidencePack(item, workspaceSlug);
+}
+
+/** Product-shaped evidence for a compiled radar row (fixtures or stress seed). */
+export function buildMockRadarEvidencePack(
+  item: RadarWorkItem,
+  workspaceSlug = "acme-capital",
+): RadarEvidencePack {
   const signal = item.signalId
     ? mockSignals.find((s) => s.id === item.signalId)
     : undefined;
@@ -1305,6 +1314,14 @@ export function getMockRadarEvidence(
       : item.product === "leak_watch"
         ? 1
         : 0;
+  const isDiligenceGate = item.product === "diligence_gate";
+  const applicantEmail =
+    item.contactEmail ||
+    (item.actor?.includes("@") ? item.actor : undefined) ||
+    "lp@vc.com";
+  const requestedAt = item.createdAt || new Date().toISOString();
+  const requestMs = new Date(requestedAt).getTime();
+
   return {
     itemId: item.id,
     product: item.product,
@@ -1322,32 +1339,75 @@ export function getMockRadarEvidence(
       ? `/${workspaceSlug}/links/${item.linkId}`
       : `/${workspaceSlug}/insights/overview`,
     metrics: {
-      opens24h: opens,
-      uniqueVisitors24h: signal?.context?.uniqueVisitors ?? Math.max(1, Math.floor(opens / 2)),
-      forwardSignals24h: forwards,
-      downloads24h: downloads,
+      opens24h: isDiligenceGate ? 0 : opens,
+      uniqueVisitors24h: isDiligenceGate
+        ? 0
+        : (signal?.context?.uniqueVisitors ?? Math.max(1, Math.floor(opens / 2))),
+      forwardSignals24h: isDiligenceGate ? 0 : forwards,
+      downloads24h: isDiligenceGate ? 0 : downloads,
       captureAttempts24h:
         signal?.subtype === "capture_attempt" || item.product === "abuse_guard"
           ? 1
           : undefined,
     },
-    keyPageTitles: signal?.context?.keyPageTitles ?? ["Executive summary", "Financials"],
-    topPages: [
-      { pageNumber: 1, views: Math.max(2, opens), avgDurationSeconds: 42 },
-      { pageNumber: 3, views: Math.max(1, Math.floor(opens / 2)), avgDurationSeconds: 28 },
-    ],
-    recentVisitors: [
-      {
-        visitorId: "vis-mock-1",
-        email: item.actor?.includes("@") ? item.actor : "lp@vc.com",
-        totalViews: Math.max(2, opens),
-        lastAccessAt: new Date().toISOString(),
-      },
-    ],
-    securityEvents:
-      item.product === "leak_watch" ||
-      item.product === "abuse_guard" ||
-      item.product === "access_decay"
+    accessRequest: isDiligenceGate
+      ? {
+          email: applicantEmail,
+          reason: "Need access for diligence review",
+          status: "pending",
+          requestedAt,
+          surface: item.dealRoomId ? "deal_room_link" : "document_link",
+        }
+      : undefined,
+    keyPageTitles: isDiligenceGate
+      ? undefined
+      : (signal?.context?.keyPageTitles ?? ["Executive summary", "Financials"]),
+    topPages: isDiligenceGate
+      ? undefined
+      : [
+          { pageNumber: 1, views: Math.max(2, opens), avgDurationSeconds: 42 },
+          { pageNumber: 3, views: Math.max(1, Math.floor(opens / 2)), avgDurationSeconds: 28 },
+        ],
+    recentVisitors: isDiligenceGate
+      ? undefined
+      : [
+          {
+            visitorId: "vis-mock-1",
+            email: applicantEmail,
+            totalViews: Math.max(2, opens),
+            lastAccessAt: new Date().toISOString(),
+          },
+        ],
+    securityEvents: isDiligenceGate
+      ? [
+          {
+            eventType: "security_gate_failed",
+            reason: "email_code_required",
+            email: applicantEmail,
+            createdAt: new Date(requestMs - 8 * 60_000).toISOString(),
+          },
+          {
+            eventType: "security_gate_failed",
+            reason: "email_code_required",
+            email: applicantEmail,
+            createdAt: new Date(requestMs + 2 * 60_000).toISOString(),
+          },
+          {
+            eventType: "security_gate_failed",
+            reason: "email_code_required",
+            email: applicantEmail,
+            createdAt: new Date(requestMs + 5 * 60_000).toISOString(),
+          },
+          {
+            eventType: "security_gate_failed",
+            reason: "email_code_required",
+            email: applicantEmail,
+            createdAt: new Date(requestMs + 9 * 60_000).toISOString(),
+          },
+        ]
+      : item.product === "leak_watch" ||
+          item.product === "abuse_guard" ||
+          item.product === "access_decay"
         ? [
             {
               eventType:
@@ -1357,6 +1417,7 @@ export function getMockRadarEvidence(
                     ? "expired_link_accessed"
                     : "forward_signal",
               reason: item.product === "leak_watch" ? "other" : undefined,
+              email: item.product === "leak_watch" ? applicantEmail : undefined,
               createdAt: new Date().toISOString(),
             },
           ]

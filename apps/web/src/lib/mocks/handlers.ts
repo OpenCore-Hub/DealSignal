@@ -51,6 +51,7 @@ import {
   getMockRadarFeed,
   getMockSignalFeed,
 } from "./data";
+import { buildRadarStressFeed } from "./radarStressFeed";
 import { computeMockLinkHeat } from "./mockHeat";
 import { applyRadarCircleLens, type RadarFeed } from "@/lib/radarQueue";
 
@@ -1577,6 +1578,26 @@ export const handlers = [
       }
       return new HttpResponse(null, { status: 204 });
     }
+    if (body?.action === "radar-stress") {
+      type StressBody = E2EResetBody & { perProduct?: number; workspaceSlug?: string };
+      const stressBody = body as StressBody;
+      radarFeedHydrated = true;
+      radarFeedHydratePromise = null;
+      mockRadarFeedOverride = buildRadarStressFeed({
+        perProduct: stressBody.perProduct,
+        workspaceSlug: stressBody.workspaceSlug,
+      });
+      await persistRadarFeedOverride();
+      return HttpResponse.json(
+        {
+          ok: true,
+          counts: mockRadarFeedOverride.counts,
+          items: mockRadarFeedOverride.items.length,
+          strands: mockRadarFeedOverride.strands?.length ?? 0,
+        },
+        { status: 200 },
+      );
+    }
     await resetMockState();
     return new HttpResponse(null, { status: 204 });
   }),
@@ -1962,6 +1983,7 @@ export const handlers = [
           link_name: link?.name ?? "",
           document_title: link?.documentTitle ?? "",
           short_url: link?.shortUrl ?? "",
+          is_workspace_member: false,
           _dealRoomId: link?.dealRoomId,
           _documentId: link?.documentId,
         };
@@ -5072,9 +5094,14 @@ export const handlers = [
 
   http.get(
     "*/api/workspaces/:workspaceSlug/radar/items/:id/evidence",
-    ({ params }) => {
+    async ({ params }) => {
+      await hydrateRadarFeedOverride();
       const slug = String(params.workspaceSlug || "acme-capital");
-      const pack = getMockRadarEvidence(String(params.id), slug);
+      const pack = getMockRadarEvidence(
+        String(params.id),
+        slug,
+        mockRadarFeedOverride,
+      );
       if (!pack) {
         return HttpResponse.json(
           { code: "not_found", message: "radar item not found" },

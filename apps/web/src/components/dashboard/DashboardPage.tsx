@@ -21,7 +21,6 @@ import type { ActionStatus } from "@/types";
 import {
   decrementRadarCounts,
   parseRadarCircle,
-  withMailtoHrefs,
   type RadarFeed,
   type RadarOutcome,
   type RadarWorkItem,
@@ -41,7 +40,6 @@ export function DashboardPage() {
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
-  const { t: tInsights } = useTranslation("insights");
   const [feedOverride, setFeedOverride] = useState<RadarFeed | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const setOpenCount = useRadarStore((s) => s.setOpenCount);
@@ -67,12 +65,7 @@ export function DashboardPage() {
         counts: { all: 0 },
       } satisfies RadarFeed;
     }
-    const items = withMailtoHrefs(base.items, {
-      subject: (document) =>
-        tInsights("suggestions.emailSubject", { document }),
-      body: ({ email, document, action }) =>
-        tInsights("suggestions.emailBody", { email, document, action }),
-    });
+    const items = base.items;
     const byId = new Map(items.map((i) => [i.id, i]));
     const strands = (base.strands ?? []).map((strand) => ({
       ...strand,
@@ -100,7 +93,7 @@ export function DashboardPage() {
       strands,
       nextUp,
     };
-  }, [feedOverride, data, tInsights, t]);
+  }, [feedOverride, data, t]);
 
   useEffect(() => {
     setOpenCount(feed.items.length);
@@ -121,10 +114,6 @@ export function DashboardPage() {
 
   const handlePrimary = (item: RadarWorkItem) => {
     setSelectedId(item.id);
-    if (item.verb === "email" && item.mailtoHref) {
-      window.open(item.mailtoHref, "_blank", "noopener,noreferrer");
-      return;
-    }
     const path = item.navigatePath || item.evidencePath;
     if (path) {
       navigate(path, {
