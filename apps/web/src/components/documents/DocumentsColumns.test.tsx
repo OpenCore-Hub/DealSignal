@@ -166,6 +166,46 @@ describe("useDocumentColumns download/delete", () => {
     expect(shareOnShare).toHaveBeenCalledTimes(2);
   });
 
+  it("keeps Share CTA visible but disabled while processing (§3.2)", async () => {
+    const i18nInstance = await initI18n();
+    const processing: DocumentRow = { ...readyDoc, status: "processing" };
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <ActionsHarness doc={processing} />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    const shareBtn = screen.getByTestId("document-row-share");
+    expect(shareBtn).toBeDisabled();
+    expect(shareBtn).toHaveAttribute("title", "Document must be ready before sharing");
+    fireEvent.click(shareBtn);
+    expect(shareOnShare).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "More actions" }));
+    const menu = await screen.findByRole("menu");
+    const overflowShare = within(menu).getByRole("menuitem", { name: /^Share$/i });
+    expect(overflowShare).toHaveAttribute("data-disabled");
+    expect(overflowShare).toHaveAttribute("title", "Document must be ready before sharing");
+  });
+
+  it("disables Share CTA for archived docs when library share is enabled", async () => {
+    const i18nInstance = await initI18n();
+    const archived: DocumentRow = { ...readyDoc, status: "archived" };
+    render(
+      <I18nextProvider i18n={i18nInstance}>
+        <MemoryRouter>
+          <ActionsHarness doc={archived} />
+        </MemoryRouter>
+      </I18nextProvider>,
+    );
+
+    const shareBtn = screen.getByTestId("document-row-share");
+    expect(shareBtn).toBeDisabled();
+    expect(shareBtn).toHaveAttribute("title", "Unarchive the document to use this action");
+  });
+
   it("requests archive confirmation instead of archiving immediately", async () => {
     const i18nInstance = await initI18n();
     render(

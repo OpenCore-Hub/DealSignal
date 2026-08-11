@@ -1378,6 +1378,15 @@ function validatePassword(password: string): boolean {
   return hasUpper && hasLower && hasDigit && hasSpecial;
 }
 
+/** Phase A archive revoke — public asset endpoints deny archived docs. */
+function publicArchivedDocumentDeny(doc: { status: string } | undefined) {
+  if (!doc || doc.status !== "archived") return null;
+  return HttpResponse.json(
+    { code: "access_denied", message: "document access denied" },
+    { status: 403 },
+  );
+}
+
 function placeholdImageUrl(width: number, height: number): string {
   return `data:image/svg+xml,${encodeURIComponent(
     `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}"><rect width="100%" height="100%" fill="#e2e8f0"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#64748b" font-size="24">Page</text></svg>`
@@ -5485,12 +5494,8 @@ export const handlers = [
   http.get("*/api/v1/public/documents/:documentId/pages", ({ params }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
-    if (doc.status === "archived") {
-      return HttpResponse.json(
-        { code: "access_denied", message: "document access denied" },
-        { status: 403 },
-      );
-    }
+    const archivedDeny = publicArchivedDocumentDeny(doc);
+    if (archivedDeny) return archivedDeny;
     const pages = Array.from({ length: doc.pageCount }, (_, i) => ({
       pageNumber: i + 1,
       width: 800,
@@ -5502,12 +5507,8 @@ export const handlers = [
   http.get("*/api/v1/public/documents/:documentId/pages/signed-url", ({ params, request }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
-    if (doc.status === "archived") {
-      return HttpResponse.json(
-        { code: "access_denied", message: "document access denied" },
-        { status: 403 },
-      );
-    }
+    const archivedDeny = publicArchivedDocumentDeny(doc);
+    if (archivedDeny) return archivedDeny;
     const url = new URL(request.url);
     const pageNumber = Number(url.searchParams.get("page_number") ?? "1");
     return HttpResponse.json({
@@ -5522,12 +5523,8 @@ export const handlers = [
   http.get("*/api/v1/public/documents/:documentId/download-url", ({ params }) => {
     const doc = mockDocuments.find((d) => d.id === params.documentId);
     if (!doc) return new HttpResponse(null, { status: 404 });
-    if (doc.status === "archived") {
-      return HttpResponse.json(
-        { code: "access_denied", message: "document access denied" },
-        { status: 403 },
-      );
-    }
+    const archivedDeny = publicArchivedDocumentDeny(doc);
+    if (archivedDeny) return archivedDeny;
     return HttpResponse.json({
       downloadUrl: placeholdImageUrl(200, 200),
       expiresAt: new Date(Date.now() + 5 * 60 * 1000).toISOString(),

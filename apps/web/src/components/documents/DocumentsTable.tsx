@@ -49,6 +49,7 @@ import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { SkeletonList } from "@/components/common/SkeletonLayout";
 import { useAsyncData } from "@/hooks/useAsyncData";
+import { useDocumentDeleteImpact } from "@/hooks/useDocumentDeleteImpact";
 import {
   UploadCancelledError,
   useDocumentUploadConflict,
@@ -57,6 +58,10 @@ import { api } from "@/lib/api";
 import { LIBRARY_DOCUMENT_CATEGORY } from "@/lib/documentCategory";
 import { ApiError } from "@/lib/apiClient";
 import { LinksTable } from "@/components/links/LinksTable";
+import {
+  clearLibraryShareHandoff,
+  readLibraryShareHandoff,
+} from "@/lib/documentsLibraryShareHandoff";
 import {
   documentsCreateLinkPath,
   sanitizeDocumentsLibrarySearchParams,
@@ -262,72 +267,12 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
     documentTitle: string;
   } | null>(null);
   const [docToArchive, setDocToArchive] = useState<DocumentRow | null>(null);
-  const [archiveImpact, setArchiveImpact] = useState<{
-    activeLinkCount: number;
-  } | null>(null);
+  const archiveImpact = useDocumentDeleteImpact(docToArchive);
   const [isArchiving, setIsArchiving] = useState(false);
   const [docToDelete, setDocToDelete] = useState<DocumentRow | null>(null);
-  const [deleteImpact, setDeleteImpact] = useState<{
-    activeLinkCount: number;
-    dealRoomCount: number;
-  } | null>(null);
+  const deleteImpact = useDocumentDeleteImpact(docToDelete);
   const [isDeleting, setIsDeleting] = useState(false);
   const filters: DocumentFilter[] = ["all", "shared", "archived"];
-
-  useEffect(() => {
-    if (!docToArchive) {
-      setArchiveImpact(null);
-      return;
-    }
-    let cancelled = false;
-    setArchiveImpact(null);
-    void api
-      .getDocumentDeleteImpact(docToArchive.id)
-      .then((impact) => {
-        if (!cancelled) {
-          setArchiveImpact({ activeLinkCount: impact.active_link_count });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setArchiveImpact({ activeLinkCount: docToArchive.links.length });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [docToArchive]);
-
-  useEffect(() => {
-    if (!docToDelete) {
-      setDeleteImpact(null);
-      return;
-    }
-    let cancelled = false;
-    setDeleteImpact(null);
-    void api
-      .getDocumentDeleteImpact(docToDelete.id)
-      .then((impact) => {
-        if (!cancelled) {
-          setDeleteImpact({
-            activeLinkCount: impact.active_link_count,
-            dealRoomCount: impact.deal_room_count,
-          });
-        }
-      })
-      .catch(() => {
-        // Fall back to row-local link count when impact endpoint is unavailable.
-        if (!cancelled) {
-          setDeleteImpact({
-            activeLinkCount: docToDelete.links.length,
-            dealRoomCount: 0,
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [docToDelete]);
 
   const {
     data,
@@ -395,33 +340,27 @@ export function DocumentsTable({ category }: DocumentsTableProps) {
   // dialog immediately with notReady, right after "Upload now".
   useEffect(() => {
     if (isAgreement || category) return;
-    const documentId = searchParams.get("shareDocumentId")?.trim();
-    if (!documentId) return;
-    const documentTitle =
-      searchParams.get("shareDocumentTitle")?.trim() || documentId;
-    const status = searchParams.get("shareDocumentStatus") || "processing";
+    const handoff = readLibraryShareHandoff(searchParams);
+    if (!handoff) return;
     setSearchParams(
-      (prev) => {
-        const next = new URLSearchParams(prev);
-        next.delete("shareDocumentId");
-        next.delete("shareDocumentTitle");
-        next.delete("shareDocumentStatus");
-        return next;
-      },
+      (prev) => clearLibraryShareHandoff(prev) ?? prev,
       { replace: true },
     );
-    if (isDocumentReadyForLibraryShare(status)) {
+    if (isDocumentReadyForLibraryShare(handoff.documentStatus)) {
       setDocToShare(
         buildShareRow({
-          documentId,
-          documentTitle,
+          documentId: handoff.documentId,
+          documentTitle: handoff.documentTitle,
           status: "ready",
           category: "general",
         }),
       );
       return;
     }
-    setPendingShareHandoff({ documentId, documentTitle });
+    setPendingShareHandoff({
+      documentId: handoff.documentId,
+      documentTitle: handoff.documentTitle,
+    });
   }, [category, isAgreement, searchParams, setSearchParams]);
 
   // Open deferred Share once list polling marks the uploaded doc ready.

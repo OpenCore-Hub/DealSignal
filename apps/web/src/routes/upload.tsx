@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useNavigate, useParams, useSearchParams } from "react-router";
 import { Uploader } from "@/components/upload/Uploader";
-import { isDocumentReadyForLibraryShare } from "@/lib/documentsUploadedEvent";
+import { documentsLibraryShareHandoffPath } from "@/lib/documentsLibraryShareHandoff";
 import type { Document } from "@/types";
 
 export function UploadPage() {
@@ -17,19 +17,16 @@ export function UploadPage() {
       return;
     }
     // POST /documents returns as soon as the object is stored — status is usually
-    // still "processing". DocumentsTable must NOT open Share until ready; we pass
-    // handoff query params so it can wait on list polling.
-    if (document?.id) {
-      const status = document.status || "processing";
-      const params = new URLSearchParams({
-        shareDocumentId: document.id,
-        shareDocumentTitle: document.title || document.fileName || document.id,
-        // Only claim ready when API says so — never force-ready to open Share early.
-        shareDocumentStatus: isDocumentReadyForLibraryShare(status)
-          ? "ready"
-          : status,
-      });
-      navigate(`/${workspaceSlug}/documents?${params.toString()}`);
+    // still "processing". DocumentsTable must NOT open Share until ready; handoff
+    // params encode status (normalized) so the library can wait on list polling.
+    if (document?.id && workspaceSlug) {
+      navigate(
+        documentsLibraryShareHandoffPath(workspaceSlug, {
+          documentId: document.id,
+          documentTitle: document.title || document.fileName || document.id,
+          documentStatus: document.status || "processing",
+        }),
+      );
       return;
     }
     navigate(`/${workspaceSlug}/documents`);
