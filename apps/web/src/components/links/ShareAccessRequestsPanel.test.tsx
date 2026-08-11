@@ -91,6 +91,28 @@ describe("ShareAccessRequestsPanel", () => {
     });
   });
 
+  it("labels workspace-member applicants as not on Deal Radar", async () => {
+    mockGetPending.mockResolvedValue({
+      data: [{ ...pendingRequest, is_workspace_member: true }],
+    });
+    renderPanel();
+
+    await waitFor(() => {
+      expect(screen.getByTestId("share-access-requests-panel")).toBeInTheDocument();
+    });
+    expect(screen.getByTestId("access-requests-radar-honesty-hint")).toHaveTextContent(
+      "accessRequests.internalOnlyHint",
+    );
+    expect(screen.getByTestId("share-access-request-lar_1-member-badge")).toHaveTextContent(
+      "accessRequests.workspaceMemberBadge",
+    );
+    expect(screen.getByText("accessRequests.notOnRadar")).toBeInTheDocument();
+    expect(screen.getByTestId("share-access-request-lar_1")).toHaveAttribute(
+      "data-workspace-member",
+      "true",
+    );
+  });
+
   it("filters by linkIds when provided", async () => {
     render(
       <MemoryRouter initialEntries={["/ws/documents?tab=shared"]}>

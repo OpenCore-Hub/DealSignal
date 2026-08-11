@@ -18,7 +18,6 @@
     "createTime": "Create Time",
     "heat": "Heat",
     "status": "Status",
-    "totalLinks": "{{count}} links",
     "clearFilter": "Clear filter",
     "copyLink": "Copy Link",
     "searchPlaceholder": "Search links…",

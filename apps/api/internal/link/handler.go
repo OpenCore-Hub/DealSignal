@@ -1025,15 +1025,16 @@ func (h *Handler) ListPendingAccessRequests(c *gin.Context) {
 	out := make([]gin.H, 0, len(requests))
 	for _, ar := range requests {
 		item := gin.H{
-			"id":             ar.ID,
-			"link_id":        ar.LinkID,
-			"email":          ar.Email,
-			"status":         ar.Status,
-			"created_at":     ar.CreatedAt.Format(time.RFC3339),
-			"updated_at":     ar.UpdatedAt.Format(time.RFC3339),
-			"link_name":      ar.LinkName,
-			"document_title": ar.DocumentTitle,
-			"short_url":      publicURL(c, h.cfg, ar.PublicToken, ar.CustomDomain),
+			"id":                   ar.ID,
+			"link_id":              ar.LinkID,
+			"email":                ar.Email,
+			"status":               ar.Status,
+			"created_at":           ar.CreatedAt.Format(time.RFC3339),
+			"updated_at":           ar.UpdatedAt.Format(time.RFC3339),
+			"link_name":            ar.LinkName,
+			"document_title":       ar.DocumentTitle,
+			"short_url":            publicURL(c, h.cfg, ar.PublicToken, ar.CustomDomain),
+			"is_workspace_member":  ar.IsWorkspaceMember,
 		}
 		if ar.Reason != "" {
 			item["reason"] = ar.Reason

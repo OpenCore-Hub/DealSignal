@@ -46,6 +46,7 @@ export function ShareAccessRequestsPanel({
         const title = request.document_title || request.link_name || request.short_url;
         return {
           ...request,
+          is_workspace_member: Boolean(request.is_workspace_member),
           documentLabel: title
             ? t("links:accessRequests.forDocument", { title })
             : undefined,

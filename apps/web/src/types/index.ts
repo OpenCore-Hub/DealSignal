@@ -259,6 +259,8 @@ export interface PendingLinkAccessRequest extends LinkAccessRequest {
   link_name?: string;
   document_title?: string;
   short_url?: string;
+  /** Applicant email matches a workspace member — actionable in Share, excluded from Deal Radar. */
+  is_workspace_member?: boolean;
 }
 
 export interface AccessRule {
@@ -555,6 +557,8 @@ export interface DealRoomAccessRequest {
   status: "pending" | "approved" | "rejected";
   reason?: string;
   reviewed_at?: string;
+  /** Applicant email matches a workspace member — actionable in room inbox, excluded from Deal Radar. */
+  is_workspace_member?: boolean;
 }
 
 export interface DealRoom {

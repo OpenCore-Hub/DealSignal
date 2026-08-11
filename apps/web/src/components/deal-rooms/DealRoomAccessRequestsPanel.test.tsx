@@ -52,6 +52,12 @@ async function renderPanel(opts?: { focusLinkId?: string }) {
       "accessRequests.rejectError": "fail",
       "accessRequests.codeSendFailed": "approved but code failed",
       "accessRequests.resendCode": "Resend",
+      "accessRequests.workspaceMemberBadge": "Workspace member",
+      "accessRequests.notOnRadar": "Not shown on Deal Radar",
+      "accessRequests.internalOnlyHint":
+        "These requests are from workspace members and will not appear on Deal Radar.",
+      "accessRequests.mixedInternalHint":
+        "{{count}} of these are workspace members and will not appear on Deal Radar.",
     },
     common: {
       loading: "Loading…",
@@ -175,5 +181,32 @@ describe("DealRoomAccessRequestsPanel", () => {
         "true",
       );
     });
+  });
+
+  it("labels room-membership workspace members as not on Deal Radar", async () => {
+    getDealRoomAccessRequestsMock.mockResolvedValue({
+      data: [
+        {
+          id: "room-req-1",
+          email: "owner@acme.com",
+          status: "pending",
+          reason: "need in",
+          is_workspace_member: true,
+        },
+      ],
+    });
+    getPendingLinkAccessRequestsMock.mockResolvedValue({ data: [] });
+
+    await renderPanel();
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-access-request-room-req-1")).toHaveAttribute(
+        "data-workspace-member",
+        "true",
+      );
+    });
+    expect(
+      screen.getByTestId("deal-room-access-request-room-req-1-member-badge"),
+    ).toHaveTextContent("Workspace member");
+    expect(screen.getByTestId("deal-room-access-requests-radar-honesty-hint")).toBeInTheDocument();
   });
 });

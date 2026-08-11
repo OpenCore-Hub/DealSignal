@@ -423,7 +423,7 @@ export function LinksTable({
     <div className="space-y-4">
       {accessInbox}
 
-      <div className="flex items-center justify-between gap-3">
+      {(!embedded || isFiltered) && (
         <div className="flex min-w-0 items-center gap-2">
           {!embedded && (
             <h2 className="text-h2">
@@ -449,10 +449,7 @@ export function LinksTable({
             </Button>
           )}
         </div>
-        <span className="text-caption whitespace-nowrap text-muted-foreground">
-          {t("table.totalLinks", { count: data.length })}
-        </span>
-      </div>
+      )}
 
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <Table className="min-w-[72rem] table-fixed">
