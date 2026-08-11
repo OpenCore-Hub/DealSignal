@@ -1,28 +1,6 @@
 import { createContext, useContext, useEffect, useReducer, useRef, type Dispatch, type ReactNode } from "react";
+import { createDefaultLinkPermissionConfig } from "@/lib/defaultLinkPermissionConfig";
 import type { Document, PermissionConfig } from "@/types";
-
-// ---------------------------------------------------------------------------
-// Default security config for new bundles
-// ---------------------------------------------------------------------------
-
-const DEFAULT_SECURITY_CONFIG: PermissionConfig = {
-  level: "customized",
-  isCustomized: true,
-  requireEmailVerification: false,
-  whitelistEnabled: false,
-  whitelist: [],
-  passwordEnabled: false,
-  ndaEnabled: false,
-  ndaDocumentId: "",
-  ndaTemplateId: "",
-  allowDownload: true,
-  watermarkEnabled: true,
-  fileRequestsEnabled: false,
-  indexFileEnabled: false,
-  expiryDays: 30,
-  maxViews: "unlimited",
-  contactIds: [],
-};
 
 // ---------------------------------------------------------------------------
 // localStorage draft persistence
@@ -251,7 +229,7 @@ export function pipelineReducer(state: BundlePipelineState, action: BundlePipeli
         editingLinkId: null,
         linkToken: null,
         selectedDocuments: [],
-        config: { ...DEFAULT_SECURITY_CONFIG },
+        config: createDefaultLinkPermissionConfig(),
       };
 
     default:
@@ -347,7 +325,7 @@ export function createInitialState(overrides?: Partial<BundlePipelineState>): Bu
     selectedDocuments: [],
     pendingDraftDocIds: draft?.selectedDocumentIds ?? [],
     searchQuery: draft?.searchQuery ?? "",
-    config: draft?.config ?? { ...DEFAULT_SECURITY_CONFIG },
+    config: draft?.config ?? createDefaultLinkPermissionConfig(),
     isSubmitting: false,
     generatedLink: null,
     copied: false,

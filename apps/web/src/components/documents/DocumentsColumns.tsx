@@ -208,7 +208,14 @@ export function useDocumentColumns({
           const busy = doc.status === "uploading" || doc.status === "processing";
           const archived = doc.status === "archived";
           const downloadReady = doc.status === "ready";
-          const shareReady = doc.status === "ready" && !archived && Boolean(onShare);
+          // §3.2: Share stays visible while processing/archived; disabled + title copy (not hidden).
+          const showShareCta = Boolean(onShare);
+          const shareDisabled = busy || archived || doc.status !== "ready";
+          const shareTitle = archived
+            ? t("documents:columns.archivedActionDisabled")
+            : doc.status !== "ready"
+              ? t("documents:share.notReady")
+              : undefined;
           const showAddToDealRoom = Boolean(onAddToDealRoom) && canAddDocumentToDealRoom(doc.category);
 
           const handleArchive = async () => {
@@ -252,11 +259,13 @@ export function useDocumentColumns({
               className="flex items-center justify-end gap-0.5"
               onClick={(e) => e.stopPropagation()}
             >
-              {shareReady ? (
+              {showShareCta ? (
                 <Button
                   size="sm"
                   variant="ghost"
                   aria-label={t("documents:share.cta")}
+                  disabled={shareDisabled}
+                  title={shareTitle}
                   className={cn(
                     "h-7 gap-1 rounded-full px-2.5 text-xs font-medium",
                     "text-muted-foreground hover:bg-foreground/[0.06] hover:text-foreground",
@@ -264,6 +273,7 @@ export function useDocumentColumns({
                   )}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (shareDisabled) return;
                     onShare?.(doc);
                   }}
                   data-testid="document-row-share"

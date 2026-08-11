@@ -18,28 +18,9 @@ import { ContactSelector } from "@/components/links/smart-link/ContactSelector";
 import { api } from "@/lib/api";
 import { apiErrorMessage } from "@/lib/apiErrors";
 import { copyToClipboard } from "@/lib/clipboard";
+import { createDefaultLinkPermissionConfig } from "@/lib/defaultLinkPermissionConfig";
 import { cn } from "@/lib/utils";
 import type { PermissionConfig } from "@/types";
-
-/** Matches BundlePipelineContext create defaults for `/links/new`. */
-const LIBRARY_SHARE_DEFAULTS: PermissionConfig = {
-  level: "customized",
-  isCustomized: true,
-  requireEmailVerification: false,
-  whitelistEnabled: false,
-  whitelist: [],
-  passwordEnabled: false,
-  ndaEnabled: false,
-  ndaDocumentId: "",
-  ndaTemplateId: "",
-  allowDownload: true,
-  watermarkEnabled: true,
-  fileRequestsEnabled: false,
-  indexFileEnabled: false,
-  expiryDays: 30,
-  maxViews: "unlimited",
-  contactIds: [],
-};
 
 export interface DocumentShareDialogProps {
   open: boolean;
@@ -64,7 +45,7 @@ export function DocumentShareDialog({
   const { t } = useTranslation(["documents", "common", "links"]);
   const [creating, setCreating] = useState(false);
   const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [config, setConfig] = useState<PermissionConfig>(LIBRARY_SHARE_DEFAULTS);
+  const [config, setConfig] = useState<PermissionConfig>(createDefaultLinkPermissionConfig);
   const shareReady = documentStatus === "ready";
   const securityGuard = validateBundleSecurityConfig(config);
   const createBlockedReason =
@@ -78,7 +59,7 @@ export function DocumentShareDialog({
   useEffect(() => {
     if (!open) return;
     setAdvancedOpen(false);
-    setConfig(LIBRARY_SHARE_DEFAULTS);
+    setConfig(createDefaultLinkPermissionConfig());
     setCreating(false);
   }, [open, documentId]);
 
