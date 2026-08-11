@@ -88,3 +88,27 @@ func TestContentTypeForSourceType(t *testing.T) {
 		}
 	}
 }
+
+func TestDocumentMatchesCategoryListFilter(t *testing.T) {
+	cases := []struct {
+		status   string
+		filter   string
+		category string
+		want     bool
+	}{
+		{"ready", "archived", CategoryGeneral, false},
+		{"archived", "archived", CategoryGeneral, true},
+		{"ready", "all", CategoryGeneral, true},
+		{"archived", "all", CategoryGeneral, false},
+		{"archived", "all", CategoryAgreement, true},
+		{"ready", "", CategoryGeneral, true},
+		{"archived", "shared", CategoryGeneral, false},
+		{"ready", "shared", CategoryGeneral, false}, // dedicated branch only
+		{"processing", "archived", CategoryGeneral, false},
+	}
+	for _, tc := range cases {
+		if got := documentMatchesCategoryListFilter(tc.status, tc.filter, tc.category); got != tc.want {
+			t.Fatalf("status=%q filter=%q category=%q: got %v want %v", tc.status, tc.filter, tc.category, got, tc.want)
+		}
+	}
+}

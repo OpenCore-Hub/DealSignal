@@ -182,6 +182,9 @@ func (h *Handler) List(c *gin.Context) {
 	}
 
 	appendDoc := func(out []gin.H, info docInfo, job db.IngestionJob) []gin.H {
+		if category != "" && !strings.EqualFold(info.Category, category) {
+			return out
+		}
 		if excludeAgreement && strings.EqualFold(info.Category, CategoryAgreement) {
 			return out
 		}
@@ -197,8 +200,9 @@ func (h *Handler) List(c *gin.Context) {
 		return append(out, documentResponse(info, job))
 	}
 
-	// When category filter is specified, use the category query
-	if category != "" {
+	// Category-scoped list for archived/all only. shared|unshared|recent|popular
+	// need dedicated SQL — fall through so those filters stay truthful.
+	if category != "" && !categoryListUsesDedicatedFilter(filter) {
 		docs, err := h.uploadService.queries.ListDocumentsByCategory(ctx, db.ListDocumentsByCategoryParams{
 			WorkspaceID: wsPgUUID,
 			Category:    category,
@@ -209,6 +213,9 @@ func (h *Handler) List(c *gin.Context) {
 		}
 		out := make([]gin.H, 0, len(docs))
 		for _, d := range docs {
+			if !documentMatchesCategoryListFilter(d.Status, filter, category) {
+				continue
+			}
 			job, _ := h.uploadService.queries.GetIngestionJobByDocument(ctx, d.ID)
 			out = appendDoc(out, docInfo{
 				ID:         d.ID,
@@ -827,6 +834,35 @@ func documentStatusDI(doc docInfo, job db.IngestionJob) string {
 		return "processing"
 	}
 	return "processing"
+}
+
+func categoryListUsesDedicatedFilter(filter string) bool {
+	switch strings.ToLower(filter) {
+	case "shared", "unshared", "recent", "popular":
+		return true
+	default:
+		return false
+	}
+}
+
+// documentMatchesCategoryListFilter applies ?filter= on category-scoped lists
+// (archived / all / empty). Dedicated filters must use List's SQL branches.
+func documentMatchesCategoryListFilter(status, filter, category string) bool {
+	archived := strings.EqualFold(status, "archived")
+	switch strings.ToLower(filter) {
+	case "archived":
+		return archived
+	case "shared", "unshared", "recent", "popular":
+		// Mistaken call must not lie as "all live docs".
+		return false
+	default:
+		// Documents library (general) pairs with an Archived tab — hide archived from "all".
+		// Agreements page has no Archived tab, so keep archived visible there.
+		if strings.EqualFold(category, CategoryAgreement) {
+			return true
+		}
+		return !archived
+	}
 }
 
 func documentFileNameDI(doc docInfo) string {
