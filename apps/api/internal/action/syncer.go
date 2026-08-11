@@ -4,6 +4,7 @@ package action
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
@@ -17,7 +18,9 @@ import (
 // and Deal Room inboxes never share a dashboard deep-link:
 //   - link_access_request            → document library share (source_id = link id)
 //   - deal_room_link_access_request  → deal-room share (source_id = link id, target_id = room id)
-// Room-level items use source_id = room id for both resolve and navigation.
+// Room membership access requests use source_id = room id.
+// Room NDA items use source_id = room_members.id and target_id = room id
+// (resolve per signer; navigate via target_id, with legacy room-keyed fallback).
 const (
 	SourceTypeLinkAccessRequest         = "link_access_request"
 	SourceTypeDealRoomLinkAccessRequest = "deal_room_link_access_request"
@@ -43,6 +46,10 @@ func NewSyncer(q *db.Queries) *Syncer {
 // SyncWorkspace creates or refreshes action items for all pending operational
 // events in a workspace. It is idempotent: existing items are touched only to
 // update their updated_at, so concurrent calls are safe.
+//
+// Radar contract: workspace members (owner/admin/member) never become visitor
+// action sources. Host lifecycle items (expiring link/room, uploaded_file) are
+// unaffected — they are not visitor-attributed.
 func (s *Syncer) SyncWorkspace(ctx context.Context, workspaceID string) error {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
@@ -52,20 +59,24 @@ func (s *Syncer) SyncWorkspace(ctx context.Context, workspaceID string) error {
 	if err != nil {
 		return fmt.Errorf("get workspace: %w", err)
 	}
+	// Fail open: member-list errors must not abort the whole sync (expiring /
+	// upload / Ask). Empty set disables internal-actor filtering — same policy
+	// as radar.Service.loadInternalEmails.
+	internal, _ := LoadMemberEmailSet(ctx, s.queries, wsUUID)
 
-	if err := s.syncDocumentLinkAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncDocumentLinkAccessRequests(ctx, ws.TenantID, wsUUID, internal); err != nil {
 		return err
 	}
-	if err := s.syncDealRoomLinkAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncDealRoomLinkAccessRequests(ctx, ws.TenantID, wsUUID, internal); err != nil {
 		return err
 	}
-	if err := s.syncRoomAccessRequests(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncRoomAccessRequests(ctx, ws.TenantID, wsUUID, internal); err != nil {
 		return err
 	}
-	if err := s.syncRoomNDAs(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncRoomNDAs(ctx, ws.TenantID, wsUUID, internal); err != nil {
 		return err
 	}
-	if err := s.syncPendingAskTurns(ctx, ws.TenantID, wsUUID); err != nil {
+	if err := s.syncPendingAskTurns(ctx, ws.TenantID, wsUUID, internal); err != nil {
 		return err
 	}
 	if err := s.syncUploadedFiles(ctx, ws.TenantID, wsUUID); err != nil {
@@ -102,13 +113,16 @@ func (s *Syncer) ResolveBySource(ctx context.Context, workspaceID, sourceType, s
 	}
 }
 
-func (s *Syncer) syncDocumentLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+func (s *Syncer) syncDocumentLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID, internal MemberEmailSet) error {
 	rows, err := s.queries.ListPendingDocumentLinkAccessRequestsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list pending document link access requests: %w", err)
 	}
 	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
+		if internal.Contains(r.Email) {
+			continue
+		}
 		linkID := uuid.UUID(r.LinkID.Bytes).String()
 		current[linkID] = true
 		// source_id = link id; no target_id (Document Library surface).
@@ -119,13 +133,16 @@ func (s *Syncer) syncDocumentLinkAccessRequests(ctx context.Context, tenantID, w
 	return s.closeStaleActions(ctx, workspaceID, SourceTypeLinkAccessRequest, current)
 }
 
-func (s *Syncer) syncDealRoomLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+func (s *Syncer) syncDealRoomLinkAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID, internal MemberEmailSet) error {
 	rows, err := s.queries.ListPendingDealRoomLinkAccessRequestsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list pending deal-room link access requests: %w", err)
 	}
 	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
+		if internal.Contains(r.Email) {
+			continue
+		}
 		linkID := uuid.UUID(r.LinkID.Bytes).String()
 		current[linkID] = true
 		// source_id = link id (resolve key); target_id = room id (navigation).
@@ -140,13 +157,16 @@ func (s *Syncer) syncDealRoomLinkAccessRequests(ctx context.Context, tenantID, w
 	return s.closeStaleActions(ctx, workspaceID, SourceTypeDealRoomLinkAccessRequest, current)
 }
 
-func (s *Syncer) syncRoomAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+func (s *Syncer) syncRoomAccessRequests(ctx context.Context, tenantID, workspaceID pgtype.UUID, internal MemberEmailSet) error {
 	rows, err := s.queries.ListPendingRoomAccessRequestsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list pending room access requests: %w", err)
 	}
 	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
+		if internal.Contains(r.Email) {
+			continue
+		}
 		roomID := uuid.UUID(r.RoomID.Bytes).String()
 		current[roomID] = true
 		// source_id = room id so dashboard navigates to the deal room access tab.
@@ -157,16 +177,30 @@ func (s *Syncer) syncRoomAccessRequests(ctx context.Context, tenantID, workspace
 	return s.closeStaleActions(ctx, workspaceID, SourceTypeRoomAccessRequest, current)
 }
 
-func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+func (s *Syncer) syncRoomNDAs(ctx context.Context, tenantID, workspaceID pgtype.UUID, internal MemberEmailSet) error {
 	rows, err := s.queries.ListPendingRoomNDAsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list pending room ndas: %w", err)
 	}
 	current := make(map[string]bool, len(rows))
 	for _, r := range rows {
-		roomID := uuid.UUID(r.RoomID.Bytes).String()
-		current[roomID] = true
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeRoomNDA, r.RoomID, pgtype.UUID{}, pgtype.Text{String: r.Email, Valid: true}, pgtype.Text{String: r.RoomName, Valid: true}, "sign"); err != nil {
+		email := strings.TrimSpace(r.Email)
+		if email == "" || !r.ID.Valid || !r.RoomID.Valid {
+			continue
+		}
+		if internal.Contains(email) {
+			continue
+		}
+		memberID := uuid.UUID(r.ID.Bytes).String()
+		current[memberID] = true
+		// source_id = member id (resolve key); target_id = room id (navigation).
+		if err := s.upsertOperational(
+			ctx, tenantID, workspaceID, SourceTypeRoomNDA,
+			r.ID, r.RoomID,
+			pgtype.Text{String: email, Valid: true},
+			pgtype.Text{String: r.RoomName, Valid: r.RoomName != ""},
+			"sign",
+		); err != nil {
 			return err
 		}
 	}
@@ -178,7 +212,7 @@ const (
 	operationalActionTypeReview = "review"
 )
 
-func (s *Syncer) syncPendingAskTurns(ctx context.Context, tenantID, workspaceID pgtype.UUID) error {
+func (s *Syncer) syncPendingAskTurns(ctx context.Context, tenantID, workspaceID pgtype.UUID, internal MemberEmailSet) error {
 	hostRows, err := s.queries.ListPendingAskTurnsByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("list pending ask turns: %w", err)
@@ -191,12 +225,12 @@ func (s *Syncer) syncPendingAskTurns(ctx context.Context, tenantID, workspaceID 
 	currentDealRoom := make(map[string]bool, n)
 	currentLibrary := make(map[string]bool, n)
 	for _, r := range hostRows {
-		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeAnswer, currentDealRoom, currentLibrary); err != nil {
+		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeAnswer, internal, currentDealRoom, currentLibrary); err != nil {
 			return err
 		}
 	}
 	for _, r := range formalRows {
-		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeReview, currentDealRoom, currentLibrary); err != nil {
+		if err := s.upsertPendingAskTurnAction(ctx, tenantID, workspaceID, r.ID, r.DealRoomID, r.LinkID, r.VisitorEmail, r.LinkName, operationalActionTypeReview, internal, currentDealRoom, currentLibrary); err != nil {
 			return err
 		}
 	}
@@ -212,9 +246,13 @@ func (s *Syncer) upsertPendingAskTurnAction(
 	turnID, dealRoomID, linkID pgtype.UUID,
 	visitorEmail, linkName pgtype.Text,
 	actionType string,
+	internal MemberEmailSet,
 	currentDealRoom, currentLibrary map[string]bool,
 ) error {
 	if !turnID.Valid {
+		return nil
+	}
+	if SkipVisitorAttributedActor(internal, visitorEmail.Valid, visitorEmail.String) {
 		return nil
 	}
 	turnKey := uuid.UUID(turnID.Bytes).String()
@@ -289,7 +327,8 @@ func (s *Syncer) syncUploadedFiles(ctx context.Context, tenantID, workspaceID pg
 		return fmt.Errorf("list pending uploaded files: %w", err)
 	}
 	for _, r := range rows {
-		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeUploadedFile, r.ID, pgtype.UUID{}, pgtype.Text{String: r.OriginalFilename, Valid: true}, r.LinkName, "verify"); err != nil {
+		// "review" — not Diligence-gate approve/sign/verify.
+		if err := s.upsertOperational(ctx, tenantID, workspaceID, SourceTypeUploadedFile, r.ID, pgtype.UUID{}, pgtype.Text{String: r.OriginalFilename, Valid: true}, r.LinkName, "review"); err != nil {
 			return err
 		}
 	}
@@ -400,6 +439,10 @@ func titleFor(sourceType, actor, target string) string {
 		}
 		return fmt.Sprintf("Approve room access request from %s", actor)
 	case SourceTypeRoomNDA:
+		actor = strings.TrimSpace(actor)
+		if actor == "" {
+			actor = "visitor"
+		}
 		if target != "" {
 			return fmt.Sprintf("NDA signature required from %s for %s", actor, target)
 		}

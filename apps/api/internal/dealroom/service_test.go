@@ -70,12 +70,78 @@ func TestNDAStatusFor(t *testing.T) {
 	}
 }
 
+func TestNDAStatusForRoleOperatorsNeverPending(t *testing.T) {
+	if got := ndaStatusForRole(true, "owner"); got != "not_required" {
+		t.Fatalf("owner=%s", got)
+	}
+	if got := ndaStatusForRole(true, "admin"); got != "not_required" {
+		t.Fatalf("admin=%s", got)
+	}
+	if got := ndaStatusForRole(true, "viewer"); got != "pending" {
+		t.Fatalf("viewer=%s", got)
+	}
+	if got := ndaStatusForRole(false, "viewer"); got != "not_required" {
+		t.Fatalf("viewer no-nda=%s", got)
+	}
+}
+
 func TestMemberStatusFor(t *testing.T) {
 	if got := memberStatusFor(true); got != "pending" {
 		t.Fatalf("expected pending, got %s", got)
 	}
 	if got := memberStatusFor(false); got != "active" {
 		t.Fatalf("expected active, got %s", got)
+	}
+}
+
+func TestMemberStatusForRole(t *testing.T) {
+	if got := memberStatusForRole(true, "admin"); got != "active" {
+		t.Fatalf("admin=%s", got)
+	}
+	if got := memberStatusForRole(true, "viewer"); got != "pending" {
+		t.Fatalf("viewer=%s", got)
+	}
+}
+
+func TestCreateRoomOwnerNeverPendingNDA(t *testing.T) {
+	fake := newFakeDB(t)
+	svc := NewService(db.New(fake), nil, testCfg())
+	ownerID := uuid.NewString()
+	wsID := uuid.NewString()
+	fake.workspace = db.Workspace{
+		ID:       pgUUID(wsID),
+		TenantID: pgUUID(uuid.NewString()),
+		Name:     "Test Workspace",
+		Slug:     "test-workspace",
+	}
+
+	room, err := svc.CreateRoom(context.Background(), ownerID, wsID, CreateRoomRequest{
+		Slug:         "nda-room",
+		Name:         "NDA Room",
+		TemplateType: "startup-fundraising",
+		RequiresNDA:  true,
+	})
+	if err != nil {
+		t.Fatalf("create room: %v", err)
+	}
+	if !room.RequiresNda {
+		t.Fatal("expected room RequiresNda")
+	}
+	var owner *db.RoomMember
+	for i := range fake.members {
+		if fake.members[i].Role == "owner" {
+			owner = &fake.members[i]
+			break
+		}
+	}
+	if owner == nil {
+		t.Fatal("expected owner member")
+	}
+	if owner.NdaStatus != "not_required" {
+		t.Fatalf("owner nda_status=%s want not_required (false-positive Diligence gate)", owner.NdaStatus)
+	}
+	if owner.Status != "active" {
+		t.Fatalf("owner status=%s", owner.Status)
 	}
 }
 

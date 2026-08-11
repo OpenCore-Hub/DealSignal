@@ -15,8 +15,54 @@ import {
 } from "@/components/insights/InsightsRangeControls";
 import { api, type InsightsOverview } from "@/lib/api";
 import { exportInsightsDailyVisitsCsv } from "@/lib/exportInsightsDailyVisits";
-import { useTranslation } from "react-i18next";
+import { useTranslation, type TFunction } from "react-i18next";
+import type { i18n as I18nInstance } from "i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
+
+const INSIGHTS_NS = "insights" as const;
+
+/** App defaultNS is common — exists/t lookups for Insights must pin the ns. */
+function insightsKeyExists(i18n: I18nInstance, key: string): boolean {
+  return i18n.exists(key, { ns: INSIGHTS_NS });
+}
+
+function scenarioPackDepthLabel(
+  depth: string,
+  t: TFunction<typeof INSIGHTS_NS>,
+): string {
+  switch (depth) {
+    case "p0":
+      return t("overview.scenarioPack.depthP0");
+    case "p1":
+      return t("overview.scenarioPack.depthP1");
+    case "lite":
+      return t("overview.scenarioPack.depthLite");
+    default:
+      return t("overview.scenarioPack.depthBase");
+  }
+}
+
+function scenarioPackKpiLabel(
+  id: string,
+  t: TFunction<typeof INSIGHTS_NS>,
+  i18n: I18nInstance,
+): string {
+  const key = `overview.scenarioPack.kpi.${id}`;
+  return insightsKeyExists(i18n, key)
+    ? t(key)
+    : t("overview.scenarioPack.unknownKpi");
+}
+
+function scenarioPackCategoryLabel(
+  category: string,
+  t: TFunction<typeof INSIGHTS_NS>,
+  i18n: I18nInstance,
+): string {
+  const key = `keyPages.categories.${category}`;
+  return insightsKeyExists(i18n, key)
+    ? t(key)
+    : t("overview.scenarioPack.unknownCategory");
+}
 
 function isLocalViewerUrl(raw: string): boolean {
   if (!raw) return false;
@@ -109,6 +155,7 @@ function formatCompletionPct(rate: number): string {
 
 export function InsightsOverviewPage() {
   const { t } = useTranslation("insights");
+  const { t: tDashboard } = useTranslation("dashboard");
   const { t: tc } = useTranslation("common");
   const { i18n } = useTranslation();
   const navigate = useNavigate();
@@ -260,6 +307,113 @@ export function InsightsOverviewPage() {
           {t("overview.exportCsv")}
         </Button>
       </div>
+
+      {overview.scenarioPack ? (
+        <section
+          className="rounded-xl border border-border px-4 py-4"
+          data-testid="insights-scenario-pack"
+          data-scenario={overview.scenarioPack.scenario}
+          data-pack-depth={overview.scenarioPack.depth}
+        >
+          <div className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
+            <div>
+              <h2 className="text-sm font-semibold text-foreground">
+                {t("overview.scenarioPack.title")}
+              </h2>
+              <p className="text-caption mt-0.5 text-muted-foreground">
+                {tDashboard(`radar.scenario.${overview.scenarioPack.scenario}.label`, {
+                  defaultValue: t("overview.scenarioPack.unknownScenario"),
+                })}
+                {" · "}
+                {t("overview.scenarioPack.rooms", {
+                  count: overview.scenarioPack.roomCount,
+                })}
+                {" · "}
+                {scenarioPackDepthLabel(overview.scenarioPack.depth, t)}
+              </p>
+            </div>
+            {overview.scenarioPack.keyPageCategories &&
+            overview.scenarioPack.keyPageCategories.length > 0 ? (
+              <p className="text-caption text-muted-foreground">
+                {t("overview.scenarioPack.keyPages")}:{" "}
+                {overview.scenarioPack.keyPageCategories
+                  .filter((cat) =>
+                    insightsKeyExists(i18n, `keyPages.categories.${cat}`),
+                  )
+                  .map((cat) => scenarioPackCategoryLabel(cat, t, i18n))
+                  .join(" · ")}
+              </p>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {overview.scenarioPack.kpis.map((kpi) => (
+              <div
+                key={kpi.id}
+                className="rounded-lg border border-border/70 px-3 py-2"
+                data-testid={`insights-scenario-kpi-${kpi.id}`}
+              >
+                <p className="text-caption text-muted-foreground">
+                  {scenarioPackKpiLabel(kpi.id, t, i18n)}
+                </p>
+                <p className="text-stat mt-1 tabular-nums">
+                  {Number.isInteger(kpi.value)
+                    ? kpi.value
+                    : Math.round(kpi.value)}
+                </p>
+              </div>
+            ))}
+          </div>
+          {overview.scenarioPack.keyPageRules &&
+          overview.scenarioPack.keyPageRules.length > 0 ? (
+            <div
+              className="mt-3 border-t border-border/70 pt-3"
+              data-testid="insights-scenario-key-page-rules"
+            >
+              <p className="text-caption font-medium text-foreground">
+                {t("overview.scenarioPack.rulesTitle")}
+              </p>
+              <p className="text-caption mt-0.5 text-muted-foreground">
+                {t("overview.scenarioPack.rulesHint")}
+              </p>
+              <ul className="mt-2 space-y-1.5">
+                {overview.scenarioPack.keyPageRules.map((rule) => (
+                  <li
+                    key={rule.category}
+                    className="text-caption text-muted-foreground"
+                  >
+                    <span className="font-medium text-foreground">
+                      {scenarioPackCategoryLabel(rule.category, t, i18n)}
+                    </span>
+                    {": "}
+                    {t("overview.scenarioPack.rulesKeywords", {
+                      count: rule.keywords?.length ?? 0,
+                    })}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          <div className="mt-3 flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              data-testid="insights-scenario-open-radar"
+              onClick={() => {
+                const circle = overview.scenarioPack?.defaultCircle;
+                const q =
+                  circle === "founder" ||
+                  circle === "sales" ||
+                  circle === "investor_ir"
+                    ? `?circle=${circle}`
+                    : "";
+                navigate(`/${workspaceSlug}/dashboard${q}`);
+              }}
+            >
+              {t("overview.openDealRadar")}
+            </Button>
+          </div>
+        </section>
+      ) : null}
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard

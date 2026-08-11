@@ -19,6 +19,9 @@ import { isOverdue, daysOverdue } from "@/lib/calculations";
 import {
   defaultOutcomeForProduct,
   outcomesForProduct,
+  radarHeadlineKey,
+  radarWhyNowFallbackKey,
+  radarWhyNowKey,
   type RadarOutcome,
   type RadarVerb,
   type RadarWorkItem,
@@ -112,7 +115,11 @@ export function RadarRow({
             </span>
           ) : null}
           <span className="text-sm font-medium text-foreground">
-            {item.headline}
+            {item.headlineCode
+              ? t(radarHeadlineKey(item), {
+                  defaultValue: t(`radar.products.${item.product}`),
+                })
+              : item.headline || t(`radar.products.${item.product}`)}
           </span>
           <span className="text-caption text-muted-foreground">
             {t(`radar.products.${item.product}`)}
@@ -130,16 +137,16 @@ export function RadarRow({
           <p
             className="text-caption mt-0.5 line-clamp-2 text-muted-foreground"
             data-testid="radar-why-now"
+            data-radar-scenario={item.scenario || undefined}
           >
-            {t(`radar.whyNow.${item.whyNowCode}`, {
+            {t(radarWhyNowKey(item), {
               hours: item.whyNowHours ?? 1,
               count: item.whyNowHours ?? item.coalescedFrom?.length ?? 1,
-              defaultValue: item.subtitle,
+              defaultValue: t(radarWhyNowFallbackKey(item), {
+                hours: item.whyNowHours ?? 1,
+                count: item.whyNowHours ?? item.coalescedFrom?.length ?? 1,
+              }),
             })}
-          </p>
-        ) : item.subtitle ? (
-          <p className="text-caption mt-0.5 line-clamp-1 text-muted-foreground">
-            {item.subtitle}
           </p>
         ) : null}
         {item.evidence && item.evidence.length > 0 ? (
@@ -151,7 +158,6 @@ export function RadarRow({
               >
                 {t(`radar.evidenceChips.${chip.kind}`, {
                   count: chip.count ?? 1,
-                  defaultValue: chip.kind,
                 })}
               </span>
             ))}

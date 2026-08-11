@@ -64,10 +64,75 @@ func TestFormatDigestBodyIncludesYesterdayAndTrail(t *testing.T) {
 		"Pitch",
 		"a@example.com",
 		"session timelines",
+		"Deal Radar",
 	} {
 		if !strings.Contains(body, want) {
 			t.Fatalf("body missing %q:\n%s", want, body)
 		}
+	}
+}
+
+func TestFormatDigestBodyScenarioSkeleton(t *testing.T) {
+	body := FormatDigestBody(DigestMetrics{
+		WorkspaceName:     "Acme",
+		DigestDay:         "2026-08-07",
+		Scenario:          "raising-first-fund",
+		ScenarioDepth:     "p1",
+		ScenarioRoomCount: 2,
+		ScenarioLabel:     "Raising first fund",
+		ScenarioLead:      "This week’s focus: follow warm LPs, protect fund materials, and clear LP diligence asks.",
+		ScenarioKPIs: []DigestScenarioKPI{
+			{ID: "active_rooms", Value: 2},
+			{ID: "hot_links", Value: 3},
+		},
+	})
+	for _, want := range []string{
+		"Scenario focus · Raising first fund",
+		"2 rooms",
+		"[p1]",
+		"warm LPs",
+		"Active rooms: 2",
+		"Hot links: 3",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestFormatDigestBodyLiteScenarioSkeleton(t *testing.T) {
+	body := FormatDigestBody(DigestMetrics{
+		WorkspaceName:     "Acme",
+		DigestDay:         "2026-08-07",
+		Scenario:          "real-estate-transaction",
+		ScenarioDepth:     "lite",
+		ScenarioRoomCount: 1,
+		ScenarioLabel:     "Real estate transaction",
+		ScenarioLead:      "This week’s focus: unlock counterparty diligence, renew decaying access, and protect property materials.",
+		ScenarioKPIs: []DigestScenarioKPI{
+			{ID: "gate_pending", Value: 4},
+		},
+	})
+	for _, want := range []string{
+		"Scenario focus · Real estate transaction",
+		"[lite]",
+		"unlock counterparty diligence",
+		"Pending gates: 4",
+	} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("body missing %q:\n%s", want, body)
+		}
+	}
+	pm := FormatDigestBody(DigestMetrics{
+		WorkspaceName: "Acme",
+		DigestDay:     "2026-08-07",
+		Scenario:      "project-management",
+		ScenarioDepth: "lite",
+		ScenarioLabel: "Project management",
+		ScenarioLead:  "This week’s focus: answer project asks, renew collaborator access, and clear blockers at the gate.",
+	})
+	if !strings.Contains(pm, "answer project asks") {
+		t.Fatalf("project digest lead missing:\n%s", pm)
 	}
 }
 

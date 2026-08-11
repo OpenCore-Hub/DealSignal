@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/action"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/db"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/heat"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/signal"
@@ -35,7 +36,8 @@ func NewService(q *db.Queries, signals SignalFeed) *Service {
 }
 
 // Get compiles the workspace radar feed for the viewer.
-func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug string, circle heat.Circle) (Feed, error) {
+// circleExplicit is true when the client passed ?circle= (role lens override).
+func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug string, circle heat.Circle, circleExplicit bool) (Feed, error) {
 	raw, err := s.signals.GetFeed(ctx, workspaceID, userID)
 	if err != nil {
 		return Feed{}, err
@@ -46,42 +48,57 @@ func (s *Service) Get(ctx context.Context, workspaceID, userID, workspaceSlug st
 		return Feed{}, err
 	}
 
-	metrics, err := s.loadLinkMetrics(ctx, links)
+	metrics, err := s.loadLinkMetrics(ctx, workspaceID, links)
 	if err != nil {
 		return Feed{}, err
 	}
 
-	demote, noiseHints, err := s.loadOutcomeLearning(ctx, workspaceID)
+	demote, demoteByScenario, noiseHints, err := s.loadOutcomeLearning(ctx, workspaceID)
 	if err != nil {
 		return Feed{}, err
 	}
+
+	// Fail open: member-list errors must not 500 the whole radar feed; an empty
+	// set disables the filter (same as unknown attribution — keep external work).
+	internal, _ := s.loadInternalEmails(ctx, workspaceID)
 
 	if circle == "" {
 		circle = heat.CircleDefault
 	}
 
 	return Compile(CompileInput{
-		WorkspaceSlug: workspaceSlug,
-		Now:           s.now(),
-		Circle:        circle,
-		Actions:       raw.Actions,
-		Signals:       raw.Signals,
-		Links:         links,
-		Rooms:         rooms,
-		Metrics:       metrics,
-		OutcomeDemote: demote,
-		NoiseHints:    noiseHints,
+		WorkspaceSlug:           workspaceSlug,
+		Now:                     s.now(),
+		Circle:                  circle,
+		CircleExplicit:          circleExplicit,
+		Actions:                 raw.Actions,
+		Signals:                 raw.Signals,
+		Links:                   links,
+		Rooms:                   rooms,
+		Metrics:                 metrics,
+		OutcomeDemote:           demote,
+		OutcomeDemoteByScenario: demoteByScenario,
+		NoiseHints:              noiseHints,
+		InternalEmails:          internal,
 	}), nil
 }
 
-func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (map[Product]int, []NoiseHint, error) {
+func (s *Service) loadInternalEmails(ctx context.Context, workspaceID string) (action.MemberEmailSet, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	rows, err := s.queries.CountRecentActionOutcomesByWorkspace(ctx, wsUUID)
+	return action.LoadMemberEmailSet(ctx, s.queries, wsUUID)
+}
+
+func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (map[Product]int, map[Scenario]map[Product]int, []NoiseHint, error) {
+	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("action outcomes: %w", err)
+		return nil, nil, nil, err
+	}
+	rows, err := s.queries.CountRecentActionOutcomesByWorkspaceScenario(ctx, wsUUID)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("action outcomes: %w", err)
 	}
 	input := make([]OutcomeRow, 0, len(rows))
 	for _, r := range rows {
@@ -90,13 +107,14 @@ func (s *Service) loadOutcomeLearning(ctx context.Context, workspaceID string) (
 			outcome = r.Outcome.String
 		}
 		input = append(input, OutcomeRow{
-			Kind:    r.Kind,
-			Outcome: outcome,
-			Count:   int(r.Count),
+			Scenario: r.TemplateType,
+			Kind:     r.Kind,
+			Outcome:  outcome,
+			Count:    int(r.Count),
 		})
 	}
-	demote, hints := LearnFromOutcomes(input)
-	return demote, hints, nil
+	global, byScenario, hints := LearnFromOutcomes(input)
+	return global, byScenario, hints, nil
 }
 
 // UpdateItem updates the underlying action status for a radar work item.
@@ -105,9 +123,13 @@ func (s *Service) UpdateItem(ctx context.Context, workspaceID, itemID, status st
 	return s.signals.UpdateActionStatus(ctx, workspaceID, itemID, status, snoozeHours, outcome)
 }
 
-func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta) (map[string]LinkMetrics24h, error) {
+func (s *Service) loadLinkMetrics(ctx context.Context, workspaceID string, links map[string]LinkMeta) (map[string]LinkMetrics24h, error) {
 	if len(links) == 0 {
 		return map[string]LinkMetrics24h{}, nil
+	}
+	wsUUID, err := pgUUID(workspaceID)
+	if err != nil {
+		return nil, err
 	}
 	ids := make([]pgtype.UUID, 0, len(links))
 	for id := range links {
@@ -121,7 +143,10 @@ func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta
 		return map[string]LinkMetrics24h{}, nil
 	}
 
-	rows, err := s.queries.GetLinkAccessMetrics24hBatch(ctx, ids)
+	rows, err := s.queries.GetLinkAccessMetrics24hBatch(ctx, db.GetLinkAccessMetrics24hBatchParams{
+		LinkIds:     ids,
+		WorkspaceID: wsUUID,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("link metrics 24h batch: %w", err)
 	}
@@ -137,7 +162,10 @@ func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta
 		}
 	}
 
-	if captures, err := s.queries.CountCaptureAttempts24hBatch(ctx, ids); err == nil {
+	if captures, err := s.queries.CountCaptureAttempts24hBatch(ctx, db.CountCaptureAttempts24hBatchParams{
+		LinkIds:     ids,
+		WorkspaceID: wsUUID,
+	}); err == nil {
 		for _, row := range captures {
 			id := uuid.UUID(row.LinkID.Bytes).String()
 			m := out[id]
@@ -166,7 +194,7 @@ func (s *Service) loadLinkMetrics(ctx context.Context, links map[string]LinkMeta
 	return out, nil
 }
 
-func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw signal.Feed) (map[string]LinkMeta, map[string]string, error) {
+func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw signal.Feed) (map[string]LinkMeta, map[string]RoomMeta, error) {
 	wsUUID, err := pgUUID(workspaceID)
 	if err != nil {
 		return nil, nil, err
@@ -196,8 +224,15 @@ func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw s
 			if src == "deal_room_link_access_request" && targetID != "" {
 				roomIDs[targetID] = struct{}{}
 			}
-		case "room_access_request", "room_nda", "expiring_room":
+		case "room_access_request", "expiring_room":
 			if sourceID != "" {
+				roomIDs[sourceID] = struct{}{}
+			}
+		case "room_nda":
+			// Member-keyed: target_id = room. Legacy: source_id = room.
+			if targetID != "" {
+				roomIDs[targetID] = struct{}{}
+			} else if sourceID != "" {
 				roomIDs[sourceID] = struct{}{}
 			}
 		case "link_question":
@@ -248,7 +283,7 @@ func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw s
 		links[id] = meta
 	}
 
-	rooms := make(map[string]string, len(roomIDs))
+	rooms := make(map[string]RoomMeta, len(roomIDs))
 	for id := range roomIDs {
 		roomUUID, err := pgUUID(id)
 		if err != nil {
@@ -261,7 +296,14 @@ func (s *Service) resolveDealMeta(ctx context.Context, workspaceID string, raw s
 		if err != nil {
 			continue
 		}
-		rooms[id] = room.Name
+		tmpl := ""
+		if room.TemplateType.Valid {
+			tmpl = room.TemplateType.String
+		}
+		rooms[id] = RoomMeta{
+			Name:     room.Name,
+			Scenario: NormalizeScenario(tmpl),
+		}
 	}
 
 	return links, rooms, nil

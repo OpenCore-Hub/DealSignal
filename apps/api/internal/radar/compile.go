@@ -23,19 +23,32 @@ type LinkMeta struct {
 	DocumentID string
 }
 
+// RoomMeta carries deal-room display + scenario pack identity.
+type RoomMeta struct {
+	Name     string
+	Scenario Scenario
+}
+
 // CompileInput is the pure-compiler input (no I/O).
 type CompileInput struct {
 	WorkspaceSlug string
 	Now           time.Time
 	Circle        heat.Circle
-	Actions       []db.ActionItem
-	Signals       []db.Signal
-	Links         map[string]LinkMeta // linkID → meta
-	Rooms         map[string]string   // roomID → name
-	Metrics       map[string]LinkMetrics24h
-	// OutcomeDemote soft-demotes products with high false_positive rates (from LearnFromOutcomes).
+	// CircleExplicit is true when the client passed ?circle= (role lens override).
+	CircleExplicit bool
+	Actions        []db.ActionItem
+	Signals        []db.Signal
+	Links          map[string]LinkMeta // linkID → meta
+	Rooms          map[string]RoomMeta // roomID → meta
+	Metrics        map[string]LinkMetrics24h
+	// OutcomeDemote soft-demotes products with high false_positive rates (workspace-global).
 	OutcomeDemote map[Product]int
-	NoiseHints    []NoiseHint
+	// OutcomeDemoteByScenario soft-demotes by scenario×product (Phase C; preferred when set).
+	OutcomeDemoteByScenario map[Scenario]map[Product]int
+	NoiseHints              []NoiseHint
+	// InternalEmails are workspace member emails (normalized). Matching actors
+	// never become radar work items — radar is for external deal parties only.
+	InternalEmails action.MemberEmailSet
 }
 
 // EvidenceChip is a structured evidence marker for FE i18n (no free-text labels).
@@ -73,6 +86,18 @@ type WorkItem struct {
 	WhyNowHours   int            `json:"whyNowHours,omitempty"`
 	Evidence      []EvidenceChip `json:"evidence,omitempty"`
 	State         string         `json:"state"`
+	Scenario      string         `json:"scenario,omitempty"`
+	// HeadlineCode is a scenario narrative id; FE prefers i18n over Headline.
+	HeadlineCode string `json:"headlineCode,omitempty"`
+}
+
+// ScenarioPackMeta discloses the active pack depth for FE / Insights alignment.
+type ScenarioPackMeta struct {
+	Scenario          string   `json:"scenario"`
+	DefaultCircle     string   `json:"defaultCircle"`
+	Depth             string   `json:"depth"`
+	KeyPageCategories []string `json:"keyPageCategories,omitempty"`
+	InsightsKPI       []string `json:"insightsKpi,omitempty"`
 }
 
 // Strand groups work items under one deal surface.
@@ -80,6 +105,7 @@ type Strand struct {
 	DealKey    string     `json:"dealKey"`
 	DealName   string     `json:"dealName"`
 	DealRoomID string     `json:"dealRoomId,omitempty"`
+	Scenario   string     `json:"scenario,omitempty"`
 	Items      []WorkItem `json:"items"`
 }
 
@@ -91,6 +117,10 @@ type Feed struct {
 	ClearedToday int            `json:"clearedToday"`
 	Counts       map[string]int `json:"counts"`
 	Lens         string         `json:"lens"`
+	DefaultLens  string         `json:"defaultLens"`
+	LensSource   string         `json:"lensSource"` // query | inferred | default
+	Scenarios    []string       `json:"scenarios,omitempty"`
+	ScenarioPack *ScenarioPackMeta `json:"scenarioPack,omitempty"`
 	NoiseHints   []NoiseHint    `json:"noiseHints,omitempty"`
 }
 
@@ -101,6 +131,7 @@ type draft struct {
 	coalesceK string
 	rankBoost int // added to productRank (soft demote)
 	microRank int // within-product tie-break (higher first)
+	scenario  Scenario
 }
 
 // Compile turns pending actions (+ linked signals) into a ranked radar feed.
@@ -142,6 +173,9 @@ func Compile(in CompileInput) Feed {
 		if !ok {
 			continue
 		}
+		if actorEmailIsInternal(in.InternalEmails, a, sig) {
+			continue
+		}
 
 		item := buildItem(in, a, sig, product, verb, now)
 		created := a.CreatedAt.Time
@@ -153,34 +187,67 @@ func Compile(in CompileInput) Feed {
 		if sig != nil {
 			subtype = sig.Subtype.String
 		}
+		mr := microRank(product, isFormalAsk(a), subtype, sig != nil && reasonLooksLikeAskEscalation(sig))
+		if product == ProductDiligenceGate {
+			mr += gateBoostMicro(Scenario(item.Scenario), textOrEmpty(a.SourceType))
+		}
 		d := draft{
 			item:      item,
 			created:   created,
 			slaDue:    slaDue,
 			coalesceK: coalesceKey(product, item.DealKey, item.ContactID, item.LinkID, item.Actor),
-			microRank: microRank(product, isFormalAsk(a), subtype, sig != nil && reasonLooksLikeAskEscalation(sig)),
+			microRank: mr,
+			scenario:  Scenario(item.Scenario),
 		}
 		applyLeakConfidence(&d, in.Metrics, now)
-		if boost := in.OutcomeDemote[product]; boost > 0 {
+		if boost := demoteBoostForItem(in.OutcomeDemote, in.OutcomeDemoteByScenario, d.scenario, product); boost > 0 {
 			d.rankBoost += boost
 		}
 		drafts = append(drafts, d)
 	}
 
+	// Draft scenarios drive per-item ranking; room inventory owns default lens / pack meta
+	// so an empty action queue still reflects the workspace's deal-room scenarios (Phase A).
+	draftScenarios := make([]Scenario, 0, len(drafts))
+	for _, d := range drafts {
+		if d.scenario != ScenarioUnknown {
+			draftScenarios = append(draftScenarios, d.scenario)
+		}
+	}
+	roomScenarios := make([]Scenario, 0, len(in.Rooms))
+	for _, room := range in.Rooms {
+		if room.Scenario != ScenarioUnknown {
+			roomScenarios = append(roomScenarios, room.Scenario)
+		}
+	}
+	lensScenarios := roomScenarios
+	if len(lensScenarios) == 0 {
+		lensScenarios = draftScenarios
+	}
+	defaultLens := InferDefaultLens(lensScenarios)
 	circle := in.Circle
+	lensSource := "default"
+	if in.CircleExplicit && circle != "" {
+		lensSource = "query"
+	} else {
+		circle = defaultLens
+		if len(lensScenarios) > 0 {
+			lensSource = "inferred"
+		}
+	}
 	if circle == "" {
 		circle = heat.CircleDefault
 	}
 
 	merged := coalesce(drafts, now)
 	sort.SliceStable(merged, func(i, j int) bool {
-		// Spec Rank: SLA overdue first, then product band / priority / ties.
+		// Spec Rank: SLA overdue first, then scenario×circle product band / priority / ties.
 		oi, oj := merged[i].slaDue.Before(now), merged[j].slaDue.Before(now)
 		if oi != oj {
 			return oi
 		}
-		pi := productRankForCircle(circle, merged[i].item.Product) + merged[i].rankBoost
-		pj := productRankForCircle(circle, merged[j].item.Product) + merged[j].rankBoost
+		pi := productRankForItem(circle, merged[i].scenario, merged[i].item.Product) + merged[i].rankBoost
+		pj := productRankForItem(circle, merged[j].scenario, merged[j].item.Product) + merged[j].rankBoost
 		if pi != pj {
 			return pi < pj
 		}
@@ -225,6 +292,11 @@ func Compile(in CompileInput) Feed {
 		counts[string(it.Product)]++
 	}
 
+	packScenarios := roomScenarios
+	if len(packScenarios) == 0 {
+		packScenarios = draftScenarios
+	}
+	scenarios := UniqueScenarios(packScenarios)
 	return Feed{
 		NextUp:       nextUp,
 		Strands:      strands,
@@ -232,8 +304,44 @@ func Compile(in CompileInput) Feed {
 		ClearedToday: clearedToday,
 		Counts:       counts,
 		Lens:         string(circle),
+		DefaultLens:  string(defaultLens),
+		LensSource:   lensSource,
+		Scenarios:    scenarios,
+		ScenarioPack: buildScenarioPackMeta(DominantScenario(packScenarios)),
 		NoiseHints:   in.NoiseHints,
 	}
+}
+
+func buildScenarioPackMeta(s Scenario) *ScenarioPackMeta {
+	if s == ScenarioUnknown {
+		return nil
+	}
+	pack := PackFor(s)
+	cats := make([]string, 0, len(pack.KeyPageExtra))
+	for cat := range pack.KeyPageExtra {
+		cats = append(cats, cat)
+	}
+	sort.Strings(cats)
+	return &ScenarioPackMeta{
+		Scenario:          string(s),
+		DefaultCircle:     string(pack.DefaultCircle),
+		Depth:             string(pack.Depth),
+		KeyPageCategories: cats,
+		InsightsKPI:       append([]string(nil), pack.InsightsKPI...),
+	}
+}
+
+func gateBoostMicro(scenario Scenario, sourceType string) int {
+	if scenario == ScenarioUnknown || sourceType == "" {
+		return 0
+	}
+	pack := PackFor(scenario)
+	for _, src := range pack.GateBoostSources {
+		if src == sourceType {
+			return 2
+		}
+	}
+	return 0
 }
 
 func confidenceRank(c Confidence) int {
@@ -252,6 +360,11 @@ func confidenceRank(c Confidence) int {
 func classify(a db.ActionItem, sig *db.Signal) (Product, Verb, bool) {
 	src := textOrEmpty(a.SourceType)
 	actType := a.ActionType
+
+	// File-request review is host ops, not a deal Diligence gate.
+	if src == action.SourceTypeUploadedFile {
+		return "", "", false
+	}
 
 	if isApprove(a) {
 		return ProductDiligenceGate, VerbApprove, true
@@ -308,8 +421,12 @@ func classify(a db.ActionItem, sig *db.Signal) (Product, Verb, bool) {
 
 func isApprove(a db.ActionItem) bool {
 	src := textOrEmpty(a.SourceType)
+	// uploaded_file uses "review" and must never land here.
+	if src == action.SourceTypeUploadedFile {
+		return false
+	}
 	switch a.ActionType {
-	case "approve", "sign", "verify":
+	case "approve", "sign":
 		return true
 	}
 	switch src {
@@ -335,6 +452,57 @@ func isFormalAsk(a db.ActionItem) bool {
 	src := textOrEmpty(a.SourceType)
 	return (src == action.SourceTypeLinkQuestion || src == action.SourceTypeDealRoomLinkQuestion) &&
 		a.ActionType == "review"
+}
+
+// actorEmailIsInternal drops visitor-attributed cards for workspace members.
+//
+// Only access / NDA / Ask source types are eligible: signal.Context.contactEmail
+// is the first link_contacts row (suggestions stamp), not the event actor — using
+// it would false-drop Leak Watch / Buying Window when a member is on the link.
+// Host lifecycle (expiring_*, uploaded_file) and signal-backed heat cards are
+// never filtered here; Leak Watch host noise is handled in metrics SQL instead.
+func actorEmailIsInternal(internal action.MemberEmailSet, a db.ActionItem, _ *db.Signal) bool {
+	if len(internal) == 0 {
+		return false
+	}
+	switch textOrEmpty(a.SourceType) {
+	case action.SourceTypeLinkAccessRequest,
+		action.SourceTypeDealRoomLinkAccessRequest,
+		action.SourceTypeRoomAccessRequest,
+		action.SourceTypeRoomNDA,
+		action.SourceTypeLinkQuestion,
+		action.SourceTypeDealRoomLinkQuestion:
+		email := emailFromActionTitle(a.Title)
+		return action.SkipVisitorAttributedActor(internal, email != "", email)
+	default:
+		return false
+	}
+}
+
+func emailFromActionTitle(title string) string {
+	// Titles use "… from <actor> for|on <target>". Only the first token after
+	// "from" is the actor — scanning further can pick an email-shaped room/link
+	// name and false-drop a real external card.
+	const marker = " from "
+	lower := strings.ToLower(title)
+	idx := strings.Index(lower, marker)
+	if idx < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(title[idx+len(marker):])
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	candidate := strings.Trim(fields[0], ".,;:\"'")
+	if strings.Count(candidate, "@") != 1 {
+		return ""
+	}
+	at := strings.IndexByte(candidate, '@')
+	if at <= 0 || at >= len(candidate)-1 {
+		return ""
+	}
+	return candidate
 }
 
 func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product, verb Verb, now time.Time) WorkItem {
@@ -389,8 +557,16 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 
 	dealRoomID := ""
 	dealName := ""
-	if src == action.SourceTypeRoomAccessRequest || src == action.SourceTypeRoomNDA || src == action.SourceTypeExpiringRoom {
+	scenario := ScenarioUnknown
+	if src == action.SourceTypeRoomAccessRequest || src == action.SourceTypeExpiringRoom {
 		dealRoomID = sourceID
+	}
+	if src == action.SourceTypeRoomNDA {
+		// Member-keyed: target_id = room. Legacy room-keyed: source_id = room.
+		dealRoomID = targetID
+		if dealRoomID == "" {
+			dealRoomID = sourceID
+		}
 	}
 	if src == action.SourceTypeDealRoomLinkAccessRequest {
 		dealRoomID = targetID
@@ -415,13 +591,21 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 		}
 	}
 	if dealRoomID != "" {
-		if name, ok := in.Rooms[dealRoomID]; ok && name != "" {
-			dealName = name
+		if room, ok := in.Rooms[dealRoomID]; ok {
+			if room.Name != "" {
+				dealName = room.Name
+			}
+			scenario = room.Scenario
 		}
 	}
 	if dealName == "" {
 		// Empty → FE i18n fallback (never hardcode English "Deal").
 		dealName = firstNonEmpty(docTitle, "")
+	}
+
+	pack := PackFor(scenario)
+	if v, ok := pack.VerbByProduct[product]; ok {
+		verb = v
 	}
 
 	dealKey := "workspace"
@@ -431,7 +615,7 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 		dealKey = "link:" + linkID
 	}
 
-	slaDue := slaDueAt(product, created, now)
+	slaDue := slaDueAtForPack(pack, product, created, now)
 	if a.DueAt.Valid && product == ProductAccessDecay {
 		slaDue = a.DueAt.Time.UTC()
 	}
@@ -443,6 +627,10 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 	}
 	if verb == VerbEmail && email == "" {
 		verb = VerbOpen
+	}
+	headlineCode := ""
+	if code, ok := pack.HeadlineCodeByProduct[product]; ok {
+		headlineCode = code
 	}
 
 	pri := Priority(a.Impact)
@@ -471,6 +659,7 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 		ID:            actionID,
 		Product:       product,
 		Headline:      headline,
+		HeadlineCode:  headlineCode,
 		Subtitle:      subtitle,
 		Actor:         actor,
 		Verb:          verb,
@@ -492,7 +681,18 @@ func buildItem(in CompileInput, a db.ActionItem, sig *db.Signal, product Product
 		DocumentTitle: docTitle,
 		Evidence:      chips,
 		State:         "open",
+		Scenario:      string(scenario),
 	}
+}
+
+func slaDueAtForPack(pack Pack, p Product, created, now time.Time) time.Time {
+	if p == ProductCommitmentAsk {
+		return slaDueAt(p, created, now)
+	}
+	if hours, ok := pack.SLAHours[p]; ok && hours > 0 {
+		return created.UTC().Add(time.Duration(hours) * time.Hour)
+	}
+	return slaDueAt(p, created, now)
 }
 
 func coalesce(drafts []draft, now time.Time) []draft {
@@ -654,11 +854,15 @@ func buildStrands(items []WorkItem) []Strand {
 				DealKey:    it.DealKey,
 				DealName:   it.DealName,
 				DealRoomID: it.DealRoomID,
+				Scenario:   it.Scenario,
 				Items:      []WorkItem{it},
 			})
 			continue
 		}
 		strands[i].Items = append(strands[i].Items, it)
+		if strands[i].Scenario == "" && it.Scenario != "" {
+			strands[i].Scenario = it.Scenario
+		}
 	}
 	return strands
 }

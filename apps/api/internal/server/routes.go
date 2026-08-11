@@ -420,16 +420,10 @@ func (s *Server) registerRoutes() error {
 			digestRunner := notification.NewDigestRunner(
 				queries,
 				notificationSvc,
-				notification.NewInsightsOverviewAdapter(func(ctx context.Context, workspaceID string, days int) (
-					periodOpens, previousPeriodOpens, periodUV int64,
-					medianDuration float64,
-					hot, warm int,
-					topDocuments, topContacts []string,
-					err error,
-				) {
+				notification.NewInsightsOverviewAdapter(func(ctx context.Context, workspaceID string, days int) (notification.DigestOverview, error) {
 					ov, err := analyticsSvc.InsightsOverview(ctx, workspaceID, days)
 					if err != nil {
-						return 0, 0, 0, 0, 0, 0, nil, nil, err
+						return notification.DigestOverview{}, err
 					}
 					docs := make([]string, 0, 3)
 					for i, d := range ov.TopDocuments {
@@ -449,10 +443,29 @@ func (s *Server) registerRoutes() error {
 							contacts = append(contacts, c.Email)
 						}
 					}
-					return ov.PeriodOpens, ov.PreviousPeriodOpens, ov.PeriodUniqueVisitors,
-						ov.PeriodMedianDurationSeconds,
-						ov.TierCounts["hot"], ov.TierCounts["warm"],
-						docs, contacts, nil
+					out := notification.DigestOverview{
+						PeriodOpens:                 ov.PeriodOpens,
+						PreviousPeriodOpens:         ov.PreviousPeriodOpens,
+						PeriodUniqueVisitors:        ov.PeriodUniqueVisitors,
+						PeriodMedianDurationSeconds: ov.PeriodMedianDurationSeconds,
+						HotLinks:                    ov.TierCounts["hot"],
+						WarmLinks:                   ov.TierCounts["warm"],
+						TopDocuments:                docs,
+						TopContacts:                 contacts,
+					}
+					if pack := ov.ScenarioPack; pack != nil {
+						out.Scenario = pack.Scenario
+						out.ScenarioDepth = pack.Depth
+						out.ScenarioRoomCount = pack.RoomCount
+						out.ScenarioLabel = pack.Label
+						out.ScenarioLead = pack.DigestLead
+						for _, kpi := range pack.KPIs {
+							out.ScenarioKPIs = append(out.ScenarioKPIs, notification.DigestScenarioKPI{
+								ID: kpi.ID, Value: kpi.Value,
+							})
+						}
+					}
+					return out, nil
 				}),
 				s.cfg.InsightsDigestHourUTC,
 			)

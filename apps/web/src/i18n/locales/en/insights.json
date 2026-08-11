@@ -77,7 +77,32 @@
     "openDealRadar": "Open Deal Radar",
     "untitledLink": "Share link",
     "views_one": "{{count}} view",
-    "views_other": "{{count}} views"
+    "views_other": "{{count}} views",
+    "scenarioPack": {
+      "title": "Scenario focus",
+      "rooms_one": "{{count}} room in this scenario",
+      "rooms_other": "{{count}} rooms in this scenario",
+      "depthP0": "P0 pack",
+      "depthP1": "IR pack",
+      "depthLite": "Lite pack",
+      "depthBase": "Base pack",
+      "keyPages": "Key-page categories",
+      "unknownScenario": "Scenario pack",
+      "unknownCategory": "Category",
+      "unknownKpi": "Metric",
+      "rulesTitle": "Why these pages count as key pages",
+      "rulesHint": "Same title-substring rules heat scoring uses for this scenario pack.",
+      "rulesKeywords_one": "{{count}} match keyword",
+      "rulesKeywords_other": "{{count}} match keywords",
+      "kpi": {
+        "active_rooms": "Active rooms",
+        "gate_pending": "Pending gates",
+        "key_page_views": "Key-page views",
+        "open_signals": "Open signals",
+        "hot_links": "Hot links",
+        "forward_pressure": "Forward signals"
+      }
+    }
   },
   "pages": {
     "title": "Page engagement",
@@ -225,6 +250,20 @@
       "security": "Security",
       "case_studies": "Case studies",
       "implementation": "Implementation",
+      "competitive": "Competitive",
+      "cap_table": "Cap table",
+      "use_of_funds": "Use of funds",
+      "board": "Board",
+      "diligence": "Diligence",
+      "legal": "Legal",
+      "title": "Title & ownership",
+      "leases": "Leases & tenancies",
+      "environmental": "Environmental",
+      "inspections": "Inspections & surveys",
+      "requirements": "Requirements",
+      "planning": "Planning",
+      "risk": "Risk & issues",
+      "status": "Status & deliverables",
       "custom": "Custom"
     }
   },

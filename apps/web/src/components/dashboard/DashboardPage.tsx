@@ -34,7 +34,9 @@ export function DashboardPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams] = useSearchParams();
-  const circle = parseRadarCircle(searchParams.get("circle"));
+  const circleQuery = searchParams.get("circle");
+  const circleExplicit = Boolean(circleQuery && circleQuery.trim());
+  const circle = circleExplicit ? parseRadarCircle(circleQuery) : null;
   const reducedMotion = useReducedMotion();
   const { t } = useTranslation("dashboard");
   const { t: tCommon } = useTranslation("common");
@@ -45,11 +47,12 @@ export function DashboardPage() {
 
   useEffect(() => {
     setFeedOverride(null);
-  }, [circle]);
+  }, [circleExplicit, circle]);
 
   const { data, loading, error, refetch } = useAsyncData<RadarFeed>(
-    async () => api.getRadar({ circle }),
-    [circle],
+    async () =>
+      api.getRadar(circleExplicit && circle ? { circle } : undefined),
+    [circleExplicit, circle],
   );
 
   const feed = useMemo(() => {

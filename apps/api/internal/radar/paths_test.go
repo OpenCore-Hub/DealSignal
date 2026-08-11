@@ -10,6 +10,18 @@ func TestNavigatePathDealRoomAccess(t *testing.T) {
 	}
 }
 
+func TestNavigatePathRoomNDAUsesTargetRoom(t *testing.T) {
+	got := navigatePath("acme", "room_nda", "member-1", "room-9", false)
+	want := "/acme/deal-rooms/room-9?tab=access"
+	if got != want {
+		t.Fatalf("member-keyed got %q want %q", got, want)
+	}
+	legacy := navigatePath("acme", "room_nda", "room-9", "", false)
+	if legacy != want {
+		t.Fatalf("legacy room-keyed got %q want %q", legacy, want)
+	}
+}
+
 func TestNavigatePathFormalAsk(t *testing.T) {
 	got := navigatePath("acme", "deal_room_link_question", "turn-1", "room-1/link-9", true)
 	if got != "/acme/deal-rooms/room-1?askInbox=formal_queue&linkId=link-9" {

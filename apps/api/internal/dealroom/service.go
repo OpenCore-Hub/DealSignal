@@ -267,8 +267,9 @@ func (s *Service) CreateRoom(ctx context.Context, userID, workspaceID string, re
 			Email:       "",
 			UserID:      userUUID,
 			Role:        "owner",
-			NdaStatus:   ndaStatusFor(created.RequiresNda),
-			Status:      "active",
+			// Owners operate the room; they never sign the room NDA themselves.
+			NdaStatus: ndaStatusForRole(created.RequiresNda, "owner"),
+			Status:    "active",
 		}); addErr != nil {
 			return fmt.Errorf("add room owner: %w", addErr)
 		}
@@ -773,8 +774,9 @@ func (s *Service) AddMember(ctx context.Context, roomID, workspaceID, inviterUse
 		RoomID:      room.ID,
 		Email:       email,
 		Role:        role,
-		NdaStatus:   ndaStatusFor(room.RequiresNda),
-		Status:      "active",
+		NdaStatus:   ndaStatusForRole(room.RequiresNda, role),
+		// Operators stay active; external invitees wait on NDA when required.
+		Status: memberStatusForRole(room.RequiresNda, role),
 	})
 	if err != nil {
 		return db.RoomMember{}, err
@@ -2333,11 +2335,31 @@ func ndaStatusFor(required bool) string {
 	return "not_required"
 }
 
+// ndaStatusForRole: room operators never owe a visitor NDA; external roles do
+// when the room requires one.
+func ndaStatusForRole(required bool, role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner", "admin":
+		return "not_required"
+	default:
+		return ndaStatusFor(required)
+	}
+}
+
 func memberStatusFor(requiresApprovalOrNDA bool) string {
 	if requiresApprovalOrNDA {
 		return "pending"
 	}
 	return "active"
+}
+
+func memberStatusForRole(requiresNDA bool, role string) string {
+	switch strings.ToLower(strings.TrimSpace(role)) {
+	case "owner", "admin":
+		return "active"
+	default:
+		return memberStatusFor(requiresNDA)
+	}
 }
 
 func pgUUID(id string) pgtype.UUID {
@@ -2374,18 +2396,35 @@ func (s *Service) resolveRoomNDA(ctx context.Context, workspaceID string, roomID
 	if s.actionSyncer == nil {
 		return
 	}
-	_ = email // member email is the signed party; action is room-scoped.
 	if !roomID.Valid {
 		return
 	}
+	email = strings.ToLower(strings.TrimSpace(email))
+	// Member-keyed actions (source_id = room_members.id, target_id = room).
+	if email != "" {
+		if member, err := s.queries.GetRoomMemberByEmail(ctx, db.GetRoomMemberByEmailParams{
+			RoomID: roomID,
+			Email:  email,
+		}); err == nil && member.ID.Valid {
+			s.actionSyncer.ResolveBySource(ctx, workspaceID, action.SourceTypeRoomNDA, uuid.UUID(member.ID.Bytes).String())
+		}
+	}
+	// Legacy room-keyed actions: clear only when no external pending NDA remains.
 	members, err := s.queries.ListRoomMembers(ctx, roomID)
 	if err != nil {
 		return
 	}
 	for _, m := range members {
-		if m.NdaStatus == "pending" {
-			return
+		if m.NdaStatus != "pending" {
+			continue
 		}
+		if m.Role == "owner" || m.Role == "admin" {
+			continue
+		}
+		if strings.TrimSpace(m.Email) == "" {
+			continue
+		}
+		return
 	}
 	s.actionSyncer.ResolveBySource(ctx, workspaceID, action.SourceTypeRoomNDA, uuid.UUID(roomID.Bytes).String())
 }

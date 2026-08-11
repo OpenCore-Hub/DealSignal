@@ -53,7 +53,7 @@ func TestCompileDiligenceGateAndNextUp(t *testing.T) {
 	feed := Compile(CompileInput{
 		WorkspaceSlug: "acme",
 		Now:           now,
-		Rooms:         map[string]string{roomID: "Series A Room"},
+		Rooms:         map[string]RoomMeta{roomID: {Name: "Series A Room"}},
 		Actions: []db.ActionItem{{
 			ID:         mustUUID(actID),
 			Title:      "Approve access",
@@ -89,6 +89,69 @@ func TestCompileDiligenceGateAndNextUp(t *testing.T) {
 	}
 	if item.NavigatePath == "" || item.NavigatePath[:len("/acme/deal-rooms/")] != "/acme/deal-rooms/" {
 		t.Fatalf("navigatePath=%s", item.NavigatePath)
+	}
+}
+
+func TestCompileExcludesUploadedFileFromDiligenceGate(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "Review uploaded file deck.pdf on Investor Link",
+			Impact:     "medium",
+			Status:     "pending",
+			ActionType: "review",
+			SourceType: pgText(action.SourceTypeUploadedFile),
+			SourceID:   pgText(uuid.New().String()),
+			CreatedAt:  pgTime(now.Add(-time.Hour)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 0 {
+		t.Fatalf("uploaded_file must not enter radar products, got %+v", feed.Items)
+	}
+}
+
+func TestCompileRoomNDAMemberKeyedNavigatesToRoom(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := uuid.New().String()
+	memberID := uuid.New().String()
+	feed := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms: map[string]RoomMeta{
+			roomID: {Name: "Startup Fundraising", Scenario: ScenarioStartupFundraising},
+		},
+		Actions: []db.ActionItem{{
+			ID:         mustUUID(uuid.New()),
+			Title:      "NDA signature required from lp@vc.com for Startup Fundraising",
+			Impact:     "high",
+			Status:     "pending",
+			ActionType: "sign",
+			SourceType: pgText(action.SourceTypeRoomNDA),
+			SourceID:   pgText(memberID),
+			TargetID:   pgText(roomID),
+			CreatedAt:  pgTime(now.Add(-30 * time.Minute)),
+			DueAt:      pgTime(now.Add(time.Hour)),
+			UpdatedAt:  pgTime(now),
+		}},
+	})
+	if len(feed.Items) != 1 {
+		t.Fatalf("items=%d", len(feed.Items))
+	}
+	item := feed.Items[0]
+	if item.Product != ProductDiligenceGate {
+		t.Fatalf("product=%s", item.Product)
+	}
+	if item.DealName != "Startup Fundraising" {
+		t.Fatalf("dealName=%s", item.DealName)
+	}
+	wantPath := "/acme/deal-rooms/" + roomID + "?tab=access"
+	if item.NavigatePath != wantPath {
+		t.Fatalf("navigatePath=%s want %s", item.NavigatePath, wantPath)
 	}
 }
 
@@ -249,7 +312,8 @@ func TestCompileSalesLensPrefersBuyingWindow(t *testing.T) {
 	feed := Compile(CompileInput{
 		WorkspaceSlug: "acme",
 		Now:           now,
-		Circle:        heat.CircleSales,
+		Circle:         heat.CircleSales,
+		CircleExplicit: true,
 		Signals: []db.Signal{
 			{
 				ID:        mustUUID(sigRisk),
@@ -439,7 +503,7 @@ func TestCompileSLAOverdueRanksFirst(t *testing.T) {
 	feed := Compile(CompileInput{
 		WorkspaceSlug: "acme",
 		Now:           now,
-		Rooms:         map[string]string{roomID: "Room"},
+		Rooms:         map[string]RoomMeta{roomID: {Name: "Room"}},
 		Signals: []db.Signal{{
 			ID: mustUUID(sigHot), Type: "hot_signal", Subtype: pgText(suggestions.SubtypeHot),
 			Title: "Hot", Priority: "high", CreatedAt: pgTime(now.Add(-30 * time.Minute)),
@@ -527,6 +591,110 @@ func TestCompileDealNameHasNoEnglishFallback(t *testing.T) {
 	}
 	if feed.Items[0].DealName == "Deal" {
 		t.Fatal("must not hardcode English Deal fallback")
+	}
+}
+
+// sameDualProductActions builds one diligence_gate + one buying_window pair for scenario rank tests.
+func sameDualProductActions(now time.Time, roomID string, sigHot uuid.UUID) []db.ActionItem {
+	return []db.ActionItem{
+		{
+			ID: mustUUID(uuid.New()), Title: "Approve access", Impact: "high", Status: "pending",
+			ActionType: "approve", SourceType: pgText(action.SourceTypeDealRoomLinkAccessRequest),
+			SourceID: pgText(uuid.New().String()), TargetID: pgText(roomID),
+			CreatedAt: pgTime(now.Add(-20 * time.Minute)), DueAt: pgTime(now.Add(2 * time.Hour)), UpdatedAt: pgTime(now),
+		},
+		{
+			ID: mustUUID(uuid.New()), SignalID: mustUUID(sigHot), Title: "Email hot", Impact: "high", Status: "pending",
+			ActionType: "email",
+			CreatedAt:  pgTime(now.Add(-10 * time.Minute)), DueAt: pgTime(now.Add(2 * time.Hour)), UpdatedAt: pgTime(now),
+		},
+	}
+}
+
+func TestCompileScenarioPackChangesNextUp(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := uuid.New().String()
+	sigHot := uuid.New()
+	linkID := uuid.New()
+	signals := []db.Signal{{
+		ID: mustUUID(sigHot), Type: "hot_signal", Subtype: pgText(suggestions.SubtypeHot),
+		Title: "Hot", Priority: "high", CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+		LinkID: mustUUID(linkID),
+	}}
+	links := map[string]LinkMeta{
+		linkID.String(): {ID: linkID.String(), Name: "Deck", DealRoomID: roomID},
+	}
+
+	fund := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms:         map[string]RoomMeta{roomID: {Name: "Series A", Scenario: ScenarioStartupFundraising}},
+		Links:         links,
+		Signals:       signals,
+		Actions:       sameDualProductActions(now, roomID, sigHot),
+	})
+	if fund.NextUp == nil || fund.NextUp.Product != ProductDiligenceGate {
+		t.Fatalf("fundraising pack should prefer diligence_gate, got %+v", fund.NextUp)
+	}
+	if fund.NextUp.Scenario != string(ScenarioStartupFundraising) {
+		t.Fatalf("scenario=%s", fund.NextUp.Scenario)
+	}
+	if fund.DefaultLens != "founder" || fund.LensSource != "inferred" {
+		t.Fatalf("defaultLens=%s lensSource=%s lens=%s", fund.DefaultLens, fund.LensSource, fund.Lens)
+	}
+	if fund.Lens != "founder" {
+		t.Fatalf("inferred lens want founder, got %s", fund.Lens)
+	}
+
+	sales := Compile(CompileInput{
+		WorkspaceSlug: "acme",
+		Now:           now,
+		Rooms:         map[string]RoomMeta{roomID: {Name: "Enterprise Deal", Scenario: ScenarioSalesDataRoom}},
+		Links:         links,
+		Signals:       signals,
+		Actions:       sameDualProductActions(now, roomID, sigHot),
+	})
+	if sales.NextUp == nil || sales.NextUp.Product != ProductBuyingWindow {
+		t.Fatalf("sales pack should prefer buying_window, got %+v", sales.NextUp)
+	}
+	if sales.NextUp.Scenario != string(ScenarioSalesDataRoom) {
+		t.Fatalf("scenario=%s", sales.NextUp.Scenario)
+	}
+	if sales.DefaultLens != "sales" || sales.Lens != "sales" || sales.LensSource != "inferred" {
+		t.Fatalf("sales inferred lens=%s default=%s source=%s", sales.Lens, sales.DefaultLens, sales.LensSource)
+	}
+}
+
+func TestCompileCircleQueryOverridesInferredLens(t *testing.T) {
+	now := time.Date(2026, 8, 8, 12, 0, 0, 0, time.UTC)
+	roomID := uuid.New().String()
+	sigHot := uuid.New()
+	linkID := uuid.New()
+	feed := Compile(CompileInput{
+		WorkspaceSlug:  "acme",
+		Now:            now,
+		Circle:         heat.CircleFounder,
+		CircleExplicit: true,
+		Rooms:          map[string]RoomMeta{roomID: {Name: "Deal", Scenario: ScenarioSalesDataRoom}},
+		Links: map[string]LinkMeta{
+			linkID.String(): {ID: linkID.String(), Name: "Deck", DealRoomID: roomID},
+		},
+		Signals: []db.Signal{{
+			ID: mustUUID(sigHot), Type: "hot_signal", Subtype: pgText(suggestions.SubtypeHot),
+			Title: "Hot", Priority: "high", CreatedAt: pgTime(now.Add(-10 * time.Minute)),
+			LinkID: mustUUID(linkID),
+		}},
+		Actions: sameDualProductActions(now, roomID, sigHot),
+	})
+	if feed.LensSource != "query" || feed.Lens != "founder" {
+		t.Fatalf("explicit founder override: lens=%s source=%s", feed.Lens, feed.LensSource)
+	}
+	if feed.DefaultLens != "sales" {
+		t.Fatalf("defaultLens should still reflect scenario pack, got %s", feed.DefaultLens)
+	}
+	// Scenario rank still primary: sales pack ranks buying_window above diligence even under founder lens.
+	if feed.NextUp == nil || feed.NextUp.Product != ProductBuyingWindow {
+		t.Fatalf("scenario pack rank should still prefer buying_window, got %+v", feed.NextUp)
 	}
 }
 

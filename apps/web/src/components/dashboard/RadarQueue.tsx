@@ -10,7 +10,6 @@ import {
 import { EmptyState } from "@/components/common/EmptyState";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { documentsSharePath } from "@/lib/documentsSharePath";
 import {
   countRadarFilters,
   defaultOutcomeForProduct,
@@ -56,8 +55,9 @@ export function RadarQueue({
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filter = parseRadarFilter(searchParams.get("filter"));
+  const circleQuery = searchParams.get("circle");
   const circle = parseRadarCircle(
-    searchParams.get("circle") ?? feed.lens ?? "founder",
+    circleQuery ?? feed.lens ?? feed.defaultLens ?? "founder",
   );
   const counts = useMemo(
     () => countRadarFilters(feed.items, feed.counts),
@@ -115,8 +115,9 @@ export function RadarQueue({
 
   const setCircle = (next: ReturnType<typeof parseRadarCircle>) => {
     const params = new URLSearchParams(searchParams);
-    if (next === "founder") params.delete("circle");
-    else params.set("circle", next);
+    // Always set ?circle= so the server treats the chip as an explicit lens override
+    // (including founder when Scenario Pack inferred sales / investor_ir).
+    params.set("circle", next);
     setSearchParams(params, { replace: true });
   };
 
@@ -284,9 +285,9 @@ export function RadarQueue({
               </Button>
               <Button
                 variant="ghost"
-                onClick={() => navigate(documentsSharePath(workspaceSlug))}
+                onClick={() => navigate(`/${workspaceSlug}/deal-rooms/new`)}
               >
-                {t("empty.actions.shareCta")}
+                {t("empty.actions.createDealRoom")}
               </Button>
             </div>
           </div>
@@ -307,9 +308,9 @@ export function RadarQueue({
             action={
               filter === "all"
                 ? {
-                    label: t("empty.actions.shareCta"),
+                    label: t("empty.actions.createDealRoom"),
                     onClick: () =>
-                      navigate(documentsSharePath(workspaceSlug)),
+                      navigate(`/${workspaceSlug}/deal-rooms/new`),
                   }
                 : {
                     label: t("radar.filters.all"),

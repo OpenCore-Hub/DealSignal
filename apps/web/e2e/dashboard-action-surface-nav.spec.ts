@@ -14,6 +14,21 @@ import {
 } from "./helpers";
 
 test.describe("Dashboard action surface navigation (MSW)", () => {
+  async function expandAllStrands(page: import("@playwright/test").Page) {
+    const strands = page.getByTestId("radar-strand");
+    const count = await strands.count();
+    for (let index = 0; index < count; index += 1) {
+      const header = strands.nth(index).locator("button").first();
+      if ((await header.getAttribute("aria-expanded")) === "false") {
+        await header.click();
+      }
+    }
+  }
+
+  function radarRow(page: import("@playwright/test").Page, text: RegExp) {
+    return page.getByTestId("radar-row").filter({ hasText: text });
+  }
+
   test("document share todo opens Document Library Share, not a deal room", async ({ page }) => {
     attachDebug(page);
     await setupAuthenticatedPage(page);
@@ -22,6 +37,7 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
       timeout: 15000,
     });
+    await expandAllStrands(page);
 
     // Actions tab may be labeled 待办 / Actions depending on locale.
     const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
@@ -29,11 +45,12 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
       await actionsTab.click();
     }
 
-    const docTodo = page.getByText(
+    const docTodo = radarRow(
+      page,
       /Approve access request from doc-share-applicant@example\.com/i,
     );
     await expect(docTodo).toBeVisible({ timeout: 15000 });
-    await docTodo.click();
+    await docTodo.getByRole("button", { name: "Approve", exact: true }).click();
 
     await expect(page).toHaveURL(/\/documents\?tab=shared&linkId=link_1/);
     await expect(page).not.toHaveURL(/\/deal-rooms\//);
@@ -50,16 +67,18 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
       timeout: 15000,
     });
+    await expandAllStrands(page);
     const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
     if (await actionsTab.isVisible().catch(() => false)) {
       await actionsTab.click();
     }
 
-    const roomShareTodo = page.getByText(
+    const roomShareTodo = radarRow(
+      page,
       /Approve deal room share access from room-share-applicant@example\.com/i,
     );
     await expect(roomShareTodo).toBeVisible({ timeout: 15000 });
-    await roomShareTodo.click();
+    await roomShareTodo.getByRole("button", { name: "Approve", exact: true }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/${WORKSPACE_SLUG}/deal-rooms/room_1\\?tab=access&linkId=link_room_1`),
@@ -82,16 +101,18 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
       timeout: 15000,
     });
+    await expandAllStrands(page);
     const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
     if (await actionsTab.isVisible().catch(() => false)) {
       await actionsTab.click();
     }
 
-    const memberTodo = page.getByText(
+    const memberTodo = radarRow(
+      page,
       /Approve room access request from marcus@boldstart\.vc/i,
     );
     await expect(memberTodo).toBeVisible({ timeout: 15000 });
-    await memberTodo.click();
+    await memberTodo.getByRole("button", { name: "Approve", exact: true }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/${WORKSPACE_SLUG}/deal-rooms/room_1\\?tab=access`),
@@ -112,14 +133,18 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
       timeout: 15000,
     });
+    await expandAllStrands(page);
     const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
     if (await actionsTab.isVisible().catch(() => false)) {
       await actionsTab.click();
     }
 
-    const askTodo = page.getByText(/Answer visitor Ask from investor@example\.com/i);
+    const askTodo = radarRow(
+      page,
+      /Answer visitor Ask from investor@example\.com/i,
+    );
     await expect(askTodo).toBeVisible({ timeout: 15000 });
-    await askTodo.click();
+    await askTodo.getByRole("button", { name: "Reply", exact: true }).click();
 
     await expect(page).toHaveURL(
       new RegExp(`/${WORKSPACE_SLUG}/deal-rooms/room_1\\?tab=qa&linkId=link_room_1`),
@@ -139,16 +164,18 @@ test.describe("Dashboard action surface navigation (MSW)", () => {
     await expect(page.getByText(/今日关注|Today's focus|Attention/i).first()).toBeVisible({
       timeout: 15000,
     });
+    await expandAllStrands(page);
     const actionsTab = page.getByRole("tab").filter({ hasText: /待办|Actions|To-do/i }).first();
     if (await actionsTab.isVisible().catch(() => false)) {
       await actionsTab.click();
     }
 
-    const formalTodo = page.getByText(
+    const formalTodo = radarRow(
+      page,
       /Review formal Q&A from compliance@example\.com on Acme Seed Data Room/i,
     );
     await expect(formalTodo).toBeVisible({ timeout: 15000 });
-    await formalTodo.click();
+    await formalTodo.getByRole("button", { name: "Reply", exact: true }).click();
 
     await expect(page).toHaveURL(
       new RegExp(
