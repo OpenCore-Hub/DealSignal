@@ -210,7 +210,9 @@ var (
 	ErrEmailVerificationDisabled = errors.New("email verification is not enabled for this link")
 	// ErrAccessCodeSendFailed means an access code was provisioned (or an access
 	// request approval was committed) but the verification-code email could not
-	// be delivered. Callers should surface this so the owner or visitor can retry.
+	// be delivered. ApproveAccessRequest still returns the approved request with
+	// this error so handlers can respond 200 + warning; other send paths keep
+	// treating it as a hard failure (502).
 	ErrAccessCodeSendFailed = errors.New("verification code could not be sent")
 	ErrAccessAlreadyAllowed = errors.New("email already has access")
 )
@@ -2794,21 +2796,24 @@ func (s *Service) ApproveAccessRequest(ctx context.Context, workspaceID, linkID,
 	s.sendInvitationEmail(ctx, inv, wsID, creatorID, link.Name.String, linkURL)
 	s.resolveLinkAccessRequest(workspaceID, linkID)
 
+	approved := dbAccessRequestToDomain(updated)
+
 	// When email verification is enabled, provision + send an access code so the
 	// approved visitor can complete Access after refresh (NDA intent is short-stored
 	// client-side; seal still happens only on successful Access). Approval is already
-	// committed; surface send failures so the owner can retry via resend.
+	// committed; return the approved request with ErrAccessCodeSendFailed so the
+	// handler can respond 200 + warning and the owner can retry via resend.
 	if link.RequireEmailVerification {
 		if codeErr := s.sendDealRoomEmailVerificationCode(ctx, link, reqRow.Email, s.viewerBaseURL, false); codeErr != nil {
 			logger.ErrorCtx(ctx, "send access code after approval failed", codeErr,
 				logger.Attr("link_id", linkID),
 				logger.Attr("email", reqRow.Email),
 			)
-			return LinkAccessRequest{}, wrapAccessCodeSendErr(codeErr)
+			return approved, wrapAccessCodeSendErr(codeErr)
 		}
 	}
 
-	return dbAccessRequestToDomain(updated), nil
+	return approved, nil
 }
 
 // RejectAccessRequest rejects a pending access request.

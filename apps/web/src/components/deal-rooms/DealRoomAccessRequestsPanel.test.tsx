@@ -27,7 +27,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), message: vi.fn() },
 }));
 
 async function renderPanel(opts?: { focusLinkId?: string }) {
@@ -50,6 +50,8 @@ async function renderPanel(opts?: { focusLinkId?: string }) {
       "accessRequests.approveError": "fail",
       "accessRequests.rejectSuccess": "ok",
       "accessRequests.rejectError": "fail",
+      "accessRequests.codeSendFailed": "approved but code failed",
+      "accessRequests.resendCode": "Resend",
     },
     common: {
       loading: "Loading…",
@@ -115,6 +117,52 @@ describe("DealRoomAccessRequestsPanel", () => {
     fireEvent.click(screen.getByRole("button", { name: /approve/i }));
     await waitFor(() => {
       expect(approveLinkAccessRequestMock).toHaveBeenCalledWith("link-1", "req-1");
+    });
+  });
+
+  it("removes the request when approve returns code-send warning", async () => {
+    const { toast } = await import("sonner");
+    approveLinkAccessRequestMock.mockResolvedValue({
+      data: { id: "req-1", status: "approved" },
+      warning: {
+        code: "access_code_send_failed",
+        message: "could not send verification code",
+      },
+    });
+    getPendingLinkAccessRequestsMock
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: "req-1",
+            link_id: "link-1",
+            email: "visitor@example.com",
+            reason: "need docs",
+            signer_name: "Visitor",
+            link_name: "测啊",
+            status: "pending",
+            created_at: "2026-07-21T00:00:00Z",
+            updated_at: "2026-07-21T00:00:00Z",
+          },
+        ],
+      })
+      .mockResolvedValue({ data: [] });
+
+    await renderPanel();
+    await waitFor(() => {
+      expect(screen.getByTestId("deal-room-access-request-req-1")).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /approve/i }));
+
+    await waitFor(() => {
+      expect(toast.warning).toHaveBeenCalledWith(
+        "approved but code failed",
+        expect.objectContaining({
+          action: expect.objectContaining({ label: "Resend" }),
+        }),
+      );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId("deal-room-access-requests-panel")).not.toBeInTheDocument();
     });
   });
 

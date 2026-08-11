@@ -322,7 +322,10 @@
     "notFound": "未找到该访问申请",
     "notPending": "该访问申请已不在待审批状态",
     "blocked": "该邮箱已被禁止申请访问",
-    "codeSendFailed": "已批准访问，但验证码发送失败。请在分享设置中重新发送。",
+    "codeSendFailed": "已批准访问，但验证码发送失败。请点击「重新发送」。",
+    "resendCode": "重新发送",
+    "resendCodeSuccess": "验证码已重新发送",
+    "resendCodeFailed": "重新发送验证码失败",
     "linkNotFound": "当前工作区未找到该分享链接"
   },
   "activity": {

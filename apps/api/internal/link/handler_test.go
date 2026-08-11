@@ -811,7 +811,6 @@ func TestWriteAccessRequestReviewError(t *testing.T) {
 		{ErrAccessRequestForbidden, http.StatusNotFound, "access_request_not_found"},
 		{ErrAccessRequestNotPending, http.StatusConflict, "access_request_not_pending"},
 		{ErrAccessRequestBlocked, http.StatusForbidden, "access_request_blocked"},
-		{ErrAccessCodeSendFailed, http.StatusBadGateway, "access_code_send_failed"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.body, func(t *testing.T) {
@@ -825,5 +824,54 @@ func TestWriteAccessRequestReviewError(t *testing.T) {
 				t.Fatalf("body %q missing %q", w.Body.String(), tc.body)
 			}
 		})
+	}
+}
+
+func TestWriteApproveAccessRequestResponseCodeSendWarning(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ar := LinkAccessRequest{ID: "req-1", Email: "visitor@example.com", Status: "approved"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	writeApproveAccessRequestResponse(c, ar, wrapAccessCodeSendErr(errors.New(`smtp close data: 550 "Queueing failed"`)))
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"status":"approved"`) {
+		t.Fatalf("body %q missing approved status", body)
+	}
+	if !strings.Contains(body, "visitor@example.com") {
+		t.Fatalf("body %q missing approved email", body)
+	}
+	if !strings.Contains(body, "access_code_send_failed") {
+		t.Fatalf("body %q missing warning code", body)
+	}
+	if !strings.Contains(body, "could not send verification code") {
+		t.Fatalf("body %q missing safe warning message", body)
+	}
+	if strings.Contains(body, "Queueing failed") {
+		t.Fatalf("body leaked SMTP detail: %q", body)
+	}
+}
+
+func TestWriteApproveAccessRequestResponseSuccess(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	ar := LinkAccessRequest{ID: "req-1", Email: "visitor@example.com", Status: "approved"}
+	w := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(w)
+	writeApproveAccessRequestResponse(c, ar, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d want %d", w.Code, http.StatusOK)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "visitor@example.com") {
+		t.Fatalf("body %q missing data", body)
+	}
+	if strings.Contains(body, "warning") {
+		t.Fatalf("body %q unexpectedly includes warning", body)
 	}
 }

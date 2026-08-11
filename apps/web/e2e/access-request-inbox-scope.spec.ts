@@ -75,7 +75,7 @@ test.describe("Access request inbox scope (MSW)", () => {
         const r = await fetch(
           `/api/workspaces/acme-capital/links/pending-access-requests?${qs}`,
         );
-        let code = "";
+        let code: string;
         try {
           const body = (await r.json()) as { code?: string };
           code = body.code ?? "";

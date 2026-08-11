@@ -2,6 +2,23 @@ import { ApiError } from "@/lib/apiClient";
 
 type Translate = (key: string) => string;
 
+export const ACCESS_CODE_SEND_FAILED = "access_code_send_failed";
+
+/**
+ * Legacy approve path: older APIs returned 502 access_code_send_failed after
+ * the approval row was already committed. Current API returns 200 + warning.
+ */
+export function isAccessCodeSendFailedAfterApprove(err: unknown): boolean {
+  return err instanceof ApiError && err.code === ACCESS_CODE_SEND_FAILED;
+}
+
+/** Current approve path: soft warning on 200 when code email failed. */
+export function isAccessCodeSendFailedWarning(
+  warning: { code?: string } | null | undefined,
+): boolean {
+  return warning?.code === ACCESS_CODE_SEND_FAILED;
+}
+
 /** Map approve/reject API failures to i18n-safe messages (no raw server strings). */
 export function accessRequestReviewErrorMessage(
   err: unknown,
@@ -19,7 +36,7 @@ export function accessRequestReviewErrorMessage(
         return t("accessRequests.notPending");
       case "access_request_blocked":
         return t("accessRequests.blocked");
-      case "access_code_send_failed":
+      case ACCESS_CODE_SEND_FAILED:
         return t("accessRequests.codeSendFailed");
       default:
         break;
