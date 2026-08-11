@@ -146,6 +146,9 @@ type Config struct {
 	FormalPublishBatchSize int
 	// FormalAskEntitledPlanCodes controls which control-plane plan codes may use Formal Q&A.
 	FormalAskEntitledPlanCodes []string
+	// FormalAskEntitlementStubPlan is a non-production escape hatch when docling-rag
+	// is unset or unreachable (CI / local). Must be empty in production.
+	FormalAskEntitlementStubPlan string
 
 	EventsEnabled       bool
 	EventsStreamName    string
@@ -265,7 +268,8 @@ func Load() (*Config, error) {
 		InsightsDigestInterval:     time.Duration(getEnvInt("INSIGHTS_DIGEST_INTERVAL_MINUTES", 15)) * time.Minute,
 		FormalPublishInterval:      time.Duration(getEnvInt("FORMAL_PUBLISH_INTERVAL_SECONDS", 15)) * time.Second,
 		FormalPublishBatchSize:     getEnvInt("FORMAL_PUBLISH_BATCH_SIZE", 50),
-		FormalAskEntitledPlanCodes: parseDelimitedList(getEnv("FORMAL_ASK_ENTITLED_PLAN_CODES", "enterprise trial")),
+		FormalAskEntitledPlanCodes:   parseDelimitedList(getEnv("FORMAL_ASK_ENTITLED_PLAN_CODES", "enterprise trial")),
+		FormalAskEntitlementStubPlan: strings.TrimSpace(getEnv("FORMAL_ASK_ENTITLEMENT_STUB_PLAN", "")),
 
 		EventsEnabled:       strings.ToLower(getEnv("EVENTS_ENABLED", "true")) == "true",
 		EventsStreamName:    getEnv("EVENTS_STREAM_NAME", "events:signal"),
@@ -340,6 +344,9 @@ func Load() (*Config, error) {
 
 	if cfg.SMTPInsecureSkipVerify && strings.ToLower(cfg.AppEnv) == "production" {
 		return nil, fmt.Errorf("SMTP_INSECURE_SKIP_VERIFY must not be enabled in production")
+	}
+	if cfg.FormalAskEntitlementStubPlan != "" && strings.ToLower(cfg.AppEnv) == "production" {
+		return nil, fmt.Errorf("FORMAL_ASK_ENTITLEMENT_STUB_PLAN must be empty in production")
 	}
 	if cfg.EmailQueueEnabled {
 		if cfg.RedisURL == "" {

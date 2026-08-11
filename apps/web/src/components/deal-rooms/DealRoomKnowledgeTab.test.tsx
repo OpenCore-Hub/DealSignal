@@ -510,12 +510,12 @@ describe("DealRoomKnowledgeTab", () => {
       documents: [
         {
           documentId: "doc-1",
-          name: "Memo.pdf",
+          title: "Memo.pdf",
           status: "synced",
           chunkCount: 2,
         },
       ],
-      progress: { synced: 1, total: 1, pending: 0, failed: 0, jobStatus: "succeeded" },
+      progress: { synced: 1, total: 1, syncing: 0, pending: 0, failed: 0, jobStatus: "succeeded" },
     });
     vi.mocked(api.listDealRoomKnowledgeSessions).mockResolvedValue({
       items: [
@@ -663,7 +663,7 @@ describe("DealRoomKnowledgeTab", () => {
       /Persisted after abort/,
     );
     // mount + empty abort poll + successful poll
-    expect(api.getActiveDealRoomKnowledgeSession.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(vi.mocked(api.getActiveDealRoomKnowledgeSession).mock.calls.length).toBeGreaterThanOrEqual(3);
   });
 
   it("ignores a second Ask click while a stream is already in flight", async () => {

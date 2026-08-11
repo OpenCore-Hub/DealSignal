@@ -12,11 +12,12 @@ import {
   seedDealRoomLink,
   enableGroundedAiForLink,
   fetchLinkById,
+  updateLinkAskPolicy,
   attachDebug,
 } from "./real-helpers";
 
 let workspaceSlug: string;
-let roomId: string;
+let _roomId: string;
 let linkId: string;
 
 test.describe("Visitor Ask Engage policy (real backend UI)", () => {
@@ -30,14 +31,16 @@ test.describe("Visitor Ask Engage policy (real backend UI)", () => {
       templateType: "seed",
       documentIds: [doc.id],
     });
-    roomId = room.id;
+    _roomId = room.id;
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask Policy UI Link ${Date.now()}`,
     });
     linkId = link.id;
 
+    // Deal-room links default ask_ai_enabled=true; disable first so the enable path is exercised.
+    await updateLinkAskPolicy(workspaceSlug, linkId, { askAiEnabled: false });
     const detail = await fetchLinkById(workspaceSlug, linkId);
-    expect(detail.askAiEnabled).not.toBe(true);
+    expect(detail.askAiEnabled).toBe(false);
   });
 
   test("owner enables grounded AI via ask-policy API", async ({ page }) => {

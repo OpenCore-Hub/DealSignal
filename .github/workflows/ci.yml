@@ -159,18 +159,19 @@ jobs:
           sed -i 's/^RATE_LIMIT_PUBLIC_RPM=.*/RATE_LIMIT_PUBLIC_RPM=10000/' .env
           sed -i 's/^RATE_LIMIT_WORKSPACE_RPM=.*/RATE_LIMIT_WORKSPACE_RPM=10000/' .env
           sed -i 's/^RATE_LIMIT_UPLOAD_RPM=.*/RATE_LIMIT_UPLOAD_RPM=10000/' .env
+          # Non-prod only: control-plane stub so Formal Q&A e2e works without docling-rag.
+          grep -q '^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=' .env || echo 'FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial' >> .env
+          sed -i 's/^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=.*/FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial/' .env
+          grep -q '^VISITOR_ASK_UNIFIED=' .env || echo 'VISITOR_ASK_UNIFIED=1' >> .env
+          sed -i 's/^VISITOR_ASK_UNIFIED=.*/VISITOR_ASK_UNIFIED=1/' .env
 
       - name: Start backend services
         working-directory: apps/api
         run: docker-compose up -d
 
       - name: Wait for API
-        run: |
-          for i in {1..60}; do
-            curl -fsS http://localhost:8080/healthz && exit 0
-            sleep 2
-          done
-          exit 1
+        working-directory: apps/api
+        run: ./scripts/ci-wait-api.sh http://localhost:8080/healthz 90 2
 
       - name: Clear rate-limit counters
         working-directory: apps/api
@@ -250,18 +251,19 @@ jobs:
           sed -i 's/^RATE_LIMIT_PUBLIC_RPM=.*/RATE_LIMIT_PUBLIC_RPM=10000/' .env
           sed -i 's/^RATE_LIMIT_WORKSPACE_RPM=.*/RATE_LIMIT_WORKSPACE_RPM=10000/' .env
           sed -i 's/^RATE_LIMIT_UPLOAD_RPM=.*/RATE_LIMIT_UPLOAD_RPM=10000/' .env
+          # Non-prod only: control-plane stub so Formal Q&A e2e works without docling-rag.
+          grep -q '^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=' .env || echo 'FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial' >> .env
+          sed -i 's/^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=.*/FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial/' .env
+          grep -q '^VISITOR_ASK_UNIFIED=' .env || echo 'VISITOR_ASK_UNIFIED=1' >> .env
+          sed -i 's/^VISITOR_ASK_UNIFIED=.*/VISITOR_ASK_UNIFIED=1/' .env
 
       - name: Start backend services
         working-directory: apps/api
         run: docker-compose up -d
 
       - name: Wait for API
-        run: |
-          for i in {1..60}; do
-            curl -fsS http://localhost:8080/healthz && exit 0
-            sleep 2
-          done
-          exit 1
+        working-directory: apps/api
+        run: ./scripts/ci-wait-api.sh http://localhost:8080/healthz 90 2
 
       - name: Clear rate-limit counters
         working-directory: apps/api
@@ -309,7 +311,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache-dependency-path: apps/api/go.sum
 
       - name: Build
@@ -341,7 +343,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache-dependency-path: apps/api/go.sum
 
       - name: Install golangci-lint from source
@@ -363,7 +365,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: '1.25.11'
+          go-version: '1.25.12'
           cache-dependency-path: apps/api/go.sum
 
       - name: govulncheck
@@ -411,18 +413,18 @@ jobs:
           cp .env.example .env
           sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' .env
           sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' .env
+          grep -q '^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=' .env || echo 'FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial' >> .env
+          sed -i 's/^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=.*/FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial/' .env
+          grep -q '^VISITOR_ASK_UNIFIED=' .env || echo 'VISITOR_ASK_UNIFIED=1' >> .env
+          sed -i 's/^VISITOR_ASK_UNIFIED=.*/VISITOR_ASK_UNIFIED=1/' .env
 
       - name: Start backend services
         working-directory: apps/api
         run: docker-compose up -d
 
       - name: Wait for API
-        run: |
-          for i in {1..60}; do
-            curl -fsS http://localhost:8080/healthz && exit 0
-            sleep 2
-          done
-          exit 1
+        working-directory: apps/api
+        run: ./scripts/ci-wait-api.sh http://localhost:8080/healthz 90 2
 
       - name: Verify document category migration 128
         working-directory: apps/api
@@ -464,17 +466,16 @@ jobs:
           cp .env.example .env
           sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' .env
           sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' .env
+          grep -q '^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=' .env || echo 'FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial' >> .env
+          sed -i 's/^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=.*/FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial/' .env
+          grep -q '^VISITOR_ASK_UNIFIED=' .env || echo 'VISITOR_ASK_UNIFIED=1' >> .env
+          sed -i 's/^VISITOR_ASK_UNIFIED=.*/VISITOR_ASK_UNIFIED=1/' .env
 
       - name: Start services
         run: docker-compose up -d
 
       - name: Wait for API
-        run: |
-          for i in {1..60}; do
-            curl -fsS http://localhost:8080/healthz && exit 0
-            sleep 2
-          done
-          exit 1
+        run: ./scripts/ci-wait-api.sh http://localhost:8080/healthz 90 2
 
       - name: Verify document category migration 128
         working-directory: apps/api
@@ -511,13 +512,24 @@ jobs:
       - name: Verify legacy question table dropped (migration 141)
         working-directory: apps/api
         run: |
-          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
-            "SELECT 1 FROM schema_migrations WHERE version = '141_drop_link_visitor_questions.up.sql';" | grep -q 1
-          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
-            "SELECT to_regclass('public.link_visitor_questions');" | grep -qx ''
-          docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc \
-            "SELECT column_name FROM information_schema.columns WHERE table_name = 'link_ask_turns' AND column_name = 'host_question_id';" \
-            | grep -qx ''
+          set -euo pipefail
+          psqlq() {
+            docker-compose exec -T postgres psql -U "${POSTGRES_USER:-dealsignal}" -d "${POSTGRES_DB:-dealsignal}" -tAc "$1"
+          }
+          applied="$(psqlq "SELECT 1 FROM schema_migrations WHERE version = '141_drop_link_visitor_questions.up.sql';" | tr -d '[:space:]')"
+          if [ "$applied" != "1" ]; then
+            echo "migration 141 not applied; recent versions:" >&2
+            psqlq "SELECT version FROM schema_migrations WHERE version LIKE '14%' ORDER BY version" >&2 || true
+            exit 1
+          fi
+          # to_regclass returns one NULL row (empty line); missing columns return zero rows.
+          # Never use `grep -qx ''` for absence checks — zero-byte stdin makes grep exit 1.
+          leftover_table="$(psqlq "SELECT to_regclass('public.link_visitor_questions');" | tr -d '[:space:]')"
+          leftover_col="$(psqlq "SELECT column_name FROM information_schema.columns WHERE table_name = 'link_ask_turns' AND column_name = 'host_question_id';" | tr -d '[:space:]')"
+          if [ -n "$leftover_table" ] || [ -n "$leftover_col" ]; then
+            echo "migration 141 incomplete: table='${leftover_table}' host_question_id='${leftover_col}'" >&2
+            exit 1
+          fi
 
       - name: Verify ask action source heal migration 142
         working-directory: apps/api
@@ -551,17 +563,17 @@ jobs:
           cp apps/api/.env.example apps/api/.env
           sed -i 's/^JWT_SECRET=.*/JWT_SECRET=ci-jwt-secret/' apps/api/.env
           sed -i 's/^OPENAI_API_KEY=.*/OPENAI_API_KEY=/' apps/api/.env
+          grep -q '^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=' apps/api/.env || echo 'FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial' >> apps/api/.env
+          sed -i 's/^FORMAL_ASK_ENTITLEMENT_STUB_PLAN=.*/FORMAL_ASK_ENTITLEMENT_STUB_PLAN=trial/' apps/api/.env
+          grep -q '^VISITOR_ASK_UNIFIED=' apps/api/.env || echo 'VISITOR_ASK_UNIFIED=1' >> apps/api/.env
+          sed -i 's/^VISITOR_ASK_UNIFIED=.*/VISITOR_ASK_UNIFIED=1/' apps/api/.env
 
       - name: Start backend
         run: cd apps/api && docker-compose up -d
 
       - name: Wait for API
-        run: |
-          for i in {1..60}; do
-            curl -fsS http://localhost:8080/healthz && exit 0
-            sleep 2
-          done
-          exit 1
+        working-directory: apps/api
+        run: ./scripts/ci-wait-api.sh http://localhost:8080/healthz 90 2
 
       - name: Verify document category migration 128
         run: |

@@ -15,8 +15,8 @@ import {
 } from "@/components/insights/InsightsRangeControls";
 import { api, type InsightsOverview } from "@/lib/api";
 import { exportInsightsDailyVisitsCsv } from "@/lib/exportInsightsDailyVisits";
-import { useTranslation, type TFunction } from "react-i18next";
-import type { i18n as I18nInstance } from "i18next";
+import { useTranslation } from "react-i18next";
+import type { i18n as I18nInstance, TFunction } from "i18next";
 import { useAsyncData } from "@/hooks/useAsyncData";
 
 const INSIGHTS_NS = "insights" as const;

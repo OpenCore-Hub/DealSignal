@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/config"
+	"github.com/OpenCore-Hub/DealSignal/apps/api/internal/httpx"
 )
 
 const (
@@ -27,10 +27,6 @@ type loginRequest struct {
 }
 
 type refreshRequest struct {
-	RefreshToken string `json:"refresh_token"`
-}
-
-type logoutRequest struct {
 	RefreshToken string `json:"refresh_token"`
 }
 

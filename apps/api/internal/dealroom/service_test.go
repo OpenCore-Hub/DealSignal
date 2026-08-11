@@ -1026,6 +1026,7 @@ func TestRecordNDARequiresMemberAndActivates(t *testing.T) {
 	}
 	if pending == nil {
 		t.Fatal("expected auto-created member")
+		return
 	}
 	if pending.Status != "pending" {
 		t.Fatalf("expected pending member before NDA, got %s", pending.Status)
@@ -1117,15 +1118,15 @@ func TestSetFolderPermissionNormalizesEmail(t *testing.T) {
 
 // fakeDB is an in-memory DBTX implementation for dealroom service tests.
 type fakeDB struct {
-	t                *testing.T
-	tenant           db.Tenant
-	workspace        db.Workspace
-	rooms            []db.DealRoom
-	members          []db.RoomMember
-	documents        []db.Document
-	roomDocs         []db.DealRoomDocument
-	requests         []db.RoomAccessRequest
-	perms            []db.RoomMemberFolderPermission
+	t         *testing.T
+	tenant    db.Tenant
+	workspace db.Workspace
+	rooms     []db.DealRoom
+	members   []db.RoomMember
+	documents []db.Document
+	roomDocs  []db.DealRoomDocument
+	requests  []db.RoomAccessRequest
+	perms     []db.RoomMemberFolderPermission
 }
 
 func newFakeDB(t *testing.T) *fakeDB {
@@ -1885,16 +1886,6 @@ func argUUID(args []interface{}, i int) pgtype.UUID {
 	return pgtype.UUID{}
 }
 
-func argStringSlice(args []interface{}, i int) []string {
-	if i >= len(args) || args[i] == nil {
-		return nil
-	}
-	if s, ok := args[i].([]string); ok {
-		return s
-	}
-	return nil
-}
-
 func argUUIDSlice(args []interface{}, i int) []pgtype.UUID {
 	if i >= len(args) || args[i] == nil {
 		return nil
@@ -1904,17 +1895,6 @@ func argUUIDSlice(args []interface{}, i int) []pgtype.UUID {
 	}
 	return nil
 }
-
-func argInt4(args []interface{}, i int) pgtype.Int4 {
-	if i >= len(args) || args[i] == nil {
-		return pgtype.Int4{}
-	}
-	if v, ok := args[i].(pgtype.Int4); ok {
-		return v
-	}
-	return pgtype.Int4{}
-}
-
 
 func argBytes(args []interface{}, i int) []byte {
 	if i >= len(args) {
@@ -2139,7 +2119,6 @@ func TestGetRoomDocumentsReturnsFolderAsPathString(t *testing.T) {
 		t.Fatalf("expected general folder docs in response, got %v", payload.Data)
 	}
 }
-
 
 func TestListRoomsReturnsAggregates(t *testing.T) {
 	fake := newFakeDB(t)

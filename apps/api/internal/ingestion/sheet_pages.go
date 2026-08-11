@@ -211,7 +211,9 @@ func materializeActiveSheetXLSX(srcPath, sheetName string, layout sheetPreviewLa
 			continue
 		}
 		// Delete other sheets so OnlyOffice active-sheet convert cannot leak them.
-		f.DeleteSheet(name)
+		if err := f.DeleteSheet(name); err != nil {
+			return "", fmt.Errorf("delete sheet %q: %w", name, err)
+		}
 	}
 	if !found {
 		return "", fmt.Errorf("sheet %q not found", sheetName)

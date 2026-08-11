@@ -512,7 +512,7 @@ func (s *Service) CreateLink(ctx context.Context, userID, workspaceID string, re
 	var primaryDocID pgtype.UUID
 	var dealRoomID pgtype.UUID
 	folderScopePaths := []string{}
-	linkDocumentIDs := []string{}
+	var linkDocumentIDs []string
 
 	if hasDealRoom {
 		drUUID, err := uuid.Parse(req.DealRoomID)
@@ -1341,37 +1341,6 @@ func (s *Service) validateDealRoomFolderPaths(ctx context.Context, qtx *db.Queri
 
 // validateDealRoomDocumentIDs checks that every provided document ID belongs to
 // the deal room and is ready. It returns the parsed UUIDs in request order.
-func (s *Service) validateDealRoomDocumentIDs(ctx context.Context, qtx *db.Queries, dealRoomID pgtype.UUID, documentIDs []string) ([]uuid.UUID, error) {
-	if len(documentIDs) == 0 {
-		return nil, nil
-	}
-	roomDocs, err := qtx.ListDealRoomDocumentsWithMeta(ctx, dealRoomID)
-	if err != nil {
-		return nil, fmt.Errorf("list deal room documents: %w", err)
-	}
-	allowed := make(map[string]db.ListDealRoomDocumentsWithMetaRow, len(roomDocs))
-	for _, d := range roomDocs {
-		allowed[uuid.UUID(d.DocumentID.Bytes).String()] = d
-	}
-
-	out := make([]uuid.UUID, 0, len(documentIDs))
-	for _, did := range documentIDs {
-		docUUID, err := uuid.Parse(did)
-		if err != nil {
-			return nil, fmt.Errorf("invalid document id: %s", did)
-		}
-		roomDoc, ok := allowed[did]
-		if !ok {
-			return nil, fmt.Errorf("document not found in deal room: %s", did)
-		}
-		if roomDoc.Status != "ready" {
-			return nil, ErrDocumentNotReady
-		}
-		out = append(out, docUUID)
-	}
-	return out, nil
-}
-
 func (s *Service) resolveNdaBinding(
 	ctx context.Context,
 	qtx *db.Queries,
@@ -1464,21 +1433,6 @@ func (s *Service) resolveNdaBinding(
 }
 
 // resolveNdaDocumentID is retained for tests; prefer resolveNdaBinding.
-func (s *Service) resolveNdaDocumentID(
-	ctx context.Context,
-	qtx *db.Queries,
-	workspaceID pgtype.UUID,
-	dealRoomID pgtype.UUID,
-	documentIDs []string,
-	ndaDocumentID string,
-	requireNDA bool,
-) (pgtype.UUID, error) {
-	docID, _, err := s.resolveNdaBinding(ctx, qtx, pgtype.UUID{}, workspaceID, pgtype.UUID{}, "", ndaDocumentID, requireNDA)
-	_ = dealRoomID
-	_ = documentIDs
-	return docID, err
-}
-
 // ListDealRoomLinks returns active share links for a deal room.
 func (s *Service) ListDealRoomLinks(ctx context.Context, workspaceID, dealRoomID string) ([]db.Link, error) {
 	workspaceUUID := pgUUID(workspaceID)

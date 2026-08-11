@@ -333,6 +333,8 @@ test.describe("Visitor Ask (real backend API)", () => {
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask AI Gate Link ${Date.now()}`,
     });
+    // Deal-room links default ask_ai_enabled=true; force the deny path under test.
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: false });
 
     restoreCookieJar([]);
     await accessPublicLinkApi(link.publicToken, `ai-gate-${Date.now()}@example.com`);
@@ -356,16 +358,17 @@ test.describe("Visitor Ask (real backend API)", () => {
       name: `Ask Policy Link ${Date.now()}`,
     });
 
+    // Deal-room links default ask_ai_enabled=true; prove PATCH can toggle both ways.
     const before = await fetchLinkById(workspaceSlug, link.id);
-    expect(before.askAiEnabled).not.toBe(true);
-
-    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: true });
-    const after = await fetchLinkById(workspaceSlug, link.id);
-    expect(after.askAiEnabled).toBe(true);
+    expect(before.askAiEnabled).toBe(true);
 
     await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: false });
     const disabled = await fetchLinkById(workspaceSlug, link.id);
     expect(disabled.askAiEnabled).toBe(false);
+
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: true });
+    const after = await fetchLinkById(workspaceSlug, link.id);
+    expect(after.askAiEnabled).toBe(true);
     restoreCookieJar(authCookies);
   });
 
@@ -380,6 +383,7 @@ test.describe("Visitor Ask (real backend API)", () => {
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask Policy Stream ${Date.now()}`,
     });
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: false });
 
     restoreCookieJar([]);
     await accessPublicLinkApi(link.publicToken, `policy-stream-${Date.now()}@example.com`);
@@ -441,10 +445,13 @@ test.describe("Visitor Ask (real backend API)", () => {
     const link = await seedDealRoomLink(workspaceSlug, room.id, {
       name: `Ask Analytics Link ${Date.now()}`,
     });
+    // Force host lane so summary counts are deterministic without docling-rag.
+    await updateLinkAskPolicy(workspaceSlug, link.id, { askAiEnabled: false });
 
     restoreCookieJar([]);
     await accessPublicLinkApi(link.publicToken, `analytics-${Date.now()}@example.com`);
-    await submitPublicAsk(link.publicToken, "Analytics summary question?");
+    const created = await submitPublicAsk(link.publicToken, "Analytics summary question?");
+    expect(created.status).toBe("host_pending");
 
     restoreCookieJar(authCookies);
     const analytics = await fetchLinkAnalytics(workspaceSlug, link.id);

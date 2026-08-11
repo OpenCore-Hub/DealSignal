@@ -52,6 +52,7 @@ describe("LinkAskPolicyQuotaPanel", () => {
         askAiMonthlyLimit: 100,
         askAiQuotaExceeded: false,
         askAiEntitled: true,
+        formalEntitled: false,
       },
     });
 
@@ -77,6 +78,7 @@ describe("LinkAskPolicyQuotaPanel", () => {
         askAiMonthlyLimit: 50,
         askAiQuotaExceeded: true,
         askAiEntitled: true,
+        formalEntitled: false,
       },
     });
 
@@ -98,6 +100,7 @@ describe("LinkAskPolicyQuotaPanel", () => {
         askAiMonthlyLimit: 0,
         askAiQuotaExceeded: false,
         askAiEntitled: false,
+        formalEntitled: false,
       },
     });
 

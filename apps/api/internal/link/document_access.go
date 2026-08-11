@@ -71,7 +71,7 @@ func evaluateLinkDocumentAccess(
 	link db.Link,
 	docID uuid.UUID,
 ) linkDocumentAccessDenial {
-	membership := linkDocAccessDenied
+	var membership linkDocumentAccessDenial
 	switch {
 	case uuid.UUID(link.DocumentID.Bytes) == docID:
 		membership = linkDocAccessAllowed

@@ -40,7 +40,6 @@ export function RightSidebar({
   documents,
   selectedDocIndex = 0,
   onSelectDoc,
-  activeDocumentId,
   qaEnabled,
   fileRequestsEnabled,
   publicToken,

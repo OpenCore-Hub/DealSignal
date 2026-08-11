@@ -116,20 +116,20 @@ func (h *Handler) GetInsightsOverview(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		// tierCounts are link-level heat.Compute buckets (founder circle).
-		"tierEntity":                      "link",
-		"tierCounts":                      overview.TierCounts,
-		"activeLinkCount":                 overview.ActiveLinkCount,
-		"rangeDays":                       overview.RangeDays,
-		"rangeFrom":                       overview.RangeFrom,
-		"rangeTo":                         overview.RangeTo,
-		"rangeCustom":                     overview.RangeCustom,
-		"generatedAt":                     overview.GeneratedAt.UTC().Format(time.RFC3339),
-		"eventRetentionDays":              overview.EventRetentionDays,
-		"pageViewRetentionDays":           overview.PageViewRetentionDays,
-		"periodOpens":                     overview.PeriodOpens,
-		"previousPeriodOpens":             overview.PreviousPeriodOpens,
-		"periodUniqueVisitors":            overview.PeriodUniqueVisitors,
-		"previousPeriodUniqueVisitors":    overview.PreviousPeriodUniqueVisitors,
+		"tierEntity":                          "link",
+		"tierCounts":                          overview.TierCounts,
+		"activeLinkCount":                     overview.ActiveLinkCount,
+		"rangeDays":                           overview.RangeDays,
+		"rangeFrom":                           overview.RangeFrom,
+		"rangeTo":                             overview.RangeTo,
+		"rangeCustom":                         overview.RangeCustom,
+		"generatedAt":                         overview.GeneratedAt.UTC().Format(time.RFC3339),
+		"eventRetentionDays":                  overview.EventRetentionDays,
+		"pageViewRetentionDays":               overview.PageViewRetentionDays,
+		"periodOpens":                         overview.PeriodOpens,
+		"previousPeriodOpens":                 overview.PreviousPeriodOpens,
+		"periodUniqueVisitors":                overview.PeriodUniqueVisitors,
+		"previousPeriodUniqueVisitors":        overview.PreviousPeriodUniqueVisitors,
 		"periodMedianDurationSeconds":         overview.PeriodMedianDurationSeconds,
 		"previousPeriodMedianDurationSeconds": overview.PreviousPeriodMedianDurationSeconds,
 		"periodAvgDurationSeconds":            overview.PeriodAvgDurationSeconds,
@@ -394,10 +394,7 @@ func (h *Handler) PutKeyPageSettings(c *gin.Context) {
 	}
 	workspaceID := middleware.WorkspaceIDFrom(c)
 	userID := middleware.UserIDFrom(c)
-	settings, err := h.service.SaveKeyPageSettings(c.Request.Context(), workspaceID, userID, KeyPageSettingsUpdate{
-		DefaultCircle: req.DefaultCircle,
-		ExtraKeywords: req.ExtraKeywords,
-	})
+	settings, err := h.service.SaveKeyPageSettings(c.Request.Context(), workspaceID, userID, KeyPageSettingsUpdate(req))
 	if err != nil {
 		if errors.Is(err, errKeyPageSettingsForbidden) {
 			c.JSON(http.StatusForbidden, gin.H{"code": "forbidden", "message": "only owner or admin can update key page settings"})

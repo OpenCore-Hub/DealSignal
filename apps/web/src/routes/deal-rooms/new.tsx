@@ -73,7 +73,6 @@ export function NewDealRoomPage() {
     if (templates && templates.length > 0 && !selectedTemplateId) {
       const first = templates[0];
       const display = getTemplateDisplay(first);
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- derive initial form state from fetched templates
       setSelectedTemplateId(first.id);
       setNda(first.ndaEnabled);
       setName(display.name);

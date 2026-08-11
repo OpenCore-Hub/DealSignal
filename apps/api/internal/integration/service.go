@@ -23,15 +23,15 @@ import (
 
 // Settings is the public view of notification/integration settings.
 type Settings struct {
-	WorkspaceID           string `json:"workspace_id"`
-	EmailEnabled          bool   `json:"email_enabled"`
-	DailyDigestEnabled    bool   `json:"daily_digest_enabled"`
-	KeyPageSlackEnabled   bool   `json:"key_page_slack_enabled"`
-	SlackWebhookURL       string `json:"slack_webhook_url,omitempty"`
-	SlackConnected        bool   `json:"slack_connected"`
-	HubSpotConnected      bool   `json:"hubspot_connected"`
-	SalesforceConnected   bool   `json:"salesforce_connected"`
-	UpdatedAt             string `json:"updated_at"`
+	WorkspaceID         string `json:"workspace_id"`
+	EmailEnabled        bool   `json:"email_enabled"`
+	DailyDigestEnabled  bool   `json:"daily_digest_enabled"`
+	KeyPageSlackEnabled bool   `json:"key_page_slack_enabled"`
+	SlackWebhookURL     string `json:"slack_webhook_url,omitempty"`
+	SlackConnected      bool   `json:"slack_connected"`
+	HubSpotConnected    bool   `json:"hubspot_connected"`
+	SalesforceConnected bool   `json:"salesforce_connected"`
+	UpdatedAt           string `json:"updated_at"`
 }
 
 // Service manages integrations and notification settings.
@@ -81,11 +81,6 @@ func (s *Service) GetSettings(ctx context.Context, workspaceID string) (Settings
 	settings.DailyDigestEnabled = digest
 	settings.KeyPageSlackEnabled = keyPageSlack
 	return settings, nil
-}
-
-func (s *Service) dailyDigestEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
-	digest, _ := s.ruleFlags(ctx, workspaceID)
-	return digest
 }
 
 func (s *Service) ruleFlags(ctx context.Context, workspaceID pgtype.UUID) (digestEnabled, keyPageSlack bool) {
@@ -650,7 +645,7 @@ func (s *Service) ProcessHubSpotSyncJob(ctx context.Context, job db.HubspotSyncJ
 	workspaceID := uuidToString(job.WorkspaceID)
 	if err := s.SyncHubSpot(ctx, workspaceID); err != nil {
 		if failErr := s.queries.MarkHubSpotSyncJobFailed(ctx, db.MarkHubSpotSyncJobFailedParams{
-			ID: job.ID,
+			ID:           job.ID,
 			ErrorMessage: pgtype.Text{String: err.Error(), Valid: true},
 		}); failErr != nil {
 			logger.ErrorCtx(ctx, "mark hubspot sync job failed", failErr,
